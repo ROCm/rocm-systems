@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/dbt/code_placement.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
@@ -57,8 +58,6 @@ constexpr uint32_t kGfx1250Rdna4SemanticMinimumVgprs = 128;
 // VGPRs by 8, so those scopes need a 232-VGPR floor to make v224 addressable.
 constexpr uint32_t kGfx1250F16WmmaScratchMinimumVgprs = 232;
 constexpr uint32_t kMaxInPlaceMetadataVgprs = 127;
-constexpr uint32_t kSCodeEnd = 0xBF9F0000u;
-constexpr uint32_t kSNop0 = 0xBF800000u;
 constexpr uint16_t kGfx1250VopdEncodingId = 0x032u;
 constexpr uint16_t kGfx1250Vopd3EncodingId = 0x0CFu;
 constexpr uint16_t kGfx1250Vop3pEncodingId = 0x198u;
@@ -250,58 +249,6 @@ gfx1250_wmma_f8f6f4_matrix_tmp_vgpr_count(const gfx1250::Vop3pMachineInst &src) 
   return nullptr;
 }
 
-[[nodiscard]] bool compute_sopp_branch_offset(uint64_t branch_pc, uint64_t target,
-                                              int16_t &offset_dwords) {
-  // SOPP branches encode a signed dword offset from the next instruction. Keep
-  // the range check shared so both cave entry and return branches fail closed.
-  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
-  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-  constexpr uint64_t kMaxSignedBranchPc =
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
-  // The PCs are unsigned until this check passes. Compare against the casted
-  // signed int64_t limits so the later signed conversion, and branch_pc + 4,
-  // cannot overflow.
-  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
-    return false;
-
-  const int64_t delta_bytes = static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + 4);
-  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
-    return false;
-
-  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
-  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
-      delta_dwords > std::numeric_limits<int16_t>::max())
-    return false;
-
-  offset_dwords = static_cast<int16_t>(delta_dwords);
-  return true;
-}
-
-[[nodiscard]] uint32_t build_sopp_with_simm(uint32_t opcode_word, int16_t simm16) {
-  return (opcode_word & 0xFFFF0000u) | static_cast<uint16_t>(simm16);
-}
-
-[[nodiscard]] bool is_s_branch_word(uint32_t word) { return (word & 0xFFFF0000u) == 0xBFA00000u; }
-
-[[nodiscard]] std::optional<uint32_t> inverse_conditional_sopp(uint32_t word) {
-  switch (word & 0xFFFF0000u) {
-  case 0xBFA10000u:
-    return 0xBFA20000u; // s_cbranch_scc0 -> s_cbranch_scc1
-  case 0xBFA20000u:
-    return 0xBFA10000u; // s_cbranch_scc1 -> s_cbranch_scc0
-  case 0xBFA30000u:
-    return 0xBFA40000u; // s_cbranch_vccz -> s_cbranch_vccnz
-  case 0xBFA40000u:
-    return 0xBFA30000u; // s_cbranch_vccnz -> s_cbranch_vccz
-  case 0xBFA50000u:
-    return 0xBFA60000u; // s_cbranch_execz -> s_cbranch_execnz
-  case 0xBFA60000u:
-    return 0xBFA50000u; // s_cbranch_execnz -> s_cbranch_execz
-  default:
-    return std::nullopt;
-  }
-}
-
 [[nodiscard]] std::optional<uint16_t>
 find_long_return_scc_sgpr(const LivenessAnalysis &liveness, const Instruction &inst,
                           std::optional<uint16_t> long_return_sgpr_pair) {
@@ -366,11 +313,6 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
 
   return patcher.patch_metadata_target_isa("amdgcn-amd-amdhsa--gfx1250",
                                            "amdgcn-amd-amdhsa--gfx1201");
-}
-
-[[nodiscard]] uint64_t align_up_to_word(uint64_t offset) {
-  constexpr uint64_t kWordMask = sizeof(uint32_t) - 1;
-  return (offset + kWordMask) & ~kWordMask;
 }
 
 [[nodiscard]] uint32_t read_u32(std::span<const uint8_t> bytes, uint64_t offset) {
@@ -5107,9 +5049,63 @@ void append_hardware_pending_warning(std::vector<std::string> *warnings,
     warnings->push_back(warning);
 }
 
+enum class PlacementTier {
+  InPlace,
+  LocalPaddingCave,
+  LocalUnreachableTextCave,
+  ChainedAppendedCave,
+  LocalPaddingBranchIsland,
+  LocalUnreachableBranchIsland,
+  AppendedCaveLongBranchIsland,
+  AppendedCaveBranchChain,
+  AppendedCave,
+};
+
+[[nodiscard]] std::string_view placement_tier_name(PlacementTier tier) {
+  switch (tier) {
+  case PlacementTier::InPlace:
+    return "in-place";
+  case PlacementTier::LocalPaddingCave:
+    return "local-padding-cave";
+  case PlacementTier::LocalUnreachableTextCave:
+    return "local-unreachable-text-cave";
+  case PlacementTier::ChainedAppendedCave:
+    return "chained-appended-cave";
+  case PlacementTier::LocalPaddingBranchIsland:
+    return "local-padding-branch-island";
+  case PlacementTier::LocalUnreachableBranchIsland:
+    return "local-unreachable-branch-island";
+  case PlacementTier::AppendedCaveLongBranchIsland:
+    return "appended-cave-long-branch-island";
+  case PlacementTier::AppendedCaveBranchChain:
+    return "appended-cave-branch-chain";
+  case PlacementTier::AppendedCave:
+    return "appended-cave";
+  }
+  return "unknown";
+}
+
 [[nodiscard]] bool cave_diagnostics_enabled() {
   const char *enabled = std::getenv("ROCJITSU_DBT_CAVE_DIAGNOSTICS");
   return enabled != nullptr && enabled[0] != '\0';
+}
+
+void append_placement_diagnostic(std::vector<std::string> *warnings, std::string_view action,
+                                 PlacementTier tier, const SemanticReplacement &repl,
+                                 std::string_view detail = {}) {
+  if (!warnings || !cave_diagnostics_enabled())
+    return;
+
+  std::ostringstream os;
+  os << "code placement " << action << " tier=" << placement_tier_name(tier);
+  if (!repl.source_mnemonic.empty())
+    os << " source_mnemonic=" << repl.source_mnemonic;
+  os << " source_offset=0x" << std::hex << repl.start_offset << " source_size=0x"
+     << (repl.end_offset - repl.start_offset) << " target_size=0x"
+     << (repl.target_words.size() * sizeof(uint32_t));
+  if (!detail.empty())
+    os << " " << detail;
+  warnings->push_back(os.str());
 }
 
 [[nodiscard]] std::string cave_range_diagnostic(const char *kind, const SemanticReplacement &repl,
@@ -5373,233 +5369,6 @@ void nop_untranslated_gfx1250_vgpr_msb_zero_resets(std::vector<uint8_t> &text,
       continue;
     std::memcpy(text.data() + offset, &nop, sizeof(nop));
   }
-}
-
-[[nodiscard]] bool ranges_overlap(uint64_t lhs_start, uint64_t lhs_end, uint64_t rhs_start,
-                                  uint64_t rhs_end) {
-  return lhs_start < rhs_end && rhs_start < lhs_end;
-}
-
-[[nodiscard]] bool overlaps_any_range(uint64_t start, uint64_t end,
-                                      std::span<const std::pair<uint64_t, uint64_t>> ranges) {
-  return std::ranges::any_of(ranges, [&](const auto &range) {
-    return ranges_overlap(start, end, range.first, range.second);
-  });
-}
-
-[[nodiscard]] bool is_local_cave_padding_run(std::span<const uint8_t> text, uint64_t start,
-                                             uint64_t size) {
-  for (uint64_t off = start; off < start + size; off += sizeof(uint32_t)) {
-    const uint32_t word = read_u32(text, off);
-    if (word != kSCodeEnd && word != kSNop0)
-      return false;
-  }
-  return true;
-}
-
-[[nodiscard]] std::optional<uint64_t>
-find_local_text_cave(std::span<const uint8_t> text, const SemanticReplacement &repl,
-                     uint64_t cave_size, std::span<const std::pair<uint64_t, uint64_t>> local_caves,
-                     std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-                     bool allow_unreachable_text_caves, int16_t &entry_branch_dwords,
-                     int16_t &return_branch_dwords) {
-  if (cave_size == 0 || cave_size % sizeof(uint32_t) != 0 || cave_size > text.size())
-    return std::nullopt;
-
-  const uint64_t source_size = repl.end_offset - repl.start_offset;
-  const uint64_t stub_next = repl.start_offset + source_size;
-  const uint64_t last_start = text.size() - cave_size;
-
-  auto try_candidate = [&](uint64_t candidate) -> std::optional<uint64_t> {
-    const uint64_t candidate_end = candidate + cave_size;
-    if (ranges_overlap(candidate, candidate_end, repl.start_offset, repl.end_offset))
-      return std::nullopt;
-    if (overlaps_any_range(candidate, candidate_end, local_caves) ||
-        overlaps_any_range(candidate, candidate_end, protected_ranges)) {
-      return std::nullopt;
-    }
-    if (!allow_unreachable_text_caves && !is_local_cave_padding_run(text, candidate, cave_size))
-      return std::nullopt;
-
-    int16_t fwd_dwords = 0;
-    if (!compute_sopp_branch_offset(repl.start_offset, candidate, fwd_dwords))
-      return std::nullopt;
-
-    int16_t ret_dwords = 0;
-    const uint64_t return_branch_pc = candidate + repl.target_words.size() * sizeof(uint32_t);
-    if (!compute_sopp_branch_offset(return_branch_pc, stub_next, ret_dwords))
-      return std::nullopt;
-
-    entry_branch_dwords = fwd_dwords;
-    return_branch_dwords = ret_dwords;
-    return candidate;
-  };
-
-  if (allow_unreachable_text_caves) {
-    std::vector<std::pair<uint64_t, uint64_t>> gaps;
-    uint64_t cursor = 0;
-    for (const auto &[range_start, range_end] : protected_ranges) {
-      if (range_start > cursor)
-        gaps.emplace_back(cursor, range_start);
-      cursor = std::max(cursor, range_end);
-    }
-    if (cursor < text.size())
-      gaps.emplace_back(cursor, text.size());
-
-    auto scan_forward = [&](uint64_t start, uint64_t end) -> std::optional<uint64_t> {
-      if (end < start || end - start < cave_size)
-        return std::nullopt;
-      for (uint64_t candidate = align_up_to_word(start); candidate + cave_size <= end;
-           candidate += sizeof(uint32_t)) {
-        if (auto cave = try_candidate(candidate))
-          return cave;
-      }
-      return std::nullopt;
-    };
-
-    auto scan_backward = [&](uint64_t start, uint64_t end) -> std::optional<uint64_t> {
-      if (end < start || end - start < cave_size || repl.start_offset < cave_size)
-        return std::nullopt;
-      uint64_t candidate = std::min(end - cave_size, repl.start_offset - cave_size);
-      candidate -= candidate % sizeof(uint32_t);
-      while (candidate >= start) {
-        if (auto cave = try_candidate(candidate))
-          return cave;
-        if (candidate < start + sizeof(uint32_t))
-          break;
-        candidate -= sizeof(uint32_t);
-      }
-      return std::nullopt;
-    };
-
-    const uint64_t forward_start = align_up_to_word(repl.end_offset);
-    for (const auto &[gap_start, gap_end] : gaps) {
-      if (gap_end <= forward_start)
-        continue;
-      if (auto cave = scan_forward(std::max(gap_start, forward_start), gap_end))
-        return cave;
-    }
-
-    for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
-      if (it->first >= repl.start_offset)
-        continue;
-      if (auto cave = scan_backward(it->first, std::min(it->second, repl.start_offset)))
-        return cave;
-    }
-
-    return std::nullopt;
-  }
-
-  for (uint64_t candidate = align_up_to_word(repl.end_offset); candidate <= last_start;
-       candidate += sizeof(uint32_t)) {
-    if (auto cave = try_candidate(candidate))
-      return cave;
-  }
-
-  if (repl.start_offset >= cave_size) {
-    uint64_t candidate = std::min(last_start, repl.start_offset - cave_size);
-    candidate -= candidate % sizeof(uint32_t);
-    while (true) {
-      if (auto cave = try_candidate(candidate))
-        return cave;
-      if (candidate < sizeof(uint32_t))
-        break;
-      candidate -= sizeof(uint32_t);
-    }
-  }
-
-  return std::nullopt;
-}
-
-[[nodiscard]] std::optional<uint64_t>
-find_local_branch_island(std::span<const uint8_t> text, const SemanticReplacement &repl,
-                         uint64_t island_target,
-                         std::span<const std::pair<uint64_t, uint64_t>> local_caves,
-                         std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-                         bool allow_unreachable_text_caves, int16_t &entry_branch_dwords,
-                         int16_t &island_branch_dwords) {
-  constexpr uint64_t kIslandSize = sizeof(uint32_t);
-  if (text.size() < kIslandSize)
-    return std::nullopt;
-
-  const uint64_t last_start = text.size() - kIslandSize;
-
-  auto try_candidate = [&](uint64_t candidate) -> std::optional<uint64_t> {
-    const uint64_t candidate_end = candidate + kIslandSize;
-    if (ranges_overlap(candidate, candidate_end, repl.start_offset, repl.end_offset))
-      return std::nullopt;
-    if (overlaps_any_range(candidate, candidate_end, local_caves) ||
-        overlaps_any_range(candidate, candidate_end, protected_ranges)) {
-      return std::nullopt;
-    }
-    if (!allow_unreachable_text_caves && !is_local_cave_padding_run(text, candidate, kIslandSize)) {
-      return std::nullopt;
-    }
-
-    int16_t entry_dwords = 0;
-    if (!compute_sopp_branch_offset(repl.start_offset, candidate, entry_dwords))
-      return std::nullopt;
-
-    int16_t island_dwords = 0;
-    if (!compute_sopp_branch_offset(candidate, island_target, island_dwords))
-      return std::nullopt;
-
-    entry_branch_dwords = entry_dwords;
-    island_branch_dwords = island_dwords;
-    return candidate;
-  };
-
-  auto scan_forward = [&](uint64_t start, uint64_t end) -> std::optional<uint64_t> {
-    if (end < start || end - start < kIslandSize)
-      return std::nullopt;
-    for (uint64_t candidate = align_up_to_word(start); candidate + kIslandSize <= end;
-         candidate += kIslandSize) {
-      if (auto island = try_candidate(candidate))
-        return island;
-    }
-    return std::nullopt;
-  };
-
-  auto scan_backward = [&](uint64_t start, uint64_t end) -> std::optional<uint64_t> {
-    if (end < start || end - start < kIslandSize)
-      return std::nullopt;
-    uint64_t candidate = std::min(end - kIslandSize, last_start);
-    candidate -= candidate % kIslandSize;
-    while (candidate >= start) {
-      if (auto island = try_candidate(candidate))
-        return island;
-      if (candidate < start + kIslandSize)
-        break;
-      candidate -= kIslandSize;
-    }
-    return std::nullopt;
-  };
-
-  if (allow_unreachable_text_caves) {
-    std::vector<std::pair<uint64_t, uint64_t>> gaps;
-    uint64_t cursor = 0;
-    for (const auto &[range_start, range_end] : protected_ranges) {
-      if (range_start > cursor)
-        gaps.emplace_back(cursor, range_start);
-      cursor = std::max(cursor, range_end);
-    }
-    if (cursor < text.size())
-      gaps.emplace_back(cursor, text.size());
-
-    for (auto it = gaps.rbegin(); it != gaps.rend(); ++it) {
-      if (auto island = scan_backward(it->first, it->second))
-        return island;
-    }
-    for (const auto &[gap_start, gap_end] : gaps) {
-      if (auto island = scan_forward(gap_start, gap_end))
-        return island;
-    }
-    return std::nullopt;
-  }
-
-  if (auto island = scan_backward(0, text.size()))
-    return island;
-  return scan_forward(0, text.size());
 }
 
 // Large kernels can need thousands of independent branch islands before later
@@ -6871,6 +6640,20 @@ void BinaryTranslator::set_trace_callback(TranslationTraceCallback callback) {
   trace_callback_ = std::move(callback);
 }
 
+std::span<const std::pair<uint64_t, uint64_t>>
+BinaryTranslator::PlacementState::reserved_local_text() const {
+  return local_caves;
+}
+
+bool BinaryTranslator::PlacementState::overlaps_reserved_local_text(uint64_t start,
+                                                                   uint64_t end) const {
+  return overlaps_any_range(start, end, reserved_local_text());
+}
+
+void BinaryTranslator::PlacementState::reserve_local_text(uint64_t start, uint64_t end) {
+  local_caves.emplace_back(start, end);
+}
+
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result;
   result.host_arch = host_arch_;
@@ -6922,6 +6705,20 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   const auto static_pc_relative_calls = guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250
                                             ? static_pc_relative_call_edges(text)
                                             : std::vector<StaticPcRelativeCallEdge>{};
+  std::vector<ExpandedTextPcRelativeFixup> static_pc_relative_fixups;
+  static_pc_relative_fixups.reserve(static_setpc_edges.size() + static_pc_relative_addresses.size());
+  for (const StaticPcRelativeSetpcEdge &edge : static_setpc_edges) {
+    static_pc_relative_fixups.push_back({.getpc_offset = edge.getpc_offset,
+                                         .add_tmp_offset = edge.add_tmp_offset,
+                                         .target_offset = edge.target_offset,
+                                         .kind = "setpc"});
+  }
+  for (const StaticPcRelativeAddress &address : static_pc_relative_addresses) {
+    static_pc_relative_fixups.push_back({.getpc_offset = address.getpc_offset,
+                                         .add_tmp_offset = address.add_tmp_offset,
+                                         .target_offset = address.target_offset,
+                                         .kind = "address"});
+  }
   std::vector<uint64_t> block_leaders(entry_offsets.begin(), entry_offsets.end());
   block_leaders.reserve(block_leaders.size() + static_setpc_edges.size() +
                         2 * static_pc_relative_addresses.size() +
@@ -7009,12 +6806,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   const auto protected_ranges = reachable_code_ranges(scopes);
   const bool allow_unreachable_text_caves = has_unprotected_text(protected_ranges, text.size()) &&
                                             !has_unresolved_reachable_indirect_control_flow(scopes);
-  std::vector<std::pair<uint64_t, uint64_t>> local_caves;
   CaveBranchIslandState cave_branch_island_storage;
   CaveBranchIslandState *cave_branch_islands =
       guest_arch_ == ROCJITSU_CODE_ARCH_GFX1250 && host_arch_ == ROCJITSU_CODE_ARCH_RDNA4
           ? &cave_branch_island_storage
           : nullptr;
+  PlacementState placement;
+  placement.protected_ranges = protected_ranges;
+  placement.allow_unreachable_text_caves = allow_unreachable_text_caves;
+  placement.cave_branch_islands = cave_branch_islands;
 
   // Code caves live in a separate executable section that is placed immediately
   // after the original .text bytes. Treating that section as a .text-relative
@@ -7022,16 +6822,15 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // dependency on compiler-emitted NOP padding after s_endpgm.
   patcher.set_cave_start(text.size());
 
+  // Placement policy:
+  // 1. Use an expanded local .text tail when the whole copied CFG can be
+  //    relocated and descriptors can enter that copy.
+  // 2. Otherwise preserve source addresses and let apply_semantic() choose
+  //    among local padding caves, unreachable-text caves, branch islands, and
+  //    appended .rj_translations fallback caves for each size-growing rewrite.
   if (supports_expanded_text_copy(guest_arch_, host_arch_, text.size(),
                                   covered_range_bytes(protected_ranges), descriptor_translations,
                                   scopes)) {
-    struct RelocatedBranch {
-      uint64_t word_index = 0;
-      uint64_t target_offset = 0;
-      std::string mnemonic;
-      std::optional<uint16_t> sgpr_pair;
-    };
-
     std::vector<uint32_t> expanded_words;
     std::unordered_map<uint64_t, uint64_t> copied_entry_offsets;
     bool expanded_copy_ok = true;
@@ -7076,7 +6875,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       HighBankShadowState high_bank_shadow_state;
       std::vector<uint32_t> scope_words;
       std::vector<uint32_t> scope_word_group_sizes;
-      std::vector<RelocatedBranch> direct_branches;
+      std::vector<ExpandedTextBranchFixup> direct_branches;
       std::unordered_map<uint64_t, uint64_t> scope_offsets;
 
       uint64_t consumed_until = 0;
@@ -7285,7 +7084,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
             const size_t old_word_index = translated_offset / sizeof(uint32_t);
             translated_offset = old_to_new[old_word_index] * sizeof(uint32_t);
           }
-          for (RelocatedBranch &branch : direct_branches)
+          for (ExpandedTextBranchFixup &branch : direct_branches)
             branch.word_index = old_to_new[branch.word_index];
           scope_words = std::move(rewritten_words);
         }
@@ -7295,215 +7094,23 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         if (direct_branches.empty())
           return true;
 
-        struct PcRelativeSetpc {
-          size_t getpc_word = 0;
-          size_t target_word = 0;
-          uint16_t sgpr_pair = 0;
-        };
+        std::vector<std::pair<uint64_t, uint64_t>> offset_map;
+        offset_map.reserve(scope_offsets.size());
+        for (const auto &[source_offset, translated_offset] : scope_offsets)
+          offset_map.emplace_back(source_offset, translated_offset);
 
-        const size_t old_word_count = scope_words.size();
-        std::vector<PcRelativeSetpc> pc_relative_setpcs;
-        for (size_t word = 0; word + 5 < old_word_count; ++word) {
-          const uint32_t getpc = scope_words[word];
-          const uint16_t sgpr_pair = static_cast<uint16_t>((getpc >> 16) & 0x7Fu);
-          if (sgpr_pair >= 127 || getpc != pack_sop1(71, sgpr_pair, 0))
-            continue;
-          if (scope_words[word + 1] != pack_sop2(0, sgpr_pair, sgpr_pair, 255))
-            continue;
-          if (scope_words[word + 3] != pack_sop2(4, static_cast<uint16_t>(sgpr_pair + 1u),
-                                                 static_cast<uint16_t>(sgpr_pair + 1u), 255))
-            continue;
-          if (scope_words[word + 5] != pack_sop1(72, 0, sgpr_pair))
-            continue;
-
-          const uint64_t delta_bits = static_cast<uint64_t>(scope_words[word + 2]) |
-                                      (static_cast<uint64_t>(scope_words[word + 4]) << 32);
-          const int64_t delta = static_cast<int64_t>(delta_bits);
-          const int64_t target =
-              static_cast<int64_t>(word * sizeof(uint32_t) + sizeof(uint32_t)) + delta;
-          if (target < 0 || target % static_cast<int64_t>(sizeof(uint32_t)) != 0) {
-            fail_expanded_copy("expanded text copy cannot relocate unaligned s_setpc target");
-            return false;
-          }
-          const auto target_word =
-              static_cast<size_t>(target / static_cast<int64_t>(sizeof(uint32_t)));
-          if (target_word > old_word_count) {
-            fail_expanded_copy("expanded text copy s_setpc target is outside the copied CFG");
-            return false;
-          }
-          pc_relative_setpcs.push_back({word, target_word, sgpr_pair});
+        auto relocation =
+            relocate_expanded_text_branches({.words = scope_words,
+                                             .branches = direct_branches,
+                                             .offset_map = offset_map});
+        if (!relocation.success) {
+          fail_expanded_copy(std::move(relocation.message));
+          return false;
         }
-
-        std::unordered_map<uint64_t, const RelocatedBranch *> branch_by_word;
-        for (const RelocatedBranch &branch : direct_branches)
-          branch_by_word.emplace(branch.word_index, &branch);
-
-        std::unordered_set<uint64_t> long_branches;
-        std::vector<size_t> old_to_new(old_word_count + 1);
-
-        auto rebuild_map = [&]() {
-          size_t new_word = 0;
-          for (size_t old_word = 0; old_word < old_word_count; ++old_word) {
-            old_to_new[old_word] = new_word;
-            if (long_branches.contains(old_word)) {
-              const uint32_t word = scope_words[old_word];
-              const auto branch_it = branch_by_word.find(old_word);
-              const uint32_t long_words =
-                  branch_it != branch_by_word.end() && is_s_branch_word(word) ? 6u : 7u;
-              new_word += long_words;
-            } else {
-              ++new_word;
-            }
-          }
-          old_to_new[old_word_count] = new_word;
-        };
-
-        auto translated_target_word = [&](const RelocatedBranch &branch) -> std::optional<size_t> {
-          const auto target_it = scope_offsets.find(branch.target_offset);
-          if (target_it == scope_offsets.end())
-            return std::nullopt;
-          if (target_it->second % sizeof(uint32_t) != 0)
-            return std::nullopt;
-          const size_t target_word = target_it->second / sizeof(uint32_t);
-          if (target_word > old_word_count)
-            return std::nullopt;
-          return target_word;
-        };
-
-        for (;;) {
-          rebuild_map();
-          bool added_long_branch = false;
-          for (const RelocatedBranch &branch : direct_branches) {
-            const auto target_word = translated_target_word(branch);
-            if (!target_word) {
-              fail_expanded_copy("expanded text copy branch target is outside the copied CFG for " +
-                                 branch.mnemonic);
-              return false;
-            }
-            if (long_branches.contains(branch.word_index))
-              continue;
-
-            int16_t branch_dwords = 0;
-            const uint64_t branch_pc = old_to_new[branch.word_index] * sizeof(uint32_t);
-            const uint64_t target_pc = old_to_new[*target_word] * sizeof(uint32_t);
-            if (compute_sopp_branch_offset(branch_pc, target_pc, branch_dwords))
-              continue;
-
-            const uint32_t word = scope_words[branch.word_index];
-            if (!branch.sgpr_pair) {
-              fail_expanded_copy("expanded text copy needs a dead SGPR pair for long branch " +
-                                 branch.mnemonic);
-              return false;
-            }
-            if (!is_s_branch_word(word) && !inverse_conditional_sopp(word)) {
-              fail_expanded_copy("expanded text copy cannot build long branch for " +
-                                 branch.mnemonic);
-              return false;
-            }
-            long_branches.insert(branch.word_index);
-            added_long_branch = true;
-          }
-          if (!added_long_branch)
-            break;
-        }
-
-        rebuild_map();
-        std::vector<uint32_t> relocated_words;
-        relocated_words.reserve(old_to_new[old_word_count]);
-        for (size_t old_word = 0; old_word < old_word_count; ++old_word) {
-          const auto branch_it = branch_by_word.find(old_word);
-          if (!long_branches.contains(old_word) || branch_it == branch_by_word.end()) {
-            relocated_words.push_back(scope_words[old_word]);
-            continue;
-          }
-
-          const RelocatedBranch &branch = *branch_it->second;
-          const auto target_word = translated_target_word(branch);
-          if (!target_word) {
-            fail_expanded_copy("expanded text copy branch target is outside the copied CFG for " +
-                               branch.mnemonic);
-            return false;
-          }
-
-          const uint64_t target_pc = old_to_new[*target_word] * sizeof(uint32_t);
-          const uint32_t word = scope_words[old_word];
-          if (is_s_branch_word(word)) {
-            auto long_branch = build_s_setpc_long_branch(relocated_words.size() * sizeof(uint32_t),
-                                                         target_pc, *branch.sgpr_pair);
-            if (long_branch.empty()) {
-              fail_expanded_copy("expanded text copy could not build long branch for " +
-                                 branch.mnemonic);
-              return false;
-            }
-            relocated_words.insert(relocated_words.end(), long_branch.begin(), long_branch.end());
-            continue;
-          }
-
-          auto inverse = inverse_conditional_sopp(word);
-          auto long_branch = build_s_setpc_long_branch(
-              (relocated_words.size() + 1) * sizeof(uint32_t), target_pc, *branch.sgpr_pair);
-          if (!inverse || long_branch.empty() ||
-              long_branch.size() > static_cast<size_t>(std::numeric_limits<int16_t>::max())) {
-            fail_expanded_copy("expanded text copy could not build long conditional branch for " +
-                               branch.mnemonic);
-            return false;
-          }
-          relocated_words.push_back(
-              build_sopp_with_simm(*inverse, static_cast<int16_t>(long_branch.size())));
-          relocated_words.insert(relocated_words.end(), long_branch.begin(), long_branch.end());
-        }
-
-        for (const RelocatedBranch &branch : direct_branches) {
-          if (long_branches.contains(branch.word_index))
-            continue;
-          const auto target_word = translated_target_word(branch);
-          if (!target_word) {
-            fail_expanded_copy("expanded text copy branch target is outside the copied CFG for " +
-                               branch.mnemonic);
-            return false;
-          }
-
-          int16_t branch_dwords = 0;
-          const uint64_t branch_pc = old_to_new[branch.word_index] * sizeof(uint32_t);
-          const uint64_t target_pc = old_to_new[*target_word] * sizeof(uint32_t);
-          if (!compute_sopp_branch_offset(branch_pc, target_pc, branch_dwords)) {
-            fail_expanded_copy("expanded text copy branch range exceeds s_branch simm16 for " +
-                               branch.mnemonic);
-            return false;
-          }
-          relocated_words[old_to_new[branch.word_index]] =
-              build_sopp_with_simm(relocated_words[old_to_new[branch.word_index]], branch_dwords);
-        }
-
-        for (const PcRelativeSetpc &pc_branch : pc_relative_setpcs) {
-          const size_t new_getpc_word = old_to_new[pc_branch.getpc_word];
-          const size_t new_target_word = old_to_new[pc_branch.target_word];
-          const int64_t getpc_pc = static_cast<int64_t>(new_getpc_word * sizeof(uint32_t));
-          const int64_t target_pc = static_cast<int64_t>(new_target_word * sizeof(uint32_t));
-          const int64_t delta = target_pc - (getpc_pc + static_cast<int64_t>(sizeof(uint32_t)));
-          const uint64_t delta_bits = static_cast<uint64_t>(delta);
-          if (new_getpc_word + 5 >= relocated_words.size()) {
-            fail_expanded_copy("expanded text copy s_setpc relocation is out of range");
-            return false;
-          }
-          relocated_words[new_getpc_word + 2] = static_cast<uint32_t>(delta_bits & 0xFFFF'FFFFu);
-          relocated_words[new_getpc_word + 4] = static_cast<uint32_t>(delta_bits >> 32);
-        }
-
-        for (auto &[_, translated_offset] : scope_offsets) {
-          if (translated_offset % sizeof(uint32_t) != 0) {
-            fail_expanded_copy("expanded text copy has an unaligned translated branch target");
-            return false;
-          }
-          const size_t old_word = translated_offset / sizeof(uint32_t);
-          if (old_word > old_word_count) {
-            fail_expanded_copy("expanded text copy has an out-of-range translated branch target");
-            return false;
-          }
-          translated_offset = old_to_new[old_word] * sizeof(uint32_t);
-        }
-
-        scope_words = std::move(relocated_words);
+        scope_words = std::move(relocation.words);
+        scope_offsets.clear();
+        for (const auto &[source_offset, translated_offset] : relocation.offset_map)
+          scope_offsets.emplace(source_offset, translated_offset);
         return true;
       };
 
@@ -7516,151 +7123,75 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         break;
       }
 
-      auto relocate_static_pc_relative_setpcs = [&](uint64_t scope_base) {
-        if (static_setpc_edges.empty())
+      auto relocate_static_pc_relative_fixups = [&](uint64_t scope_base) {
+        if (static_pc_relative_fixups.empty())
           return true;
 
-        constexpr uint32_t kOpSAddCoI32 = 2;
-        for (const StaticPcRelativeSetpcEdge &edge : static_setpc_edges) {
-          const auto getpc_it = scope_offsets.find(edge.getpc_offset);
-          const auto add_tmp_it = scope_offsets.find(edge.add_tmp_offset);
-          if (getpc_it == scope_offsets.end() || add_tmp_it == scope_offsets.end())
-            continue;
-          if (getpc_it->second % sizeof(uint32_t) != 0 ||
-              add_tmp_it->second % sizeof(uint32_t) != 0) {
-            fail_expanded_copy("expanded text copy cannot relocate unaligned pc-relative setpc");
-            return false;
-          }
+        std::vector<std::pair<uint64_t, uint64_t>> offset_map;
+        offset_map.reserve(scope_offsets.size());
+        for (const auto &[source_offset, translated_offset] : scope_offsets)
+          offset_map.emplace_back(source_offset, translated_offset);
 
-          const size_t add_tmp_word = add_tmp_it->second / sizeof(uint32_t);
-          if (add_tmp_word + 1 >= scope_words.size()) {
-            fail_expanded_copy("expanded text copy pc-relative setpc literal is out of range");
-            return false;
-          }
-
-          const uint32_t add_tmp = scope_words[add_tmp_word];
-          const uint16_t tmp = static_cast<uint16_t>((add_tmp >> 16) & 0x7Fu);
-          if (tmp >= 128 ||
-              add_tmp != pack_sop2(kOpSAddCoI32, tmp, 255, scalar_positive_inline_u32(4))) {
-            fail_expanded_copy(
-                "expanded text copy pc-relative setpc materialization was rewritten");
-            return false;
-          }
-
-          const auto copied_target_it = scope_offsets.find(edge.target_offset);
-          const int64_t target =
-              copied_target_it == scope_offsets.end()
-                  ? static_cast<int64_t>(edge.target_offset)
-                  : static_cast<int64_t>(text.size() + scope_base + copied_target_it->second);
-          const int64_t getpc_pc =
-              static_cast<int64_t>(text.size() + scope_base + getpc_it->second);
-          const int64_t literal = target - getpc_pc - 2 * static_cast<int64_t>(sizeof(uint32_t));
-          if (literal < std::numeric_limits<int32_t>::min() ||
-              literal > std::numeric_limits<int32_t>::max()) {
-            fail_expanded_copy("expanded text copy pc-relative setpc exceeds literal range");
-            return false;
-          }
-
-          scope_words[add_tmp_word + 1] = static_cast<uint32_t>(static_cast<int32_t>(literal));
+        auto relocation = relocate_expanded_text_pc_relative_fixups(
+            {.words = scope_words,
+             .offset_map = offset_map,
+             .fixups = static_pc_relative_fixups,
+             .original_text_size_bytes = text.size(),
+             .scope_base_bytes = scope_base});
+        if (!relocation.success) {
+          fail_expanded_copy(std::move(relocation.message));
+          return false;
         }
         return true;
       };
 
-      auto relocate_static_pc_relative_addresses = [&](uint64_t scope_base) {
-        if (static_pc_relative_addresses.empty())
-          return true;
-
-        constexpr uint32_t kOpSAddCoI32 = 2;
-        for (const StaticPcRelativeAddress &address : static_pc_relative_addresses) {
-          const auto getpc_it = scope_offsets.find(address.getpc_offset);
-          const auto add_tmp_it = scope_offsets.find(address.add_tmp_offset);
-          if (getpc_it == scope_offsets.end() || add_tmp_it == scope_offsets.end())
-            continue;
-          if (getpc_it->second % sizeof(uint32_t) != 0 ||
-              add_tmp_it->second % sizeof(uint32_t) != 0) {
-            fail_expanded_copy("expanded text copy cannot relocate unaligned pc-relative address");
-            return false;
-          }
-
-          const size_t add_tmp_word = add_tmp_it->second / sizeof(uint32_t);
-          if (add_tmp_word + 1 >= scope_words.size()) {
-            fail_expanded_copy("expanded text copy pc-relative address literal is out of range");
-            return false;
-          }
-
-          const uint32_t add_tmp = scope_words[add_tmp_word];
-          const uint16_t tmp = static_cast<uint16_t>((add_tmp >> 16) & 0x7Fu);
-          if (tmp >= 128 ||
-              add_tmp != pack_sop2(kOpSAddCoI32, tmp, 255, scalar_positive_inline_u32(4))) {
-            fail_expanded_copy(
-                "expanded text copy pc-relative address materialization was rewritten");
-            return false;
-          }
-
-          const auto copied_target_it = scope_offsets.find(address.target_offset);
-          const int64_t target =
-              copied_target_it == scope_offsets.end()
-                  ? static_cast<int64_t>(address.target_offset)
-                  : static_cast<int64_t>(text.size() + scope_base + copied_target_it->second);
-          const int64_t getpc_pc =
-              static_cast<int64_t>(text.size() + scope_base + getpc_it->second);
-          const int64_t literal = target - getpc_pc - 2 * static_cast<int64_t>(sizeof(uint32_t));
-          if (literal < std::numeric_limits<int32_t>::min() ||
-              literal > std::numeric_limits<int32_t>::max()) {
-            fail_expanded_copy("expanded text copy pc-relative address exceeds literal range");
-            return false;
-          }
-
-          scope_words[add_tmp_word + 1] = static_cast<uint32_t>(static_cast<int32_t>(literal));
-        }
-        return true;
+      const ExpandedTextScopePlacementRequest placement_request{
+          .original_text_size_bytes = text.size(),
+          .current_tail_size_bytes = expanded_words.size() * sizeof(uint32_t),
+          .original_entry_offset = scope.translation->entry_text_offset,
+          .translated_entry_offset = entry_it->second,
+          .prologue_size_bytes =
+              scope.translation->prologue_words.size() * sizeof(uint32_t),
       };
+      const auto scope_placement = plan_expanded_text_scope_placement(placement_request);
+      if (!scope_placement) {
+        fail_expanded_copy("expanded text copy could not place copied kernel entry");
+        break;
+      }
 
-      const uint64_t entry_residue = scope.translation->entry_text_offset % 256;
       if (scope.translation->prologue_words.empty()) {
-        const uint64_t entry_without_padding =
-            text.size() + expanded_words.size() * sizeof(uint32_t) + entry_it->second;
-        const uint64_t padding_bytes = (entry_residue + 256 - (entry_without_padding % 256)) % 256;
-        assert(padding_bytes % sizeof(uint32_t) == 0 && "entry padding must be word aligned");
-        expanded_words.insert(expanded_words.end(), padding_bytes / sizeof(uint32_t),
+        expanded_words.insert(expanded_words.end(),
+                              scope_placement->padding_bytes / sizeof(uint32_t),
                               build_s_nop(0, host_arch_));
 
-        const uint64_t scope_base = expanded_words.size() * sizeof(uint32_t);
-        if (!relocate_static_pc_relative_setpcs(scope_base) ||
-            !relocate_static_pc_relative_addresses(scope_base))
+        const uint64_t scope_base = scope_placement->body_offset;
+        assert(expanded_words.size() * sizeof(uint32_t) == scope_base &&
+               "expanded scope body placement mismatch");
+        if (!relocate_static_pc_relative_fixups(scope_base))
           break;
         expanded_words.insert(expanded_words.end(), scope_words.begin(), scope_words.end());
         copied_entry_offsets.emplace(scope.translation->entry_text_offset,
-                                     scope_base + entry_it->second);
+                                     scope_placement->descriptor_entry_offset);
       } else {
-        const uint64_t stub_without_padding =
-            text.size() + expanded_words.size() * sizeof(uint32_t);
-        const uint64_t padding_bytes = (entry_residue + 256 - (stub_without_padding % 256)) % 256;
-        assert(padding_bytes % sizeof(uint32_t) == 0 && "entry padding must be word aligned");
-        expanded_words.insert(expanded_words.end(), padding_bytes / sizeof(uint32_t),
+        expanded_words.insert(expanded_words.end(),
+                              scope_placement->padding_bytes / sizeof(uint32_t),
                               build_s_nop(0, host_arch_));
 
-        const uint64_t stub_start = expanded_words.size() * sizeof(uint32_t);
+        assert(expanded_words.size() * sizeof(uint32_t) == *scope_placement->launch_stub_offset &&
+               "expanded launch stub placement mismatch");
         std::vector<uint32_t> launch_stub(scope.translation->prologue_words.begin(),
                                           scope.translation->prologue_words.end());
-        const uint64_t branch_pc = stub_start + launch_stub.size() * sizeof(uint32_t);
-        const uint64_t scope_base = branch_pc + sizeof(uint32_t);
-        const uint64_t body_entry = scope_base + entry_it->second;
-        int16_t entry_branch = 0;
-        if (!compute_sopp_branch_offset(branch_pc, body_entry, entry_branch)) {
-          fail_expanded_copy("expanded text copy prologue branch range exceeds s_branch simm16");
-          break;
-        }
-        launch_stub.push_back(build_s_branch(entry_branch, host_arch_));
+        launch_stub.push_back(build_s_branch(*scope_placement->prologue_branch_dwords, host_arch_));
 
         expanded_words.insert(expanded_words.end(), launch_stub.begin(), launch_stub.end());
+        const uint64_t scope_base = scope_placement->body_offset;
         assert(expanded_words.size() * sizeof(uint32_t) == scope_base &&
                "expanded launch stub size mismatch");
-        if (!relocate_static_pc_relative_setpcs(scope_base) ||
-            !relocate_static_pc_relative_addresses(scope_base))
+        if (!relocate_static_pc_relative_fixups(scope_base))
           break;
         expanded_words.insert(expanded_words.end(), scope_words.begin(), scope_words.end());
-        copied_entry_offsets.emplace(scope.translation->entry_text_offset, stub_start);
+        copied_entry_offsets.emplace(scope.translation->entry_text_offset,
+                                     scope_placement->descriptor_entry_offset);
       }
     }
 
@@ -7671,22 +7202,39 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
                                expanded_bytes + expanded_words.size() * sizeof(uint32_t));
       }
 
-      std::unordered_set<uint64_t> applied_descriptors;
+      std::vector<ExpandedTextDescriptorEntry> descriptor_entries;
+      descriptor_entries.reserve(descriptor_translations.size());
+      std::unordered_map<uint64_t, const KdTranslation *> descriptor_by_file_offset;
       for (const KdTranslation &translation : descriptor_translations) {
-        if (!applied_descriptors.insert(translation.descriptor_file_offset).second)
-          continue;
-        const auto copied_entry_it = copied_entry_offsets.find(translation.entry_text_offset);
-        if (copied_entry_it == copied_entry_offsets.end()) {
+        descriptor_entries.push_back({.descriptor_file_offset = translation.descriptor_file_offset,
+                                      .entry_text_offset = translation.entry_text_offset});
+        descriptor_by_file_offset.emplace(translation.descriptor_file_offset, &translation);
+      }
+      std::vector<std::pair<uint64_t, uint64_t>> copied_entry_map;
+      copied_entry_map.reserve(copied_entry_offsets.size());
+      for (const auto &[entry_text_offset, copied_entry_offset] : copied_entry_offsets)
+        copied_entry_map.emplace_back(entry_text_offset, copied_entry_offset);
+
+      const auto descriptor_plan = plan_expanded_text_descriptor_redirections(
+          descriptor_entries, copied_entry_map, text.size());
+      if (!descriptor_plan.success) {
+        result.warnings.push_back(descriptor_plan.message);
+        return leave_unchanged();
+      }
+      for (const ExpandedTextDescriptorRedirection &redirection : descriptor_plan.redirections) {
+        const auto descriptor_it = descriptor_by_file_offset.find(redirection.descriptor_file_offset);
+        if (descriptor_it == descriptor_by_file_offset.end() || descriptor_it->second == nullptr) {
           result.warnings.push_back("expanded text copy could not map a kernel descriptor entry; "
                                     "leaving code object unchanged");
           return leave_unchanged();
         }
+        const KdTranslation &translation = *descriptor_it->second;
         KdTranslation descriptor_patch = translation;
         descriptor_patch.prologue_words.clear();
         if (!patcher.apply_kernel_descriptor_translation(descriptor_patch, host_arch_) ||
-            !patcher.redirect_kernel_entry(translation.descriptor_file_offset,
-                                           translation.entry_text_offset,
-                                           text.size() + copied_entry_it->second)) {
+            !patcher.redirect_kernel_entry(redirection.descriptor_file_offset,
+                                           redirection.original_entry_offset,
+                                           redirection.redirected_entry_offset)) {
           result.warnings.push_back("kernel descriptor translation could not be applied safely; "
                                     "leaving code object unchanged");
           return leave_unchanged();
@@ -7846,7 +7394,7 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       for (auto it = instructions.begin(); it != instructions.end(); ++it) {
         const auto &inst = *it;
         const uint32_t inst_size = inst.size();
-        if (overlaps_any_range(offset, offset + inst_size, local_caves)) {
+        if (placement.overlaps_reserved_local_text(offset, offset + inst_size)) {
           offset += inst_size;
           continue;
         }
@@ -7883,9 +7431,10 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           const auto long_return_scc_sgpr =
               find_long_return_scc_sgpr(active_liveness, inst, long_return_sgpr_pair);
           require_long_return_sgprs(long_return_sgpr_pair, long_return_scc_sgpr);
-          return apply_semantic(repl, translated_text, patcher, local_caves, protected_ranges,
-                                allow_unreachable_text_caves, long_return_sgpr_pair,
-                                long_return_scc_sgpr, &cave_chain, cave_branch_islands);
+          placement.long_return_sgpr_pair = long_return_sgpr_pair;
+          placement.long_return_scc_sgpr = long_return_scc_sgpr;
+          placement.cave_chain = &cave_chain;
+          return apply_semantic(repl, translated_text, patcher, placement);
         };
 
         if (active_high_bank_shadow_plan) {
@@ -8135,12 +7684,13 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         const auto long_return_scc_sgpr =
             find_long_return_scc_sgpr(active_liveness, inst, long_return_sgpr_pair);
         require_long_return_sgprs(long_return_sgpr_pair, long_return_scc_sgpr);
-        if (!handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text, local_caves,
-                             protected_ranges, allow_unreachable_text_caves,
+        placement.long_return_sgpr_pair = long_return_sgpr_pair;
+        placement.long_return_scc_sgpr = long_return_scc_sgpr;
+        placement.cave_chain = &cave_chain;
+        if (!handle_encoding(inst, offset, translated_text, dst_opcode, patcher, text, placement,
                              scope.translation ? scope.translation->rdna4_grid_x_sgpr : -1,
                              scope.translation ? scope.translation->rdna4_grid_yz_sgpr : -1,
-                             instructions.begin(), it, active_scope_blocks, long_return_sgpr_pair,
-                             long_return_scc_sgpr, &cave_chain, cave_branch_islands)) {
+                             instructions.begin(), it, active_scope_blocks)) {
           if (continue_after_instruction_error(inst, offset)) {
             offset += inst_size;
             continue;
@@ -8391,11 +7941,7 @@ std::vector<uint32_t> BinaryTranslator::translate_remapped_guest_instruction_wor
 
 bool BinaryTranslator::apply_semantic(
     const SemanticReplacement &repl, std::vector<uint8_t> &text, CodeObjectPatcher &patcher,
-    std::vector<std::pair<uint64_t, uint64_t>> &local_caves,
-    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-    bool allow_unreachable_text_caves, std::optional<uint16_t> long_return_sgpr_pair,
-    std::optional<uint16_t> long_return_scc_sgpr, CaveChainState *cave_chain,
-    CaveBranchIslandState *cave_branch_islands) {
+    PlacementState &placement) {
   assert(repl.matched() && "apply_semantic called with unmatched replacement");
   assert(repl.start_offset < repl.end_offset && "invalid replacement range");
   assert(repl.end_offset <= text.size() && "replacement exceeds text bounds");
@@ -8407,6 +7953,7 @@ bool BinaryTranslator::apply_semantic(
     std::memcpy(text.data() + repl.start_offset, repl.target_words.data(), target_size);
     if (target_size < source_size)
       fill_nops(text, repl.start_offset + target_size, source_size - target_size, host_arch_);
+    append_placement_diagnostic(warnings_, "selected", PlacementTier::InPlace, repl);
     return true;
   }
 
@@ -8423,39 +7970,43 @@ bool BinaryTranslator::apply_semantic(
   };
 
   const uint64_t local_cave_size = target_size + sizeof(uint32_t);
-  int16_t local_fwd_dwords = 0;
-  int16_t local_ret_dwords = 0;
+  const LocalTextCaveRequest local_cave_request{
+      .source = {.start = repl.start_offset, .end = repl.end_offset},
+      .body_size_bytes = target_size,
+      .cave_size_bytes = local_cave_size,
+  };
 
-  auto apply_local_cave = [&](uint64_t local_cave_offset) {
+  auto apply_local_cave = [&](const BranchableTextPlacement &local_cave, PlacementTier tier) {
     auto cave_words = repl.target_words;
-    cave_words.push_back(build_s_branch(local_ret_dwords, host_arch_));
+    cave_words.push_back(build_s_branch(local_cave.exit_branch_dwords, host_arch_));
 
-    patch_source_branch(local_fwd_dwords);
-    std::memcpy(text.data() + local_cave_offset, cave_words.data(),
+    patch_source_branch(local_cave.entry_branch_dwords);
+    std::memcpy(text.data() + local_cave.offset, cave_words.data(),
                 cave_words.size() * sizeof(uint32_t));
-    local_caves.emplace_back(local_cave_offset,
-                             local_cave_offset + cave_words.size() * sizeof(uint32_t));
+    placement.reserve_local_text(local_cave.offset,
+                                 local_cave.offset + cave_words.size() * sizeof(uint32_t));
+    std::ostringstream detail;
+    detail << "local_cave_offset=0x" << std::hex << local_cave.offset;
+    append_placement_diagnostic(warnings_, "selected", tier, repl, detail.str());
   };
 
   if (auto local_cave_offset =
-          find_local_text_cave(text, repl, local_cave_size, local_caves, protected_ranges, false,
-                               local_fwd_dwords, local_ret_dwords)) {
-    apply_local_cave(*local_cave_offset);
+          find_local_text_cave(text, local_cave_request, placement.reserved_local_text(),
+                               placement.protected_ranges, false)) {
+    apply_local_cave(*local_cave_offset, PlacementTier::LocalPaddingCave);
     return true;
   }
-  if (allow_unreachable_text_caves) {
-    local_fwd_dwords = 0;
-    local_ret_dwords = 0;
+  if (placement.allow_unreachable_text_caves) {
     if (auto local_cave_offset =
-            find_local_text_cave(text, repl, local_cave_size, local_caves, protected_ranges, true,
-                                 local_fwd_dwords, local_ret_dwords)) {
-      apply_local_cave(*local_cave_offset);
+            find_local_text_cave(text, local_cave_request, placement.reserved_local_text(),
+                                 placement.protected_ranges, true)) {
+      apply_local_cave(*local_cave_offset, PlacementTier::LocalUnreachableTextCave);
       return true;
     }
   }
 
-  if (cave_branch_islands != nullptr)
-    ensure_cave_branch_islands(patcher, *cave_branch_islands, host_arch_);
+  if (placement.cave_branch_islands != nullptr)
+    ensure_cave_branch_islands(patcher, *placement.cave_branch_islands, host_arch_);
 
   const uint64_t cave_byte_offset = patcher.cave_start() + patcher.cave_body_size();
 
@@ -8463,30 +8014,32 @@ bool BinaryTranslator::apply_semantic(
     int16_t short_ret_dwords = 0;
     if (compute_sopp_branch_offset(return_pc, target, short_ret_dwords))
       return {build_s_branch(short_ret_dwords, host_arch_)};
-    if (!long_return_sgpr_pair)
+    if (!placement.long_return_sgpr_pair)
       return {};
-    if (!long_return_scc_sgpr)
+    if (!placement.long_return_scc_sgpr)
       return {};
-    return build_s_setpc_long_branch_preserving_scc(return_pc, target, *long_return_sgpr_pair,
-                                                    *long_return_scc_sgpr);
+    return build_s_setpc_long_branch_preserving_scc(return_pc, target,
+                                                    *placement.long_return_sgpr_pair,
+                                                    *placement.long_return_scc_sgpr);
   };
 
   auto record_cave_chain = [&](uint64_t return_target, uint64_t trailer_body_offset) {
-    if (cave_chain == nullptr)
+    if (placement.cave_chain == nullptr)
       return;
-    cave_chain->active = true;
-    cave_chain->return_target = return_target;
-    cave_chain->trailer_body_offset = trailer_body_offset;
+    placement.cave_chain->active = true;
+    placement.cave_chain->return_target = return_target;
+    placement.cave_chain->trailer_body_offset = trailer_body_offset;
   };
 
   // s_branch simm16 targets (PC + 4 + simm16*4).
   int16_t fwd_dwords = 0;
   if (!compute_sopp_branch_offset(branch_pc, cave_byte_offset, fwd_dwords)) {
-    if (cave_chain != nullptr && cave_chain->active &&
-        cave_chain->return_target <= repl.start_offset) {
-      const uint64_t bridge_size = repl.start_offset - cave_chain->return_target;
+    if (placement.cave_chain != nullptr && placement.cave_chain->active &&
+        placement.cave_chain->return_target <= repl.start_offset) {
+      const uint64_t bridge_size = repl.start_offset - placement.cave_chain->return_target;
       const uint64_t chained_body_size = bridge_size + target_size;
-      const uint64_t trailer_body_offset = cave_chain->trailer_body_offset + chained_body_size;
+      const uint64_t trailer_body_offset =
+          placement.cave_chain->trailer_body_offset + chained_body_size;
       const uint64_t return_branch_pc = patcher.cave_start() + trailer_body_offset;
       auto return_trailer = make_return_trailer(return_branch_pc, stub_next);
       if (!return_trailer.empty()) {
@@ -8494,56 +8047,67 @@ bool BinaryTranslator::apply_semantic(
         if (bridge_size != 0) {
           assert(bridge_size % sizeof(uint32_t) == 0 && "bridge must be word-aligned");
           bridge_words.resize(bridge_size / sizeof(uint32_t));
-          std::memcpy(bridge_words.data(), text.data() + cave_chain->return_target, bridge_size);
+          std::memcpy(bridge_words.data(), text.data() + placement.cave_chain->return_target,
+                      bridge_size);
         }
 
-        patcher.truncate_cave_body(cave_chain->trailer_body_offset);
-        fill_nops(text, cave_chain->return_target, static_cast<uint32_t>(bridge_size + source_size),
-                  host_arch_);
+        patcher.truncate_cave_body(placement.cave_chain->trailer_body_offset);
+        fill_nops(text, placement.cave_chain->return_target,
+                  static_cast<uint32_t>(bridge_size + source_size), host_arch_);
         auto cave_words = repl.target_words;
         cave_words.insert(cave_words.begin(), bridge_words.begin(), bridge_words.end());
         cave_words.insert(cave_words.end(), return_trailer.begin(), return_trailer.end());
         patcher.append_cave_body(cave_words);
         record_cave_chain(stub_next, trailer_body_offset);
+        append_placement_diagnostic(warnings_, "selected", PlacementTier::ChainedAppendedCave,
+                                    repl);
         return true;
       }
     }
 
-    auto apply_forward_branch_island = [&](bool allow_unreachable_text) -> bool {
+    auto apply_forward_branch_island = [&](bool allow_unreachable_text,
+                                           PlacementTier tier) -> bool {
       const uint64_t return_branch_pc =
           cave_byte_offset + repl.target_words.size() * sizeof(uint32_t);
       auto return_trailer = make_return_trailer(return_branch_pc, stub_next);
       if (return_trailer.empty())
         return false;
 
-      int16_t island_entry_dwords = 0;
-      int16_t island_target_dwords = 0;
-      auto island_offset = find_local_branch_island(text, repl, cave_byte_offset, local_caves,
-                                                    protected_ranges, allow_unreachable_text,
-                                                    island_entry_dwords, island_target_dwords);
+      const LocalBranchIslandRequest branch_island_request{
+          .source = {.start = repl.start_offset, .end = repl.end_offset},
+          .island_target = cave_byte_offset,
+      };
+      auto island_offset =
+          find_local_branch_island(text, branch_island_request, placement.reserved_local_text(),
+                                   placement.protected_ranges, allow_unreachable_text);
       if (!island_offset)
         return false;
 
-      patch_source_branch(island_entry_dwords);
-      const uint32_t island_branch = build_s_branch(island_target_dwords, host_arch_);
-      std::memcpy(text.data() + *island_offset, &island_branch, sizeof(island_branch));
-      local_caves.emplace_back(*island_offset, *island_offset + sizeof(island_branch));
+      patch_source_branch(island_offset->entry_branch_dwords);
+      const uint32_t island_branch = build_s_branch(island_offset->exit_branch_dwords, host_arch_);
+      std::memcpy(text.data() + island_offset->offset, &island_branch, sizeof(island_branch));
+      placement.reserve_local_text(island_offset->offset,
+                                   island_offset->offset + sizeof(island_branch));
 
       auto cave_words = repl.target_words;
       cave_words.insert(cave_words.end(), return_trailer.begin(), return_trailer.end());
       patcher.append_cave_body(cave_words);
       record_cave_chain(stub_next,
                         patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
+      std::ostringstream detail;
+      detail << "island_offset=0x" << std::hex << island_offset->offset;
+      append_placement_diagnostic(warnings_, "selected", tier, repl, detail.str());
       return true;
     };
 
-    if (apply_forward_branch_island(false))
+    if (apply_forward_branch_island(false, PlacementTier::LocalPaddingBranchIsland))
       return true;
-    if (allow_unreachable_text_caves && apply_forward_branch_island(true))
+    if (placement.allow_unreachable_text_caves &&
+        apply_forward_branch_island(true, PlacementTier::LocalUnreachableBranchIsland))
       return true;
 
     auto apply_cave_branch_chain = [&]() -> bool {
-      if (cave_branch_islands == nullptr)
+      if (placement.cave_branch_islands == nullptr)
         return false;
 
       for (uint32_t attempt = 0; attempt < 8; ++attempt) {
@@ -8552,9 +8116,10 @@ bool BinaryTranslator::apply_semantic(
             branch_target + repl.target_words.size() * sizeof(uint32_t);
         auto return_trailer = make_return_trailer(return_branch_pc, stub_next);
         int16_t island_entry_dwords = 0;
-        if (!return_trailer.empty() && long_return_sgpr_pair &&
-            allocate_cave_long_branch_island(patcher, *cave_branch_islands, repl, branch_target,
-                                             host_arch_, *long_return_sgpr_pair,
+        if (!return_trailer.empty() && placement.long_return_sgpr_pair &&
+            allocate_cave_long_branch_island(patcher, *placement.cave_branch_islands, repl,
+                                             branch_target, host_arch_,
+                                             *placement.long_return_sgpr_pair,
                                              island_entry_dwords)) {
           patch_source_branch(island_entry_dwords);
 
@@ -8563,12 +8128,14 @@ bool BinaryTranslator::apply_semantic(
           patcher.append_cave_body(cave_words);
           record_cave_chain(stub_next,
                             patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
+          append_placement_diagnostic(warnings_, "selected",
+                                      PlacementTier::AppendedCaveLongBranchIsland, repl);
           return true;
         }
 
         if (!return_trailer.empty() &&
-            allocate_cave_branch_chain(patcher, *cave_branch_islands, repl, branch_target,
-                                       host_arch_, island_entry_dwords)) {
+            allocate_cave_branch_chain(patcher, *placement.cave_branch_islands, repl,
+                                       branch_target, host_arch_, island_entry_dwords)) {
           patch_source_branch(island_entry_dwords);
 
           auto cave_words = repl.target_words;
@@ -8576,10 +8143,12 @@ bool BinaryTranslator::apply_semantic(
           patcher.append_cave_body(cave_words);
           record_cave_chain(stub_next,
                             patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
+          append_placement_diagnostic(warnings_, "selected",
+                                      PlacementTier::AppendedCaveBranchChain, repl);
           return true;
         }
 
-        append_cave_branch_island_block(patcher, *cave_branch_islands, host_arch_);
+        append_cave_branch_island_block(patcher, *placement.cave_branch_islands, host_arch_);
       }
 
       return false;
@@ -8598,6 +8167,8 @@ bool BinaryTranslator::apply_semantic(
       if (cave_diagnostics_enabled())
         warnings_->push_back(cave_range_diagnostic("code cave branch range diagnostic", repl,
                                                    cave_byte_offset, target_size));
+      append_placement_diagnostic(warnings_, "failed", PlacementTier::AppendedCave, repl,
+                                  "reason=source-branch-out-of-range");
     }
     if (can_defer)
       return true;
@@ -8621,6 +8192,8 @@ bool BinaryTranslator::apply_semantic(
       if (cave_diagnostics_enabled())
         warnings_->push_back(cave_range_diagnostic("code cave return range diagnostic", repl,
                                                    cave_byte_offset, target_size));
+      append_placement_diagnostic(warnings_, "failed", PlacementTier::AppendedCave, repl,
+                                  "reason=return-branch-out-of-range");
     }
     if (can_defer)
       return true;
@@ -8638,19 +8211,16 @@ bool BinaryTranslator::apply_semantic(
 
   patcher.append_cave_body(cave_words);
   record_cave_chain(stub_next, patcher.cave_body_size() - return_trailer.size() * sizeof(uint32_t));
+  append_placement_diagnostic(warnings_, "selected", PlacementTier::AppendedCave, repl);
   return true;
 }
 
 bool BinaryTranslator::handle_encoding(
     const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text, uint16_t dst_opcode,
-    CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text,
-    std::vector<std::pair<uint64_t, uint64_t>> &local_caves,
-    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-    bool allow_unreachable_text_caves, int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr,
+    CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text, PlacementState &placement,
+    int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr,
     InstructionList::Iterator block_begin, InstructionList::Iterator inst_it,
-    std::span<BasicBlock *const> scope_blocks, std::optional<uint16_t> long_return_sgpr_pair,
-    std::optional<uint16_t> long_return_scc_sgpr, CaveChainState *cave_chain,
-    CaveBranchIslandState *cave_branch_islands) {
+    std::span<BasicBlock *const> scope_blocks) {
   const uint32_t *raw = inst.raw_encoding();
   assert(raw && "handle_encoding called without raw encoding");
   const bool tracing = static_cast<bool>(trace_callback_);
@@ -8740,9 +8310,7 @@ bool BinaryTranslator::handle_encoding(
   } else {
     SemanticReplacement repl{offset, offset + inst.size(), std::string(inst.mnemonic()),
                              std::move(replacement_words)};
-    if (!apply_semantic(repl, text, patcher, local_caves, protected_ranges,
-                        allow_unreachable_text_caves, long_return_sgpr_pair, long_return_scc_sgpr,
-                        cave_chain, cave_branch_islands))
+    if (!apply_semantic(repl, text, patcher, placement))
       return false;
   }
   emit_trace(copied_original, changed, emitted_in_cave, target_offset, target_words_for_trace);
