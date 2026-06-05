@@ -82,3 +82,8 @@ add_test(NAME cargo_test
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(cargo_test PROPERTIES TIMEOUT 1800)
+
+# rocjitsu-corpus gfx1250 regression, run through mirage + an emulator
+# (HotSwap by default). Opt-in via MIRAGE_RUN_CORPUS; tests SKIP when the
+# corpus, IREE tools, or emulator install are unavailable.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/RocjitsuCorpus.cmake)
