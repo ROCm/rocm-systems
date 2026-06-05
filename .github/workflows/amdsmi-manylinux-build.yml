@@ -5,11 +5,17 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/docs/**'
+      - '!projects/amdsmi/**/*.md'
+      - '!projects/amdsmi/**/*.rst'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - '!projects/amdsmi/docs/**'
+      - '!projects/amdsmi/**/*.md'
+      - '!projects/amdsmi/**/*.rst'
       - '.github/workflows/amdsmi-manylinux-build.yml'
   workflow_dispatch:
 
@@ -28,7 +34,7 @@ jobs:
         target:
           - id: rpm
             name: Build RPM Wheels (AlmaLinux 8 / manylinux_2_28)
-            runs-on: ubuntu-latest
+            runs-on: ubuntu-22.04
             container: quay.io/pypa/manylinux_2_28_x86_64
             python-bin: /opt/python/cp310-cp310/bin/python3
             os-variant: AlmaLinux8
