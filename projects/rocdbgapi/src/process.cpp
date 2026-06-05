@@ -107,6 +107,22 @@ process_t::process_t (amd_dbgapi_process_id_t process_id,
     fatal_error ("Could not create the OS driver");
 }
 
+process_t::process_t (test_access_key_t,
+                      amd_dbgapi_process_id_t process_id,
+                      amd_dbgapi_client_process_id_t client_process_id,
+                      std::optional<amd_dbgapi_os_process_id_t> os_process_id,
+                      std::unique_ptr<os_driver_t> os_driver)
+  : handle_object (process_id), m_client_process_id (client_process_id),
+    m_os_process_id (os_process_id), m_os_driver (std::move (os_driver)),
+    m_dummy_agent (AMD_DBGAPI_AGENT_NONE, *this, nullptr, {})
+{
+  /* Test seam: skip notifier open and client_process_get_info().
+     Caller is responsible for supplying a valid os_driver (typically a
+     MockOsDriver or null_driver_t).  */
+  if (m_os_driver == nullptr || !m_os_driver->is_valid ())
+    fatal_error ("process_t test ctor requires a valid os_driver");
+}
+
 process_t::~process_t ()
 {
   /* Make sure to discard any cache before closing the driver.  The agent dtor
