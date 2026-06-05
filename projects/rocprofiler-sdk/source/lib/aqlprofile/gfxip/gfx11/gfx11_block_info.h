@@ -126,7 +126,7 @@ enum SpmSeBlockId
 static const uint32_t CbCounterBlockNumInstances   = 4;
 static const uint32_t DbCounterBlockNumInstances   = 4;
 static const uint32_t TaCounterBlockNumInstances   = 16;
-static const uint32_t TdCounterBlockNumInstances   = 16;
+static const uint32_t TdCounterBlockNumInstances   = 2;
 static const uint32_t TcpCounterBlockNumInstances  = 16;
 static const uint32_t TcaCounterBlockNumInstances  = 2;
 static const uint32_t TccCounterBlockNumInstances  = 16;
@@ -201,8 +201,8 @@ static const uint32_t SxCounterBlockMaxEvent =
 // static const uint32_t TcaCounterBlockMaxEvent       = TCA_PERF_SEL_CROSSBAR_STALL_TCC7;
 // static const uint32_t TccCounterBlockMaxEvent       = TCC_PERF_SEL_CLIENT127_REQ;
 // static const uint32_t TcpCounterBlockMaxEvent       = TCP_PERF_SEL_TCC_DCC_REQ;
-// static const uint32_t TdCounterBlockMaxEvent        =
-// TD_PERF_SEL_texels_zeroed_out_by_blend_zero_prt; static const uint32_t VgtCounterBlockMaxEvent =
+static const uint32_t TdCounterBlockMaxEvent = TD_PERF_SEL_ray_tracing_bvh4_instr_invld_thread_cnt;
+// static const uint32_t VgtCounterBlockMaxEvent =
 // vgt_perf_sclk_te11_vld; static const uint32_t WdCounterBlockMaxEvent        =
 // wd_perf_utcl1_stall_utcl2_event;
 static const uint32_t GceaCounterBlockMaxEvent   = 76;

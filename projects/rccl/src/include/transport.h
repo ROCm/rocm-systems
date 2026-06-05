@@ -37,6 +37,8 @@ struct ncclRing;
 struct ncclConnector;
 struct ncclComm;
 
+int64_t ncclParamMultiSegmentRegister();
+
 #define CHANNEL_MASK_OFFSET(nranks, connIndex) (nranks * (connIndex == NCCL_CONN_IDX_P2P_NET ? NCCL_CONN_IDX_P2P_NET : 0))
 
 #define CONNECT_SIZE 256

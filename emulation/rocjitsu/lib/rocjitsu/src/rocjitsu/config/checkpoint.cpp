@@ -40,8 +40,7 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
       if (num_cus > 0) {
         const auto &cu_cfg = se->compute_unit(0)->config();
         fb_cu = fb::CreateComputeUnitConfig(builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf,
-                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb,
-                                            cu_cfg.functional_quantum);
+                                            cu_cfg.vgprs_per_wf, cu_cfg.lds_size_kb);
       }
     }
   }
@@ -81,7 +80,6 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
           cu_cfg.sgprs_per_wf = cu->sgprs_per_wf();
           cu_cfg.vgprs_per_wf = cu->vgprs_per_wf();
           cu_cfg.lds_size_kb = cu->lds_size_kb();
-          cu_cfg.functional_quantum = cu->functional_quantum();
         }
       }
     }
@@ -131,7 +129,7 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
         auto name = builder.CreateString(cu->name());
         auto wfs_vec = builder.CreateVector(wf_offsets);
-        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, cu->next_wf_index());
+        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0);
         cu_offsets.push_back(cus);
       }
     }
