@@ -174,8 +174,9 @@ RUN cd rocshmem/src/projects/rocshmem \
 # ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
 # ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
 ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil-vmm2
-ARG RCCL_CACHE_BUST=5
+ARG RCCL_CACHE_BUST=7
 COPY projects/rccl/ /tmp/local/projects/rccl/
+COPY projects/rccl-tests/ /tmp/local/projects/rccl-tests/
 # rccl-tests is optional in sparse-checkout worktrees; fetched via git in RUN when absent.
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
 ENV ONLY_FUNCS="SendRecv|AlltoAllPivot|AlltoAllGda|AlltoAllvGda"
@@ -223,12 +224,14 @@ RUN RCCL_BUILD_DIR=$([ "${DEBUG_BUILD}" = "1" ] && echo "debug" || echo "release
  && cp -r ${WORKDIR}/rocshmem/src/projects/rocshmem/src/sdma ${RCCL_INSTALL_PREFIX}/include/sdma
 
 ## building RCCL-Tests
+ARG RCCL_TESTS_CACHE_BUST=${RCCL_CACHE_BUST}
 RUN if [ "${USE_LOCAL_SRC}" != "1" ]; then \
       cd rccl/src && \
       git sparse-checkout add --cone projects/rccl-tests && \
       git checkout ${RCCL_BRANCH}; \
     fi
-RUN mkdir rccl-tests \
+RUN echo "RCCL_TESTS_CACHE_BUST=${RCCL_TESTS_CACHE_BUST}" \
+    && mkdir rccl-tests \
     && cd rccl-tests \
     && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DROCSHMEM_SOURCE_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
     && make -j16 alltoall_perf \

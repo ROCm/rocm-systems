@@ -144,19 +144,20 @@ add_rccl_test(all_gather)
 add_rccl_test(all_reduce)
 add_rccl_test(alltoall)
 if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
-    target_compile_definitions(alltoall_perf PRIVATE ENABLE_ROCSHMEM ENABLE_ROCSHMEM_GIN)
+    target_compile_definitions(alltoall_perf PRIVATE
+        ENABLE_ROCSHMEM ENABLE_ROCSHMEM_GIN NCCL_GIN_ANVIL_ENABLE=1 NCCL_GIN_ROCSHMEM_ENABLE=1)
     target_compile_options(alltoall_perf PRIVATE -fgpu-rdc $<$<CONFIG:Debug>:-ggdb -O0>)
     foreach(_gpu_raw ${GPU_TARGETS})
         string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
         target_compile_options(alltoall_perf PRIVATE
             "-Xarch_${_gpu}=-DENABLE_ROCSHMEM"
-            "-Xarch_${_gpu}=-DENABLE_ROCSHMEM_GIN")
+            "-Xarch_${_gpu}=-DENABLE_ROCSHMEM_GIN"
+            "-Xarch_${_gpu}=-DNCCL_GIN_ANVIL_ENABLE=1"
+            "-Xarch_${_gpu}=-DNCCL_GIN_ROCSHMEM_ENABLE=1")
     endforeach()
     find_library(_HSAKMT hsakmt HINTS ${ROCM_PATH}/lib ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     find_library(_DRM drm HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
     find_library(_DRM_AMDGPU drm_amdgpu HINTS ${ROCM_PATH}/lib/rocm_sysdeps/lib)
-    # Whole-archive librocshmem so device symbols resolve; export-dynamic binds
-    # Anvil host symbols for librccl.so (GIN-only build, no librocshmem link).
     target_link_libraries(alltoall_perf PRIVATE
         -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive
         ibverbs hsa-runtime64 numa ${_HSAKMT} ${_DRM} ${_DRM_AMDGPU})

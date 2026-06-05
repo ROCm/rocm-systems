@@ -261,6 +261,7 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm, ncclGinConnectionType_t r
     } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
       NCCLCHECKGOTO(ncclGinAnvilCreateContext(comm, ginState->ginComms[n], localGinDevs[n % nLocalGinDevs],
                                               ginState->signalSpaceSize, ginState->counterSpaceSize,
+                                              nContextsPerComm,
                                               &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
 #endif

@@ -148,10 +148,20 @@ struct ncclGinApi_Flush {
 #endif
 
 #if NCCL_CHECK_CUDACC
+NCCL_DEVICE_INLINE static int ncclGinDispatchBackend(unsigned beMask, ncclGinCtx ctx) {
+  // Prefer the runtime backend (e.g. NCCL_GIN_TYPE=5 Anvil) when it was compiled in.
+  // The old singleton shortcut ignored ctx.backend and always picked the sole compiled
+  // backend (typically Proxy), which mis-dispatched Anvil handles and faulted on nil.
+  unsigned be = (unsigned)ctx.backend;
+  if (beMask & (1u << be)) return (int)be;
+  bool singleton = (beMask & (beMask - 1)) == 0;
+  if (singleton) return __popc(beMask - 1);
+  return (int)ctx.backend;
+}
+
 template <template <ncclNetDeviceType> typename ApiFn, typename... Arg>
 NCCL_DEVICE_INLINE static decltype(auto) ncclGinCallImpl(unsigned beMask, ncclGinCtx ctx, Arg&&... arg) {
-  bool singleton = (beMask & (beMask - 1)) == 0;  // Only one bit set
-  switch (singleton ? __popc(beMask - 1) : (int)ctx.backend) {
+  switch (ncclGinDispatchBackend(beMask, ctx)) {
 #if NCCL_GIN_PROXY_ENABLE
     case (int)NCCL_NET_DEVICE_GIN_PROXY:
       if (!(1 & (beMask >> (int)NCCL_NET_DEVICE_GIN_PROXY))) __builtin_unreachable();

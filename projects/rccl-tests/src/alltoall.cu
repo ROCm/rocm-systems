@@ -14,6 +14,12 @@
 #if defined(ENABLE_DEVICE_API) && !defined(ENABLE_ROCSHMEM_GIN)
 #error "alltoall_perf GIN device tests require -DENABLE_ROCSHMEM=ON (sets ENABLE_ROCSHMEM_GIN; NCCL_GIN_ANVIL_ENABLE stays 0 without it)"
 #endif
+#if defined(ENABLE_DEVICE_API) && defined(ENABLE_ROCSHMEM_GIN)
+#include "nccl_device/gin/gin_device_common.h"
+#if NCCL_GIN_ANVIL_ENABLE != 1
+#error "NCCL_GIN_ANVIL_ENABLE is 0: alltoall_perf device code will mis-dispatch GIN calls"
+#endif
+#endif
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #ifdef MPI_SUPPORT

@@ -25,7 +25,7 @@ struct ginAnvilCtx {
   void* collComm;
   ncclNetDeviceHandle_v11_t* devHandle;
 
-  ncclGinAnvilGPUContext gpuCtxHost;
+  int nContexts;
   ncclGinAnvilGPUContext* gpuCtxDev;
 
   // Device arrays
@@ -52,16 +52,19 @@ static ncclResult_t allocDeviceArray(void*** devPtr, void** hostData, size_t cou
 }
 
 ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, int devId,
-                                       int nSignals, int nCounters, void** outGinCtx,
-                                       ncclNetDeviceHandle_v11_t** outDevHandle) {
+                                       int nSignals, int nCounters, int nContexts,
+                                       void** outGinCtx, ncclNetDeviceHandle_v11_t** outDevHandle) {
   ncclResult_t ret = ncclSuccess;
   ginAnvilCtx* ctx = nullptr;
   uint64_t* signalsLocal = nullptr;
   uint64_t* countersLocal = nullptr;
+  ncclGinAnvilGPUContext* gpuCtxHostArr = nullptr;
   struct ncclDevrState* devr = nullptr;
+  if (nContexts < 1) nContexts = 1;
   NCCLCHECK(ncclCalloc(&ctx, 1));
   ctx->comm = comm;
   ctx->collComm = collComm;
+  ctx->nContexts = nContexts;
   ctx->hasError = false;
 
   // GIN_ANVIL uses MI300 xGMI SDMA and is valid only for single-node jobs.
@@ -76,19 +79,21 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   NCCLCHECK(ncclDevrInitOnce(comm));
   NCCLCHECK(ncclGinRocshmemEnsureInit(comm));
 
-  // Signals must live on the rocSHMEM heap so SDMA can atomically update them.
+  // Indexed signals are local to this GPU (readSignal / put completion). One
+  // slice per GIN context, matching the proxy layout (signalsDev + contextId*nSignals).
   if (nSignals > 0) {
-    signalsLocal = (uint64_t*)rocshmem::rocshmem_malloc(sizeof(uint64_t) * nSignals);
-    if (!signalsLocal) {
-      WARN("GIN anvil: rocshmem_malloc failed for %d signals", nSignals);
+    size_t signalsBytes = (size_t)nSignals * (size_t)nContexts * sizeof(uint64_t);
+    if (hipMalloc((void**)&signalsLocal, signalsBytes) != hipSuccess) {
+      WARN("GIN anvil: hipMalloc failed for %d signals x %d contexts", nSignals, nContexts);
       ret = ncclSystemError;
       goto fail;
     }
-    hipMemset(signalsLocal, 0, sizeof(uint64_t) * nSignals);
+    hipMemset(signalsLocal, 0, signalsBytes);
   }
   if (nCounters > 0) {
-    if (hipMalloc(&countersLocal, sizeof(uint64_t) * nCounters) != hipSuccess) { ret = ncclSystemError; goto fail; }
-    hipMemset(countersLocal, 0, sizeof(uint64_t) * nCounters);
+    size_t countersBytes = (size_t)nCounters * (size_t)nContexts * sizeof(uint64_t);
+    if (hipMalloc((void**)&countersLocal, countersBytes) != hipSuccess) { ret = ncclSystemError; goto fail; }
+    hipMemset(countersLocal, 0, countersBytes);
   }
 
   // Exchange the per-rank signal base pointers inside the LSA team (single node assumption).
@@ -140,23 +145,33 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   if (hipMalloc(&ctx->signalsBaseDev, comm->nRanks * sizeof(uint64_t*)) != hipSuccess) { ret = ncclSystemError; goto fail_signals; }
   if (hipMemcpy(ctx->signalsBaseDev, ctx->signalsBaseHost, comm->nRanks * sizeof(uint64_t*), hipMemcpyHostToDevice) != hipSuccess) { ret = ncclSystemError; goto fail_signals; }
 
-  // Build GPU context and copy to device.
-  memset(&ctx->gpuCtxHost, 0, sizeof(ctx->gpuCtxHost));
-  ctx->gpuCtxHost.queues = ctx->queuesDev;
-  ctx->gpuCtxHost.signalsBase = ctx->signalsBaseDev;
-  ctx->gpuCtxHost.signals = signalsLocal;
-  ctx->gpuCtxHost.counters = countersLocal;
-  ctx->gpuCtxHost.nSignals = nSignals;
-  ctx->gpuCtxHost.nCounters = nCounters;
-  ctx->gpuCtxHost.nRanks = comm->nRanks;
-  ctx->gpuCtxHost.rank = comm->rank;
-  ctx->gpuCtxHost.myNode = comm->rankToNode[comm->rank];
-  ctx->gpuCtxHost.lsaStrideBytes = devr->bigSize;
-  // lsaRank0Base is per-window; kept here only for debugging.
-  ctx->gpuCtxHost.lsaRank0Base = (uintptr_t)devr->lsaFlatBase;
+  // Build per-context GPU contexts (proxy uses an array indexed by contextId).
+  NCCLCHECKGOTO(ncclCalloc(&gpuCtxHostArr, nContexts), ret, fail_signals);
+  for (int contextId = 0; contextId < nContexts; contextId++) {
+    ncclGinAnvilGPUContext* h = &gpuCtxHostArr[contextId];
+    memset(h, 0, sizeof(*h));
+    h->queues = ctx->queuesDev;
+    h->signalsBase = ctx->signalsBaseDev;
+    h->signals = signalsLocal ? signalsLocal + (size_t)contextId * (size_t)nSignals : nullptr;
+    h->counters = countersLocal ? countersLocal + (size_t)contextId * (size_t)nCounters : nullptr;
+    h->nSignals = nSignals;
+    h->nCounters = nCounters;
+    h->nRanks = comm->nRanks;
+    h->rank = comm->rank;
+    h->myNode = comm->rankToNode[comm->rank];
+    h->lsaStrideBytes = devr->bigSize;
+    h->lsaRank0Base = (uintptr_t)devr->lsaFlatBase;
+  }
 
-  if (hipMalloc(&ctx->gpuCtxDev, sizeof(ncclGinAnvilGPUContext)) != hipSuccess) { ret = ncclSystemError; goto fail_signals; }
-  if (hipMemcpy(ctx->gpuCtxDev, &ctx->gpuCtxHost, sizeof(ctx->gpuCtxHost), hipMemcpyHostToDevice) != hipSuccess) { ret = ncclSystemError; goto fail_signals; }
+  if (hipMalloc(&ctx->gpuCtxDev, (size_t)nContexts * sizeof(ncclGinAnvilGPUContext)) != hipSuccess) {
+    ret = ncclSystemError;
+    goto fail_signals;
+  }
+  if (hipMemcpy(ctx->gpuCtxDev, gpuCtxHostArr, (size_t)nContexts * sizeof(ncclGinAnvilGPUContext),
+                hipMemcpyHostToDevice) != hipSuccess) {
+    ret = ncclSystemError;
+    goto fail_signals;
+  }
 
   // Create net device handle
   NCCLCHECK(ncclCalloc(&ctx->devHandle, 1));
@@ -164,14 +179,18 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   ctx->devHandle->netDeviceVersion = NCCL_GIN_ANVIL_VERSION;
   ctx->devHandle->needsProxyProgress = 0;
   ctx->devHandle->handle = ctx->gpuCtxDev;
-  ctx->devHandle->size = sizeof(ncclGinAnvilGPUContext);
+  ctx->devHandle->size = 0;
 
   *outGinCtx = ctx;
   *outDevHandle = ctx->devHandle;
-  INFO(NCCL_INIT, "GIN anvil: context created (%d signals, %d counters)", nSignals, nCounters);
+  INFO(NCCL_INIT, "GIN anvil: context created (%d signals, %d counters, %d contexts, signalsDev=%p)",
+       nSignals, nCounters, nContexts, (void*)signalsLocal);
+  free(gpuCtxHostArr);
+  gpuCtxHostArr = nullptr;
   return ncclSuccess;
 
 fail_signals:
+  free(gpuCtxHostArr);
 fail:
   if (ctx) {
     if (ctx->queuesDev) hipFree(ctx->queuesDev);
@@ -182,7 +201,7 @@ fail:
     free(ctx->signalsBaseHost);
     free(ctx);
   }
-  if (signalsLocal) rocshmem::rocshmem_free(signalsLocal);
+  if (signalsLocal) hipFree(signalsLocal);
   if (countersLocal) hipFree(countersLocal);
   return ret;
 }
@@ -193,7 +212,7 @@ ncclResult_t ncclGinAnvilDestroyContext(ncclGin_t*, void* ginCtx) {
   if (ctx->gpuCtxDev) {
     ncclGinAnvilGPUContext hostCtx;
     if (hipMemcpy(&hostCtx, ctx->gpuCtxDev, sizeof(hostCtx), hipMemcpyDeviceToHost) == hipSuccess) {
-      if (hostCtx.signals) rocshmem::rocshmem_free(hostCtx.signals);
+      if (hostCtx.signals) hipFree(hostCtx.signals);
       if (hostCtx.counters) hipFree(hostCtx.counters);
     }
   }

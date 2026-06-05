@@ -29,7 +29,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
                                       cuda::thread_scope, cuda::thread_scope,
                                       uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
-    auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
+    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
     bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
     ncclGinSignal_t signalId = 0;
     if (hasSignal && signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
@@ -95,7 +95,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL> {
 template <>
 struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
+    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
     return nccl::utility::loadConst(&aCtx->counters) + counterId;
   }
 };
@@ -103,7 +103,7 @@ struct ncclGinApi_GetCounterPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
 template <>
 struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinCounter_t counterId) {
-    auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
+    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
     nccl::utility::loadConst(&aCtx->counters)[counterId] = 0;
   }
 };
@@ -111,7 +111,7 @@ struct ncclGinApi_ResetCounter<NCCL_NET_DEVICE_GIN_ANVIL> {
 template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
-    auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
+    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
     uint64_t* signals = nccl::utility::loadConst(&aCtx->signals);
     if (signals == nullptr) return nullptr;
     return signals + signalId;
@@ -130,10 +130,13 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop, cuda::memory_order,
                                       uint32_t* abortFlag) {
-    auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
+    using nccl::utility::loadConst;
+    auto* aCtx = &((ncclGinAnvilGPUContext*)ctx.handle)[ctx.contextId];
+    void** queues = (void**)loadConst(&aCtx->queues);
+    if (queues == nullptr) return;
     for (int p = 0; p < ctx.nRanks; p++) {
       if (p == ctx.rank) continue;
-      auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)nccl::utility::loadConst(&aCtx->queues[p]);
+      auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[p]);
       if (q == nullptr) continue;
       rocshmem::anvil::quiet(*q);
     }
