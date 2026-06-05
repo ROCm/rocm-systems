@@ -3,19 +3,15 @@ subtrees:
   - caption: Install
     entries:
       - file: install/install
-  - caption: Conceptual
-    entries:
-      - file: conceptual/io-backends
-      - file: conceptual/registration-lifecycle
-      - file: conceptual/environment-variables
+      - file: install/build-from-source
+      - file: install/python-bindings
   - caption: How to
     entries:
       - file: how-to/collect-io-statistics
-      - file: how-to/use-with-fio
-      - file: how-to/use-python-api
-      - file: how-to/nvidia-cufile-compat
+      - file: how-to/ais-stats-tool
   - caption: Tutorials
     entries:
+<<<<<<< HEAD
       - file: tutorials/synchronous-file-copy
       - file: tutorials/async-multistream-io
       - file: tutorials/python-file-copy
@@ -29,5 +25,18 @@ subtrees:
       - file: reference/api-errors
       - file: reference/api-python
   - caption: About
+=======
+      - file: tutorials/copy-a-file
+      - file: tutorials/get-version
+      - file: tutorials/python-gpu-io
+  - caption: Reference
+>>>>>>> dab6cd01a03 (applied style guide; updated with review feedback; reorganized and edited)
     entries:
-      - file: license
+      - file: reference/io-backends
+      - file: reference/filesystem-requirements
+      - file: reference/driver-lifecycle
+      - file: reference/statistics-collection
+      - file: reference/environment-variables
+      - file: reference/api-reference
+      - file: reference/errors
+      - file: reference/python-api-reference
