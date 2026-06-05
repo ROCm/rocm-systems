@@ -1766,8 +1766,7 @@ class SetValueCommands:
                     "mem_carveout",
                     f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. "
                     "Takes effect after the next reboot — "
-                    "current VRAM size still reflects the previous boot. Note: the BIOS-provided value is the requested carveout; "
-                    "the post-boot VRAM total reported by the kernel may differ slightly due to firmware reservations.",
+                    "current VRAM size still reflects the previous boot.",
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()

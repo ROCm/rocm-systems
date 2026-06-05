@@ -4,35 +4,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 7.14.0
-
-### Added
-
-- **Improved Python test runner behavior**.
-  - Added `-l`/`--list` flag to list all available tests and exit without running them.
-  - Added shadow detection: if `amdsmi` loads from a path other than the resolved expected path (`AMDSMI_PATH`, `ROCM_HOME`, `ROCM_PATH`, or `/opt/rocm` default), tests exit early with a clear error message and remediation steps.
-  - Non-root invocations now exit with code 1 immediately with a clear message instead of failing mid-test.
-
 ## amd_smi_lib for ROCm 7.13.0
 
-### Changed
-
-- **Renamed `processor_type_t` enum typedef to `amdsmi_processor_type_t`**.
-
-### Fixed
-
-- **Fixed `amd-smi static` hanging indefinitely on gfx1153 and gfx950**.  
-  - Added a 60-second timeout to `amdsmi_init()` in the CLI so the process exits with a clear error message instead of hanging when the GPU driver is unresponsive.
-  - Added `O_NONBLOCK` to DRM device open during initialization so `open()` returns immediately if the device is wedged.
-  - The unprefixed typedef name did not follow the `amdsmi_*_t` convention used throughout `amdsmi.h` and was easy to collide with identifiers defined by other system-management libraries. New code should use `amdsmi_processor_type_t`. The old name is preserved as a backward-compatibility typedef alias, so existing callers continue to compile unchanged.
-
 ### Added
-
-- **Added `--sort-by-pid` flag and `amdsmi_get_gpu_process_list_by_pid()` API**.
-  - New C API `amdsmi_get_gpu_process_list_by_pid()` aggregates process info across all GPUs and returns results keyed by PID, with per-GPU breakdowns for memory, engine usage, and occupancy.
-  - New structs: `amdsmi_proc_gpu_entry_t`, `amdsmi_proc_info_by_pid_t`.
-  - New `--sort-by-pid` CLI flag for `amd-smi process` and `amd-smi monitor --process` groups output by PID instead of GPU.
-  - New Python interface function `amdsmi_get_gpu_process_list_by_pid()`.
 
 - **Added APU metrics support (table versions 2.4 and 3.0)**.  
   - New `amdsmi_apu_metrics_t` struct accessible via `amdsmi_gpu_metrics_t.apu_metrics` pointer (non-null when APU-specific metrics are available).
@@ -92,12 +66,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     `/sys/module/ttm/parameters/pages_limit` may report `0` on DKMS hosts
     because the active module is `amdttm`, not `ttm`; `amd-smi` reads the
     active one.
-  - **Initramfs rebuild**: `set --gtt` / `reset --gtt` / `set --mem-carveout`
-    now invoke the distro's initramfs builder so the new `modprobe.d` snippet
-    is picked up at next boot. Supported tools (first available wins):
-    `dracut -f` (RHEL/Fedora/openSUSE), `update-initramfs -u`
-    (Debian/Ubuntu), and `mkinitcpio -P` (Arch). If none is found, a clear
-    message is printed describing the manual command to run.
+  - **Initramfs rebuild**: `set --gtt` / `reset --gtt` now invoke the
+    distro's initramfs builder so the new `modprobe.d` snippet is picked up
+    at next boot. Supported tools (first available wins): `dracut -f`
+    (RHEL/Fedora/openSUSE), `update-initramfs -u` (Debian/Ubuntu), and
+    `mkinitcpio -P` (Arch). If none is found, a clear message is printed
+    describing the manual command to run.
   - **Reboot semantics**: these settings take effect only after the next
     reboot. `amd-smi node --gtt` shows the currently active value and, when
     a pending value has been written, an additional `PENDING (after reboot)`
@@ -114,17 +88,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Updated memory API documentation**  
     Added note that the sum of per-process memory usage is not expected to equal total usage.
 
-### Optimized
-
-- **Optimized `rsmi_dev_device_identifiers_get()` in the ROCm-SMI device layer**.  
-  - Removed unnecessary iteration by directly indexing the device list.
-  - Added bounds checking for `device_id`, with clearer error handling/logging.
-  - Improves performance for device identifier queries.
-
 ### Resolved Issues
-
-- **Fixed `amd-smi metric` crashing with `TypeError` on MI300A when no CPU flags are specified**.  
-  - When no CPU arguments are passed, `metric_cpu()` sets all boolean CPU args to `True` to display all available data. `--cpu-svi3-vr-controller-temp` takes a TYPE argument (and optional RAIL_INDEX) rather than a boolean flag — setting it to `True` caused a `TypeError` crash when the code tried to subscript it with `[0][0]`. Added `cpu_svi3_vr_controller_temp` to the show-all exclusion list, following the existing pattern for `cpu_lclk_dpm_level`, `cpu_io_bandwidth`, `cpu_dimm_sb_reg`, and similar argument-taking flags.
 
 - **Fixed `amd-smi metric` crashing with `TypeError` on MI300A when no CPU flags are specified**.  
   - When no CPU arguments are passed, `metric_cpu()` sets all boolean CPU args to `True` to display all available data. `--cpu-svi3-vr-controller-temp` takes a TYPE argument (and optional RAIL_INDEX) rather than a boolean flag — setting it to `True` caused a `TypeError` crash when the code tried to subscript it with `[0][0]`. Added `cpu_svi3_vr_controller_temp` to the show-all exclusion list, following the existing pattern for `cpu_lclk_dpm_level`, `cpu_io_bandwidth`, `cpu_dimm_sb_reg`, and similar argument-taking flags.
@@ -159,28 +123,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `cu_occupancy` displaying `0%` instead of `N/A` when file is unavailable**.  
   - Process `cu_occupancy` is now initialized to `INVALID` instead of zero, so `amd-smi process` displays `N/A` rather than a misleading `0%` when the sysfs file is not accessible.
 
-- **Fixed CLI set commands silently succeeding on invalid input values**.  
-  - `amd-smi set --profile <INVALID>` now returns a non-zero exit code and lists available profiles in the error message; invalid profile names are rejected at parse time.
-  - `amd-smi set --clk-level <CLK_TYPE>` (missing performance level indices) now returns a non-zero exit code with a usage hint instead of silently succeeding.
-  - `amd-smi set --power-cap <OUT_OF_RANGE>` now returns a non-zero exit code.
-  - `amd-smi set --fan <INVALID>%` no longer prompts the out-of-spec warning before validating the percentage range; invalid values are rejected immediately.
-
-- **Fixed `amd-smi set --profile` help text omitting `BOOTUP_DEFAULT`**.  
-  - `BOOTUP_DEFAULT` was always accepted at runtime but was missing from the `--help` profile list. Auditing invalid-input handling exposed this gap. `amd-smi reset --profile` can also be used to return to the bootup default power profile.
-
-- **Fixed `amd-smi monitor --brcm_nic` and `--brcm_switch` flags being registered on non-BRCM systems**.  
-  - These flags are now only registered when BRCM hardware is present, preventing spurious failures on AMD GPU-only systems.
-
-- **Fixed `amd-smi` default command alignment**.  
-  - Updated default `amd-smi` output to align values to the left for improved readability.
-    Several items were misaligned in the default output, and this change ensures a consistent left-aligned format across all fields.
-  - *This change is purely cosmetic and does not affect any functionality.*  
+- **Fixed `amd-smi static -C` reporting `N/A` for SYS/MEM/DF/SOC/DCEF clocks at idle on gfx1151-class APUs (ROCM-21057)**.  
+  - `get_frequencies()` in the rsmi backend no longer discards a parsed `pp_dpm_*` DPM table with `STATUS_UNEXPECTED_DATA` when the kernel omits the `*` current-level marker (which happens whenever the SMU power-gates the domain at idle). The supported frequency table is now returned and `current` is reported as `-1` (unknown) until the marker reappears, so `amdsmi_get_clk_freq()` and all callers see the table at idle as well as under load.
 
 ### Changed
-
-- **Package install no longer modifies the system-wide logrotate timer or cron schedule**.
-  - Previously, installing `amd-smi-lib` overwrote `/lib/systemd/system/logrotate.timer` (or moved `/etc/cron.daily/logrotate` to `/etc/cron.hourly/`) to force hourly rotation, which affected every other package using logrotate.
-  - The package now only ships `/etc/logrotate.d/amd_smi.conf`, which sets its own `hourly` + `size 1M` cadence. AMD-SMI logs still rotate at the same frequency; system-wide settings stay as the distribution configured them.
 
 - **Renamed `lc_perf_other_end_recovery` to `lc_perf_other_end_recovery_count` in `amd-smi metric` CLI output for unification**.  
 
