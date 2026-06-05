@@ -6,7 +6,6 @@
 
 import subprocess
 
-from rocm_docs import ROCmDocs
 
 name = "RCCL"
 get_major = r'sed -n -e "s/^NCCL_MAJOR.*\([0-9]\+\).*/\1/p" ../makefiles/version.mk'
@@ -20,17 +19,35 @@ version_number = f"{major}.{minor}.{patch}"
 # for PDF output on Read the Docs
 project = f"{name} Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
-
-docs_core = ROCmDocs(f"{name} {version_number} Documentation")
-docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
-docs_core.setup()
-
 external_projects_current_project = "rccl"
 
-for sphinx_var in ROCmDocs.SPHINX_VARS:
-    globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+doxygen_root = "doxygen"
+doxygen_project = {
+    "name": "doxygen",
+    "path": "doxygen/xml",
+}
+extensions = [
+    "rocm_docs",
+    "rocm_docs.doxygen"
+]
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "announcement": f"This is ROCm 7.13.0 technology preview release documentation. For the latest production stream release, refer to <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>ROCm documentation</a>.",
+    "flavor": "generic",
+    "header_title": f"ROCm™ 7.13.0 Preview",
+    "header_link": f"https://rocm.docs.amd.com/en/7.13.0-preview/index.html",
+    "version_list_link": "",
+    "nav_secondary_items": {
+        "GitHub": "https://github.com/ROCm/ROCm",
+        "Community": "https://github.com/ROCm/ROCm/discussions",
+        "Blogs": "https://rocm.blogs.amd.com/",
+        "System and Infra Docs": "https://instinct.docs.amd.com/",
+        "Support": "https://github.com/ROCm/ROCm/issues/new/choose",
+    },
+    "link_main_doc": False,
+}

@@ -10,7 +10,6 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
-from rocm_docs import ROCmDocs
 
 version_numbers = []
 version_file = open("../VERSION", "r")
@@ -25,26 +24,17 @@ left_nav_title = f"HIP {version_number} Documentation"
 # for PDF output on Read the Docs
 project = "HIP Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
-
-docs_core = ROCmDocs(left_nav_title)
-docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
-docs_core.enable_api_reference()
-docs_core.setup()
-
 external_projects_current_project = "hip"
-
-for sphinx_var in ROCmDocs.SPHINX_VARS:
-    globals()[sphinx_var] = getattr(docs_core, sphinx_var)
 
 # Add the _extensions directory to Python's search path
 sys.path.append(str(Path(__file__).parent / 'extension'))
 
-extensions += ["sphinxcontrib.doxylink", "custom_directive"]
+extensions = ["rocm_docs", "rocm_docs.doxygen", "sphinxcontrib.doxylink", "custom_directive"]
 
 cpp_id_attributes = ["__global__", "__device__", "__host__", "__forceinline__", "static"]
 cpp_paren_attributes = ["__declspec"]
@@ -62,3 +52,27 @@ exclude_patterns = [
     './how-to/debugging_env.rst',
     "./reference/env_variables"
 ]
+
+doxygen_root = "doxygen"
+doxysphinx_enabled = True
+doxygen_project = {
+    "name": "doxygen",
+    "path": "doxygen/xml",
+}
+
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "announcement": f"This is ROCm 7.13.0 technology preview release documentation. For the latest production stream release, refer to <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>ROCm documentation</a>.",
+    "flavor": "generic",
+    "header_title": f"ROCm™ 7.13.0 Preview",
+    "header_link": f"https://rocm.docs.amd.com/en/7.13.0-preview/index.html",
+    "version_list_link": "",
+    "nav_secondary_items": {
+        "GitHub": "https://github.com/ROCm/ROCm",
+        "Community": "https://github.com/ROCm/ROCm/discussions",
+        "Blogs": "https://rocm.blogs.amd.com/",
+        "System and Infra Docs": "https://instinct.docs.amd.com/",
+        "Support": "https://github.com/ROCm/ROCm/issues/new/choose",
+    },
+    "link_main_doc": False,
+}

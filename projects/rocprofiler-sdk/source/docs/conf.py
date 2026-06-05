@@ -45,7 +45,7 @@ build_doxyfile()
 
 # -- Project information -----------------------------------------------------
 project = "Rocprofiler SDK"
-copyright = "2023-2025, Advanced Micro Devices, Inc."
+copyright = "2023-2026, Advanced Micro Devices, Inc."
 author = "Advanced Micro Devices, Inc."
 
 project_root = os.path.normpath(os.path.join(os.getcwd(), "..", ".."))
@@ -97,7 +97,21 @@ nitpick_ignore = [
 # a list of builtin themes.
 
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {
+    "announcement": f"This is ROCm 7.13.0 technology preview release documentation. For the latest production stream release, refer to <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>ROCm documentation</a>.",
+    "flavor": "generic",
+    "header_title": f"ROCm™ 7.13.0 Preview",
+    "header_link": f"https://rocm.docs.amd.com/en/7.13.0-preview/index.html",
+    "version_list_link": "",
+    "nav_secondary_items": {
+        "GitHub": "https://github.com/ROCm/ROCm",
+        "Community": "https://github.com/ROCm/ROCm/discussions",
+        "Blogs": "https://rocm.blogs.amd.com/",
+        "System and Infra Docs": "https://instinct.docs.amd.com/",
+        "Support": "https://github.com/ROCm/ROCm/issues/new/choose",
+    },
+    "link_main_doc": False,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
