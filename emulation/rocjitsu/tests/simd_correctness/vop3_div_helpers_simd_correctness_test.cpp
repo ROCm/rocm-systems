@@ -282,6 +282,76 @@ void check_div_fixup_f64(uint64_t exec) {
     }
 }
 
+std::array<uint32_t, WF_SIZE> run_div_fixup_f32_nan_precedence(bool force_scalar, uint32_t opcode) {
+  util::set_force_scalar_for_testing(force_scalar);
+  Fixture fx;
+  EXPECT_NE(fx.cu, nullptr);
+  EXPECT_NE(fx.wf, nullptr);
+  uint32_t words[4] = {0u, 0u, 0u, 0u};
+  vop3_tern_encode(opcode, /*vdst=*/kDstVgpr32, /*src0=*/256, /*src1=*/257, /*src2=*/258, words);
+  Instruction *inst = fx.decoder->decode(words);
+  EXPECT_NE(inst, nullptr) << "v_div_fixup_f32-family decode failed";
+
+  constexpr uint32_t kP = 0x3F800000u;
+  constexpr uint32_t kS1Nan = 0x7FC12345u;
+  constexpr uint32_t kS2Nan = 0x7FC54321u;
+  const uint32_t vb = fx.wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    fx.cu->write_vgpr(vb + 0, lane, kP);
+    fx.cu->write_vgpr(vb + 1, lane, kS1Nan);
+    fx.cu->write_vgpr(vb + 2, lane, kS2Nan);
+    fx.cu->write_vgpr(vb + kDstVgpr32, lane, DST_SENTINEL_32);
+  }
+  fx.wf->set_exec(~0ULL);
+  fx.wf->set_vcc(0);
+  fx.cu->execute_instruction(inst, *fx.wf);
+  delete inst;
+
+  std::array<uint32_t, WF_SIZE> out{};
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    out[lane] = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
+  return out;
+}
+
+std::array<uint64_t, WF_SIZE> run_div_fixup_f64_nan_precedence(bool force_scalar) {
+  util::set_force_scalar_for_testing(force_scalar);
+  Fixture fx;
+  EXPECT_NE(fx.cu, nullptr);
+  EXPECT_NE(fx.wf, nullptr);
+  uint32_t words[4] = {0u, 0u, 0u, 0u};
+  vop3_tern_encode(/*op=*/479, /*vdst=*/kDstVgpr64, /*src0=*/256, /*src1=*/258,
+                   /*src2=*/260, words);
+  Instruction *inst = fx.decoder->decode(words);
+  EXPECT_NE(inst, nullptr) << "v_div_fixup_f64_vop3 decode failed";
+
+  constexpr uint64_t kP = 0x3FF0000000000000ULL;
+  constexpr uint64_t kS1Nan = 0x7FF8000000012345ULL;
+  constexpr uint64_t kS2Nan = 0x7FF8000000054321ULL;
+  const uint32_t vb = fx.wf->vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    fx.cu->write_vgpr(vb + 0, lane, static_cast<uint32_t>(kP));
+    fx.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(kP >> 32));
+    fx.cu->write_vgpr(vb + 2, lane, static_cast<uint32_t>(kS1Nan));
+    fx.cu->write_vgpr(vb + 3, lane, static_cast<uint32_t>(kS1Nan >> 32));
+    fx.cu->write_vgpr(vb + 4, lane, static_cast<uint32_t>(kS2Nan));
+    fx.cu->write_vgpr(vb + 5, lane, static_cast<uint32_t>(kS2Nan >> 32));
+    fx.cu->write_vgpr(vb + kDstVgpr64 + 0, lane, static_cast<uint32_t>(DST_SENTINEL_64));
+    fx.cu->write_vgpr(vb + kDstVgpr64 + 1, lane, static_cast<uint32_t>(DST_SENTINEL_64 >> 32));
+  }
+  fx.wf->set_exec(~0ULL);
+  fx.wf->set_vcc(0);
+  fx.cu->execute_instruction(inst, *fx.wf);
+  delete inst;
+
+  std::array<uint64_t, WF_SIZE> out{};
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    const uint64_t lo = fx.cu->read_vgpr(vb + kDstVgpr64 + 0, lane);
+    const uint64_t hi = fx.cu->read_vgpr(vb + kDstVgpr64 + 1, lane);
+    out[lane] = lo | (hi << 32);
+  }
+  return out;
+}
+
 void check_div_fmas_f32(uint64_t exec) {
   ForceScalarGuard gate_guard;
   auto run_mode = [&](bool force_scalar, uint64_t vcc,
@@ -397,6 +467,41 @@ TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_PartialExec) {
     return;
   }
   check_div_fixup_f64(/*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+TEST(Vop3DivHelpersSimdCorrectness, DivFixupF32Family_Source2NaNPrecedence) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  }
+  ForceScalarGuard gate_guard;
+  constexpr uint32_t kS2Nan = 0x7FC54321u;
+  struct Op {
+    uint32_t opcode;
+    const char *name;
+  };
+  for (const Op &o : {Op{478, "v_div_fixup_f32_vop3"}, Op{519, "v_div_fixup_f16_vop3"},
+                      Op{495, "v_div_fixup_legacy_f16_vop3"}}) {
+    for (const bool force_scalar : {true, false}) {
+      const auto out = run_div_fixup_f32_nan_precedence(force_scalar, o.opcode);
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+        EXPECT_EQ(out[lane], kS2Nan)
+            << o.name << " force_scalar=" << force_scalar << " lane " << lane;
+    }
+  }
+}
+TEST(Vop3DivHelpersSimdCorrectness, DivFixupF64_Source2NaNPrecedence) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  }
+  ForceScalarGuard gate_guard;
+  constexpr uint64_t kS2Nan = 0x7FF8000000054321ULL;
+  for (const bool force_scalar : {true, false}) {
+    const auto out = run_div_fixup_f64_nan_precedence(force_scalar);
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      EXPECT_EQ(out[lane], kS2Nan)
+          << "v_div_fixup_f64_vop3 force_scalar=" << force_scalar << " lane " << lane;
+  }
 }
 TEST(Vop3DivHelpersSimdCorrectness, DivFmasF32_FullExec) {
   if constexpr (!util::has_stdx_simd) {

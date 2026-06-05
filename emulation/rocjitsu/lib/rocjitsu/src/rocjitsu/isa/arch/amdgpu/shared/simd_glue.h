@@ -2043,8 +2043,9 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 /// `c` (denominator), pick the result among NaN/Inf/zero copysign cases
 /// according to AMD's div_fixup ULP table. The cascade is applied lowest-
 /// priority first so that the higher-priority `where` blends overwrite —
-/// equivalent to scalar's first-match `else if`. The sign-of-quotient
-/// `b ^ c` is computed once in the integer domain and reinterpreted as
+/// equivalent to scalar's first-match `else if`; source-2 NaN therefore
+/// overwrites source-1 NaN. The sign-of-quotient `b ^ c` is computed once
+/// in the integer domain and reinterpreted as
 /// float, matching the scalar's `bit_cast<float>(bits(b) ^ bits(c))`. Both
 /// `std::copysign(Inf, bxc)` and `std::copysign(0, bxc)` reduce to
 /// `stdx::copysign(target, bxc)`.
@@ -2069,8 +2070,8 @@ inline util::native<float> div_fixup_f32_simd(util::native<float> p, util::nativ
   util::stdx::where(b_zero, r) = inf_val;
   util::stdx::where(b_inf && c_inf, r) = qnan;
   util::stdx::where(b_zero && c_zero, r) = qnan;
-  util::stdx::where(c_nan, r) = c;
   util::stdx::where(b_nan, r) = b;
+  util::stdx::where(c_nan, r) = c;
   return r;
 }
 
@@ -2096,8 +2097,8 @@ inline util::native<double> div_fixup_f64_simd(util::native<double> p, util::nat
   util::stdx::where(b_zero, r) = inf_val;
   util::stdx::where(b_inf && c_inf, r) = qnan;
   util::stdx::where(b_zero && c_zero, r) = qnan;
-  util::stdx::where(c_nan, r) = c;
   util::stdx::where(b_nan, r) = b;
+  util::stdx::where(c_nan, r) = c;
   return r;
 }
 

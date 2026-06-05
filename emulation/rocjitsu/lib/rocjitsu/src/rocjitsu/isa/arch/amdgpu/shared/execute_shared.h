@@ -9451,10 +9451,10 @@ inline void execute_v_div_fixup_f16_vop3([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg & (1u << 2))
       c = -c;
     float result;
-    if (std::isnan(b))
-      result = b;
-    else if (std::isnan(c))
+    if (std::isnan(c))
       result = c;
+    else if (std::isnan(b))
+      result = b;
     else if (c == 0.0f && b == 0.0f)
       result = std::numeric_limits<float>::quiet_NaN();
     else if (std::isinf(c) && std::isinf(b))
@@ -9510,10 +9510,10 @@ inline void execute_v_div_fixup_f32_vop3([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg & (1u << 2))
       c = -c;
     float result;
-    if (std::isnan(b))
-      result = b;
-    else if (std::isnan(c))
+    if (std::isnan(c))
       result = c;
+    else if (std::isnan(b))
+      result = b;
     else if (c == 0.0f && b == 0.0f)
       result = std::numeric_limits<float>::quiet_NaN();
     else if (std::isinf(c) && std::isinf(b))
@@ -9569,10 +9569,10 @@ inline void execute_v_div_fixup_f64_vop3([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg & (1u << 2))
       c = -c;
     double result;
-    if (std::isnan(b))
-      result = b;
-    else if (std::isnan(c))
+    if (std::isnan(c))
       result = c;
+    else if (std::isnan(b))
+      result = b;
     else if (c == 0.0 && b == 0.0)
       result = std::numeric_limits<double>::quiet_NaN();
     else if (std::isinf(c) && std::isinf(b))
@@ -9628,10 +9628,10 @@ inline void execute_v_div_fixup_legacy_f16_vop3([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg & (1u << 2))
       c = -c;
     float result;
-    if (std::isnan(b))
-      result = b;
-    else if (std::isnan(c))
+    if (std::isnan(c))
       result = c;
+    else if (std::isnan(b))
+      result = b;
     else if (c == 0.0f && b == 0.0f)
       result = std::numeric_limits<float>::quiet_NaN();
     else if (std::isinf(c) && std::isinf(b))
