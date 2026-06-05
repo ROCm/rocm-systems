@@ -316,7 +316,10 @@ set(TESTS_COMPONENT "tests")
 # Standalone only folders
 if(BUILD_STANDALONE)
     # these packages are later used in server and client targets
-    find_package(protobuf HINTS ${GRPC_ROOT} CONFIG REQUIRED)
+    find_package(protobuf HINTS ${GRPC_ROOT} CONFIG QUIET)
+    if(NOT protobuf_FOUND)
+        find_package(Protobuf REQUIRED)
+    endif()
     find_package(gRPC ${GRPC_DESIRED_VERSION} HINTS ${GRPC_ROOT} CONFIG REQUIRED)
 
     # Don't print grpc install because it floods the terminal

@@ -79,6 +79,19 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
 
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
+  const auto& table = get_flat_gpu_table();
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_id);
+
+  if (info.instance_index == 0 && info.entity_role == RDC_DEVICE_ROLE_PHYSICAL) {
+    uint32_t flat_idx = info.device_index;
+    if (flat_idx >= table.size()) {
+      return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+    *processor_handle = table[flat_idx].handle;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  // Entity-encoded index (partition instances): use socket/proc mapping
   uint32_t socket_count = 0;
   amdsmi_status_t ret = amdsmi_get_socket_handles(&socket_count, nullptr);
   if (ret != AMDSMI_STATUS_SUCCESS) {
@@ -91,39 +104,30 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
     return ret;
   }
 
-  std::vector<std::vector<amdsmi_processor_handle>> procs_by_socket;
-  procs_by_socket.resize(socket_count);
-
-  for (size_t s = 0; s < sockets.size(); s++) {
-    uint32_t proc_count = 0;
-    ret = amdsmi_get_processor_handles(sockets[s], &proc_count, nullptr);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      return ret;
-    }
-
-    std::vector<amdsmi_processor_handle> procs(proc_count);
-    ret = amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data());
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-      return ret;
-    }
-
-    procs_by_socket[s] = procs;
-  }
-
-  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_id);
   uint32_t socket_index = info.device_index;
   uint32_t instance_index = info.instance_index;
 
-  if (socket_index >= procs_by_socket.size()) {
+  if (socket_index >= socket_count) {
     return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
   }
 
-  const auto& handles = procs_by_socket[socket_index];
-  if (instance_index >= handles.size()) {
+  uint32_t proc_count = 0;
+  ret = amdsmi_get_processor_handles(sockets[socket_index], &proc_count, nullptr);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  if (instance_index >= proc_count) {
     return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
   }
 
-  *processor_handle = handles[instance_index];
+  std::vector<amdsmi_processor_handle> procs(proc_count);
+  ret = amdsmi_get_processor_handles(sockets[socket_index], &proc_count, procs.data());
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  *processor_handle = procs[instance_index];
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -224,22 +228,36 @@ amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metric
 }
 
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
-  // Get the processor handle for the physical device.
-  amdsmi_processor_handle proc_handle = nullptr;
-  amdsmi_status_t ret = get_processor_handle_from_id(index, &proc_handle);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
   if (num_partition == nullptr) {
     return AMDSMI_STATUS_INVAL;
+  }
+
+  // Use flat table to find the physical GPU (first processor in the socket)
+  const auto& table = get_flat_gpu_table();
+  if (index >= table.size()) {
+    return AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+
+  // Find the first processor in the same socket to query the physical GPU profile.
+  uint32_t target_socket = table[index].socket_index;
+  amdsmi_processor_handle phys_handle = nullptr;
+  for (const auto& entry : table) {
+    if (entry.socket_index == target_socket) {
+      phys_handle = entry.handle;
+      break;
+    }
+  }
+
+  if (phys_handle == nullptr) {
+    return AMDSMI_STATUS_NOT_FOUND;
   }
 
   amdsmi_accelerator_partition_profile_t profile;
   memset(&profile, 0, sizeof(profile));
   uint32_t partition_id{};
 
-  ret = amdsmi_get_gpu_accelerator_partition_profile(proc_handle, &profile, &partition_id);
+  amdsmi_status_t ret =
+      amdsmi_get_gpu_accelerator_partition_profile(phys_handle, &profile, &partition_id);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }
@@ -251,6 +269,60 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   *num_partition = profile.num_partitions;
 
   return ret;
+}
+
+
+static std::vector<GpuHandleEntry> s_flat_gpu_table;
+static bool s_flat_gpu_table_initialized = false;
+
+static void build_flat_gpu_table() {
+  s_flat_gpu_table.clear();
+
+  uint32_t socket_count = 0;
+  if (amdsmi_get_socket_handles(&socket_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+    return;
+  }
+  std::vector<amdsmi_socket_handle> sockets(socket_count);
+  if (amdsmi_get_socket_handles(&socket_count, sockets.data()) != AMDSMI_STATUS_SUCCESS) {
+    return;
+  }
+
+  for (uint32_t s = 0; s < socket_count; s++) {
+    uint32_t proc_count = 0;
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, nullptr) != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    std::vector<amdsmi_processor_handle> procs(proc_count);
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data()) != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    for (uint32_t p = 0; p < proc_count; p++) {
+      processor_type_t proc_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+      if (amdsmi_get_processor_type(procs[p], &proc_type) != AMDSMI_STATUS_SUCCESS) {
+        continue;
+      }
+      if (proc_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+        GpuHandleEntry entry;
+        entry.handle = procs[p];
+        entry.socket_index = s;
+        entry.proc_index = p;
+        s_flat_gpu_table.push_back(entry);
+      }
+    }
+  }
+  s_flat_gpu_table_initialized = true;
+}
+
+const std::vector<GpuHandleEntry>& get_flat_gpu_table() {
+  if (!s_flat_gpu_table_initialized) {
+    build_flat_gpu_table();
+  }
+  return s_flat_gpu_table;
+}
+
+void reset_flat_gpu_table() {
+  s_flat_gpu_table.clear();
+  s_flat_gpu_table_initialized = false;
 }
 
 }  // namespace rdc
