@@ -80,14 +80,14 @@ __host__ GDAContext::~GDAContext() {
 __device__ void GDAContext::putmem(void *dest, const void *source, size_t nelems,
                                    int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
     return;
   }
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
   qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
   qps[qp_index].quiet(wf_info);
 }
@@ -96,14 +96,14 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
                                    int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
     return;
   }
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[my_pe];
+  uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
   qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
   qps[qp_index].quiet(wf_info);
 }
@@ -111,14 +111,14 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
 __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
     return;
   }
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[constmem.my_pe];
   qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
 }
 
@@ -126,14 +126,14 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe) {
   const char *src_typed = reinterpret_cast<const char *>(source);
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     uint64_t L_offset = const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
     return;
   }
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
-  uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[my_pe];
+  uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[constmem.my_pe];
   qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
 }
 
