@@ -127,7 +127,8 @@ including:
           number of precisions/frequencies supported.
 
         - Importantly, `lttng` provides mechanisms for producers to determine at runtime if a stream has any active
-          consumers. They do not need to call into KFD and produce if there are no active consumers
+          consumers. They do not need to call into KFD and produce if there are no active consumers for a given
+          (`M`,`N`)
 
 
 #### Pros/Cons of out-of-process
