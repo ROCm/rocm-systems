@@ -267,7 +267,7 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
     fingerprint = 0;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
-  return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+  return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id &id) const {

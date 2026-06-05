@@ -52,10 +52,10 @@ amdcuid_status_t CuidNic::discover(std::vector<DevicePtr> &nics) {
       nics.emplace_back(std::make_shared<CuidNic>(info));
     }
   }
+  closedir(dir);
   if (nics.size() == 0)
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
-  closedir(dir);
   return AMDCUID_STATUS_SUCCESS;
 }
 

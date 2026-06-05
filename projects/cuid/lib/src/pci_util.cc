@@ -201,7 +201,11 @@ amdcuid_status_t PciUtil::get_pci_vsec_cap_offset(std::string bdf,
           (static_cast<uint32_t>(config_space[cap_ptr + 7]) << 24);
 
       // if the VSEC has the required length for our fingerprint, return the
-      // offset
+      // offset. Since VSEC ID for serial number/id not typically defined,
+      // we rely on the length field to to simply get enough bytes
+      // for the fingerprint rather than checking an ID field in the VSEC
+      // header. If one is defined in the future, we will add that check here as
+      // well.
       uint16_t vsec_length =
           static_cast<uint16_t>((vsec_header >> 20) & 0x0FFF);
       if (vsec_length >= 8) {
