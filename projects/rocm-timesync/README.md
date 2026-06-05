@@ -107,7 +107,7 @@ The key steps:
 - On the ROCR side, `ROCR-timesync-r_m` consumes the data streams it needs (e.g., the GPUs it's process is using),
   and stores this data in a shared TSDB.
 - ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
-  timesync -- i.e., `translate()` - which queries the TSDB and applies the offset.
+  timesync` -- i.e., `translate()` - which queries the TSDB and applies the offset.
 
 #### Regarding lttng
 
