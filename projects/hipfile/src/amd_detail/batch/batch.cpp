@@ -475,8 +475,20 @@ BatchContext::completeCanceledOperations()
 void
 BatchContextMap::clear()
 {
-    std::unique_lock<std::shared_mutex> ulock{batch_mutex};
-    active_contexts.clear();
+    std::vector<std::shared_ptr<IBatchContext>> contexts;
+
+    {
+        std::unique_lock<std::shared_mutex> ulock{batch_mutex};
+        contexts.reserve(active_contexts.size());
+        for (auto &context : active_contexts) {
+            contexts.push_back(std::move(context.second));
+        }
+        active_contexts.clear();
+    }
+
+    for (const auto &context : contexts) {
+        context->cancelOperationsAndWait();
+    }
 }
 
 hipFileBatchHandle_t

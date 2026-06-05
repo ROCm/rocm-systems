@@ -363,6 +363,31 @@ TEST_F(HipFileBatch, GetDestroyedContext)
     ASSERT_THROW(batch_map.get(handle), InvalidBatchHandle);
 }
 
+TEST_F(HipFileBatch, ClearEmptyMapSucceeds)
+{
+    ASSERT_NO_THROW(batch_map.clear());
+}
+
+TEST_F(HipFileBatch, ClearRemovesAllContexts)
+{
+    hipFileBatchHandle_t handle1 = batch_map.createContext(1);
+    hipFileBatchHandle_t handle2 = batch_map.createContext(1);
+
+    batch_map.clear();
+
+    ASSERT_THROW(batch_map.get(handle1), InvalidBatchHandle);
+    ASSERT_THROW(batch_map.get(handle2), InvalidBatchHandle);
+}
+
+TEST_F(HipFileBatch, ClearIsIdempotent)
+{
+    batch_map.createContext(1);
+
+    batch_map.clear();
+
+    ASSERT_NO_THROW(batch_map.clear());
+}
+
 struct HipFileBatchContext : public HipFileUnopened {
     BatchContextMap                          batch_map = BatchContextMap{};
     std::shared_ptr<IBatchContext>           _context;
@@ -1018,6 +1043,20 @@ TEST_F(HipFileBatchContext, DestroyContextRemovesHandle)
     EXPECT_CALL(*op, tryCancel()).WillOnce(Return(true));
     expectTaskQueueFlushed(mock_task_group);
     batch_map.destroyContext(handle);
+
+    ASSERT_THROW(batch_map.get(handle), InvalidBatchHandle);
+}
+
+TEST_F(HipFileBatchContext, ClearCancelsOutstandingOperationsAndRemovesHandle)
+{
+    auto op = std::make_shared<StrictMock<MBatchOperation>>();
+    EXPECT_CALL(*op, markPending()).Times(1);
+    submitMockOperations({op});
+    hipFileBatchHandle_t handle = _context.get();
+
+    EXPECT_CALL(*op, tryCancel()).Times(1);
+    expectTaskQueueFlushed(mock_task_group);
+    batch_map.clear();
 
     ASSERT_THROW(batch_map.get(handle), InvalidBatchHandle);
 }
