@@ -550,7 +550,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
         y = total + y;
         if (blockIdx.x == y) {
-          ncclShmem.channelId = x + total;
+          // channelId is the absolute bit position in the global mask:
+          // i*64 + x. Using `x + total` was only correct when prior mask
+          // words were densely packed (which broke for sparse channel sets,
+          // e.g. SATURATE_P2P_NCHANNELS with small messages or non-pow2
+          // tilings, causing the wrong channel to be loaded -> IMA).
+          ncclShmem.channelId = x + i*64;
           break;
         }
       }
@@ -560,7 +565,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
           y = __popcll(args->channelMask.masks[i] & ((1ull<<x)-1));
           y = y + total;
           if (blockIdx.x == y) {
-            ncclShmem.channelId = x + total;
+            ncclShmem.channelId = x + i*64;
             break;
           }
         }
@@ -644,7 +649,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
         y = __popcll(args->channelMask.masks[i] & ((1ull<<laneId)-1));
         y = total + y;
         if (globalWarpId == y) {
-          ncclShmem.warpChannelId[localWarpId] = laneId + total;
+          // Same fix as the non-WS path: channelId is the absolute bit
+          // position (i*64 + laneId), not total bits seen so far.
+          ncclShmem.warpChannelId[localWarpId] = laneId + i*64;
           break;
         }
       }
