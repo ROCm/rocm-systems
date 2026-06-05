@@ -15,6 +15,7 @@
 
 // Anvil host API (src/sdma); include path from ROCSHMEM_SOURCE_DIR or mono-repo sibling.
 #include "sdma/anvil.hpp"
+#include <rocshmem/rocshmem.hpp>
 
 #include <hip/hip_runtime.h>
 #include <map>
@@ -70,9 +71,15 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     goto fail;
   }
 
-  // Allocate local signal/counter storage in device memory.
+  // Signals must live on the rocSHMEM symmetric heap so peer GPUs can SDMA-atomic
+  // them (plain hipMalloc is not reliably peer-writable from SDMA).
   if (nSignals > 0) {
-    if (hipMalloc(&signalsLocal, sizeof(uint64_t) * nSignals) != hipSuccess) { ret = ncclSystemError; goto fail; }
+    signalsLocal = (uint64_t*)rocshmem::rocshmem_malloc(sizeof(uint64_t) * nSignals);
+    if (!signalsLocal) {
+      WARN("GIN anvil: rocshmem_malloc failed for %d signals", nSignals);
+      ret = ncclSystemError;
+      goto fail;
+    }
     hipMemset(signalsLocal, 0, sizeof(uint64_t) * nSignals);
   }
   if (nCounters > 0) {
@@ -173,7 +180,7 @@ fail:
     free(ctx->signalsBaseHost);
     free(ctx);
   }
-  if (signalsLocal) hipFree(signalsLocal);
+  if (signalsLocal) rocshmem::rocshmem_free(signalsLocal);
   if (countersLocal) hipFree(countersLocal);
   return ret;
 }
@@ -181,6 +188,13 @@ fail:
 ncclResult_t ncclGinAnvilDestroyContext(ncclGin_t*, void* ginCtx) {
   ginAnvilCtx* ctx = (ginAnvilCtx*)ginCtx;
   if (ctx == nullptr) return ncclSuccess;
+  if (ctx->gpuCtxDev) {
+    ncclGinAnvilGPUContext hostCtx;
+    if (hipMemcpy(&hostCtx, ctx->gpuCtxDev, sizeof(hostCtx), hipMemcpyDeviceToHost) == hipSuccess) {
+      if (hostCtx.signals) rocshmem::rocshmem_free(hostCtx.signals);
+      if (hostCtx.counters) hipFree(hostCtx.counters);
+    }
+  }
   if (ctx->queuesDev) hipFree(ctx->queuesDev);
   if (ctx->signalsBaseDev) hipFree(ctx->signalsBaseDev);
   if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);

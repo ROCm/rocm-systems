@@ -38,7 +38,9 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     if (!hasWins) return;
     if (peer == ctx.rank) return;
 
-    auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&aCtx->queues[peer]);
+    void** queues = (void**)loadConst(&aCtx->queues);
+    if (queues == nullptr) return;
+    auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[peer]);
     if (q == nullptr) return;
 
     auto* dstMh = (ncclGinAnvilMemHandle*)dstWin;
@@ -46,6 +48,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     uintptr_t dstRank0Base = loadConst(&dstMh->lsaRank0Base);
     uintptr_t srcRank0Base = loadConst(&srcMh->lsaRank0Base);
     uint64_t stride = loadConst(&dstMh->lsaStrideBytes);
+    if (dstRank0Base == 0 || srcRank0Base == 0 || stride == 0) return;
 
     void* dst = (void*)(ncclGinAnvilRankPtr(dstRank0Base, stride, peer) + dstOff);
     void* src = (void*)(ncclGinAnvilRankPtr(srcRank0Base, stride, ctx.rank) + srcOff);
@@ -56,10 +59,11 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     uint64_t* sigPtr = nullptr;
     if (hasSignal) {
       uint64_t** sigBases = (uint64_t**)loadConst(&aCtx->signalsBase);
+      if (sigBases == nullptr) return;
       uint64_t* peerBase = (uint64_t*)loadConst(&sigBases[peer]);
+      if (peerBase == nullptr) return;
       sigPtr = peerBase + signalId;
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-      signalOpArg = 1;
     }
 
     if (hasSignal && hasCounter) {
@@ -108,7 +112,9 @@ template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     auto* aCtx = (ncclGinAnvilGPUContext*)ctx.handle;
-    return nccl::utility::loadConst(&aCtx->signals) + signalId;
+    uint64_t* signals = nccl::utility::loadConst(&aCtx->signals);
+    if (signals == nullptr) return nullptr;
+    return signals + signalId;
   }
 };
 
