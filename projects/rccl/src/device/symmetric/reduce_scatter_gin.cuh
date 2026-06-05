@@ -1,7 +1,8 @@
 #include "sym_kernels.h"
-#include "kernel.cuh"
-#include "primitives.cuh"
-#include "data_ops.cuh"
+#include "symmetric/kernel.h"
+#include "symmetric/primitives.h"
+#include "symmetric/data_ops.h"
+#include "symmetric/gin_scratch__funcs.h"
 
 template<template<typename> typename Red, typename T, bool multimem>
 static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multimem> multimemTag) {
@@ -16,7 +17,13 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
   Red<AccT> red(handler.devWork->redOpArg);
   Red<T> mmRed(handler.devWork->redOpArg);
 
-  int nWorkWarps = blockDim.x/32 - 2;
+  // [RCCL] Warps here are hardware wavefronts of WARP_SIZE threads. ncclCoopWarpSpan
+  // measures thread_rank()/size()/sync() in units of WARP_SIZE (64 on gfx9), so the
+  // warp/role partitioning below must use WARP_SIZE too. Upstream NCCL hardcodes 32;
+  // keeping that on a wave64 GPU makes the stage-1 spans address threads [256,512) of a
+  // 256-thread block, yielding negative coop thread_rank() and out-of-bounds GIN signal
+  // indices (illegal memory access). Matches the WARP_SIZE usage in all_gather_gin.cuh.
+  int nWorkWarps = blockDim.x/WARP_SIZE - 2;
   int stage0_nWorkWarps;
   if (lsa.nRanks == 1) {
     stage0_nWorkWarps = 0; // Stage 0 just posts sends so no workers.
@@ -29,14 +36,14 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
   }
 
   // 2 stage pipeline, one coop per stage.
-  int stage = threadIdx.x/32 < 1 + stage0_nWorkWarps ? 0 : 1;
+  int stage = threadIdx.x/WARP_SIZE < 1 + stage0_nWorkWarps ? 0 : 1;
   ncclCoopWarpSpan coopStage{
     /*warp0=*/stage == 0 ? 0 : 1 + stage0_nWorkWarps,
     /*nWarps=*/1 + (stage == 0 ? stage0_nWorkWarps : nWorkWarps-stage0_nWorkWarps),
     /*id=*/stage
   };
   // Within each stage we have 2 roles: GIN warp, worker warps.
-  bool roleIsWorker = 32 <= coopStage.thread_rank();
+  bool roleIsWorker = WARP_SIZE <= coopStage.thread_rank();
   ncclCoopWarpSpan coopRole{
     /*warp0=*/(stage == 0 ? 0 : 1 + stage0_nWorkWarps) + (roleIsWorker ? 1 : 0),
     /*nWarps=*/!roleIsWorker ? 1 : (stage == 0 ? stage0_nWorkWarps : nWorkWarps - stage0_nWorkWarps),
@@ -138,11 +145,10 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
               if (!roleIsWorker) {
                 if (coopRole.thread_rank() == 0) {
                   // totalSends += rail.nRanks-1;
-                  #if __CUDA_ARCH__ >= 700
-                  asm volatile("red.relaxed.shared.add.s32 [%0],%1;" :: "r"((uint32_t)__cvta_generic_to_shared(&totalSends)), "r"(rail.nRanks-1) : "memory");
-                  #else
-                  __trap();
-                  #endif
+                  // [RCCL] The upstream NVPTX `red.relaxed.shared.add.s32` inline
+                  // asm has no amdgcn equivalent (the #else path traps). atomicAdd
+                  // lowers to a relaxed shared-memory atomic on both HIP and CUDA.
+                  atomicAdd(&totalSends, rail.nRanks-1);
                 }
               } else {
                 // outbox.apportion() was told to defer sync so that we don't sync
@@ -277,7 +283,7 @@ static __device__ void rsAlgoHier(ncclSymkDevWorkArgs const* args, BoolTag<multi
         gin.waitCounter(ncclCoopThread(), handler.ginCounterPerBlock + blockIdx.x, totalSends, 32);
       }
     } else {
-      outbox.template ~ncclGinOutboxSession<ncclCoopWarpSpan>();
+      outbox.~ncclGinOutboxSession<ncclCoopWarpSpan>();
     }
   }
 
