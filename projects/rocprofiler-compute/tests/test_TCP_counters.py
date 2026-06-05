@@ -73,8 +73,26 @@ def test_L1_cache_counters(
         ])
         assert return_code == 0
 
+        # DEBUG: dump merged pmc_perf.csv (created by the analyze phase)
+        pmc_perf_path = Path(workload_dir) / "pmc_perf.csv"
+        print(f"\n===== DEBUG pmc_perf.csv [{app_name}] {pmc_perf_path} =====")
+        with pd.option_context(
+            "display.max_rows", None, "display.max_columns", None, "display.width", None
+        ):
+            print(pd.read_csv(pmc_perf_path))
+        print(f"===== END pmc_perf.csv [{app_name}] =====\n")
+
         # 3. save results in local
         csv_path = workload_dir_output + "/workload_metric.csv"
+
+        # DEBUG: dump workload_metric.csv from the analysis phase
+        print(f"\n===== DEBUG workload_metric.csv [{app_name}] {csv_path} =====")
+        with pd.option_context(
+            "display.max_rows", None, "display.max_columns", None, "display.width", None
+        ):
+            print(pd.read_csv(csv_path))
+        print(f"===== END workload_metric.csv [{app_name}] =====\n")
+
         data = load_metrics(csv_path)
 
         for metric in metrics:

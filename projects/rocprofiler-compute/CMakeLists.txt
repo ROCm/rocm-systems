@@ -477,7 +477,7 @@ add_test(
 add_test(
     NAME test_L1_cache_counters
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m L1_cache
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -s -m L1_cache
         --junitxml=tests/test_L1_cache_counters.xml ${COV_OPTION}
         tests/test_TCP_counters.py ${WORKING_DIR_OPTION}
 )
