@@ -961,6 +961,12 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExec() {
+    {
+      std::scoped_lock lock(graphExecSetLock_);
+      // GraphExecSet is normally erased in hipGraphExecDestroy() before release(), but child graph
+      // nodes (which inherit GraphExec) are destroyed via delete and never go through that path.
+      graphExecSet_.erase(this);
+    }
     for (auto& streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
