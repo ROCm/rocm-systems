@@ -56,6 +56,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Exposed `amdsmi_get_afids_from_cper` in the Python package**.  
   - The CPER AFID API was implemented but missing from `py-interface/__init__.py`, making it unavailable to Python callers using `from amdsmi import ...`.
 
+- **Python unittest scripts now append a GTest-style summary after test output**.  
+  - All `*_test.py` and `unit_tests.py` scripts print a colored `[PASSED]`/`[SKIPPED]`/`[FAILED]` block after the standard unittest output. Colors are automatically suppressed when output is not a TTY (e.g. file redirection, CI log capture).
+
 - **Corrected the documented unit of `amdsmi_frequencies_t::frequency`**.  
   - The struct comment claimed frequencies were in MHz, but `amdsmi_get_clk_freq()` returns them in Hz. The comment now reads "List of frequencies in Hz".
   - Also removed the incorrect "in MHz" note from the `current` field, which is a frequency index, not a frequency value.
