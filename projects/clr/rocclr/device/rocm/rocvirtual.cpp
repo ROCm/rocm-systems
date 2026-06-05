@@ -102,6 +102,22 @@ static constexpr hsa_barrier_and_packet_t kBarrierAcquirePacket = {
 static constexpr hsa_barrier_and_packet_t kBarrierReleasePacket = {
     kBarrierPacketReleaseHeader, 0, 0, {{0}}, 0, {0}};
 
+namespace {
+
+void CL_CALLBACK ReleasePinnedMemoryCallback(cl_event event, int32_t command_exec_status,
+                                             void* user_data) {
+  (void)event;
+  (void)command_exec_status;
+  std::vector<amd::Memory*>* pinned_memories =
+      reinterpret_cast<std::vector<amd::Memory*>*>(user_data);
+  for (amd::Memory* pinned_memory : *pinned_memories) {
+    pinned_memory->release();
+  }
+  delete pinned_memories;
+}
+
+}  // namespace
+
 double Timestamp::ticksToTime_ = 0;
 
 static unsigned extractAqlBits(unsigned v, unsigned pos, unsigned width) {
@@ -3358,6 +3374,51 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::SchedulePinnedMemoryRelease(amd::HostQueue& queue,
+                                             std::vector<amd::Memory*> pinned_memory) {
+  if (pinned_memory.empty()) {
+    return;
+  }
+
+  std::unique_ptr<std::vector<amd::Memory*>> callback_data(
+      new (std::nothrow) std::vector<amd::Memory*>(std::move(pinned_memory)));
+  if (callback_data == nullptr) {
+    releaseGpuMemoryFence();
+    for (amd::Memory* pinned_memory_ref : pinned_memory) {
+      pinned_memory_ref->release();
+    }
+    return;
+  }
+
+  amd::Command* marker = new amd::Marker(queue, false);
+  if (marker == nullptr) {
+    LogWarning("Failed to enqueue pinned memory release marker; releasing after GPU wait.");
+    releaseGpuMemoryFence();
+    for (amd::Memory* pinned_memory_ref : *callback_data) {
+      pinned_memory_ref->release();
+    }
+    return;
+  }
+
+  marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+  constexpr bool kNonBlockingCallback = false;
+  if (!marker->setCallback(CL_COMPLETE, ReleasePinnedMemoryCallback, callback_data.get(),
+                           kNonBlockingCallback)) {
+    marker->release();
+    LogWarning("Failed to enqueue pinned memory release marker; releasing after GPU wait.");
+    releaseGpuMemoryFence();
+    for (amd::Memory* pinned_memory_ref : *callback_data) {
+      pinned_memory_ref->release();
+    }
+    return;
+  }
+
+  marker->enqueue();
+  marker->release();
+  callback_data.release();
+}
+
+// ================================================================================================
 void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -3389,6 +3450,7 @@ void VirtualGPU::SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) {
   }
 
   profilingEnd();
+  SchedulePinnedMemoryRelease(*cmd.queue(), cmd.TakePinnedMemory());
 }
 
 // ================================================================================================
@@ -3414,6 +3476,7 @@ void VirtualGPU::SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) {
   }
 
   profilingEnd();
+  SchedulePinnedMemoryRelease(*cmd.queue(), cmd.TakePinnedMemory());
 }
 
 // ================================================================================================

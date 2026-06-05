@@ -21,6 +21,7 @@
 #include <stack>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace amd::roc {
 class Device;
@@ -646,6 +647,9 @@ class VirtualGPU : public device::VirtualDevice {
   void* getOrCreateHostcallBuffer();
 
  private:
+  //! Release pinned memory after previously submitted work on the queue has completed.
+  void SchedulePinnedMemoryRelease(amd::HostQueue& queue, std::vector<amd::Memory*> pinned_memory);
+
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
 
