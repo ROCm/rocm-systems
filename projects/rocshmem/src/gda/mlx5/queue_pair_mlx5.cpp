@@ -133,7 +133,7 @@ __device__ void QueuePairMLX5::poll_cq_until(uint16_t requested_available_slots)
 #define MLX5_LOCK_USE_S_SLEEP  1
 #define MLX5_LOCK_USE_S_WAKEUP (0 && MLX5_LOCK_USE_S_SLEEP)
 // sleep for up to 64 * MLX5_LOCK_S_SLEEP_DELAY clock cycles
-static constexpr int MLX5_LOCK_S_SLEEP_DELAY = 2;
+static constexpr inline int MLX5_LOCK_S_SLEEP_DELAY = 2;
 
 #if MLX5_LOCK_USE_S_WAKEUP
 __device__ static inline void amdgcn_s_wakeup() {
