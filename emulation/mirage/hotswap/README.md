@@ -6,13 +6,14 @@ code as it is loaded — for example running a `gfx1250` (RDNA-class) workload o
 a `gfx942` (MI300) or `gfx950` (MI350) host GPU.
 
 Unlike [`rocjitsu`](../rocjitsu/) — which is a *software* simulator that decodes
-the ISA in an event-driven core — HotSwap runs on **real hardware** and only
-rewrites the parts of the program that the host GPU cannot execute natively.
-Because the rewrite happens once, at code-object load time, it is much faster
-than a full simulator while still letting you exercise code for an architecture
-you don't physically have.
+the ISA in an event-driven core — HotSwap runs on **real hardware** by raising
+the source assembly to LLVM IR and lowering it back down to the host
+architecture's assembly. There is no guarantee about which instructions survive
+unchanged. Because the rewrite happens once, at code-object load time, it is much
+faster than a full simulator while still letting you exercise code for an
+architecture you don't physically have.
 
-## What HotSwap actually is
+## How used HotSwap
 
 HotSwap is **not** a single `libhsa-hotswap.so`. It is a set of co-installed
 artifacts (the same ones the reference Docker recipe produces), staged into one
@@ -37,6 +38,8 @@ target and adapter policy (mirroring the reference `env_contract.py`).
 By default mirage does **not** build HotSwap — it *finds* and *uses* an existing
 install. An opt-in CMake flag (`MIRAGE_BUILD_HOTSWAP`, see below) can build it
 from source as part of the mirage build.
+
+If mirage cannot find hotswap, it won't run things using hotswap.
 
 ## Usage with mirage
 
@@ -97,7 +100,7 @@ cmake -S . -B build -DMIRAGE_BUILD_HOTSWAP=ON
 cmake --build build --target hotswap
 ```
 
-This mirrors the reference Docker recipe and produces three artifact sets,
+This mirrors the [reference Docker recipe](https://github.com/ROCm/aise/blob/mluecke/hotswap-transformers-ut/docker/huggingface_ut_hotswap.ubuntu.amd.Dockerfile) and produces three artifact sets,
 staged under `build/hotswap/` (`lib/`, `llvm-tools/`, `runtime/hotswap_py/`).
 mirage discovers this tree automatically (it probes `../../build/hotswap/lib`
 relative to the binary); no extra configuration is needed for an in-tree build.
