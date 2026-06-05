@@ -20,7 +20,6 @@ project(rccl-tests LANGUAGES CXX)
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
 option(ENABLE_ROCSHMEM             "Build with rocshmem GIN backend support."     OFF)
-set(ROCSHMEM_SOURCE_DIR "" CACHE PATH "rocshmem source tree (required for GIN Anvil device headers)")
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -212,20 +211,11 @@ endif()
 if (ENABLE_ROCSHMEM)
     message(STATUS "rocshmem GIN backend support enabled")
     add_definitions(-DENABLE_ROCSHMEM)
-    # Match librccl ENABLE_ROCSHMEM_GIN so device GIN dispatch includes Anvil (type 5).
-    add_definitions(-DENABLE_ROCSHMEM_GIN)
     if (NOT ROCSHMEM_INSTALL_DIR)
         message(FATAL_ERROR "ENABLE_ROCSHMEM is ON but ROCSHMEM_INSTALL_DIR is not set")
     endif()
     # Device headers include <rocshmem/rocshmem.hpp> when ENABLE_ROCSHMEM is set
     include_directories(${ROCSHMEM_INSTALL_DIR}/include)
-    # gin_anvil.h includes sdma/anvil_device.hpp from rocshmem sources (not in the install prefix).
-    if (ROCSHMEM_SOURCE_DIR)
-        include_directories(${ROCSHMEM_SOURCE_DIR}/src/sdma)
-        message(STATUS "rocshmem source (Anvil SDMA headers): ${ROCSHMEM_SOURCE_DIR}/src/sdma")
-    elseif (ENABLE_DEVICE_API)
-        message(WARNING "ROCSHMEM_SOURCE_DIR not set; GIN Anvil (-D 3, NCCL_GIN_TYPE=5) device builds may fail")
-    endif()
     # rccl-tests device code calls rocshmem device functions via GIN template
     # specializations. librocshmem.a is compiled with -fgpu-rdc, so tests that
     # use GIN must also use -fgpu-rdc and device-link with it.
