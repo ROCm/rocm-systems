@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include <stdlib.h>
 #include <dlfcn.h>
@@ -29,12 +30,12 @@ static ncclResult_t ncclEnvFinalize(void) {
 }
 
 static const char* ncclEnvGetEnv(const char* name) {
-  return getenv(name);
+  return std::getenv(name);
 }
 
 ncclEnv_v1_t ncclIntEnv_v1 = {
-  .name = "ncclEnvDefault",
-  .init = ncclEnvInit,
-  .finalize = ncclEnvFinalize,
-  .getEnv = ncclEnvGetEnv,
+  "ncclEnvDefault",
+  ncclEnvInit,
+  ncclEnvFinalize,
+  ncclEnvGetEnv,
 };

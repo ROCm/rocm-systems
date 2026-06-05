@@ -256,14 +256,15 @@ TEST(CApiTest, CreateAndDestroyFromString) {
     }
   })";
   rj_vm_t *handle = nullptr;
-  EXPECT_EQ(rj_vm_create_from_string(json, &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(handle, nullptr);
   rj_vm_destroy(handle);
 }
 
 TEST(CApiTest, InvalidArguments) {
   rj_vm_t *handle = nullptr;
-  EXPECT_EQ(rj_vm_create_from_string(nullptr, &handle), ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(rj_vm_create_from_string(nullptr, RJ_VM_MODE_DEFAULT, &handle),
+            ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(rj_vm_step(nullptr, nullptr), ROCJITSU_STATUS_INVALID_ARGUMENT);
 }
 
