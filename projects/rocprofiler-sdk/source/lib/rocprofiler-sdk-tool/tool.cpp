@@ -108,9 +108,7 @@
 #include <vector>
 
 #include <dlfcn.h>
-#include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -2280,13 +2278,14 @@ reset_output_thread(std::optional<std::thread>& thread_ptr)
 
 namespace
 {
-// Session counter file permissions (0644).
-constexpr mode_t attach_session_file_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+constexpr auto attach_session_file_perms =
+    fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read;
 
-// Same PID as /tmp/rocprofv3_attach_<pid>.pkl: ROCPROF_ATTACH_PID when set by rocprofv3 /
-// rocprof-attach, otherwise the attach target PID used for metadata in tool_attach (ppid).
+// Attach target PID shared by session bookkeeping and tool_attach metadata.
+// Matches /tmp/rocprofv3_attach_<pid>.pkl: ROCPROF_ATTACH_PID when set by rocprofv3 /
+// rocprof-attach, otherwise getppid().
 pid_t
-get_attach_session_target_pid()
+get_attach_target_pid()
 {
     if(const auto env_pid = common::get_env("ROCPROF_ATTACH_PID", static_cast<long>(-1));
        env_pid > 0)
@@ -2296,59 +2295,107 @@ get_attach_session_target_pid()
     return getppid();
 }
 
-std::string
+fs::path
 attach_session_file_path(pid_t target_pid)
 {
     return fmt::format("/tmp/rocprofv3_attach_{}.session", target_pid);
 }
 
-int
-open_attach_session_file(const std::string& path, int flags)
+// Reject symlinks and non-regular files before fstream open (best-effort; fstream has no
+// O_NOFOLLOW).
+bool
+is_attach_session_path_safe(const fs::path& path)
 {
-    return ::open(path.c_str(), flags | O_NOFOLLOW | O_CLOEXEC, attach_session_file_mode);
+    std::error_code ec;
+    if(!fs::exists(path, ec)) return true;
+    if(ec)
+    {
+        ROCP_WARNING << "Failed to stat attach session file " << path << " :: " << ec.message();
+        return false;
+    }
+    if(fs::is_symlink(path, ec))
+    {
+        ROCP_WARNING << "Refusing attach session path (symlink): " << path;
+        return false;
+    }
+    if(!fs::is_regular_file(path, ec))
+    {
+        ROCP_WARNING << "Refusing attach session path (not a regular file): " << path;
+        return false;
+    }
+    return true;
+}
+
+void
+set_attach_session_file_permissions(const fs::path& path)
+{
+    std::error_code ec;
+    fs::permissions(path, attach_session_file_perms, fs::perm_options::replace, ec);
+    if(ec)
+    {
+        ROCP_WARNING << "Failed to set attach session file permissions on " << path << " :: "
+                     << ec.message();
+    }
 }
 
 bool
-read_attach_session(const std::string& path, uint64_t& session_out)
+read_attach_session(const fs::path& path, uint64_t& session_out)
 {
-    const int fd = open_attach_session_file(path, O_RDONLY);
-    if(fd < 0) return false;
+    constexpr auto reattach_overwrite_warning =
+        "If this is a re-attach, output may overwrite a previous session";
 
-    char       buf[32] = {};
-    const auto nread   = ::read(fd, buf, sizeof(buf) - 1);
-    ::close(fd);
-    if(nread <= 0) return false;
-
-    try
+    if(!is_attach_session_path_safe(path))
     {
-        session_out = std::stoull(std::string{buf, static_cast<size_t>(nread)});
-        return true;
-    } catch(...)
-    {
+        ROCP_WARNING << reattach_overwrite_warning;
         return false;
     }
+    if(!fs::exists(path)) return false;
+
+    std::ifstream ifs{path};
+    if(!ifs)
+    {
+        ROCP_WARNING << "Failed to open attach session file for read: " << path << ". "
+                     << reattach_overwrite_warning;
+        return false;
+    }
+
+    uint64_t session = 0;
+    if(!(ifs >> session))
+    {
+        ROCP_WARNING << "Failed to parse attach session file: " << path << ". "
+                     << reattach_overwrite_warning;
+        return false;
+    }
+
+    session_out = session;
+    return true;
 }
 
 bool
-write_attach_session(const std::string& path, uint64_t session)
+write_attach_session(const fs::path& path, uint64_t session)
 {
-    const int fd = open_attach_session_file(path, O_WRONLY | O_CREAT | O_TRUNC);
-    if(fd < 0)
+    if(!is_attach_session_path_safe(path)) return false;
+
+    std::ofstream ofs{path, std::ios::trunc};
+    if(!ofs)
     {
-        ROCP_WARNING << "Failed to open attach session file (will not suffix output): " << path
-                     << " :: " << strerror(errno);
+        ROCP_WARNING << "Failed to open attach session file for write (reattaches may "
+                        "overwrite previous rocprof output): "
+                     << path;
         return false;
     }
 
-    const auto data     = fmt::format("{}", session);
-    const auto nwritten = ::write(fd, data.data(), data.size());
-    const auto ok       = (::close(fd) == 0) && (nwritten == static_cast<ssize_t>(data.size()));
-    if(!ok)
+    ofs << session;
+    if(!ofs.good())
     {
-        ROCP_WARNING << "Failed to write attach session file (will not suffix output): " << path
-                     << " :: " << strerror(errno);
+        ROCP_WARNING << "Failed to write attach session file (reattaches may "
+                        "overwrite previous rocprof output): "
+                     << path;
+        return false;
     }
-    return ok;
+
+    set_attach_session_file_permissions(path);
+    return true;
 }
 }  // namespace
 
@@ -2358,7 +2405,7 @@ write_attach_session(const std::string& path, uint64_t session)
 void
 assign_attach_output_session_suffix()
 {
-    const auto target_pid   = get_attach_session_target_pid();
+    const auto target_pid   = get_attach_target_pid();
     const auto session_path = attach_session_file_path(target_pid);
 
     auto session = uint64_t{0};
@@ -2407,8 +2454,8 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     assign_attach_output_session_suffix();
 
-    pid_t target_pid = getppid();  // The target process we're attaching to
-    pid_t tool_pid   = getpid();   // The rocprofv3 tool process
+    pid_t target_pid = get_attach_target_pid(); //The target process we're attaching to
+    pid_t tool_pid   = getpid(); //The rocprofv3 tool process
     ROCP_INFO << "Attach mode: Setting process_id to target PID " << target_pid
               << " (tool PID: " << tool_pid << ")";
     tool_metadata->set_process_id(target_pid, 0);  // Set target as main process
