@@ -391,19 +391,3 @@ def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
-
-
-def test_sanitize_pc_sampling_injects_into_filter_metrics():
-    """Analyze mode reads filter_metrics; injection should target it."""
-    args = _make_rpc_args(
-        mode="analyze",
-        filter_blocks=None,
-        filter_metrics=[],
-        pc_sampling=True,
-        experimental=True,
-    )
-    # Drop filter_blocks to mimic analyze-mode Namespace shape.
-    delattr(args, "filter_blocks")
-    instance = _make_rpc_with_args(args)
-    instance.sanitize()
-    assert args.filter_metrics == ["21"]

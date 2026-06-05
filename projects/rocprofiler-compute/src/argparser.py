@@ -1006,20 +1006,6 @@ Examples:
     )
 
     analyze_group.add_argument(
-        "--pc-sampling",
-        dest="pc_sampling",
-        required=False,
-        default=False,
-        base_action="store_const",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="PC Sampling",
-        nargs=0,
-        const=True,
-        help="\t\tEnable PC sampling (block 21) for analysis mode.",
-    )
-
-    analyze_group.add_argument(
         "--gui",
         type=int,
         nargs="?",

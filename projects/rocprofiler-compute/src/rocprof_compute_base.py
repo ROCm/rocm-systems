@@ -175,34 +175,23 @@ class RocProfCompute:
                         f'To use "-b {block_input}", you must also specify: '
                         "--membw-analysis --experimental"
                     )
-            # Check if this is block 21 (starts with "21" or "21.")
-            if block_input.startswith("21") and (
-                len(block_input) == 2 or block_input[2] == "."
-            ):
-                if (
-                    not getattr(self.__args, "pc_sampling", False)
-                    or not self.__args.experimental
-                ):
+            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
+            # from the profiling config yaml.
+            if self.__mode == "profile" and block_input == "21":
+                if not self.__args.pc_sampling or not self.__args.experimental:
                     console_error(
                         "Block 21 (PC Sampling) is an experimental feature.\n"
                         f'To use "-b {block_input}", you must also specify: '
                         "--pc-sampling --experimental"
                     )
 
-        # When --pc-sampling is set, inject "21" so downstream code sees it.
-        # Profile mode reads args.filter_blocks; analyze mode reads
-        # args.filter_metrics.
-        if getattr(self.__args, "pc_sampling", False):
-            target_attr = (
-                "filter_blocks" if hasattr(self.__args, "filter_blocks") else None
-            )
-            if target_attr is None and hasattr(self.__args, "filter_metrics"):
-                target_attr = "filter_metrics"
-            if target_attr is not None:
-                current = getattr(self.__args, target_attr) or []
-                if "21" not in current:
-                    current.append("21")
-                setattr(self.__args, target_attr, current)
+        # When --pc-sampling is set, inject "21" into filter_blocks so the
+        # profiling config yaml records it and downstream code is unchanged.
+        if self.__mode == "profile" and self.__args.pc_sampling:
+            current = self.__args.filter_blocks or []
+            if "21" not in current:
+                current.append("21")
+            self.__args.filter_blocks = current
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
