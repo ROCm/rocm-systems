@@ -1420,6 +1420,14 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #endif
+#if(ROCPROFILER_VERSION >= 10300)
+            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+            {
+                tool_tracing_callback_start(category::rocm_rocshmem_api{}, record,
+                                            user_data, ts);
+                break;
+            }
+#endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
                 tool_tracing_callback_start(category::rocm_rccl_api{}, record, user_data,
@@ -1503,6 +1511,14 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API:
             {
                 tool_tracing_callback_stop(category::rocm_rocjpeg_api{}, record,
+                                           user_data, ts, _bt_data);
+                break;
+            }
+#endif
+#if(ROCPROFILER_VERSION >= 10300)
+            case ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API:
+            {
+                tool_tracing_callback_stop(category::rocm_rocshmem_api{}, record,
                                            user_data, ts, _bt_data);
                 break;
             }
@@ -2487,6 +2503,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
 #if(ROCPROFILER_VERSION >= 700)
             ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+#endif
+#if(ROCPROFILER_VERSION >= 10300)
+            ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API,
 #endif
         })
     {
