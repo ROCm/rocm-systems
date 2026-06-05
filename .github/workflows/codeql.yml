@@ -9,6 +9,9 @@ on:
       - develop
       - "release**/therock*"
       - "release/rocm-rel-7.[1-2]*"
+    paths:
+      - '**/*.py'
+      - '.github/**'
   pull_request:
     branches:
       - develop
