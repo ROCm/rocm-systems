@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef _IPC_HOST_RMA_TESTER_HPP_
-#define _IPC_HOST_RMA_TESTER_HPP_
+#ifndef _HOST_RMA_TESTER_HPP_
+#define _HOST_RMA_TESTER_HPP_
 
 #include "tester.hpp"
 
@@ -37,10 +37,10 @@ using namespace rocshmem;
  *
  * All operations are issued from the host via rocshmem_ctx_* APIs.
  *****************************************************************************/
-class IpcHostRmaTester : public Tester {
+class HostRmaTester : public Tester {
  public:
-  explicit IpcHostRmaTester(TesterArguments args);
-  virtual ~IpcHostRmaTester();
+  explicit HostRmaTester(TesterArguments args);
+  virtual ~HostRmaTester();
 
  protected:
   virtual void resetBuffers(size_t size) override;
@@ -64,4 +64,4 @@ class IpcHostRmaTester : public Tester {
   int *amo_int_buf{nullptr};
 };
 
-#endif  // _IPC_HOST_RMA_TESTER_HPP_
+#endif  // _HOST_RMA_TESTER_HPP_

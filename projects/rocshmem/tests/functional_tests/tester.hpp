@@ -161,16 +161,16 @@
   X(TileGetArbitrary,          116)  \
   X(ReduceOnStream,            117)  \
   X(HostCtxCreate,             118)  \
-  X(IpcHostPutmem,             119)  \
-  X(IpcHostGetmem,             120)  \
-  X(IpcHostAmoFAdd,            121)  \
-  X(IpcHostAmoFCswap,          122)  \
-  X(IpcHostCtxPutmem,          123)  \
-  X(IpcHostCtxGetmem,          124)  \
-  X(IpcHostIntAmoFAdd,         125)  \
-  X(IpcHostIntAmoFCswap,       126)  \
-  X(IpcHostAmoAllPes,          127)  \
-  X(IpcHostAmoSelf,            128)
+  X(HostPutmem,                119)  \
+  X(HostGetmem,                120)  \
+  X(HostAmoFAdd,               121)  \
+  X(HostAmoFCswap,             122)  \
+  X(HostCtxPutmem,             123)  \
+  X(HostCtxGetmem,             124)  \
+  X(HostIntAmoFAdd,            125)  \
+  X(HostIntAmoFCswap,          126)  \
+  X(HostAmoAllPes,             127)  \
+  X(HostAmoSelf,               128)
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)

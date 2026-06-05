@@ -33,7 +33,7 @@
 #include <vector>
 
 #include "amo_bitwise_tester.hpp"
-#include "ipc_host_rma_tester.hpp"
+#include "host_rma_tester.hpp"
 #include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
 #include "default_ctx_primitive_tester.hpp"
@@ -332,45 +332,55 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Putmem_On_Stream";
       testers.push_back(new PutmemOnStreamTester(args));
       break;
-    case IpcHostPutmemTestType:
-      test_name = "IPC_Host_Putmem";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostPutmemTestType:
+      test_name = "Host_Putmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostGetmemTestType:
-      test_name = "IPC_Host_Getmem";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostGetmemTestType:
+      test_name = "Host_Getmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostAmoFAddTestType:
-      test_name = "IPC_Host_Amo_FAdd";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostAmoFAddTestType:
+      test_name = "Host_Amo_FAdd";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostAmoFCswapTestType:
-      test_name = "IPC_Host_Amo_FCswap";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostAmoFCswapTestType:
+      test_name = "Host_Amo_FCswap";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostCtxPutmemTestType:
-      test_name = "IPC_Host_Ctx_Putmem";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostCtxPutmemTestType:
+      test_name = "Host_Ctx_Putmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostCtxGetmemTestType:
-      test_name = "IPC_Host_Ctx_Getmem";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostCtxGetmemTestType:
+      test_name = "Host_Ctx_Getmem";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostIntAmoFAddTestType:
-      test_name = "IPC_Host_Int_Amo_FAdd";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostIntAmoFAddTestType:
+      test_name = "Host_Int_Amo_FAdd";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostIntAmoFCswapTestType:
-      test_name = "IPC_Host_Int_Amo_FCswap";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostIntAmoFCswapTestType:
+      test_name = "Host_Int_Amo_FCswap";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostAmoAllPesTestType:
-      test_name = "IPC_Host_Amo_AllPes";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostAmoAllPesTestType:
+      test_name = "Host_Amo_AllPes";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
-    case IpcHostAmoSelfTestType:
-      test_name = "IPC_Host_Amo_Self";
-      testers.push_back(new IpcHostRmaTester(args));
+    case HostAmoSelfTestType:
+      test_name = "Host_Amo_Self";
+      if (BackendType::IPC_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
     case PutmemSignalOnStreamTestType:
       test_name = "Putmem_Signal_On_Stream";
@@ -914,16 +924,16 @@ bool Tester::peLaunchesKernel() {
     case FenceOrderPutWaveNbiChunksTestType:
       is_launcher = true;
       break;
-    case IpcHostPutmemTestType:
-    case IpcHostGetmemTestType:
-    case IpcHostAmoFAddTestType:
-    case IpcHostAmoFCswapTestType:
-    case IpcHostCtxPutmemTestType:
-    case IpcHostCtxGetmemTestType:
-    case IpcHostIntAmoFAddTestType:
-    case IpcHostIntAmoFCswapTestType:
-    case IpcHostAmoAllPesTestType:
-    case IpcHostAmoSelfTestType:
+    case HostPutmemTestType:
+    case HostGetmemTestType:
+    case HostAmoFAddTestType:
+    case HostAmoFCswapTestType:
+    case HostCtxPutmemTestType:
+    case HostCtxGetmemTestType:
+    case HostIntAmoFAddTestType:
+    case HostIntAmoFCswapTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
       is_launcher = true;
       break;
     default:

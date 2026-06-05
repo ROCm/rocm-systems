@@ -22,14 +22,14 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "ipc_host_rma_tester.hpp"
+#include "host_rma_tester.hpp"
 
 #include <iostream>
 #include <rocshmem/rocshmem.hpp>
 
 using namespace rocshmem;
 
-IpcHostRmaTester::IpcHostRmaTester(TesterArguments args) : Tester(args) {
+HostRmaTester::HostRmaTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_my_pe();
   n_pes = rocshmem_n_pes();
   peer  = (my_pe + 1) % n_pes;
@@ -40,14 +40,14 @@ IpcHostRmaTester::IpcHostRmaTester(TesterArguments args) : Tester(args) {
   amo_int_buf = reinterpret_cast<int  *>(alloc_test_buffer(sizeof(int)));
 }
 
-IpcHostRmaTester::~IpcHostRmaTester() {
+HostRmaTester::~HostRmaTester() {
   free_test_buffer(source_buf);
   free_test_buffer(dest_buf);
   free_test_buffer(amo_buf);
   free_test_buffer(amo_int_buf);
 }
 
-void IpcHostRmaTester::resetBuffers(size_t size) {
+void HostRmaTester::resetBuffers(size_t size) {
   for (size_t i = 0; i < size; i++)
     source_buf[i] = static_cast<char>('A' + (my_pe + i) % 26);
   memset(dest_buf, 0, size);
@@ -55,7 +55,7 @@ void IpcHostRmaTester::resetBuffers(size_t size) {
   *amo_int_buf = 0;
 }
 
-void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
+void HostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
                                     [[maybe_unused]] dim3 blockSize,
                                     [[maybe_unused]] int loop,
                                     size_t size) {
@@ -69,14 +69,14 @@ void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
     // -----------------------------------------------------------------------
     // Default-context RMA — exercises rocshmem_fence / rocshmem_quiet
     // -----------------------------------------------------------------------
-    case IpcHostPutmemTestType:
+    case HostPutmemTestType:
       if (my_pe == 0) {
         rocshmem_putmem(dest_buf, source_buf, size, peer);
         rocshmem_fence();
       }
       break;
 
-    case IpcHostGetmemTestType:
+    case HostGetmemTestType:
       if (my_pe == 0) {
         rocshmem_getmem(dest_buf, source_buf, size, peer);
         rocshmem_quiet();
@@ -87,7 +87,7 @@ void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
     // Explicit-context RMA — exercises rocshmem_ctx_fence / rocshmem_ctx_quiet
     // Requires ROCSHMEM_MAX_NUM_HOST_CONTEXTS >= 2 (default context + this one).
     // -----------------------------------------------------------------------
-    case IpcHostCtxPutmemTestType: {
+    case HostCtxPutmemTestType: {
       if (my_pe == 0) {
         rocshmem_ctx_t ctx;
         int rc = rocshmem_ctx_create(0, &ctx);
@@ -104,7 +104,7 @@ void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
       break;
     }
 
-    case IpcHostCtxGetmemTestType: {
+    case HostCtxGetmemTestType: {
       if (my_pe == 0) {
         rocshmem_ctx_t ctx;
         int rc = rocshmem_ctx_create(0, &ctx);
@@ -122,14 +122,14 @@ void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
     }
 
     // Long AMOs (64-bit) — exercises rocshmem_long_atomic_fetch_add/cas
-    case IpcHostAmoFAddTestType:
+    case HostAmoFAddTestType:
       if (my_pe == 0) {
         long old = rocshmem_long_atomic_fetch_add(amo_buf, 1L, peer);
         dest_buf[0] = static_cast<char>(old == 0L ? 1 : 0);
       }
       break;
 
-    case IpcHostAmoFCswapTestType:
+    case HostAmoFCswapTestType:
       if (my_pe == 0) {
         long old = rocshmem_long_atomic_compare_swap(amo_buf, 0L, 42L, peer);
         dest_buf[0] = static_cast<char>(old == 0L ? 1 : 0);
@@ -137,14 +137,14 @@ void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
       break;
 
     // Int AMOs (32-bit) — exercises rocshmem_int_atomic_fetch_add/cas
-    case IpcHostIntAmoFAddTestType:
+    case HostIntAmoFAddTestType:
       if (my_pe == 0) {
         int old = rocshmem_int_atomic_fetch_add(amo_int_buf, 1, peer);
         dest_buf[0] = static_cast<char>(old == 0 ? 1 : 0);
       }
       break;
 
-    case IpcHostIntAmoFCswapTestType:
+    case HostIntAmoFCswapTestType:
       if (my_pe == 0) {
         int old = rocshmem_int_atomic_compare_swap(amo_int_buf, 0, 42, peer);
         dest_buf[0] = static_cast<char>(old == 0 ? 1 : 0);
@@ -154,11 +154,11 @@ void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
     // IpcHostAmoAllPes: all n_pes PEs simultaneously atomic-add 1 to PE 0's
     // amo_int_buf, including PE 0 itself. 
     // Expected final value: n_pes.
-    case IpcHostAmoAllPesTestType:
+    case HostAmoAllPesTestType:
       rocshmem_int_atomic_fetch_add(amo_int_buf, 1, 0);
       break;
 
-    case IpcHostAmoSelfTestType: {
+    case HostAmoSelfTestType: {
       int old = rocshmem_int_atomic_fetch_add(amo_int_buf, 1, my_pe);
       dest_buf[0] = static_cast<char>(old == 0 ? 1 : 0);
       break;
@@ -169,10 +169,10 @@ void IpcHostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
   }
 }
 
-void IpcHostRmaTester::verifyResults(size_t size) {
+void HostRmaTester::verifyResults(size_t size) {
   switch (_type) {
-    case IpcHostPutmemTestType:
-    case IpcHostCtxPutmemTestType:
+    case HostPutmemTestType:
+    case HostCtxPutmemTestType:
       // PE 1 checks dest_buf matches PE 0's source pattern.
       if (my_pe == 1) {
         for (size_t i = 0; i < size; i++) {
@@ -187,8 +187,8 @@ void IpcHostRmaTester::verifyResults(size_t size) {
       }
       break;
 
-    case IpcHostGetmemTestType:
-    case IpcHostCtxGetmemTestType:
+    case HostGetmemTestType:
+    case HostCtxGetmemTestType:
       // PE 0 checks dest_buf matches PE 1's source pattern.
       if (my_pe == 0) {
         for (size_t i = 0; i < size; i++) {
@@ -203,7 +203,7 @@ void IpcHostRmaTester::verifyResults(size_t size) {
       }
       break;
 
-    case IpcHostAmoFAddTestType:
+    case HostAmoFAddTestType:
       if (my_pe == 0 && dest_buf[0] != 1) {
         std::cerr << "[PE " << my_pe
                   << "] AmoFAdd(long): fetch_add did not return 0\n";
@@ -216,7 +216,7 @@ void IpcHostRmaTester::verifyResults(size_t size) {
       }
       break;
 
-    case IpcHostAmoFCswapTestType:
+    case HostAmoFCswapTestType:
       if (my_pe == 0 && dest_buf[0] != 1) {
         std::cerr << "[PE " << my_pe
                   << "] AmoFCswap(long): fetch_cas did not return old 0\n";
@@ -229,7 +229,7 @@ void IpcHostRmaTester::verifyResults(size_t size) {
       }
       break;
 
-    case IpcHostIntAmoFAddTestType:
+    case HostIntAmoFAddTestType:
       if (my_pe == 0 && dest_buf[0] != 1) {
         std::cerr << "[PE " << my_pe
                   << "] AmoFAdd(int): fetch_add did not return 0\n";
@@ -242,7 +242,7 @@ void IpcHostRmaTester::verifyResults(size_t size) {
       }
       break;
 
-    case IpcHostIntAmoFCswapTestType:
+    case HostIntAmoFCswapTestType:
       if (my_pe == 0 && dest_buf[0] != 1) {
         std::cerr << "[PE " << my_pe
                   << "] AmoFCswap(int): fetch_cas did not return old 0\n";
@@ -255,7 +255,7 @@ void IpcHostRmaTester::verifyResults(size_t size) {
       }
       break;
 
-    case IpcHostAmoAllPesTestType:
+    case HostAmoAllPesTestType:
       // PE 0: final counter must equal n_pes (all PEs added 1, including self).
       if (my_pe == 0 && *amo_int_buf != n_pes) {
         std::cerr << "[PE 0] AmoAllPes: expected " << n_pes
@@ -264,7 +264,7 @@ void IpcHostRmaTester::verifyResults(size_t size) {
       }
       break;
 
-    case IpcHostAmoSelfTestType:
+    case HostAmoSelfTestType:
       // Each PE: old value must be 0, final value must be 1.
       if (dest_buf[0] != 1) {
         std::cerr << "[PE " << my_pe

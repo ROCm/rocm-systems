@@ -313,8 +313,8 @@ void TesterArguments::get_arguments() {
     case DeviceBitcodeTestType:
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
-    case IpcHostAmoAllPesTestType:
-    case IpcHostAmoSelfTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
       requires_two_pes = false;
       break;
     default:
