@@ -1840,7 +1840,6 @@ ncclResult_t ncclTopoGetLocalGinDev(struct ncclTopoSystem* system, int rank, int
 }
 
 ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount) {
-  *localGinCount = 1;
   for (int c=0; c<NCCL_TOPO_MAX_NODES; c++) {
     NCCLCHECK(ncclTopoGetLocalGinDev(comm->topo, comm->rank, c, NULL, localGinDevs+c));
     if (c > 0 && localGinDevs[c] == localGinDevs[0]) {

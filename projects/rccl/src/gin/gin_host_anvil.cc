@@ -71,8 +71,12 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     goto fail;
   }
 
-  // Signals must live on the rocSHMEM symmetric heap so peer GPUs can SDMA-atomic
-  // them (plain hipMalloc is not reliably peer-writable from SDMA).
+  devr = &comm->devrState;
+  // rocshmem_malloc and Anvil endpoint setup require a live rocSHMEM runtime.
+  NCCLCHECK(ncclDevrInitOnce(comm));
+  NCCLCHECK(ncclGinRocshmemEnsureInit(comm));
+
+  // Signals must live on the rocSHMEM heap so SDMA can atomically update them.
   if (nSignals > 0) {
     signalsLocal = (uint64_t*)rocshmem::rocshmem_malloc(sizeof(uint64_t) * nSignals);
     if (!signalsLocal) {
@@ -89,13 +93,6 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   // Exchange the per-rank signal base pointers inside the LSA team (single node assumption).
   // We rely on symmetric ranks being in the same node subset (devr->lsaRankList).
-  devr = &comm->devrState;
-  // Ensure symmetric runtime is initialized (for lsaRankList/bigSize fields).
-  NCCLCHECK(ncclDevrInitOnce(comm));
-
-  // Anvil SDMA uses rocSHMEM host runtime (initEndpoint); ensure it is ready even
-  // when librccl is built GIN-only and the test binary owns rocshmem symbols.
-  NCCLCHECK(ncclGinRocshmemEnsureInit(comm));
 
   // For LSA flat VA accesses, expose signals in that space as well by mapping them
   // into symmetric memory is non-trivial. For now, we require signals to live in
@@ -130,6 +127,11 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     int dstDev = comm->peerInfo[r].cudaDev;
     rocshmem::anvil::anvil.connect(srcDev, dstDev, /*numChannels=*/1);
     auto* q = rocshmem::anvil::anvil.getSdmaQueue(srcDev, dstDev, 0);
+    if (q == nullptr) {
+      WARN("GIN anvil: getSdmaQueue failed for dev %d -> %d", srcDev, dstDev);
+      ret = ncclSystemError;
+      goto fail_signals;
+    }
     ctx->queuesHost[r] = (void*)q->deviceHandle();
   }
 

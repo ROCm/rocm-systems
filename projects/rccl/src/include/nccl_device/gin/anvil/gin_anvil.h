@@ -58,11 +58,11 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
     uint64_t* sigPtr = nullptr;
     if (hasSignal) {
-      uint64_t** sigBases = (uint64_t**)loadConst(&aCtx->signalsBase);
-      if (sigBases == nullptr) return;
-      uint64_t* peerBase = (uint64_t*)loadConst(&sigBases[peer]);
-      if (peerBase == nullptr) return;
-      sigPtr = peerBase + signalId;
+      // Indexed completion signals are local (same as proxy/rocshmem GIN): the
+      // initiator SDMA-atomics its own signal array when the put completes.
+      uint64_t* localSignals = (uint64_t*)loadConst(&aCtx->signals);
+      if (localSignals == nullptr) return;
+      sigPtr = localSignals + signalId;
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
     }
 

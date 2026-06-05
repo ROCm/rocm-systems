@@ -11,13 +11,13 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #endif
+#if defined(ENABLE_DEVICE_API) && !defined(ENABLE_ROCSHMEM_GIN)
+#error "alltoall_perf GIN device tests require -DENABLE_ROCSHMEM=ON (sets ENABLE_ROCSHMEM_GIN; NCCL_GIN_ANVIL_ENABLE stays 0 without it)"
+#endif
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #ifdef MPI_SUPPORT
 #include <mpi.h>
-#endif
-#if defined(ENABLE_DEVICE_API) && !defined(ENABLE_ROCSHMEM_GIN)
-#error "alltoall_perf GIN device tests require ENABLE_ROCSHMEM_GIN (NCCL_GIN_ANVIL_ENABLE stays 0 without it)"
 #endif
 // Initialize rocshmem before ncclCommInit so that rocshmem_malloc etc. work.
 // Called via test_pre_init_callback from common.cu's main(), after MPI_Init.

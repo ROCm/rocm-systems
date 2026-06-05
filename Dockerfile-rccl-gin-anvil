@@ -174,7 +174,7 @@ RUN cd rocshmem/src/projects/rocshmem \
 # ARG RCCL_BRANCH=users/abouteiller/gin-stage1-wip
 # ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil
 ARG RCCL_BRANCH=users/dondai/gin-stage2a-anvil-vmm2
-ARG RCCL_CACHE_BUST=4
+ARG RCCL_CACHE_BUST=5
 COPY projects/rccl/ /tmp/local/projects/rccl/
 # rccl-tests is optional in sparse-checkout worktrees; fetched via git in RUN when absent.
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl
@@ -232,9 +232,9 @@ RUN mkdir rccl-tests \
     && cd rccl-tests \
     && cmake $([ "${DEBUG_BUILD}" = "1" ] && echo "-DCMAKE_BUILD_TYPE=Debug" || echo "-DCMAKE_BUILD_TYPE=Release") -DUSE_MPI=ON -DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=${ROCSHMEM_INSTALL_DIR} -DROCSHMEM_SOURCE_DIR=${WORKDIR}/rocshmem/src/projects/rocshmem -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DGPU_TARGETS=${GPU_TARGETS} ${WORKDIR}/rccl/src/projects/rccl-tests \
     && make -j16 alltoall_perf \
-    && test -x ${WORKDIR}/rccl-tests/alltoall_perf \
-    && nm -D ${WORKDIR}/rccl-tests/alltoall_perf | grep -q '_ZN8rocshmem5anvil5anvilE' \
-    || (echo "FATAL: alltoall_perf missing rocshmem::anvil::anvil export" && exit 1)
+    && test -x alltoall_perf \
+    && nm -D alltoall_perf | grep -q 'anvil5anvil' \
+    || { echo "ERROR: alltoall_perf missing or lacks exported Anvil symbols"; nm -D alltoall_perf 2>/dev/null | grep anvil || true; exit 1; }
 
 ## set environment variables
 ENV PATH="${MPI_INSTALL_PREFIX}/bin:${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
