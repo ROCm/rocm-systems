@@ -353,6 +353,9 @@ deviceLib:
   Unit_e8m0_int_conversions:
     <<: *level_2
     tags: [types]
+  Unit__hip_cvt_e8m0_to_double_exhaustive_host:
+    <<: *level_2
+    tags: [types]
   Unit_e8m0_int_conversions_saturation:
     <<: *level_2
     tags: [types]
