@@ -62,6 +62,29 @@ class TestMIGPUSpecs:
             result = MIGPUSpecs.get_perfmon_config(arch)
             assert isinstance(result, dict)
 
+    # -- is_partition_supported ----------------------------------------------
+
+    def test_is_partition_supported_true(self):
+        for arch in ("gfx942", "gfx950", "GFX942", "GFX950"):
+            assert MIGPUSpecs.is_partition_supported(arch), (
+                f"is_partition_supported({arch!r}) should be True"
+            )
+
+    def test_is_partition_supported_false(self):
+        for arch in (
+            "gfx90a",
+            "gfx1150",
+            "gfx1151",
+            "gfx1152",
+            "gfx908",
+            None,
+            "",
+            "junk",
+        ):
+            assert not MIGPUSpecs.is_partition_supported(arch), (
+                f"is_partition_supported({arch!r}) should be False"
+            )
+
     # -- get_num_xcds --------------------------------------------------------
 
     def test_get_num_xcds_legacy_returns_1(self):

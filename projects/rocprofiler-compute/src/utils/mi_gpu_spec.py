@@ -265,6 +265,15 @@ class MIGPUSpecs:
         return DEFAULT_NUM_XCD
 
     @classmethod
+    def is_partition_supported(cls, gpu_arch: Optional[str]) -> bool:
+        """Return True if the GPU architecture supports compute partitions.
+
+        Add new partition-capable archs here as they ship.
+        """
+        partition_archs = {"gfx942", "gfx950"}
+        return bool(gpu_arch) and gpu_arch.lower().strip() in partition_archs
+
+    @classmethod
     def get_num_xcds(
         cls,
         gpu_arch: Optional[str] = None,
@@ -281,8 +290,6 @@ class MIGPUSpecs:
         3. Model + partition-based lookup (fallback)
         4. Default settings (last resort)
         """
-        # Constants for legacy GPUs that don't support compute partitions
-        LEGACY_ARCHS = {"gfx908", "gfx90a", "gfx1150", "gfx1151", "gfx1152"}
         LEGACY_MODELS = {"mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"}
 
         # Normalize inputs to lowercase for consistent comparison
@@ -292,7 +299,10 @@ class MIGPUSpecs:
 
         # 1. Return 1 XCDs for archs/models not supporting compute partition
         # NOTE: gpu arch is enough to verify this logic, gpu model is used as a backup.
-        if gpu_arch_norm in LEGACY_ARCHS or gpu_model_norm in LEGACY_MODELS:
+        if (
+            not cls.is_partition_supported(gpu_arch_norm)
+            or gpu_model_norm in LEGACY_MODELS
+        ):
             return 1
 
         # 2. Try architecture-based lookup first (preferred method)
