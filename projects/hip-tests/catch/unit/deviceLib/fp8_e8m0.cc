@@ -491,7 +491,7 @@ template <typename T_out>
 void device_e8m0_float_conversions(const std::vector<float>& in, std::vector<T_out>& out) {
   float* in_d = nullptr;
   T_out* out_d = nullptr;
-  REQUIRE(in.size() < 1024);
+  REQUIRE(in.size() <= 1024);
 
   HIP_CHECK(hipMalloc(&in_d, sizeof(float) * in.size()));
   HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()));
@@ -592,7 +592,7 @@ void device_e8m0_saturation_conversions(const std::vector<unsigned char>& in,
                                         std::vector<T_out>& out) {
   unsigned char* in_d = nullptr;
   T_out* out_d = nullptr;
-  REQUIRE(in.size() < 1024);
+  REQUIRE(in.size() <= 1024);
 
   HIP_CHECK(hipMalloc(&in_d, sizeof(unsigned char) * in.size()));
   HIP_CHECK(hipMalloc(&out_d, sizeof(T_out) * out.size()));
