@@ -635,33 +635,6 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return CPUSvi3VrControllerTempArgs
 
-    def _check_folder_path(self):
-        """Argument action validator:
-        Returns a path to folder from the folder path provided.
-        If the path doesn't exist create it.
-        """
-
-        class CheckOutputFilePath(argparse.Action):
-            outputformat = self.helpers.get_output_format()
-
-            # Checks the values
-            def __call__(self, parser, args, values, option_string=None):
-                path = Path(values)
-                try:
-                    path.mkdir(parents=True, exist_ok=True)
-                except OSError as e:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
-                        path, CheckOutputFilePath.outputformat, f"Unable to make '{path}' a folder."
-                    )
-                if not path.exists():
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidFilePathException(
-                        path, CheckOutputFilePath.outputformat
-                    )
-                elif path.is_dir():
-                    setattr(args, self.dest, path)
-
-        return CheckOutputFilePath
-
     def _check_output_file_path(self):
         """Argument action validator:
         Returns a path to a file from the output file path provided.
@@ -3176,12 +3149,14 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for RAS arguments
         cper_help = "Trigger current CPER data retrieval"
-        afid_help = "Generate an AFID (AMD Field ID) given a CPER record file"
-        decode_help = "Decode out-of-band CPER files captured by or collected from other systems"
+        afid_help = "Generate an AFID (AMD Field ID) given a CPER record file or folder"
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
-        folder_help = "Folder to dump current CPER report files"
+        folder_help = (
+            "With --cper: folder to dump current CPER report files (created if missing)."
+            "\n    With --afid: existing folder of CPER records to decode."
+        )
         file_limit_help = "Maximum number of current CPER files in target folder\n    Older files beyond limit will be deleted"
         cper_file_help = "Full path of a retrieved CPER record file to generate the AFID"
         follow_help = "Continuously monitor for new CPER entries"
@@ -3207,9 +3182,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             choices=severity_choices,
             metavar="SEVERITY",
         )
-        cper_group.add_argument(
-            "--folder", type=str, action=self._check_folder_path(), help=folder_help
-        )
+        cper_group.add_argument("--folder", type=Path, help=folder_help)
         cper_group.add_argument(
             "--file-limit", type=self._positive_int, action="store", help=file_limit_help
         )
@@ -3223,7 +3196,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             metavar="CPER_FILE",
             help=cper_file_help,
         )
-        afid_group.add_argument("--decode", action="store_true", help=decode_help)
 
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)
