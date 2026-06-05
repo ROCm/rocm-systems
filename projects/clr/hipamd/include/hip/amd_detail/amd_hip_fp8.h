@@ -982,9 +982,6 @@ __FP8_HOST_DEVICE_STATIC__ double __internal_cvt_e8m0_to_double(const __hip_fp8_
   } ret;
 
   switch (x) {
-    case 0x00U:
-      ret.as_int = double_half_sig_bit;
-      break;
     case hip_detail::e8m0_NaN:
       ret.as_int = default_double_NaN;
       break;

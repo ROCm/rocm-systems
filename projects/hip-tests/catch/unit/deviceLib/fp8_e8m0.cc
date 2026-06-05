@@ -608,6 +608,36 @@ void device_e8m0_saturation_conversions(const std::vector<unsigned char>& in,
   HIP_CHECK(hipFree(out_d));
 }
 
+// Exhaustively verify that the e8m0 -> double host conversion agrees with the
+// e8m0 -> float host conversion (upcast to double) for every one of the 256
+// encodings. The broader-than-pointwise coverage is intentional: a prior bug
+// produced 2^-1023 instead of 2^-127 at encoding 0x00 because the float
+// subnormal-mantissa trick was copy-pasted into the double path even though
+// double can represent 2^-127 as a normal number. Sweeping every encoding
+// against the float oracle catches that class of copy-paste drift wherever it
+// reappears, not just at the originally reported point.
+HIP_TEST_CASE(Unit__hip_cvt_e8m0_to_double_exhaustive_host) {
+  for (unsigned i = 0; i < 256u; ++i) {
+    unsigned char enc = static_cast<unsigned char>(i);
+    __hip_fp8_e8m0 fp8;
+    fp8.__x = enc;
+    double d = static_cast<double>(fp8);
+
+    if (enc == 0xFFu) {
+      INFO("encoding: 0x" << std::hex << static_cast<unsigned>(enc));
+      REQUIRE(std::isnan(d));
+    } else {
+      __hip_fp8_e8m0 fp8f;
+      fp8f.__x = enc;
+      float f = static_cast<float>(fp8f);
+      double expected = static_cast<double>(f);
+      INFO("encoding: 0x" << std::hex << static_cast<unsigned>(enc)
+                          << " out:" << d << " exp:" << expected);
+      REQUIRE(d == expected);
+    }
+  }
+}
+
 HIP_TEMPLATE_TEST_CASE(Unit_e8m0_int_conversions_saturation, char, int, long int, long long int,
                        short int, signed char, unsigned char, unsigned int, unsigned long int,
                        unsigned long long int, unsigned short int) {
