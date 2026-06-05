@@ -155,6 +155,13 @@ the anonymous pages with the shared memfd. The interposer suppresses
 MADV_HUGEPAGE and MADV_DONTFORK on GPUVM addresses to prevent kernel 6.17
 shmem fault failures.
 
+### Trust Model
+
+The RPC protocol assumes a trusted, version-matched client (i.e., the
+same rocjitsu build on both sides). The handshake rejects version
+mismatches, but payload contents are not validated beyond size checks.
+Untrusted or adversarial clients are out of scope.
+
 ## Transport Layer
 
 ### Abstract Interface

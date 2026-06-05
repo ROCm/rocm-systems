@@ -66,7 +66,7 @@ def _detect_profile(isa_xml: str) -> str:
     key = f'{family}{version}'
     if key in _PROFILES:
         return key
-    key_underscore = f'{family}{version.replace('.', '_')}'
+    key_underscore = f'{family}{version.replace(".", "_")}'
     if key_underscore in _PROFILES:
         return key_underscore
     if family == 'cdna':

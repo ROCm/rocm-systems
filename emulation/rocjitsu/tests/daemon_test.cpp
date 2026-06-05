@@ -19,7 +19,9 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
@@ -32,9 +34,16 @@ struct ProcessResult {
   int exit_code = -1;
 };
 
-bool socket_exists(const std::string &path) {
-  struct stat st {};
-  return stat(path.c_str(), &st) == 0 && S_ISSOCK(st.st_mode);
+bool daemon_ready(const std::string &path) {
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd < 0)
+    return false;
+  sockaddr_un addr{};
+  addr.sun_family = AF_UNIX;
+  path.copy(addr.sun_path, sizeof(addr.sun_path) - 1);
+  bool ok = connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0;
+  close(fd);
+  return ok;
 }
 
 class DaemonTest : public ::testing::Test {
@@ -60,7 +69,7 @@ protected:
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
-      if (socket_exists(sock_path_))
+      if (daemon_ready(sock_path_))
         return;
       int status = 0;
       if (waitpid(daemon_pid_, &status, WNOHANG) > 0) {
@@ -234,7 +243,7 @@ protected:
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (std::chrono::steady_clock::now() < deadline) {
-      if (socket_exists(sock_path_))
+      if (daemon_ready(sock_path_))
         return;
       int status = 0;
       if (waitpid(daemon_pid_, &status, WNOHANG) > 0) {

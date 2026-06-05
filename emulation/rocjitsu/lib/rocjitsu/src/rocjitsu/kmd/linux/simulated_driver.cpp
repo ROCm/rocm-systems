@@ -1597,7 +1597,12 @@ int SimulatedDriver::get_dmabuf_info_ioctl(KfdProcess &proc, void *arg) {
   args->size = size;
   args->gpu_id = gpu_id;
   args->flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
-  if (args->metadata_ptr && args->metadata_size) {
+  // metadata_ptr is a client-process address that cannot be dereferenced in
+  // daemon mode. ROCR currently queries with metadata_size == 0; reject
+  // metadata-bearing calls rather than risk a cross-process pointer deref.
+  if (args->metadata_size > 0 && daemon_mode_)
+    return -EINVAL;
+  if (args->metadata_ptr && args->metadata_size && !daemon_mode_) {
     std::memset(reinterpret_cast<void *>(args->metadata_ptr), 0,
                 static_cast<size_t>(args->metadata_size));
   }

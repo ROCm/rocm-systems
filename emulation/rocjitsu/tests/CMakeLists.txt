@@ -253,7 +253,7 @@ if(HSA_RUNTIME64)
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
                 ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
                 ${CMAKE_SOURCE_DIR}/lib/util/include
-                /opt/rocm/include
+                ${RJ_HSA_INCLUDE_DIR}
         )
         target_link_libraries(
             hsa_translate_test
@@ -263,7 +263,10 @@ if(HSA_RUNTIME64)
                 GTest::gtest
                 GTest::gtest_main
         )
-        target_link_options(hsa_translate_test PRIVATE -Wl,-rpath,/opt/rocm/lib)
+        target_link_options(
+            hsa_translate_test
+            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+        )
         target_compile_definitions(
             hsa_translate_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
@@ -480,7 +483,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         PATH_SUFFIXES lib
     )
     if(RCCL_LIB)
-        rj_add_hip_test(hip_rccl_test EXTRA_LIBS -lrccl)
+        rj_add_hip_test(hip_rccl_test EXTRA_LIBS ${RCCL_LIB})
         message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
     else()
         message(STATUS "RCCL collective test disabled (librccl not found)")
@@ -550,8 +553,8 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         PATH_SUFFIXES lib
     )
     if(ROCBLAS_LIB)
-        rj_add_hip_test(hip_gemm_test EXTRA_LIBS -lrocblas)
-        rj_add_hip_test(hip_gemm_test_cdna3 ARCH gfx942 SOURCE hip_gemm_test.cpp EXTRA_LIBS -lrocblas)
+        rj_add_hip_test(hip_gemm_test EXTRA_LIBS ${ROCBLAS_LIB})
+        rj_add_hip_test(hip_gemm_test_cdna3 ARCH gfx942 SOURCE hip_gemm_test.cpp EXTRA_LIBS ${ROCBLAS_LIB})
 
         foreach(
             TC
@@ -591,6 +594,9 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     else()
         message(STATUS "rocBLAS GEMM test disabled (librocblas not found)")
     endif()
+
+    rj_add_hip_test(hip_bfe_2d_test)
+    rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()
