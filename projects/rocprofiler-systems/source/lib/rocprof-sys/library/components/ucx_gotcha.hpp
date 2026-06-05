@@ -83,7 +83,7 @@ public:
     static void audit(const gotcha_data&, audit::incoming, void*, void*, size_t, size_t*,
                       const void*);
 
-    // Outgoing audit for return values
+    // Outgoing audit
     static void audit(const gotcha_data&, audit::outgoing);
     static void audit(const gotcha_data&, audit::outgoing, void*);
     static void audit(const gotcha_data&, audit::outgoing, int);
