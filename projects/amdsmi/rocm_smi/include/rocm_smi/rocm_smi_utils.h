@@ -120,10 +120,6 @@ rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_com
 
 VirtModeDetectionResult detect_virtualization_mode_sysfs(const std::string& render_path);
 
-inline auto contains(std::string_view text, std::string_view substr) -> bool {
-  return text.find(substr) != std::string_view::npos;
-}
-
 std::string leftTrim(const std::string& s);
 std::string rightTrim(const std::string& s);
 std::string trim(const std::string& s);

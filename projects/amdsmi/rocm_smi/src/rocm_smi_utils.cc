@@ -1454,39 +1454,39 @@ bool is_running_in_container() {
   std::ostringstream ss;
 
   // Container detection indicators
-  constexpr std::string_view kDOCKER_ENV_PATH = "/.dockerenv";
-  constexpr std::string_view kCONTAINER_ENV_PATH = "/run/.containerenv";
-  constexpr std::string_view kCGROUP_PATH = "/proc/1/cgroup";
-  constexpr std::string_view kCONTAINER_ENV_VAR = "container";
+  const std::string kDOCKER_ENV_PATH = "/.dockerenv";
+  const std::string kCONTAINER_ENV_PATH = "/run/.containerenv";
+  const std::string kCGROUP_PATH = "/proc/1/cgroup";
+  const std::string kCONTAINER_ENV_VAR = "container";
 
-  constexpr std::string_view kDOCKER = "docker";
-  constexpr std::string_view kLXC = "lxc";
-  constexpr std::string_view kKUBEPODS = "kubepods";
-  constexpr std::string_view kCONTAINERD = "containerd";
-  constexpr std::string_view kPODMAN = "podman";
+  const std::string kDOCKER = "docker";
+  const std::string kLXC = "lxc";
+  const std::string kKUBEPODS = "kubepods";
+  const std::string kCONTAINERD = "containerd";
+  const std::string kPODMAN = "podman";
 
   // Check for Docker
-  if (FileExists(kDOCKER_ENV_PATH.data())) {
+  if (FileExists(kDOCKER_ENV_PATH.c_str())) {
     ss << __PRETTY_FUNCTION__ << " | Detected Docker container (/.dockerenv exists)";
     LOG_DEBUG(ss);
     return true;
   }
 
   // Check for Podman/other container runtimes
-  if (FileExists(kCONTAINER_ENV_PATH.data())) {
+  if (FileExists(kCONTAINER_ENV_PATH.c_str())) {
     ss << __PRETTY_FUNCTION__ << " | Detected container (/run/.containerenv exists)";
     LOG_DEBUG(ss);
     return true;
   }
 
   // Check cgroup for container indicators
-  std::ifstream cgroup_file(kCGROUP_PATH.data());
+  std::ifstream cgroup_file(kCGROUP_PATH);
   if (cgroup_file.is_open()) {
     std::string line;
     while (std::getline(cgroup_file, line)) {
-      if (amd::smi::contains(line, kDOCKER) || amd::smi::contains(line, kLXC) ||
-          amd::smi::contains(line, kKUBEPODS) || amd::smi::contains(line, kCONTAINERD) ||
-          amd::smi::contains(line, kPODMAN)) {
+      if (containsString(line, kDOCKER) || containsString(line, kLXC) ||
+          containsString(line, kKUBEPODS) || containsString(line, kCONTAINERD) ||
+          containsString(line, kPODMAN)) {
         ss << __PRETTY_FUNCTION__ << " | Detected container via cgroup: " << line;
         LOG_DEBUG(ss);
         return true;
@@ -1495,7 +1495,7 @@ bool is_running_in_container() {
   }
 
   // Check for container environment variables (less reliable but useful)
-  const char* container_env = std::getenv(kCONTAINER_ENV_VAR.data());
+  const char* container_env = std::getenv(kCONTAINER_ENV_VAR.c_str());
   if (container_env != nullptr) {
     ss << __PRETTY_FUNCTION__ << " | Detected container via $container env var: " << container_env;
     LOG_DEBUG(ss);
@@ -1511,7 +1511,7 @@ bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
   std::ostringstream ss;
 
   // Virtualization detection indicators
-  constexpr std::string_view kVFIO_PCI = "vfio-pci";
+  const std::string kVFIO_PCI = "vfio-pci";
 
   std::string driver_link = pci_sysfs_path + "/driver";
   std::error_code ec;
@@ -1524,7 +1524,7 @@ bool is_device_vfio_bound(const std::string& pci_sysfs_path) {
   ss << __PRETTY_FUNCTION__ << " | Device driver: " << driver;
   LOG_DEBUG(ss);
 
-  if (amd::smi::contains(driver, kVFIO_PCI)) {
+  if (containsString(driver, kVFIO_PCI)) {
     ss << __PRETTY_FUNCTION__ << " | Device bound to vfio-pci (passthrough)";
     LOG_INFO(ss);
     return true;
