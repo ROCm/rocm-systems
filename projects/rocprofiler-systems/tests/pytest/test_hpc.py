@@ -163,7 +163,9 @@ class TestJacobi(RocprofsysTest):
         # functions visible, changing the depth of the ROCTx markers as
         # _QMjacobi_modPinit_jacobi is captured.
         # sys_run does not go through dyninst, and hence needs a different depth check
-        expected_depths = [2, 2] if mode == "binary_rewrite" else [1, 1]
+        expected_depths = (
+            [2, 2] if mode in ["binary_rewrite", "runtime_instrument"] else [1, 1]
+        )
         self.assert_perfetto(
             result,
             subtest_name="Perfetto ROCtx marker validation",

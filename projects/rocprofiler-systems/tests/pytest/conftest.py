@@ -2258,8 +2258,15 @@ def assert_regex(subtests, record_subtest_failure, request):
         **kwargs,
     ) -> None:
 
-        filtered = _filter_kwargs("assert_regex", mode, **kwargs)
+        if mode is None and kwargs:
+            pytest.fail(
+                f"assert_regex received mode-specific kwargs {sorted(kwargs)} but no "
+                f"'mode' was provided. Pass mode=... so they can be resolved, or use "
+                f"pass_regex/fail_regex directly."
+            )
+
         if mode is not None:
+            filtered = _filter_kwargs("assert_regex", mode, **kwargs)
             mode_key = mode.replace("-", "_")
             mode_pass_regex = filtered.get(f"{mode_key}_pass_regex")
             if mode_pass_regex is not None:
