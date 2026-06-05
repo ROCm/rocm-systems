@@ -3,6 +3,12 @@
 
 /// @file profiled_execution_plugin_group.h
 /// @brief ExecutionPluginGroup subclass with adaptive-sampling hook profiling.
+///
+/// Wraps each hook with timing instrumentation. Sampling frequency decreases
+/// as the hook fires more often (interval scales as sqrt(count/1000)), so
+/// hot hooks are profiled without dominating execution time. Enable by
+/// constructing a ProfiledExecutionPluginGroup instead of a plain
+/// ExecutionPluginGroup. On shutdown, prints per-hook timing summaries.
 
 #pragma once
 

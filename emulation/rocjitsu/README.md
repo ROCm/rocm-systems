@@ -69,7 +69,7 @@ lib/
         dbt/generated/  Auto-generated legalization tables and encoding translation data tables
       vm/               Virtual machine layer
         amdgpu/         AMD GPU hardware model (CU, SE, XCD, caches, pipelines)
-        plugins/        Execution plugins (logging, race detection)
+        plugins/        Execution plugins (e.g. kernel logging)
         risc_v/         RISC-V hart model
       kmd/linux/        KMD emulation: LD_PRELOAD interposer + simulated KFD driver
 lib/python/amdisa/      ISA code generation toolchain
@@ -79,7 +79,6 @@ configs/                JSON configurations (amdgpu_cdna4.json)
 tests/                  Google Test suite + scaling test
   kernels/              HIP device kernels for integration testing
 scripts/                Utility scripts
-
 ```
 
 ## Prerequisites
@@ -91,14 +90,6 @@ scripts/                Utility scripts
 
 Third-party dependencies (Google Test and FlatBuffers) are fetched automatically
 via CMake `FetchContent`.
-
-## Sparse checkout
-
-This project lives in the `rocm-systems` monorepo. To work on rocjitsu:
-
-```bash
-git sparse-checkout add emulation/rocjitsu
-```
 
 ## Building
 

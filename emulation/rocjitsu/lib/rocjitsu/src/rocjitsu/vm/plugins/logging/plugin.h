@@ -12,7 +12,7 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief Logging plugin that logs kernel dispatches and detects mfma usage.
+/// @brief Proof-of-concept plugin: logs kernel dispatches and detects MFMA usage.
 class KernelLoggingPlugin : public ExecutionPlugin {
 public:
   KernelLoggingPlugin();

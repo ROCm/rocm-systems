@@ -666,6 +666,9 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   dp.host_signal = false;
   dp.barrier_bit = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
 
+  // Process AQL acquire fence: invalidate caches so the kernel sees the
+  // latest host/agent writes (kernarg data, input buffers, etc.).
+  // On real hardware the CP issues GL1_INV + GL2_INV for SYSTEM/AGENT scope.
   uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
   if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
     for (auto *cu : cus_)

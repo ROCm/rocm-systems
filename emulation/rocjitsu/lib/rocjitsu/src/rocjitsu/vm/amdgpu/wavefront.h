@@ -415,6 +415,7 @@ private:
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
 
+  /// @brief Cycle at which this WF became RUNNING (for scheduler priority).
   uint64_t ready_cycle() const { return ready_cycle_; }
   void set_ready_cycle(uint64_t c) { ready_cycle_ = c; }
 

@@ -323,6 +323,8 @@ public:
   /// @brief Read a scalar register from the physical SGPR file.
   /// @param reg_idx Physical register index.
   /// @returns Register value.
+  // TODO(newling) consider cmake flag to build without plugins, this call
+  // overhead might be non-negligible.
   uint32_t read_sgpr(uint32_t reg_idx) const {
     if (auto *wf = sgpr_to_wave_[reg_idx]) {
       plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
