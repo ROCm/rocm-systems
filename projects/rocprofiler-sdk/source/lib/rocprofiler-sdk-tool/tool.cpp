@@ -1038,6 +1038,19 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                tool::get_config().pc_sampling_stochastic)
             {
                 CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
+
+                // PC correction: build the classification only for stochastic
+                // sampling on a gfx1250 agent (scope the build to agents that can
+                // exhibit the bug; see pc_sampling_pc_correction.hpp).
+                if(tool::get_config().pc_sampling_stochastic)
+                {
+                    const auto* agent = tool_metadata->get_agent(obj_data->rocp_agent);
+                    if(agent != nullptr &&
+                       rocprofiler::tool::pc_correction::is_gfx1250(agent->gfx_target_version))
+                    {
+                        tool_metadata->pc_correction().build(*obj_data);
+                    }
+                }
             }
 
             if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY &&
@@ -1115,6 +1128,18 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
             flush();
+
+            // PC correction: drop this code object's classification. flush()
+            // above (plus the SDK-side flush in flush_pc_sampling_buffers) drains
+            // all samples for this code object before unload, so no sample can
+            // still need the classification. erase() is a no-op for code objects
+            // that were never classified (non-stochastic / non-gfx1250).
+            if(tool::get_config().pc_sampling_stochastic)
+            {
+                auto* obj_data =
+                    static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
+                tool_metadata->pc_correction().erase(obj_data->code_object_id);
+            }
         }
     }
 
@@ -1668,6 +1693,9 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
     // count number of valid VS invalid samples delivered by this callback
     uint64_t valid_samples_cnt   = 0;
     uint64_t invalid_samples_cnt = 0;
+    // samples suppressed by PC correction (CorrectionResult::Drop): neither valid
+    // output nor an invalid HW sample, so counted separately.
+    uint64_t dropped_samples_cnt = 0;
 
     for(size_t i = 0; i < num_headers; i++)
     {
@@ -1701,9 +1729,34 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                 auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_stochastic_v0_t*>(
                     cur_header->payload);
 
+                const int64_t idx = get_instruction_index(pc_sample->pc);
+
                 auto pc_sample_tool_record =
-                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(
-                        *pc_sample, get_instruction_index(pc_sample->pc));
+                    rocprofiler::tool::rocprofiler_tool_pc_sampling_stochastic_record_t(*pc_sample,
+                                                                                        idx);
+
+                // PC correction (gfx1250 stochastic only). The gate's common path
+                // is a string-prefix check on the already-decoded instruction; the
+                // classification map is touched at most once, only for a sample
+                // that passes the gate. idx < 0 means the PC could not be decoded,
+                // so there is nothing to classify -- skip correction.
+                auto& pc_correction_mgr = tool_metadata->pc_correction();
+                if(idx >= 0 &&
+                   pc_correction_mgr.should_correct(*pc_sample, tool_metadata->get_instruction(idx)))
+                {
+                    if(pc_correction_mgr.correct(pc_sample_tool_record) ==
+                       rocprofiler::tool::pc_correction::CorrectionResult::Drop)
+                    {
+                        // Unrecoverable sample: skip both the ring-buffer write and
+                        // the valid-sample counter.
+                        dropped_samples_cnt++;
+                        continue;
+                    }
+
+                    // Re-resolve inst_index from the corrected PC.
+                    pc_sample_tool_record.inst_index =
+                        get_instruction_index(pc_sample_tool_record.pc_sample_record.pc);
+                }
 
                 rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
                                                      domain_type::PC_SAMPLING_STOCHASTIC);
@@ -1720,11 +1773,12 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
         }
     }
 
-    // sum up number of valid/invalid samples for pc sampling stats
+    // sum up number of valid/invalid/dropped samples for pc sampling stats
     tool_metadata->pc_sampling_stats.wlock(
-        [valid_samples_cnt, invalid_samples_cnt](auto& pc_sampling_stats) {
+        [valid_samples_cnt, invalid_samples_cnt, dropped_samples_cnt](auto& pc_sampling_stats) {
             pc_sampling_stats.valid_samples += valid_samples_cnt;
             pc_sampling_stats.invalid_samples += invalid_samples_cnt;
+            pc_sampling_stats.dropped_samples += dropped_samples_cnt;
         });
 }
 
@@ -2284,6 +2338,17 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
                                                           *buffer_id,
                                                           flags),
                 "configure PC sampling");
+
+            // Enable PC correction iff a gfx1250 agent is being stochastically
+            // sampled and the env-var toggle (default on) allows it. Folding both
+            // conditions into the manager's single enable flag keeps the manager
+            // unaware of config and gfx targets.
+            if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC &&
+               tool::get_config().pc_sampling_correction &&
+               rocprofiler::tool::pc_correction::is_gfx1250(itr->gfx_target_version))
+            {
+                tool_metadata->pc_correction().set_enabled(true);
+            }
         }
     }
     if(!config_match_found)
