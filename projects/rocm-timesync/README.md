@@ -29,8 +29,8 @@ This is due to several reasons:
 - On PTP enabled systems, the node's realtime clock does not tick based solely on CPU, but rather is disciplined by a
   network clocksource.
 
-For this reason, our approach is constantly sample synchronized GPU/realtime timestamps ("crosststamps") and use them to perform
-translations between clock domains when needed.
+For this reason, our approach is to continuously sample synchronized GPU/realtime timestamps ("crosststamps") at high
+frequency, and use them to perform translations between clock domains when needed.
 
 A notional workflow we need to support is something like this:
 1. User runs an application under rocprof
