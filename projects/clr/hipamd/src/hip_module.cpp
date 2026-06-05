@@ -173,10 +173,10 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
   HIP_INIT_API(hipFuncGetAttributes, attr, func);
 
   if (attr == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   if (func == nullptr) {
-    HIP_RETURN(hipErrorInvalidDeviceFunction);
+    return hipErrorInvalidDeviceFunction;
   }
 
   HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().GetFuncAttr(attr, func, ihipGetDevice()));
