@@ -84,6 +84,11 @@ typedef const int16_t *PCWSTR;
 #define DECLARE_HANDLE(name) struct name##__{int unused;}; typedef struct name##__ *name
 #define C_ASSERT(e) typedef char __C_ASSERT__[(e)?1:-1]
 
+/* FARPROC is used by newer Windows SDK (>=10.0.28000.0) d3dkmthk.h */
+#ifndef FARPROC
+typedef int (*FARPROC)();
+#endif
+
 DECLARE_HANDLE(HWND);
 DECLARE_HANDLE(HDC);
 DECLARE_HANDLE(PALETTEENTRY);
