@@ -43,10 +43,11 @@ ncclResult_t bootstrapAbort(void* commState);
 // the exact contract production uses.
 //   nranks: total ranks in the comm (returns false unconditionally for < 3).
 //   kind:   0 = socket OOB path, 1 = net (IB/OFI) OOB path.
-// Marked visibility("hidden") so the symbol is linkable inside librccl.so for
-// the test TU but never exported in the final shared library; see the matching
-// attribute on the definition in src/bootstrap.cc.
-__attribute__((visibility("hidden")))
+// Visibility is left to the global -fvisibility flag: hidden (not exported) in
+// production and Release builds, default (exported, so rccl-UnitTestsFixturesDebug
+// can link it) in BUILD_TESTS + Debug builds. See the note on the definition in
+// src/bootstrap.cc — an explicit visibility("hidden") attribute here would override
+// that flag and break the Debug test link.
 bool bootstrapBidirEnabled(int nranks, int kind);
 
 #endif

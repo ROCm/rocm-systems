@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna1/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_cache_flags.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -1201,7 +1202,7 @@ BufferAtomicCmpswapMubuf::BufferAtomicCmpswapMubuf(const MachineInst *inst)
 void BufferAtomicCmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
@@ -1683,7 +1684,7 @@ BufferAtomicFcmpswapMubuf::BufferAtomicFcmpswapMubuf(const MachineInst *inst)
 void BufferAtomicFcmpswapMubuf::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.glc != 0);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
@@ -2472,7 +2473,7 @@ BufferGl0InvMubuf::BufferGl0InvMubuf(const MachineInst *inst)
 }
 
 void BufferGl0InvMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_scalar().invalidate_all();
+  amdgpu::execute_buffer_gl0_inv_mubuf(*this, wf);
 }
 
 BufferGl1InvMubuf::BufferGl1InvMubuf(const MachineInst *inst)
@@ -2483,7 +2484,7 @@ BufferGl1InvMubuf::BufferGl1InvMubuf(const MachineInst *inst)
 }
 
 void BufferGl1InvMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().l1_scalar().invalidate_all();
+  amdgpu::execute_buffer_gl1_inv_mubuf(*this, wf);
 }
 
 BufferLoadFormatD16XMubuf::BufferLoadFormatD16XMubuf(const MachineInst *inst)

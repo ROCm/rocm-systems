@@ -286,6 +286,87 @@
         }
       ]
     },
+    "net_ib_coverage_env": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "_comment": "Coverage-oriented re-run of core transfer tests under alternate IB env. GID_INDEX=-1 forces RoCE GID auto-select (the auto-select path is skipped when a fixed index is pinned); PCI_RELAXED_ORDERING=0 exercises the relaxed-ordering-disabled registration/connect paths; ADAPTIVE_ROUTING=1 reaches the adaptive-routing threshold path. Env knobs are NIC-agnostic.",
+      "env_variables": {
+        "NCCL_IB_GID_INDEX": "-1",
+        "NCCL_IB_PCI_RELAXED_ORDERING": "0",
+        "NCCL_IB_ADAPTIVE_ROUTING": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Cov_SimpleSendRecv",
+          "description": "Send/recv under GID auto-select + relaxed-ordering-off + adaptive routing",
+          "test_filter": "NetIbMPITest.SimpleSendRecv",
+          "timeout": 180
+        },
+        {
+          "name": "NetIB_Cov_MultipleSizes",
+          "description": "Multi-size transfer under alternate IB env (GID auto-select / RO off / AR on)",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes",
+          "timeout": 300
+        },
+        {
+          "name": "NetIB_Cov_LargeTransfer",
+          "description": "Large transfer crossing the AR threshold under adaptive routing",
+          "test_filter": "NetIbMPITest.LargeTransfer",
+          "timeout": 300
+        },
+        {
+          "name": "NetIB_Cov_RegisterHost",
+          "description": "Host MR registration under relaxed-ordering-disabled path",
+          "test_filter": "NetIbMPITest.RegisterHostMemory",
+          "timeout": 180
+        }
+      ]
+    },
+    "net_ib_merge_disabled": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "_comment": "Exercises the makeVDevice merge-disabled guard, which only runs with NCCL_IB_MERGE_NICS=0 (the rest of the suite uses 1). Without this entry MakeVirtualDeviceMergeDisabled always GTEST_SKIPs in CI.",
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_MergeDisabledGuard",
+          "description": "makeVDevice with a multi-device request must be rejected when NCCL_IB_MERGE_NICS=0",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceMergeDisabled"
+        }
+      ]
+    },
+    "net_ib_vnic_validation": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "_comment": "makeVDevice / CheckVProps validation and topology error paths. WARN_RAIL_LOCAL=1 so the rail-local mismatch arm in DisjointMergeRailLocal_VNic is reachable. Topology-dependent cases (cross-NUMA, disjoint >=5-NIC merge) GTEST_SKIP when the hardware doesn't provide them.",
+      "env_variables": {
+        "NCCL_IB_WARN_RAIL_LOCAL": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_VNic_OutOfRangeDev",
+          "description": "makeVDevice rejects an out-of-range physical device index",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceOutOfRangeDev"
+        },
+        {
+          "name": "NetIB_VNic_DuplicateDevs",
+          "description": "makeVDevice dedups a repeated device into a single-device vNIC",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceDuplicateDevs"
+        },
+        {
+          "name": "NetIB_VNic_CrossNuma",
+          "description": "makeVDevice warns (but succeeds) merging NICs across NUMA nodes",
+          "test_filter": "NetIbMPITest.MakeVirtualDeviceCrossNuma"
+        },
+        {
+          "name": "NetIB_VNic_DisjointRailLocal",
+          "description": "CheckVProps rail-local mismatch + ndevs-swap on a disjoint asymmetric vNIC merge",
+          "test_filter": "NetIbMPITest.DisjointMergeRailLocal_VNic"
+        }
+      ]
+    },
     "net_ib_multirecv": {
       "extends": "net_ib_base",
       "timeout": 300,
@@ -1818,6 +1899,10 @@
       "extends": "net_ib_transfer",
       "env_variables": { "NCCL_NET": "ib-cast" }
     },
+    "net_ib_coverage_env_cast": {
+      "extends": "net_ib_coverage_env",
+      "env_variables": { "NCCL_NET": "ib-cast" }
+    },
     "net_ib_multirecv_cast": {
       "extends": "net_ib_multirecv",
       "env_variables": { "NCCL_NET": "ib-cast" }
@@ -1906,6 +1991,24 @@
       "name": "NET IB - Data Transfer",
       "description": "InfiniBand data transfer and stress tests",
       "config": "net_ib_transfer",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Coverage Env (GID auto-select / RO off / AR)",
+      "description": "Core transfer tests re-run under alternate IB env to cover GID auto-select, relaxed-ordering-disabled, and adaptive-routing branches",
+      "config": "net_ib_coverage_env",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Merge Disabled Guard",
+      "description": "Exercises the makeVDevice merge-disabled guard under NCCL_IB_MERGE_NICS=0",
+      "config": "net_ib_merge_disabled",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - vNIC Validation",
+      "description": "makeVDevice/CheckVProps validation and topology error paths (bounds, dedup, cross-NUMA, rail-local)",
+      "config": "net_ib_vnic_validation",
       "enabled": true
     },
     {
@@ -2182,6 +2285,12 @@
       "name": "NET IB - Data Transfer (ib-cast)",
       "description": "InfiniBand data transfer via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_transfer_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Coverage Env (ib-cast)",
+      "description": "Coverage-env transfer tests via ib-cast plugin: exercises CAST GID auto-select and relaxed-ordering paths (NCCL_NET=ib-cast)",
+      "config": "net_ib_coverage_env_cast",
       "enabled": true
     },
     {

@@ -1764,7 +1764,9 @@ class SetValueCommands:
                 self.logger.store_output(
                     args.gpu,
                     "mem_carveout",
-                    f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. Reboot required for changes to take effect.",
+                    f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. "
+                    "Takes effect after the next reboot — "
+                    "current VRAM size still reflects the previous boot.",
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()
@@ -1914,7 +1916,9 @@ class SetValueCommands:
             try:
                 amdsmi_interface.amdsmi_set_ttm_pages_limit(pages)
                 self.logger.output["set_gtt"] = (
-                    f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). Reboot required for changes to take effect."
+                    f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). "
+                    "Takes effect after the next reboot — "
+                    "current values shown by 'amd-smi node --gtt' still reflect the previous boot."
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()

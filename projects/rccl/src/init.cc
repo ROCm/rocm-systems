@@ -1831,7 +1831,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 #ifdef ENABLE_WARP_SPEED
-  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || rcclCanUseWarpSpeedAuto(comm, nNodes));
+  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || (!parent && rcclCanUseWarpSpeedAuto(comm, nNodes)));
 #endif
 
   // For single node communicators that do not uses the full xgmi links per gpu, i.e., nranks < 8
@@ -2591,17 +2591,35 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     if (comm->minLocalRanks != comm->maxLocalRanks) {
       INFO(NCCL_INIT, "Hierarchical AllGather: non-uniform GPU count per node, skipping hierarchical allgather");
     } else {
-      int node_id = comm->rankToNode[comm->rank];
-      int local_rank = comm->rankToLocalRank[comm->rank];
-      NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
-      comm->forcePatEnable = true;
-      NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
-      comm->forcePatEnable = false;
-      size_t tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
-      NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
-      comm->hierarchicalCommsInitialized = true;
-      INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
-        comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+      // Hierarchical Shuffle kernel assumes compact rank ordering.
+      // rank R == rankToNode[R] * localRanks + rankToLocalRank[R] for every R.
+      const int lr = comm->maxLocalRanks;
+      bool compactRanks = true;
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (comm->rankToNode[r] != r / lr ||
+            comm->rankToLocalRank[r] != r % lr) {
+          compactRanks = false;
+          break;
+        }
+      }
+      if (!compactRanks) {
+        INFO(NCCL_INIT, "Hierarchical AllGather: non-compact rank ordering, skipping hierarchical allgather");
+      } else {
+        int node_id = comm->rankToNode[comm->rank];
+        int local_rank = comm->rankToLocalRank[comm->rank];
+        NCCLCHECKGOTO(ncclCommSplit(comm, node_id, local_rank, &comm->hierarchicalIntraComm, NULL), res, fail);
+        // honor user input if user explicitly disables PAT
+        const char* patEnableEnv = ncclGetEnv("NCCL_PAT_ENABLE");
+        bool userDisabledPat = (patEnableEnv != nullptr) && (std::atoi(patEnableEnv) == 0);
+        comm->forcePatEnable = !userDisabledPat;
+        NCCLCHECKGOTO(ncclCommSplit(comm, local_rank, node_id, &comm->hierarchicalInterComm, NULL), res, fail);
+        comm->forcePatEnable = false;
+        size_t tempBufSize = (comm->nNodes >= 16) ? HIERARCHICAL_AG_TEMP_BUFFER_SIZE : HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+        NCCLCHECKGOTO(ncclCudaMalloc(&(comm->hierarchicalAGTempBuffer), tempBufSize, comm->memManager), res, fail);
+        comm->hierarchicalCommsInitialized = true;
+        INFO(NCCL_INIT, "Hierarchical AllGather: intraComm (nRanks=%d) and interComm (nRanks=%d) Initialized",
+          comm->hierarchicalIntraComm->nRanks, comm->hierarchicalInterComm->nRanks);
+      }
     }
   }
 

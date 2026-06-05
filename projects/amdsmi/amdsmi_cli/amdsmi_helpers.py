@@ -1705,6 +1705,46 @@ class AMDSMIHelpers:
         bytes_value = pages * page_size
         return bytes_value / (1024**3)
 
+    def read_pending_gtt_pages(self):
+        """Read the pending GTT pages_limit written by `amd-smi set --gtt`.
+
+        Returns the integer ``pages_limit`` from the modprobe.d snippet
+        produced by ``amdsmi_set_ttm_pages_limit``, which will take effect
+        on the next boot once the initramfs picks it up. The file name
+        depends on the active TTM module detected by the C++ layer
+        (``amdttm``, ``amd-ttm``, or ``ttm``), so all three candidates are
+        probed in the same priority order. The ``AMDSMI_TTM_SYSFS_NAME``
+        environment variable (when set to one of ``amdttm`` / ``amd_ttm`` /
+        ``ttm``) is checked first to mirror the C++ override. Returns
+        ``None`` if no candidate file exists, none is readable, or none
+        contains a valid ``options <mod> ... pages_limit=<int>`` directive.
+        """
+        candidates = ["amdttm", "amd-ttm", "ttm"]
+        override = os.environ.get("AMDSMI_TTM_SYSFS_NAME", "").strip()
+        if override:
+            # Mirror C++ ttm_modprobe_name(): sysfs "amd_ttm" -> conf "amd-ttm".
+            override_conf = "amd-ttm" if override == "amd_ttm" else override
+            if override_conf in candidates:
+                candidates.remove(override_conf)
+            candidates.insert(0, override_conf)
+
+        pattern = re.compile(r"^\s*options\s+\S+\s+.*?pages_limit\s*=\s*(\d+)", re.MULTILINE)
+        for name in candidates:
+            path = "/etc/modprobe.d/" + name + ".conf"
+            try:
+                with open(path, "r") as f:
+                    content = f.read()
+            except (OSError, IOError):
+                continue
+            m = pattern.search(content)
+            if not m:
+                continue
+            try:
+                return int(m.group(1))
+            except ValueError:
+                continue
+        return None
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.
 

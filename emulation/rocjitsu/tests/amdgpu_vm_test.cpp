@@ -221,13 +221,13 @@ TEST(VmLifecycleTest, CreateAndDestroy) {
 TEST(VmLifecycleTest, MissingArchFails) {
   const char *json = R"({"vm":{"gpu":{"num_shader_engines":1}}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 TEST(VmLifecycleTest, InvalidArchFails) {
   const char *json = R"({"vm":{"arch":"bogus"}})";
   rj_vm_t *handle = nullptr;
-  EXPECT_NE(rj_vm_create_from_string(json, &handle), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_NE(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_SUCCESS);
 }
 
 class IsaTest : public ::testing::TestWithParam<std::string> {
@@ -379,7 +379,8 @@ TEST_P(IsaTest, RunToCompletion) {
                      R"(]}})";
 
   rj_vm_t *handle = nullptr;
-  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), &handle), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &handle),
+            ROCJITSU_STATUS_SUCCESS);
 
   uint64_t ticks = 0;
   EXPECT_EQ(rj_vm_run(handle, &ticks), ROCJITSU_STATUS_SUCCESS);
