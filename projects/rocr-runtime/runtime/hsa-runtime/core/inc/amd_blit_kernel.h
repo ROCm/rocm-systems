@@ -101,7 +101,7 @@ class BlitKernel : public core::Blit {
 
   /// @brief Submit a broadcast copy command using compute shader (single source
   /// to multiple destinations). This is the fallback path for devices without
-  /// SDMA multicast support or when SDMA is disabled (MI300, Navi4).
+  /// SDMA multicast support or when SDMA is disabled.
   ///
   /// @param src Memory address of the copy source.
   /// @param dst_list Array of destination memory addresses.

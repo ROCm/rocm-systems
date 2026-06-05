@@ -120,7 +120,7 @@
 .set kBroadcastCopyNumSGPRs, 24
 
 // VGPR allocation differs by architecture:
-// - GFX9 (MI300): Uses v16 for local_id to avoid clobber by flat_load_dwordx4 v[12:15]
+// - GFX9: Uses v16 for local_id to avoid clobber by flat_load_dwordx4 v[12:15]
 //   due to different instruction execution ordering. Requires 20 VGPRs.
 // - GFX10+: Uses v14 for local_id since it's consumed before flat_load_dwordx4.
 //   Requires 16 VGPRs.
@@ -171,8 +171,8 @@ BroadcastCopy:
 
     // Get workgroup ID (destination index)
     // TTMP9 register usage per architecture:
-    //   GFX9 (MI300):  s2 via compute_pgm_rsrc2_tgid_x_en (ttmp9 has dispatch_grid_y)
-    //   GFX10+:        ttmp9 has workgroup_x (SPI initialized)
+    //   GFX9:   s2 via compute_pgm_rsrc2_tgid_x_en (ttmp9 has dispatch_grid_y)
+    //   GFX10+: ttmp9 has workgroup_x (SPI initialized)
     .if (.amdgcn.gfx_generation_number >= 10)
       v_mov_b32         v0, ttmp9
     .else
@@ -195,7 +195,9 @@ BroadcastCopy:
 
     // Main Loop: 16-byte vectorized copy
     // s12 = 64 * 16 = 1024 (stride for workgroup, not total workitems)
+    // s13 = 3 * s12 = 3072 (for unroll bounds adjustment)
     s_mov_b32           s12, 64 * 16
+    s_mov_b32           s13, 64 * 16 * 3
 
     // v[6:7] = src_addr + local_id * 16
     .if (.amdgcn.gfx_generation_number >= 10)
@@ -217,11 +219,76 @@ BroadcastCopy:
     V_ADD_CO_U32        v10, v10, s4
     V_ADD_CO_CI_U32     v11, v11, 0x0
 
-L_BROADCAST_VEC_LOOP:
+    // Phase 1: Unrolled loop (4 iterations per check)
+    // Adjusted end: v[10:11] - 3*stride ensures 4 iterations are always safe
+    // We compare against (end - 3*stride) so when ptr < adjusted_end,
+    // ptr, ptr+stride, ptr+2*stride, ptr+3*stride are all < end
+
+    // Compute adjusted_end = end - 3*stride in v[0:1] (must be 64-bit aligned for gfx1250)
+    // Use v_sub for 64-bit subtraction
+    v_mov_b32           v0, s13             // v0 = 3*stride
+    v_mov_b32           v1, 0
+    // v[0:1] = v[10:11] - v[0:1] (end - 3*stride)
+    .if (.amdgcn.gfx_generation_number >= 10)
+      v_sub_co_u32      v0, vcc_lo, v10, v0
+      v_sub_co_ci_u32   v1, vcc_lo, v11, v1, vcc_lo
+    .elseif (.amdgcn.gfx_generation_number >= 9)
+      v_sub_co_u32      v0, vcc, v10, v0
+      v_subb_co_u32     v1, vcc, v11, v1, vcc
+    .else
+      v_sub_u32         v0, vcc, v10, v0
+      v_subb_u32        v1, vcc, v11, v1, vcc
+    .endif
+
+L_BROADCAST_VEC_UNROLL:
+    // Check if 4 full iterations fit: ptr < end - 3*stride
+    V_CMP_LT_U64        v[6:7], v[0:1]
+    s_cbranch_vccz      L_BROADCAST_VEC_SINGLE
+
+    // Unrolled vectorized copy (4 iterations, bounds guaranteed safe)
+    flat_load_dwordx4   v[12:15], v[6:7]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[8:9], v[12:15]
+
+    V_ADD_CO_U32        v6, v6, s12
+    V_ADD_CO_CI_U32     v7, v7, 0x0
+    V_ADD_CO_U32        v8, v8, s12
+    V_ADD_CO_CI_U32     v9, v9, 0x0
+
+    flat_load_dwordx4   v[12:15], v[6:7]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[8:9], v[12:15]
+
+    V_ADD_CO_U32        v6, v6, s12
+    V_ADD_CO_CI_U32     v7, v7, 0x0
+    V_ADD_CO_U32        v8, v8, s12
+    V_ADD_CO_CI_U32     v9, v9, 0x0
+
+    flat_load_dwordx4   v[12:15], v[6:7]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[8:9], v[12:15]
+
+    V_ADD_CO_U32        v6, v6, s12
+    V_ADD_CO_CI_U32     v7, v7, 0x0
+    V_ADD_CO_U32        v8, v8, s12
+    V_ADD_CO_CI_U32     v9, v9, 0x0
+
+    flat_load_dwordx4   v[12:15], v[6:7]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[8:9], v[12:15]
+
+    V_ADD_CO_U32        v6, v6, s12
+    V_ADD_CO_CI_U32     v7, v7, 0x0
+    V_ADD_CO_U32        v8, v8, s12
+    V_ADD_CO_CI_U32     v9, v9, 0x0
+
+    s_branch            L_BROADCAST_VEC_UNROLL
+
+    // Phase 2: Single-iteration cleanup (handles remaining 0-3 iterations)
+L_BROADCAST_VEC_SINGLE:
     V_CMP_LT_U64        v[6:7], v[10:11]
     s_cbranch_vccz      L_BROADCAST_VEC_DONE
 
-    // Unrolled vectorized copy (4 iterations of 16 bytes each)
     flat_load_dwordx4   v[12:15], v[6:7]
     S_WAITCNT_LOADCNT
     flat_store_dwordx4  v[8:9], v[12:15]
@@ -231,35 +298,7 @@ L_BROADCAST_VEC_LOOP:
     V_ADD_CO_U32        v8, v8, s12
     V_ADD_CO_CI_U32     v9, v9, 0x0
 
-    flat_load_dwordx4   v[12:15], v[6:7]
-    S_WAITCNT_LOADCNT
-    flat_store_dwordx4  v[8:9], v[12:15]
-
-    V_ADD_CO_U32        v6, v6, s12
-    V_ADD_CO_CI_U32     v7, v7, 0x0
-    V_ADD_CO_U32        v8, v8, s12
-    V_ADD_CO_CI_U32     v9, v9, 0x0
-
-    flat_load_dwordx4   v[12:15], v[6:7]
-    S_WAITCNT_LOADCNT
-    flat_store_dwordx4  v[8:9], v[12:15]
-
-    V_ADD_CO_U32        v6, v6, s12
-    V_ADD_CO_CI_U32     v7, v7, 0x0
-    V_ADD_CO_U32        v8, v8, s12
-    V_ADD_CO_CI_U32     v9, v9, 0x0
-
-    flat_load_dwordx4   v[12:15], v[6:7]
-    S_WAITCNT_LOADCNT
-    flat_store_dwordx4  v[8:9], v[12:15]
-
-    // Advance pointers for next loop iteration
-    V_ADD_CO_U32        v6, v6, s12
-    V_ADD_CO_CI_U32     v7, v7, 0x0
-    V_ADD_CO_U32        v8, v8, s12
-    V_ADD_CO_CI_U32     v9, v9, 0x0
-
-    s_branch            L_BROADCAST_VEC_LOOP
+    s_branch            L_BROADCAST_VEC_SINGLE
 
 L_BROADCAST_VEC_DONE:
 

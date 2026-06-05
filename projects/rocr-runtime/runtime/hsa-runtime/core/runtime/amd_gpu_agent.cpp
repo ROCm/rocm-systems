@@ -44,8 +44,9 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstring>
+#include <cinttypes>
 #include <climits>
+#include <cstring>
 #include <map>
 #include <set>
 #include <string>
@@ -142,7 +143,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
   num_p2p_engines_ =  properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
-                      : (properties_.NumSdmaEngines > 2 ? properties_.NumSdmaEngines - 2 : 0);
+                      : std::max(0U, properties_.NumSdmaEngines - 2);
 
   const core::Isa *isa_base;
 
@@ -304,7 +305,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     ASICShader compute_11;
     ASICShader compute_12;
     ASICShader compute_1250;
-    ASICShader compute_13;  // GFX13 (Navi4)
+    ASICShader compute_13;  // GFX13
   };
 
   std::map<std::string, CompiledShader> compiled_shaders = {
@@ -384,43 +385,43 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        {
            {NULL, 0, 0, 0},                                             // gfx7 (not supported)
            {NULL, 0, 0, 0},                                             // gfx8 (not supported)
-           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 16},  // gfx9
-           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 16},  // gfx90a
-           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 16},  // gfx942 (MI300)
-           {kCodeBroadcastCopy1010, sizeof(kCodeBroadcastCopy1010), 24, 16},  // gfx1010
-           {kCodeBroadcastCopy10, sizeof(kCodeBroadcastCopy10), 24, 16},      // gfx10
-           {kCodeBroadcastCopy11, sizeof(kCodeBroadcastCopy11), 24, 16},      // gfx11
-           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 24, 16},      // gfx12
-           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 24, 16},      // gfx1250 (use gfx12)
-           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 24, 16},      // gfx13 (Navi4)
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 20},  // gfx9
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 20},  // gfx90a
+           {kCodeBroadcastCopy9, sizeof(kCodeBroadcastCopy9), 24, 20},  // gfx942
+           {kCodeBroadcastCopy1010, sizeof(kCodeBroadcastCopy1010), 24, 20},  // gfx1010
+           {kCodeBroadcastCopy10, sizeof(kCodeBroadcastCopy10), 24, 20},      // gfx10
+           {kCodeBroadcastCopy11, sizeof(kCodeBroadcastCopy11), 24, 20},      // gfx11
+           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 24, 20},      // gfx12
+           {kCodeBroadcastCopy1250, sizeof(kCodeBroadcastCopy1250), 24, 20},  // gfx1250
+           {kCodeBroadcastCopy12, sizeof(kCodeBroadcastCopy12), 24, 20},      // gfx13 (use gfx12)
        }},
       {"SwapCopy",
        {
-           {NULL, 0, 0, 0},                                       // gfx7 (not supported)
-           {NULL, 0, 0, 0},                                       // gfx8 (not supported)
-           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 24, 16},      // gfx9
-           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 24, 16},      // gfx90a
-           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 24, 16},      // gfx942 (MI300)
-           {kCodeSwapCopy1010, sizeof(kCodeSwapCopy1010), 24, 16},  // gfx1010
-           {kCodeSwapCopy10, sizeof(kCodeSwapCopy10), 24, 16},      // gfx10
-           {kCodeSwapCopy11, sizeof(kCodeSwapCopy11), 24, 16},      // gfx11
-           {kCodeSwapCopy12, sizeof(kCodeSwapCopy12), 24, 16},      // gfx12
-           {kCodeSwapCopy1250, sizeof(kCodeSwapCopy1250), 24, 16},  // gfx1250
-           {kCodeSwapCopy12, sizeof(kCodeSwapCopy12), 24, 16},      // gfx13 (use gfx12)
+           {NULL, 0, 0, 0},                                           // gfx7 (not supported)
+           {NULL, 0, 0, 0},                                           // gfx8 (not supported)
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 16, 16},          // gfx9
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 16, 16},          // gfx90a
+           {kCodeSwapCopy9, sizeof(kCodeSwapCopy9), 16, 16},          // gfx942
+           {kCodeSwapCopy1010, sizeof(kCodeSwapCopy1010), 16, 16},    // gfx1010
+           {kCodeSwapCopy10, sizeof(kCodeSwapCopy10), 16, 16},        // gfx10
+           {kCodeSwapCopy11, sizeof(kCodeSwapCopy11), 16, 16},        // gfx11
+           {kCodeSwapCopy12, sizeof(kCodeSwapCopy12), 16, 16},        // gfx12
+           {kCodeSwapCopy1250, sizeof(kCodeSwapCopy1250), 16, 16},    // gfx1250
+           {kCodeSwapCopy12, sizeof(kCodeSwapCopy12), 16, 16},        // gfx13 (use gfx12)
        }},
       {"IndirectCopy",
        {
            {NULL, 0, 0, 0},                                               // gfx7 (not supported)
            {NULL, 0, 0, 0},                                               // gfx8 (not supported)
-           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 16},      // gfx9
-           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 16},      // gfx90a
-           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 16},      // gfx942 (MI300)
-           {kCodeIndirectCopy1010, sizeof(kCodeIndirectCopy1010), 24, 16},  // gfx1010
-           {kCodeIndirectCopy10, sizeof(kCodeIndirectCopy10), 24, 16},      // gfx10
-           {kCodeIndirectCopy11, sizeof(kCodeIndirectCopy11), 24, 16},      // gfx11
-           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 24, 16},      // gfx12
-           {kCodeIndirectCopy1250, sizeof(kCodeIndirectCopy1250), 24, 16},  // gfx1250
-           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 24, 16},      // gfx13 (use gfx12)
+           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 20},      // gfx9
+           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 20},      // gfx90a
+           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 20},      // gfx942
+           {kCodeIndirectCopy1010, sizeof(kCodeIndirectCopy1010), 24, 20},  // gfx1010
+           {kCodeIndirectCopy10, sizeof(kCodeIndirectCopy10), 24, 20},      // gfx10
+           {kCodeIndirectCopy11, sizeof(kCodeIndirectCopy11), 24, 20},      // gfx11
+           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 24, 20},      // gfx12
+           {kCodeIndirectCopy1250, sizeof(kCodeIndirectCopy1250), 24, 20},  // gfx1250
+           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 24, 20},      // gfx13 (use gfx12)
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
@@ -650,14 +651,14 @@ void GpuAgent::ReserveScratch()
 {
   size_t reserved_sz = core::Runtime::runtime_singleton_->flag().scratch_single_limit();
   if (reserved_sz > MaxScratchDevice()) {
-    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%lu max:%lu)!\n",
-            reserved_sz, MaxScratchDevice());
+    fprintf(stdout, "User specified scratch limit exceeds device limits (requested:%zu max:%zu)!\n",
+                    reserved_sz, MaxScratchDevice());
     reserved_sz = MaxScratchDevice();
   }
 
   size_t available;
-  hsa_status_t err = driver().AvailableMemory(node_id(), &available);
-  assert(err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
+  [[maybe_unused]] hsa_status_t mem_err = driver().AvailableMemory(node_id(), &available);
+  assert(mem_err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
   std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
     HSAuint64 alt_va;
@@ -999,21 +1000,18 @@ void GpuAgent::InitDma() {
   // Determine and instantiate the number of blit objects to
   // engage. The total number is sum of three plus number of
   // sdma-xgmi engines
-  uint32_t blit_cnt_ = DefaultBlitCount + properties_.NumSdmaXgmiEngines;
+  uint32_t blit_cnt_ = DefaultBlitCount + num_p2p_engines_;
   blits_.resize(blit_cnt_);
 
   // Initialize blit objects used for D2D, H2D, D2H, and
   // P2P copy operations.
-  // -- Blit at index BlitDevToDev(0) deals with copies within
-  //    local framebuffer and always engages a Blit Kernel
-  // -- Blit at index BlitHostToDev(1) deals with copies from
-  //    Host to Device (H2D) and could engage either a Blit
+  // -- Blit at index BlitDevToDev(0) deals with copies within local framebuffer and always engages a Blit Kernel
+  // -- Blit at index BlitHostToDev(1) deals with copies from Host to Device (H2D) and could engage either a Blit
   //    Kernel or sDMA
-  // -- Blit at index BlitDevToHost(2) deals with copies from
-  //    Device to Host (D2H) and Peer to Peer (P2P) over PCIe.
+  // -- Blit at index BlitDevToHost(2) deals with copies from Device to Host (D2H) and Peer to Peer (P2P) over PCIe.
   //    It could engage either a Blit Kernel or sDMA
-  // -- Blit at index DefaultBlitCount(3) and beyond deal
-  //    exclusively P2P over xGMI links
+  // -- Blit at index DefaultBlitCount(3) and beyond deal exclusively P2P. These can be over xGMI engines or SDMA
+  //    engines when number of SDMA engines > 2
   blits_[BlitDevToDev].reset([this]() {
     auto ret = CreateBlitKernel((*queues_[QueueUtility]).get());
     if (ret == nullptr)
@@ -1075,8 +1073,8 @@ void GpuAgent::ReleaseResources() {
 
     for (auto& blit : blits_) {
       if (!blit.empty()) {
-        hsa_status_t status = blit->Destroy();
-        assert(status == HSA_STATUS_SUCCESS);
+        [[maybe_unused]] hsa_status_t destroy_st = blit->Destroy();
+        assert(destroy_st == HSA_STATUS_SUCCESS);
       }
     }
 
@@ -1187,8 +1185,9 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
                                std::vector<core::Signal*>& dep_signals,
                                core::Signal& out_signal) {
   // Recommended SDMA engine copies only have gang factor 1
-  uint32_t rec_sdma_eng =
-      rocr::os::Ffs(rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle]);
+  uint32_t rec_mask = 0;
+  DmaPreferredEngine(dst_agent, src_agent, &rec_mask);
+  uint32_t rec_sdma_eng = PickSdmaEngine(rec_mask);
   if (rec_sdma_eng)
     return DmaCopyOnEngine(dst, dst_agent, src, src_agent, size,
                            dep_signals, out_signal, rec_sdma_eng, false);
@@ -1291,7 +1290,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
           (dst_agent.device_type() == core::Agent::kAmdGpuDevice)) &&
          ("Both devices are CPU agents which is not expected"));
 
-  if (engine_offset > properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines) {
+  if (engine_offset > num_h2d_d2h_engines_ + num_p2p_engines_) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -1311,8 +1310,8 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
 
     engine_offset = BlitDevToDev;
   } else {
-    bool is_xgmi = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
-                         properties_.NumSdmaXgmiEngines;
+    bool use_p2p_engines = is_p2p && dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
+                         num_p2p_engines_;
 
     // Due to a RAS issue, GFX90a can only support H2D copies on SDMA0
     bool is_h2d_blit = (src_agent.device_type() == core::Agent::kAmdCpuDevice &&
@@ -1320,9 +1319,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     bool limit_h2d_blit = isa_->GetVersion() == core::Isa::Version(9, 0, 10);
 
     // Ensure engine selection is within proper range based on transfer type
-    if ((is_xgmi && !rec_sdma_eng_override_ && engine_offset <= properties_.NumSdmaEngines) ||
-        (!is_xgmi && engine_offset > (properties_.NumSdmaEngines +
-                                      properties_.NumSdmaXgmiEngines)) ||
+    if ((use_p2p_engines && !rec_sdma_eng_override_ && engine_offset <= num_h2d_d2h_engines_) ||
           (!is_h2d_blit && !is_same_gpu && limit_h2d_blit &&
             engine_offset == BlitHostToDev)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1339,6 +1336,19 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
     // Track the agent so we could translate the resulting timestamp to system
     // domain correctly.
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+  }
+
+  // gfx1250 fast path: fuse poll+copy+signal into a single WaitSignal packet.
+  if (core::Runtime::runtime_singleton_->flag().enable_sdma_fastpath_debug() && !profiling_enabled() && blit->isSDMA()) {
+    BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
+    if (sdma_blit->IsGfx1250()) {
+      hsa_status_t stat = sdma_blit->SubmitNotifyPrologue();
+      if (stat != HSA_STATUS_SUCCESS) return stat;
+      stat = sdma_blit->SubmitLinearCopyBodyWaitSignal(
+          dst, src, size, dep_signals, out_signal);
+      if (stat != HSA_STATUS_SUCCESS) return stat;
+      return sdma_blit->SubmitNotifyEpilogue(out_signal);
+    }
   }
 
   std::vector<core::Signal*> gang_signals(0);
@@ -1368,16 +1378,16 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
   if (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
                    dst_agent.device_type() == core::Agent::kAmdGpuDevice &&
                      dst_agent.HiveId() && src_agent.HiveId() == dst_agent.HiveId() &&
-                       properties_.NumSdmaXgmiEngines) {
-    //Find a free xGMI SDMA engine
+                       num_p2p_engines_ > 0) {
+    //Find a free p2p SDMA engine
     if (rec_sdma_eng_override_) {
-      for (int i = 0; i < (properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines); i++) {
+      for (int i = 0; i < (num_h2d_d2h_engines_ + num_p2p_engines_); i++) {
         if (DmaEngineIsFree(BlitHostToDev + i)) {
           *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_0 << i);
         }
       }
     } else {
-      for (int i = 0; i < properties_.NumSdmaXgmiEngines; i++) {
+      for (int i = 0; i < num_p2p_engines_; i++) {
         if (DmaEngineIsFree(DefaultBlitCount + i)) {
           *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
         }
@@ -1398,12 +1408,12 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
     // Check is D2H is free
     if (DmaEngineIsFree(BlitDevToHost)) {
-      *engine_ids_mask |= properties_.NumSdmaEngines > 1 ?
+      *engine_ids_mask |= num_h2d_d2h_engines_ > 1 ?
                           HSA_AMD_SDMA_ENGINE_1 :
                           HSA_AMD_SDMA_ENGINE_0;
     }
-    // Find a free xGMI SDMA engine for H2D/D2H though it may be lower bandwidth
-    for (int i = 0; i < properties_.NumSdmaXgmiEngines; i++) {
+    // Find a free p2p SDMA engine for H2D/D2H though it may be lower bandwidth when using XGMI links
+    for (int i = 0; i < num_p2p_engines_; i++) {
       if (DmaEngineIsFree(DefaultBlitCount + i)) {
          *engine_ids_mask |= (HSA_AMD_SDMA_ENGINE_2 << i);
       }
@@ -1415,6 +1425,21 @@ hsa_status_t GpuAgent::DmaCopyStatus(core::Agent& dst_agent, core::Agent& src_ag
 
 hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                           uint32_t *recommended_ids_mask) {
+  // gfx1250+: all SDMA engines are equivalent and there are no XGMI engines, we prefer first 2 engines
+  // for h2d/d2h and remaining for p2p.
+  if (isa_->GetMajorVersion() == 12 && isa_->GetMinorVersion() >= 5) {
+    bool is_p2p = (src_agent.device_type() == core::Agent::kAmdGpuDevice &&
+                  dst_agent.device_type() == core::Agent::kAmdGpuDevice);
+
+    if (is_p2p) {
+      *recommended_ids_mask = ((1u << num_p2p_engines_) - 1) << (DefaultBlitCount - 1);
+    } else {
+      *recommended_ids_mask = (1u << num_h2d_d2h_engines_) - 1;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
   // From the collected data, gfx94x performance is better only for first 3 SDMA engines
   bool isGfx94x = (isa_->GetMajorVersion() == 9 &&
                   (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5));
@@ -1459,27 +1484,58 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   if (profiling_enabled())
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
-  lazy_ptr<core::Blit>& coord_blit = GetBlitObject(BlitHostToDev);
+  // Resolve per-entry SDMA engines.
+  const uint32_t total_sdma = num_h2d_d2h_engines_ + num_p2p_engines_;
+
+  // Select the coordinator engine. For gfx1250, all engines are
+  // equivalent so we rotate the coordinator via PeekSdmaEngine (read-only peek
+  // at the round-robin counter) to spread GCR prologue/epilogue workload across
+  // engines over successive fan-out calls. The counter is NOT incremented here
+  // so body assignments start from the same position and coordinator selection
+  // is independent of body distribution.
+  // For all other architectures the coordinator is always BlitHostToDev (the
+  // dedicated H2D/P2P engine that owns the prologue/epilogue).
+  uint32_t coord_idx = BlitHostToDev;
+  {
+    uint32_t eng_mask = 0;
+    DmaPreferredEngine(*this, *this, &eng_mask);
+    if (eng_mask && total_sdma > 0) {
+      uint32_t peek = PickSdmaEngine(eng_mask, false);
+      if (peek) coord_idx = peek;
+    }
+  }
+
+  lazy_ptr<core::Blit>& coord_blit = GetBlitObject(coord_idx);
   if (!coord_blit->isSDMA())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   BlitSdmaBase* coordinator = static_cast<BlitSdmaBase*>((*coord_blit).get());
 
-  if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP && !coordinator->SwapSupported())
+  if (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP &&
+      !coordinator->SwapSupported() && !coordinator->IsGfx1250())
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  // Resolve per-entry SDMA engines.
-  constexpr bool kUseRRBalancing = false;
-  const uint32_t total_sdma = properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
+  const bool is_indirect =
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ||
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ||
+      (op == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
+
+  // Indirect copy operations use shader fallback (BlitKernel)
+  // No SDMA hardware support check needed since we always have shader path
 
   struct EngineSlot { BlitSdmaBase* blit; uint32_t idx; };
-  std::vector<EngineSlot> engines(num_entries, {coordinator, BlitHostToDev});
+  std::vector<EngineSlot> engines(num_entries, {coordinator, coord_idx});
 
-  if (kUseRRBalancing && total_sdma > 0) {
+  if ((coordinator->IsGfx1250()) && total_sdma > 0) {
+    // gfx1250: all engines equivalent — round-robin via PickSdmaEngine.
+    uint32_t eng_mask = 0;
+    DmaPreferredEngine(*this, *this, &eng_mask);
     for (uint32_t d = 0; d < num_entries; ++d) {
-      uint32_t rr = sdma_rr_index_.fetch_add(1, std::memory_order_relaxed);
-      uint32_t eng_idx = BlitHostToDev + (rr % total_sdma);
-      lazy_ptr<core::Blit>& blit = GetBlitObject(eng_idx);
-      if (blit->isSDMA()) engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()), eng_idx};
+      uint32_t eng_idx = PickSdmaEngine(eng_mask);
+      if (eng_idx) {
+        lazy_ptr<core::Blit>& blit = GetBlitObject(eng_idx);
+        if (blit->isSDMA())
+          engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()), eng_idx};
+      }
     }
   } else {
     std::set<uint32_t> usedEngines;
@@ -1488,7 +1544,9 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     // Assign recommended engines to entries that have one.
     for (uint32_t d = 0; d < num_entries; ++d) {
       core::Agent* dst_agent = core::Agent::Convert(dst_agent_list[d]);
-      int rec_eng = rocr::os::Ffs(rec_sdma_eng_id_peers_info_[dst_agent->public_handle().handle]);
+      uint32_t rec_mask = 0;
+      DmaPreferredEngine(*dst_agent, *this, &rec_mask);
+      int rec_eng = PickSdmaEngine(rec_mask);
       if (rec_eng) {
         lazy_ptr<core::Blit>& blit = GetBlitObject(rec_eng);
         if (blit->isSDMA()) {
@@ -1619,8 +1677,12 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(const hsa_amd_memory_copy_op_t& op,
   const uint16_t num_entries = op.num_entries;
   constexpr size_t kBroadcastMaxSize = 1024 * 1024;
 
-  // Try HW broadcast for small transfers.
-  if (op.size < kBroadcastMaxSize) {
+  // Check if user has forced BlitKernel shader path for testing/debugging.
+  const bool force_shader =
+      core::Runtime::runtime_singleton_->flag().force_blit_kernel_broadcast();
+
+  // Try HW broadcast for small transfers (unless shader path is forced).
+  if (!force_shader && op.size < kBroadcastMaxSize) {
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
 
@@ -1645,35 +1707,38 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(const hsa_amd_memory_copy_op_t& op,
   }
 
   // Try BlitKernel (compute shader) fallback for devices without SDMA broadcast
-  // support (MI300/GFX9) or when SDMA is disabled (HSA_ENABLE_SDMA=0).
+  // support (GFX9), when SDMA is disabled (HSA_ENABLE_SDMA=0), or when shader
+  // path is forced (HSA_FORCE_BLIT_KERNEL_BROADCAST=1).
   // BlitKernel is more efficient than FanOut for broadcast operations.
   {
     SetCopyRequestRefCount(true);
     MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
 
-    lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
+    // Check if SDMA is available by looking at BlitHostToDev (not BlitDevToDev,
+    // which is always a BlitKernel).
+    lazy_ptr<core::Blit>& blit_sdma = GetBlitObject(BlitHostToDev);
 
     // Use BlitKernel when:
-    // 1. SDMA is disabled (!isSDMA), OR
-    // 2. SDMA is enabled but doesn't support broadcast (MI300/GFX9)
-    bool use_blit_kernel = !blit_dev->isSDMA();
+    // 1. Shader path is explicitly forced (HSA_FORCE_BLIT_KERNEL_BROADCAST=1), OR
+    // 2. SDMA is disabled (!isSDMA), OR
+    // 3. SDMA is enabled but doesn't support broadcast (GFX9)
+    bool use_blit_kernel = force_shader || !blit_sdma->isSDMA();
 
-    if (!use_blit_kernel) {
-      // Check if SDMA supports broadcast - if not, use BlitKernel
-      lazy_ptr<core::Blit>& blit_sdma = GetBlitObject(BlitHostToDev);
-      if (blit_sdma->isSDMA()) {
-        BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit_sdma).get());
-        use_blit_kernel = !sdma_blit->BroadcastSupported();
-      }
+    if (!use_blit_kernel && blit_sdma->isSDMA()) {
+      // SDMA is available - check if it supports broadcast
+      BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit_sdma).get());
+      use_blit_kernel = !sdma_blit->BroadcastSupported();
     }
 
     if (use_blit_kernel) {
+      lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
       if (profiling_enabled())
         out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
       LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-               "BlitKernel Broadcast fallback, src=%p, num_entries=%u, size=%zu, "
+               "BlitKernel Broadcast fallback%s, src=%p, num_entries=%u, size=%zu, "
                "completion_signal=0x%zx",
+               force_shader ? " (forced)" : "",
                op.src, num_entries, op.size, out_signal.signal_);
 
       std::vector<core::Signal*> gang_signals;
@@ -1702,78 +1767,40 @@ hsa_status_t GpuAgent::DmaCopyMulti(const hsa_amd_memory_copy_op_t& op,
 hsa_status_t GpuAgent::DmaCopySwap(const hsa_amd_memory_copy_op_t& op,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal) {
-  // First check BlitDevToDev to determine if SDMA is available at all.
-  // BlitDevToDev is always a BlitKernel, so if it reports !isSDMA(), we know
-  // SDMA is disabled and should skip the SDMA checks entirely.
-  {
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+  SetCopyRequestRefCount(true);
+  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
 
+  // Check if SDMA is available via BlitHostToDev (not BlitDevToDev which is always BlitKernel)
+  lazy_ptr<core::Blit>& blit_sdma = GetBlitObject(BlitHostToDev);
+
+  // Try SDMA HW swap for supported devices (gfx9.4+)
+  if (blit_sdma->isSDMA()) {
+    BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit_sdma).get());
+    if (sdma_blit->SwapSupported()) {
+      // Use SDMA HW swap path via fan-out
+      return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal, dep_signals,
+                             op.num_entries, const_cast<const void* const*>(op.src_list),
+                             op.dst_list, op.dst_agent_list, op.size_list);
+    }
+  }
+
+  // Shader fallback for single swap when SDMA is disabled or doesn't support swap
+  if (op.num_entries == 0) {
     lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
+    if (profiling_enabled())
+      out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
-    // If BlitDevToDev is not SDMA (i.e., it's BlitKernel), use shader fallback directly
-    // without triggering unnecessary BlitKernel creation via BlitHostToDev check
-    if (!blit_dev->isSDMA() && op.num_entries == 0) {
-      // Single swap operation - use shader fallback
-      if (profiling_enabled())
-        out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "BlitKernel Swap fallback, addr_a=%p, addr_b=%p, size=%zu, "
+             "completion_signal=0x%zx",
+             op.src, op.dst, op.src_size, out_signal.signal_);
 
-      LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-               "BlitKernel Swap fallback, addr_a=%p, addr_b=%p, size=%zu, "
-               "completion_signal=0x%zx",
-               op.src, op.dst, op.src_size, out_signal.signal_);
-
-      std::vector<core::Signal*> gang_signals;
-      return blit_dev->SubmitSwapCopyCommand(const_cast<void*>(op.src), op.dst, op.src_size,
-                                             dep_signals, out_signal, gang_signals);
-    }
+    std::vector<core::Signal*> gang_signals;
+    return blit_dev->SubmitSwapCopyCommand(const_cast<void*>(op.src), op.dst, op.src_size,
+                                           dep_signals, out_signal, gang_signals);
   }
 
-  // Try SDMA HW swap for supported devices (gfx9.4+/MI300+)
-  {
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
-    lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
-    if (blit->isSDMA()) {
-      BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
-      if (sdma_blit->SwapSupported()) {
-        // Use SDMA HW swap path
-        return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal, dep_signals,
-                               op.num_entries, const_cast<const void* const*>(op.src_list),
-                               op.dst_list, op.dst_agent_list, op.size_list);
-      }
-    }
-  }
-
-  // Check if shader fallback is appropriate for single swap (SDMA doesn't support swap)
-  {
-    SetCopyRequestRefCount(true);
-    MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-
-    lazy_ptr<core::Blit>& blit_dev = GetBlitObject(BlitDevToDev);
-    lazy_ptr<core::Blit>& blit_sdma = GetBlitObject(BlitHostToDev);
-
-    if (blit_sdma->isSDMA()) {
-      BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit_sdma).get());
-      if (!sdma_blit->SwapSupported() && op.num_entries == 0) {
-        // SDMA available but doesn't support swap - use shader
-        if (profiling_enabled())
-          out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
-
-        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
-                 "BlitKernel Swap fallback, addr_a=%p, addr_b=%p, size=%zu, "
-                 "completion_signal=0x%zx",
-                 op.src, op.dst, op.src_size, out_signal.signal_);
-
-        std::vector<core::Signal*> gang_signals;
-        return blit_dev->SubmitSwapCopyCommand(const_cast<void*>(op.src), op.dst, op.src_size,
-                                               dep_signals, out_signal, gang_signals);
-      }
-    }
-  }
-
-  // Fall back to fan-out for multi-entry swap or if shader not available
+  // Fall back to fan-out for multi-entry swap
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                          dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),
@@ -1852,8 +1879,9 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
       } else {
         core::Agent* dst_agent = core::Agent::Convert(op.dst_agent);
         core::Agent* src_agent = core::Agent::Convert(op.src_agent);
-        uint32_t engine_offset =
-            rocr::os::Ffs(rec_sdma_eng_id_peers_info_[dst_agent->public_handle().handle]);
+        uint32_t rec_mask = 0;
+        DmaPreferredEngine(*dst_agent, *src_agent, &rec_mask);
+        uint32_t engine_offset = PickSdmaEngine(rec_mask);
         if (!engine_offset) {
           bool is_h2d = (src_agent->device_type() == core::Agent::kAmdCpuDevice &&
                          dst_agent->device_type() == core::Agent::kAmdGpuDevice);
@@ -2669,7 +2697,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
 
     // Attempt to trim the maximum number of concurrent waves to allow scratch to fit.
     if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
-      debug_print("Failed to map requested scratch (%ld) - reducing queue occupancy.\n",
+      debug_print("Failed to map requested scratch (%zd) - reducing queue occupancy.\n",
                   scratch.main_size);
     const uint64_t num_cus = properties_.NumFComputeCores / properties_.NumSIMDPerCU;
     const uint64_t se_per_xcc = properties_.NumShaderBanks / properties_.NumXcc;
@@ -2691,7 +2719,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
         scratch_used_large_ += scratch.main_size;
         scratch_cache_.insertMain(scratch);
         if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
-          debug_print("  %ld scratch mapped, %.2f%% occupancy.\n", scratch.main_size,
+          debug_print("  %zd scratch mapped, %.2f%% occupancy.\n", scratch.main_size,
                       float(waves_per_cu * num_cus) / scratch.dispatch_slots * 100.0f);
         return;
       }
@@ -2855,7 +2883,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   signal->GetRawTs(false, start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
-    debug_print("Signal %p time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
+    debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
     time.end = 0;
@@ -2873,7 +2901,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   signal->GetRawTs(true, start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
-    debug_print("Signal %p async copy time stamps may be invalid (start=%lu, end=%lu, t0=%lu).\n",
+    debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
     time.end = 0;

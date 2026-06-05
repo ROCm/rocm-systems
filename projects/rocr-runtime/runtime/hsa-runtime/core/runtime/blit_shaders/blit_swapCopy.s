@@ -44,6 +44,12 @@
 // After execution: A contains original B, B contains original A.
 // All threads in workgroup participate in parallel swap.
 //
+// Algorithm:
+//   1. Vectorized phase: Each thread swaps 16 bytes at global_id*16
+//      - Bounds checked against swap_size & ~0xF
+//   2. Tail phase: Threads with global_id < (swap_size % 16) swap 1 byte each
+//      - Handles non-16-byte-aligned sizes
+//
 // Kernel Arguments (20 bytes):
 //   [DW 0-1]  Address A (64-bit)
 //   [DW 2-3]  Address B (64-bit)
@@ -55,16 +61,18 @@
 //   s[4:5]  = addr_a
 //   s[6:7]  = addr_b
 //   s8      = swap_size
-//   s9      = num_workitems (64 per workgroup)
-//   s10     = stride (num_workitems * 16 for vectorized loop)
+//   s9      = num_workitems (64 per workgroup) - unused
+//   s10     = stride - unused in single-iteration version
 //
-//   v0      = global thread offset
-//   v[2:3]  = current addr_a pointer (64-bit aligned for gfx1250)
-//   v[4:5]  = current addr_b pointer (64-bit aligned for gfx1250)
-//   v[6:7]  = end address (addr_a + aligned_size) (64-bit aligned for gfx1250)
-//   v[8:11] = data from buffer A (16 bytes) (64-bit aligned for gfx1250)
-//   v[12:15]= data from buffer B (16 bytes) (64-bit aligned for gfx1250)
-//   v1      = saved local_id
+//   v0      = global thread offset (global_id)
+//   v1      = saved global_id
+//   v[2:3]  = vectorized: addr_a + global_id*16 / tail: byte data
+//   v[4:5]  = vectorized: addr_b + global_id*16
+//   v[6:7]  = vectorized: end address / tail: addr_a tail pointer
+//   v[8:9]  = tail: addr_b tail pointer
+//   v[8:11] = vectorized: data from buffer A (16 bytes)
+//   v[10:11]= tail: end address
+//   v[12:15]= vectorized: data from buffer B (16 bytes)
 
 .text
 
@@ -173,8 +181,8 @@ SwapCopy:
 
     // Compute global thread ID = workgroup_id * 64 + local_id
     // TTMP9 register usage per architecture:
-    //   GFX9 (MI300):  s2 via compute_pgm_rsrc2_tgid_x_en (ttmp9 has dispatch_grid_y)
-    //   GFX10+:        ttmp9 has workgroup_x (SPI initialized)
+    //   GFX9:   s2 via compute_pgm_rsrc2_tgid_x_en (ttmp9 has dispatch_grid_y)
+    //   GFX10+: ttmp9 has workgroup_x (SPI initialized)
     .if (.amdgcn.gfx_generation_number >= 10)
       s_lshl_b32        s2, ttmp9, 0x6      // s2 = workgroup_id * 64
     .else
@@ -203,6 +211,25 @@ SwapCopy:
     V_ADD_CO_U32        v4, v4, s6
     V_ADD_CO_CI_U32     v5, v5, 0x0
 
+    // Compute end address for bounds checking: v[6:7] = addr_a + (swap_size & ~0xF)
+    // Align swap_size down to 16 bytes since we operate on 16-byte chunks
+    v_and_b32           v6, 0xFFFFFFF0, s8
+    v_mov_b32           v7, s5
+    V_ADD_CO_U32        v6, v6, s4
+    V_ADD_CO_CI_U32     v7, v7, 0x0
+
+    // Bounds check: skip vectorized swap if v[2:3] >= v[6:7]
+    // This handles dispatch grid rounding (grid rounded up to multiple of 64)
+    V_CMP_LT_U64        v[2:3], v[6:7]
+    s_cbranch_vccz      L_SWAP_VEC_DONE
+
+    // Mask off threads that are out of bounds for vectorized phase
+    .if (.amdgcn.gfx_generation_number >= 10)
+      s_and_saveexec_b32 s3, vcc_lo
+    .else
+      s_and_saveexec_b64 s[2:3], vcc
+    .endif
+
     // Each thread swaps its 16-byte chunk
     flat_load_dwordx4   v[8:11], v[2:3]
     flat_load_dwordx4   v[12:15], v[4:5]
@@ -210,4 +237,58 @@ SwapCopy:
     flat_store_dwordx4  v[2:3], v[12:15]
     flat_store_dwordx4  v[4:5], v[8:11]
     S_WAITCNT_STORECNT
+
+    // Restore EXEC for tail phase
+    .if (.amdgcn.gfx_generation_number >= 10)
+      s_mov_b32         exec_lo, s3
+    .else
+      s_mov_b64         exec, s[2:3]
+    .endif
+
+L_SWAP_VEC_DONE:
+    // Tail Loop: Byte-by-byte swap for remaining bytes (swap_size % 16)
+    // Only threads with local_id < (swap_size % 16) participate
+    // Use saved global_id (v1) and v0 for local_id
+
+    // v[6:7] = addr_a + (swap_size & ~0xF) + local_id (reuse v6:7)
+    v_and_b32           v6, 0xFFFFFFF0, s8       // aligned_size
+    V_ADD_NC_U32        v6, v6, v1               // add global_id (v1 saved earlier)
+    v_mov_b32           v7, s5
+    V_ADD_CO_U32        v6, v6, s4               // v6:7 = addr_a + aligned_size + global_id
+    V_ADD_CO_CI_U32     v7, v7, 0x0
+
+    // v[8:9] = addr_b + (swap_size & ~0xF) + local_id
+    v_and_b32           v8, 0xFFFFFFF0, s8       // aligned_size
+    V_ADD_NC_U32        v8, v8, v1               // add global_id
+    v_mov_b32           v9, s7
+    V_ADD_CO_U32        v8, v8, s6               // v8:9 = addr_b + aligned_size + global_id
+    V_ADD_CO_CI_U32     v9, v9, 0x0
+
+    // v[10:11] = addr_a + swap_size (end address for tail)
+    v_mov_b32           v10, s8                  // swap_size
+    v_mov_b32           v11, s5
+    V_ADD_CO_U32        v10, v10, s4
+    V_ADD_CO_CI_U32     v11, v11, 0x0
+
+    // Only process if within tail region: v[6:7] < v[10:11]
+    V_CMP_LT_U64        v[6:7], v[10:11]
+    s_cbranch_vccz      L_SWAP_DONE
+
+    // Mask off threads outside tail region
+    .if (.amdgcn.gfx_generation_number >= 10)
+      s_and_b32         exec_lo, exec_lo, vcc_lo
+    .else
+      s_and_b64         exec, exec, vcc
+    .endif
+
+    // Byte swap: load from both, store swapped
+    // v2 = byte from A, v3 = byte from B (reusing registers)
+    flat_load_ubyte     v2, v[6:7]
+    flat_load_ubyte     v3, v[8:9]
+    S_WAITCNT_LOADCNT
+    flat_store_byte     v[6:7], v3
+    flat_store_byte     v[8:9], v2
+    S_WAITCNT_STORECNT
+
+L_SWAP_DONE:
     s_endpgm

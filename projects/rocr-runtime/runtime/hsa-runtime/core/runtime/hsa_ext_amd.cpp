@@ -457,6 +457,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           IS_BAD_PTR(op.src_list[d]);
           IS_BAD_PTR(op.dst_list[d]);
+          IS_VALID_AGENT_HANDLE(op.dst_agent_list[d]);
           core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
           IS_VALID(da);
           if (src_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice &&
@@ -468,6 +469,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
       } else {
         // Single linear copy.
         IS_BAD_PTR(op.dst);
+        IS_VALID_AGENT_HANDLE(op.dst_agent);
         dst_agent = core::Agent::Convert(op.dst_agent);
         IS_VALID(dst_agent);
         if (op.unused_size != 0)
@@ -487,6 +489,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           IS_BAD_PTR(op.src_list[d]);
           IS_BAD_PTR(op.dst_list[d]);
+          IS_VALID_AGENT_HANDLE(op.dst_agent_list[d]);
           core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
           IS_VALID(da);
           if (op.size_list[d] == 0)
@@ -498,6 +501,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         // the direction(s) selected by op.type.
         IS_BAD_PTR(op.src);
         IS_BAD_PTR(op.dst);
+        IS_VALID_AGENT_HANDLE(op.dst_agent);
         dst_agent = core::Agent::Convert(op.dst_agent);
         IS_VALID(dst_agent);
         if (op.size == 0 || op.unused_size != 0)
@@ -510,6 +514,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       for (uint32_t d = 0; d < op.num_entries; ++d) {
         IS_BAD_PTR(op.dst_list[d]);
+        IS_VALID_AGENT_HANDLE(op.dst_agent_list[d]);
         core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
         IS_VALID(da);
       }
@@ -523,6 +528,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           IS_BAD_PTR(op.src_list[d]);
           IS_BAD_PTR(op.dst_list[d]);
+          IS_VALID_AGENT_HANDLE(op.dst_agent_list[d]);
           core::Agent* da = core::Agent::Convert(op.dst_agent_list[d]);
           IS_VALID(da);
           if (op.size_list[d] == 0)
@@ -530,6 +536,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
         }
       } else {
         IS_BAD_PTR(op.dst);
+        IS_VALID_AGENT_HANDLE(op.dst_agent);
         dst_agent = core::Agent::Convert(op.dst_agent);
         IS_VALID(dst_agent);
         if (op.src_size == 0 || op.dst_size == 0)

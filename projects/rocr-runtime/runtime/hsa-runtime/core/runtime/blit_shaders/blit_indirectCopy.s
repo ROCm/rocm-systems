@@ -187,7 +187,10 @@ L_DST_DIRECT:
     v_mov_b32           v0, v0
 
     // s12 = num_workitems * 16 (stride for vectorized loop)
+    // s13 = 3 * s12 (for unroll bounds adjustment)
     s_lshl_b32          s12, s9, 4
+    s_lshl_b32          s13, s9, 4
+    s_mul_i32           s13, s13, 3
 
     // v[2:3] = src_addr + thread_offset * 16
     v_lshlrev_b32       v1, 4, v0
@@ -207,14 +210,78 @@ L_DST_DIRECT:
     V_ADD_CO_CI_U32     v7, v7, 0x0
 
     // =====================================================
-    // Phase 2: Vectorized copy loop (16-byte chunks)
+    // Phase 2a: Unrolled vectorized loop (4 iterations per check)
+    // Adjusted end: v[6:7] - 3*stride ensures 4 iterations are safe
     // =====================================================
 
-L_INDIRECT_VEC_LOOP:
+L_INDIRECT_VEC_UNROLL:
+    // Compute adjusted_end = end - 3*stride in v[12:13] (must be 64-bit aligned for gfx1250)
+    // Recompute each iteration since v[8:11] are clobbered by data loads
+    v_mov_b32           v12, s13            // v12 = 3*stride
+    v_mov_b32           v13, 0
+    // v[12:13] = v[6:7] - v[12:13] (end - 3*stride)
+    .if (.amdgcn.gfx_generation_number >= 10)
+      v_sub_co_u32      v12, vcc_lo, v6, v12
+      v_sub_co_ci_u32   v13, vcc_lo, v7, v13, vcc_lo
+    .elseif (.amdgcn.gfx_generation_number >= 9)
+      v_sub_co_u32      v12, vcc, v6, v12
+      v_subb_co_u32     v13, vcc, v7, v13, vcc
+    .else
+      v_sub_u32         v12, vcc, v6, v12
+      v_subb_u32        v13, vcc, v7, v13, vcc
+    .endif
+
+    // Check if 4 full iterations fit: ptr < end - 3*stride
+    V_CMP_LT_U64        v[2:3], v[12:13]
+    s_cbranch_vccz      L_INDIRECT_VEC_SINGLE
+
+    // Unrolled vectorized copy (4 iterations, bounds guaranteed safe)
+    flat_load_dwordx4   v[8:11], v[2:3]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[4:5], v[8:11]
+
+    V_ADD_CO_U32        v2, v2, s12
+    V_ADD_CO_CI_U32     v3, v3, 0x0
+    V_ADD_CO_U32        v4, v4, s12
+    V_ADD_CO_CI_U32     v5, v5, 0x0
+
+    flat_load_dwordx4   v[8:11], v[2:3]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[4:5], v[8:11]
+
+    V_ADD_CO_U32        v2, v2, s12
+    V_ADD_CO_CI_U32     v3, v3, 0x0
+    V_ADD_CO_U32        v4, v4, s12
+    V_ADD_CO_CI_U32     v5, v5, 0x0
+
+    flat_load_dwordx4   v[8:11], v[2:3]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[4:5], v[8:11]
+
+    V_ADD_CO_U32        v2, v2, s12
+    V_ADD_CO_CI_U32     v3, v3, 0x0
+    V_ADD_CO_U32        v4, v4, s12
+    V_ADD_CO_CI_U32     v5, v5, 0x0
+
+    flat_load_dwordx4   v[8:11], v[2:3]
+    S_WAITCNT_LOADCNT
+    flat_store_dwordx4  v[4:5], v[8:11]
+
+    V_ADD_CO_U32        v2, v2, s12
+    V_ADD_CO_CI_U32     v3, v3, 0x0
+    V_ADD_CO_U32        v4, v4, s12
+    V_ADD_CO_CI_U32     v5, v5, 0x0
+
+    s_branch            L_INDIRECT_VEC_UNROLL
+
+    // =====================================================
+    // Phase 2b: Single-iteration cleanup (handles remaining 0-3 iterations)
+    // =====================================================
+
+L_INDIRECT_VEC_SINGLE:
     V_CMP_LT_U64        v[2:3], v[6:7]
     s_cbranch_vccz      L_INDIRECT_VEC_DONE
 
-    // Unrolled vectorized copy (4 iterations of 16 bytes each)
     flat_load_dwordx4   v[8:11], v[2:3]
     S_WAITCNT_LOADCNT
     flat_store_dwordx4  v[4:5], v[8:11]
@@ -224,35 +291,7 @@ L_INDIRECT_VEC_LOOP:
     V_ADD_CO_U32        v4, v4, s12
     V_ADD_CO_CI_U32     v5, v5, 0x0
 
-    flat_load_dwordx4   v[8:11], v[2:3]
-    S_WAITCNT_LOADCNT
-    flat_store_dwordx4  v[4:5], v[8:11]
-
-    V_ADD_CO_U32        v2, v2, s12
-    V_ADD_CO_CI_U32     v3, v3, 0x0
-    V_ADD_CO_U32        v4, v4, s12
-    V_ADD_CO_CI_U32     v5, v5, 0x0
-
-    flat_load_dwordx4   v[8:11], v[2:3]
-    S_WAITCNT_LOADCNT
-    flat_store_dwordx4  v[4:5], v[8:11]
-
-    V_ADD_CO_U32        v2, v2, s12
-    V_ADD_CO_CI_U32     v3, v3, 0x0
-    V_ADD_CO_U32        v4, v4, s12
-    V_ADD_CO_CI_U32     v5, v5, 0x0
-
-    flat_load_dwordx4   v[8:11], v[2:3]
-    S_WAITCNT_LOADCNT
-    flat_store_dwordx4  v[4:5], v[8:11]
-
-    // Advance pointers for next loop iteration
-    V_ADD_CO_U32        v2, v2, s12
-    V_ADD_CO_CI_U32     v3, v3, 0x0
-    V_ADD_CO_U32        v4, v4, s12
-    V_ADD_CO_CI_U32     v5, v5, 0x0
-
-    s_branch            L_INDIRECT_VEC_LOOP
+    s_branch            L_INDIRECT_VEC_SINGLE
 
 L_INDIRECT_VEC_DONE:
 

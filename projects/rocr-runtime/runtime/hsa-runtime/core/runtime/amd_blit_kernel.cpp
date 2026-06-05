@@ -1056,7 +1056,7 @@ hsa_status_t BlitKernel::SubmitBroadcastCopyCommand(const void* src, void* const
   // Register async cleanup for dst_list_gpu BEFORE dispatch.
   // Handler fires when signal reaches 0 (after kernel completion).
   // Registering before dispatch allows us to fail fast if registration fails.
-  bool handler_registered = core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+  hsa_status_t handler_status = core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
       core::Signal::Convert(&out_signal), HSA_SIGNAL_CONDITION_EQ, 0,
       [](hsa_signal_value_t, void* arg) -> bool {
         void* buf = arg;
@@ -1065,7 +1065,7 @@ hsa_status_t BlitKernel::SubmitBroadcastCopyCommand(const void* src, void* const
       },
       dst_list_gpu);
 
-  if (!handler_registered) {
+  if (handler_status != HSA_STATUS_SUCCESS) {
     // Handler registration failed - free buffer and return error before dispatch
     hsa_amd_memory_pool_free(dst_list_gpu);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;

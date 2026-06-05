@@ -61,6 +61,7 @@
 #include "core/inc/signal.h"
 #include "core/util/lazy_ptr.h"
 #include "core/util/locks.h"
+#include "core/util/os.h"
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 #include "core/inc/counted_queue_manager.h"
@@ -299,6 +300,24 @@ class GpuAgent : public GpuAgentInt {
   // @brief Override from core::Agent.
   hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                   uint32_t* recommended_ids_mask) override;
+
+  // @brief Pick an SDMA engine from a preferred-engine mask using round-robin.
+  // Returns a blit object index (1-indexed, suitable for GetBlitObject), or 0
+  // if mask is empty. When advance=true (default) the counter is incremented so
+  // successive body assignments spread across engines. Pass advance=false to
+  // peek at the current position without consuming a slot — used when selecting
+  // a coordinator engine so it rotates independently of body assignments.
+  inline uint32_t PickSdmaEngine(uint32_t engine_mask, bool advance = true) {
+    if (!engine_mask) return 0;
+    int count = rocr::os::Popcount(engine_mask);
+    if (count == 1) return rocr::os::Ffs(engine_mask);
+    uint32_t rr = advance ? sdma_rr_index_.fetch_add(1, std::memory_order_relaxed)
+                          : sdma_rr_index_.load(std::memory_order_relaxed);
+    uint32_t m = engine_mask;
+    for (uint32_t i = 0, pick = rr % count; i < pick; ++i)
+      m &= m - 1;
+    return rocr::os::Ffs(m);
+  }
 
   // @brief Override from core::Agent.
   hsa_status_t DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
@@ -797,17 +816,6 @@ class GpuAgent : public GpuAgentInt {
   // @p out_signal receives completion notification (may be internal for fire-and-forget).
   hsa_status_t DmaCopyIndirect(const hsa_amd_memory_copy_op_t& op,
                                std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
-
-  // Indirect copy: src and/or dst is a pointer-to-pointer slot that the SDMA
-  // engine dereferences just before performing the transfer.  Whatever fills
-  // the slot (e.g. a kernel or a host-side write) is expected to synchronize
-  // with this op through `dep_signals`: `dep_signals[0]` maps to the packet's
-  // hardware WAIT field and the remaining entries are emitted as 64-bit poll
-  // commands ahead of the copy.  The runtime itself therefore does not need
-  // to know how, or by whom, the slot gets populated.
-  hsa_status_t DmaCopyIndirect(
-      const hsa_amd_memory_copy_op_t& op,
-      std::vector<core::Signal*>& dep_signals);
 
   // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
   // swap and indirect operations.  Submits prologue, per-entry bodies

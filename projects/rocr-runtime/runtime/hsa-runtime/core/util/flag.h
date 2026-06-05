@@ -349,6 +349,11 @@ class Flag {
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
     sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
+    // HSA_FORCE_BLIT_KERNEL_BROADCAST: 1=force BlitKernel shader path for broadcast copies
+    // (bypasses SDMA HW broadcast even when supported). Useful for testing/debugging.
+    var = os::GetEnvVar("HSA_FORCE_BLIT_KERNEL_BROADCAST");
+    force_blit_kernel_broadcast_ = (var == "1") ? true : false;
+
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -493,6 +498,8 @@ class Flag {
 
   SDMA_OVERRIDE sdma_linear_b2b() const { return sdma_linear_b2b_; }
 
+  bool force_blit_kernel_broadcast() const { return force_blit_kernel_broadcast_; }
+
   [[nodiscard]]
   bool core_dump_disable() const { return core_dump_disable_; }
 
@@ -573,6 +580,7 @@ class Flag {
   bool enable_dtif_;
   bool enable_dxg_detection_;
   SDMA_OVERRIDE sdma_linear_b2b_ = SDMA_DEFAULT;
+  bool force_blit_kernel_broadcast_ = false;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;
