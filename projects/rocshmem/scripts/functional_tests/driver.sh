@@ -1,3 +1,4 @@
+#!/bin/bash
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -21,8 +22,6 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ###############################################################################
-
-#!/bin/bash
 if true || tty -s; then
   PRETTY_FAILED="\033[1;31mFAILED\033[0m"
   PRETTY_PASSED="\033[1;32mPASSED\033[0m"
@@ -687,6 +686,8 @@ TestTiles() {
 TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
+  # Batch rotation allocates volume*batch*2 = 20 GiB; use 22 GiB to leave headroom
+  ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((22*1024*1024*1024))}
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
