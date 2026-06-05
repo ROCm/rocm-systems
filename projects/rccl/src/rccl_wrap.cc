@@ -457,11 +457,14 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     }
   } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
     threshold = 4194304;
+  } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250") && threshold != -1) {
+    threshold = 134217728;
+    INFO(NCCL_INIT, "RCCL Direct AllGather threshold in gfx1250 is set to: %zu", threshold);
   }
 
-  comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
+  comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
 
-  int rankMultiple = comm->nRanks % 8;
+  int rankMultiple = comm->nRanks % 4;
 
   //return (comm->enableCustColl && (comm->nNodes > 1) && (msgSize <= threshold) && (threshold != -1))
   return (comm->enableCustColl && (msgSize <= threshold) && (threshold != -1) && !rankMultiple)

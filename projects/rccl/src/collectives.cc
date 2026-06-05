@@ -225,7 +225,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     info.useDirect = true;
     return ncclEnqueueCheck(&info);
   } else {
-     // use ring allgather
+     // force direct allgather
+     info.useDirect = true;
      return ncclEnqueueCheck(&info);
   }
 }

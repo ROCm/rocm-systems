@@ -3164,6 +3164,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           // kernel handles isCopy = (sendRank == self) as a local memcpy
           // (see device/sendrecv.h's RunWorkBatch<ncclFuncSendRecv,...>).
           size_t rankOffset = info->count * ncclTypeSize(info->datatype);
+          INFO(NCCL_COLL, "Enqueue: Direct AllGather: sendbuff %p, recvbuff %p, count %zu, datatype %d, root %d, useDirect %d", info->sendbuff, info->recvbuff, info->count, info->datatype, info->root, info->useDirect);
           for (int r=0; r<comm->nRanks; r++) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype, r));
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)((char*)info->recvbuff + r*rankOffset), info->count, info->datatype, r));
