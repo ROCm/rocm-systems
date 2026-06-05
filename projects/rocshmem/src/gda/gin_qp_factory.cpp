@@ -1213,34 +1213,74 @@ void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set) {
   }
   if (qp_set->gpu_qps) (void)hipFree(qp_set->gpu_qps);
 
-  // Destroy IBV QPs
-  for (auto *qp : qp_set->ibv_qps) {
-    if (qp) ibv.destroy_qp(qp);
-  }
-#if defined(GDA_MLX5)
-  for (auto &mq : qp_set->mlx5_qps) {
-    qp_set->mlx5dv.destroy_qp(mq);
-  }
+#if defined(GDA_BNXT)
+  if (qp_set->provider == GDAProvider::BNXT) {
+    for (size_t i = 0; i < qp_set->bnxt_qps.size(); i++) {
+      auto &bqp = qp_set->bnxt_qps[i];
+
+      if (qp_set->ibv_qps[i])
+        (void)qp_set->bnxt_re_dv.destroy_qp(qp_set->ibv_qps[i]);
+
+      if (bqp.db_region_attr) {
+        (void)hipHostUnregister(bqp.db_region_attr->dbr);
+        if (qp_set->bnxt_re_dv.free_db_region)
+          (void)qp_set->bnxt_re_dv.free_db_region(qp_set->nic.context, bqp.db_region_attr);
+      }
+
+      if (bqp.attr.rq_umem_handle)
+        (void)qp_set->bnxt_re_dv.umem_dereg(bqp.attr.rq_umem_handle);
+      if (bqp.attr.sq_umem_handle)
+        (void)qp_set->bnxt_re_dv.umem_dereg(bqp.attr.sq_umem_handle);
+
+      if (bqp.sq_buf) qp_set->qp_allocator->deallocate(bqp.sq_buf);
+      if (bqp.rq_buf) qp_set->qp_allocator->deallocate(bqp.rq_buf);
+
+      if (bqp.sq_dmabuf_fd > 0) close(bqp.sq_dmabuf_fd);
+      if (bqp.rq_dmabuf_fd > 0) close(bqp.rq_dmabuf_fd);
+    }
+
+    for (size_t i = 0; i < qp_set->bnxt_scqs.size(); i++) {
+      auto &scq = qp_set->bnxt_scqs[i];
+      auto &rcq = qp_set->bnxt_rcqs[i];
+
+      if (scq.cq) (void)qp_set->bnxt_re_dv.destroy_cq(scq.cq);
+      if (rcq.cq) (void)qp_set->bnxt_re_dv.destroy_cq(rcq.cq);
+
+      if (scq.umem_handle) (void)qp_set->bnxt_re_dv.umem_dereg(scq.umem_handle);
+      if (rcq.umem_handle) (void)qp_set->bnxt_re_dv.umem_dereg(rcq.umem_handle);
+
+      if (scq.buf) qp_set->qp_allocator->deallocate(scq.buf);
+      if (rcq.buf) qp_set->qp_allocator->deallocate(rcq.buf);
+
+      if (scq.dmabuf_fd > 0) close(scq.dmabuf_fd);
+      if (rcq.dmabuf_fd > 0) close(rcq.dmabuf_fd);
+    }
+
+    delete qp_set->qp_allocator;
+  } else
 #endif
-
-  // Destroy CQs
-  for (auto *cq : qp_set->ibv_cqs) {
-    if (cq) ibv.destroy_cq(cq);
+#if defined(GDA_MLX5)
+  if (qp_set->provider == GDAProvider::MLX5) {
+    for (auto &mq : qp_set->mlx5_qps)
+      qp_set->mlx5dv.destroy_qp(mq);
+  } else
+#endif
+  {
+    // IONIC and fallback: standard verbs cleanup
+    for (auto *qp : qp_set->ibv_qps)
+      if (qp) ibv.destroy_qp(qp);
+    for (auto *cq : qp_set->ibv_cqs)
+      if (cq) ibv.destroy_cq(cq);
   }
 
-  // Close IB device
-  if (qp_set->nic.pd_parent) ibv.dealloc_pd(qp_set->nic.pd_parent);
+  // PDs and device
   if (qp_set->nic.pd_uxdma[0]) ibv.dealloc_pd(qp_set->nic.pd_uxdma[0]);
   if (qp_set->nic.pd_uxdma[1]) ibv.dealloc_pd(qp_set->nic.pd_uxdma[1]);
+  if (qp_set->nic.pd_parent) ibv.dealloc_pd(qp_set->nic.pd_parent);
   if (qp_set->nic.pd_orig) ibv.dealloc_pd(qp_set->nic.pd_orig);
   if (qp_set->nic.context) ibv.close_device(qp_set->nic.context);
 
-  // Close DV library
   if (qp_set->dv_handle) dlclose(qp_set->dv_handle);
-
-#if defined(GDA_BNXT)
-  delete qp_set->qp_allocator;
-#endif
 
   delete qp_set;
 }
