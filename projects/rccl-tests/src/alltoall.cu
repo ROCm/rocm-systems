@@ -24,15 +24,14 @@ static bool shouldSkipRocshmemPreInit() {
   const char* skip = getenv("RCCL_TEST_SKIP_ROCSHMEM_PREINIT");
   if (skip && skip[0] == '1') return true;
 
-  // GIN_ROCSHMEM (NCCL_GIN_TYPE=4) calls rocshmem_malloc during ncclDevCommCreate.
-  // gin-anvil images build librccl with ENABLE_ROCSHMEM_GIN only (see Dockerfile:
-  // -DENABLE_ROCSHMEM_GIN=ON without ENABLE_ROCSHMEM), so init.cc never calls
-  // rocshmem_init even when RCCL_ROCSHMEM_ENABLE=1. The test binary must preinit.
+  // GIN_ROCSHMEM (NCCL_GIN_TYPE=4) and GIN_ANVIL (NCCL_GIN_TYPE=5) need rocshmem
+  // initialized before ncclCommInit. librccl is built with ENABLE_ROCSHMEM_GIN only
+  // (not ENABLE_ROCSHMEM), so init.cc never calls rocshmem_init.
   const char* ginTypeEnv = getenv("NCCL_GIN_TYPE");
   if (ginTypeEnv) {
     char* end = nullptr;
     long ginType = strtol(ginTypeEnv, &end, 0);
-    if (end != ginTypeEnv && ginType == 4) return false;
+    if (end != ginTypeEnv && (ginType == 4 || ginType == 5)) return false;
   }
 
   // GIN proxy/anvil and other RCCL GIN tests set RCCL_ROCSHMEM_ENABLE explicitly.
