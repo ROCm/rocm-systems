@@ -43,9 +43,11 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   // Calculate start index for each work group
+  // Each workgroup owns `batch` contiguous slots of `size` bytes.
   source += size * batch * wg_id;
   dest += size * batch * wg_id;
 
+  // Choose start_slot so that after `skip` iterations slot wraps to 0.
   int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {

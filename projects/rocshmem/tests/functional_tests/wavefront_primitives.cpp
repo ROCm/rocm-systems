@@ -48,9 +48,11 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
   int wf_id = get_flat_block_id() / wf_size;
   int wg_offset = wg_id * ((get_flat_block_size() - 1 ) / wf_size + 1);
   int idx = wf_id + wg_offset;
+  // Each wavefront owns `batch` contiguous slots of `size` bytes.
   source += size * batch * idx;
   dest += size * batch * idx;
 
+  // Choose start_slot so that after `skip` iterations slot wraps to 0.
   int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {

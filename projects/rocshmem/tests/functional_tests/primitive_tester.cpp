@@ -54,9 +54,11 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
   /**
    * Calculate start index for each thread within the grid
    */
+  // Each thread owns `batch` contiguous slots of `size` bytes.
   source += size * batch * get_flat_id();
   dest += size * batch * get_flat_id();
 
+  // Choose start_slot so that after `skip` iterations slot wraps to 0.
   int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {
