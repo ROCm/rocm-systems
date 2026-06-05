@@ -139,14 +139,11 @@ std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
 
-// Shared implementation behind the public shutdown(). reset_gpu_perf_counter must be
-// false on the post-fork reinit path: that reinit only exists to refresh AMD SMI device
-// handles, but the rocprofiler-sdk GPU perf-counter collector is registered once (from
-// sdk_tool_configure) and is never recreated by setup(). Its SDK contexts are owned by
-// the parent and survive fork(), so tearing it down here would permanently disable GPU
-// hardware-counter sampling. Only the real finalize (public shutdown()) resets it.
+// Tears down the AMD SMI collector slices and marks the sampler uninitialized.
+// This is the only teardown performed on the post-fork reinit path: that reinit
+// exists solely to refresh AMD SMI device handles in the child.
 void
-shutdown_impl(bool reset_gpu_perf_counter)
+shutdown_amd_smi_collectors()
 {
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
@@ -169,13 +166,22 @@ shutdown_impl(bool reset_gpu_perf_counter)
     }
 
     is_initialized() = false;
+}
+
+// Tears down the rocprofiler-sdk GPU hardware perf-counter collector. This must
+// NOT run on the post-fork reinit path: the collector is registered once (from
+// sdk_tool_configure) and is never recreated by setup(); its SDK contexts are
+// owned by the parent and survive fork(), so tearing it down would permanently
+// disable GPU hardware-counter sampling. Only the real finalize resets it.
+void
+shutdown_gpu_hw_collector()
+{
 #if ROCPROFILER_VERSION >= 600
-    if(reset_gpu_perf_counter)
-    {
-        if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
-        g_gpu_perf_counter_collector.reset();
-        g_gpu_perf_counter_provider.reset();
-    }
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
+    g_gpu_perf_counter_collector.reset();
+    g_gpu_perf_counter_provider.reset();
 #endif
 }
 
@@ -186,7 +192,7 @@ reinit_if_pending()
     if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
 
     LOG_DEBUG("Performing deferred PMC reinit after fork.");
-    shutdown_impl(/*reset_gpu_perf_counter=*/false);
+    shutdown_amd_smi_collectors();
     setup();
 }
 
@@ -284,7 +290,8 @@ setup()
 void
 shutdown()
 {
-    shutdown_impl(/*reset_gpu_perf_counter=*/true);
+    shutdown_amd_smi_collectors();
+    shutdown_gpu_hw_collector();
 }
 
 void
