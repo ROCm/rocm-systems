@@ -46,6 +46,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -5920,11 +5921,12 @@ amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle proce
   int major_version = 3;
   int minor_version = 62;
   int patch_version = 0;
-  bool isDRMVersionSupported = false;
-  ((drm_version->version_major >= major_version) && (drm_version->version_minor >= minor_version) &&
-           (drm_version->version_patchlevel >= patch_version)
-       ? isDRMVersionSupported = true
-       : isDRMVersionSupported = false);
+  // Lexicographic compare so that e.g. 4.0.0 >= 3.62.0 (major dominates, then
+  // minor, then patch) rather than requiring every component to independently
+  // meet or exceed the minimum.
+  bool isDRMVersionSupported = std::tie(drm_version->version_major, drm_version->version_minor,
+                                        drm_version->version_patchlevel) >=
+                               std::tie(major_version, minor_version, patch_version);
   ss << __PRETTY_FUNCTION__ << " | drm_version: " << std::dec << drm_version->version_major << "."
      << drm_version->version_minor << "." << drm_version->version_patchlevel << "\n"
      << " | isDRMVersionSupported: " << (isDRMVersionSupported ? "TRUE" : "FALSE") << "\n"
