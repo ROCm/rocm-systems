@@ -19,6 +19,10 @@
 // Initialize rocshmem before ncclCommInit so that rocshmem_malloc etc. work.
 // Called via test_pre_init_callback from common.cu's main(), after MPI_Init.
 static void rocshmemPreInit(int rank, int nranks) {
+  // Only GIN_TYPE=4 (rocshmem API) needs rocshmem_init.
+  const char *gin_type = getenv("NCCL_GIN_TYPE");
+  if (!gin_type || atoi(gin_type) != 4) return;
+
   // Set the correct GPU before rocshmem_init so that device symbols
   // (ROCSHMEM_CTX_DEFAULT etc.) are initialized on the right device.
   int nGpus = 0;
