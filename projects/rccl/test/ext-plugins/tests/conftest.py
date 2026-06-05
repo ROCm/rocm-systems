@@ -206,7 +206,8 @@ def pytest_runtest_setup(item):
     if item.get_closest_marker("ext_tuner"):
         # The native thread-safety regression builds its own binary from source
         # and does not use the prebuilt plugin .so, so don't skip it on its absence.
-        needs_plugin_so = "test_config_parser_thread_safety" not in item.nodeid
+        test_name = getattr(item, "originalname", item.name)
+        needs_plugin_so = test_name != "test_config_parser_thread_safety"
         if needs_plugin_so and not os.path.exists(PLUGIN_SO):
             pytest.skip(f"Tuner plugin library not found at: {PLUGIN_SO}")
     

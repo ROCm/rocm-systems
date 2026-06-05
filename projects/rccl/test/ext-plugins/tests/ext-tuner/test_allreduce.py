@@ -11,13 +11,13 @@ import warnings
 import pytest
 
 # Native tuner unit-test harness lives in the plugin source tree:
-#   <rccl>/ext-tuner/example/test/{test_plugin.c,Makefile}
+#   <rccl>/plugins/tuner/example/test/{test_plugin.c,Makefile}
 # This file is at <rccl>/test/ext-plugins/tests/ext-tuner/, four levels down.
 NATIVE_TUNER_TEST_DIR = os.path.abspath(
     os.path.join(
         os.path.dirname(__file__),
         "..", "..", "..", "..",
-        "ext-tuner", "example", "test",
+        "plugins", "tuner", "example", "test",
     )
 )
 
@@ -506,10 +506,10 @@ def test_config_parser_thread_safety():
             f"{run.stdout}\n{run.stderr}"
         )
     finally:
-        # Keep the source tree clean of build artifacts.
         subprocess.run(
             ["make", "-C", NATIVE_TUNER_TEST_DIR, "clean"],
             capture_output=True,
             text=True,
+            timeout=120,
         )
 
