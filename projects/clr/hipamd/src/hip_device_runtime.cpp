@@ -603,8 +603,7 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig) {
 
   // No way to set cache config yet.
 
-  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(
-      amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig)));
+  hip::getCurrentDevice()->devices()[0]->UpdateGroupMemCarveout(cacheConfig);
   HIP_RETURN(hipSuccess);
 }
 
