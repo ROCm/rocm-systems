@@ -178,7 +178,7 @@ ExternalProject_Add(hotswap_rocr
   BUILD_COMMAND
     ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel ${MIRAGE_HOTSWAP_JOBS}
   INSTALL_COMMAND
-    ${CMAKE_COMMAND} -DHS_ROOT=<BINARY_DIR> -DHS_RECURSE_ANCHOR=libhsa-runtime64.so.1
+    ${CMAKE_COMMAND} -DHS_ROOT=<BINARY_DIR> -DHS_RECURSE_ANCHOR=libhsa-runtime64.so
       -DHS_GLOB=libhsa-runtime64.so* -DHS_DST=${_hs_libdir} -P ${_hs_copy}
   USES_TERMINAL_BUILD   TRUE
   USES_TERMINAL_INSTALL TRUE

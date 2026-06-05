@@ -21,7 +21,7 @@ tree:
 ```
 <hotswap-root>/
   lib/        libhotswap_intercept.so   # HIP intercept, LD_PRELOADed
-              libhsa-runtime64.so.1     # HotSwap-patched ROCR runtime
+              libhsa-runtime64.so     # HotSwap-patched ROCR runtime
               libamd_comgr.so           # COMGR transpiler
   llvm-tools/ llc llvm-mc lld ld.lld    # the transpiler shells out to these
   runtime/hotswap_py/                   # python adapter runtime
@@ -106,7 +106,7 @@ relative to the binary); no extra configuration is needed for an in-tree build.
    `llvm-project` HotSwap fork. The in-tree
    [`../llvm-project-hotswap`](../llvm-project-hotswap) checkout is used as the
    source by default to avoid re-cloning llvm-project.
-2. **HotSwap-patched ROCR** (`libhsa-runtime64.so.1`), from the `rocm-systems`
+2. **HotSwap-patched ROCR** (`libhsa-runtime64.so`), from the `rocm-systems`
    HotSwap fork (built with `ROCR_ENABLE_HOTSWAP_COMGR_ADAPTER=ON`).
 3. **HIP intercept** (`libhotswap_intercept.so`) + the python runtime, from the
    HotSwap testing repo.
@@ -133,7 +133,7 @@ helper, or an SSH rewrite).
 flowchart TD
     ENV["HOTSWAP_* env contract<br/>LD_PRELOAD=libhotswap_intercept.so<br/>LD_LIBRARY_PATH=…/hotswap/lib"] -->|set by mirage| APP
     APP["ROCm app"] -->|HIP calls intercepted| INT["libhotswap_intercept.so"]
-    INT -->|patched runtime shadows system| ROCR["libhsa-runtime64.so.1<br/>(HotSwap-patched ROCR)"]
+    INT -->|patched runtime shadows system| ROCR["libhsa-runtime64.so<br/>(HotSwap-patched ROCR)"]
     ROCR -->|transpiles gfx1250 → gfx942/gfx950<br/>at code-object load| COMGR["libamd_comgr.so<br/>(COMGR transpiler)"]
     COMGR -->|shells out to| TOOLS["llc / llvm-mc / lld"]
     ROCR -->|dispatches rewritten kernels| GPU["real GPU (gfx942 / gfx950)"]

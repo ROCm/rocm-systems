@@ -13,11 +13,11 @@
 #   HS_RECURSE_ANCHOR  Optional. When set, the file with this name is located
 #                      recursively under HS_ROOT and its parent directory is
 #                      used as the glob base instead of HS_ROOT (ROCR buries
-#                      libhsa-runtime64.so.1 in a build subdirectory whose path
+#                      libhsa-runtime64.so in a build subdirectory whose path
 #                      is not known ahead of time).
 #
 # FOLLOW_SYMLINK_CHAIN is used so versioned SONAME links (e.g.
-# libhsa-runtime64.so -> libhsa-runtime64.so.1) are reproduced verbatim.
+# libhsa-runtime64.so -> libhsa-runtime64.so) are reproduced verbatim.
 
 if(NOT DEFINED HS_ROOT OR NOT DEFINED HS_GLOB OR NOT DEFINED HS_DST)
   message(FATAL_ERROR "hotswap_copy_glob: HS_ROOT, HS_GLOB and HS_DST are required")

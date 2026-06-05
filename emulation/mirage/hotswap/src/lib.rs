@@ -10,7 +10,7 @@
 //! into one tree:
 //!
 //! * `libhotswap_intercept.so` — the HIP intercept, `LD_PRELOAD`ed.
-//! * `libhsa-runtime64.so.1`   — the HotSwap-patched ROCR runtime.
+//! * `libhsa-runtime64.so`   — the HotSwap-patched ROCR runtime.
 //! * `libamd_comgr.so`         — the COMGR transpiler.
 //! * `llvm-tools/`             — `llc`/`llvm-mc`/`lld` the transpiler
 //!   shells out to, plus a `runtime/hotswap_py/` python runtime.
@@ -40,7 +40,7 @@ use mirage_core::session::{SessionHealth, SessionId};
 pub const LIB_NAME: &str = "libhotswap_intercept.so";
 
 /// The HotSwap-patched ROCR runtime, expected alongside [`LIB_NAME`].
-pub const ROCR_LIB: &str = "libhsa-runtime64.so.1";
+pub const ROCR_LIB: &str = "libhsa-runtime64.so";
 
 /// The COMGR transpiler, expected alongside [`LIB_NAME`].
 pub const COMGR_LIB: &str = "libamd_comgr.so";
