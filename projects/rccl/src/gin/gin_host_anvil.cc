@@ -36,6 +36,9 @@ struct ginAnvilCtx {
   void** queuesHost;
   uint64_t** signalsBaseHost;
 
+  uint64_t* signalsAlloc;   // rocshmem_malloc base (all contexts); remote SDMA atomics require symmetric heap
+  uint64_t* countersAlloc;  // hipMalloc base (local-only)
+
   bool hasError;
 };
 
@@ -79,31 +82,28 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   NCCLCHECK(ncclDevrInitOnce(comm));
   NCCLCHECK(ncclGinRocshmemEnsureInit(comm));
 
-  // Indexed signals are local to this GPU (readSignal / put completion). One
-  // slice per GIN context, matching the proxy layout (signalsDev + contextId*nSignals).
+  // Indexed signals live on the rocSHMEM symmetric heap so peer SDMA signal atomics
+  // (GIN barrier + put completion) can write destination signal cells. hipMalloc pages
+  // fault as read-only under remote SDMA stores.
   if (nSignals > 0) {
     size_t signalsBytes = (size_t)nSignals * (size_t)nContexts * sizeof(uint64_t);
-    if (hipMalloc((void**)&signalsLocal, signalsBytes) != hipSuccess) {
-      WARN("GIN anvil: hipMalloc failed for %d signals x %d contexts", nSignals, nContexts);
+    signalsLocal = (uint64_t*)rocshmem::rocshmem_malloc(signalsBytes);
+    if (signalsLocal == nullptr) {
+      WARN("GIN anvil: rocshmem_malloc failed for %d signals x %d contexts", nSignals, nContexts);
       ret = ncclSystemError;
       goto fail;
     }
+    ctx->signalsAlloc = signalsLocal;
     hipMemset(signalsLocal, 0, signalsBytes);
   }
   if (nCounters > 0) {
     size_t countersBytes = (size_t)nCounters * (size_t)nContexts * sizeof(uint64_t);
     if (hipMalloc((void**)&countersLocal, countersBytes) != hipSuccess) { ret = ncclSystemError; goto fail; }
+    ctx->countersAlloc = countersLocal;
     hipMemset(countersLocal, 0, countersBytes);
   }
 
-  // Exchange the per-rank signal base pointers inside the LSA team (single node assumption).
-  // We rely on symmetric ranks being in the same node subset (devr->lsaRankList).
-
-  // For LSA flat VA accesses, expose signals in that space as well by mapping them
-  // into symmetric memory is non-trivial. For now, we require signals to live in
-  // LSA flat space by allocating them from the symmetric resource window.
-  // If not available, we fall back to exchanging raw pointers (requires peer access).
-  // Enable peer access on all GPUs in the node.
+  // Exchange per-rank signal base pointers (symmetric heap local VAs for SDMA targeting).
   for (int r = 0; r < comm->nRanks; r++) {
     if (r == comm->rank) continue;
     if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) continue;
@@ -199,23 +199,21 @@ fail:
     if (ctx->devHandle) free(ctx->devHandle);
     free(ctx->queuesHost);
     free(ctx->signalsBaseHost);
+    if (ctx->signalsAlloc) rocshmem::rocshmem_free(ctx->signalsAlloc);
+    if (ctx->countersAlloc) hipFree(ctx->countersAlloc);
     free(ctx);
+  } else {
+    if (signalsLocal) rocshmem::rocshmem_free(signalsLocal);
+    if (countersLocal) hipFree(countersLocal);
   }
-  if (signalsLocal) hipFree(signalsLocal);
-  if (countersLocal) hipFree(countersLocal);
   return ret;
 }
 
 ncclResult_t ncclGinAnvilDestroyContext(ncclGin_t*, void* ginCtx) {
   ginAnvilCtx* ctx = (ginAnvilCtx*)ginCtx;
   if (ctx == nullptr) return ncclSuccess;
-  if (ctx->gpuCtxDev) {
-    ncclGinAnvilGPUContext hostCtx;
-    if (hipMemcpy(&hostCtx, ctx->gpuCtxDev, sizeof(hostCtx), hipMemcpyDeviceToHost) == hipSuccess) {
-      if (hostCtx.signals) hipFree(hostCtx.signals);
-      if (hostCtx.counters) hipFree(hostCtx.counters);
-    }
-  }
+  if (ctx->signalsAlloc) rocshmem::rocshmem_free(ctx->signalsAlloc);
+  if (ctx->countersAlloc) hipFree(ctx->countersAlloc);
   if (ctx->queuesDev) hipFree(ctx->queuesDev);
   if (ctx->signalsBaseDev) hipFree(ctx->signalsBaseDev);
   if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
