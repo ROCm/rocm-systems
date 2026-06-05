@@ -106,10 +106,18 @@ def amdsmi_cli_init():
         err: AmdSmiLibraryException if not successful in initializing any drivers
     """
     init_flag = 0
+    cpu_init_disabled = os.environ.get("AMDSMI_DISABLE_CPU_INIT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     if check_amdgpu_driver():
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
         logging.debug("amdgpu driver's initstate is live")
-    if check_amd_hsmp_driver() and hasattr(
+    if cpu_init_disabled:
+        logging.debug("CPU/ESMI init disabled via AMDSMI_DISABLE_CPU_INIT")
+    elif check_amd_hsmp_driver() and hasattr(
         amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles"
     ):
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS

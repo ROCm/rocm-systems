@@ -12,6 +12,7 @@
 #include "core.h"
 #include "xml.h"
 #include "net.h"
+#include "os.h"
 #include "archinfo.h"
 #include <string.h>
 
@@ -43,13 +44,14 @@
 // to GPU traffic consumes more PCI bandwidth.
 #define INTEL_P2P_OVERHEAD(bw) (bw*6/5)
 
-#define NCCL_TOPO_NODE_TYPES 6
+#define NCCL_TOPO_NODE_TYPES 7
 #define GPU 0
 #define PCI 1
 #define NVS 2
 #define CPU 3 // Actually NUMA domains
 #define NIC 4
 #define NET 5
+#define GIN 6
 extern const char* topoNodeTypeStr[];
 
 // We want link types and path types to match as much as possible
@@ -180,7 +182,7 @@ struct ncclTopoNode {
       int arch;
       int vendor;
       int model;
-      cpu_set_t affinity;
+      ncclAffinity affinity;
     }cpu;
     struct {
       uint64_t device;
@@ -243,6 +245,8 @@ ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink
 
 struct ncclTopoNetInfo {
   bool coll;
+  bool gin;
+  bool net;
   // communicator-specific information
   int netPluginIndex;
   bool dmaBufSupport;
@@ -269,6 +273,7 @@ ncclResult_t ncclTopoGetGraphFromXml(struct ncclXmlNode *xmlGraphs, struct ncclT
 ncclResult_t ncclTopoGetXmlFromGraphs(int ngraphs, struct ncclTopoGraph** graphs, struct ncclTopoSystem* system, struct ncclXml *xml);
 
 ncclResult_t ncclTopoGetCompCap(struct ncclTopoSystem* system, int* ccMin, int* ccMax);
+ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, float* bw);
 
 void rcclApplyTuningOverrides(struct ncclTopoSystem* system);
 

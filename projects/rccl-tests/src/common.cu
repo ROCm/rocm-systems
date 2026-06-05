@@ -39,6 +39,8 @@ size_t cache_bytes = 192 * 1024 * 1024; // Use 192MB
 rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo = NULL;
 rcclTestsGetProtocolName_t rcclTestsGetProtocolName = NULL;
 rcclTestsGetAlgoName_t rcclTestsGetAlgoName= NULL;
+rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
+
 static void loadRcclSyms() {
   static void* handle = NULL;
   const char* libname = "librccl.so";
@@ -50,8 +52,9 @@ static void loadRcclSyms() {
       }
   }
   rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     dlsym(handle, "rcclGetAlgoInfo");
-  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(handle,  "rcclGetAlgoName");
-  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(handle,  "rcclGetProtocolName");
+  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(handle, "rcclGetAlgoName");
+  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(handle, "rcclGetProtocolName");
+  rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(handle, "rcclSymKGetInfo");
 }
 
 // RCCL_FLOAT8 support
@@ -1098,10 +1101,23 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           int algo, proto, nchannels;
           const char* algoName = NULL;
           const char* protoName = NULL;
-          TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
-          NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
-          NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
-          PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+          bool fromSymk = false;
+          if (test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER && rcclTestsGetSymkInfo) {
+            if (args->collTest->getSymkInfo) {
+              TESTCHECK(args->collTest->getSymkInfo(args->comms[0], args->nbytes / wordSize(type), type, op, &algo, &proto, &nchannels));
+              fromSymk = true;
+            }
+          }
+          if (!fromSymk) {
+            TESTCHECK(args->collTest->getAlgoProtoChannels(args->comms[0], args->nbytes / wordSize(type), type, &algo, &proto, &nchannels));
+          }
+          if (rcclTestsGetAlgoName && rcclTestsGetProtocolName) {
+            NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
+            NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
+            PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+          } else {
+            PRINT("%8s  %8s  %10s", "N/A", "N/A", "N/A");
+          }
         } else {
           PRINT("%8s  %8s  %10s","N/A", "N/A", "N/A");
         }
@@ -1698,7 +1714,6 @@ int main(int argc, char* argv[], char **envp) {
         break;
       case 'A':
         output_algo_proto_channels = strtol(optarg, NULL, 0);
-        if(rcclTestsGetAlgoInfo == NULL || rcclTestsGetAlgoName == NULL || rcclTestsGetProtocolName == NULL) output_algo_proto_channels = 0;
         break;
       case 'M':
         memory_report = (int)strtol(optarg, NULL, 0);
@@ -1787,6 +1802,26 @@ int main(int argc, char* argv[], char **envp) {
         return 0;
     }
   }
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+  if (output_algo_proto_channels) {
+    const bool haveSymk = (rcclTestsGetSymkInfo != NULL);
+    const bool haveAlgo = (rcclTestsGetAlgoInfo != NULL && rcclTestsGetAlgoName != NULL && rcclTestsGetProtocolName != NULL);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (!haveAlgo && !(local_register == SYMMETRIC_REGISTER && haveSymk)) {
+      output_algo_proto_channels = 0;
+    }
+#else
+    (void)haveSymk;
+    if (!haveAlgo) output_algo_proto_channels = 0;
+#endif
+  }
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  if (output_algo_proto_channels) {
+    if (rcclTestsGetAlgoInfo == NULL || rcclTestsGetAlgoName == NULL || rcclTestsGetProtocolName == NULL)
+      output_algo_proto_channels = 0;
+  }
+#endif
 
   CUDACHECK(cudaGetDeviceCount(&numDevices));
 #ifndef MPI_SUPPORT
