@@ -359,6 +359,9 @@ deviceLib:
   Unit_e8m0_int_conversions_saturation:
     <<: *level_2
     tags: [types]
+  Unit_e8m0_int_conversions_saturation_boundary:
+    <<: *level_2
+    tags: [types]
   Unit_all_fp6_ocp_vector_cvt_interger_data:
     <<: *level_2
     tags: [types]

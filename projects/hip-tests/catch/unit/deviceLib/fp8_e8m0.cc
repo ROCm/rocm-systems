@@ -661,3 +661,41 @@ HIP_TEMPLATE_TEST_CASE(Unit_e8m0_int_conversions_saturation, char, int, long int
     REQUIRE(out[i] == expected_max);
   }
 }
+
+// Boundary-encoding saturation test for 32/64-bit integer types.
+//
+// For these widths, (float)numeric_limits<T>::max() rounds UP to 2^N (e.g.
+// (float)INT32_MAX rounds to 2^31). The e8m0 encoding (127 + N) decodes to
+// exactly 2^N as well, so the saturation comparison `f > max()` evaluated to
+// false at that boundary and the subsequent integer cast was UB per
+// [conv.fpint]/1. The boundary encodings:
+//   int32_t   -> enc 158 (= 127 + 31)
+//   uint32_t  -> enc 159 (= 127 + 32)
+//   int64_t   -> enc 190 (= 127 + 63)
+//   uint64_t  -> enc 191 (= 127 + 64)
+// Verify both the exact-boundary encoding and one step above it saturate to
+// numeric_limits<T>::max().
+HIP_TEMPLATE_TEST_CASE(Unit_e8m0_int_conversions_saturation_boundary, int, unsigned int,
+                       long long int, unsigned long long int) {
+  bool run_on_host = GENERATE(true, false);
+
+  constexpr unsigned int bit_width = sizeof(TestType) * 8u;
+  constexpr unsigned char boundary_enc = static_cast<unsigned char>(
+      127u + bit_width - (std::is_signed_v<TestType> ? 1u : 0u));
+
+  std::vector<unsigned char> in = {boundary_enc, static_cast<unsigned char>(boundary_enc + 1)};
+  std::vector<TestType> out(in.size());
+
+  if (run_on_host) {
+    host_e8m0_saturation_conversions<TestType>(in, out);
+  } else {
+    device_e8m0_saturation_conversions<TestType>(in, out);
+  }
+
+  TestType expected_max = std::numeric_limits<TestType>::max();
+  for (size_t i = 0; i < out.size(); ++i) {
+    INFO("encoding:0x" << std::hex << static_cast<unsigned>(in[i]) << std::dec
+                       << " out:" << out[i] << " expected_max:" << expected_max);
+    REQUIRE(out[i] == expected_max);
+  }
+}
