@@ -904,7 +904,11 @@ GlobalInvVglobal::GlobalInvVglobal(const MachineInst *inst)
   num_dst_ = 0;
 }
 
-void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_vector().invalidate_all(); }
+void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
+  wf.cu().l1_vector().invalidate_all();
+  if (auto *l2 = wf.cu().l2())
+    l2->flush_all(wf.process_id());
+}
 
 GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
     : Vglobal("global_wb", reinterpret_cast<const OpEncoding *>(inst),
@@ -986,7 +990,7 @@ void GlobalAtomicCmpswapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
@@ -1599,7 +1603,7 @@ void GlobalAtomicSwapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
@@ -1646,7 +1650,7 @@ void GlobalAtomicCmpswapB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
@@ -1695,7 +1699,7 @@ void GlobalAtomicAddU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::ADD;
@@ -1742,7 +1746,7 @@ void GlobalAtomicSubU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::SUB;
@@ -1789,7 +1793,7 @@ void GlobalAtomicMinI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
@@ -1838,7 +1842,7 @@ void GlobalAtomicMinU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
@@ -1887,7 +1891,7 @@ void GlobalAtomicMaxI64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
@@ -1936,7 +1940,7 @@ void GlobalAtomicMaxU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
@@ -1985,7 +1989,7 @@ void GlobalAtomicAndB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::AND;
@@ -2032,7 +2036,7 @@ void GlobalAtomicOrB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::OR;
@@ -2079,7 +2083,7 @@ void GlobalAtomicXorB64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::XOR;
@@ -2126,7 +2130,7 @@ void GlobalAtomicIncU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::INC;
@@ -2173,7 +2177,7 @@ void GlobalAtomicDecU64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::DEC;
@@ -2503,7 +2507,7 @@ void GlobalAtomicAddF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
@@ -2757,7 +2761,7 @@ void GlobalAtomicMinNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
@@ -2806,7 +2810,7 @@ void GlobalAtomicMaxNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.nv != 0);
   d->atomic_op = amdgpu::AtomicOp::FMAX;

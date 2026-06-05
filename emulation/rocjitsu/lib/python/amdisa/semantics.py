@@ -1199,7 +1199,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # IEEE 754-2019 binary min/max (VOP3 forms)
     if name.startswith('V_MINIMUM_') or name.startswith('V_MAXIMUM_'):
         _, dt = _split_dtype(name)
-        op = 'fmin' if 'MINIMUM' in name else 'fmax'
+        op = 'minimum' if 'MINIMUM' in name else 'maximum'
         return InstructionSemantics(name, 'vector_binop', operation=op, data_type=dt)
 
     # Dot product with F16/BF16 output
