@@ -5850,11 +5850,13 @@ amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle proce
     } else if (result.is_vm_guest) {
       // hypervisor flag = GUEST (containers inherit this correctly)
       *mode = AMDSMI_VIRTUALIZATION_MODE_GUEST;
-    } else if (!result.is_vm_guest) {
-      // Not VM, safe to say BAREMETAL
+    } else if (result.sysfs_accessible) {
+      // sysfs was readable and showed no active VFs, no vfio-pci binding, and
+      // no hypervisor flag = BAREMETAL
       *mode = AMDSMI_VIRTUALIZATION_MODE_BAREMETAL;
     } else {
-      // Can't determine reliably, return UNKNOWN
+      // sysfs was not accessible and there is no hypervisor flag, so HOST,
+      // PASSTHROUGH, and BAREMETAL cannot be distinguished = UNKNOWN
       *mode = AMDSMI_VIRTUALIZATION_MODE_UNKNOWN;
     }
     return AMDSMI_STATUS_SUCCESS;
