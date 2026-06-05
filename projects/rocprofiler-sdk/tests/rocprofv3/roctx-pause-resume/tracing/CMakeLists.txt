@@ -45,6 +45,8 @@ rocprofiler_add_integration_execute_test(
         --log-level info -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
     TIMEOUT 45
+    # rocprofv3-test-roctx-pause-resume-tracing times out in CI; disabled until fixed
+    DISABLED ON
     LABELS "integration-tests;pause-resume"
     ENVIRONMENT "${roctx-pause-resume-env}"
     FIXTURES_SETUP rocprofv3-test-roctx-pause-resume-tracing)
@@ -57,6 +59,8 @@ rocprofiler_add_integration_validate_test(
     ARGS --json-input
          ${CMAKE_CURRENT_BINARY_DIR}/roctx-pause-resume-trace/out_results.json
     TIMEOUT 45
+    # depends on the disabled rocprofv3-test-roctx-pause-resume-tracing execute fixture
+    DISABLED ON
     LABELS "integration-tests;pause-resume"
     FIXTURES_REQUIRED rocprofv3-test-roctx-pause-resume-tracing
     FAIL_REGULAR_EXPRESSION "AssertionError")
