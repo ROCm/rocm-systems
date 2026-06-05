@@ -1446,7 +1446,15 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             if(counter_collection_bf_records.empty())
                 throw std::runtime_error{
                     "missing rocprofiler_dispatch_counting_service_record_t (header)"};
-            counter_collection_bf_records.back().emplace_back(*profiler_record);
+            auto ritr = std::find_if(counter_collection_bf_records.rbegin(),
+                                     counter_collection_bf_records.rend(),
+                                     [profiler_record](const profile_counting_record& itr) {
+                                         return itr == *profiler_record;
+                                     });
+            if(ritr == counter_collection_bf_records.rend())
+                throw std::runtime_error{
+                    "missing rocprofiler_dispatch_counting_service_record_t (header)"};
+            ritr->emplace_back(*profiler_record);
         }
         else
         {
