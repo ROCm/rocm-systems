@@ -259,6 +259,9 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm, ncclGinConnectionType_t r
                                                   &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
     } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+      NCCLCHECKGOTO(ginState->ncclGin->connect(comm->ginContext, handles, nGinRanks, myGinRank,
+            nContextsPerComm, ginState->ginQueueDepth, listenComm, ginState->ginComms + n),
+          ret, fail);
       NCCLCHECKGOTO(ncclGinAnvilCreateContext(comm, ginState->ginComms[n], localGinDevs[n % nLocalGinDevs],
                                               ginState->signalSpaceSize, ginState->counterSpaceSize,
                                               nContextsPerComm,

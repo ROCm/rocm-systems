@@ -7,6 +7,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 
 #include "gin/gin_host_anvil.h"
+#include "alloc.h"
 #include "bootstrap.h"
 #include "comm.h"
 #include "dev_runtime.h"
@@ -35,8 +36,10 @@ struct ginAnvilCtx {
   uint64_t** signalsBaseHost;
   bool* signalsIpcOpen;     // [nRanks] true if signalsBaseHost[r] was hipIpcOpenMemHandle'd
 
-  uint64_t* signalsAlloc;   // hipMalloc base (all contexts)
+  uint64_t* signalsAlloc;   // ncclCuMemAlloc base (all contexts)
   uint64_t* countersAlloc;  // hipMalloc base (local-only)
+  CUmemGenericAllocationHandle signalsCumemhandle;
+  bool signalsCuMem;
 
   bool hasError;
 };
@@ -105,14 +108,18 @@ static ncclResult_t setupSignalBases(ginAnvilCtx* ctx, struct ncclComm* comm, ui
         ctx->signalsIpcOpen[r] = true;
       }
     } else {
-      ctx->signalsBaseHost[comm->rank] = signalsLocal;
-      NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, ctx->signalsBaseHost, sizeof(uint64_t*)),
-                    ret, fail);
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (r != comm->rank && comm->rankToNode[r] != comm->rankToNode[comm->rank])
-          ctx->signalsBaseHost[r] = nullptr;
-      }
+      WARN("GIN anvil: hipIpcGetMemHandle failed for signals %p; HIP IPC is required for "
+           "cross-GPU SDMA signal atomics (no rocSHMEM API)",
+           (void*)signalsLocal);
+      ret = ncclSystemError;
+      goto fail;
     }
+  }
+
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (r == comm->rank || ctx->signalsBaseHost[r] == nullptr) continue;
+    INFO(NCCL_INIT | NCCL_NET, "GIN anvil: signalsBase[rank %d] peer %d -> %p ipcOpen=%d", comm->rank,
+         r, (void*)ctx->signalsBaseHost[r], ctx->signalsIpcOpen[r] ? 1 : 0);
   }
 
 fail:
@@ -136,6 +143,8 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   ctx->collComm = collComm;
   ctx->nContexts = nContexts;
   ctx->hasError = false;
+  ctx->signalsCuMem = false;
+  ctx->signalsCumemhandle = 0;
 
   // GIN_ANVIL uses MI300 xGMI SDMA and is valid only for single-node jobs.
   if (comm->nNodes > 1) {
@@ -149,13 +158,13 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   if (nSignals > 0) {
     size_t signalsBytes = (size_t)nSignals * (size_t)nContexts * sizeof(uint64_t);
-    if (hipMalloc((void**)&signalsLocal, signalsBytes) != hipSuccess) {
-      WARN("GIN anvil: hipMalloc failed for %d signals x %d contexts", nSignals, nContexts);
-      ret = ncclSystemError;
-      goto fail;
-    }
+    NCCLCHECKGOTO(
+        ncclCuMemAlloc((void**)&signalsLocal, &ctx->signalsCumemhandle, ncclCuMemHandleType,
+                       signalsBytes, comm->memManager),
+        ret, fail);
     ctx->signalsAlloc = signalsLocal;
-    hipMemset(signalsLocal, 0, signalsBytes);
+    ctx->signalsCuMem = true;
+    CUDACHECKGOTO(cudaMemset(signalsLocal, 0, signalsBytes), ret, fail);
   }
   if (nCounters > 0) {
     size_t countersBytes = (size_t)nCounters * (size_t)nContexts * sizeof(uint64_t);
@@ -258,11 +267,13 @@ fail:
     if (ctx->devHandle) free(ctx->devHandle);
     free(ctx->queuesHost);
     freeSignalBases(ctx);
-    if (ctx->signalsAlloc) hipFree(ctx->signalsAlloc);
+    if (ctx->signalsAlloc) {
+      if (ctx->signalsCuMem) NCCLCHECK(ncclCuMemFree(ctx->signalsAlloc, comm->memManager));
+      else hipFree(ctx->signalsAlloc);
+    }
     if (ctx->countersAlloc) hipFree(ctx->countersAlloc);
     free(ctx);
   } else {
-    if (signalsLocal) hipFree(signalsLocal);
     if (countersLocal) hipFree(countersLocal);
   }
   return ret;
@@ -272,7 +283,10 @@ ncclResult_t ncclGinAnvilDestroyContext(ncclGin_t*, void* ginCtx) {
   ginAnvilCtx* ctx = (ginAnvilCtx*)ginCtx;
   if (ctx == nullptr) return ncclSuccess;
   freeSignalBases(ctx);
-  if (ctx->signalsAlloc) hipFree(ctx->signalsAlloc);
+  if (ctx->signalsAlloc) {
+    if (ctx->signalsCuMem) NCCLCHECK(ncclCuMemFree(ctx->signalsAlloc, ctx->comm->memManager));
+    else hipFree(ctx->signalsAlloc);
+  }
   if (ctx->countersAlloc) hipFree(ctx->countersAlloc);
   if (ctx->queuesDev) hipFree(ctx->queuesDev);
   if (ctx->signalsBaseDev) hipFree(ctx->signalsBaseDev);

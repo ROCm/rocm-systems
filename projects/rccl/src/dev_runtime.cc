@@ -1038,6 +1038,12 @@ ncclResult_t ncclDevrCommCreateInternal(
        outDevComm->resourceWindow_inlined.lsaFlatBase, devr->ginEnabled);
 
   if (devr->ginEnabled) {
+    if (nGinConnections <= 0) {
+      WARN("GIN enabled but no GIN connections are available (ginCommCount=%d)",
+           comm->sharedRes->ginState.ginCommCount);
+      ret = ncclInternalError;
+      goto fail_stream_mem_win_signals;
+    }
     outDevComm->ginConnectionCount = nGinConnections;
     outDevComm->ginContextCount = nGinContexts;
     outDevComm->ginSignalCount = ginSignalTotal;
@@ -1061,6 +1067,10 @@ ncclResult_t ncclDevrCommCreateInternal(
       outDevComm->ginNetDeviceTypes[connectionId] = (int)comm->sharedRes->ginState.ginDevHandles[connectionId]->netDeviceType;
       outDevComm->ginHandles[connectionId] = comm->sharedRes->ginState.ginDevHandles[connectionId]->handle;
     }
+    INFO(NCCL_INIT|NCCL_NET, "devComm GIN wired: handle0=%p type0=%d conn=%d ctxBase=%u signals=%d base=%u shadows=%p",
+         outDevComm->ginHandles[0], outDevComm->ginNetDeviceTypes[0], outDevComm->ginConnectionCount,
+         outDevComm->ginContextBase, outDevComm->ginSignalCount, outDevComm->ginSignalBase,
+         (void*)outDevComm->ginSignalShadows);
   }
 
   CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_stream_mem_win_signals);
@@ -1322,7 +1332,21 @@ static ncclResult_t ncclDevCommCreateCopyCB_v22902(struct ncclDevComm const* tmp
   outDevComm->resourceWindow_inlined = tmpDevComm->resourceWindow_inlined;
   outDevComm->lsaMultimem = tmpDevComm->lsaMultimem;
   outDevComm->lsaBarrier = tmpDevComm->lsaBarrier;
-  // No need to copy GIN-specific fields since this is used only if GIN has not been requested.
+  outDevComm->railGinBarrier = tmpDevComm->railGinBarrier;
+
+  // Copy GIN fields when present (e.g. app compiled with older struct layout but runtime enabled GIN).
+  if (tmpDevComm->ginConnectionCount > 0) {
+    outDevComm->ginContextCount = (uint8_t)tmpDevComm->ginContextCount;
+    for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+      outDevComm->ginNetDeviceTypes[i] = tmpDevComm->ginNetDeviceTypes[i];
+      outDevComm->ginHandles[i] = tmpDevComm->ginHandles[i];
+    }
+    outDevComm->ginSignalBase = tmpDevComm->ginSignalBase;
+    outDevComm->ginSignalCount = tmpDevComm->ginSignalCount;
+    outDevComm->ginCounterBase = tmpDevComm->ginCounterBase;
+    outDevComm->ginCounterCount = tmpDevComm->ginCounterCount;
+    outDevComm->ginSignalShadows = tmpDevComm->ginSignalShadows;
+  }
 
   return ncclSuccess;
 }
