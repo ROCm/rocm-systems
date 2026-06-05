@@ -12,6 +12,7 @@ and the ROCpd database.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.gpu,
@@ -41,12 +42,9 @@ def kfd_environment() -> dict[str, str]:
 
 
 @pytest.fixture
-def kfd_rules(validation_rules_dir) -> list[Path]:
-    """Get validation rules for KFD event tests."""
-    rules_dir = validation_rules_dir / "kfd"
-    return [
-        rules_dir / "kfd-rules.json",
-    ]
+def kfd_rules() -> list:
+    """Get native validation rule sets for KFD event tests."""
+    return [rr.kfd_rules]
 
 
 # =============================================================================
@@ -120,7 +118,7 @@ class TestKFD(RocprofsysTest):
         self.assert_rocpd(
             result,
             subtest_name="ROCpd KFD event validation",
-            rules_files=kfd_rules,
+            rule_sets=kfd_rules,
         )
 
     @pytest.mark.timeout(120)
@@ -174,7 +172,7 @@ class TestKFD(RocprofsysTest):
         self.assert_rocpd(
             result,
             subtest_name="ROCpd KFD prefetch validation",
-            rules_files=kfd_rules,
+            rule_sets=kfd_rules,
         )
 
     @pytest.mark.timeout(180)
@@ -238,5 +236,5 @@ class TestKFD(RocprofsysTest):
         self.assert_rocpd(
             result,
             subtest_name="ROCpd KFD pressure validation",
-            rules_files=kfd_rules,
+            rule_sets=kfd_rules,
         )

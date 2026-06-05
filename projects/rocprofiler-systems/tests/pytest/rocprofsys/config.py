@@ -36,7 +36,6 @@ class RocprofsysConfig:
             In install mode, this is the examples/ directory.
         - rocprofsys_tests_dir: Path to rocprofsys tests directory
         - test_output_dir: Path to test output directory
-        - rocpd_validation_rules: Path to rocprofiler-systems rocpd validation rules directory
         - rocm_version: Tuple of (major, minor, patch) of the installed ROCm version
         - is_installed: Whether this is an installed configuration
         - rocprofsys_python: Path to rocprof-sys-python executable
@@ -57,7 +56,6 @@ class RocprofsysConfig:
     rocprofsys_bin_dir: Path
     rocprofsys_examples_dir: Path
     rocprofsys_tests_dir: Path
-    rocpd_validation_rules: Path
     test_output_dir: Path
     rocprofsys_python: Optional[Path] = None
     rocprofsys_site_packages: Optional[Path] = None
@@ -538,7 +536,6 @@ def discover_install_config(
 
     examples_dir = install_dir / "share" / "rocprofiler-systems" / "examples"
     tests_dir = install_dir / "share" / "rocprofiler-systems" / "tests"
-    rocpd_validation_rules = tests_dir / "rocpd-validation-rules"
 
     # Create a temporary directory for test outputs
     try:
@@ -573,7 +570,6 @@ def discover_install_config(
         rocprofsys_bin_dir=bin_dir,
         rocprofsys_examples_dir=examples_dir,
         rocprofsys_tests_dir=tests_dir,
-        rocpd_validation_rules=rocpd_validation_rules,
         test_output_dir=output_dir,
         rocm_version=_get_rocm_version(rocm_optional=rocm_optional),
         is_installed=True,
@@ -675,7 +671,6 @@ def discover_build_config(
         rocprofsys_bin_dir=bin_dir,
         rocprofsys_examples_dir=build_dir,  # Example binaries are (almost always) in root of build directory
         rocprofsys_tests_dir=tests_dir,
-        rocpd_validation_rules=tests_dir / "rocpd-validation-rules",
         test_output_dir=output_dir,
         rocm_version=_get_rocm_version(rocm_optional=rocm_optional),
         is_installed=False,

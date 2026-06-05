@@ -7,8 +7,8 @@ Tests for the jpegdecode example.
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.gpu,
@@ -35,16 +35,15 @@ def jpeg_decode_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def jpeg_decode_rules(validation_rules_dir, gpu_info) -> list[Path]:
-    """Get validation rules for JPEG decode tests."""
-    rules_dir = validation_rules_dir / "jpeg-decode"
+def jpeg_decode_rules(gpu_info) -> list:
+    """Get native validation rule sets for JPEG decode tests."""
     rules = [
-        validation_rules_dir / "default-rules.json",
-        rules_dir / "validation-rules.json",
-        rules_dir / "sdk-metrics-rules.json",
+        rr.default_rules,
+        rr.jpeg_validation_rules,
+        rr.jpeg_sdk_metrics_rules,
     ]
     if "instinct" in gpu_info.categories:
-        rules.append(rules_dir / "amd-smi-rules.json")
+        rules.append(rr.jpeg_amd_smi_rules)
     return rules
 
 
@@ -89,4 +88,4 @@ class TestJPEGDecode(RocprofsysTest):
                     ["JPEG Busy"] if "instinct" in gpu_info.categories else None
                 ),
             )
-            self.assert_rocpd(result, rules_files=jpeg_decode_rules)
+            self.assert_rocpd(result, rule_sets=jpeg_decode_rules)

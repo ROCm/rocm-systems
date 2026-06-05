@@ -18,14 +18,7 @@ endif()
 #
 # ------------------------------------------------------------------------------#
 
-set(ROCPROFSYS_PYTHON_VALIDATION_FILES
-    ${CMAKE_CURRENT_LIST_DIR}/check_amd_smi_metrics.py
-    ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
-    ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py
-    ${CMAKE_CURRENT_LIST_DIR}/validate-rocpd.py
-    ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py
-    ${CMAKE_CURRENT_LIST_DIR}/validate-unified-memory.py
-)
+set(ROCPROFSYS_PYTHON_VALIDATION_FILES ${CMAKE_CURRENT_LIST_DIR}/check_amd_smi_metrics.py)
 
 set(ROCPROFSYS_TEST_SCRIPTS
     ${CMAKE_CURRENT_LIST_DIR}/run-rocprof-sys-pid.sh
@@ -62,10 +55,6 @@ add_custom_target(
         ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_LIST_DIR}/README.md
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     COMMAND
-        ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
-        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/rocpd-validation-rules
-    COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_TEST_SCRIPTS}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
 )
@@ -81,11 +70,6 @@ if(ROCPROFSYS_INSTALL_TESTING)
     # Python Validation scripts
     install(
         PROGRAMS ${ROCPROFSYS_PYTHON_VALIDATION_FILES}
-        DESTINATION share/rocprofiler-systems/tests
-        COMPONENT rocprofiler-systems-tests
-    )
-    install(
-        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules
         DESTINATION share/rocprofiler-systems/tests
         COMPONENT rocprofiler-systems-tests
     )

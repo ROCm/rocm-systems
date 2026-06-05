@@ -8,7 +8,7 @@ Python tests.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
-from pathlib import Path
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [pytest.mark.python]
 
@@ -23,19 +23,13 @@ def python_rocpd_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def python_source_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
-    rules_dir = validation_rules_dir / "python"
-    return [
-        rules_dir / "python-source-rules.json",
-    ]
+def python_source_rocpd_rules() -> list:
+    return [rr.python_source_rules]
 
 
 @pytest.fixture
-def python_builtin_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
-    rules_dir = validation_rules_dir / "python"
-    return [
-        rules_dir / "python-builtin-rules.json",
-    ]
+def python_builtin_rocpd_rules() -> list:
+    return [rr.python_builtin_rules]
 
 
 @pytest.fixture(scope="session")
@@ -203,7 +197,7 @@ class TestPython(RocprofsysTest):
             )
             self.assert_rocpd(
                 result,
-                rules_files=python_builtin_rocpd_rules,
+                rule_sets=python_builtin_rocpd_rules,
             )
 
     @pytest.mark.timeout(120)
@@ -259,5 +253,5 @@ class TestPython(RocprofsysTest):
         )
         self.assert_rocpd(
             result,
-            rules_files=python_source_rocpd_rules,
+            rule_sets=python_source_rocpd_rules,
         )

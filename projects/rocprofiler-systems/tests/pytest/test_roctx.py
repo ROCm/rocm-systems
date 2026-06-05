@@ -7,8 +7,8 @@ Tests for the ROCTx marker API integration with rocprofiler-systems.
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.gpu,
@@ -33,13 +33,12 @@ def roctx_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def roctx_rules(validation_rules_dir: Path) -> list[Path]:
-    """Get validation rules for rocTX tests."""
-    rules_dir = validation_rules_dir / "roctx"
+def roctx_rules() -> list:
+    """Get native validation rule sets for rocTX tests."""
     return [
-        rules_dir / "validation-rules.json",
-        rules_dir / "amd-smi-rules.json",
-        rules_dir / "sdk-metrics-rules.json",
+        rr.roctx_validation_rules,
+        rr.roctx_amd_smi_rules,
+        rr.roctx_sdk_metrics_rules,
     ]
 
 
@@ -161,5 +160,5 @@ class TestROCTx(RocprofsysTest):
         )
         self.assert_rocpd(
             result,
-            rules_files=roctx_rules,
+            rule_sets=roctx_rules,
         )

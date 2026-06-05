@@ -8,7 +8,7 @@ Tests for RCCL
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
-from pathlib import Path
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.rccl,
@@ -41,12 +41,9 @@ def rccl_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def rccl_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
-    """Get validation rules for RCCL rocpd tests."""
-    rules_dir = validation_rules_dir / "rccl"
-    return [
-        rules_dir / "rccl-comm-rules.json",
-    ]
+def rccl_rocpd_rules() -> list:
+    """Get native validation rule sets for RCCL rocpd tests."""
+    return [rr.rccl_comm_rules]
 
 
 # =============================================================================
@@ -149,4 +146,4 @@ class TestRCCL(RocprofsysTest):
                 categories=["rocm_rccl_api"],
                 counter_names=["RCCL Comm"],
             )
-            self.assert_rocpd(result, rules_files=rccl_rocpd_rules)
+            self.assert_rocpd(result, rule_sets=rccl_rocpd_rules)

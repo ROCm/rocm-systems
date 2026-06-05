@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for the standalone unified-memory validator."""
+"""Unit tests for the in-process unified-memory validator."""
 
 from __future__ import annotations
 

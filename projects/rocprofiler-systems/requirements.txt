@@ -18,3 +18,6 @@ pytest-cov>=4.0.0
 perfetto>=0.7.0
 typing-extensions>=4.0.0
 numpy>=1.22
+# Required by the in-process rocprofsys_validator framework (Perfetto/RocPD/timemory
+# readers return pandas DataFrames).
+pandas>=2.0

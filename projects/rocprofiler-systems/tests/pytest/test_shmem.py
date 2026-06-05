@@ -9,8 +9,8 @@ from __future__ import annotations
 import re
 import subprocess
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys.rocpd_rules import shmem_rules as shmem_rule_set
 
 pytestmark = [
     pytest.mark.shmem,
@@ -36,11 +36,8 @@ def shmem_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def shmem_rules(validation_rules_dir: Path) -> list[Path]:
-    rules_dir = validation_rules_dir / "shmem"
-    return [
-        rules_dir / "validation-rules.json",
-    ]
+def shmem_rules() -> list:
+    return [shmem_rule_set]
 
 
 @pytest.fixture(scope="session")
@@ -115,4 +112,4 @@ class TestShmem(RocprofsysTest):
                 counts=[1, 1],
                 depths=[0, 1],
             )
-            self.assert_rocpd(result, rules_files=shmem_rules)
+            self.assert_rocpd(result, rule_sets=shmem_rules)

@@ -7,8 +7,8 @@ Tests for OpenMP integration with rocprofiler-systems.
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [pytest.mark.openmp, pytest.mark.ci_enable]
 
@@ -82,12 +82,11 @@ def ompt_no_tmp_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.fixture
-def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
-    """Get validation rules for OpenMP target tests."""
-    rules_dir = validation_rules_dir / "openmp-target"
+def openmp_target_rules() -> list:
+    """Get native validation rule sets for OpenMP target tests."""
     return [
-        rules_dir / "kernel-rules.json",
-        rules_dir / "sdk-metrics-rules.json",
+        rr.openmp_kernel_rules,
+        rr.openmp_sdk_metrics_rules,
     ]
 
 
@@ -229,7 +228,7 @@ class TestOpenMPTarget(RocprofsysTest):
         self.assert_regex(result)
 
         if mode == "sampling":
-            self.assert_rocpd(result, rules_files=openmp_target_rules)
+            self.assert_rocpd(result, rule_sets=openmp_target_rules)
             self.assert_perfetto(
                 result,
                 subtest_name="Perfetto Kernel Dispatch Validation",

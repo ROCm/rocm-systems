@@ -50,6 +50,7 @@ from rocprofsys import (
     PythonRunner,
     safe_remove,
 )
+from rocprofsys.rocpd_rules import default_rules as _default_rocpd_rules
 
 # Key for storing the single test result on pytest items
 # Item-level stash keys
@@ -1379,7 +1380,6 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Bin dir:", rocprof_config.rocprofsys_bin_dir),
         _row("Tests dir:", rocprof_config.rocprofsys_tests_dir),
         _row("Examples dir:", rocprof_config.rocprofsys_examples_dir),
-        _row("Validation dir:", rocprof_config.rocpd_validation_rules),
         "-" * 70,
         "Python:",
         _row("Site packages:", rocprof_config.rocprofsys_site_packages),
@@ -1719,12 +1719,6 @@ def gpu_info() -> GPUInfo:
 def tests_dir(rocprof_config) -> Path:
     """Path to tests directory."""
     return rocprof_config.rocprofsys_tests_dir
-
-
-@pytest.fixture(scope="session")
-def validation_rules_dir(rocprof_config) -> Path:
-    """Path to validation rules directory."""
-    return rocprof_config.rocpd_validation_rules
 
 
 # ----------------------------------------------------------------------------
@@ -2373,7 +2367,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
     def _assert_rocpd(
         result: TestResult,
         subtest_name: str = "ROCpd validation",
-        rules_files: Optional[list[Path]] = None,
+        rule_sets: Optional[list] = None,
         timeout: int = 60,
         pass_regex: Optional[list[str]] = None,
         fail_regex: Optional[list[str]] = None,
@@ -2388,17 +2382,15 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 record_subtest_failure(subtest_name)
                 pytest.fail("ROCpd database not created")
 
-            existing_rules = None
-            if rules_files is not None:
-                existing_rules = [r for r in rules_files if r.exists()]
-                if not existing_rules:
-                    record_subtest_failure(subtest_name)
-                    pytest.fail("No validation rules found")
+            # Bare assert_rocpd(result) defaults to the baseline rule set, matching
+            # the previous default of validate-rocpd.py (default-rules.json).
+            if not rule_sets:
+                rule_sets = [_default_rocpd_rules]
 
             validation = validate_rocpd_database(
                 rocpd_file,
                 tests_dir=tests_dir,
-                rules_files=existing_rules,
+                rule_sets=rule_sets,
                 timeout=timeout,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"

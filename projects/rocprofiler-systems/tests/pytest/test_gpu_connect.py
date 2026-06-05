@@ -7,8 +7,8 @@ Tests for GPU connectivity
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.gpu,
@@ -37,12 +37,11 @@ def gpu_connect_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
-    """Get validation rules for GPU connectivity tests."""
-    rules_dir = validation_rules_dir / "gpu-connect"
+def gpu_connect_rules() -> list:
+    """Get native validation rule sets for GPU connectivity tests."""
     return [
-        rules_dir / "validation-rules.json",
-        rules_dir / "amd-smi-rules.json",
+        rr.gpu_connect_validation_rules,
+        rr.gpu_connect_amd_smi_rules,
     ]
 
 
@@ -73,7 +72,7 @@ class TestTransferBench(RocprofsysTest):
         self.assert_regex(result)
 
         if mode == "sys_run":
-            self.assert_rocpd(result, rules_files=gpu_connect_rules)
+            self.assert_rocpd(result, rule_sets=gpu_connect_rules)
             self.assert_perfetto(
                 result,
                 counter_names=["XGMI Read Data", "XGMI Write Data"],

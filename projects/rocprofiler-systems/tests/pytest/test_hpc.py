@@ -8,7 +8,7 @@ HPC Example Tests.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
-from pathlib import Path
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [pytest.mark.hpc]
 
@@ -47,30 +47,21 @@ def hpc_hip_environment() -> dict[str, str]:
 
 
 @pytest.fixture
-def kfd_rules(validation_rules_dir) -> list[Path]:
-    """Get validation rules for KFD event tests."""
-    rules_dir = validation_rules_dir / "kfd"
-    return [
-        rules_dir / "kfd-rules.json",
-    ]
+def kfd_rules() -> list:
+    """Get native validation rule sets for KFD event tests."""
+    return [rr.kfd_rules]
 
 
 @pytest.fixture
-def matrix_exponential_rules(validation_rules_dir) -> list[Path]:
-    """Get validation rules for matrix exponential tests."""
-    rules_dir = validation_rules_dir / "hpc" / "matrix-exponential"
-    return [
-        rules_dir / "sdk-metrics-rules.json",
-    ]
+def matrix_exponential_rules() -> list:
+    """Get native validation rule sets for matrix exponential tests."""
+    return [rr.hpc_matrix_exponential_rules]
 
 
 @pytest.fixture
-def split_copy_compute_hw_queues_rules(validation_rules_dir) -> list[Path]:
-    """Get validation rules for split copy compute hw queues tests."""
-    rules_dir = validation_rules_dir / "hpc" / "split-copy-compute"
-    return [
-        rules_dir / "sdk-metrics-rules.json",
-    ]
+def split_copy_compute_hw_queues_rules() -> list:
+    """Get native validation rule sets for split copy compute hw queues tests."""
+    return [rr.hpc_split_copy_compute_rules]
 
 
 # =============================================================================
@@ -255,7 +246,7 @@ class TestMatrixExponential(RocprofsysTest):
 
         # self.assert_rocpd(
         #     result,
-        #     rules_files=matrix_exponential_rules,
+        #     rule_sets=matrix_exponential_rules,
         # )
 
 
@@ -296,5 +287,5 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
 
         self.assert_rocpd(
             result,
-            rules_files=split_copy_compute_hw_queues_rules,
+            rule_sets=split_copy_compute_hw_queues_rules,
         )

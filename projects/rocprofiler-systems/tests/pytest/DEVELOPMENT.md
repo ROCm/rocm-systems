@@ -47,7 +47,7 @@ These fixtures run as **subtests**, meaning multiple validations within a single
 | `assert_regex` | Validates test output against pass/fail regex patterns. Patterns can be per-mode (e.g., different patterns for `binary_rewrite` vs `sampling`). |
 | `assert_file_regex` | Like `assert_regex` but validates against a file's contents. |
 | `assert_perfetto` | Validates that a Perfetto trace was generated and optionally checks its contents. |
-| `assert_rocpd` | Validates that a ROCpd database was created. Requires `@pytest.mark.rocpd("env_name")`. |
+| `assert_rocpd` | Validates that a ROCpd database was created. Requires `@pytest.mark.rocpd("env_name")`. Pass `rule_sets=[...]` with native rule functions from `rocprofsys.rocpd_rules` (e.g. `rr.transpose_validation_rules`); a bare call defaults to `default_rules`. |
 | `assert_timemory` | Validates timemory JSON output files. |
 | `assert_file_exists` | Validates that a specific file exists in the output directory. |
 | `assert_causal_json` | Validates causal profiling JSON output. |

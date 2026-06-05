@@ -21,8 +21,8 @@ It also validates outputs including:
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.transpose,
@@ -68,26 +68,24 @@ def gpu_perf_counter_env(
 
 
 @pytest.fixture
-def transpose_rules(validation_rules_dir: Path) -> list[Path]:
-    """Get validation rules files for transpose tests."""
-    rules_dir = validation_rules_dir / "transpose"
+def transpose_rules() -> list:
+    """Get native validation rule sets for transpose tests."""
     return [
-        validation_rules_dir / "default-rules.json",
-        rules_dir / "validation-rules.json",
-        rules_dir / "amd-smi-rules.json",
-        rules_dir / "cpu-metrics-rules.json",
-        rules_dir / "timer-sampling-rules.json",
-        rules_dir / "sdk-metrics-rules.json",
+        rr.default_rules,
+        rr.transpose_validation_rules,
+        rr.transpose_amd_smi_rules,
+        rr.transpose_cpu_metrics_rules,
+        rr.transpose_timer_sampling_rules,
+        rr.transpose_sdk_metrics_rules,
     ]
 
 
 @pytest.fixture
-def rocprofiler_rules(validation_rules_dir: Path) -> list[Path]:
-    """Get validation rules for GPU hardware counter RocPD output."""
-    rules_dir = validation_rules_dir / "transpose"
+def rocprofiler_rules() -> list:
+    """Get native validation rule sets for GPU hardware counter RocPD output."""
     return [
-        validation_rules_dir / "default-rules.json",
-        rules_dir / "hw-counter-rules.json",
+        rr.default_rules,
+        rr.transpose_hw_counter_rules,
     ]
 
 
@@ -189,7 +187,7 @@ class TestTranspose(RocprofsysTest):
             subtest_name="Perfetto HIP API Call Validation",
             categories=["hip_runtime_api"],
         )
-        self.assert_rocpd(result, rules_files=transpose_rules)
+        self.assert_rocpd(result, rule_sets=transpose_rules)
 
     @pytest.mark.parametrize(
         "mode",
@@ -320,7 +318,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
             self.assert_rocpd(
                 result,
                 subtest_name="RocPD HW counter validation",
-                rules_files=rocprofiler_rules,
+                rule_sets=rocprofiler_rules,
             )
 
 
@@ -340,7 +338,6 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
         gpu_perf_counter_env,
         gpu_info,
         num_processes,
-        validation_rules_dir,
     ):
         result = self.run_test(
             "sampling",
@@ -356,9 +353,8 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             subtest_name="Perfetto GPU perf counter validation",
             counter_names=gpu_info.counter_names,
         )
-        rules_dir = validation_rules_dir / "transpose"
         self.assert_rocpd(
             result,
             subtest_name="ROCpd GPU perf counter validation",
-            rules_files=[rules_dir / "gpu-perf-counter-rules.json"],
+            rule_sets=[rr.transpose_gpu_perf_counter_rules],
         )

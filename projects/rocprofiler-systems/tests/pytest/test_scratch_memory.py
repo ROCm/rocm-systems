@@ -7,8 +7,8 @@ Tests for scratch memory.
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.scratch_memory,
@@ -31,11 +31,8 @@ def scratch_memory_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def scratch_memory_rules(validation_rules_dir: Path) -> list[Path]:
-    rules_dir = validation_rules_dir / "scratch-memory"
-    return [
-        rules_dir / "sdk-metrics-rules.json",
-    ]
+def scratch_memory_rules() -> list:
+    return [rr.scratch_memory_rules]
 
 
 # =============================================================================
@@ -76,5 +73,5 @@ class TestScratchMemory(RocprofsysTest):
             )
             self.assert_rocpd(
                 result,
-                rules_files=scratch_memory_rules,
+                rule_sets=scratch_memory_rules,
             )

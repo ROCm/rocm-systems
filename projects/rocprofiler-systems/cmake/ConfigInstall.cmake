@@ -48,10 +48,11 @@ install(
 export(PACKAGE ${PROJECT_NAME})
 
 # ------------------------------------------------------------------------------#
-# install the validate-causal-json python script as a utility
+# install the causal-print python utility (self-contained CLI from the vendored
+# rocprofsys_validator framework; stdlib-only so it runs as a single-file script)
 #
 configure_file(
-    ${PROJECT_SOURCE_DIR}/tests/validate-causal-json.py
+    ${PROJECT_SOURCE_DIR}/tests/pytest/rocprofsys_validator/readers/_causal_validator.py
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-sys-causal-print
     COPYONLY
 )

@@ -7,8 +7,8 @@ These tests exercise minimal examples to verify targeted behavior of the profile
 
 from __future__ import annotations
 import pytest
-from pathlib import Path
 from conftest import RocprofsysTest
+from rocprofsys.rocpd_rules import recursion_rules as recursion_rule_set
 
 pytestmark = [pytest.mark.minimal, pytest.mark.ci_enable]
 
@@ -23,9 +23,8 @@ def rocpd_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def recursion_rules(validation_rules_dir: Path) -> list[Path]:
-    rules_dir = validation_rules_dir / "minimal"
-    return [rules_dir / "recursion-rules.json"]
+def recursion_rules() -> list:
+    return [recursion_rule_set]
 
 
 # =============================================================================
@@ -70,5 +69,5 @@ class TestMinimal(RocprofsysTest):
         self.assert_rocpd(
             result,
             subtest_name="ROCpd Recursion Validation",
-            rules_files=recursion_rules,
+            rule_sets=recursion_rules,
         )

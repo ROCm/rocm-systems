@@ -29,10 +29,21 @@ set(ROCPROFSYS_PYTEST_FILES
     ${ROCPROFSYS_PYTEST_TEST_FILES}
 )
 
+# Vendored in-process validation framework (rocprofsys_validator package). Copied
+# as a whole directory so its readers/ subpackage is preserved.
+file(
+    GLOB_RECURSE ROCPROFSYS_VALIDATOR_FILES
+    CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_LIST_DIR}/rocprofsys_validator/*.py"
+)
+
 add_custom_target(
     copy-pytest-files
     ALL
-    DEPENDS ${ROCPROFSYS_PYTEST_PACKAGE_FILES} ${ROCPROFSYS_PYTEST_FILES}
+    DEPENDS
+        ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
+        ${ROCPROFSYS_PYTEST_FILES}
+        ${ROCPROFSYS_VALIDATOR_FILES}
     COMMAND
         ${CMAKE_COMMAND} -E make_directory
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest/rocprofsys
@@ -42,6 +53,9 @@ add_custom_target(
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${ROCPROFSYS_PYTEST_FILES}
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest/
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/rocprofsys_validator
+        ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest/rocprofsys_validator
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different ${PROJECT_SOURCE_DIR}/requirements.txt
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/

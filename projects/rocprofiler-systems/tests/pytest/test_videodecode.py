@@ -8,6 +8,7 @@ Tests for the videodecode example.
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
+from rocprofsys import rocpd_rules as rr
 
 pytestmark = [
     pytest.mark.gpu,
@@ -35,15 +36,14 @@ def video_decode_env() -> dict[str, str]:
 
 
 @pytest.fixture
-def video_decode_rules(validation_rules_dir, gpu_info) -> list[Path]:
-    """Get validation rules for video decode tests."""
-    rules_dir = validation_rules_dir / "video-decode"
+def video_decode_rules(gpu_info) -> list:
+    """Get native validation rule sets for video decode tests."""
     rules = [
-        rules_dir / "validation-rules.json",
-        rules_dir / "sdk-metrics-rules.json",
+        rr.video_validation_rules,
+        rr.video_sdk_metrics_rules,
     ]
     if "instinct" in gpu_info.categories:
-        rules.append(rules_dir / "amd-smi-rules.json")
+        rules.append(rr.video_amd_smi_rules)
     return rules
 
 
@@ -87,4 +87,4 @@ class TestVideoDecode(RocprofsysTest):
                     ["VCN Busy"] if "instinct" in gpu_info.categories else None
                 ),
             )
-            self.assert_rocpd(result, rules_files=video_decode_rules)
+            self.assert_rocpd(result, rule_sets=video_decode_rules)

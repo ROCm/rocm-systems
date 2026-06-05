@@ -4,42 +4,25 @@
 """
 Output validators for rocprofiler-systems test results.
 
-This module wraps the existing validation scripts from the tests/ directory:
-- validate-perfetto-proto.py
-- validate-rocpd.py
-- validate-timemory-json.py
-- validate-causal-json.py
+All validation runs in-process via the vendored ``rocprofsys_validator`` framework:
+Perfetto / RocPD / timemory-JSON / causal / unified-memory readers act as the
+load/query layer (RocPD rule sets live in ``rocprofsys.rocpd_rules``). No
+validation shells out to standalone scripts anymore.
 
 We also provide the following validators:
 - validate_file_exists
 """
 
 from __future__ import annotations
+import contextlib
+import io
 import os
 import re
-import shlex
-import shutil
-import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-
-
-def _python_for_validation_scripts() -> str:
-    """Return the Python executable to use when running validation scripts.
-
-    When running inside a PyInstaller/frozen binary, sys.executable is the
-    binary itself, which does not accept script paths and validation args.
-    Use system Python instead.
-    """
-    if getattr(sys, "frozen", False):
-        env_py = os.environ.get("ROCPROFSYS_VALIDATION_PYTHON")
-        if env_py:
-            return env_py
-        path = shutil.which("python3") or shutil.which("python")
-        return path or "python3"
-    return sys.executable
 
 
 @dataclass
@@ -192,68 +175,306 @@ def validate_file_exists(path: Path, description: str = "File") -> ValidationRes
     return ValidationResult(True, f"{description} exists: {path}")
 
 
-def _run_validation_script(
-    script_name: str,
-    args: list[str],
-    tests_dir: Path,
-    timeout: int = 60,
-) -> ValidationResult:
-    """Run an existing validation script from the tests directory.
+# ============================================================================
+# Perfetto Validation - in-process via rocprofsys_validator.PerfettoReader
+# ============================================================================
 
-    Args:
-        script_name: Name of the script (e.g., 'validate-perfetto-proto.py')
-        args: Arguments to pass to the script
-        tests_dir: Path to directory containing validation scripts
-        timeout: Timeout in seconds
 
-    Returns:
-        ValidationResult with script output
+def _resolve_trace_processor_bin(trace_processor_path: Optional[Path]) -> Optional[str]:
+    """Resolve the trace_processor_shell binary path (env var wins, like the script).
+
+    ``ROCPROFSYS_TRACE_PROC_SHELL`` overrides the caller-supplied path (used to run
+    perfetto validation against an older GLIBC). A path that does not point at an
+    existing file falls back to the perfetto package's bundled binary (None).
     """
-    script_path = tests_dir / script_name
+    env_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
+    bin_path = env_path or (str(trace_processor_path) if trace_processor_path else None)
+    if bin_path and not os.path.isfile(bin_path):
+        bin_path = None
+    return bin_path
 
-    if not script_path.exists():
-        return ValidationResult(False, f"Validation script not found: {script_path}")
 
-    python_exe = _python_for_validation_scripts()
-    cmd = [python_exe, str(script_path)] + args
-    cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
+def _load_perfetto_reader(trace: str, tp_bin: Optional[str], max_tries: int = 5,
+                          retry_wait: int = 1):
+    """Build a PerfettoReader, retrying transient trace-processor connection errors.
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+    Mirrors the retry behaviour of the old ``load_trace`` helper so spurious HTTP
+    errors from the trace processor subprocess do not flake the test suite.
+    """
+    from rocprofsys_validator import PerfettoReader
+
+    last_exc: Optional[BaseException] = None
+    for attempt in range(max_tries + 1):
+        try:
+            return PerfettoReader(trace, tp_bin=tp_bin)
+        except Exception as ex:  # noqa: BLE001 - surfaced to caller on final attempt
+            last_exc = ex
+            sys.stderr.write(f"{ex}\n")
+            sys.stderr.flush()
+            if attempt >= max_tries:
+                raise
+            time.sleep(retry_wait)
+    assert last_exc is not None  # pragma: no cover - loop always returns or raises
+    raise last_exc
+
+
+def _pf_validate_positional(data, labels, counts, depths, use_substrings=False):
+    """Positional (label, count, depth) row-by-row validation (ported from the script)."""
+    if not data and labels:
+        raise RuntimeError("Data is empty but labels are not")
+
+    if len(labels) != len(counts) or len(labels) != len(depths):
+        raise RuntimeError(
+            "labels, counts, and depths must have the same length "
+            f"(got {len(labels)}, {len(counts)}, {len(depths)})"
         )
 
-        if result.returncode == 0:
-            message = result.stdout.strip()
+    expected = [[litr, citr, ditr] for litr, citr, ditr in zip(labels, counts, depths)]
+    for ditr, eitr in zip(data, expected):
+        _label = ditr["label"]
+        _count = ditr["count"]
+        _depth = ditr["depth"]
+        if use_substrings:
+            if eitr[0] not in _label:
+                raise RuntimeError(
+                    f"Mismatched label (substring): {_label!r} does not contain {eitr[0]!r}"
+                )
+        elif _label != eitr[0]:
+            raise RuntimeError(
+                f"Mismatched label (exact): {_label!r} vs expected {eitr[0]!r}"
+            )
+        if _count != eitr[1]:
+            raise RuntimeError(f"Mismatched count: {_count} vs. {eitr[1]}")
+        if _depth != eitr[2]:
+            raise RuntimeError(f"Mismatched depth: {_depth} vs. {eitr[2]}")
+
+
+def _pf_validate_by_label(data, labels, counts, use_substrings=False):
+    """Aggregate-by-name validation summing counts across depths (ported from script)."""
+    from collections import defaultdict
+
+    presence_only = len(counts) == 0
+    if not presence_only and len(counts) != len(labels):
+        raise RuntimeError(
+            "counts must have one entry per label, or be omitted for presence-only mode"
+        )
+
+    totals_by_slice_name: dict[str, int] = defaultdict(int)
+    for srow in data:
+        totals_by_slice_name[srow["label"]] += srow["count"]
+
+    for i, litr in enumerate(labels):
+        if use_substrings:
+            total = sum(c for name, c in totals_by_slice_name.items() if litr in name)
         else:
-            message = (
-                result.stderr.strip()
-                or result.stdout.strip()
-                or f"Exit code: {result.returncode}"
+            total = totals_by_slice_name.get(litr, 0)
+
+        if presence_only:
+            if total < 1:
+                raise RuntimeError(f"No slice found for expected label '{litr}'")
+            continue
+
+        if total != counts[i]:
+            raise RuntimeError(
+                f"Mismatched count for expected label '{litr}': "
+                f"got {total}, expected {counts[i]}"
             )
 
-        return ValidationResult(
-            is_valid=(result.returncode == 0),
-            message=message,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            command=cmd_str,
+
+def _perfetto_validate_in_process(
+    reader,
+    *,
+    input_name: str,
+    categories: list[str],
+    labels: list[str],
+    label_substrings: list[str],
+    counts: list[int],
+    depths: list[int],
+    print_output: bool,
+    key_names: list[str],
+    key_counts: list[int],
+    counter_names: list[str],
+    check_counter_pairing: bool,
+) -> tuple[int, str]:
+    """Reproduce validate-perfetto-proto.py exactly, in-process.
+
+    Returns ``(ret, stdout)``. ``ret == 0`` means validated. All ``print`` output is
+    captured into the returned string so callers (and conftest ``pass_regex`` /
+    ``fail_regex``) see the same text the standalone script emitted.
+    """
+    if labels and label_substrings:
+        raise RuntimeError(
+            "Cannot specify both expected labels and expected label substrings"
         )
 
-    except subprocess.TimeoutExpired:
-        return ValidationResult(
-            False, f"Validation timed out after {timeout}s", command=cmd_str
+    expected_labels = labels if labels else label_substrings
+    aggregate_by_name = not depths
+    use_substrings = bool(label_substrings)
+
+    if expected_labels:
+        if aggregate_by_name:
+            if counts and len(counts) != len(expected_labels):
+                raise RuntimeError(
+                    "With -d omitted, provide no -c (presence-only) or one count per label"
+                )
+        elif len(expected_labels) != len(counts) or len(expected_labels) != len(depths):
+            raise RuntimeError(
+                "The same number of labels, counts, and depths must be specified "
+                "when -d is provided"
+            )
+
+    if (key_names or key_counts) and len(key_names) != len(key_counts):
+        raise RuntimeError(
+            "--key-names and --key-counts must have the same number of entries"
         )
-    except Exception as e:
-        return ValidationResult(False, f"Validation error: {e}", command=cmd_str)
+
+    buf = io.StringIO()
+    ret = 0
+    with contextlib.redirect_stdout(buf):
+        # Build the per-(name, depth) call-count table, filtered by category.
+        slice_df = reader.execute_sql("SELECT name, depth, category FROM slice")
+        pdata: dict = {}
+        for name, depth, category in zip(
+            slice_df["name"].tolist(),
+            slice_df["depth"].tolist(),
+            slice_df["category"].tolist(),
+        ):
+            if categories and category not in categories:
+                continue
+            pdata.setdefault(name, {})
+            d = int(depth)
+            pdata[name][d] = pdata[name].get(d, 0) + 1
+
+        perfetto_data = [
+            {"label": name, "count": count, "depth": depth}
+            for name, by_depth in pdata.items()
+            for depth, count in by_depth.items()
+        ]
+
+        if print_output:
+            print(f"Printing Perfetto Data {categories}")
+            for itr in perfetto_data:
+                n = 0 if itr["depth"] < 2 else itr["depth"] - 1
+                lbl = "{}{}{}".format(
+                    "  " * n, "|_" if itr["depth"] > 0 else "", itr["label"]
+                )
+                print("| {:40} | {:6} | {:6} |".format(lbl, itr["count"], itr["depth"]))
+
+        try:
+            if expected_labels:
+                if aggregate_by_name:
+                    _pf_validate_by_label(
+                        perfetto_data, expected_labels, counts,
+                        use_substrings=use_substrings,
+                    )
+                else:
+                    _pf_validate_positional(
+                        perfetto_data, expected_labels, counts, depths,
+                        use_substrings=use_substrings,
+                    )
+        except RuntimeError as e:
+            print(f"Fail: {e}")
+            ret = 1
+
+        for key_name, key_count in zip(key_names, key_counts):
+            slice_args = reader.execute_sql(
+                "select * from slice join args using (arg_set_id) "
+                f"where key='debug.{key_name}'"
+            )
+            count = len(slice_args)
+            if print_output:
+                print(f"{key_name} (expected: {key_count}):")
+                for rec in slice_args.to_dict(orient="records"):
+                    for key, val in rec.items():
+                        print(f"  - {key:20} :: {val}")
+            print(f"Number of entries with {key_name} = {count} (expected: {key_count})")
+            if key_count != count:
+                ret = 1
+
+        if counter_names and print_output:
+            all_counter_tracks = reader.execute_sql(
+                "SELECT DISTINCT name FROM counter_track ORDER BY name"
+            )
+            track_names = [n for n in all_counter_tracks["name"].tolist()]
+            print(f"Available counter tracks ({len(track_names)}):")
+            for name in track_names:
+                print(f"  - {name}")
+
+        for counter_name in counter_names:
+            if print_output:
+                matching_tracks = reader.execute_sql(
+                    "SELECT counter_track.name, COUNT(counter.id) AS num_entries, "
+                    "SUM(counter.value) AS sum_value, MIN(counter.value) AS min_value, "
+                    "MAX(counter.value) AS max_value "
+                    "FROM counter_track JOIN counter ON counter.track_id = counter_track.id "
+                    f"WHERE counter_track.name LIKE '%{counter_name}%' "
+                    "GROUP BY counter_track.name ORDER BY counter_track.name"
+                )
+                if len(matching_tracks) == 0:
+                    print(f"  No counter tracks matching '%{counter_name}%' found in trace")
+                for rec in matching_tracks.to_dict(orient="records"):
+                    print(
+                        f"  Track: {rec['name']} | entries={rec['num_entries']} "
+                        f"sum={rec['sum_value']} min={rec['min_value']} max={rec['max_value']}"
+                    )
+
+            sum_df = reader.execute_sql(
+                "SELECT SUM(counter.value) AS total_value FROM counter_track "
+                "JOIN counter ON counter.track_id = counter_track.id "
+                f"WHERE counter_track.name LIKE '%{counter_name}%'"
+            )
+            total_value = 0
+            if len(sum_df) > 0:
+                raw = sum_df["total_value"].iloc[0]
+                total_value = -1 if raw is None or _is_nan(raw) else raw
+
+            if print_output:
+                print(f"Total value of {counter_name} is {total_value}")
+
+            if total_value <= 0:
+                print(f"Fail: Counter {counter_name} is not found in the traces")
+                ret = 1
+
+        if check_counter_pairing and counter_names:
+            for counter_name in counter_names:
+                tracks = reader.execute_sql(
+                    "SELECT counter_track.id, counter_track.name, "
+                    "COUNT(counter.id) AS num_entries "
+                    "FROM counter_track JOIN counter ON counter.track_id = counter_track.id "
+                    f"WHERE counter_track.name LIKE '%{counter_name}%' "
+                    "GROUP BY counter_track.id"
+                )
+                for rec in tracks.to_dict(orient="records"):
+                    if rec["num_entries"] % 2 != 0:
+                        print(
+                            f"Fail: Counter track '{rec['name']}' has {rec['num_entries']} "
+                            "entries (expected even number for paired start/end)"
+                        )
+                        ret = 1
+                    else:
+                        last_df = reader.execute_sql(
+                            "SELECT counter.value FROM counter "
+                            f"WHERE counter.track_id = {rec['id']} "
+                            "ORDER BY counter.ts DESC LIMIT 1"
+                        )
+                        if len(last_df) > 0 and last_df["value"].iloc[0] != 0:
+                            print(
+                                f"Fail: Counter track '{rec['name']}' last value is "
+                                f"{last_df['value'].iloc[0]} (expected 0 for end marker)"
+                            )
+                            ret = 1
+
+        if ret == 0:
+            print(f"{input_name} validated")
+        else:
+            print(f"Failure validating {input_name}")
+
+    return ret, buf.getvalue()
 
 
-# ============================================================================
-# Perfetto Validation - wraps validate-perfetto-proto.py
-# ============================================================================
+def _is_nan(value: Any) -> bool:
+    """True only for NaN floats (NULL SQL aggregates surface as NaN via pandas)."""
+    return isinstance(value, float) and value != value
 
 
 def validate_perfetto_trace(
@@ -272,28 +493,27 @@ def validate_perfetto_trace(
     check_counter_pairing: bool = False,
     timeout: int = 120,
 ) -> ValidationResult:
-    """Validate a Perfetto trace file using validate-perfetto-proto.py.
+    """Validate a Perfetto trace in-process via rocprofsys_validator.PerfettoReader.
 
-    Slice validation mode is inferred by validate-perfetto-proto.py: pass ``depths``
-    (-d) for positional row-by-row checks; omit ``depths`` for aggregate-by-name
-    (sum counts across depths). Omit ``counts`` (-c) in aggregate mode for
-    presence-only checks.
+    Slice validation mode is inferred: pass ``depths`` (-d) for positional row-by-row
+    checks; omit ``depths`` for aggregate-by-name (sum counts across depths). Omit
+    ``counts`` (-c) in aggregate mode for presence-only checks.
 
     Args:
         trace_path: Path to perfetto-trace.proto file
-        tests_dir: Path to directory containing validation scripts
-        categories: List of categories to filter by (-m flag)
-        labels: Expected labels (-l flag)
-        counts: Expected counts (-c flag)
-        depths: Expected depths (-d flag); omit for aggregate-by-name validation
-        label_substrings: Expected label substrings (-s flag)
-        counter_names: Counter names to validate (--counter-names flag)
-        key_names: Debug key names to check (--key-names flag)
-        key_counts: Expected counts for debug keys (--key-counts flag)
-        trace_processor_path: Path to trace_processor_shell (-t flag)
-        print_output: Whether to print trace data (-p flag)
+        tests_dir: Unused (kept for signature compatibility)
+        categories: List of categories to filter by
+        labels: Expected labels (exact match)
+        counts: Expected counts
+        depths: Expected depths; omit for aggregate-by-name validation
+        label_substrings: Expected label substrings (substring match)
+        counter_names: Counter names to validate
+        key_names: Debug annotation key names to check
+        key_counts: Expected counts for debug annotation keys
+        trace_processor_path: Path to trace_processor_shell
+        print_output: Whether to render the slice/counter tables into stdout
         check_counter_pairing: Verify counter tracks have paired start/end entries
-        timeout: Validation timeout in seconds
+        timeout: Accepted for compatibility; in-process validation has no subprocess
 
     Returns:
         ValidationResult with validation status
@@ -301,66 +521,105 @@ def validate_perfetto_trace(
     if not trace_path.exists():
         return ValidationResult(False, f"Trace file not found: {trace_path}")
 
-    # Allow override of trace_processor_path to allow perfetto validation using older GLIBC versions
-    env_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
-    if env_path:
-        trace_processor_path = Path(env_path)
+    categories = categories or []
+    labels = labels or []
+    counts = counts or []
+    depths = depths or []
+    label_substrings = label_substrings or []
+    counter_names = counter_names or []
+    key_names = key_names or []
+    key_counts = key_counts or []
 
-    args = ["-i", str(trace_path)]
+    cmd_str = (
+        f"validate_perfetto_trace(in-process) input={trace_path} "
+        f"categories={categories} labels={labels} substrings={label_substrings} "
+        f"counts={counts} depths={depths} counter_names={counter_names} "
+        f"check_counter_pairing={check_counter_pairing} "
+        f"key_names={key_names} key_counts={key_counts}"
+    )
 
-    if categories:
-        args.extend(["-m"] + categories)
+    try:
+        from rocprofsys_validator import PerfettoReader  # noqa: F401
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(
+            False, f"rocprofsys_validator import failed: {e}", command=cmd_str
+        )
 
-    if labels:
-        args.extend(["-l"] + labels)
-    elif label_substrings:
-        args.extend(["-s"] + label_substrings)
+    tp_bin = _resolve_trace_processor_bin(trace_processor_path)
 
-    if counts:
-        args.extend(["-c"] + [str(c) for c in counts])
+    reader = None
+    try:
+        reader = _load_perfetto_reader(str(trace_path), tp_bin)
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(
+            False, f"Failed to load trace {trace_path}: {e}", command=cmd_str
+        )
 
-    if depths:
-        args.extend(["-d"] + [str(d) for d in depths])
+    try:
+        ret, output = _perfetto_validate_in_process(
+            reader,
+            input_name=str(trace_path),
+            categories=categories,
+            labels=labels,
+            label_substrings=label_substrings,
+            counts=counts,
+            depths=depths,
+            print_output=print_output,
+            key_names=key_names,
+            key_counts=key_counts,
+            counter_names=counter_names,
+            check_counter_pairing=check_counter_pairing,
+        )
+    except RuntimeError as e:
+        return ValidationResult(False, str(e), command=cmd_str)
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(False, f"Validation error: {e}", command=cmd_str)
+    finally:
+        with contextlib.suppress(Exception):
+            reader.close()
 
-    if counter_names:
-        args.extend(["--counter-names"] + counter_names)
-
-    if check_counter_pairing:
-        args.append("--check-counter-pairing")
-
-    if key_names:
-        args.extend(["--key-names"] + key_names)
-
-    if key_counts:
-        args.extend(["--key-counts"] + [str(k) for k in key_counts])
-
-    if trace_processor_path:
-        args.extend(["-t", str(trace_processor_path)])
-
-    if print_output:
-        args.append("-p")
-
-    return _run_validation_script("validate-perfetto-proto.py", args, tests_dir, timeout)
+    return ValidationResult(
+        is_valid=(ret == 0),
+        message=output.strip(),
+        stdout=output,
+        command=cmd_str,
+    )
 
 
 # ============================================================================
-# ROCpd Database Validation - wraps validate-rocpd.py
+# ROCpd Database Validation - in-process via rocprofsys_validator.RocpdReader
 # ============================================================================
+
+
+def _detect_available_metrics(tests_dir: Path) -> Optional[set]:
+    """Detect available GPU metrics for ``requires``-gated rules (via amd-smi).
+
+    Imports check_amd_smi_metrics from the tests dir and unions the metric names
+    across all GPUs. Returns None on any failure so gated rules run unconditionally.
+    """
+    try:
+        if str(tests_dir) not in sys.path:
+            sys.path.insert(0, str(tests_dir))
+        from check_amd_smi_metrics import get_available_metrics_set
+
+        return get_available_metrics_set()
+    except Exception:  # noqa: BLE001 - any failure => run all queries
+        return None
 
 
 def validate_rocpd_database(
     db_path: Path,
     tests_dir: Path,
-    rules_files: Optional[list[Path]] = None,
+    rule_sets: Optional[list] = None,
     timeout: int = 60,
 ) -> ValidationResult:
-    """Validate a ROCpd database file using validate-rocpd.py.
+    """Validate a ROCpd database file in-process via native rule sets.
 
     Args:
         db_path: Path to rocpd.db file
-        tests_dir: Path to directory containing validation scripts
-        rules_files: List of JSON rules files to use for validation
-        timeout: Validation timeout in seconds
+        tests_dir: Path to directory containing the check_amd_smi_metrics helper
+        rule_sets: Native rule-set callables (see rocprofsys.rocpd_rules)
+        timeout: Accepted for compatibility; in-process validation has no subprocess
 
     Returns:
         ValidationResult with validation status
@@ -368,19 +627,64 @@ def validate_rocpd_database(
     if not db_path.exists():
         return ValidationResult(False, f"Database not found: {db_path}")
 
-    args = ["-db", str(db_path)]
+    rule_sets = rule_sets or []
+    names = [getattr(rs, "__name__", str(rs)) for rs in rule_sets]
+    cmd_str = f"validate_rocpd_database(in-process) db={db_path} rule_sets={names}"
 
-    if rules_files:
-        existing_rules = [str(r) for r in rules_files if r.exists()]
-        if existing_rules:
-            args.extend(["-r"] + existing_rules)
+    try:
+        from rocprofsys_validator import RocpdReader
+        from rocprofsys.rocpd_rules import run_rule_sets
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(False, f"rocprofsys_validator import failed: {e}", command=cmd_str)
 
-    return _run_validation_script("validate-rocpd.py", args, tests_dir, timeout)
+    available_metrics = _detect_available_metrics(tests_dir)
+
+    try:
+        reader = RocpdReader(str(db_path))
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(False, f"Failed to open database {db_path}: {e}", command=cmd_str)
+
+    try:
+        is_valid, message = run_rule_sets(reader, rule_sets, available_metrics)
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(False, f"Validation error: {e}", command=cmd_str)
+    finally:
+        with contextlib.suppress(Exception):
+            reader.close()
+
+    return ValidationResult(is_valid=is_valid, message=message, stdout=message, command=cmd_str)
 
 
 # ============================================================================
-# Timemory JSON Validation - wraps validate-timemory-json.py
+# Timemory JSON Validation - in-process via rocprofsys_validator.TimemoryJsonReader
 # ============================================================================
+
+
+def _tm_validate_json(data, labels, counts, depths):
+    """Positional prefix/laps/depth validation (ported from validate-timemory-json.py).
+
+    The ``>>>`` prefix strip is reproduced verbatim, including the legacy behaviour
+    where a missing ``>>>`` (find returns -1) slices ``prefix[3:]``.
+    """
+    expected = []
+    for litr, citr, ditr in zip(labels, counts, depths):
+        _label = litr
+        if ditr > 0:
+            _label = "{}|_{}".format("  " * (ditr - 1), litr)
+        expected.append([_label, citr, ditr])
+
+    for ditr, eitr in zip(data, expected):
+        _prefix = ditr["prefix"]
+        _depth = ditr["depth"]
+        _count = ditr["entry"]["laps"]
+        _idx = _prefix.find(">>>")
+        _prefix = _prefix[(_idx + 4):]
+        if _prefix != eitr[0]:
+            raise RuntimeError(f"Mismatched prefix: {_prefix} vs. {eitr[0]}")
+        if _count != eitr[1]:
+            raise RuntimeError(f"Mismatched count for {_prefix}: {_count} vs. {eitr[1]}")
+        if _depth != eitr[2]:
+            raise RuntimeError(f"Mismatched depth for {_prefix}: {_depth} vs. {eitr[2]}")
 
 
 def validate_timemory_json(
@@ -393,17 +697,17 @@ def validate_timemory_json(
     print_output: bool = False,
     timeout: int = 60,
 ) -> ValidationResult:
-    """Validate a timemory JSON output file using validate-timemory-json.py.
+    """Validate a timemory JSON output file in-process via TimemoryJsonReader.
 
     Args:
         json_path: Path to JSON file
-        metric: Metric name to validate (-m flag)
-        tests_dir: Path to directory containing validation scripts
-        labels: Expected labels (-l flag)
-        counts: Expected counts (-c flag)
-        depths: Expected depths (-d flag)
-        print_output: Whether to print data (-p flag)
-        timeout: Validation timeout in seconds
+        metric: Metric name (JSON key under data["timemory"])
+        tests_dir: Unused (kept for signature compatibility)
+        labels: Expected labels
+        counts: Expected counts (laps)
+        depths: Expected depths
+        print_output: Whether to render the graph table into stdout
+        timeout: Accepted for compatibility; in-process validation has no subprocess
 
     Returns:
         ValidationResult with validation status
@@ -411,25 +715,80 @@ def validate_timemory_json(
     if not json_path.exists():
         return ValidationResult(False, f"JSON file not found: {json_path}")
 
-    args = ["-i", str(json_path), "-m", metric]
+    labels = labels or []
+    counts = counts or []
+    depths = depths or []
 
-    if labels:
-        args.extend(["-l"] + labels)
+    cmd_str = (
+        f"validate_timemory_json(in-process) input={json_path} metric={metric} "
+        f"labels={labels} counts={counts} depths={depths}"
+    )
 
-    if counts:
-        args.extend(["-c"] + [str(c) for c in counts])
+    if len(labels) != len(counts) or len(labels) != len(depths):
+        return ValidationResult(
+            False,
+            "The same number of labels, counts, and depths must be specified",
+            command=cmd_str,
+        )
 
-    if depths:
-        args.extend(["-d"] + [str(d) for d in depths])
+    try:
+        from rocprofsys_validator import TimemoryJsonReader
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(
+            False, f"rocprofsys_validator import failed: {e}", command=cmd_str
+        )
 
-    if print_output:
-        args.append("-p")
+    try:
+        reader = TimemoryJsonReader(str(json_path))
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(
+            False, f"Failed to load {json_path}: {e}", command=cmd_str
+        )
 
-    return _run_validation_script("validate-timemory-json.py", args, tests_dir, timeout)
+    buf = io.StringIO()
+    ret = 0
+    try:
+        with contextlib.redirect_stdout(buf):
+            # Reach the graph the same way the script did so a missing metric/graph
+            # raises (parity with the script's uncaught KeyError -> non-zero exit).
+            graph = reader._data["timemory"][metric]["ranks"][0]["graph"]
+
+            if print_output:
+                for itr in graph:
+                    _prefix = itr["prefix"]
+                    _depth = itr["depth"]
+                    _count = itr["entry"]["laps"]
+                    _idx = _prefix.find(">>>")
+                    _prefix = _prefix[(_idx + 4):]
+                    print("| {:40} | {:6} | {:6} |".format(_prefix, _count, _depth))
+
+            try:
+                _tm_validate_json(graph, labels, counts, depths)
+            except RuntimeError as e:
+                print(f"{e}")
+                ret = 1
+
+            if ret == 0:
+                print(f"{json_path} validated")
+    except Exception as e:  # noqa: BLE001 - parity with the script's traceback->failure
+        return ValidationResult(
+            False, f"{type(e).__name__}: {e}", stdout=buf.getvalue(), command=cmd_str
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            reader.close()
+
+    output = buf.getvalue()
+    return ValidationResult(
+        is_valid=(ret == 0),
+        message=output.strip(),
+        stdout=output,
+        command=cmd_str,
+    )
 
 
 # ============================================================================
-# Causal JSON Validation - wraps validate-causal-json.py
+# Causal JSON Validation - in-process via rocprofsys_validator causal CLI
 # ============================================================================
 
 
@@ -440,14 +799,14 @@ def validate_causal_json(
     additional_args: Optional[list[str]] = None,
     timeout: int = 60,
 ) -> ValidationResult:
-    """Validate a causal profiling JSON output file using validate-causal-json.py.
+    """Validate a causal profiling JSON file in-process via the framework causal CLI.
 
     Args:
         json_path: Path to causal JSON file
-        tests_dir: Path to directory containing validation scripts
+        tests_dir: Unused (kept for signature compatibility)
         ci_mode: Whether running in CI mode (--ci flag)
-        additional_args: Additional arguments to pass to the script
-        timeout: Validation timeout in seconds
+        additional_args: Additional CLI arguments (same surface as the old script)
+        timeout: Accepted for compatibility; in-process validation has no subprocess
 
     Returns:
         ValidationResult with validation status
@@ -455,15 +814,42 @@ def validate_causal_json(
     if not json_path.exists():
         return ValidationResult(False, f"JSON file not found: {json_path}")
 
-    args = ["-i", str(json_path)]
-
+    additional_args = additional_args or []
+    argv = ["-i", str(json_path)]
     if ci_mode:
-        args.append("--ci")
+        argv.append("--ci")
+    argv.extend(additional_args)
+    cmd_str = "validate_causal_json(in-process) " + " ".join(argv)
 
-    if additional_args:
-        args.extend(additional_args)
+    try:
+        from rocprofsys_validator.readers._causal_validator import main as causal_main
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(
+            False, f"rocprofsys_validator import failed: {e}", command=cmd_str
+        )
 
-    return _run_validation_script("validate-causal-json.py", args, tests_dir, timeout)
+    out_buf = io.StringIO()
+    err_buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
+            rc = causal_main(argv)
+    except SystemExit as e:  # argparse error / explicit exit
+        rc = e.code if isinstance(e.code, int) else 1
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(
+            False, f"Validation error: {e}", stdout=out_buf.getvalue(), command=cmd_str
+        )
+
+    out = out_buf.getvalue()
+    err = err_buf.getvalue()
+    if rc == 0:
+        message = out.strip()
+    else:
+        message = err.strip() or out.strip() or f"Exit code: {rc}"
+
+    return ValidationResult(
+        is_valid=(rc == 0), message=message, stdout=out, stderr=err, command=cmd_str
+    )
 
 
 def validate_unified_memory_outputs(
@@ -471,7 +857,7 @@ def validate_unified_memory_outputs(
     tests_dir: Path,
     timeout: int = 60,
 ) -> ValidationResult:
-    """Validate unified-memory text and JSON outputs in a test output tree."""
+    """Validate unified-memory text and JSON outputs in-process via UnifiedMemoryReader."""
     txt_matches = sorted(output_dir.rglob("unified_memory*.txt"))
     json_matches = sorted(output_dir.rglob("unified_memory*.json"))
 
@@ -492,9 +878,21 @@ def validate_unified_memory_outputs(
             f"{txt_file.parent} vs {json_file.parent}",
         )
 
-    return _run_validation_script(
-        "validate-unified-memory.py",
-        ["--output-dir", str(txt_file.parent)],
-        tests_dir,
-        timeout,
+    target_dir = txt_file.parent
+    cmd_str = f"validate_unified_memory_outputs(in-process) output_dir={target_dir}"
+
+    try:
+        from rocprofsys_validator.readers.unified_memory import UnifiedMemoryReader
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(
+            False, f"rocprofsys_validator import failed: {e}", command=cmd_str
+        )
+
+    try:
+        is_valid, text = UnifiedMemoryReader(target_dir).validate_outputs()
+    except Exception as e:  # noqa: BLE001
+        return ValidationResult(False, f"Validation error: {e}", command=cmd_str)
+
+    return ValidationResult(
+        is_valid=is_valid, message=text.strip(), stdout=text, command=cmd_str
     )
