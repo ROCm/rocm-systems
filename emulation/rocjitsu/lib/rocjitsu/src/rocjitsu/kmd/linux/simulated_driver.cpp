@@ -262,6 +262,15 @@ bool SimulatedDriver::is_doorbell_range(const void *addr, size_t length) const {
 }
 
 int SimulatedDriver::open() {
+  static std::once_flag raise_nofile_flag;
+  std::call_once(raise_nofile_flag, [] {
+    struct rlimit rl {};
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur < 8192) {
+      rl.rlim_cur = std::min<rlim_t>(rl.rlim_max, 65536);
+      setrlimit(RLIMIT_NOFILE, &rl);
+    }
+  });
+
   if (fd_ < 0) {
     fd_ = static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_kfd", 0));
     if (fd_ < 0)
@@ -759,20 +768,24 @@ void *SimulatedDriver::dispatch_mmap(KfdProcess &proc, void *addr, size_t length
 
   if (type == KFD_MMAP_TYPE_EVENTS) {
     if (proc.event_state_.memfd < 0) {
-      auto raw_events_fd =
-          static_cast<int>(syscall(SYS_memfd_create, "rocjitsu_events", MFD_ALLOW_SEALING));
+      auto raw_events_fd = static_cast<int>(
+          syscall(SYS_memfd_create, "rocjitsu_events", MFD_CLOEXEC | MFD_ALLOW_SEALING));
       if (raw_events_fd < 0)
         return MAP_FAILED;
       proc.event_state_.memfd = fcntl(raw_events_fd, F_DUPFD_CLOEXEC, 4096);
+      if (proc.event_state_.memfd < 0)
+        proc.event_state_.memfd = raw_events_fd;
+      else
+        syscall(SYS_close, raw_events_fd);
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        if (proc.event_state_.memfd >= 0)
-          owned_fds_.insert(proc.event_state_.memfd);
+        owned_fds_.insert(proc.event_state_.memfd);
       }
-      syscall(SYS_close, raw_events_fd);
-      if (proc.event_state_.memfd < 0)
-        return MAP_FAILED;
       if (ftruncate(proc.event_state_.memfd, static_cast<off_t>(length)) != 0) {
+        {
+          std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+          owned_fds_.erase(proc.event_state_.memfd);
+        }
         syscall(SYS_close, proc.event_state_.memfd);
         proc.event_state_.memfd = -1;
         return MAP_FAILED;
@@ -1011,12 +1024,14 @@ int SimulatedDriver::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
         syscall(SYS_memfd_create, "rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING));
     if (raw_fd >= 0) {
       alloc.memfd = fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
+      if (alloc.memfd < 0)
+        alloc.memfd = raw_fd;
+      else
+        syscall(SYS_close, raw_fd);
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        if (alloc.memfd >= 0)
-          owned_fds_.insert(alloc.memfd);
+        owned_fds_.insert(alloc.memfd);
       }
-      syscall(SYS_close, raw_fd);
       if (alloc.memfd >= 0) {
         [[maybe_unused]] auto ft_rc = ftruncate(alloc.memfd, static_cast<off_t>(alloc.size));
         fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
@@ -1077,23 +1092,37 @@ bool SimulatedDriver::allocate_scratch_backing(uint32_t process_id, uint64_t gpu
     return false;
 
   int memfd = fcntl(raw_fd, F_DUPFD_CLOEXEC, 4096);
-  syscall(SYS_close, raw_fd);
   if (memfd < 0)
-    return false;
+    memfd = raw_fd;
+  else
+    syscall(SYS_close, raw_fd);
   {
     std::lock_guard<std::mutex> lk(owned_fds_mutex_);
     owned_fds_.insert(memfd);
   }
 
   if (ftruncate(memfd, static_cast<off_t>(aligned_size)) != 0) {
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.erase(memfd);
+    }
     syscall(SYS_close, memfd);
     return false;
   }
   auto *host_ptr = safe_mmap(nullptr, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
   if (host_ptr == MAP_FAILED) {
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.erase(memfd);
+    }
     syscall(SYS_close, memfd);
     return false;
   }
+  {
+    std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+    owned_fds_.erase(memfd);
+  }
+  syscall(SYS_close, memfd);
   std::memset(host_ptr, 0, aligned_size);
   proc->map_pages(gpu_va, host_ptr, aligned_size);
 
