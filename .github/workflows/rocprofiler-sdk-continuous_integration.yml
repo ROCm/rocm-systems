@@ -141,7 +141,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .git/modules
@@ -366,7 +366,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .git/modules
@@ -510,7 +510,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           .git/modules
