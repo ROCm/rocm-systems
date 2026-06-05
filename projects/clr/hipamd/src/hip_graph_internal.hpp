@@ -1154,6 +1154,20 @@ class ChildGraphNode : public GraphNode, public GraphExec {
     graphCaptureStatus_ = false;
   }
 
+  ~ChildGraphNode() {
+    // Unlike regular nodes (whose commands_ hold non-owning references after
+    // EnqueueCommands transfers ownership to the queue), a child graph node
+    // stores an owning reference to its completion command, acquired via
+    // getLastQueuedCommand(true) in Graph::RunOneNode. Each launch releases the
+    // previous launch's stored command, but the final launch's command is only
+    // released here. Without this the command, its HwEvent ProfilingSignal and
+    // the underlying HSA signal would leak.
+    for (auto command : commands_) {
+      command->release();
+    }
+    commands_.clear();
+  }
+
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
   ChildGraphNode& operator=(const ChildGraphNode&) = delete;
 
