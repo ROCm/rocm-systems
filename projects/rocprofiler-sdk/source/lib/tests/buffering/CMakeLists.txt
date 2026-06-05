@@ -18,8 +18,10 @@ target_link_libraries(
 rocprofiler_add_unit_test(
     TARGET buffering-tests
     SOURCES ${buffering_sources}
-    # unit.buffering.save_load segfaults in CI; disabled until the underlying issue is fixed
-    DISABLE_TESTS buffering.save_load
+            # unit.buffering.save_load segfaults in CI; disabled until the underlying
+            # issue is fixed
+            DISABLE_TESTS
+            buffering.save_load
     ENVIRONMENT
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     )
