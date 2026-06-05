@@ -64,6 +64,46 @@ function(_dbgapi_apply_common_test_properties target)
   endif()
 endfunction()
 
+# Internal: install a test binary into tests/rocdbgapi/ under the
+# 'tests' component.  TheRock-style test stages pull the 'tests'
+# component to a GPU runner and invoke the binaries via ctest there;
+# colocating every test binary (and the dbgapi_test_idle_kernel HIP
+# workload, installed separately) keeps the runtime next-to-exe
+# lookup in spawn_hip_workload.cpp working from both the build tree
+# and the install tree.
+#
+# RPATH wiring:
+#  * Build tree: CMake's default behavior bakes the absolute build-
+#    tree library directory into the binary's RUNPATH at link time,
+#    so running a test out of build/test/{unit,feature}/ already
+#    resolves librocm-dbgapi.so without LD_LIBRARY_PATH.
+#  * Install tree: INSTALL_RPATH is set to "$ORIGIN/<relpath>" where
+#    <relpath> walks from tests/rocdbgapi/ to CMAKE_INSTALL_LIBDIR
+#    under the same prefix, so an installed test binary finds
+#    librocm-dbgapi.so colocated under <prefix>/lib (or lib64) with
+#    no environment setup.  amd_comgr / hip / driver libraries are
+#    still resolved through whatever LD_LIBRARY_PATH the runner sets
+#    up — that's outside our packaging boundary.
+function(_dbgapi_install_test_target target)
+  install(TARGETS ${target}
+    RUNTIME DESTINATION tests/rocdbgapi
+    COMPONENT tests)
+
+  # Resolve a relative path from the test install dir to LIBDIR once;
+  # the helper is called for every test target so caching it in a
+  # GLOBAL property avoids recomputing.
+  get_property(_rel GLOBAL PROPERTY _dbgapi_test_to_libdir_rel)
+  if(NOT _rel)
+    file(RELATIVE_PATH _rel
+      "${CMAKE_INSTALL_PREFIX}/tests/rocdbgapi"
+      "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+    set_property(GLOBAL PROPERTY _dbgapi_test_to_libdir_rel "${_rel}")
+  endif()
+
+  set_target_properties(${target} PROPERTIES
+    INSTALL_RPATH "$ORIGIN/${_rel}")
+endfunction()
+
 # add_dbgapi_unit_test(name
 #                     SOURCES src1.cpp [src2.cpp ...]
 #                     [LABELS extra-label ...]
@@ -77,6 +117,7 @@ function(add_dbgapi_unit_test target_name)
 
   add_executable(${target_name} ${ARG_SOURCES})
   _dbgapi_apply_common_test_properties(${target_name})
+  _dbgapi_install_test_target(${target_name})
 
   target_link_libraries(${target_name} PRIVATE
     GTest::gtest_main
@@ -131,6 +172,7 @@ function(add_dbgapi_feature_test target_name)
 
   add_executable(${target_name} ${ARG_SOURCES})
   _dbgapi_apply_common_test_properties(${target_name})
+  _dbgapi_install_test_target(${target_name})
 
   target_link_libraries(${target_name} PRIVATE
     GTest::gtest_main
