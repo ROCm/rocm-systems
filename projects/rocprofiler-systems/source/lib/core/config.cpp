@@ -2752,27 +2752,32 @@ get_rank_filter_logs()
 
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
 // Return the first env var in `env_var_options` that holds an unsigned integer.
-// `label` is used only for logging (e.g. "MPI rank", "world size").
+// `label` is used only for logging (e.g. "MPI rank", "MPI world size").
 std::optional<std::uint64_t>
-get_first_uint_from_env(const std::vector<std::string>& env_var_options,
-                        const std::string&              label)
+get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
+                       const std::string&              label)
 {
     for(const auto& env_var : env_var_options)
     {
         const std::string value_str = get_env(env_var, std::string{});
 
         if(value_str.empty()) continue;
-        try
+
+        std::uint64_t value  = 0;
+        const char*   first  = value_str.data();
+        const char*   last   = first + value_str.size();
+        const auto    result = std::from_chars(first, last, value);
+
+        if(result.ec != std::errc{} || result.ptr != last)
         {
-            const auto value = std::stoul(value_str);
-            LOG_DEBUG("MPI output filtering: using {} = {} from {}", label, value,
-                      env_var);
-            return value;
-        } catch(const std::exception& e)
-        {
-            LOG_WARNING("MPI output filtering: failed to get {} from {}='{}': {}", label,
-                        env_var, value_str, e.what());
+            LOG_WARNING("MPI output filtering: failed to parse {} from {}='{}' as a "
+                        "non-negative integer",
+                        label, env_var, value_str);
+            continue;
         }
+
+        LOG_DEBUG("MPI output filtering: using {} = {} from {}", label, value, env_var);
+        return value;
     }
 
     return std::nullopt;
@@ -2782,18 +2787,18 @@ std::optional<std::uint64_t>
 get_mpi_rank_from_env()
 {
     // global rank env-vars: user-provided, then runtime-specific
-    return get_first_uint_from_env({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
-                                     "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
-                                     "SLURM_PROCID" },
-                                   "MPI rank");
+    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
+                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
+                                    "SLURM_PROCID" },
+                                  "MPI rank");
 }
 
 std::optional<std::uint64_t>
 get_mpi_world_size_from_env()
 {
-    return get_first_uint_from_env({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
-                                     "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
-                                   "world size");
+    return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
+                                    "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
+                                  "MPI world size");
 }
 #endif
 }  // namespace
