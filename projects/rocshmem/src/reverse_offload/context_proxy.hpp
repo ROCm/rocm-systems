@@ -49,7 +49,7 @@ class DefaultContextProxy {
   : proxy_{num_elems}, constructed_{true} {
     auto ctx{proxy_.get()};
     new (ctx) ROContext(reinterpret_cast<Backend*>(backend), -1, true);
-    rocshmem_ctx_t local{ctx, tinfo};
+    rocshmem_ctx_t local{ctx, nullptr};
     set_internal_ctx(&local);
   }
 

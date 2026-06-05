@@ -50,7 +50,7 @@ class IPCDefaultContextProxy {
     auto ctx{proxy_.get()};
     new (ctx) IPCContext(reinterpret_cast<Backend*>(backend), 0);
     ctx->tinfo = tinfo;
-    rocshmem_ctx_t local{ctx, tinfo};
+    rocshmem_ctx_t local{ctx, nullptr};
     set_internal_ctx(&local);
   }
 

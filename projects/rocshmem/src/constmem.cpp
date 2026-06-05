@@ -20,6 +20,9 @@ void init_constant_memory(void) {
     constmem_values.alltoall_wg_algo = gda::ALLTOALLV_WG_ALGO_COPY;
   }
 
+  constmem_values.my_pe = backend->getMyPE();
+  constmem_values.num_pes = backend->getNumPEs();
+
   constmem_values.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
   constmem_values.ipc_stride = backend->ipcImpl.ipc_stride;
   // ipc_shm_size == 0 means IPC disabled (fast early return on device).
