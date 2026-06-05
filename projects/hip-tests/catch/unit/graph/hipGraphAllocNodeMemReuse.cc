@@ -889,6 +889,10 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
     hipError_t err = hipGraphLaunch(exec, stream);
     REQUIRE(err == hipErrorInvalidValue);
 
+    HIP_CHECK(hipStreamSynchronize(stream));
+    // Free the still-live allocation from the alloc node so the pool can reap it
+    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipGraphExecDestroy(exec));
   }
 
@@ -920,6 +924,10 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
     REQUIRE(statsAfterSecond.usedCurrent == kAllocSize * 2 );
 #endif
 
+    HIP_CHECK(hipStreamSynchronize(stream));
+    // Free the still-live allocation from the alloc node so the pool can reap it
+    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipGraphExecDestroy(exec));
   }
 
