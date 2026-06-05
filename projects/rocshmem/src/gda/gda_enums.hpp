@@ -39,6 +39,9 @@ namespace gda {
     ALLTOALLV_WG_ALGO_COPY,
   };
 }  // namespace gda
+
+using GDAProvider = gda::provider;
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_GDA_ENUMS_HPP_

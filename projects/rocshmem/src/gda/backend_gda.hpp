@@ -82,7 +82,7 @@ class GDABackend : public Backend {
     union ibv_gid gid;
   } dest_info_t;
 
-  gda::provider gda_provider = gda::provider::UNSET;
+  GDAProvider gda_provider = GDAProvider::UNSET;
 
   uint32_t *heap_rkey = nullptr;
 
@@ -159,10 +159,10 @@ class GDABackend : public Backend {
   /**
    * @brief return user-preferred GDA provider (or NONE if not specified)
    */
-  static gda::provider requested_provider();
+  static GDAProvider requested_provider();
 
  public:
-  gda::provider get_gda_provider() const { return gda_provider; }
+  GDAProvider get_gda_provider() const { return gda_provider; }
 
   friend GDAContext;
 
@@ -185,7 +185,7 @@ class GDABackend : public Backend {
    * @param device_name The device name (for debug messages)
    * @return true if the device vendor matches the provider, false otherwise
    */
-  static bool device_matches_provider_vendor(gda::provider provider,
+  static bool device_matches_provider_vendor(GDAProvider provider,
                                              const struct ibv_device_attr &device_attr,
                                              const char *device_name);
 
@@ -197,7 +197,7 @@ class GDABackend : public Backend {
    * @return true if at least one active port on a matching vendor device is found,
    *         false otherwise
    */
-  static bool has_active_ib_interface(gda::provider provider);
+  static bool has_active_ib_interface(GDAProvider provider);
 
   /**
    * @brief Verify whether GDA Backend could run

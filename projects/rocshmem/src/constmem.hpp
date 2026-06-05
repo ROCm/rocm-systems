@@ -35,7 +35,7 @@ namespace rocshmem {
 
 struct constmem_t {
   BackendType backend_type;
-  gda::provider gda_provider;
+  GDAProvider gda_provider;
   uint64_t alltoall_wg_algo;
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)

@@ -805,48 +805,48 @@ void GDABackend::rte_barrier() {
   }
 }
 
-gda::provider GDABackend::requested_provider() {
+GDAProvider GDABackend::requested_provider() {
   /* Check whether the user explicitly requests a particular provider type */
   std::string envstr = envvar::gda::provider;
   std::transform(envstr.begin(), envstr.end(), envstr.begin(), ::tolower);
   if (!envstr.empty()) {
     LOG_INFO("Found environment variable ROCSHMEM_GDA_PROVIDER, value is %s", envstr.c_str());
     if (envstr.find("bnxt") != std::string::npos) {
-      return gda::provider::BNXT;
+      return GDAProvider::BNXT;
     }
     if (envstr.find("ionic") != std::string::npos || envstr.find("pensando") != std::string::npos) {
-      return gda::provider::IONIC;
+      return GDAProvider::IONIC;
     }
     if (envstr.find("mlx5") != std::string::npos) {
-      return gda::provider::MLX5;
+      return GDAProvider::MLX5;
     }
   }
-  return gda::provider::UNSET;
+  return GDAProvider::UNSET;
 }
 
 /* Check if a device's vendor ID matches the expected vendor for a given provider.
  * Returns true if the device matches, false otherwise.
  */
-bool GDABackend::device_matches_provider_vendor(gda::provider provider,
+bool GDABackend::device_matches_provider_vendor(GDAProvider provider,
                                                  const struct ibv_device_attr &device_attr,
                                                  [[maybe_unused]] const char *device_name) {
   uint32_t expected_vendor_id = 0;
   [[maybe_unused]] const char *vendor_name = nullptr;
 
   switch (provider) {
-    case gda::provider::BNXT:
+    case GDAProvider::BNXT:
       expected_vendor_id = GDA_BNXT_VENDOR_ID;
       vendor_name = "BNXT/Broadcom";
       break;
-    case gda::provider::IONIC:
+    case GDAProvider::IONIC:
       expected_vendor_id = GDA_IONIC_VENDOR_ID;
       vendor_name = "IONIC/Pensando";
       break;
-    case gda::provider::MLX5:
+    case GDAProvider::MLX5:
       expected_vendor_id = GDA_MLX5_VENDOR_ID;
       vendor_name = "MLX5/Mellanox";
       break;
-    case gda::provider::UNSET:
+    case GDAProvider::UNSET:
       // UNSET accepts any vendor
       return true;
     default:
@@ -867,7 +867,7 @@ bool GDABackend::device_matches_provider_vendor(gda::provider provider,
  * the wrong NIC when multiple vendors are present.
  * Returns true if at least one active port is found on a matching device.
  */
-bool GDABackend::has_active_ib_interface(gda::provider provider) {
+bool GDABackend::has_active_ib_interface(GDAProvider provider) {
   struct ibv_device **device_list = nullptr;
   int num_devices = 0;
   bool has_active = false;
@@ -925,7 +925,7 @@ bool GDABackend::has_active_ib_interface(gda::provider provider) {
  */
 int GDABackend::backend_can_run() {
   void *handle{nullptr};
-  gda::provider requested = requested_provider();
+  GDAProvider requested = requested_provider();
 
   /* Libnuma ? */
   if (!numa.is_available()) {
@@ -938,10 +938,10 @@ int GDABackend::backend_can_run() {
 
   /* Try opening bnxt DV libraries */
 #if defined(GDA_BNXT)
-  if (requested == gda::provider::UNSET || requested == gda::provider::BNXT) {
+  if (requested == GDAProvider::UNSET || requested == GDAProvider::BNXT) {
     handle = bnxt_dv_dlopen();
     if (handle) {
-      auto ret = has_active_ib_interface(gda::provider::BNXT);
+      auto ret = has_active_ib_interface(GDAProvider::BNXT);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
       LOG_TRACE("BNXT DV library found but no active InfiniBand interface available");
@@ -951,10 +951,10 @@ int GDABackend::backend_can_run() {
 
   /* Try opening ionic DV libraries */
 #if defined(GDA_IONIC)
-  if (requested == gda::provider::UNSET || requested == gda::provider::IONIC) {
+  if (requested == GDAProvider::UNSET || requested == GDAProvider::IONIC) {
     handle = ionic_dv_dlopen();
     if (handle) {
-      auto ret = has_active_ib_interface(gda::provider::IONIC);
+      auto ret = has_active_ib_interface(GDAProvider::IONIC);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
       LOG_TRACE("IONIC DV library found but no active InfiniBand interface available");
@@ -964,10 +964,10 @@ int GDABackend::backend_can_run() {
 
   /* Try opening mlx5 DV libraries */
 #if defined(GDA_MLX5)
-  if (requested == gda::provider::UNSET || requested == gda::provider::MLX5) {
+  if (requested == GDAProvider::UNSET || requested == GDAProvider::MLX5) {
     handle = mlx5_dv_dlopen();
     if (handle) {
-      auto ret = has_active_ib_interface(gda::provider::MLX5);
+      auto ret = has_active_ib_interface(GDAProvider::MLX5);
 //      dlclose(handle); //TODO: unloading the lib crashes the next call to ibv_open_device
       if (ret) return ROCSHMEM_SUCCESS;
       LOG_TRACE("MLX5 DV library found but no active InfiniBand interface available");
@@ -997,7 +997,7 @@ void GDABackend::setup_ibv() {
 void GDABackend::cleanup_ibv() {
   int err;
 
-  if (gda_provider == gda::provider::BNXT) {
+  if (gda_provider == GDAProvider::BNXT) {
     for (size_t i = 0; i < qps.size(); i++) {
       NicDevice &nic = nic_for_qp(i);
 
@@ -1039,7 +1039,7 @@ void GDABackend::cleanup_ibv() {
       qp_allocator_->deallocate(bnxt_scqs[i].buf);
       qp_allocator_->deallocate(bnxt_rcqs[i].buf);
     }
-  } else if (gda_provider == gda::provider::MLX5) {
+  } else if (gda_provider == GDAProvider::MLX5) {
     for (size_t i = 0; i < mlx5_qps.size(); i++) {
       // mlx5dv::destroy_qp also destroys the associated CQ
       err = mlx5dv.destroy_qp(mlx5_qps[i]);
@@ -1056,7 +1056,7 @@ void GDABackend::cleanup_ibv() {
   }
 
   for (auto &nic : nic_devices_) {
-    if (gda_provider == gda::provider::IONIC) {
+    if (gda_provider == GDAProvider::IONIC) {
       if (nic.pd_uxdma[0]) {
         err = ibv.dealloc_pd(nic.pd_uxdma[0]);
         CHECK_ZERO(err, "ibv_dealloc_pd (uxdma[0])");
@@ -1084,18 +1084,18 @@ void GDABackend::cleanup_ibv() {
 
 void GDABackend::open_dv_libs() {
   int ret;
-  gda::provider requested = requested_provider();
+  GDAProvider requested = requested_provider();
 
   //this hardcoded init order will always prefer BNXT>IONIC>MLX5
   //if all three drivers are installed and enabled
 
 #if defined(GDA_BNXT)
-  if (gda_provider == gda::provider::UNSET
-  && (requested == gda::provider::UNSET || requested == gda::provider::BNXT)) {
+  if (gda_provider == GDAProvider::UNSET
+  && (requested == GDAProvider::UNSET || requested == GDAProvider::BNXT)) {
     ret = bnxt_dv_dl_init();
 
     if (ret == ROCSHMEM_SUCCESS) {
-      gda_provider = gda::provider::BNXT;
+      gda_provider = GDAProvider::BNXT;
     } else {
       LOG_TRACE("Initializing rocSHMEM BNXT GDA support failed");
     }
@@ -1103,12 +1103,12 @@ void GDABackend::open_dv_libs() {
 #endif // defined(GDA_BNXT)
 
 #if defined(GDA_IONIC)
-  if (gda_provider == gda::provider::UNSET
-  && (requested == gda::provider::UNSET || requested == gda::provider::IONIC)) {
+  if (gda_provider == GDAProvider::UNSET
+  && (requested == GDAProvider::UNSET || requested == GDAProvider::IONIC)) {
     ret = ionic_dv_dl_init();
 
     if (ret == ROCSHMEM_SUCCESS) {
-      gda_provider = gda::provider::IONIC;
+      gda_provider = GDAProvider::IONIC;
     } else {
       LOG_TRACE("Initializing rocSHMEM IONIC GDA support failed");
     }
@@ -1116,19 +1116,19 @@ void GDABackend::open_dv_libs() {
 #endif // defined(GDA_IONIC)
 
 #if defined(GDA_MLX5)
-  if (gda_provider == gda::provider::UNSET
-  && (requested == gda::provider::UNSET || requested == gda::provider::MLX5)) {
+  if (gda_provider == GDAProvider::UNSET
+  && (requested == GDAProvider::UNSET || requested == GDAProvider::MLX5)) {
     ret = mlx5_dv_dl_init();
 
     if (ret == ROCSHMEM_SUCCESS) {
-      gda_provider = gda::provider::MLX5;
+      gda_provider = GDAProvider::MLX5;
     } else {
       LOG_TRACE("Initializing rocSHMEM MLX5 GDA support failed");
     }
   }
 #endif // defined(GDA_MLX5)
 
-  if (gda_provider == gda::provider::UNSET) {
+  if (gda_provider == GDAProvider::UNSET) {
     LOG_ERROR_EXIT("gda:open_dv_libs: no DV library could dlopen for IONIC, BNXT, or MLX5 GDA support");
   }
 }
@@ -1143,14 +1143,14 @@ void GDABackend::close_dv_libs() {
   if (mlx5dv_handle_ != nullptr)
     dlclose(mlx5dv_handle_);
 
-  gda_provider = gda::provider::UNSET;
+  gda_provider = GDAProvider::UNSET;
 }
 
 void GDABackend::exchange_qp_dest_info() {
   for (size_t i = 0; i < qps.size(); i++) {
     NicDevice &nic = nic_for_qp(i);
     dest_info[i].lid = nic.portinfo.lid;
-    if (gda_provider == gda::provider::MLX5) {
+    if (gda_provider == GDAProvider::MLX5) {
       dest_info[i].qpn = mlx5_qps[i].qpn;
     } else {
       dest_info[i].qpn = qps[i]->qp_num;
@@ -1287,7 +1287,7 @@ void GDABackend::open_ib_device() {
         nic.nic_name.c_str());
     }
 
-    if (gda_provider == gda::provider::MLX5) {
+    if (gda_provider == GDAProvider::MLX5) {
       /* Explicitly request DevX context */
       struct mlx5dv_context_attr context_attr = {};
       context_attr.flags = MLX5DV_CONTEXT_FLAGS_DEVX;
@@ -1305,7 +1305,7 @@ void GDABackend::open_ib_device() {
     CHECK_NNULL(nic.pd_orig, "ib allocate pd");
     dump_ibv_pd(nic.pd_orig);
 
-    if (gda_provider == gda::provider::IONIC) {
+    if (gda_provider == GDAProvider::IONIC) {
       create_parent_domain(nic);
     }
 
@@ -1339,12 +1339,12 @@ void GDABackend::validate_ib_device(NicDevice &nic) {
   err = ibv.query_device(nic.context, &nic.device_attr);
   CHECK_ZERO(err, "ibv_query_device");
 
-  if (gda_provider == gda::provider::BNXT) {
+  if (gda_provider == GDAProvider::BNXT) {
     const std::set<uint32_t> supported_bnxt_part_ids = { 0x1760 /* BCM57608 */};
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
     if (nic.device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
-      LOG_ERROR_EXIT("%s gda::provider::BNXT requested but an invalid device is selected", debug_str.c_str());
+      LOG_ERROR_EXIT("%s GDAProvider::BNXT requested but an invalid device is selected", debug_str.c_str());
     }
 
     if (supported_bnxt_part_ids.find(nic.device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
@@ -1397,9 +1397,9 @@ void GDABackend::modify_qps_reset_to_init() {
     NicDevice &nic = nic_for_qp(i);
     attr.port_num = nic.port;
 
-    if (gda_provider == gda::provider::BNXT) {
+    if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
-    } else if (gda_provider == gda::provider::MLX5) {
+    } else if (gda_provider == GDAProvider::MLX5) {
       err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, nic.gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
@@ -1417,7 +1417,7 @@ void GDABackend::modify_qps_init_to_rtr() {
   attr.qp_state               = IBV_QPS_RTR;
   attr.min_rnr_timer          = 12;
 
-  if (gda_provider == gda::provider::IONIC) {
+  if (gda_provider == GDAProvider::IONIC) {
     attr.max_dest_rd_atomic = 15;
   } else {
     attr.max_dest_rd_atomic = 1;
@@ -1460,9 +1460,9 @@ void GDABackend::modify_qps_init_to_rtr() {
       attr.ah_attr.dlid = dest_info[i].lid;
     }
 
-    if (gda_provider == gda::provider::BNXT) {
+    if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
-    } else if (gda_provider == gda::provider::MLX5) {
+    } else if (gda_provider == GDAProvider::MLX5) {
       err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, nic.gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
@@ -1482,7 +1482,7 @@ void GDABackend::modify_qps_rtr_to_rts() {
   attr.retry_cnt     = 7;
   attr.rnr_retry     = 7;
 
-  if (gda_provider == gda::provider::IONIC) {
+  if (gda_provider == GDAProvider::IONIC) {
     attr.max_rd_atomic = 15;
   } else {
     attr.max_rd_atomic = 1;
@@ -1499,9 +1499,9 @@ void GDABackend::modify_qps_rtr_to_rts() {
     NicDevice &nic = nic_for_qp(i);
     attr.sq_psn = dest_info[i].psn;
 
-    if (gda_provider == gda::provider::BNXT) {
+    if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
-    } else if (gda_provider == gda::provider::MLX5) {
+    } else if (gda_provider == GDAProvider::MLX5) {
       err = mlx5dv.modify_qp(mlx5_qps[i], &attr, attr_mask, nic.gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
@@ -1514,7 +1514,7 @@ void GDABackend::create_queues() {
   int ncqes;
   uint32_t sq_size = envvar::gda::sq_size;
 
-  if (gda_provider == gda::provider::IONIC) {
+  if (gda_provider == GDAProvider::IONIC) {
     ncqes = sq_size << 1;
   } else {
     ncqes = sq_size;
@@ -1530,13 +1530,13 @@ void GDABackend::create_queues() {
 
   mlx5_qps.resize(num_qps);
 
-  if (gda_provider == gda::provider::BNXT) {
+  if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
     bnxt_create_qps(sq_size);
-  } else if (gda_provider == gda::provider::IONIC) {
+  } else if (gda_provider == GDAProvider::IONIC) {
     ionic_create_cqs(ncqes);
     create_qps(sq_size);
-  } else if (gda_provider == gda::provider::MLX5) {
+  } else if (gda_provider == GDAProvider::MLX5) {
     // mlx5_create_qps also creates the associated CQs
     mlx5_create_qps(sq_size);
   }
@@ -1624,7 +1624,7 @@ void GDABackend::create_parent_domain(NicDevice &nic) {
   pattr.free       = GDABackend::pd_release;
   pattr.pd_context = nullptr;
 
-  if (gda_provider == gda::provider::IONIC) {
+  if (gda_provider == GDAProvider::IONIC) {
     pattr.alloc      = GDABackend::pd_alloc_device_uncached;
   } else {
     pattr.alloc      = GDABackend::pd_alloc_host;
@@ -1634,7 +1634,7 @@ void GDABackend::create_parent_domain(NicDevice &nic) {
   CHECK_NNULL(nic.pd_parent, "ibv_alloc_parent_domain");
   dump_ibv_pd(nic.pd_parent);
 
-  if (gda_provider == gda::provider::IONIC) {
+  if (gda_provider == GDAProvider::IONIC) {
     ionic_setup_parent_domain(nic, &pattr);
   }
 }
@@ -1643,8 +1643,8 @@ void GDABackend::create_cqs(int cqe) {
   struct ibv_cq_init_attr_ex cq_attr;
   struct ibv_cq_ex *cq_ex;
 
-  assert(gda_provider != gda::provider::BNXT);
-  assert(gda_provider != gda::provider::IONIC);
+  assert(gda_provider != GDAProvider::BNXT);
+  assert(gda_provider != GDAProvider::IONIC);
 
   memset(&cq_attr, 0, sizeof(struct ibv_cq_init_attr_ex));
   cq_attr.cqe           = cqe;
@@ -1660,7 +1660,7 @@ void GDABackend::create_cqs(int cqe) {
    *    and linux/include/linux/mlx5/mlx5_ifc.h for Completion Queue Context definition
    *  - see also rdma-core/libibverbs/cmd_cq.c and linux/drivers/infiniband/hw/mlx5/cq.c
    *    for how this flag sets the bit */
-  if (gda_provider == gda::provider::MLX5) {
+  if (gda_provider == GDAProvider::MLX5) {
     cq_attr.cqe         = 1;
     cq_attr.comp_mask  |= IBV_CQ_INIT_ATTR_MASK_FLAGS;
     cq_attr.flags      |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
@@ -1679,19 +1679,19 @@ void GDABackend::create_cqs(int cqe) {
 
 void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   switch (gda_provider) {
-  case gda::provider::IONIC:
+  case GDAProvider::IONIC:
     ionic_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
-  case gda::provider::BNXT:
+  case GDAProvider::BNXT:
     bnxt_initialize_gpu_qp(gpu_qp, conn_num);
     dump_ibv_qp(qps[conn_num], conn_num);
     break;
-  case gda::provider::MLX5:
+  case GDAProvider::MLX5:
     mlx5_initialize_gpu_qp(gpu_qp, conn_num);
     break;
   default:
-    assert(false /* gda::provider initialize_gpu_qp */);
+    assert(false /* GDAProvider initialize_gpu_qp */);
   }
 }
 
@@ -1706,13 +1706,13 @@ void GDABackend::create_qps(int sq_length) {
   attr.qp_type             = IBV_QPT_RC;
   attr.comp_mask           = IBV_QP_INIT_ATTR_PD;
 
-  if (gda_provider == gda::provider::IONIC) {
+  if (gda_provider == GDAProvider::IONIC) {
     attr.cap.max_recv_sge    = 1; // TODO allow zero sges in the driver
   }
 
   for (size_t i = 0; i < qps.size(); i++) {
     NicDevice &nic = nic_for_qp(i);
-    if (gda_provider == gda::provider::IONIC) {
+    if (gda_provider == GDAProvider::IONIC) {
       attr.pd = nic.pd_uxdma[i & 1];
     } else {
       attr.pd = nic.pd_parent;
