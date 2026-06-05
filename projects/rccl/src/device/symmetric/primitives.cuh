@@ -18,6 +18,17 @@ struct tmaSmemStruct {
   alignas(8) __mbarrier_t bar;
 };
 
+// HIP/ROCm does not provide CUDA's __isShared() address-space query, which the
+// symmetric kernels use only as a __builtin_assume() hint. Map it to the AMDGCN
+// builtin so these hints still compile. Guarded so we never clash with a HIP
+// runtime that already declares __isShared().
+#if defined(__HIP_PLATFORM_AMD__) && !defined(NCCL_SYMK_HAVE_ISSHARED)
+#define NCCL_SYMK_HAVE_ISSHARED 1
+static __device__ __forceinline__ bool __isShared(const void* p) {
+  return __builtin_amdgcn_is_shared((void*)p);
+}
+#endif
+
 #if __CUDA_ARCH__ >= 700
 // __grid_constant__ appears to break cuda-gdb
 #define NCCL_GRID_CONSTANT __grid_constant__
