@@ -88,7 +88,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+      return hipErrorStreamCaptureUnsupported;
     }
   }
 
@@ -144,7 +144,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
   // Return error if any stream other than the current stream is in capture mode
   if (device->StreamCaptureBlocking()) {
     if (s->GetCaptureStatus() != hipStreamCaptureStatusActive) {
-      HIP_RETURN(hipErrorStreamCaptureUnsupported);
+      return hipErrorStreamCaptureUnsupported;
     }
   }
 
