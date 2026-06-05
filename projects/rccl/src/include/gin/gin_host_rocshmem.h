@@ -22,6 +22,7 @@ ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *add
                                      int type, int mr_flags, void **mhandle, void **ginHandle);
 ncclResult_t ncclGinRocshmemDeregister(ncclGin_t *ginComm, void *ginCtx, void *mhandle);
 ncclResult_t ncclGinRocshmemDestroyContext(ncclGin_t *ginComm, void *ginCtx);
+ncclResult_t ncclGinRocshmemFinalizeIfOwned(struct ncclComm* comm);
 ncclResult_t ncclGinRocshmemProgress(ncclGin_t *ginComm, void *ginCtx);
 ncclResult_t ncclGinRocshmemQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError);
 

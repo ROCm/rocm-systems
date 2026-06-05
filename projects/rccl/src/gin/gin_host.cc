@@ -370,6 +370,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
         ginState->ginCtx[n] = NULL;
       }
     }
+    NCCLCHECK(ncclGinRocshmemFinalizeIfOwned(comm));
   }
   if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
     for (int n = 0; n < ginState->ginCommCount; n++) {

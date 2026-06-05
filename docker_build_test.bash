@@ -109,7 +109,7 @@ if [ 1 -eq 1 ]; then
 echo "=== RCCL AlltoAll: GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
-  -x RCCL_ROCSHMEM_ENABLE=1 \
+  -x RCCL_ROCSHMEM_ENABLE=0 \
   -x ROCSHMEM_BACKEND=ipc \
   -x ROCSHMEM_HEAP_SIZE=1073741824 \
   -x ROCSHMEM_SDMA_ENABLED=1 \

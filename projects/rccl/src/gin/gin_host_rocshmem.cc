@@ -7,6 +7,7 @@
 #ifdef ENABLE_ROCSHMEM_GIN
 
 #include "gin/gin_host_rocshmem.h"
+#include "bootstrap.h"
 #include "comm.h"
 #include "dev_runtime.h"
 #include "nccl_device/gin/rocshmem/gin_rocshmem_device_host_common.h"
@@ -14,10 +15,66 @@
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>
 #include <map>
+#include <mutex>
 
 // Refcount for buffer registration: ncclGinRegister calls us once per
 // GIN context for the same buffer.
 static std::map<void*, int> bufferRegRefcount;
+
+// gin-anvil builds RCCL with ENABLE_ROCSHMEM_GIN only (not ENABLE_ROCSHMEM), so
+// init.cc never calls rocshmem_init. GIN type 4 needs it before rocshmem_malloc.
+static std::mutex ginRocshmemInitMutex;
+static bool ginRocshmemRcclInited = false;
+
+static ncclResult_t ncclGinRocshmemEnsureInit(struct ncclComm* comm) {
+  if (comm == nullptr) return ncclSuccess;
+  if (rocshmem::rocshmem_n_pes() > 0) return ncclSuccess;
+
+  std::lock_guard<std::mutex> lock(ginRocshmemInitMutex);
+  if (rocshmem::rocshmem_n_pes() > 0) return ncclSuccess;
+  if (ginRocshmemRcclInited) return ncclSuccess;
+
+  int nGpus = 0;
+  if (hipGetDeviceCount(&nGpus) == hipSuccess && nGpus > 0) {
+    hipError_t err = hipSetDevice(comm->rank % nGpus);
+    if (err != hipSuccess) {
+      WARN("GIN rocshmem: hipSetDevice failed");
+      return ncclUnhandledCudaError;
+    }
+  }
+
+  rocshmem::rocshmem_uniqueid_t rocshmemUniqueId;
+  rocshmem::rocshmem_init_attr_t rocshmemAttr;
+  int ret;
+
+  if (comm->rank == 0) {
+    ret = rocshmem::rocshmem_get_uniqueid(&rocshmemUniqueId);
+    if (ret != rocshmem::ROCSHMEM_SUCCESS) {
+      WARN("GIN rocshmem: rocshmem_get_uniqueid failed");
+      return ncclSystemError;
+    }
+  }
+
+  NCCLCHECK(bootstrapBroadcast(comm->bootstrap, comm->rank, comm->nRanks, 0,
+                               &rocshmemUniqueId, sizeof(rocshmemUniqueId)));
+
+  ret = rocshmem::rocshmem_set_attr_uniqueid_args(comm->rank, comm->nRanks,
+                                                  &rocshmemUniqueId, &rocshmemAttr);
+  if (ret != rocshmem::ROCSHMEM_SUCCESS) {
+    WARN("GIN rocshmem: rocshmem_set_attr_uniqueid_args failed");
+    return ncclSystemError;
+  }
+
+  ret = rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &rocshmemAttr);
+  if (ret != rocshmem::ROCSHMEM_SUCCESS) {
+    WARN("GIN rocshmem: rocshmem_init_attr failed");
+    return ncclSystemError;
+  }
+
+  ginRocshmemRcclInited = true;
+  INFO(NCCL_INIT, "GIN rocshmem: initialized rocSHMEM (rank %d/%d)", comm->rank, comm->nRanks);
+  return ncclSuccess;
+}
 
 
 struct ginRocshmemCtx {
@@ -48,6 +105,8 @@ ncclResult_t ncclGinRocshmemCreateContext(struct ncclComm *comm, void *collComm,
                                           ncclNetDeviceHandle_v11_t **outDevHandle) {
   ncclResult_t ret = ncclSuccess;
   struct ginRocshmemCtx *ctx = NULL;
+
+  NCCLCHECK(ncclGinRocshmemEnsureInit(comm));
 
   NCCLCHECK(ncclCalloc(&ctx, 1));
   ctx->comm = comm;
@@ -244,6 +303,22 @@ ncclResult_t ncclGinRocshmemQueryLastError(ncclGin_t *ginComm, void *ginCtx, boo
 ///////////////////////////////////////////////////////////////////////////////
 // Plugin-facing variants (no ncclComm available)
 ///////////////////////////////////////////////////////////////////////////////
+
+ncclResult_t ncclGinRocshmemFinalizeIfOwned(struct ncclComm* comm) {
+  if (!ginRocshmemRcclInited || comm == nullptr || comm->sharedRes == nullptr) {
+    return ncclSuccess;
+  }
+  if (comm->sharedRes->refCount != 1) return ncclSuccess;
+  if (rocshmem::rocshmem_n_pes() <= 0) {
+    ginRocshmemRcclInited = false;
+    return ncclSuccess;
+  }
+
+  rocshmem::rocshmem_finalize();
+  ginRocshmemRcclInited = false;
+  INFO(NCCL_INIT, "GIN rocshmem: finalized rocSHMEM");
+  return ncclSuccess;
+}
 
 ncclResult_t ncclGinRocshmemCreateContextFromPlugin(int nSignals, int nCounters,
                                                      void **outGinCtx,
