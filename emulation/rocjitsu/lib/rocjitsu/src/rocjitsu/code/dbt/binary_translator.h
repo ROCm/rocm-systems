@@ -172,6 +172,26 @@ private:
     uint64_t trailer_body_offset = 0;
   };
 
+  /// @brief Mutable placement state for size-growing instruction rewrites.
+  ///
+  /// @details This collects the generic placement policy inputs that used to be
+  /// passed through the translator as separate parameters. Keeping them in one
+  /// object makes the eventual placement engine boundary explicit while leaving
+  /// target-specific lowering decisions in BinaryTranslator.
+  struct PlacementState {
+    std::vector<std::pair<uint64_t, uint64_t>> local_caves;
+    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges;
+    bool allow_unreachable_text_caves = false;
+    std::optional<uint16_t> long_return_sgpr_pair;
+    std::optional<uint16_t> long_return_scc_sgpr;
+    CaveChainState *cave_chain = nullptr;
+    CaveBranchIslandState *cave_branch_islands = nullptr;
+
+    [[nodiscard]] std::span<const std::pair<uint64_t, uint64_t>> reserved_local_text() const;
+    [[nodiscard]] bool overlaps_reserved_local_text(uint64_t start, uint64_t end) const;
+    void reserve_local_text(uint64_t start, uint64_t end);
+  };
+
   /// @brief Apply a single semantic replacement to the translated text.
   ///
   /// @details If the replacement fits within the source byte range, writes
@@ -182,31 +202,13 @@ private:
   /// @param repl    The semantic replacement to apply.
   /// @param text    The translated text buffer (same size as original .text).
   /// @param patcher The code object patcher for cave body accumulation.
-  /// @param local_caves Ranges in .text already reserved for local cave bodies.
-  /// @param protected_ranges Decoded reachable code ranges that must not be
-  ///                         repurposed as local caves.
-  /// @param allow_unreachable_text_caves Whether decoded-unreachable, non-padding
-  ///                                     text may be repurposed for cave bodies.
-  /// @param long_return_sgpr_pair Optional dead SGPR pair used to materialize a
-  ///                              far return when the appended cave is outside
-  ///                              SOPP branch range.
-  /// @param long_return_scc_sgpr Optional dead SGPR used to preserve SCC across
-  ///                             a far return to an s_cbranch_scc* target.
-  /// @param cave_chain Per-basic-block state for joining adjacent far-cave
-  ///                   replacements behind one source branch.
-  /// @param cave_branch_islands Per-code-object state for reserved branch
-  ///                            islands at the front of the appended cave.
+  /// @param placement Mutable placement state and policy inputs for expanding
+  ///                  rewrites.
   /// @returns true if the replacement was applied safely; false if an expanding
   ///          replacement could not be branched to/from the code cave.
   [[nodiscard]] bool apply_semantic(const struct SemanticReplacement &repl,
                                     std::vector<uint8_t> &text, CodeObjectPatcher &patcher,
-                                    std::vector<std::pair<uint64_t, uint64_t>> &local_caves,
-                                    std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-                                    bool allow_unreachable_text_caves,
-                                    std::optional<uint16_t> long_return_sgpr_pair = std::nullopt,
-                                    std::optional<uint16_t> long_return_scc_sgpr = std::nullopt,
-                                    CaveChainState *cave_chain = nullptr,
-                                    CaveBranchIslandState *cave_branch_islands = nullptr);
+                                    PlacementState &placement);
 
   /// @brief Translate a single instruction via the encoding translation pipeline.
   ///
@@ -220,38 +222,21 @@ private:
   /// @param dst_opcode Target opcode from the legalization table.
   /// @param patcher    The code object patcher for expanded instruction bodies.
   /// @param orig_text   The original .text bytes used to preserve trailing literals.
-  /// @param local_caves Ranges in .text already reserved for local cave bodies.
-  /// @param protected_ranges Decoded reachable code ranges that must not be
-  ///                         repurposed as local caves.
-  /// @param allow_unreachable_text_caves Whether decoded-unreachable, non-padding
-  ///                                     text may be repurposed for cave bodies.
+  /// @param placement Mutable placement state and policy inputs for expanding
+  ///                  rewrites.
   /// @param rdna4_grid_x_sgpr SGPR holding the entry-captured RDNA4 GridX value,
   ///                          or -1 when no remap is needed.
   /// @param rdna4_grid_yz_sgpr SGPR holding the entry-captured packed RDNA4
   ///                           GridY/Z value, or -1 when no remap is needed.
-  /// @param long_return_sgpr_pair Optional dead SGPR pair used to materialize a
-  ///                              far return when the appended cave is outside
-  ///                              SOPP branch range.
-  /// @param long_return_scc_sgpr Optional dead SGPR used to preserve SCC across
-  ///                             a far return to an s_cbranch_scc* target.
-  /// @param cave_chain Per-basic-block state for joining adjacent far-cave
-  ///                   replacements behind one source branch.
-  /// @param cave_branch_islands Per-code-object state for reserved branch
-  ///                            islands at the front of the appended cave.
   /// @returns true if the instruction was translated or copied safely; false if
   ///          the translated encoding expanded and could not be branched through
   ///          the code cave.
   [[nodiscard]] bool handle_encoding(
       const Instruction &inst, uint64_t offset, std::vector<uint8_t> &text, uint16_t dst_opcode,
-      CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text,
-      std::vector<std::pair<uint64_t, uint64_t>> &local_caves,
-      std::span<const std::pair<uint64_t, uint64_t>> protected_ranges,
-      bool allow_unreachable_text_caves, int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr,
+      CodeObjectPatcher &patcher, std::span<const uint8_t> orig_text, PlacementState &placement,
+      int16_t rdna4_grid_x_sgpr, int16_t rdna4_grid_yz_sgpr,
       InstructionList::Iterator block_begin, InstructionList::Iterator inst_it,
-      std::span<BasicBlock *const> scope_blocks,
-      std::optional<uint16_t> long_return_sgpr_pair = std::nullopt,
-      std::optional<uint16_t> long_return_scc_sgpr = std::nullopt,
-      CaveChainState *cave_chain = nullptr, CaveBranchIslandState *cave_branch_islands = nullptr);
+      std::span<BasicBlock *const> scope_blocks);
 
   /// @brief Translate one instruction to host instruction words.
   ///
