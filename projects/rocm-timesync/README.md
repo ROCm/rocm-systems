@@ -23,8 +23,8 @@ onto the system's POSIX `CLOCK_REALTIME` timeline. A topic for future product ge
 programmable real-time clock to the GPU which can then surface REALTIME aligned timestamps directly into SW, but this is 
 out of scope for MI4xx, and thus out of scope for this project at the moment.
 
-The primary challenge with performing GPU->realtime timestamp translation is that the adjust factor is not constant.
-This is owing to several reasons:
+The primary challenge with performing GPU->realtime timestamp translation is that the adjustment factor is not constant.
+This is due to several reasons:
 - On dGPU configurations, CPU and GPU clocks are expected to drift independently
 - On PTP enabled systems, the node's realtime clock does not tick based solely on CPU, but rather is disciplined by a
   network clocksource.
