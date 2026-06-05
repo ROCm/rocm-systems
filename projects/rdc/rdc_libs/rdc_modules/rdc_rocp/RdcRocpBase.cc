@@ -166,83 +166,34 @@ const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
 }
 
 rdc_status_t RdcRocpBase::map_entity_to_profiler() {
-  // std::map<uint32_t, uint32_t> entity_to_index_map;
-  // kfd_id_t is only used inside this function
   typedef uint64_t kfd_id_t;
   std::map<uint32_t, kfd_id_t> prof_kfd_map;
 
-  // populate profiler map
   for (uint32_t prof_gpu_index = 0; prof_gpu_index < agents.size(); prof_gpu_index++) {
     prof_kfd_map.insert({prof_gpu_index, agents[prof_gpu_index].gpu_id});
   }
 
-  std::vector<amdsmi_socket_handle> sockets;
-  auto amdsmi_status = get_socket_handles(sockets);
-  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "Failed to get socket handles: " << amdsmi_status);
-    return Smi2RdcError(amdsmi_status);
-  }
+  const auto& flat_table = get_flat_gpu_table();
 
-  for (int socket_index = 0; socket_index < sockets.size(); socket_index++) {
-    auto* socket = sockets[socket_index];
-    std::vector<amdsmi_processor_handle> processors;
-    amdsmi_status = get_processor_handles(socket, processors);
+  for (uint32_t flat_idx = 0; flat_idx < flat_table.size(); flat_idx++) {
+    auto* processor = flat_table[flat_idx].handle;
+
+    amdsmi_kfd_info_t kfd_info;
+    auto amdsmi_status = amdsmi_get_gpu_kfd_info(processor, &kfd_info);
     if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "Failed to get processor handles for socket " << socket_index << ": "
-                                                                       << amdsmi_status);
-      return Smi2RdcError(amdsmi_status);
+      RDC_LOG(RDC_ERROR, "Failed to get KFD info for flat GPU " << flat_idx
+                             << " (socket " << flat_table[flat_idx].socket_index
+                             << ", proc " << flat_table[flat_idx].proc_index << "): "
+                             << amdsmi_status);
+      continue;
     }
 
-    for (int processor_index = 0; processor_index < processors.size(); processor_index++) {
-      auto* processor = processors[processor_index];
-      processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
-      amdsmi_status = amdsmi_get_processor_type(processor, &processor_type);
-      if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR, "Failed to get processor type for processor "
-                               << processor_index << " on socket " << socket_index << ": "
-                               << amdsmi_status);
-        return Smi2RdcError(amdsmi_status);
-      }
-      if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
-        continue;
-      }
-
-      amdsmi_kfd_info_t kfd_info;
-      amdsmi_status = amdsmi_get_gpu_kfd_info(processor, &kfd_info);
-      if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-        RDC_LOG(RDC_ERROR, "Failed to get KFD info for processor "
-                               << processor_index << " on socket " << socket_index << ": "
-                               << amdsmi_status);
-        return Smi2RdcError(amdsmi_status);
-      }
-
-      rdc_entity_info_t entity_info = {
-          .device_index = static_cast<uint32_t>(socket_index),
-          .instance_index = static_cast<uint32_t>(processor_index),
-          .entity_role = RDC_DEVICE_ROLE_PHYSICAL,
-          .device_type = RDC_DEVICE_TYPE_GPU,
-      };
-
-      uint32_t entity_index = rdc_get_entity_index_from_info(entity_info);
-
-      for (const auto& [prof_index, prof_id] : prof_kfd_map) {
-        if (std::memcmp(&kfd_info.kfd_id, &prof_id, sizeof(kfd_id_t)) == 0) {
-          // match found
-          // clang-format off
-          RDC_LOG(RDC_DEBUG, "SMI[" << entity_index << "] <-> Profiler[" << prof_index << "] = KFD_ID[" << prof_id << "]");
-          // clang-format on
-          if (entity_info.entity_role == RDC_DEVICE_ROLE_PHYSICAL) {
-            entity_index = rdc_get_entity_index_from_info(entity_info);
-            entity_to_prof_map.insert({entity_index, prof_index});
-          }
-          if (processors.size() > 1) {
-            // if there are multiple processors, also add entity with partition instance type
-            entity_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
-            entity_index = rdc_get_entity_index_from_info(entity_info);
-            entity_to_prof_map.insert({entity_index, prof_index});
-          }
-          break;
-        }
+    for (const auto& [prof_index, prof_id] : prof_kfd_map) {
+      if (std::memcmp(&kfd_info.kfd_id, &prof_id, sizeof(kfd_id_t)) == 0) {
+        RDC_LOG(RDC_DEBUG, "Flat[" << flat_idx << "] <-> Profiler[" << prof_index
+                                   << "] = KFD_ID[" << prof_id << "]");
+        entity_to_prof_map.insert({flat_idx, prof_index});
+        break;
       }
     }
   }

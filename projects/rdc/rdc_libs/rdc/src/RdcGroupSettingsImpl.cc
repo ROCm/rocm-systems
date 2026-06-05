@@ -90,8 +90,17 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
   rdc_status_t status =
       partition_->rdc_get_num_partition_impl(entity_info.device_index, &num_partitions);
   if (status != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "rdc_group_gpu_add: get_num_partition failed for gpu_index=" << gpu_index
+                       << " device_index=" << entity_info.device_index
+                       << " instance_index=" << entity_info.instance_index
+                       << " role=" << entity_info.entity_role
+                       << " status=" << status);
     return status;
   }
+  RDC_LOG(RDC_DEBUG, "rdc_group_gpu_add: gpu_index=" << gpu_index
+                     << " device_index=" << entity_info.device_index
+                     << " num_partitions=" << num_partitions
+                     << " role=" << entity_info.entity_role);
 
   if (num_partitions != UINT16_MAX && num_partitions > 1) {
     if (entity_info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
