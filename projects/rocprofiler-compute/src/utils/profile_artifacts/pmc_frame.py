@@ -37,8 +37,30 @@ ROCPD_METADATA_COLUMNS = [
 ]
 
 
+def is_long_counter_frame(df: pd.DataFrame) -> bool:
+    """Return True when a frame stores one counter value per row."""
+    counter_columns = {ROCPD_COUNTER_NAME_COLUMN, ROCPD_COUNTER_VALUE_COLUMN}
+    return counter_columns.issubset(df.columns)
+
+
+def to_canonical_pmc_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Return the canonical wide PMC frame used by analysis."""
+    if df.empty:
+        return df
+
+    if is_long_counter_frame(df):
+        return pivot_counter_rows(df)
+
+    return df
+
+
 def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
-    """Merge long-form rocpd counter rows into one row per dispatch."""
+    """Normalize rocpd counter rows to the canonical PMC frame."""
+    return to_canonical_pmc_frame(df)
+
+
+def pivot_counter_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Pivot long-form counter rows into one row per dispatch."""
     if df.empty:
         return df
 
@@ -77,7 +99,7 @@ def load_pmc_frame_from_csv(
 
     df = pd.read_csv(pmc_perf_path)
     if is_rocpd:
-        df = process_rocpd_csv(df)
+        df = to_canonical_pmc_frame(df)
 
     return prepare_pmc_frame(
         df,
