@@ -127,9 +127,15 @@ inline float bf16_to_f32(uint16_t h) {
   return std::bit_cast<float>(f);
 }
 
-/// @brief Convert a float to 16-bit BFloat16 (truncation, no rounding).
+/// @brief Convert a float to 16-bit BFloat16 (round-to-nearest-even).
 inline uint16_t f32_to_bf16(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
+  if (((f >> 16) & 0x7F80) == 0x7F80) {
+    if (f & 0xFFFF)
+      return static_cast<uint16_t>((f >> 16) | 0x0040);
+    return static_cast<uint16_t>(f >> 16);
+  }
+  f += 0x7FFF + ((f >> 16) & 1);
   return static_cast<uint16_t>(f >> 16);
 }
 
@@ -167,16 +173,50 @@ inline float fp8_e4m3_to_f32(uint8_t v) {
   return std::bit_cast<float>(f);
 }
 
-/// @brief Convert a float to 8-bit E4M3 FP8 (truncation).
+/// @brief Convert a float to 8-bit E4M3 FP8 (round-to-nearest-even).
 inline uint8_t f32_to_fp8_e4m3(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 24) & 0x80;
-  int32_t exp = static_cast<int32_t>((f >> 23) & 0xFF) - 127 + 7;
-  uint32_t mant = (f >> 20) & 0x7;
-  if (exp <= 0)
-    return static_cast<uint8_t>(sign);
+  uint32_t f_exp = (f >> 23) & 0xFF;
+  uint32_t f_mant = f & 0x7FFFFF;
+
+  // NaN → E4M3 NaN (0x7F with sign).
+  if (f_exp == 0xFF && f_mant)
+    return static_cast<uint8_t>(sign | 0x7F);
+  // Inf → clamp to max normal (E4M3 has no infinity encoding).
+  if (f_exp == 0xFF)
+    return static_cast<uint8_t>(sign | 0x7E);
+
+  int32_t exp = static_cast<int32_t>(f_exp) - 127 + 7;
+
+  // Denormal or underflow.
+  if (exp <= 0) {
+    if (exp < -3)
+      return static_cast<uint8_t>(sign);
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 21 - exp; // 21 when exp=0, 24 when exp=-3
+    uint32_t round_bit = (mant >> (shift - 1)) & 1;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    return static_cast<uint8_t>(sign | result);
+  }
+
+  // Overflow → max normal.
   if (exp >= 15)
-    return static_cast<uint8_t>(sign | 0x7E); // max normal
+    return static_cast<uint8_t>(sign | 0x7E);
+
+  // Normal: round-to-nearest-even on the 20 truncated mantissa bits.
+  uint32_t round_bit = (f_mant >> 19) & 1;
+  uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x7) {
+    mant = 0;
+    exp += 1;
+    if (exp >= 15)
+      return static_cast<uint8_t>(sign | 0x7E);
+  }
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
 }
 
@@ -229,16 +269,50 @@ inline float bf8_e5m2_to_f32(uint8_t v) {
   return std::bit_cast<float>(f);
 }
 
-/// @brief Convert a float to 8-bit E5M2 BF8 (truncation).
+/// @brief Convert a float to 8-bit E5M2 BF8 (round-to-nearest-even).
 inline uint8_t f32_to_bf8_e5m2(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   uint32_t sign = (f >> 24) & 0x80;
-  int32_t exp = static_cast<int32_t>((f >> 23) & 0xFF) - 127 + 15;
-  uint32_t mant = (f >> 21) & 0x3;
-  if (exp <= 0)
-    return static_cast<uint8_t>(sign);
+  uint32_t f_exp = (f >> 23) & 0xFF;
+  uint32_t f_mant = f & 0x7FFFFF;
+
+  // NaN → E5M2 NaN (preserve sign, set mantissa non-zero).
+  if (f_exp == 0xFF && f_mant)
+    return static_cast<uint8_t>(sign | 0x7C | ((f_mant >> 21) & 0x3) | 1);
+  // Inf.
+  if (f_exp == 0xFF)
+    return static_cast<uint8_t>(sign | 0x7C);
+
+  int32_t exp = static_cast<int32_t>(f_exp) - 127 + 15;
+
+  // Denormal or underflow.
+  if (exp <= 0) {
+    if (exp < -1)
+      return static_cast<uint8_t>(sign);
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 22 - exp; // 22 when exp=0, 23 when exp=-1
+    uint32_t round_bit = (mant >> (shift - 1)) & 1;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    return static_cast<uint8_t>(sign | result);
+  }
+
+  // Overflow → Inf.
   if (exp >= 31)
-    return static_cast<uint8_t>(sign | 0x7C | (mant ? 0x1 : 0));
+    return static_cast<uint8_t>(sign | 0x7C);
+
+  // Normal: round-to-nearest-even on the 21 truncated mantissa bits.
+  uint32_t round_bit = (f_mant >> 20) & 1;
+  uint32_t sticky = (f_mant & 0xFFFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x3) {
+    mant = 0;
+    exp += 1;
+    if (exp >= 31)
+      return static_cast<uint8_t>(sign | 0x7C);
+  }
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
 }
 
