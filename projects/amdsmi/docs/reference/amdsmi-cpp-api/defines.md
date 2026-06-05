@@ -7,7 +7,7 @@ myst:
 
 # AMD SMI C/C++ defines
 
-Common defines includding preprocessor constants defining array size limits,
+Common defines including preprocessor constants defining array size limits,
 string lengths, and hardware maximums used throughout the AMD SMI API.
 
 ```{amdsmi-doxygen}
