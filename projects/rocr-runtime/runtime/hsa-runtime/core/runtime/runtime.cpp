@@ -359,20 +359,24 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
     size_t peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
     while (current > peak && !g_mem_metrics.peak_allocated.compare_exchange_weak(peak, current,
            std::memory_order_release, std::memory_order_relaxed));
-    uint64_t alloc_num = g_mem_metrics.allocation_count.fetch_add(1, std::memory_order_relaxed);
+    // Note: After CAS loop, 'peak' is updated to the final value stored
+    uint64_t alloc_num = g_mem_metrics.allocation_count.fetch_add(1, std::memory_order_relaxed) + 1;
 
     // Log large allocations that might cause fragmentation
     if (size_requested > 256 * 1024 * 1024) {  // >256MB
+      // Re-read peak after CAS loop to get current accurate value
+      size_t current_peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
       RocrLogInfo(ROCR_LOG_MEM | ROCR_LOG_PERF,
-        "Large allocation: ptr=%p size=%zu total_live=%zu num_allocations=%llu node=%d",
-        *address, size_requested, current, (unsigned long long)alloc_num, agent_node_id);
+        "Large allocation: ptr=%p size=%zu total_live=%zu peak=%zu num_allocations=%llu node=%d",
+        *address, size_requested, current, current_peak, (unsigned long long)alloc_num, agent_node_id);
     }
 
-    // Warn on memory pressure (>90% of peak)
-    if (peak > 0 && current > peak * 9 / 10) {
+    // Warn on memory pressure (>90% of peak) - use current value for accurate check
+    size_t current_peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
+    if (current_peak > 0 && current > current_peak * 9 / 10) {
       RocrLogWarning(ROCR_LOG_MEM | ROCR_LOG_HEALTH,
         "Memory pressure HIGH: current=%zu peak=%zu utilization=%.1f%% num_allocations=%zu",
-        current, peak, (float)current / peak * 100.0f, allocation_map_.size());
+        current, current_peak, (float)current / current_peak * 100.0f, allocation_map_.size());
     }
 
     RocrLogDebug(ROCR_LOG_MEM, "AllocateMemory: ptr=%p size=%zu flags=0x%x node=%d total=%zu",
@@ -1833,7 +1837,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   err = mapMemoryToNodes(num_agents, nodes);
   if (err == HSA_STATUS_SUCCESS) {
     // Track IPC attachment using file-scope metrics (fixes counter mismatch bug)
-    uint64_t attach_num = g_ipc_metrics.attach_count.fetch_add(1, std::memory_order_relaxed);
+    // Note: fetch_add returns the previous value, so add 1 to get current
+    uint64_t attach_num = g_ipc_metrics.attach_count.fetch_add(1, std::memory_order_relaxed) + 1;
     uint64_t active = g_ipc_metrics.active_count.fetch_add(1, std::memory_order_relaxed) + 1;
 
     RocrLogDebug(ROCR_LOG_IPC, "IPCAttach: mapped=%p len=%zu num_agents=%u attach_id=%llu active=%llu",
@@ -4580,6 +4585,10 @@ hsa_status_t Runtime::EnableLogging(uint8_t* flags, void* file) {
     rocr::g_rocr_log_state.log_level = rocr::ROCR_LOG_INFO;
     rocr::g_rocr_log_state.log_mask = mask;
     rocr::g_rocr_log_state.log_file = log_file;
+    // Caller owns this file handle - we must not close it on shutdown
+    rocr::g_rocr_log_state.owns_log_file = false;
+    // Update fd for async-signal-safe crash handler
+    rocr::g_rocr_log_state.log_file_fd = (log_file == stderr) ? STDERR_FILENO : fileno(log_file);
   } else {
     rocr::g_rocr_log_state.log_level = rocr::ROCR_LOG_NONE;
   }
