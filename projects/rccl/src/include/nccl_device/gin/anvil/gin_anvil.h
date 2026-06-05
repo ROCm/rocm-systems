@@ -22,7 +22,7 @@ NCCL_DEVICE_INLINE static ncclGinAnvilGPUContext* ncclGinAnvilGetCtx(ncclGinCtx 
   return &((ncclGinAnvilGPUContext*)handle)[ctx.contextId];
 }
 
-// Indexed signal cell on peer P (destination of put/barrier signal). readSignal uses local signals.
+// Indexed signal cell on peer P (SDMA destination). Local read/wait uses aCtx->signals.
 NCCL_DEVICE_INLINE static uint64_t* ncclGinAnvilPeerSignalPtr(ncclGinAnvilGPUContext* aCtx, int peer,
                                                                ncclGinSignal_t signalId) {
   using nccl::utility::loadConst;
@@ -33,12 +33,33 @@ NCCL_DEVICE_INLINE static uint64_t* ncclGinAnvilPeerSignalPtr(ncclGinAnvilGPUCon
   return peerSignals + signalId;
 }
 
+NCCL_DEVICE_INLINE static uint64_t* ncclGinAnvilLocalSignalPtr(ncclGinAnvilGPUContext* aCtx,
+                                                               ncclGinSignal_t signalId) {
+  uint64_t* signals = nccl::utility::loadConst(&aCtx->signals);
+  if (signals == nullptr) return nullptr;
+  return signals + signalId;
+}
+
 NCCL_DEVICE_INLINE static void ncclGinAnvilLocalSignalOp(uint64_t* sigPtr, ncclGinSignalOp_t signalOp,
                                                          uint64_t signalOpArg) {
   if (sigPtr == nullptr) return;
   if (signalOp == ncclGinSignalInc) signalOpArg = 1;
   if (signalOp == ncclGinSignalInc || signalOp == ncclGinSignalAdd)
     atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
+}
+
+NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteSignalOp(rocshmem::anvil::SdmaQueueDeviceHandle& q,
+                                                            ncclGinAnvilGPUContext* aCtx, int peer,
+                                                            ncclGinSignal_t signalId,
+                                                            ncclGinSignalOp_t signalOp,
+                                                            uint64_t signalOpArg) {
+  uint64_t* sigPtr = ncclGinAnvilPeerSignalPtr(aCtx, peer, signalId);
+  if (sigPtr == nullptr) return;
+  if (signalOp == ncclGinSignalInc) {
+    rocshmem::anvil::signal(q, sigPtr);
+  } else if (signalOp == ncclGinSignalAdd) {
+    atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
+  }
 }
 
 template <>
@@ -65,7 +86,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     if (peer == ctx.rank) {
       if (!hasWins) {
         if (hasSignal)
-          ncclGinAnvilLocalSignalOp(ncclGinAnvilPeerSignalPtr(aCtx, ctx.rank, signalId), signalOp, signalOpArg);
+          ncclGinAnvilLocalSignalOp(ncclGinAnvilLocalSignalPtr(aCtx, signalId), signalOp, signalOpArg);
         return;
       }
       if (dstWin == nullptr || srcWin == nullptr) return;
@@ -82,7 +103,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
       for (size_t i = 0; i < bytes; ++i) dst[i] = src[i];
 
       if (hasSignal)
-        ncclGinAnvilLocalSignalOp(ncclGinAnvilPeerSignalPtr(aCtx, ctx.rank, signalId), signalOp, signalOpArg);
+        ncclGinAnvilLocalSignalOp(ncclGinAnvilLocalSignalPtr(aCtx, signalId), signalOp, signalOpArg);
       if (hasCounter)
         atomicAdd((unsigned long long*)(loadConst(&aCtx->counters) + counterId), 1ULL);
       return;
@@ -101,7 +122,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     }
 
     if (!hasWins) {
-      if (hasSignal) rocshmem::anvil::signal(*q, sigPtr);
+      if (hasSignal) ncclGinAnvilRemoteSignalOp(*q, aCtx, peer, signalId, signalOp, signalOpArg);
       return;
     }
 
@@ -171,9 +192,7 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
     if (aCtx == nullptr) return nullptr;
-    uint64_t* signals = nccl::utility::loadConst(&aCtx->signals);
-    if (signals == nullptr) return nullptr;
-    return signals + signalId;
+    return ncclGinAnvilLocalSignalPtr(aCtx, signalId);
   }
 };
 

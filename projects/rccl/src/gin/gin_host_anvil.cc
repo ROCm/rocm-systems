@@ -10,12 +10,10 @@
 #include "bootstrap.h"
 #include "comm.h"
 #include "dev_runtime.h"
-#include "gin/gin_host_rocshmem.h"
 #include "nccl_device/gin/anvil/gin_anvil_device_host_common.h"
 
 // Anvil host API (src/sdma); include path from ROCSHMEM_SOURCE_DIR or mono-repo sibling.
 #include "sdma/anvil.hpp"
-#include <rocshmem/rocshmem.hpp>
 
 #include <hip/hip_runtime.h>
 #include <map>
@@ -35,8 +33,9 @@ struct ginAnvilCtx {
   // Host mirrors
   void** queuesHost;
   uint64_t** signalsBaseHost;
+  bool* signalsIpcOpen;     // [nRanks] true if signalsBaseHost[r] was hipIpcOpenMemHandle'd
 
-  uint64_t* signalsAlloc;   // rocshmem_malloc base (all contexts); remote SDMA atomics require symmetric heap
+  uint64_t* signalsAlloc;   // hipMalloc base (all contexts)
   uint64_t* countersAlloc;  // hipMalloc base (local-only)
 
   bool hasError;
@@ -52,6 +51,74 @@ static ncclResult_t allocDeviceArray(void*** devPtr, void** hostData, size_t cou
   if (hipMalloc(devPtr, count * sizeof(void*)) != hipSuccess) return ncclSystemError;
   if (hipMemcpy(*devPtr, hostData, count * sizeof(void*), hipMemcpyHostToDevice) != hipSuccess) return ncclSystemError;
   return ncclSuccess;
+}
+
+static void freeSignalBases(ginAnvilCtx* ctx) {
+  if (ctx == nullptr || ctx->comm == nullptr) return;
+  if (ctx->signalsBaseHost && ctx->signalsIpcOpen) {
+    for (int r = 0; r < ctx->comm->nRanks; r++) {
+      if (ctx->signalsIpcOpen[r] && ctx->signalsBaseHost[r])
+        hipIpcCloseMemHandle(ctx->signalsBaseHost[r]);
+    }
+  }
+  free(ctx->signalsBaseHost);
+  free(ctx->signalsIpcOpen);
+  ctx->signalsBaseHost = nullptr;
+  ctx->signalsIpcOpen = nullptr;
+}
+
+// Build per-peer signal bases for SDMA on this GPU. Prefer HIP IPC handles when
+// available; fall back to exchanging raw device pointers for VMM allocations.
+static ncclResult_t setupSignalBases(ginAnvilCtx* ctx, struct ncclComm* comm, uint64_t* signalsLocal) {
+  ncclResult_t ret = ncclSuccess;
+  hipIpcMemHandle_t* ipcHandles = nullptr;
+
+  NCCLCHECKGOTO(ncclCalloc(&ctx->signalsBaseHost, comm->nRanks), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&ctx->signalsIpcOpen, comm->nRanks), ret, fail);
+
+  if (signalsLocal == nullptr) goto fail;
+
+  {
+    hipIpcMemHandle_t myHandle;
+    hipError_t hipErr = hipIpcGetMemHandle(&myHandle, signalsLocal);
+    if (hipErr == hipSuccess) {
+      NCCLCHECKGOTO(ncclCalloc(&ipcHandles, comm->nRanks), ret, fail);
+      ipcHandles[comm->rank] = myHandle;
+      NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, ipcHandles, sizeof(hipIpcMemHandle_t)), ret, fail);
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r == comm->rank) {
+          ctx->signalsBaseHost[r] = signalsLocal;
+          continue;
+        }
+        if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) {
+          ctx->signalsBaseHost[r] = nullptr;
+          continue;
+        }
+        void* mapped = nullptr;
+        hipErr = hipIpcOpenMemHandle(&mapped, ipcHandles[r], hipIpcMemLazyEnablePeerAccess);
+        if (hipErr != hipSuccess) {
+          WARN("GIN anvil: hipIpcOpenMemHandle failed for peer %d", r);
+          ret = ncclSystemError;
+          goto fail;
+        }
+        ctx->signalsBaseHost[r] = (uint64_t*)mapped;
+        ctx->signalsIpcOpen[r] = true;
+      }
+    } else {
+      ctx->signalsBaseHost[comm->rank] = signalsLocal;
+      NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, ctx->signalsBaseHost, sizeof(uint64_t*)),
+                    ret, fail);
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r != comm->rank && comm->rankToNode[r] != comm->rankToNode[comm->rank])
+          ctx->signalsBaseHost[r] = nullptr;
+      }
+    }
+  }
+
+fail:
+  free(ipcHandles);
+  if (ret != ncclSuccess) freeSignalBases(ctx);
+  return ret;
 }
 
 ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, int devId,
@@ -78,18 +145,12 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   }
 
   devr = &comm->devrState;
-  // rocshmem_malloc and Anvil endpoint setup require a live rocSHMEM runtime.
   NCCLCHECK(ncclDevrInitOnce(comm));
-  NCCLCHECK(ncclGinRocshmemEnsureInit(comm));
 
-  // Indexed signals live on the rocSHMEM symmetric heap so peer SDMA signal atomics
-  // (GIN barrier + put completion) can write destination signal cells. hipMalloc pages
-  // fault as read-only under remote SDMA stores.
   if (nSignals > 0) {
     size_t signalsBytes = (size_t)nSignals * (size_t)nContexts * sizeof(uint64_t);
-    signalsLocal = (uint64_t*)rocshmem::rocshmem_malloc(signalsBytes);
-    if (signalsLocal == nullptr) {
-      WARN("GIN anvil: rocshmem_malloc failed for %d signals x %d contexts", nSignals, nContexts);
+    if (hipMalloc((void**)&signalsLocal, signalsBytes) != hipSuccess) {
+      WARN("GIN anvil: hipMalloc failed for %d signals x %d contexts", nSignals, nContexts);
       ret = ncclSystemError;
       goto fail;
     }
@@ -103,7 +164,6 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     hipMemset(countersLocal, 0, countersBytes);
   }
 
-  // Enable xGMI P2P for in-node SDMA queues (rocshmem IPC covers symmetric heap).
   for (int r = 0; r < comm->nRanks; r++) {
     if (r == comm->rank) continue;
     if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) continue;
@@ -112,33 +172,9 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     rocshmem::anvil::EnablePeerAccess(comm->cudaDev, peerDev);
   }
 
-  // Build per-peer signal bases for SDMA on this GPU. Anvil SDMA packets carry an
-  // address in the *source* GPU VA space (like rocshmem AMOs), not the peer's raw
-  // local pointer. rocshmem_ptr(localBase, pe) returns the IPC-mapped address.
-  NCCLCHECKGOTO(ncclCalloc(&ctx->signalsBaseHost, comm->nRanks), ret, fail_signals);
-  for (int r = 0; r < comm->nRanks; r++) {
-    if (signalsLocal == nullptr) {
-      ctx->signalsBaseHost[r] = nullptr;
-      continue;
-    }
-    if (r == comm->rank) {
-      ctx->signalsBaseHost[r] = signalsLocal;
-    } else if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) {
-      ctx->signalsBaseHost[r] = nullptr;
-    } else {
-      void* remote = rocshmem::rocshmem_ptr(signalsLocal, r);
-      if (remote == nullptr) {
-        WARN("GIN anvil: rocshmem_ptr(signals=%p, pe=%d) failed", (void*)signalsLocal, r);
-        ret = ncclSystemError;
-        goto fail_signals;
-      }
-      ctx->signalsBaseHost[r] = (uint64_t*)remote;
-    }
-  }
-
+  NCCLCHECKGOTO(setupSignalBases(ctx, comm, signalsLocal), ret, fail_signals);
   NCCLCHECKGOTO(ncclCalloc(&ctx->queuesHost, comm->nRanks), ret, fail_signals);
 
-  // Create SDMA queues for each peer in-node.
   if (!rocshmem::anvil::initEndpoint()) {
     WARN("GIN anvil: anvil initEndpoint failed");
     ret = ncclSystemError;
@@ -159,12 +195,17 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     ctx->queuesHost[r] = (void*)q->deviceHandle();
   }
 
-  // Allocate device arrays for queues and peer signal bases.
   NCCLCHECKGOTO(allocDeviceArray(&ctx->queuesDev, ctx->queuesHost, comm->nRanks), ret, fail_signals);
-  if (hipMalloc(&ctx->signalsBaseDev, comm->nRanks * sizeof(uint64_t*)) != hipSuccess) { ret = ncclSystemError; goto fail_signals; }
-  if (hipMemcpy(ctx->signalsBaseDev, ctx->signalsBaseHost, comm->nRanks * sizeof(uint64_t*), hipMemcpyHostToDevice) != hipSuccess) { ret = ncclSystemError; goto fail_signals; }
+  if (hipMalloc(&ctx->signalsBaseDev, comm->nRanks * sizeof(uint64_t*)) != hipSuccess) {
+    ret = ncclSystemError;
+    goto fail_signals;
+  }
+  if (hipMemcpy(ctx->signalsBaseDev, ctx->signalsBaseHost, comm->nRanks * sizeof(uint64_t*),
+                hipMemcpyHostToDevice) != hipSuccess) {
+    ret = ncclSystemError;
+    goto fail_signals;
+  }
 
-  // Build per-context GPU contexts (proxy uses an array indexed by contextId).
   NCCLCHECKGOTO(ncclCalloc(&gpuCtxHostArr, nContexts), ret, fail_signals);
   for (int contextId = 0; contextId < nContexts; contextId++) {
     ncclGinAnvilGPUContext* h = &gpuCtxHostArr[contextId];
@@ -192,7 +233,6 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     goto fail_signals;
   }
 
-  // Create net device handle
   NCCLCHECK(ncclCalloc(&ctx->devHandle, 1));
   ctx->devHandle->netDeviceType = NCCL_NET_DEVICE_GIN_ANVIL;
   ctx->devHandle->netDeviceVersion = NCCL_GIN_ANVIL_VERSION;
@@ -217,12 +257,12 @@ fail:
     if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
     if (ctx->devHandle) free(ctx->devHandle);
     free(ctx->queuesHost);
-    free(ctx->signalsBaseHost);
-    if (ctx->signalsAlloc) rocshmem::rocshmem_free(ctx->signalsAlloc);
+    freeSignalBases(ctx);
+    if (ctx->signalsAlloc) hipFree(ctx->signalsAlloc);
     if (ctx->countersAlloc) hipFree(ctx->countersAlloc);
     free(ctx);
   } else {
-    if (signalsLocal) rocshmem::rocshmem_free(signalsLocal);
+    if (signalsLocal) hipFree(signalsLocal);
     if (countersLocal) hipFree(countersLocal);
   }
   return ret;
@@ -231,13 +271,13 @@ fail:
 ncclResult_t ncclGinAnvilDestroyContext(ncclGin_t*, void* ginCtx) {
   ginAnvilCtx* ctx = (ginAnvilCtx*)ginCtx;
   if (ctx == nullptr) return ncclSuccess;
-  if (ctx->signalsAlloc) rocshmem::rocshmem_free(ctx->signalsAlloc);
+  freeSignalBases(ctx);
+  if (ctx->signalsAlloc) hipFree(ctx->signalsAlloc);
   if (ctx->countersAlloc) hipFree(ctx->countersAlloc);
   if (ctx->queuesDev) hipFree(ctx->queuesDev);
   if (ctx->signalsBaseDev) hipFree(ctx->signalsBaseDev);
   if (ctx->gpuCtxDev) hipFree(ctx->gpuCtxDev);
   free(ctx->queuesHost);
-  free(ctx->signalsBaseHost);
   free(ctx->devHandle);
   free(ctx);
   return ncclSuccess;
@@ -251,7 +291,6 @@ ncclResult_t ncclGinAnvilRegister(ncclGin_t*, void* ginCtx, void* addr, size_t s
   mh->addr = addr;
   mh->size = size;
 
-  // Resolve this address into LSA flat VA space; required for symmetric addressing.
   void* lsaSelfAddr = nullptr;
   NCCLCHECK(ncclDevrGetLsaSelfAddr(ctx->comm, addr, &lsaSelfAddr));
   if (lsaSelfAddr == nullptr) {
@@ -262,7 +301,6 @@ ncclResult_t ncclGinAnvilRegister(ncclGin_t*, void* ginCtx, void* addr, size_t s
   struct ncclDevrState* devr = &ctx->comm->devrState;
   uintptr_t rank0Base = (uintptr_t)lsaSelfAddr - (uintptr_t)devr->lsaSelf * (uintptr_t)devr->bigSize;
 
-  // Device handle contains symmetric base info.
   ncclGinAnvilMemHandle hostMh;
   hostMh.lsaRank0Base = rank0Base;
   hostMh.lsaStrideBytes = devr->bigSize;
@@ -299,4 +337,3 @@ ncclResult_t ncclGinAnvilQueryLastError(ncclGin_t*, void* ginCtx, bool* hasError
 }
 
 #endif // ENABLE_ROCSHMEM_GIN
-
