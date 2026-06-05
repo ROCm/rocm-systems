@@ -27,10 +27,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     rocshmem::QueuePair* qp = loadConst(loadConst(&rsCtx->qps) + peer);
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
 
-    printf("GDA Enter: rank=%d peer=%d hasWins=%d hasSignal=%d hasCounter=%d bytes=%zu dstOff=%zu srcOff=%zu tid=%d bid=%d\n",
-           ctx.rank, peer, (int)hasWins, (int)hasSignal, (int)hasCounter, bytes, dstOff, srcOff,
-           threadIdx.x, blockIdx.x);
-
     if (hasWins) {
       ncclGinRocshmemGdaMemHandle* dstMh = (ncclGinRocshmemGdaMemHandle*)dstWin;
       ncclGinRocshmemGdaMemHandle* srcMh = (ncclGinRocshmemGdaMemHandle*)srcWin;
@@ -40,35 +36,21 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
       uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-      printf("GDA Put: rank=%d peer=%d dst=%p src=%p bytes=%zu dstRkey=0x%x srcLkey=0x%x ring_db=1(forced)\n",
-             ctx.rank, peer, (void*)dstAddr, (void*)srcAddr, bytes, dstRkey, srcLkey);
-      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, /*ring_db=*/true);
-      printf("GDA Put done: rank=%d peer=%d, calling quiet to test put alone...\n", ctx.rank, peer);
-      qp->quiet(wf_info);
-      printf("GDA Put+quiet done: rank=%d peer=%d\n", ctx.rank, peer);
+      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
     }
 
     if (hasSignal) {
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
       uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
       uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-      printf("GDA Signal: rank=%d peer=%d sigAddr=%p sigRkey=0x%x val=%lld fence=1\n",
-             ctx.rank, peer, (void*)sigAddr, sigRkey, (long long)signalOpArg);
       qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
-      printf("GDA Signal posted: rank=%d peer=%d, calling quiet...\n", ctx.rank, peer);
-      qp->quiet(wf_info);
-      printf("GDA Signal+quiet done: rank=%d peer=%d\n", ctx.rank, peer);
     } else if (hasCounter) {
-      printf("GDA Counter quiet: rank=%d peer=%d\n", ctx.rank, peer);
       qp->quiet(wf_info);
-      printf("GDA Counter quiet done: rank=%d peer=%d\n", ctx.rank, peer);
     }
 
     if (hasCounter) {
       atomicAdd((unsigned long long*)&loadConst(&rsCtx->counters)[counterId], 1ULL);
     }
-
-    printf("GDA Exit: rank=%d peer=%d\n", ctx.rank, peer);
   }
 };
 
@@ -123,8 +105,7 @@ template <>
 struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static uint64_t* call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
-    uint64_t* ptr = nccl::utility::loadConst(&rsCtx->signals) + signalId;
-    return ptr;
+    return nccl::utility::loadConst(&rsCtx->signals) + signalId;
   }
 };
 
@@ -143,16 +124,11 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     using nccl::utility::loadConst;
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
     rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
-    printf("GDA Flush enter: rank=%d tid=%d bid=%d nRanks=%d\n",
-           ctx.rank, threadIdx.x, blockIdx.x, ctx.nRanks);
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
-      printf("GDA Flush quiet: rank=%d peer=%d\n", ctx.rank, peer);
       rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
       loadConst(qps + peer)->quiet(wf_info);
-      printf("GDA Flush quiet done: rank=%d peer=%d\n", ctx.rank, peer);
     }
-    printf("GDA Flush exit: rank=%d\n", ctx.rank);
   }
 };
 
