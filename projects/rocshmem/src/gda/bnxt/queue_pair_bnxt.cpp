@@ -127,8 +127,8 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
 
   hdr.typ_qid_indx = (key_lo | (key_hi << 32));
 
-  printf("bnxt_ring_db: qp=%u slot=%u epoch=%u dbr=%p val=0x%llx\n",
-         qp_num, slot_idx, epoch, (void*)bnxt_dbr, (unsigned long long)hdr.typ_qid_indx);
+  LOGD_TRACE("bnxt_ring_db: qp=%u slot=%u epoch=%u dbr=%p val=0x%llx",
+             qp_num, slot_idx, epoch, (void*)bnxt_dbr, (unsigned long long)hdr.typ_qid_indx);
   __threadfence_system();
   __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
 }
@@ -196,8 +196,8 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
           __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
       uint8_t status = (flg_val >> BNXT_RE_BCQE_STATUS_SHIFT) & BNXT_RE_BCQE_STATUS_MASK;
       if (poll_count == 0) {
-        printf("bnxt_poll_cq: qp=%u req_slots=%u depth=%u cq_buf=%p flg=0x%x status=%u\n",
-               qp_num, requested_available_slots, sq_depth, (void*)bnxt_cq.buf, flg_val, status);
+        LOGD_TRACE("bnxt_poll_cq: qp=%u req_slots=%u depth=%u cq_buf=%p flg=0x%x status=%u",
+                   qp_num, requested_available_slots, sq_depth, (void*)bnxt_cq.buf, flg_val, status);
       }
       if (status != BNXT_RE_REQ_ST_OK && status != 0) {
         bnxt_print_cqe_error(status);
@@ -213,8 +213,8 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
     available_slots = sq_depth - consumed_slots;
 
     if (poll_count == 0) {
-      printf("bnxt_poll_cq: qp=%u head=%u tail=%u consumed=%u avail=%u con_indx=0x%x\n",
-             qp_num, sq_head, sq_tail, consumed_slots, available_slots, cqe->con_indx);
+      LOGD_TRACE("bnxt_poll_cq: qp=%u head=%u tail=%u consumed=%u avail=%u con_indx=0x%x",
+                 qp_num, sq_head, sq_tail, consumed_slots, available_slots, cqe->con_indx);
     }
     poll_count++;
   } while (available_slots < requested_available_slots);
@@ -354,9 +354,17 @@ __device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uint32_
 
   {
     uint8_t *wqe = (uint8_t*)hdr_ptr;
-    printf("WQE put_with_keys [%u]: ", qp_num);
-    for (int b = 0; b < 48; b++) printf("%02x", wqe[b]);
-    printf("\n");
+    LOGD_TRACE("WQE put_with_keys [%u]: "
+               "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+               "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+               "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x",
+               qp_num,
+               wqe[0],wqe[1],wqe[2],wqe[3],wqe[4],wqe[5],wqe[6],wqe[7],
+               wqe[8],wqe[9],wqe[10],wqe[11],wqe[12],wqe[13],wqe[14],wqe[15],
+               wqe[16],wqe[17],wqe[18],wqe[19],wqe[20],wqe[21],wqe[22],wqe[23],
+               wqe[24],wqe[25],wqe[26],wqe[27],wqe[28],wqe[29],wqe[30],wqe[31],
+               wqe[32],wqe[33],wqe[34],wqe[35],wqe[36],wqe[37],wqe[38],wqe[39],
+               wqe[40],wqe[41],wqe[42],wqe[43],wqe[44],wqe[45],wqe[46],wqe[47]);
   }
 
   bnxt_re_fill_psns_for_msntbl(&bnxt_sq, size);
@@ -569,10 +577,10 @@ __device__ void QueuePair::bnxt_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t
       sge.lkey   = nonfetching_atomic_lkey;
       sge.length = sizeof(uint64_t);
 
-      printf("bnxt_amo_with_keys: raddr=%p rkey=0x%x data=%lld fence=%d "
-             "sge.pa=%p sge.lkey=0x%x qp_num=%u\n",
-             (void*)raddr, rkey, (long long)atomic_data, (int)fence,
-             (void*)sge.pa, sge.lkey, qp_num);
+      LOGD_TRACE("bnxt_amo_with_keys: raddr=%p rkey=0x%x data=%lld fence=%d "
+                 "sge.pa=%p sge.lkey=0x%x qp_num=%u",
+                 (void*)raddr, rkey, (long long)atomic_data, (int)fence,
+                 (void*)sge.pa, sge.lkey, qp_num);
 
       auto *hdr_ptr = (struct bnxt_re_bsqe*)  bnxt_re_get_hwqe(&bnxt_sq, 0);
       auto *amo_ptr = (struct bnxt_re_atomic*) bnxt_re_get_hwqe(&bnxt_sq, 1);
