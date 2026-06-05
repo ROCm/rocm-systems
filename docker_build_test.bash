@@ -29,7 +29,7 @@ if ${BUILD_FLAG}; then
   docker build -f ${DOCKERFILE} -t ${DOCKER_IMAGE} \
     --no-cache \
     --build-arg GPU_TARGETS=${TARGET_GPU_ARCH} \
-    --build-arg USE_LOCAL_SRC=0 \
+    --build-arg USE_LOCAL_SRC=1 \
     --build-arg ROCSHMEM_CACHE_BUST=$((N++)) .
   docker image inspect "${DOCKER_IMAGE}" >/dev/null
 fi
