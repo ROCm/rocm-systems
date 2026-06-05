@@ -36,10 +36,10 @@ A notional workflow we need to support is something like this:
 1. User runs an application under rocprof
 2. A dedicated thread (or threads) is established to do the following:
     - Collect crosststamps from KFD at some high frequency needed to support PTP-level precision (e.g., 100Hz)
-    - Store crosststamps in a persistent storage of some form (e.g., a time-series database or table). The storage must
-      support subsequent querying for timestamp translation.
+    - Store crosststamps in some form of storage (e.g., a time-series database or simple in-memory hashtable). The
+      storage must support subsequent querying for timestamp translation.
     - **Note: whether these operations are done by the same or separate threads, whether those threads are part of the
-      ROCr instance or a separate system daemon(s), and how persistent storage is managed are design considerations we
+      ROCr instance or a separate system daemon(s), and how storage is managed are design considerations we
       will elaborate on below.**
 3. Kernel dispatch/completion events produced by the workload, which include raw GPU timestamps, are surfaced into rocprof
 5. rocprof calls into ROCR through HSA API to convert these raw GPU timestamps to the system/realtime timeline (e.g.,
@@ -83,6 +83,8 @@ The key steps:
 
 Pros:
 + Simplicity: no new processes, standalone system daemons, or external SW dependencies are needed
+- Data retention: data is resident in memory as long as the process is running. When a process completes, its timestamp
+  data goes away
 
 Cons:
 - Space inefficient: every ROCR instance stores timestamp data leading to duplication (nothing about a crosststamp is
@@ -143,3 +145,6 @@ Cons:
 - Simplicity: clearly this is not as simple as the in-process design; however, we strike some balance by using a
   fully API-less design and relying on a system service in `lttng` that will likely already be shipping with future
   versions of ROCm.
+- Data retention: the fact that data is now stored out of process means that it is not straightforwards to reap old
+  data. There must be some mechanism to tag on insertion with the corresponding consumer process(es), or absent that a
+  downsampling process to gradually decrease and ultimately evict data as it ages.
