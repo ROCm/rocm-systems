@@ -87,6 +87,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
@@ -107,7 +108,9 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -2275,27 +2278,93 @@ reset_output_thread(std::optional<std::thread>& thread_ptr)
     }
 }
 
+namespace
+{
+// Session counter file permissions (0644).
+constexpr mode_t attach_session_file_mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+
+// Same PID as /tmp/rocprofv3_attach_<pid>.pkl: ROCPROF_ATTACH_PID when set by rocprofv3 /
+// rocprof-attach, otherwise the attach target PID used for metadata in tool_attach (ppid).
+pid_t
+get_attach_session_target_pid()
+{
+    if(const auto env_pid = common::get_env("ROCPROF_ATTACH_PID", static_cast<long>(-1));
+       env_pid > 0)
+    {
+        return static_cast<pid_t>(env_pid);
+    }
+    return getppid();
+}
+
+std::string
+attach_session_file_path(pid_t target_pid)
+{
+    return fmt::format("/tmp/rocprofv3_attach_{}.session", target_pid);
+}
+
+int
+open_attach_session_file(const std::string& path, int flags)
+{
+    return ::open(path.c_str(), flags | O_NOFOLLOW | O_CLOEXEC, attach_session_file_mode);
+}
+
+bool
+read_attach_session(const std::string& path, uint64_t& session_out)
+{
+    const int fd = open_attach_session_file(path, O_RDONLY);
+    if(fd < 0) return false;
+
+    char       buf[32] = {};
+    const auto nread   = ::read(fd, buf, sizeof(buf) - 1);
+    ::close(fd);
+    if(nread <= 0) return false;
+
+    try
+    {
+        session_out = std::stoull(std::string{buf, static_cast<size_t>(nread)});
+        return true;
+    } catch(...)
+    {
+        return false;
+    }
+}
+
+bool
+write_attach_session(const std::string& path, uint64_t session)
+{
+    const int fd = open_attach_session_file(path, O_WRONLY | O_CREAT | O_TRUNC);
+    if(fd < 0)
+    {
+        ROCP_WARNING << "Failed to open attach session file (will not suffix output): " << path
+                     << " :: " << strerror(errno);
+        return false;
+    }
+
+    const auto data     = fmt::format("{}", session);
+    const auto nwritten = ::write(fd, data.data(), data.size());
+    const auto ok       = (::close(fd) == 0) && (nwritten == static_cast<ssize_t>(data.size()));
+    if(!ok)
+    {
+        ROCP_WARNING << "Failed to write attach session file (will not suffix output): " << path
+                     << " :: " << strerror(errno);
+    }
+    return ok;
+}
+}  // namespace
+
 // Checks for a file in /tmp to see if this is a re-attach to a process that was already profiled,
 // and if so suffixes the output file name with the session number so that previous output files are
 // not overwritten.
 void
 assign_attach_output_session_suffix()
 {
-    const auto target_pid =
-        static_cast<pid_t>(common::get_env("ROCPROF_ATTACH_PID", static_cast<long>(getpid())));
-    const auto session_path = fmt::format("/tmp/rocprofv3_attach_{}.session", target_pid);
+    const auto target_pid   = get_attach_session_target_pid();
+    const auto session_path = attach_session_file_path(target_pid);
 
     auto session = uint64_t{0};
-    if(fs::exists(session_path))
-    {
-        std::ifstream ifs{session_path};
-        if(ifs >> session) ++session;
-    }
+    if(read_attach_session(session_path, session)) ++session;
 
-    {
-        std::ofstream ofs{session_path, std::ios::trunc};
-        ofs << session;
-    }
+    if(!write_attach_session(session_path, session)) return;
 
     if(session > 0)
     {
