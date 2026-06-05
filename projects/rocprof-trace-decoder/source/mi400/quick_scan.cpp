@@ -288,9 +288,8 @@ ScanFn select_scanner()
 size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap)
 {
     static const ScanFn fn = select_scanner();
-    // Precondition: caller has verified availability via the export-level
-    // probe (rocprof_trace_decoder_quick_scan with data=nullptr).
-    if (!fn) return 0;
+    if (!fn) throw std::exception();
+
     return fn(buf, size, out, out_cap);
 }
 

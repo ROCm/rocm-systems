@@ -436,8 +436,9 @@ TEST(ExtractElfSection, RejectsBadShentsize)
 {
     ElfBuildOptions options;
     options.shentsize = static_cast<uint16_t>(sizeof(detail::Elf64Shdr) - 1);
-    auto elf = ElfBuilder::build({
-        {".sqtt_funcmap", bytes_of("x")}
+    auto elf = ElfBuilder::build(
+        {
+            {".sqtt_funcmap", bytes_of("x")}
     },
         options
     );
@@ -455,7 +456,7 @@ TEST(ExtractElfSection, RejectsShoffOutOfRange)
     auto elf = ElfBuilder::build(
         {
             {".sqtt_funcmap", bytes_of("x")}
-        },
+    },
         options
     );
 
@@ -472,7 +473,7 @@ TEST(ExtractElfSection, RejectsNoShstrndx)
     auto elf = ElfBuilder::build(
         {
             {".sqtt_funcmap", bytes_of("x")}
-        },
+    },
         options
     );
 

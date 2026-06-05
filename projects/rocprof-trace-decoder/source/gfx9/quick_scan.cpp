@@ -516,9 +516,8 @@ namespace quick_scan
 size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
     thread_local const gfx9::quick_scan::ScanFn fn = gfx9::quick_scan::select_scanner();
-    // Precondition: caller has verified availability via the export-level
-    // probe (rocprof_trace_decoder_quick_scan with data=nullptr).
-    if (!fn) return 0;
+    if (!fn) throw std::exception();
+
     return fn(buf, size, out, out_cap);
 }
 #endif

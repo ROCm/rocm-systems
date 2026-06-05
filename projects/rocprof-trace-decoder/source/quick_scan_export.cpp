@@ -188,19 +188,12 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     void* userdata
 )
 {
+    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
     thread_local std::vector<quick_scan::QuickToken> raw{1u << 18};
 
-    // Availability probe: `data == nullptr` queries whether the SIMD scanner
-    // can run on this CPU/build without performing any actual work. Returns
-    // SUCCESS when available, NOT_IMPLEMENTED otherwise. All other arguments
-    // are ignored on the probe path.
-    if (!data)
-        return quick_scan::avx512_available() ? ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-                                              : ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
-    if (data_size < 8 || !trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+    if (!data || data_size == 0) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     TIMING(t0);
 
@@ -262,18 +255,23 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     size_t ntokens = 0;
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
-    auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
-    if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
-
-    ntokens = scanner(buf, data_size, raw.data(), raw.size());
-    while (ntokens == raw.size())
+    try
     {
-        raw.resize(raw.size() * 2);
+        auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
+        if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
+
         ntokens = scanner(buf, data_size, raw.data(), raw.size());
+        while (ntokens == raw.size())
+        {
+            raw.resize(raw.size() * 2);
+            ntokens = scanner(buf, data_size, raw.data(), raw.size());
+        }
     }
-#else
-    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+    catch (std::exception&)
 #endif
+    {
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+    }
 
     TIMING(t2);
 

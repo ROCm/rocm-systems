@@ -158,20 +158,20 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
     const __m256i high_nibble_y = _mm256_set1_epi8(static_cast<char>(0xF0));
     const __m512i zero_v = _mm512_setzero_si512();
 
-#define GFX12_EXTRACT_SUCCESSOR(pos_, has_attention_, succ_, attention_mask_)                                          \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        const __m128i succ_0_15_ = _mm512_castsi512_si128((succ_));                                                    \
-        uint64_t succ_word_;                                                                                           \
-        if (__builtin_expect(entry < 8, 1))                                                                             \
-            succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(succ_0_15_));                                         \
-        else if (__builtin_expect(entry < 16, 1))                                                                       \
-            succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm_srli_si128(succ_0_15_, 8)));                      \
-        else                                                                                                           \
-            succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm512_extracti32x4_epi32((succ_), 1)));              \
-        (pos_) = static_cast<unsigned>((succ_word_ >> ((entry & 7u) * 8)) & 0xFFu);                                    \
-        (has_attention_) = (((attention_mask_) >> entry) & 1u) != 0;                                                    \
-    } while (false)
+#    define GFX12_EXTRACT_SUCCESSOR(pos_, has_attention_, succ_, attention_mask_)                                      \
+        do {                                                                                                           \
+            const __m128i succ_0_15_ = _mm512_castsi512_si128((succ_));                                                \
+            uint64_t succ_word_;                                                                                       \
+            if (__builtin_expect(entry < 8, 1))                                                                        \
+                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(succ_0_15_));                                     \
+            else if (__builtin_expect(entry < 16, 1))                                                                  \
+                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm_srli_si128(succ_0_15_, 8)));                  \
+            else                                                                                                       \
+                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm512_extracti32x4_epi32((succ_), 1)));          \
+            (pos_) = static_cast<unsigned>((succ_word_ >> ((entry & 7u) * 8)) & 0xFFu);                                \
+            (has_attention_) = (((attention_mask_) >> entry) & 1u) != 0;                                               \
+        }                                                                                                              \
+        while (false)
 
     size_t bp = 0;
     unsigned entry = 0;
@@ -301,7 +301,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
         tail_pos += nibbles;
     }
 
-#undef GFX12_EXTRACT_SUCCESSOR
+#    undef GFX12_EXTRACT_SUCCESSOR
 
     return n_out;
 }
@@ -329,9 +329,8 @@ namespace quick_scan
 size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
     static const gfx12::quick_scan::ScanFn fn = gfx12::quick_scan::select_scanner();
-    // Precondition: caller has verified availability via the export-level
-    // probe (rocprof_trace_decoder_quick_scan with data=nullptr).
-    if (!fn) return 0;
+    if (!fn) throw std::exception();
+
     return fn(buf, size, out, out_cap);
 }
 #endif
