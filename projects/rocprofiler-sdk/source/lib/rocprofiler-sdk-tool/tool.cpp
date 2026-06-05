@@ -3674,6 +3674,32 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                                 this_func,
                                 signo);
 
+    // Guard against recursive re-entry on the same thread. This occurs when a
+    // chained signal handler (e.g. one installed by the HSA runtime *after*
+    // rocprofv3 installed its own handler) invokes the previously-registered
+    // handler, which is this very function. Without this guard the std::call_once
+    // below would be re-entered by the same thread while it is still executing
+    // the call_once callable, which deadlocks (recursive use of std::once_flag is
+    // undefined behavior). When re-entered, the finalization has already been
+    // performed (or is in progress) by this thread, so we simply break the chain
+    // loop and proceed to termination.
+    static thread_local bool _in_signal_handler = false;
+    if(_in_signal_handler)
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] rocprofv3 re-entered signal handler for {} (chained "
+            "handler looped back); terminating",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            signo);
+        if(signal_handler_exit) ::quick_exit(signo);
+        ::raise(signo);
+        return;
+    }
+    _in_signal_handler = true;
+
     static auto _once = std::once_flag{};
     std::call_once(_once, [&]() {
         auto get_children = [&this_pid]() {

@@ -18,9 +18,7 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
     set(IS_DISABLED ON)
 else()
-    # set(IS_DISABLED OFF)
-    set(IS_DISABLED ON) # this test is currently unstable so we are disabling it
-    # unconditionally for now
+    set(IS_DISABLED OFF)
 endif()
 
 # app-abort
