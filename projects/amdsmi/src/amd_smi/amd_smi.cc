@@ -1482,7 +1482,7 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   }
 
   if (amd::smi::trim(std::string(board_info->manufacturer_name)) == "0x1002") {
-    std::string amd_name(amd::smi::kAmdVendorName);
+    std::string amd_name(amd::smi::kAmdManufacturerName);
     smi_clear_char_and_reinitialize(board_info->manufacturer_name, AMDSMI_MAX_STRING_LENGTH,
                                     amd_name);
   }
