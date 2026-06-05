@@ -2393,9 +2393,7 @@ finalize_rocprofv3(std::string_view context)
     }
 
     // Join the worker thread if called from a non-worker context (atexit / rocprofv3_main).
-    // Only in the root process — forked children have a stale thread object.
-    if(ROCPROF_ROOT_PID == getpid() && sw.thread.joinable() &&
-       sw.thread.get_id() != std::this_thread::get_id())
+    if(sw.thread.joinable() && sw.thread.get_id() != std::this_thread::get_id())
     {
         if(sw.eventfd >= 0)
         {
@@ -4488,9 +4486,7 @@ signal_finalization_worker()
 
     if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
-    // If we're handling signals, the app likely doesn't coordinate child shutdown.
-    // Wait for children so they can flush their profiling data via atexit before
-    // the parent re-raises and dies.
+    // Wait for children to finalize before we re-raise.
     wait_for_children(this_pid, this_ppid, this_tid, this_func);
 
     ROCP_INFO << fmt::format(
@@ -4512,11 +4508,11 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 
     auto& sw = get_signal_worker();
 
-    // We're in the bad path — app doesn't coordinate shutdown properly.
+    // We're handling signals = assume app doesn't coordinate shutdown properly.
     // All processes (parent and children) need to flush and die.
     // For well-behaved apps, use --disable-signal-handlers (atexit handles everything).
 
-    // Re-entry guard (lock-free atomic, async-signal-safe)
+    // Re-entry guard
     bool expected = false;
     if(!sw.handling.compare_exchange_strong(expected, true, std::memory_order_acquire)) return;
 
@@ -4526,7 +4522,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     // Store signal number for the worker thread to log (serialized by eventfd write/read)
     sw.signo = signo;
 
-    // Wake the worker thread (write is async-signal-safe)
+    // Wake the worker thread
     bool worker_notified = false;
     if(sw.eventfd >= 0)
     {
@@ -4534,7 +4530,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         worker_notified = (write(sw.eventfd, &val, sizeof(val)) == sizeof(val));
     }
 
-    // Wait for worker with bounded timeout (futex syscall is async-signal-safe)
+    // Wait for worker with bounded timeout via futex syscall instead of a std::mutex
+    // to guarantee async signal-safe communication
     if(worker_notified)
     {
         struct timespec timeout = {};
@@ -4570,11 +4567,20 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         get_sigaction_function()(signo, &sa, nullptr);
     }
 
-    // Unblock and re-raise. App's handler (or SIG_DFL) runs in a fresh delivery.
-    sigset_t unblock {};
+    // Unblock and re-raise. The restored handler (or SIG_DFL) runs in a fresh delivery.
+    sigset_t unblock{};
     sigemptyset(&unblock);
     sigaddset(&unblock, signo);
-    sigprocmask(SIG_UNBLOCK, &unblock, nullptr);
+    pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+    raise(signo);
+
+    // If the chained handler returned (didn't kill the process), force exit.
+    {
+        struct sigaction sa = {};
+        sa.sa_handler       = SIG_DFL;
+        sigemptyset(&sa.sa_mask);
+        get_sigaction_function()(signo, &sa, nullptr);
+    }
     raise(signo);
 }
 
@@ -4779,12 +4785,9 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // Determine root process for signal handling.
-    // Only the root process installs signal handlers and spawns the finalization worker.
-    // Children (fork or fork+exec) inherit ROCPROF_ROOT_PID and skip signal handling —
-    // they rely on atexit for finalization after the parent coordinates their shutdown.
-    // For apps that correctly handle signals themselves, --disable-signal-handlers
-    // bypasses all of this and relies purely on atexit in all processes.
+    // Track root process via ROCPROF_ROOT_PID env var.
+    // All processes (root + children) get their own worker thread and signal handler.
+    // For well-behaved apps, use --disable-signal-handlers (atexit handles everything).
     {
         auto* root_pid_env = getenv("ROCPROF_ROOT_PID");
         bool  is_child     = (root_pid_env != nullptr);
@@ -4809,6 +4812,22 @@ rocprofv3_main(int argc, char** argv, char** envp)
         sw.eventfd     = eventfd(0, EFD_CLOEXEC);
         sw.timeout_sec = signal_handler_timeout;
         if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
+
+        // Register atfork handler so fork() children get a fresh worker thread.
+        // Without this, fork children inherit the parent's stale eventfd/thread.
+        static bool atfork_registered = false;
+        if(!atfork_registered)
+        {
+            atfork_registered = true;
+            pthread_atfork(nullptr, nullptr, []() {
+                // Child handler: reset stale state and spawn a fresh worker.
+                get_signal_worker(true);
+                auto& child_sw       = get_signal_worker();
+                child_sw.eventfd     = eventfd(0, EFD_CLOEXEC);
+                child_sw.timeout_sec = signal_handler_timeout;
+                if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
+            });
+        }
     }
 
     initialize_signal_handler(get_sigaction_function());
