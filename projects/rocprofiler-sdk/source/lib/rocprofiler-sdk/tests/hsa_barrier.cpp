@@ -143,7 +143,7 @@ inject_barriers(hsa_barrier& barrier, QueueController::queue_map_t& queues)
     for(auto& [hsa_queue, fq] : queues)
     {
         auto complete = barrier.complete();
-        auto _pkt     = barrier.enqueue_packet(fq.get());
+        auto _pkt     = barrier.enqueue_packet(fq->get_id().handle, 0);
         // If barrier is complete, no packets should be generated
         ASSERT_NE(complete, _pkt.has_value());
 
@@ -410,29 +410,28 @@ TEST(hsa_barrier, safe_to_destroy_gated_on_transition_drain)
     for(const auto& [k, v] : queues)
         q_map[k] = v.get();
 
-    q->serialized_dispatched_inc();  // pre-barrier dispatch (id 1), in flight
-    q->async_started();
+    const int64_t qid = q->get_id().handle;
+
+    q->async_started();  // pre-barrier dispatch (id 1) in flight
 
     hsa_barrier barrier([]() {}, get_api_table());
     barrier.set_barrier(q_map);
     ASSERT_FALSE(barrier.complete());
     ASSERT_FALSE(barrier.safe_to_destroy());
 
-    q->serialized_dispatched_inc();  // carrying dispatch (id 2) gets the transition packet
-    auto pkt = barrier.enqueue_packet(q);
+    // carrying dispatch (id 2) gets the transition packet
+    auto pkt = barrier.enqueue_packet(qid, 2);
     ASSERT_TRUE(pkt.has_value());
 
     // dispatch 1 completes -> barrier clears, but carrier (id 2) has not run -> not retirable
-    q->serialized_completed_inc();  // completion of dispatch id 1
     q->async_complete();
     barrier.register_completion(q);
-    barrier.drain_queue(q);  // completed(1) < token(2): no-op
+    barrier.drain_queue(qid, 1);  // completed(1) < token(2): no-op
     ASSERT_TRUE(barrier.complete());
     ASSERT_FALSE(barrier.safe_to_destroy());
 
     // carrier (id 2) completes -> retirable
-    q->serialized_completed_inc();  // completion of dispatch id 2 (the carrier)
-    barrier.drain_queue(q);
+    barrier.drain_queue(qid, 2);
     ASSERT_TRUE(barrier.safe_to_destroy());
 
     registration::set_init_status(1);
@@ -457,12 +456,13 @@ TEST(hsa_barrier, safe_to_destroy_after_enqueued_queue_removed)
     for(const auto& [k, v] : queues)
         q_map[k] = v.get();
 
+    const int64_t qid = q->get_id().handle;
+
     q->async_started();
     hsa_barrier barrier([]() {}, get_api_table());
     barrier.set_barrier(q_map);
 
-    q->serialized_dispatched_inc();
-    ASSERT_TRUE(barrier.enqueue_packet(q).has_value());
+    ASSERT_TRUE(barrier.enqueue_packet(qid, 1).has_value());
 
     q->async_complete();
     barrier.register_completion(q);

@@ -49,8 +49,8 @@ hsa_barrier::~hsa_barrier()
     _barrier_enqueued.rlock(
         [&](const auto& barrier_enqueued) { outstanding = !barrier_enqueued.empty(); });
 
-    // retirement is gated on safe_to_destroy() and queue teardown clears entries via remove_queue,
-    // so a barrier should never be destroyed while a transition packet still references its signal.
+    // retirement is gated on safe_to_destroy(), so a barrier should never be destroyed while a
+    // transition packet still references its signal; log an error (and still release) if it does.
     ROCP_ERROR_IF(outstanding) << "hsa_barrier (handle: " << _barrier_signal.handle
                                << ") destroyed with outstanding transition packets";
 
@@ -84,17 +84,17 @@ hsa_barrier::set_barrier(const queue_map_ptr_t& q)
 }
 
 std::optional<rocprofiler_packet>
-hsa_barrier::enqueue_packet(const Queue* queue)
+hsa_barrier::enqueue_packet(int64_t queue_id, uint64_t dispatch_id)
 {
     if(complete()) return std::nullopt;
     bool return_block = false;
     _barrier_enqueued.wlock([&](auto& barrier_enqueued) {
-        if(barrier_enqueued.find(queue->get_id().handle) == barrier_enqueued.end())
+        if(barrier_enqueued.find(queue_id) == barrier_enqueued.end())
         {
             return_block = true;
-            // record the current serialized-dispatch id; the transition packet has executed
-            // once this queue's completed count reaches it
-            barrier_enqueued.emplace(queue->get_id().handle, queue->serialized_dispatched());
+            // record the dispatch id carrying this transition packet; it has executed once the
+            // queue's completed count reaches this id
+            barrier_enqueued.emplace(queue_id, dispatch_id);
         }
     });
 
@@ -104,20 +104,20 @@ hsa_barrier::enqueue_packet(const Queue* queue)
     barrier.barrier_and.header        = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
     barrier.barrier_and.dep_signal[0] = _barrier_signal;
     ROCP_INFO << "Barrier (handle: " << _barrier_signal.handle
-              << ") added to queue (handle: " << queue->get_id().handle << ")";
+              << ") added to queue (handle: " << queue_id << ")";
     return barrier;
 }
 
 void
-hsa_barrier::drain_queue(const Queue* queue)
+hsa_barrier::drain_queue(int64_t queue_id, uint64_t completed_id)
 {
     // transition packet can't have executed until the barrier clears; skip the lock while armed
     if(!complete()) return;
     _barrier_enqueued.wlock([&](auto& barrier_enqueued) {
-        auto it = barrier_enqueued.find(queue->get_id().handle);
+        auto it = barrier_enqueued.find(queue_id);
         if(it == barrier_enqueued.end()) return;
         // packet executed once completions reach the carrying dispatch id (queue is in-order)
-        if(queue->serialized_completed() >= it->second)
+        if(completed_id >= it->second)
         {
             barrier_enqueued.erase(it);
         }

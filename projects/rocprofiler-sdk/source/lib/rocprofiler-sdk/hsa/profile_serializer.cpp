@@ -44,11 +44,12 @@ profiler_serializer_ready_signal_handler(hsa_signal_value_t /* signal_value */, 
 
 void
 drain_barriers(std::deque<profiler_serializer::barrier_with_state>& barriers,
-               const Queue&                                         completed)
+               int64_t                                              queue_id,
+               uint64_t                                             completed_id)
 {
-    // let each barrier drop `completed` if its transition packet on that queue has now executed
+    // let each barrier drop the queue if its transition packet on that queue has now executed
     for(auto& barrier : barriers)
-        barrier.barrier->drain_queue(&completed);
+        barrier.barrier->drain_queue(queue_id, completed_id);
 }
 
 void
@@ -84,12 +85,21 @@ profiler_serializer::add_queue(hsa_queue_t** hsa_queues, const Queue& queue)
                                              profiler_serializer_ready_signal_handler,
                                              *hsa_queues);
     if(status != HSA_STATUS_SUCCESS) ROCP_FATAL << "hsa_amd_signal_async_handler failed";
+
+    // Track this queue's in-order serialized dispatch/completion ids. Created here (under wlock) so
+    // the dispatch path only ever increments an existing entry under the shared lock.
+    _serial.try_emplace(queue.get_id().handle);
 }
 
 void
 profiler_serializer::kernel_completion_signal(const Queue& completed)
 {
-    drain_barriers(_barrier, completed);
+    const auto qid          = completed.get_id().handle;
+    uint64_t   completed_id = 0;
+    if(auto it = _serial.find(qid); it != _serial.end())
+        completed_id = it->second.completed.fetch_add(1, std::memory_order_relaxed) + 1;
+
+    drain_barriers(_barrier, qid, completed_id);
 
     // We do not want to track kernel completion signals before we have reached the barrier
     clear_complete_barriers(_barrier);
@@ -191,9 +201,15 @@ profiler_serializer::kernel_dispatch(const Queue& queue) const
         return barrier;
     };
 
+    // advance this queue's in-order dispatch id (counts every serialized dispatch)
+    const auto qid         = queue.get_id().handle;
+    uint64_t   dispatch_id = 0;
+    if(auto it = _serial.find(qid); it != _serial.end())
+        dispatch_id = it->second.dispatched.fetch_add(1, std::memory_order_relaxed) + 1;
+
     if(!_barrier.empty())
     {
-        if(auto maybe_barrier = _barrier.back().barrier->enqueue_packet(&queue))
+        if(auto maybe_barrier = _barrier.back().barrier->enqueue_packet(qid, dispatch_id))
         {
             ret.push_back(*maybe_barrier);
         }

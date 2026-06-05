@@ -54,19 +54,20 @@ public:
     // packets, clears the barrier and marks it as complete.
     void set_barrier(const queue_map_ptr_t& q);
 
-    // Returns the packets needed to place this barrier in a queue.
-    // If the barrier has already been enqueued in the queue given or the barrier is complete, no
-    // packets are returned.
-    std::optional<rocprofiler_packet> enqueue_packet(const Queue* queue);
+    // Returns the transition packet to insert in the queue identified by queue_id, stamping it with
+    // dispatch_id (that queue's in-order serialized-dispatch id carrying the packet). Returns
+    // nothing if the barrier is already complete or the queue was already handed a packet.
+    std::optional<rocprofiler_packet> enqueue_packet(int64_t queue_id, uint64_t dispatch_id);
 
     // To be called when 1 async packet is finished in the given queue to decrement the remaining
     // packets counter. If all packets in all queues given in set_barrier are completed, clears the
     // barrier and marks it as complete. Returns true if the given queue had async packets waiting.
     bool register_completion(const Queue* queue);
 
-    // Drop the queue from the outstanding set once it has executed past the dispatch that
-    // carried this barrier's transition packet (called on each serialized completion).
-    void drain_queue(const Queue* queue);
+    // Drop the queue from the outstanding set once its completed count (completed_id) reaches the
+    // dispatch id that carried this barrier's transition packet (called on each serialized
+    // completion).
+    void drain_queue(int64_t queue_id, uint64_t completed_id);
 
     // Checks if this barrier is complete
     bool complete() const;
