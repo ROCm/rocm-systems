@@ -17,8 +17,8 @@
 
 // Called from gin_host.cc (with ncclComm context)
 ncclResult_t ncclGinAnvilCreateContext(struct ncclComm *comm, void *collComm, int devId,
-                                       int nSignals, int nCounters, int nContexts,
-                                       void **outGinCtx, ncclNetDeviceHandle_v11_t **outDevHandle);
+                                       int nSignals, int nCounters, void **outGinCtx,
+                                       ncclNetDeviceHandle_v11_t **outDevHandle);
 ncclResult_t ncclGinAnvilRegister(ncclGin_t *ginComm, void *ginCtx, void *addr, size_t size,
                                   int type, int mr_flags, void **mhandle, void **ginHandle);
 ncclResult_t ncclGinAnvilDeregister(ncclGin_t *ginComm, void *ginCtx, void *mhandle);

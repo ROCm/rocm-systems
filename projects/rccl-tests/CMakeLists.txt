@@ -111,7 +111,7 @@ endif()
 # Set CMAKE flags
 #==================================================================================================
 set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "")
-set(CMAKE_CXX_STANDARD   17)   # ROCm 7.x device headers require C++17
+set(CMAKE_CXX_STANDARD   14)   # We use C++14 features, this will add compile option: -std=c++14
 set(CMAKE_CXX_EXTENSIONS OFF)  # Without this line, it will add -std=gnu++14 instead, which has some issues.
 set(CPACK_PACKAGING_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Path to install to when packaged.")
 if(ROCM_PATH)
@@ -208,14 +208,9 @@ if (ENABLE_DEVICE_API)
     add_definitions(-DENABLE_DEVICE_API)
 endif()
 
-set(ROCSHMEM_SOURCE_DIR "" CACHE PATH "rocSHMEM source tree (for Anvil SDMA device headers)")
-
 if (ENABLE_ROCSHMEM)
     message(STATUS "rocshmem GIN backend support enabled")
-    add_definitions(-DENABLE_ROCSHMEM -DENABLE_ROCSHMEM_GIN)
-    if (ROCSHMEM_SOURCE_DIR)
-        include_directories(${ROCSHMEM_SOURCE_DIR}/src/sdma)
-    endif()
+    add_definitions(-DENABLE_ROCSHMEM)
     if (NOT ROCSHMEM_INSTALL_DIR)
         message(FATAL_ERROR "ENABLE_ROCSHMEM is ON but ROCSHMEM_INSTALL_DIR is not set")
     endif()

@@ -22,6 +22,26 @@ NCCL_DEVICE_INLINE static ncclGinAnvilGPUContext* ncclGinAnvilGetCtx(ncclGinCtx 
   return &((ncclGinAnvilGPUContext*)handle)[ctx.contextId];
 }
 
+// Indexed signal cell on peer P (destination of put/barrier signal). readSignal uses local signals.
+NCCL_DEVICE_INLINE static uint64_t* ncclGinAnvilPeerSignalPtr(ncclGinAnvilGPUContext* aCtx, int peer,
+                                                               ncclGinSignal_t signalId) {
+  using nccl::utility::loadConst;
+  uint64_t** signalsBaseArr = (uint64_t**)loadConst(&aCtx->signalsBase);
+  if (signalsBaseArr == nullptr) return nullptr;
+  uint64_t* peerSignals = (uint64_t*)loadConst(&signalsBaseArr[peer]);
+  if (peerSignals == nullptr) return nullptr;
+  return peerSignals + signalId;
+}
+
+NCCL_DEVICE_INLINE static void ncclGinAnvilLocalSignalOp(uint64_t* sigPtr, ncclGinSignalOp_t signalOp,
+                                                         uint64_t signalOpArg) {
+  if (sigPtr == nullptr) return;
+  if (signalOp == ncclGinSignalInc) signalOpArg = 1;
+  cuda::atomic_ref<uint64_t, cuda::thread_scope_system> ref(*sigPtr);
+  if (signalOp == ncclGinSignalInc || signalOp == ncclGinSignalAdd)
+    ref.fetch_add(signalOpArg, cuda::memory_order_relaxed);
+}
+
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop>
@@ -43,7 +63,31 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     if (hasSignal && signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
       signalId = signal.indexedSignal.signalId;
 
-    if (peer == ctx.rank) return;
+    if (peer == ctx.rank) {
+      if (!hasWins) {
+        if (hasSignal)
+          ncclGinAnvilLocalSignalOp(ncclGinAnvilPeerSignalPtr(aCtx, ctx.rank, signalId), signalOp, signalOpArg);
+        return;
+      }
+      if (dstWin == nullptr || srcWin == nullptr) return;
+
+      auto* dstMh = (ncclGinAnvilMemHandle*)dstWin;
+      auto* srcMh = (ncclGinAnvilMemHandle*)srcWin;
+      uintptr_t dstRank0Base = loadConst(&dstMh->lsaRank0Base);
+      uintptr_t srcRank0Base = loadConst(&srcMh->lsaRank0Base);
+      uint64_t stride = loadConst(&dstMh->lsaStrideBytes);
+      if (dstRank0Base == 0 || srcRank0Base == 0 || stride == 0) return;
+
+      char* dst = (char*)(ncclGinAnvilRankPtr(dstRank0Base, stride, ctx.rank) + dstOff);
+      char* src = (char*)(ncclGinAnvilRankPtr(srcRank0Base, stride, ctx.rank) + srcOff);
+      for (size_t i = 0; i < bytes; ++i) dst[i] = src[i];
+
+      if (hasSignal)
+        ncclGinAnvilLocalSignalOp(ncclGinAnvilPeerSignalPtr(aCtx, ctx.rank, signalId), signalOp, signalOpArg);
+      if (hasCounter)
+        atomicAdd((unsigned long long*)(loadConst(&aCtx->counters) + counterId), 1ULL);
+      return;
+    }
 
     void** queues = (void**)loadConst(&aCtx->queues);
     if (queues == nullptr) return;
@@ -52,9 +96,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
     uint64_t* sigPtr = nullptr;
     if (hasSignal) {
-      uint64_t* localSignals = (uint64_t*)loadConst(&aCtx->signals);
-      if (localSignals == nullptr) return;
-      sigPtr = localSignals + signalId;
+      sigPtr = ncclGinAnvilPeerSignalPtr(aCtx, peer, signalId);
+      if (sigPtr == nullptr) return;
       if (signalOp == ncclGinSignalInc) signalOpArg = 1;
     }
 

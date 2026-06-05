@@ -50,9 +50,7 @@ NCCL_DEVICE_INLINE void ncclGinBarrierSession<Coop>::sync(Coop, cuda::memory_ord
     );
 
     // Load and update barrier state in memory. The load/store should be covered by the GIN signal latency.
-    uint64_t* shadowCell = this->net.getSignalShadowPtr(this->signal + peer);
-    if (shadowCell == nullptr) continue;
-    uint32_t* shadowPtr = (uint32_t*)shadowCell;
+    uint32_t* shadowPtr = (uint32_t*)this->net.getSignalShadowPtr(this->signal + peer);
     int waitVal = ++*shadowPtr;
 
     // Wait for GIN signal

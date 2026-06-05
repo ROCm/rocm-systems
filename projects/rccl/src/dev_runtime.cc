@@ -934,7 +934,7 @@ ncclResult_t ncclDevrCommCreateInternal(
   outDevComm->lsaSize = devr->lsaSize;
   outDevComm->lsaSize_rcp32 = idivRcp32(devr->lsaSize);
   outDevComm->ginIsRailed = requestedConnectionType == NCCL_GIN_CONNECTION_RAIL; // false if FULL or NONE
-  outDevComm->abortFlag = comm->abortFlagDev;
+  if (isInternal) outDevComm->abortFlag = comm->abortFlagDev;
 
   NCCLCHECKGOTO(symTeamObtain(comm, lsa, /*multicast=*/reqs->lsaMultimem, &tmLsa), ret, fail);
   outDevComm->lsaMultimem.mcBasePtr = tmLsa->mcBasePtr;
@@ -989,12 +989,8 @@ ncclResult_t ncclDevrCommCreateInternal(
       struct ncclWindow_vidmem* winHost;
       NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, win->vidmem, &winHost), ret, fail_stream);
       winHost->ginOffset4K = (win->bigOffset - win->memory->bigOffset)>>12;
-      for (int c=0; c < NCCL_GIN_MAX_CONNECTIONS; c++) {
-        winHost->ginWins[c] = win->memory->ginDevWins[c];
-      }
-      if (winHost->ginWins[0] == nullptr) {
-        WARN("GIN window update: win %p userPtr %p has null ginWins[0] after registration",
-             win->vidmem, win->userPtr);
+      for (int i=0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
+        winHost->ginWins[i] = win->memory->ginDevWins[i];
       }
       CUDACHECKGOTO(cudaMemcpyAsync(win->vidmem, winHost, sizeof(struct ncclWindow_vidmem), cudaMemcpyHostToDevice, stream), ret, fail_stream);
     }
@@ -1065,9 +1061,6 @@ ncclResult_t ncclDevrCommCreateInternal(
       outDevComm->ginNetDeviceTypes[connectionId] = (int)comm->sharedRes->ginState.ginDevHandles[connectionId]->netDeviceType;
       outDevComm->ginHandles[connectionId] = comm->sharedRes->ginState.ginDevHandles[connectionId]->handle;
     }
-    INFO(NCCL_INIT|NCCL_NET, "devComm GIN handles[0]=%p type=%d ginSignalShadows=%p",
-         outDevComm->ginHandles[0], (int)outDevComm->ginNetDeviceTypes[0],
-         (void*)outDevComm->ginSignalShadows);
   }
 
   CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, fail_stream_mem_win_signals);
@@ -1329,17 +1322,7 @@ static ncclResult_t ncclDevCommCreateCopyCB_v22902(struct ncclDevComm const* tmp
   outDevComm->resourceWindow_inlined = tmpDevComm->resourceWindow_inlined;
   outDevComm->lsaMultimem = tmpDevComm->lsaMultimem;
   outDevComm->lsaBarrier = tmpDevComm->lsaBarrier;
-  outDevComm->railGinBarrier = tmpDevComm->railGinBarrier;
-  outDevComm->ginContextCount = (uint8_t)tmpDevComm->ginContextCount;
-  for (int i = 0; i < NCCL_GIN_MAX_CONNECTIONS; i++) {
-    outDevComm->ginNetDeviceTypes[i] = tmpDevComm->ginNetDeviceTypes[i];
-    outDevComm->ginHandles[i] = tmpDevComm->ginHandles[i];
-  }
-  outDevComm->ginSignalBase = tmpDevComm->ginSignalBase;
-  outDevComm->ginSignalCount = tmpDevComm->ginSignalCount;
-  outDevComm->ginCounterBase = tmpDevComm->ginCounterBase;
-  outDevComm->ginCounterCount = tmpDevComm->ginCounterCount;
-  outDevComm->ginSignalShadows = tmpDevComm->ginSignalShadows;
+  // No need to copy GIN-specific fields since this is used only if GIN has not been requested.
 
   return ncclSuccess;
 }

@@ -284,14 +284,11 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::put(
   ncclGinCtx_M<beMask> ctx = this->_makeCtx();
   coop.sync();
   if (coop.thread_rank() == 0) {
-    ncclGinWindow_t dstGinWin = loadConst(&dstWin->ginWins[this->connectionId]);
-    ncclGinWindow_t srcGinWin = loadConst(&srcWin->ginWins[this->connectionId]);
-    if (dstGinWin == nullptr || srcGinWin == nullptr) return;
     ncclGinCall<ncclGinApi_Put>(ctx,
       ncclCoopThread(), teamRankToGinRank(this->comm, team, peer), /*hasWins=*/true,
-      dstGinWin,
+      loadConst(&dstWin->ginWins[this->connectionId]),
       4096*size_t(loadConst(&dstWin->ginOffset4K)) + dstOffset,
-      srcGinWin,
+      loadConst(&srcWin->ginWins[this->connectionId]),
       4096*size_t(loadConst(&srcWin->ginOffset4K)) + srcOffset, bytes,
       ncclGin_getSignalDescriptor(*this, remoteAction),
       ncclGin_getSignalOp(remoteAction),
@@ -619,7 +616,6 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::increaseSignalShadow(ncclGi
 template<unsigned beMask>
 NCCL_DEVICE_INLINE uint64_t ncclGin_BackendMask<beMask>::readSignal(ncclGinSignal_t signal, int bits, cuda::memory_order ord) const {
   uint64_t* ptr = ncclGinCall<ncclGinApi_GetSignalPtr>(this->_makeCtx(), this->comm.ginSignalBase + signal);
-  if (ptr == nullptr) return 0;
   uint64_t mask = uint64_t(-1)>>(64-bits);
   return mask & cuda::atomic_ref<uint64_t>{*ptr}.load(ord);
 }
@@ -634,12 +630,10 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::waitSignal(Coop coop, ncclG
   coop.sync();
   if (coop.thread_rank() == 0) {
     uint64_t* ptr = ncclGinCall<ncclGinApi_GetSignalPtr>(this->_makeCtx(), this->comm.ginSignalBase + signal);
-    if (ptr != nullptr) {
-      uint64_t got;
-      #pragma unroll 1
-      do got = cuda::atomic_ref<uint64_t>{*ptr}.load(ord);
-      while (!nccl::utility::rollingLessEq(least, got, bits) && !testAbort(this->comm.abortFlag, steps));
-    }
+    uint64_t got;
+    #pragma unroll 1
+    do got = cuda::atomic_ref<uint64_t>{*ptr}.load(ord);
+    while (!nccl::utility::rollingLessEq(least, got, bits) && !testAbort(this->comm.abortFlag, steps));
   }
   coop.sync();
 }

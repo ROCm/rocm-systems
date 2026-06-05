@@ -332,8 +332,6 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
   gin.flush(ncclCoopCta());
-
-  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
 template <typename T>
