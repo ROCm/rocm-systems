@@ -63,6 +63,7 @@ public:
   /// @brief Backend-defined tag for pipeline routing or dispatch.
   /// @returns Tag value.
   uint8_t tag() const { return tag_; }
+  void set_tag(uint8_t t) { tag_ = t; }
 
 protected:
   uint8_t tag_ = 0;

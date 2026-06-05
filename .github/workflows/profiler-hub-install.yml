@@ -1,0 +1,106 @@
+name: profiler-hub Install
+run-name: profiler-hub-install
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-install.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+  pull_request:
+    paths:
+      - '.github/workflows/profiler-hub-install.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install-and-consume:
+    name: ${{ matrix.os }} / install + find_package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    env:
+      CC: gcc
+      CXX: g++
+      INSTALL_PREFIX: ${{ github.workspace }}/profiler-hub-install
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            gcc g++ \
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev
+
+      - name: Configure profiler-hub
+        working-directory: profilers/profiler-hub
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX} \
+            -DPROFILER_HUB_BUILD_TESTS=OFF \
+            -DPROFILER_HUB_BUILD_BENCHMARKS=OFF
+
+      - name: Build profiler-hub
+        working-directory: profilers/profiler-hub
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Install profiler-hub
+        working-directory: profilers/profiler-hub
+        run: cmake --install build
+
+      - name: Verify install layout
+        run: |
+          set -e
+          test -f ${INSTALL_PREFIX}/lib/libprofiler-hub.so       || { echo "::error::libprofiler-hub.so missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/libprofiler-hub.a        || { echo "::error::libprofiler-hub.a missing";  exit 1; }
+          test -d ${INSTALL_PREFIX}/include/profiler-hub         || { echo "::error::include/profiler-hub missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/profiler-hub/writer.hpp  || { echo "::error::writer.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/profiler-hub/reader.hpp  || { echo "::error::reader.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/include/profiler-hub/storage.hpp || { echo "::error::storage.hpp missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/profiler-hub/profiler-hub-config.cmake         || { echo "::error::profiler-hub-config.cmake missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/profiler-hub/profiler-hub-config-version.cmake || { echo "::error::profiler-hub-config-version.cmake missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/profiler-hub/profiler-hub-targets.cmake        || { echo "::error::profiler-hub-targets.cmake missing"; exit 1; }
+          test -f ${INSTALL_PREFIX}/lib/cmake/profiler-hub/Findprofiler-hub.cmake            || { echo "::error::Findprofiler-hub.cmake missing"; exit 1; }
+          echo "Install layout OK:"
+          find ${INSTALL_PREFIX} -type f | sort
+
+      - name: Configure consumer (find_package)
+        run: |
+          cmake \
+            -S profilers/profiler-hub/tests/find_package \
+            -B consumer-build \
+            -DCMAKE_PREFIX_PATH=${INSTALL_PREFIX}
+
+      - name: Build consumer
+        run: cmake --build consumer-build --parallel $(nproc)
+
+      - name: Run consumer smoke test
+        working-directory: consumer-build
+        env:
+          LD_LIBRARY_PATH: ${{ env.INSTALL_PREFIX }}/lib
+        run: ctest --output-on-failure

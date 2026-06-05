@@ -1,0 +1,97 @@
+name: profiler-hub CI
+run-name: profiler-hub-ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-ci.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/profiler-hub-ci.yml'
+      - 'profilers/profiler-hub/**'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
+      - '!profilers/profiler-hub/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }} / ${{ matrix.compiler.name }} / ${{ matrix.build-type }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        compiler:
+          - { name: gcc,   cc: gcc,   cxx: g++,     pkg: 'gcc g++' }
+          - { name: clang, cc: clang, cxx: clang++, pkg: 'clang' }
+        build-type: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            profilers/profiler-hub
+            .github/workflows
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ${{ matrix.compiler.pkg }} \
+            libsqlite3-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
+            libgtest-dev libgmock-dev libbenchmark-dev
+
+      - name: Configure
+        working-directory: profilers/profiler-hub
+        env:
+          CC: ${{ matrix.compiler.cc }}
+          CXX: ${{ matrix.compiler.cxx }}
+        run: |
+          cmake --version
+          ${CXX} --version
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+            -DPROFILER_HUB_BUILD_TESTS=ON \
+            -DPROFILER_HUB_BUILD_BENCHMARKS=ON
+
+      - name: Build
+        working-directory: profilers/profiler-hub
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Verify library artifacts
+        working-directory: profilers/profiler-hub
+        run: |
+          set -e
+          test -f build/lib/libprofiler-hub.so || { echo "::error::libprofiler-hub.so not built"; exit 1; }
+          test -f build/lib/libprofiler-hub.a  || { echo "::error::libprofiler-hub.a not built";  exit 1; }
+          ls -la build/lib/
+
+      - name: Test
+        working-directory: profilers/profiler-hub/build
+        run: ctest --output-on-failure --output-junit test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.compiler.name }}-${{ matrix.build-type }}
+          path: profilers/profiler-hub/build/test-results.xml
+          if-no-files-found: warn

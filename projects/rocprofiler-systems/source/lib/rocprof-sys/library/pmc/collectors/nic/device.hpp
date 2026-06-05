@@ -66,8 +66,8 @@ public:
     /**
      * @brief Collect current NIC RDMA metrics.
      *
-     * Queries the first RDMA port for statistics and extracts the
-     * 6 RDMA metrics: rx/tx bytes, rx/tx packets, and rx/tx CNP packets.
+     * Queries the first RDMA port for statistics and extracts
+     * all metrics enumerated by METRIC_MAP.
      *
      * @return Collected metrics (zeros if query fails)
      */
@@ -90,7 +90,12 @@ public:
                                { "rx_rdma_ucast_pkts", &metrics::rx_rdma_ucast_pkts },
                                { "tx_rdma_ucast_pkts", &metrics::tx_rdma_ucast_pkts },
                                { "rx_rdma_cnp_pkts", &metrics::rx_rdma_cnp_pkts },
-                               { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts } };
+                               { "tx_rdma_cnp_pkts", &metrics::tx_rdma_cnp_pkts },
+                               { "tx_rdma_ack_timeout", &metrics::tx_rdma_ack_timeout },
+                               { "resp_tx_pkt_seq_err", &metrics::resp_tx_pkt_seq_err },
+                               { "req_rx_pkt_seq_err", &metrics::req_rx_pkt_seq_err },
+                               { "req_rx_impl_nak_seq_err",
+                                 &metrics::req_rx_impl_nak_seq_err } };
 
             for(const auto& stat : stats)
             {

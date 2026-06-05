@@ -292,34 +292,20 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
         set(_DEPTH "--depth=1")
     endif()
 
-    # Partial clone: skip blob history (--filter=blob:none); blobs fetched lazily on
-    # demand. Requires git >= 2.36 and remote with uploadpack.allowFilter=true (GitHub
-    # supports it). Falls back to non-filtered fetch if rejected. Combined with
-    # --depth=1 for minimal initial transfer.
-    option(
-        ROCPROFSYS_GIT_PARTIAL_CLONE
-        "Use --filter=blob:none when fetching git submodules / external repos"
-        ON
-    )
-    set(_FILTER "")
-    if(ROCPROFSYS_GIT_PARTIAL_CLONE)
-        set(_FILTER "--filter=blob:none")
-    endif()
-
     # if the module has not been checked out
     if(NOT _TEST_FILE_EXISTS AND _SUBMODULE_EXISTS)
-        # perform the checkout (shallow + partial first)
+        # perform the checkout (shallow first; --filter is only valid for git clone)
         execute_process(
             COMMAND
-                ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_FILTER} ${_RECURSE}
+                ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_RECURSE}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET
         )
 
-        # retry without --depth=1 / --filter if shallow or partial fetch failed
-        # (pinned SHA may not be reachable; remote may reject filter)
-        if(RET GREATER 0 AND (ROCPROFSYS_GIT_SHALLOW OR ROCPROFSYS_GIT_PARTIAL_CLONE))
+        # retry without --depth=1 if shallow fetch failed
+        # (pinned SHA may not be reachable)
+        if(RET GREATER 0 AND ROCPROFSYS_GIT_SHALLOW)
             message(
                 STATUS
                 "Optimized fetch of '${CHECKOUT_RELATIVE_PATH}' failed; retrying full fetch"
@@ -357,17 +343,17 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
             execute_process(COMMAND ${CMAKE_COMMAND} -E remove_directory ${_DIR})
         endif()
 
-        # perform the checkout (shallow + partial first)
+        # perform the checkout (shallow first)
         execute_process(
             COMMAND
-                ${GIT_EXECUTABLE} clone ${_DEPTH} ${_FILTER} -b ${CHECKOUT_REPO_BRANCH}
+                ${GIT_EXECUTABLE} clone ${_DEPTH} -b ${CHECKOUT_REPO_BRANCH}
                 ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
             RESULT_VARIABLE RET
         )
 
-        # retry without --depth=1 / --filter if optimized clone failed
-        if(RET GREATER 0 AND (ROCPROFSYS_GIT_SHALLOW OR ROCPROFSYS_GIT_PARTIAL_CLONE))
+        # retry without --depth=1 if shallow clone failed
+        if(RET GREATER 0 AND ROCPROFSYS_GIT_SHALLOW)
             message(
                 STATUS
                 "Optimized clone of '${CHECKOUT_REPO_URL}' failed; retrying full clone"
@@ -385,16 +371,14 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
             )
         endif()
 
-        # perform the submodule update (shallow + partial first)
+        # perform the submodule update (shallow; --filter is only valid for git clone)
         if(CHECKOUT_RECURSIVE AND EXISTS "${_DIR}" AND IS_DIRECTORY "${_DIR}")
             execute_process(
-                COMMAND
-                    ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_FILTER}
-                    ${_RECURSE}
+                COMMAND ${GIT_EXECUTABLE} submodule update --init ${_DEPTH} ${_RECURSE}
                 WORKING_DIRECTORY ${_DIR}
                 RESULT_VARIABLE RET
             )
-            if(RET GREATER 0 AND (ROCPROFSYS_GIT_SHALLOW OR ROCPROFSYS_GIT_PARTIAL_CLONE))
+            if(RET GREATER 0 AND ROCPROFSYS_GIT_SHALLOW)
                 execute_process(
                     COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                     WORKING_DIRECTORY ${_DIR}

@@ -97,6 +97,18 @@ public:
   /// @returns Workgroup ID.
   uint32_t wg_id() const { return wg_id_; }
 
+  /// @brief Return the dispatch ID assigned at dispatch.
+  uint32_t dispatch_id() const { return dispatch_id_; }
+
+  /// @brief Set the dispatch ID (called by DispatchController).
+  void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
+
+  /// @brief Return the owning process ID (PASID analog).
+  uint32_t process_id() const { return process_id_; }
+
+  /// @brief Set the owning process ID at dispatch time.
+  void set_process_id(uint32_t id) { process_id_ = id; }
+
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
 
@@ -149,6 +161,20 @@ public:
   /// @brief Set the per-wavefront scratch base address.
   /// @param val Scratch base byte address (set at dispatch by CP).
   void set_scratch_base(uint64_t val) { scratch_base_ = val; }
+
+  uint32_t scratch_lane_size() const { return scratch_lane_size_; }
+  void set_scratch_lane_size(uint32_t val) { scratch_lane_size_ = val; }
+
+  uint64_t shared_aperture_base() const { return shared_aperture_base_; }
+  uint64_t shared_aperture_limit() const { return shared_aperture_limit_; }
+  uint64_t private_aperture_base() const { return private_aperture_base_; }
+  uint64_t private_aperture_limit() const { return private_aperture_limit_; }
+  void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl) {
+    shared_aperture_base_ = sb;
+    shared_aperture_limit_ = sl;
+    private_aperture_base_ = pb;
+    private_aperture_limit_ = pl;
+  }
 
   /// @brief Return the wait counters for outstanding memory operations.
   /// @returns Reference to the wait counters.
@@ -288,8 +314,12 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
-  /// @brief Halt this wavefront (immediate — all memory ops must be drained).
-  void halt() { state_ = WfState::HALTED; }
+  /// @brief Halt this wavefront and notify the CU for WG completion tracking.
+  /// @details Transitions to HALTED and decrements the CU's per-WG refcount.
+  /// When the refcount reaches zero (all WFs in the WG halted), the CU fires
+  /// notify_wg_complete to the CP. This is the sole completion detection path —
+  /// driven entirely by s_endpgm → end() → halt().
+  void halt();
 
   /// @brief End program execution. If all memory ops are drained, halts
   /// immediately. Otherwise, transitions to ENDING and lets the memory
@@ -312,6 +342,8 @@ public:
   void reset() {
     pc = 0;
     wg_id_ = 0;
+    dispatch_id_ = 0;
+    process_id_ = 0;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
     sgpr_alloc_ = {};
@@ -320,8 +352,14 @@ public:
     vcc_ = 0;
     m0_ = 0;
     scratch_base_ = 0;
+    scratch_lane_size_ = 0;
+    shared_aperture_base_ = 0;
+    shared_aperture_limit_ = 0;
+    private_aperture_base_ = 0;
+    private_aperture_limit_ = 0;
     wait_counters_ = {};
     wait_target_ = {};
+    ready_cycle_ = 0;
     state_ = WfState::HALTED;
   }
 
@@ -336,10 +374,12 @@ protected:
             uint32_t max_vgprs)
       : cu_(cu), wf_id_(wf_id), wf_size_(wf_size), max_sgprs_(max_sgprs), max_vgprs_(max_vgprs) {}
 
-  ComputeUnitCore &cu_;   ///< Parent CU (permanent, set at construction).
-  uint32_t wf_id_ = 0;    ///< Slot index within the CU (permanent).
-  uint32_t wg_id_ = 0;    ///< Workgroup ID (set per dispatch).
-  uint32_t lds_base_ = 0; ///< Per-WG LDS base offset (set per dispatch).
+  ComputeUnitCore &cu_;      ///< Parent CU (permanent, set at construction).
+  uint32_t wf_id_ = 0;       ///< Slot index within the CU (permanent).
+  uint32_t wg_id_ = 0;       ///< Workgroup ID (set per dispatch).
+  uint32_t dispatch_id_ = 0; ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t process_id_ = 0;  ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t lds_base_ = 0;    ///< Per-WG LDS base offset (set per dispatch).
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
   uint32_t num_sgprs_ = 0; ///< Allocated scalar registers (set at dispatch).
@@ -351,16 +391,27 @@ protected:
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
 
 private:
-  uint64_t exec_ = ~0ULL;           ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vcc_ = 0;                ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                 ///< M0 special register (misc addressing).
-  uint64_t scratch_base_ = 0;       ///< Per-wavefront scratch (private segment) base address.
+  uint64_t exec_ = ~0ULL;          ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vcc_ = 0;               ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;                ///< M0 special register (misc addressing).
+  uint64_t scratch_base_ = 0;      ///< Per-wavefront scratch (private segment) base address.
+  uint32_t scratch_lane_size_ = 0; ///< Per-lane scratch size (private_segment_fixed_size).
+  uint64_t shared_aperture_base_ = 0;
+  uint64_t shared_aperture_limit_ = 0;
+  uint64_t private_aperture_base_ = 0;
+  uint64_t private_aperture_limit_ = 0;
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
+
+  /// @brief Cycle at which this WF became RUNNING (for scheduler priority).
+  uint64_t ready_cycle() const { return ready_cycle_; }
+  void set_ready_cycle(uint64_t c) { ready_cycle_ = c; }
+
 private:
+  uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.

@@ -127,6 +127,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_counter_info_v1_t
     const rocprofiler_counter_record_dimension_info_t**          dimensions;
     uint64_t                                                     dimensions_instances_count;
     const rocprofiler_counter_record_dimension_instance_info_t** dimensions_instances;
+    uint8_t spm_support;          ///< If this counter supports SPM
+    uint8_t reserved_padding[7];  //< unused or reserved for future use
 
     /// @var dimensions_count
     /// @brief Number of dimensions for the counter
