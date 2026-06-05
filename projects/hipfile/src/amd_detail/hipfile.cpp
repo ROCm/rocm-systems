@@ -208,11 +208,9 @@ selectBackend(const vector<shared_ptr<Backend>> &backends, const shared_ptr<IFil
 }
 
 ssize_t
-hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
-          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
+hipFileIo(IoType type, std::shared_ptr<IFile> file, std::shared_ptr<IBuffer> buffer, size_t size,
+          hoff_t file_offset, hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
 try {
-    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
-
     if (file_offset < 0 || buffer_offset < 0) {
         throw std::system_error(EINVAL, std::generic_category());
     }
@@ -221,11 +219,32 @@ try {
 
     return backend->io(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset);
 }
-catch (const DriverNotInitialized &) {
-    return -hipFileDriverNotInitialized;
-}
 catch (hipFileError_t e) {
     return -e.err;
+}
+catch (const Hip::RuntimeError &) {
+    throw;
+}
+catch (const std::system_error &e) {
+    errno = e.code().value();
+    return -1;
+}
+catch (const std::invalid_argument &) {
+    return -hipFileInvalidValue;
+}
+catch (...) {
+    return -hipFileInternalError;
+}
+
+ssize_t
+hipFileIo(IoType type, hipFileHandle_t fh, const void *buffer_base, size_t size, hoff_t file_offset,
+          hoff_t buffer_offset, const vector<shared_ptr<Backend>> &backends)
+try {
+    auto [file, buffer] = Context<DriverState>::get()->getFileAndBuffer(fh, buffer_base);
+    return hipFileIo(type, std::move(file), std::move(buffer), size, file_offset, buffer_offset, backends);
+}
+catch (const DriverNotInitialized &) {
+    return -hipFileDriverNotInitialized;
 }
 catch (const InvalidMemoryType &) {
     return -hipFileHipMemoryTypeInvalid;
@@ -238,10 +257,6 @@ catch (const FileNotRegistered &) {
 }
 catch (const Hip::RuntimeError &e) {
     return -e.error;
-}
-catch (const std::system_error &e) {
-    errno = e.code().value();
-    return -1;
 }
 catch (...) {
     return -hipFileInternalError;
