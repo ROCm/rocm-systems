@@ -28,7 +28,6 @@
 #include <utility>
 
 #include "gda/endian.hpp"
-#include "gda/mlx5/mlx5dv_core.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
 #include "gda/queue_pair.hpp"
 

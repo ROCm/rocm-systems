@@ -27,8 +27,9 @@
 #include "log.hpp"
 #include "util.hpp"
 #include "gda/backend_gda.hpp"
-#include "gda/mlx5/mlx5dv_core.hpp"
-#include "gda/mlx5/mlx5_ifc_core.hpp"
+#include "gda/mlx5/provider_gda_mlx5.hpp"
+#include "gda/mlx5/queue_pair_mlx5.hpp"
+#include "gda/queue_pair_provider.hpp"
 
 namespace rocshmem {
 
