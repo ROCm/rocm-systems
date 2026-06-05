@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstring>
 #include <memory>
 #include <sstream>
@@ -102,12 +103,17 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
   ctx.file_size = file_stats.st_size;
   ctx.buffer = std::make_unique<char[]>(ctx.file_size);
 
-  // Use POSIX open/read/close rather than std::ifstream. debugfs CPER nodes
+  // Read with POSIX open/read/close rather than std::ifstream. The hazard is
+  // not open() vs ifstream itself, but where the memory is allocated and freed:
+  // std::ifstream owns a std::basic_filebuf whose internal buffer is allocated
+  // and later torn down (in its destructor) by the libstdc++ bound to this
+  // library. When libamd_smi.so is LD_PRELOAD-ed alongside a different host
+  // libstdc++, that destructor can free a pointer the host allocator never
+  // owned, producing "free(): invalid pointer". debugfs CPER nodes
   // (e.g. /sys/kernel/debug/dri/<N>/amdgpu_ring_cper) report st_size == 0
-  // because their content is generated on read. An ifstream over such a node
-  // allocates an internal filebuf whose destructor can crash (invalid free)
-  // when the library is LD_PRELOAD-ed alongside the host libstdc++. The POSIX
-  // path performs no STL allocation across the library boundary (ROCM-25398).
+  // because their content is generated on read, which is the case that
+  // triggered the abort. POSIX I/O performs no STL allocation across the
+  // library boundary, avoiding the issue entirely (ROCM-25398).
   int fd = open(filepath.c_str(), O_RDONLY);
   if (fd == -1) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath
@@ -115,7 +121,7 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
     LOG_ERROR(ss);
     return ctx;
   }
-  long bytes_read = read(fd, ctx.buffer.get(), ctx.file_size);
+  auto bytes_read = read(fd, ctx.buffer.get(), ctx.file_size);
   if (bytes_read <= 0) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
        << "[CPER] failed to read complete file, read only  " << bytes_read << " of "

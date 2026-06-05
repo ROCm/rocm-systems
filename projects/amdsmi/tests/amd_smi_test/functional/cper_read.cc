@@ -60,19 +60,20 @@ static amdsmi_status_t CallCperByPath(const char* path) {
 // stat() reports S_ISREG with st_size == 0. Before the fix this aborted the
 // process inside the std::ifstream filebuf destructor.
 TEST(amdsmitstReadOnly, CperReadZeroSizeFile) {
-  char tmpl[] = "/tmp/amdsmi_cper_zero_XXXXXX";
-  int fd = mkstemp(tmpl);
+  std::string tmpl = "/tmp/amdsmi_cper_zero_XXXXXX";
+  int fd = mkstemp(tmpl.data());
   ASSERT_NE(fd, -1) << "failed to create temp file";
   close(fd);  // leave it empty -> st_size == 0
 
-  amdsmi_status_t status = CallCperByPath(tmpl);
-  unlink(tmpl);
+  amdsmi_status_t status = CallCperByPath(tmpl.c_str());
+  unlink(tmpl.c_str());
 
   EXPECT_EQ(status, AMDSMI_STATUS_FILE_ERROR);
 }
 
-// A non-existent path must report a clean status, never crash.
+// A non-existent path must report a clean status, never crash. stat() fails for
+// a missing path, so the read helper reports AMDSMI_STATUS_NOT_SUPPORTED.
 TEST(amdsmitstReadOnly, CperReadMissingFile) {
   amdsmi_status_t status = CallCperByPath("/tmp/amdsmi_cper_does_not_exist_12345");
-  EXPECT_NE(status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);
 }
