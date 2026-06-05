@@ -44,6 +44,7 @@
 #include "backend_gda.hpp"
 #include "debug_gda.hpp"
 #include "envvar.hpp"
+#include "topology.hpp"
 #include "util.hpp"
 #include "constants.hpp"
 #include "rocshmem/rocshmem_common.hpp"
@@ -194,8 +195,21 @@ static int gin_open_ib_device(rocshmem_gin_qp_set *set) {
     return -1;
   }
 
-  // Find first device with an active port
+  // Use topology-aware NIC selection (same as GDABackend::select_nics)
+  int gpu_dev = 0;
+  (void)hipGetDevice(&gpu_dev);
+  std::string closest_nic;
+  if (GetClosestNicToGpu(gpu_dev, nullptr, &closest_nic) >= 0) {
+    LOG_INFO("GIN QP factory: GPU %d closest NIC: %s", gpu_dev, closest_nic.c_str());
+  }
+
+  // Find the selected device (or first active if topology unavailable)
   for (int d = 0; d < ndev; d++) {
+    // If topology selected a NIC, skip non-matching devices
+    if (!closest_nic.empty() &&
+        closest_nic != ibv.get_device_name(dev_list[d])) {
+      continue;
+    }
     struct ibv_context *ctx = nullptr;
 
 #if defined(GDA_MLX5)
