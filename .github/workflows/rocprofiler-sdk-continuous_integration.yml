@@ -426,17 +426,6 @@ jobs:
         run: |
           source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-          EXCLUDE_TESTS_REGEX="${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
-
-          # TODO: Re-enable once openmp-target-sample and intercept-table are stable on rhel-8.8/core42.
-          if [[ "${{ matrix.system.os }}" == "rhel-8.8" ]]; then
-            if [[ -n "${EXCLUDE_TESTS_REGEX}" ]]; then
-              EXCLUDE_TESTS_REGEX="(${EXCLUDE_TESTS_REGEX})|(openmp-target-sample|intercept-table)"
-            else
-              EXCLUDE_TESTS_REGEX="(openmp-target-sample|intercept-table)"
-            fi
-          fi
-
           python3 ./source/scripts/run-ci.py -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
             --mode ${CI_MODE} \
@@ -456,7 +445,7 @@ jobs:
             -- \
             --parallel 4 \
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${EXCLUDE_TESTS_REGEX}"
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
