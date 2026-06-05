@@ -296,7 +296,6 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
 
   init_rocp_if_not();
 
-  const auto start_time = std::chrono::high_resolution_clock::now();
   // direct read from rocprofiler
   double read_dbl = 0.0;
   const auto status = run_profiler(agent_index, field, &read_dbl);
@@ -306,8 +305,11 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
     return status;
   }
 
-  const auto stop_time = std::chrono::high_resolution_clock::now();
-  const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
+  // Eval fields are rates over the fixed collection window. Use the configured
+  // sample time instead of wall-clock elapsed so the value is deterministic and
+  // free of sampling overhead. run_profiler() samples eval fields for
+  // collection_duration_us_k.
+  const double sample_time_ms = static_cast<double>(collection_duration_us_k) / 1000.0;
 
   // For OCC_ELAPSED, we need to read the occupancy metric as well
   std::map<std::string, double> sampled_values;
@@ -325,8 +327,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   }
 
   // Apply field transformations using the helper function
-  return apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values, data,
-                                    type);
+  return apply_field_transformation(field, agent_index, read_dbl, sample_time_ms, sampled_values,
+                                    data, type);
 }
 
 rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& fields,
@@ -406,7 +408,6 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
   const uint32_t duration_us =
       needs_simd_window ? simd_utilization_duration_us_k : collection_duration_us_k;
 
-  const auto start_time = std::chrono::high_resolution_clock::now();
   if (!metrics_to_sample.empty()) {
     try {
       counter_sampler->sample_counters_with_packing(metrics_to_sample, sampled_values, duration_us);
@@ -418,8 +419,12 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
       return RDC_ST_BAD_PARAMETER;
     }
   }
-  const auto stop_time = std::chrono::high_resolution_clock::now();
-  const double elapsed = std::chrono::duration<double, std::milli>(stop_time - start_time).count();
+
+  // Eval fields are rates over the fixed collection window. Divide by the actual
+  // sample window used for this batch (duration_us) instead of wall-clock
+  // elapsed, so the reported value is deterministic and free of sampling
+  // overhead.
+  const double sample_time_ms = static_cast<double>(duration_us) / 1000.0;
 
   // Process results for each field
   for (size_t i = 0; i < fields.size(); i++) {
@@ -447,15 +452,15 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     double read_dbl = sampled_it->second;
 
     // Apply field transformation using the helper function
-    statuses[i] = apply_field_transformation(field, agent_index, read_dbl, elapsed, sampled_values,
-                                             &values[i], &types[i]);
+    statuses[i] = apply_field_transformation(field, agent_index, read_dbl, sample_time_ms,
+                                             sampled_values, &values[i], &types[i]);
   }
 
   return RDC_ST_OK;
 }
 
 rdc_status_t RdcRocpBase::apply_field_transformation(
-    rdc_field_t field, uint32_t agent_index, double raw_value, double elapsed_time_ms,
+    rdc_field_t field, uint32_t agent_index, double raw_value, double sample_time_ms,
     const std::map<std::string, double>& sampled_values, rdc_field_value_data* output,
     rdc_field_type_t* type) {
   // Default type is DOUBLE
@@ -466,10 +471,10 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
   // Calculate divided value for eval fields
   double divided_dbl = NAN;
   if (is_eval_field) {
-    if (elapsed_time_ms != 0.0) {
-      divided_dbl = raw_value / elapsed_time_ms;
+    if (sample_time_ms != 0.0) {
+      divided_dbl = raw_value / sample_time_ms;
     } else {
-      RDC_LOG(RDC_ERROR, "Error: Elapsed time is zero. Cannot divide by zero.");
+      RDC_LOG(RDC_ERROR, "Error: Sample time is zero. Cannot divide by zero.");
       return RDC_ST_BAD_PARAMETER;
     }
   }
