@@ -7,7 +7,7 @@
 /// Tests important GEMM sizes, non-square dimensions, alpha/beta variants,
 /// and random fuzzing — all validated against a CPU golden reference.
 /// Compiled with hipcc and linked against rocblas. Requires
-/// LD_PRELOAD=librocjitsu_kmd.so and RJ_CONFIG env var.
+/// LD_PRELOAD=librocjitsu_kmd.so.
 ///
 /// Each test case is registered as a separate ctest because running multiple
 /// HIP dispatches sequentially in one process hangs due to comgr state issues.

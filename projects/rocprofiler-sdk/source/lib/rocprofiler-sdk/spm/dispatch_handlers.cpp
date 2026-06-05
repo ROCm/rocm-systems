@@ -255,6 +255,16 @@ post_kernel_call(const context::context*                           ctx,
                 {
                     ROCP_ERROR << "SPM KFD stop failed in post-kernel completion";
                 }
+                if(pkt->cb.record_cb)
+                {
+                    pkt->cb.record_cb(&pkt->cb.dispatch_data,
+                                      nullptr,
+                                      0,
+                                      ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END,
+                                      pkt->cb.user_data,
+                                      pkt->cb.record_callback_args);
+                }
+                pkt->clear();
                 rel_pkt = std::move(aql_pkt);
                 return;
             }

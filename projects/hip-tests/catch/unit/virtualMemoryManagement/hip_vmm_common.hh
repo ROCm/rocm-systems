@@ -44,7 +44,7 @@
     hipDeviceAttribute_t attr = hipDeviceAttributeHandleTypeFabricSupported;                       \
     HIP_CHECK(hipDeviceGetAttribute(&value, attr, device));                                        \
     if (value == 0) {                                                                              \
-      HipTest::HIP_SKIP_TEST("Fabric Handle Support not found. Skipping Test..");                  \
+      HIP_SKIP_TEST("Fabric Handle Support not found. Skipping Test..");                  \
       return;                                                                                      \
     }                                                                                              \
   }

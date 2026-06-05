@@ -207,9 +207,6 @@ TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
 
   REQUIRE(fabrichandle != 0);
 
-  std::cout << "FABRIC_HANDLE_SIZE=" << sizeof(int) << std::endl;
-  std::cout << "FABRIC_HANDLE_HEX=" << fabrichandle << std::endl;
-
   HIP_CHECK(hipMemUnmap(addr, allocSize));
   HIP_CHECK(hipMemRelease(allocHandle));
   HIP_CHECK(hipMemAddressFree(addr, allocSize));

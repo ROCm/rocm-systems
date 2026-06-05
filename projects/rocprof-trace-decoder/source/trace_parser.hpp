@@ -292,15 +292,17 @@ public:
 class PipeArray64 : public PipeArray<uint64_t>
 {
 public:
+    static constexpr uint64_t LOW_32_MASK = (uint64_t{1} << 32) - 1;
+
     template <typename T2> void setlo(const T2& token, uint64_t lo)
     {
         uint64_t& elem = at_reg(token);
-        elem = (elem & ~((1ul << 32) - 1)) | lo;
+        elem = (elem & ~LOW_32_MASK) | (lo & LOW_32_MASK);
     }
     template <typename T2> void sethi(const T2& token, uint64_t hi)
     {
         uint64_t& elem = at_reg(token);
-        elem = (elem & ((1ul << 32) - 1)) | (hi << 32);
+        elem = (elem & LOW_32_MASK) | ((hi & LOW_32_MASK) << 32);
     }
     template <typename T2> void setlo(const T2& token) { setlo(token, token.regdata); }
     template <typename T2> void sethi(const T2& token) { sethi(token, token.regdata); }
@@ -562,7 +564,7 @@ public:
 
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
-        constexpr uint64_t BITMASK = (1ul << 48) - 1;
+        constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
         return ToPcV2(table.write(), (wave_start_addr.at_reg(token) << 8) & BITMASK);
     }
 

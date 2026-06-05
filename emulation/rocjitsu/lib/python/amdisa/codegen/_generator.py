@@ -879,7 +879,7 @@ class CodeGenerator:
             L.append(
                 f'  int16_t offset = static_cast<int16_t>({src_ops[0]}.encoding_value_);'
             )
-            L.append('  wf.pc = wf.pc + static_cast<int64_t>(offset) * 4 - size_;')
+            L.append('  wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;')
             return '\n'.join(L)
 
         if cls == 'scalar_getreg':
@@ -1136,10 +1136,28 @@ class CodeGenerator:
             return '  wf.cu().l1_scalar().invalidate_all();'
 
         if cls == 'dcache_wb':
-            return '  wf.cu().l1_scalar().writeback_all();'
+            return '  wf.cu().l1_scalar().writeback_all(wf.process_id());'
 
         if cls == 'gl1_inv':
-            return '  wf.cu().l1_vector().invalidate_all();'
+            return (
+                '  wf.cu().l1_vector().invalidate_all();\n'
+                '  if (auto *l2 = wf.cu().l2())\n'
+                '    l2->flush_all(wf.process_id());'
+            )
+
+        if cls == 'gl2_wb':
+            return (
+                '  if (auto *l2 = wf.cu().l2())\n' '    l2->flush_all(wf.process_id());'
+            )
+
+        if cls == 'smem_time':
+            return (
+                '  static thread_local uint64_t counter = 0;\n'
+                '  counter += 100;\n'
+                '  uint32_t dst = wf.sgpr_alloc().base + inst_.sdata;\n'
+                '  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));\n'
+                '  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));'
+            )
 
         if cls == 'flat_atomic':
             return self._gen_flat_atomic(dst_ops, src_ops, sem)
@@ -1768,9 +1786,15 @@ class CodeGenerator:
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
+        is_cmpswap = sem.operation == 'cmpswap'
+        half = data_dwords // 2
         for i in range(data_dwords):
+            if is_cmpswap and i >= half:
+                reg = f'inst_.data1 + {i - half}'
+            else:
+                reg = f'inst_.data0 + {i}'
             L.append(
-                f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + inst_.data0 + {i}, lane);'
+                f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + {reg}, lane);'
             )
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);'
@@ -2019,11 +2043,12 @@ class CodeGenerator:
             'ds_read_tr_b16': (4, 2, 4),  # elem_size=4, num_elems=2, transpose=4
         }
         esz, ne, tr_kind = tr_map.get(sem.semantic_class, (4, 2, 4))
+        acc = self._acc_vgpr_expr
         L = []
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
-        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + inst_.vdst;')
+        L.append(f'  d->dst_reg_base = wf.vgpr_alloc().base + {acc} + inst_.vdst;')
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
         L.append('  d->is_load = true;')
@@ -2775,7 +2800,7 @@ class CodeGenerator:
                         f'{inst.fmt_name}::'
                         f'{inst.fmt_name}(const MachineInst *inst) '
                         f': {init_list} '
-                        f'{{{"".join(ctor_body_parts)}}}'
+                        f'{{{''.join(ctor_body_parts)}}}'
                     )
                     class_ctor_impl = cgen.Line(class_ctor_impl_str)
                     class_members.extend(public_members)
@@ -3801,6 +3826,10 @@ class CodeGenerator:
             'namespace {\n'
             '\n'
             'uint32_t resolve_src_scalar(const amdgpu::Wavefront &wf, int ev) {\n'
+            '  if (ev == 102)\n'
+            '    return static_cast<uint32_t>(wf.scratch_base());\n'
+            '  if (ev == 103)\n'
+            '    return static_cast<uint32_t>(wf.scratch_base() >> 32);\n'
             '  if (ev <= 105)\n'
             '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             '  if (ev == 106)\n'
@@ -3835,6 +3864,14 @@ class CodeGenerator:
             '    return 0xC0800000u; // -4.0f\n'
             '  if (ev == 248)\n'
             '    return 0x3E22F983u; // 1/(2*pi)\n'
+            '  if (ev == 235)\n'
+            '    return static_cast<uint32_t>(wf.shared_aperture_base() >> 32); // SRC_SHARED_BASE\n'
+            '  if (ev == 236)\n'
+            '    return static_cast<uint32_t>(wf.shared_aperture_limit() >> 32); // SRC_SHARED_LIMIT\n'
+            '  if (ev == 237)\n'
+            '    return static_cast<uint32_t>(wf.private_aperture_base() >> 32); // SRC_PRIVATE_BASE\n'
+            '  if (ev == 238)\n'
+            '    return static_cast<uint32_t>(wf.private_aperture_limit() >> 32); // SRC_PRIVATE_LIMIT\n'
             '  if (ev == 249)\n'
             '    return 0u; // SRC_POPS_EXITING_WAVE_ID (not used in compute)\n'
             '  if (ev == 250)\n'
@@ -3858,6 +3895,8 @@ class CodeGenerator:
             '}\n'
             '\n'
             'uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {\n'
+            '  if (ev == 102)\n'
+            '    return wf.scratch_base();\n'
             '  if (ev <= 105) {\n'
             '    uint32_t lo = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
             '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
@@ -3889,10 +3928,28 @@ class CodeGenerator:
             '    return 0xC010000000000000ULL; // -4.0\n'
             '  if (ev == 248)\n'
             '    return 0x3FC45F306DC9C883ULL; // 1/(2*pi)\n'
+            '  if (ev == 235)\n'
+            '    return wf.shared_aperture_base(); // SRC_SHARED_BASE\n'
+            '  if (ev == 236)\n'
+            '    return wf.shared_aperture_limit(); // SRC_SHARED_LIMIT\n'
+            '  if (ev == 237)\n'
+            '    return wf.private_aperture_base(); // SRC_PRIVATE_BASE\n'
+            '  if (ev == 238)\n'
+            '    return wf.private_aperture_limit(); // SRC_PRIVATE_LIMIT\n'
             '  throw std::logic_error("Unsupported encoding value for scalar64 read: " + std::to_string(ev));\n'
             '}\n'
             '\n'
             'void resolve_dst_write(amdgpu::Wavefront &wf, int ev, uint32_t val) {\n'
+            '  if (ev == 102) {\n'
+            '    uint64_t sb = wf.scratch_base();\n'
+            '    wf.set_scratch_base((sb & 0xFFFFFFFF00000000ULL) | val);\n'
+            '    return;\n'
+            '  }\n'
+            '  if (ev == 103) {\n'
+            '    uint64_t sb = wf.scratch_base();\n'
+            '    wf.set_scratch_base((sb & 0x00000000FFFFFFFFULL) | (static_cast<uint64_t>(val) << 32));\n'
+            '    return;\n'
+            '  }\n'
             '  if (ev <= 105) {\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
             '    return;\n'
@@ -3921,6 +3978,10 @@ class CodeGenerator:
             '}\n'
             '\n'
             'void resolve_dst_write64(amdgpu::Wavefront &wf, int ev, uint64_t val) {\n'
+            '  if (ev == 102) {\n'
+            '    wf.set_scratch_base(val);\n'
+            '    return;\n'
+            '  }\n'
             '  if (ev <= 105) {\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), static_cast<uint32_t>(val));\n'
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1), static_cast<uint32_t>(val >> 32));\n'
@@ -4186,7 +4247,7 @@ class CodeGenerator:
                                         cgen.Block(
                                             [
                                                 cgen.Statement(
-                                                    f'return std::make_unique<{fn.removeprefix("decode")}>(opcode)'
+                                                    f'return std::make_unique<{fn.removeprefix('decode')}>(opcode)'
                                                 )
                                             ]
                                         ),
