@@ -250,6 +250,14 @@ static void rcclDetectIBNics() {
   int _NicsRate[rcclIBNicTypeMax]{};
   int totalNnics = 0;
 
+  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware */
+  const char* envNet = ncclGetEnv("NCCL_NET");
+  if (envNet && strcasecmp(envNet, "ROCM-IB") == 0) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC mode forced by NCCL_NET=ROCM-IB");
+    rcclPrimaryNicInfo.type = rcclIBNicTypeAINIC;
+    return;
+  }
+
   /* respect user preference for AINIC */
   if (rcclParamAinicRoce() == 1) {
     INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC detection: enforced by user settings");
