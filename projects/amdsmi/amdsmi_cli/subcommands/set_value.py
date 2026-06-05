@@ -22,6 +22,7 @@
 import json
 import logging
 import math
+import os
 import sys
 
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
@@ -31,6 +32,70 @@ from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
 
 
 class SetValueCommands:
+    @staticmethod
+    def _normalize_dpm_force_level_for_clk_limit(gpu_handle):
+        """ROCM-25288: ensure power_dpm_force_performance_level=auto before
+        issuing a soft clock-limit on this GPU.
+
+        Some PMFW/kernel combinations (e.g. MI300A) only refresh the
+        sysfs ``pp_dpm_<clk>`` '*' marker on an ``auto -> manual``
+        transition. A second ``amd-smi set -L`` issued while the device
+        is already in ``manual`` (from a prior set in the same shell or
+        from another tool) updates the SMU soft-limit but leaves the
+        ``pp_dpm_<clk>`` display stale, causing user-visible confusion
+        even though the cap is in force. Normalising to ``auto`` here
+        guarantees every soft-limit set is an ``auto -> manual``
+        transition.
+
+        Best-effort: silent on failure - the SMU set below is the
+        authoritative path, this is purely a display-consistency
+        workaround.
+        """
+        try:
+            import glob
+
+            try:
+                bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_handle)
+            except Exception as e:  # noqa: BLE001
+                logging.debug("ROCM-25288: amdsmi_get_gpu_device_bdf failed: %s", e)
+                return
+            if not bdf:
+                return
+            # amdsmi returns "0000:23:00.0" form. Sysfs symlink target
+            # of /sys/class/drm/cardN/device basenames to the same form.
+            bdf_l = str(bdf).lower()
+            for card_dev in glob.glob("/sys/class/drm/card[0-9]*/device"):
+                try:
+                    real = os.path.basename(os.path.realpath(card_dev))
+                except OSError:
+                    continue
+                if real.lower() != bdf_l:
+                    continue
+                perf_path = os.path.join(card_dev, "power_dpm_force_performance_level")
+                if not os.path.exists(perf_path):
+                    return
+                try:
+                    with open(perf_path, "r", encoding="utf-8") as fh:
+                        current = fh.read().strip()
+                except OSError as e:
+                    logging.debug("ROCM-25288: read %s failed: %s", perf_path, e)
+                    return
+                if current == "auto":
+                    return
+                try:
+                    with open(perf_path, "w", encoding="utf-8") as fh:
+                        fh.write("auto")
+                    logging.debug("ROCM-25288: normalised %s from %r to 'auto'", perf_path, current)
+                except PermissionError:
+                    logging.debug(
+                        "ROCM-25288: no permission to write %s (requires root); skipping", perf_path
+                    )
+                except OSError as e:
+                    logging.debug("ROCM-25288: write %s failed: %s", perf_path, e)
+                return
+        except Exception as e:  # noqa: BLE001 - never break the set path
+            logging.debug("ROCM-25288: normalize_dpm_force_level error: %s", e)
+
     def set_core(
         self,
         args,
@@ -1657,6 +1722,10 @@ class SetValueCommands:
             # Set the value
             try:
                 if val_changed:
+                    # ROCM-25288: normalise perf-level so the kernel
+                    # refreshes pp_dpm_<clk> '*' marker on the
+                    # subsequent SMU auto->manual transition.
+                    self._normalize_dpm_force_level_for_clk_limit(args.gpu)
                     amdsmi_interface.amdsmi_set_gpu_clk_limit(args.gpu, clk_type, lim_type, val)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
