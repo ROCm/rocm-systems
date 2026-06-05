@@ -53,6 +53,7 @@ rj_add_device_kernel(matmul_mfma_16x16 gfx950)
 rj_add_device_kernel(matmul_tiled gfx950)
 rj_add_device_kernel(vector_add gfx950)
 rj_add_device_kernel(dynamic_copy_loop gfx950)
+rj_add_device_kernel_as(vector_add vector_add_gfx1250 gfx1250)
 
 # Triton-generated assembly fixtures. The checked-in assembly records the
 # original Triton-generated kernels, so normal test builds only need the ROCm
@@ -115,8 +116,10 @@ add_custom_target(
         kernel_triton_cdna3_matmul_buffer_async_1024
         kernel_triton_cdna3_flash_attention_no_async_1024
         kernel_triton_cdna3_flash_attention_buffer_async_1024
+        kernel_vector_add_gfx1250
 )
 
 # Export variables to the parent scope so the test executable can use them.
 set(HAS_DEVICE_KERNELS TRUE PARENT_SCOPE)
+set(HAS_GFX1250_DEVICE_KERNELS TRUE PARENT_SCOPE)
 set(KERNEL_OUTPUT_DIR ${KERNEL_OUTPUT_DIR} PARENT_SCOPE)

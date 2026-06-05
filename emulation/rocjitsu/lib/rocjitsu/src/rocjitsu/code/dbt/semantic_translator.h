@@ -28,6 +28,7 @@
 
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "rocjitsu/analysis/liveness.h"
@@ -43,6 +44,7 @@ class Instruction;
 struct SemanticReplacement {
   uint64_t start_offset = 0;          ///< First byte of the matched source range.
   uint64_t end_offset = 0;            ///< One past the last byte of the source range.
+  std::string source_mnemonic;        ///< Decoded source instruction mnemonic, for diagnostics.
   std::vector<uint32_t> target_words; ///< Replacement instruction words for the host ISA.
 
   /// @brief Whether this replacement represents a successful match.
@@ -67,6 +69,17 @@ public:
   [[nodiscard]] ExpandResult try_lower_expand(const Instruction &inst, uint64_t offset,
                                               const LivenessAnalysis &liveness,
                                               TranslationContext &context) const;
+
+  /// @brief Try to expand/lower an instruction using an explicit opcode key.
+  ///
+  /// @details Some generated decoders split a physical encoding into multiple
+  /// encoding ids and leave the raw opcode field out of Instruction::opcode().
+  /// Callers that already recovered the raw opcode can use this overload so
+  /// semantic rule lookup still keys on the architectural operation.
+  [[nodiscard]] ExpandResult try_lower_expand_with_opcode(const Instruction &inst, uint64_t offset,
+                                                          const LivenessAnalysis &liveness,
+                                                          TranslationContext &context,
+                                                          uint16_t opcode) const;
 
   [[nodiscard]] bool has_rules() const { return !expand_rules_.empty(); }
 

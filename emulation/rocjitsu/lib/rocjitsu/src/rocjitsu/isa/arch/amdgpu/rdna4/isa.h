@@ -73,6 +73,11 @@ struct Isa : amdgpu::RdnaIsaBase {
   using OperandType = rdna4::OperandType;
   using StatusReg = rdna4::StatusReg;
 
+  // GFX12 exposes two VGPR high-bank bits per operand role in MODE[19:12].
+  // For Wave32 kernels, the 6-bit descriptor VGPR field encodes 64 granules of
+  // 8 VGPRs, so translated high-bank lowerings can validly require >256 VGPRs.
+  static constexpr uint32_t MAX_VGPRS_PER_WF = 512;
+
   // SIMD fast-path traits — consumed by AmdgpuIsaOperand<Isa> in
   // rocjitsu/isa/isa_operand_simd_inl.h. Definitions live in this arch's
   // operand.cpp; bodies forward to the anonymous-namespace helpers.

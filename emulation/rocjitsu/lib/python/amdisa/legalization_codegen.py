@@ -47,7 +47,11 @@ def _clang_format(path: Path) -> None:
     The generator emits simple 4-space templates; formatting here keeps the
     checked-in generated headers aligned with rocjitsu's 2-space C++ style.
     """
-    exe = shutil.which('clang-format')
+    exe = (
+        shutil.which('clang-format')
+        or shutil.which('clang-format-18')
+        or shutil.which('clang-format-20')
+    )
     if exe is None:
         print(
             'warning: clang-format not found; emitted files may need manual '
@@ -79,7 +83,7 @@ def emit_all(
         # fields. The 9-bit encoding_id (raw[0]>>23) has don't-care low bits
         # for these formats. We emit one entry per alias so that binary search
         # works without encoding_id normalization.
-        expanded = []
+        expanded: list[tuple[LegalizationEntry, int]] = []
         for e in entries:
             enc_id = e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF
             dont_care = 9 - e.src_encoding_bits
@@ -87,20 +91,44 @@ def emit_all(
                 for i in range(1 << dont_care):
                     alias_id = enc_id | i
                     expanded.append(
-                        LegalizationEntry(
-                            src_mnemonic=e.src_mnemonic,
-                            src_encoding=e.src_encoding,
-                            src_encoding_order=alias_id,
-                            src_encoding_bits=9,
-                            src_opcode=e.src_opcode,
-                            action=e.action,
+                        (
+                            LegalizationEntry(
+                                src_mnemonic=e.src_mnemonic,
+                                src_encoding=e.src_encoding,
+                                src_encoding_order=alias_id,
+                                src_encoding_bits=9,
+                                src_opcode=e.src_opcode,
+                                action=e.action,
+                            ),
+                            e.src_encoding_bits,
                         )
                     )
             else:
-                expanded.append(e)
+                expanded.append((e, e.src_encoding_bits))
+
+        best_by_key: dict[tuple[int, int], tuple[LegalizationEntry, int]] = {}
+        for e, specificity in expanded:
+            enc_id = e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF
+            key = (enc_id, e.src_opcode)
+            existing = best_by_key.get(key)
+            if existing is None or specificity > existing[1]:
+                best_by_key[key] = (e, specificity)
+                continue
+            if specificity == existing[1] and (
+                e.action.kind,
+                e.action.target_opcode,
+            ) != (
+                existing[0].action.kind,
+                existing[0].action.target_opcode,
+            ):
+                raise ValueError(
+                    f'conflicting legalization for {src}->{dst} '
+                    f'encoding_id={enc_id} opcode={e.src_opcode}: '
+                    f'{existing[0].src_mnemonic} vs {e.src_mnemonic}'
+                )
 
         sorted_entries = sorted(
-            expanded,
+            [e for e, _ in best_by_key.values()],
             key=lambda e: (
                 e.src_encoding_order if e.src_encoding_order >= 0 else 0xFFFF,
                 e.src_opcode,

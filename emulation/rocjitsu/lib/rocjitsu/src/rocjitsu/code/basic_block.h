@@ -63,6 +63,12 @@ public:
   /// @brief CFG predecessor blocks, inverse of successors().
   [[nodiscard]] const std::vector<BasicBlock *> &predecessors() const { return predecessors_; }
 
+  /// @brief Add an externally-known CFG successor edge.
+  ///
+  /// @details Use this for statically-resolved branch idioms that the generic
+  /// block builder does not decode as ordinary direct branches.
+  void add_cfg_successor(BasicBlock &successor);
+
   /// @brief Mutable access to the intrusive list of instructions.
   /// @returns Reference to the instruction list.
   InstructionList &instructions() { return instructions_; }

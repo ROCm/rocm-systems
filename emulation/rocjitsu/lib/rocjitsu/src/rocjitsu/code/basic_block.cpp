@@ -6,6 +6,7 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <cassert>
@@ -60,6 +61,8 @@ void BasicBlock::add_successor(BasicBlock &successor) {
   successor.predecessors_.push_back(this);
 }
 
+void BasicBlock::add_cfg_successor(BasicBlock &successor) { add_successor(successor); }
+
 std::vector<std::unique_ptr<BasicBlock>> BasicBlock::build(const CodeObject &co, Decoder &decoder) {
   return build(co, decoder, {});
 }
@@ -81,7 +84,18 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, std::span<const uint64
     std::vector<DecodedInst> decoded;
 
     while (pc < inst_data_size) {
-      auto *raw_inst = decoder.decode(&inst_data[pc]);
+      Instruction *raw_inst = nullptr;
+      try {
+        raw_inst = decoder.decode(&inst_data[pc]);
+      } catch (const util::InvalidInst &) {
+        // Linked AMDGPU code objects may zero-pad gaps between aligned kernels.
+        if (inst_data[pc] == 0) {
+          ++pc;
+          byte_offset += sizeof(uint32_t);
+          continue;
+        }
+        throw;
+      }
       std::unique_ptr<Instruction> inst(raw_inst);
       uint32_t inst_size_bytes = static_cast<uint32_t>(inst->size());
       uint32_t inst_words = inst_size_bytes / sizeof(uint32_t);

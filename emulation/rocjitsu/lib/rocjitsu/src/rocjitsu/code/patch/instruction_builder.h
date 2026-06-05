@@ -21,21 +21,26 @@
 
 #include <cstdint>
 #include <limits>
-#include <optional>
-#include <span>
+#include <vector>
 
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
 
-class Instruction;
-
 /// @brief SOPP encoding prefix, consistent across all AMDGPU ISA generations.
 inline constexpr uint32_t kSoppEncodingPrefix = 0x17F;
 inline constexpr uint32_t kSop1EncodingPrefix = 0x17D;
 inline constexpr uint32_t kSop2EncodingPrefix = 0x2;
+inline constexpr uint32_t kSopcEncodingPrefix = 0x17E;
 inline constexpr uint16_t kScalarPositiveInlineBase = 128;
 inline constexpr uint16_t kDelayAluSaluDep1 = 9;
+inline constexpr uint16_t kWaitAluDepctrVaSdst0 = 0xF19F;
+inline constexpr uint16_t kWaitAluDepctrVaVdst0 = 0x0F9F;
+inline constexpr uint16_t kWaitAluDepctrVaVcc0 = 0xFF9D;
+inline constexpr uint16_t kWaitAluDepctrVmVsrc0 = 0xFF83;
+inline constexpr uint16_t kWaitAluDepctrVaVdstVmVsrc0 =
+    kWaitAluDepctrVaVdst0 & kWaitAluDepctrVmVsrc0;
+inline constexpr uint16_t kWaitAluDepctrSaSdst0 = 0xFF9E;
 
 /// @brief Pack a SOPP instruction word from its constituent fields.
 ///
@@ -59,43 +64,15 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
          ((ssrc1 & 0xFFu) << 8) | (ssrc0 & 0xFFu);
 }
 
+/// @brief Pack a SOPC instruction word from its constituent fields.
+[[nodiscard]] inline constexpr uint32_t pack_sopc(uint32_t op, uint32_t ssrc0, uint32_t ssrc1) {
+  return (kSopcEncodingPrefix << 23) | ((op & 0x7Fu) << 16) | ((ssrc1 & 0xFFu) << 8) |
+         (ssrc0 & 0xFFu);
+}
+
 /// @brief Scalar source operand encoding for a non-negative inline integer.
 [[nodiscard]] inline constexpr uint16_t scalar_positive_inline_u32(uint16_t value) {
   return static_cast<uint16_t>(kScalarPositiveInlineBase + value);
-}
-
-/// @brief Compute the SOPP simm16 dword field for a branch from @p branch_pc
-///        to @p target under SOPP semantics: target = branch_pc + 4 + simm16*4.
-///
-/// Returns std::nullopt if @p branch_pc or @p target is not dword-aligned, if
-/// the resulting delta does not fit in a signed 16-bit dword field, or if
-/// @p branch_pc / @p target are large enough that the signed int64 intermediate
-/// would overflow.
-///
-/// Shared by DBT cave-entry/return branches and the DBI relocation trampoline
-/// so both paths fail closed on the same range.
-[[nodiscard]] inline constexpr std::optional<int16_t> compute_sopp_branch_simm16(uint64_t branch_pc,
-                                                                                 uint64_t target) {
-  constexpr int64_t kBranchPcBiasBytes = static_cast<int64_t>(sizeof(uint32_t));
-  constexpr uint64_t kMaxSignedTarget = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-  constexpr uint64_t kMaxSignedBranchPc =
-      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - kBranchPcBiasBytes);
-  if (branch_pc > kMaxSignedBranchPc || target > kMaxSignedTarget)
-    return std::nullopt;
-
-  // The SOPP immediate is a signed *dword* offset, so both the branch base
-  // (branch_pc + 4) and the target must be dword-aligned.
-  if (branch_pc % sizeof(uint32_t) != 0 || target % sizeof(uint32_t) != 0)
-    return std::nullopt;
-
-  const int64_t delta_bytes =
-      static_cast<int64_t>(target) - (static_cast<int64_t>(branch_pc) + kBranchPcBiasBytes);
-  const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
-  if (delta_dwords < std::numeric_limits<int16_t>::min() ||
-      delta_dwords > std::numeric_limits<int16_t>::max())
-    return std::nullopt;
-
-  return static_cast<int16_t>(delta_dwords);
 }
 
 /// @brief Get the s_branch opcode for a target ISA.
@@ -112,19 +89,6 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   }
 }
 
-/// @brief Get the s_endpgm opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_endpgm(rj_code_arch_t arch) {
-  // GFX9 (CDNA1-4): opcode 1; GFX12 (RDNA3/3.5/4, gfx1250): opcode 48
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_GFX1250:
-    return 48;
-  default:
-    return 1;
-  }
-}
 /// @brief Get the s_nop opcode for a target ISA.
 [[nodiscard]] inline constexpr uint32_t sopp_op_nop([[maybe_unused]] rj_code_arch_t arch) {
   return 0; // s_nop is opcode 0 on all ISAs
@@ -171,17 +135,76 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   return pack_sopp(sopp_op_branch(arch), static_cast<uint16_t>(offset_dwords));
 }
 
-/// @brief Patch an emitted direct PC-relative branch instruction in-place.
+/// @brief Build a PC-relative long branch through s_getpc_b64/s_setpc_b64.
 ///
-/// @details @p words points into the translated output buffer. @p delta_bytes is
-/// relative to the instruction's branch base. For AMDGPU SOPP direct branches,
-/// the base is the next instruction and the immediate is a signed dword offset.
-/// The function handles unconditional and conditional SOPP direct branches by
-/// replacing bits [15:0] of word 0. It returns false when @p inst is not a
-/// decoded direct branch, the buffer is empty, or the delta is not representable
-/// by SOPP's signed 16-bit dword immediate.
-[[nodiscard]] bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
-                                             int64_t delta_bytes, rj_code_arch_t arch);
+/// @details This clobbers @p sgpr_pair and @p sgpr_pair + 1, so callers must
+/// only use a pair known to be dead at the branch site.
+[[nodiscard]] inline std::vector<uint32_t>
+build_s_setpc_long_branch(uint64_t getpc_pc, uint64_t target, uint16_t sgpr_pair) {
+  if (sgpr_pair >= 127 ||
+      getpc_pc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - 4) ||
+      target > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    return {};
+
+  const int64_t delta = static_cast<int64_t>(target) - (static_cast<int64_t>(getpc_pc) + 4);
+  const auto delta_bits = static_cast<uint64_t>(delta);
+  const uint32_t delta_lo = static_cast<uint32_t>(delta_bits & 0xFFFF'FFFFu);
+  const uint32_t delta_hi = static_cast<uint32_t>(delta_bits >> 32);
+
+  constexpr uint8_t kOpSAddCoU32 = 0;
+  constexpr uint8_t kOpSAddCoCiU32 = 4;
+  constexpr uint8_t kOpSGetPcB64 = 71;
+  constexpr uint8_t kOpSSetPcB64 = 72;
+  return {
+      pack_sop1(kOpSGetPcB64, sgpr_pair, 0),
+      pack_sop2(kOpSAddCoU32, sgpr_pair, sgpr_pair, 255),
+      delta_lo,
+      pack_sop2(kOpSAddCoCiU32, static_cast<uint16_t>(sgpr_pair + 1u),
+                static_cast<uint16_t>(sgpr_pair + 1u), 255),
+      delta_hi,
+      pack_sop1(kOpSSetPcB64, 0, sgpr_pair),
+  };
+}
+
+/// @brief Build a PC-relative long branch that preserves the incoming SCC.
+///
+/// @details The ordinary long branch uses scalar add-with-carry instructions to
+/// materialize the target PC, which clobber SCC. Use this form when a cave body
+/// must return with branch-like semantics, preserving the SCC value produced by
+/// the cave body for any later scalar condition or carry consumer.
+[[nodiscard]] inline std::vector<uint32_t>
+build_s_setpc_long_branch_preserving_scc(uint64_t getpc_pc, uint64_t target, uint16_t sgpr_pair,
+                                         uint16_t scc_sgpr) {
+  if (sgpr_pair >= 127 || scc_sgpr >= 127 || scc_sgpr == sgpr_pair || scc_sgpr == sgpr_pair + 1u ||
+      getpc_pc > static_cast<uint64_t>(std::numeric_limits<int64_t>::max() - 8) ||
+      target > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    return {};
+
+  const uint64_t actual_getpc_pc = getpc_pc + sizeof(uint32_t);
+  const int64_t delta = static_cast<int64_t>(target) - (static_cast<int64_t>(actual_getpc_pc) + 4);
+  const auto delta_bits = static_cast<uint64_t>(delta);
+  const uint32_t delta_lo = static_cast<uint32_t>(delta_bits & 0xFFFF'FFFFu);
+  const uint32_t delta_hi = static_cast<uint32_t>(delta_bits >> 32);
+
+  constexpr uint8_t kOpSAddCoU32 = 0;
+  constexpr uint8_t kOpSAddCoCiU32 = 4;
+  constexpr uint8_t kOpSCselectB32 = 48;
+  constexpr uint8_t kOpSCmpLgU32 = 7;
+  constexpr uint8_t kOpSGetPcB64 = 71;
+  constexpr uint8_t kOpSSetPcB64 = 72;
+  return {
+      pack_sop2(kOpSCselectB32, scc_sgpr, scalar_positive_inline_u32(1),
+                scalar_positive_inline_u32(0)),
+      pack_sop1(kOpSGetPcB64, sgpr_pair, 0),
+      pack_sop2(kOpSAddCoU32, sgpr_pair, sgpr_pair, 255),
+      delta_lo,
+      pack_sop2(kOpSAddCoCiU32, static_cast<uint16_t>(sgpr_pair + 1u),
+                static_cast<uint16_t>(sgpr_pair + 1u), 255),
+      delta_hi,
+      pack_sopc(kOpSCmpLgU32, scc_sgpr, scalar_positive_inline_u32(0)),
+      pack_sop1(kOpSSetPcB64, 0, sgpr_pair),
+  };
+}
 
 /// @brief Encode an s_nop instruction for the given target ISA.
 ///
@@ -193,18 +216,16 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
   return pack_sopp(sopp_op_nop(arch), cycles);
 }
 
-/// @brief Encode an s_endpgm instruction for the given target ISA.
-///
-/// @param arch    Target ISA architecture.
-/// @returns The encoded 32-bit instruction word.
-[[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
-  return pack_sopp(sopp_op_endpgm(arch), 0);
-}
-
 /// @brief Encode s_delay_alu for the given target ISA.
 [[nodiscard]] inline constexpr uint32_t build_s_delay_alu(uint16_t simm16, rj_code_arch_t) {
   constexpr uint8_t kSoppDelayAlu = 7;
   return pack_sopp(kSoppDelayAlu, simm16);
+}
+
+/// @brief Encode s_wait_alu for the given target ISA.
+[[nodiscard]] inline constexpr uint32_t build_s_wait_alu(uint16_t simm16, rj_code_arch_t) {
+  constexpr uint8_t kSoppWaitAlu = 8;
+  return pack_sopp(kSoppWaitAlu, simm16);
 }
 
 /// @brief Encode s_mov_b32 for the given target ISA.
