@@ -25,7 +25,9 @@
                     "error_message": "'rocm_kfd_page_migrate' category entries not found in regions",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'rocm_kfd_page_migrate';",
-                    "skip_on_apu": true
+                    "skip_on_categories": [
+                        "apu"
+                    ]
                 },
                 {
                     "comparison": "greater_than",
@@ -105,7 +107,9 @@
                     "error_message": "No 'src_agent' argument found for kfd_page_migrate events",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'src_agent';",
-                    "skip_on_apu": true
+                    "skip_on_categories": [
+                        "apu"
+                    ]
                 },
                 {
                     "comparison": "greater_than",
@@ -113,7 +117,9 @@
                     "error_message": "No 'dst_agent' argument found for kfd_page_migrate events",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_kfd_page_migrate' AND arg_name = 'dst_agent';",
-                    "skip_on_apu": true
+                    "skip_on_categories": [
+                        "apu"
+                    ]
                 },
                 {
                     "comparison": "greater_than",
@@ -212,7 +218,9 @@
                     "error_message": "No PMC event samples found for 'rocm_kfd_page_migrate'",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'rocm_kfd_page_migrate'",
-                    "skip_on_apu": true
+                    "skip_on_categories": [
+                        "apu"
+                    ]
                 },
                 {
                     "comparison": "greater_than",

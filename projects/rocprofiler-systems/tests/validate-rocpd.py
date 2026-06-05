@@ -22,7 +22,7 @@ class validation_rule:
         error_message,
         requires=None,
         expected_result_max=None,
-        skip_on_apu=False,
+        skip_on_categories=None,
     ):
         self.description = description
         self.query = query
@@ -31,7 +31,7 @@ class validation_rule:
         self.error_message = error_message
         self.requires = requires
         self.expected_result_max = expected_result_max
-        self.skip_on_apu = skip_on_apu
+        self.skip_on_categories = set(skip_on_categories or [])
 
     def __repr__(self):
         return f"validation_rule(description={self.description}, query={self.query})"
@@ -147,18 +147,11 @@ def print_help():
     """)
 
 
-def _import_is_apu_host():
-    tests_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-    pytest_dir = tests_dir / "pytest"
-    if str(pytest_dir) not in sys.path:
-        sys.path.insert(0, str(pytest_dir))
-    from rocprofsys.gpu import is_apu_host
-
-    return is_apu_host
+GPU_CATEGORY_CHOICES = ("instinct", "radeon", "apu")
 
 
 def validate_table(
-    cursor, rule, tables, available_metrics=None, host_is_apu=False
+    cursor, rule, tables, available_metrics=None, gpu_categories=None
 ) -> bool:
     """
     Validates a database table against a set of rules.
@@ -249,10 +242,11 @@ def validate_table(
                     )
                     continue
 
-                if validation_query.skip_on_apu and host_is_apu:
+                matched = validation_query.skip_on_categories & (gpu_categories or set())
+                if matched:
                     print(
                         f"⏭️  Skipping '{validation_query.description}' on '{table_name}' "
-                        f"(skip_on_apu: APU host — page migrate not expected)"
+                        f"(skip_on_categories matched: {sorted(matched)})"
                     )
                     continue
 
@@ -298,7 +292,7 @@ def validate_table(
 
 
 def validate_rocpd(
-    cursor, rules, tables, available_metrics=None, host_is_apu=False
+    cursor, rules, tables, available_metrics=None, gpu_categories=None
 ) -> bool:
     """
     Validation of a ROCPD database by applying a set of validation rules to specified tables.
@@ -319,7 +313,9 @@ def validate_rocpd(
 
     for rule in rules:
         print(f"\nValidating table: {rule.get_table_identifier()}")
-        table_valid = validate_table(cursor, rule, tables, available_metrics, host_is_apu)
+        table_valid = validate_table(
+            cursor, rule, tables, available_metrics, gpu_categories
+        )
         db_valid = db_valid and table_valid
 
     if db_valid:
@@ -369,7 +365,7 @@ def load_validation_rules(validation_rules) -> list:
                             error_message=vq["error_message"],
                             requires=vq.get("requires", None),
                             expected_result_max=vq.get("expected_result_max"),
-                            skip_on_apu=vq.get("skip_on_apu", False),
+                            skip_on_categories=vq.get("skip_on_categories"),
                         )
                         validation_queries.append(validation_query_obj)
 
@@ -415,6 +411,18 @@ if __name__ == "__main__":
                 f"{os.path.dirname(os.path.abspath(__file__))}/rocpd-validation-rules/default-rules.json"
             )
         ],
+    )
+
+    parser.add_argument(
+        "--gpu-category",
+        action="append",
+        choices=GPU_CATEGORY_CHOICES,
+        default=[],
+        help=(
+            "GPU category of the host that produced this database. Validation "
+            "queries marked 'skip_on_categories' that intersect are skipped. "
+            "Repeatable (e.g. --gpu-category instinct --gpu-category apu)."
+        ),
     )
 
     parser.add_argument(
@@ -468,13 +476,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Warning: Could not detect GPU metrics ({e}), running all queries")
 
-    host_is_apu = False
-    try:
-        host_is_apu = _import_is_apu_host()()
-        if host_is_apu:
-            print("APU host detected (rocminfo); skip_on_apu rules will be skipped")
-    except Exception as e:
-        print(f"Warning: Could not detect APU host ({e}), running all queries")
+    gpu_categories = set(args.gpu_category)
+    if gpu_categories:
+        print(f"Host GPU categories: {sorted(gpu_categories)}")
 
     print(f"Validating ROCPD. Database file: {args.database}")
 
@@ -501,7 +505,7 @@ if __name__ == "__main__":
         tables = cursor.fetchall()
 
         validation_result = validate_rocpd(
-            cursor, rules, tables, available_metrics, host_is_apu
+            cursor, rules, tables, available_metrics, gpu_categories
         )
 
         conn.close()

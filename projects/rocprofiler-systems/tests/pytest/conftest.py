@@ -2379,6 +2379,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         fail_regex: Optional[list[str]] = None,
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
+        gpu_categories: Optional[set[str]] = None,
     ) -> None:
         with subtests.test(subtest_name):
             if not check_use_rocpd():
@@ -2395,10 +2396,14 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                     record_subtest_failure(subtest_name)
                     pytest.fail("No validation rules found")
 
+            if gpu_categories is None:
+                gpu_categories = get_gpu_info().categories
+
             validation = validate_rocpd_database(
                 rocpd_file,
                 tests_dir=tests_dir,
                 rules_files=existing_rules,
+                gpu_categories=gpu_categories,
                 timeout=timeout,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"
