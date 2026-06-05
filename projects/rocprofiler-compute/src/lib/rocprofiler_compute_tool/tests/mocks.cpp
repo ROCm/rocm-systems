@@ -266,3 +266,11 @@ const std::vector<MockCountersWriter::write_counters_info>& MockCountersWriter::
 {
     return m_write_counters_args;
 }
+
+void MockPcSamplingCollector::on_code_object_load(
+    const rocprofiler_callback_tracing_code_object_load_data_t& /*info*/)
+{
+    ++load_count;
+}
+
+void MockPcSamplingCollector::write(rocprofiler_compute_tool::code_object_writer_t& /*writer*/) {}

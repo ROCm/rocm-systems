@@ -186,6 +186,7 @@ set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
 target_link_libraries(
     rocjitsu_shared
     PRIVATE
+        rocjitsu_analysis
         rocjitsu_code
         rocjitsu_isa
         rocjitsu_isa_cdna1

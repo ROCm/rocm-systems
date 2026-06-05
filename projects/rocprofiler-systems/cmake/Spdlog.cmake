@@ -13,7 +13,7 @@ if(ROCPROFSYS_BUILD_SPDLOG)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/gabime/spdlog.git
         TEST_FILE CMakeLists.txt
-        REPO_BRANCH "v1.16.0"
+        REPO_BRANCH "v1.17.0"
     )
 
     FetchContent_Declare(spdlog SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/spdlog)
@@ -33,9 +33,27 @@ if(ROCPROFSYS_BUILD_SPDLOG)
     set(BUILD_SHARED_LIBS ${_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP})
     unset(_ROCPROFSYS_BUILD_SHARED_LIBS_BACKUP)
 
+    # Mark spdlog (and its bundled fmt) include directories as SYSTEM so
+    # bundled-third-party warnings (e.g. GCC 10 -Wstringop-overflow false
+    # positive in fmt::v12::detail::write) do not break our -Werror builds.
+    get_target_property(_spdlog_include_dirs spdlog INTERFACE_INCLUDE_DIRECTORIES)
+    if(_spdlog_include_dirs)
+        set_target_properties(
+            spdlog
+            PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_spdlog_include_dirs}"
+        )
+    endif()
+
     target_link_libraries(rocprofiler-systems-spdlog INTERFACE spdlog::spdlog)
 else()
     message(STATUS "Using system spdlog library")
     find_package(spdlog REQUIRED)
+    get_target_property(_spdlog_include_dirs spdlog::spdlog INTERFACE_INCLUDE_DIRECTORIES)
+    if(_spdlog_include_dirs)
+        set_target_properties(
+            spdlog::spdlog
+            PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_spdlog_include_dirs}"
+        )
+    endif()
     target_link_libraries(rocprofiler-systems-spdlog INTERFACE spdlog::spdlog)
 endif()

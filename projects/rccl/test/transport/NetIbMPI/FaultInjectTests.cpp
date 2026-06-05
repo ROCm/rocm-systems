@@ -36,7 +36,11 @@ static int CreateMergedDeviceForFailover(ncclNet_t* net, int totalDevs) {
         vProps.devs[1] = 1;
         net->makeVDevice(&mergedDev, &vProps);
     }
-    MPI_Bcast(&mergedDev, 1, MPI_INT, /*root=*/0, MPI_COMM_WORLD);
+    // Each rank creates its own merged device from its local physical devices.
+    // Reduce to the minimum: if any rank lacks >=2 devices, all ranks skip.
+    int minDev = 0;
+    MPI_Allreduce(&mergedDev, &minDev, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    if (minDev < 0) return -1;
     return mergedDev;
 }
 

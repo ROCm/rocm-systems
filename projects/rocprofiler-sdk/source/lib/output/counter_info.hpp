@@ -43,6 +43,8 @@ constexpr uint32_t lds_block_size = 128 * 4;
 using counter_dimension_id_vec_t   = std::vector<rocprofiler_counter_dimension_id_t>;
 using counter_dimension_info_vec_t = std::vector<rocprofiler_counter_record_dimension_info_t>;
 
+using spm_config_vec_t            = std::vector<rocprofiler_spm_available_configuration_t>;
+using agent_spm_config_info_map_t = std::unordered_map<rocprofiler_agent_id_t, spm_config_vec_t>;
 struct tool_counter_info : rocprofiler_counter_info_v1_t
 {
     using parent_type = rocprofiler_counter_info_v1_t;
@@ -104,6 +106,46 @@ struct tool_counter_record_t
         // should be removed when moving to buffered tracing
         auto tmp = read();
 
+        ar(cereal::make_nvp("thread_id", thread_id));
+        ar(cereal::make_nvp("dispatch_data", dispatch_data));
+        ar(cereal::make_nvp("records", tmp));
+        ar(cereal::make_nvp("stream_id", stream_id));
+    }
+
+    container_type read() const;
+    void           write(const container_type& data);
+};
+
+struct tool_spm_counter_value_t
+{
+    rocprofiler_counter_id_t          id          = {};
+    double                            value       = 0;
+    rocprofiler_timestamp_t           timestamp   = 0;
+    rocprofiler_counter_instance_id_t instance_id = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("counter_id", id));
+        ar(cereal::make_nvp("value", value));
+        ar(cereal::make_nvp("timestamp", timestamp));
+        ar(cereal::make_nvp("instance_id", instance_id));
+    }
+};
+
+struct tool_spm_counter_record_t
+{
+    using container_type = std::vector<tool_spm_counter_value_t>;
+
+    uint64_t                                         thread_id     = 0;
+    serialized_counter_record_t                      record        = {};
+    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data = {};
+    rocprofiler_stream_id_t                          stream_id     = {.handle = 0};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        auto tmp = read();
         ar(cereal::make_nvp("thread_id", thread_id));
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
