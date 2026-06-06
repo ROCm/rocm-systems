@@ -16,7 +16,11 @@ NCCL_DEVICE_INLINE static uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uin
   return rank0Base + (uintptr_t)rank * (uintptr_t)strideBytes;
 }
 
-// Intra-rank / local-LSA copy (Put self path and other single-thread callers).
+// Match ROCSHMEM IPC SDMA policy (see ROCSHMEM_SDMA_THRESHOLD, default 256): below this
+// size, GPU load/store to peer-mapped LSA memory beats SDMA queue submit latency.
+constexpr size_t ncclGinAnvilSdmaThresholdBytes = 256;
+
+// Intra-rank / local-LSA copy (Put self path and sub-threshold remote puts).
 NCCL_DEVICE_INLINE static void ncclGinAnvilMemcpy(void* dst, void const* src, size_t bytes) {
   if (bytes == 0) return;
 #if defined(__HIPCC__) || defined(__clang__)
@@ -164,6 +168,13 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
     uint64_t* counterPtr = nullptr;
     if (hasCounter) counterPtr = (uint64_t*)(loadConst(&aCtx->counters) + counterId);
+
+    if (bytes < ncclGinAnvilSdmaThresholdBytes) {
+      ncclGinAnvilMemcpy(dst, src, bytes);
+      if (hasSignal) ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
+      if (hasCounter) atomicAdd((unsigned long long*)counterPtr, 1ULL);
+      return;
+    }
 
     if (hasSignal) {
       rocshmem::anvil::put(*q, dst, src, bytes);

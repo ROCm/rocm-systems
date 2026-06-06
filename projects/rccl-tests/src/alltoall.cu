@@ -345,12 +345,14 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   const size_t size = count * sizeof(T);
   const int self = devComm.rank;
 
-  /* Self slice: parallel local copy (all CTA threads). */
+  /* Self slice: parallel copy for large messages; single-thread for small (CTA sync cost). */
   T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
   T* recvLocal = (T*)ncclGetLocalPointer(recvwin, recvoffset);
   char* selfDst = (char*)&recvLocal[self * count];
   char* selfSrc = (char*)&sendLocal[self * count];
-  if ((size | (uintptr_t)selfDst | (uintptr_t)selfSrc) % sizeof(uint64_t) == 0) {
+  if (size <= 256) {
+    if (tid == self && size > 0) __builtin_memcpy(selfDst, selfSrc, size);
+  } else if ((size | (uintptr_t)selfDst | (uintptr_t)selfSrc) % sizeof(uint64_t) == 0) {
     uint64_t* d64 = (uint64_t*)selfDst;
     uint64_t* s64 = (uint64_t*)selfSrc;
     size_t n64 = size / sizeof(uint64_t);
@@ -360,10 +362,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
       recvLocal[self * count + i] = sendLocal[self * count + i];
   }
   if (tid == self) {
-    gin.put(ncclTeamWorld(devComm), self,
-        recvwin, recvoffset + self * size,
-        sendwin, sendoffset + self * size,
-        0, ncclGin_SignalInc{signalIndex});
+    gin.signal(ncclTeamWorld(devComm), self, ncclGin_SignalInc{signalIndex});
   }
 
   for (int r = tid; r < devComm.nRanks; r += nthreads) {
