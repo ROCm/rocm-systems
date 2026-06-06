@@ -125,10 +125,7 @@ __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
   microtiming_record(mt, 2);  // T2: before ActiveWFInfo
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-  microtiming_record(mt, 3);
-  microtiming_record(mt, 4);
-  microtiming_record(mt, 5);
-  microtiming_record(mt, 6);
+  microtiming_record_and_skip(mt, 3, 6);
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
   microtiming_record(mt, 7);  // T7: after put_nbi
     return;

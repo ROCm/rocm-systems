@@ -75,6 +75,22 @@ __device__ static inline void microtiming_record(microtiming_t* mt, int slot) {
 }
 
 /**
+ * Skip slots [from, to] by writing the same timestamp to all of them.
+ */
+__device__ static inline void microtiming_record_and_skip(microtiming_t* mt,
+                                               int from, int to) {
+  if (!mt || !mt->enabled) return;
+  uint64_t t = microtiming_clock();
+  int base = mt->iter * MICROTIMING_STAMPS_PER_ITER;
+  for (int s = from; s <= to; s++) {
+    int idx = base + s;
+    if (idx < MICROTIMING_ARRAY_SIZE) {
+      mt->ts[idx] = t;
+    }
+  }
+}
+
+/**
  * Fallback: load pointer from global. Used by call sites that don't
  * thread the pointer (e.g., quiet).
  */
