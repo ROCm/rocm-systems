@@ -162,6 +162,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         return testInternalError;
       }
       reqs->ginContextCount = 1;
+      reqs->lsaBarrierCount = 1;
       reqs->barrierCount = 1;
       reqs->railGinBarrierCount = 1;
       reqs->ginSignalCount = 1;
@@ -195,6 +196,7 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: // GinAlltoAllKernel
       reqs->ginContextCount = 1;
+      reqs->lsaBarrierCount = 1;
       reqs->barrierCount = 1;
       reqs->railGinBarrierCount = 1;
       reqs->ginSignalCount = 1;
@@ -325,30 +327,78 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// LSA alltoall copy shared by NVL and GIN single-node fast paths.
+template <typename T>
+__device__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin,
+                                size_t recvoffset, size_t count, int recvRank, int startLsa,
+                                int lsaSize, int tid, int nthreads) {
+  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+  for (size_t offset = tid; offset < count; offset += nthreads) {
+    for (int lp = 0; lp < lsaSize; lp++) {
+      int wr = startLsa + lp;
+      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
+      recvPtr[recvRank * count + offset] = sendLocal[wr * count + offset];
+    }
+  }
+}
+
 template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  // Match alltoallPureKernel reference: one GIN context / one CTA (see case 3 reqs).
   constexpr int ginContext = 0;
-  unsigned int signalIndex = 0;
-  ncclGin gin { devComm, ginContext };
-  uint64_t signalValue = gin.readSignal(signalIndex);
-
-  // LSA inbox + GIN-rail barrier (Hybrid pattern). Pure ncclGinBarrierSession on World
-  // costs O(nRanks) imported-signal round trips per sync; on single-node Anvil that is ~2× slower
-  // than ROCSHMEM. LSA inbox sync is the fast path when all peers are on-node.
-  ncclBarrierSession<ncclCoopCta> bar {
-    ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
-  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
-
-  int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  int nthreads = blockDim.x * gridDim.x;
 
   ncclTeam world = ncclTeamWorld(devComm);
   ncclTeam lsa = ncclTeamLsa(devComm);
   const int startLsa = world.rank - lsa.rank;
+  const int numRemotePeers = world.nRanks - lsa.nRanks;
+  const bool allLocal = (numRemotePeers == 0);
   const size_t size = count * sizeof(T);
 
-  /* Remote peers via GIN (inter-node / non-LSA). */
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int nthreads = blockDim.x * gridDim.x;
+
+  if (allLocal) {
+    // Single-node: LSA barriers; avoid GIN signal/wait/flush on the hot path.
+    ncclLsaBarrierSession<ncclCoopCta> lsaBar {
+      ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+
+    // Anvil: direct xGMI SDMA beats LSA scalar stores for large per-peer slices.
+    constexpr size_t kAnvilSdmaAlltoAllBytes = 65536;
+    const bool anvilSdma = devComm.ginNetDeviceTypes[ginContext] == NCCL_NET_DEVICE_GIN_ANVIL &&
+                         size >= kAnvilSdmaAlltoAllBytes;
+    if (anvilSdma) {
+      ncclGin gin { devComm, ginContext };
+      const int self = world.rank;
+      T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+      T* recvLocal = (T*)ncclGetLocalPointer(recvwin, recvoffset);
+      for (size_t i = tid; i < count; i += nthreads)
+        recvLocal[self * count + i] = sendLocal[self * count + i];
+      for (int r = tid; r < world.nRanks; r += nthreads) {
+        if (r == self) continue;
+        gin.put(world, r,
+            recvwin, recvoffset + (size_t)self * size,
+            sendwin, sendoffset + (size_t)r * size,
+            size);
+      }
+      gin.flush(ncclCoopCta());
+    } else {
+      AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
+                         lsa.nRanks, tid, nthreads);
+    }
+
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
+    return;
+  }
+
+  // Multi-node: LSA inbox + GIN-rail barrier, remote GIN puts, local LSA copy.
+  ncclGin gin { devComm, ginContext };
+  unsigned int signalIndex = 0;
+  uint64_t signalValue = gin.readSignal(signalIndex);
+
+  ncclBarrierSession<ncclCoopCta> bar {
+    ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+
   for (int r = tid; r < startLsa; r += nthreads) {
     gin.put(world, r,
         recvwin, recvoffset + world.rank * size,
@@ -362,17 +412,9 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
         size, ncclGin_SignalInc{signalIndex});
   }
 
-  /* On-node peers via LSA (single-node Anvil avoids per-peer GIN Put + flush quiet). */
-  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  for (size_t offset = tid; offset < count; offset += nthreads) {
-    for (int lp = 0; lp < lsa.nRanks; lp++) {
-      int wr = startLsa + lp;
-      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
-      recvPtr[world.rank * count + offset] = sendLocal[wr * count + offset];
-    }
-  }
+  AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
+                     lsa.nRanks, tid, nthreads);
 
-  int numRemotePeers = world.nRanks - lsa.nRanks;
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
   gin.flush(ncclCoopCta());
 

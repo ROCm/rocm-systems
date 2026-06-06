@@ -23,20 +23,25 @@ constexpr size_t ncclGinAnvilSdmaThresholdBytes = 256;
 // Intra-rank / local-LSA copy (Put self path and sub-threshold remote puts).
 NCCL_DEVICE_INLINE static void ncclGinAnvilMemcpy(void* dst, void const* src, size_t bytes) {
   if (bytes == 0) return;
-#if defined(__HIPCC__) || defined(__clang__)
-  __builtin_memcpy(dst, src, bytes);
-#else
   char* d = (char*)dst;
   char const* s = (char const*)src;
-  if (((uintptr_t)d | (uintptr_t)s) % alignof(uint64_t) == 0) {
+  if (bytes >= sizeof(uint64_t) &&
+      ((uintptr_t)d | (uintptr_t)s) % alignof(uint64_t) == 0) {
     uint64_t* d64 = (uint64_t*)d;
     uint64_t const* s64 = (uint64_t const*)s;
-    size_t n = bytes / sizeof(uint64_t);
-    for (size_t i = 0; i < n; ++i) d64[i] = s64[i];
-    size_t tail = n * sizeof(uint64_t);
+    size_t n64 = bytes / sizeof(uint64_t);
+#if defined(__HIPCC__) || defined(__clang__)
+    for (size_t i = 0; i < n64; ++i) d64[i] = s64[i];
+#else
+    for (size_t i = 0; i < n64; ++i) d64[i] = s64[i];
+#endif
+    size_t tail = n64 * sizeof(uint64_t);
     for (size_t i = tail; i < bytes; ++i) d[i] = s[i];
     return;
   }
+#if defined(__HIPCC__) || defined(__clang__)
+  __builtin_memcpy(dst, src, bytes);
+#else
   for (size_t i = 0; i < bytes; ++i) d[i] = s[i];
 #endif
 }
@@ -82,7 +87,7 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteGpuSignalOp(uint64_t* sigPtr, n
   if (signalOp == ncclGinSignalInc || signalOp == ncclGinSignalAdd) {
 #if defined(__HIP_PLATFORM_AMD__)
     __hip_atomic_fetch_add((unsigned long long*)sigPtr, (unsigned long long)signalOpArg,
-                           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+                           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 #else
     atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
 #endif
@@ -243,7 +248,7 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ANVIL> {
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop, cuda::memory_order,
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order,
                                       uint32_t* abortFlag) {
     using nccl::utility::loadConst;
     ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
@@ -251,12 +256,14 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
     void** queues = (void**)loadConst(&aCtx->queues);
     if (queues == nullptr) return;
     uint32_t dirty = atomicExch((unsigned int*)&aCtx->sdmaDirtyMask, 0u);
-    for (int p = 0; p < ctx.nRanks; p++) {
+    for (int p = coop.thread_rank(); p < ctx.nRanks; p += coop.size()) {
       if (p == ctx.rank || (dirty & (1u << p)) == 0) continue;
       auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[p]);
       if (q == nullptr) continue;
       rocshmem::anvil::quiet(*q);
     }
+    coop.sync();
+    (void)abortFlag;
   }
 };
 
