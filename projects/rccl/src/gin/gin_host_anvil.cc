@@ -104,11 +104,16 @@ static void freeSignalBases(ginAnvilCtx* ctx) {
   ctx->signalsBaseHost = nullptr;
 }
 
-// Exchange each rank's signal owner GPU VA. Peers receive cuMemSetAccess on the owner
-// allocation so Anvil SDMA atomics can write the peer-native address.
+// Exchange cuMem handles and map peer signal allocs into this GPU (imported RW view).
+// Remote signal updates use GPU atomics on the import; SDMA is used for data puts only.
+struct ginAnvilSignalExport {
+  ncclIpcDesc ipcDesc;
+  void* directPtr;
+};
+
 static ncclResult_t setupSignalBases(ginAnvilCtx* ctx, struct ncclComm* comm, uint64_t* signalsLocal) {
   ncclResult_t ret = ncclSuccess;
-  void** allDirectPtrs = nullptr;
+  struct ginAnvilSignalExport* allExports = nullptr;
 
   NCCLCHECKGOTO(ncclCalloc(&ctx->signalsBaseHost, comm->nRanks), ret, fail);
 
@@ -116,9 +121,10 @@ static ncclResult_t setupSignalBases(ginAnvilCtx* ctx, struct ncclComm* comm, ui
 
   ctx->signalsBaseHost[comm->rank] = signalsLocal;
 
-  NCCLCHECKGOTO(ncclCalloc(&allDirectPtrs, comm->nRanks), ret, fail);
-  allDirectPtrs[comm->rank] = signalsLocal;
-  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allDirectPtrs, sizeof(void*)), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&allExports, comm->nRanks), ret, fail);
+  allExports[comm->rank].ipcDesc = ctx->signalsIpcDesc;
+  allExports[comm->rank].directPtr = signalsLocal;
+  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allExports, sizeof(struct ginAnvilSignalExport)), ret, fail);
 
   for (int r = 0; r < comm->nRanks; r++) {
     if (r == comm->rank) continue;
@@ -126,23 +132,22 @@ static ncclResult_t setupSignalBases(ginAnvilCtx* ctx, struct ncclComm* comm, ui
       ctx->signalsBaseHost[r] = nullptr;
       continue;
     }
-    if (allDirectPtrs[r] == nullptr) {
-      WARN("GIN anvil: peer %d signal directPtr is null", r);
-      ret = ncclSystemError;
-      goto fail;
-    }
-    ctx->signalsBaseHost[r] = (uint64_t*)allDirectPtrs[r];
+    void* mapped = nullptr;
+    NCCLCHECKGOTO(ncclP2pImportShareableBuffer(comm, r, ctx->signalsBytes, &allExports[r].ipcDesc,
+                                               &mapped, allExports[r].directPtr, ncclMemPersist),
+                  ret, fail);
+    ctx->signalsBaseHost[r] = (uint64_t*)mapped;
   }
 
   for (int r = 0; r < comm->nRanks; r++) {
     if (r == comm->rank || ctx->signalsBaseHost[r] == nullptr) continue;
     INFO(NCCL_INIT | NCCL_NET,
-         "GIN anvil: signalsBase[rank %d] peer %d -> %p (peer owner VA for SDMA)", comm->rank, r,
-         (void*)ctx->signalsBaseHost[r]);
+         "GIN anvil: signalsBase[rank %d] peer %d -> %p (import owner %p)", comm->rank, r,
+         (void*)ctx->signalsBaseHost[r], allExports[r].directPtr);
   }
 
 fail:
-  free(allDirectPtrs);
+  free(allExports);
   if (ret != ncclSuccess) freeSignalBases(ctx);
   return ret;
 }
@@ -244,6 +249,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     h->queues = ctx->queuesDev;
     h->signalsBase = ctx->signalsBaseDev;
     h->signals = signalsLocal ? signalsLocal + (size_t)contextId * (size_t)nSignals : nullptr;
+    h->signalsContextOffset = (uint32_t)((size_t)contextId * (size_t)nSignals);
     h->counters = countersLocal ? countersLocal + (size_t)contextId * (size_t)nCounters : nullptr;
     h->nSignals = nSignals;
     h->nCounters = nCounters;
