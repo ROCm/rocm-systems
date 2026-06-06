@@ -209,13 +209,16 @@ def sanitize_ai_value(value: float) -> float:
     return value if value and value not in excluded_values else 0
 
 
-def sanitize_mem_level(mem_level: list | str, gpu_arch: str) -> list:
+def sanitize_mem_level(mem_level: Union[list, str], gpu_arch: str) -> list:
     """
     Ensure cache level requests through --mem-level roofline analysis option
     are supported on the architecture, and have been normalized."
     """
     # Make mem_level a list if not already one
     levels_raw = mem_level if isinstance(mem_level, list) else [mem_level]
+
+    # Normalize user-facing "vL1D" to CSV column name "L1" before filtering
+    levels_raw = [("L1" if m == "vL1D" else m) for m in levels_raw]
 
     # Remove any requested mem levels not supported in the profiled arch
     levels = [m for m in levels_raw if m in CACHE_HIERARCHY[gpu_arch]]
@@ -231,9 +234,6 @@ def sanitize_mem_level(mem_level: list | str, gpu_arch: str) -> list:
     # An empty list means the mem_level was originally ALL, or the user requested
     # only unsupported levels and we should default back to ALL.
     levels = CACHE_HIERARCHY[gpu_arch] if levels == [] else levels
-
-    # Normalize user-facing "vL1D" to CSV column name "L1"
-    levels = [("L1" if m == "vL1D" else m) for m in levels]
 
     return levels
 
