@@ -27,8 +27,10 @@ NIGHTLY_DEB_BASE="https://rocm.nightlies.amd.com/deb"
 # breaks ties so same-day builds resolve to a single deterministic match.
 select_latest_build() {
     # awk 'NR==1' (rather than head) consumes the whole stream so sort does not
-    # receive SIGPIPE under pipefail.
-    grep -oE '[0-9]{8}-[0-9]+' \
+    # receive SIGPIPE under pipefail. The `|| true` keeps a no-match grep (exit 1)
+    # from aborting the caller under `set -e`/pipefail: we emit nothing and exit 0
+    # so the caller's own empty-result check can report a clean error.
+    { grep -oE '[0-9]{8}-[0-9]+' || true; } \
         | sort -u -t- -k1,1nr -k2,2nr \
         | awk 'NR==1 { print }'
 }
@@ -155,6 +157,17 @@ EOF
     _assert_eq "  extract_clean_version" \
         "$(printf '%s' "${PACKAGES_FIXTURE_ALT}" | extract_clean_version)" \
         "7.15.1" || failures=$((failures+1))
+
+    echo
+    echo "Test 5: index with no build ids -> empty output and exit 0 (no-match grep"
+    echo "        must not abort the caller under set -e/pipefail)"
+    local nomatch_out nomatch_rc
+    nomatch_out="$(printf '%s' '<a href="stable/">stable/</a>' | select_latest_build)"
+    nomatch_rc=$?
+    _assert_eq "  select_latest_build (output)" "${nomatch_out}" "" \
+        || failures=$((failures+1))
+    _assert_eq "  select_latest_build (exit)" "${nomatch_rc}" "0" \
+        || failures=$((failures+1))
 
     echo
     if [ "${failures}" -eq 0 ]; then
