@@ -306,7 +306,8 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  int ginContext = 0;
+  // One GIN context per CTA (matches ginContextCount / railGinBarrierCount from devComm reqs).
+  int ginContext = blockIdx.x;
   unsigned int signalIndex = 0;
   ncclGin gin { devComm, ginContext };
   uint64_t signalValue = gin.readSignal(signalIndex);
@@ -336,7 +337,7 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 
 template <typename T>
 __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  int ginContext = 0;
+  int ginContext = blockIdx.x;
   unsigned int signalIndex = 0;
   ncclGin gin { devComm, ginContext };
   uint64_t signalValue = gin.readSignal(signalIndex);
