@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_DEBUG_H_
 #define NCCL_DEBUG_H_
@@ -74,7 +75,11 @@ typedef enum {
   ncclFuncAlltoAllPivot = 11,
   ncclFuncAlltoAllGda = 12,
   ncclFuncAlltoAllvGda = 13,
-  ncclNumFuncs = 14
+  ncclFuncAllGatherV = 14,
+  ncclFuncPutSignal = 15,
+  ncclFuncSignal = 16,
+  ncclFuncWaitSignal = 17,
+  ncclNumFuncs = 18
 } ncclFunc_t;
 
 

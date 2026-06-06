@@ -38,9 +38,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from config_management import utils_ruamel as cm_utils  # noqa: E402
 
 
-def is_rdna35_arch(arch_name: str) -> bool:
-    """True for RDNA 3.5 IP names: gfx115x (gfx1150 to gfx115f)."""
-    return bool(re.fullmatch(r"gfx115[0-9a-f]", arch_name, re.IGNORECASE))
+def is_gfx115x_ip_variant(arch_name: str) -> bool:
+    """True for gfx115x IP names (gfx1150 to gfx115f)."""
+    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
 
 
 def normalize_unit_for_docs(unit: str) -> str:
@@ -73,7 +73,7 @@ def format_yaml_scalar(value: str):
 
 def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
     """Apply docs-only section name cleanup for selected architectures."""
-    if not is_rdna35_arch(arch_name):
+    if not is_gfx115x_ip_variant(arch_name):
         return section_name
 
     replacements = {
@@ -86,7 +86,7 @@ def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
 
 def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
     """Apply docs-only metric name cleanup for selected architectures."""
-    if not is_rdna35_arch(arch_name):
+    if not is_gfx115x_ip_variant(arch_name):
         return metric_name
 
     replacements = {
@@ -98,6 +98,8 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
 # All CDNA architectures share the same panel ID mapping.
 CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
     201: "System Speed-of-Light",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
     501: "Command processor fetcher (CPF)",
     502: "Command processor packet processor (CPC)",
     601: "Workgroup manager utilizations",
@@ -193,7 +195,7 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
     """Resolve documentation section name for a metric_table id (arch-specific)."""
     if table_id is None:
         return None
-    if is_rdna35_arch(arch_name):
+    if is_gfx115x_ip_variant(arch_name):
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 

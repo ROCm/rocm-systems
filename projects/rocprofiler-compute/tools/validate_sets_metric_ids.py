@@ -31,7 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
     counter_to_block,
-    extract_counters,
+    extract_counters_and_variables,
 )
 
 # ---------------------------------------------------------------------------
@@ -217,7 +217,9 @@ def validate() -> list[str]:
                 if limits is None:
                     continue
 
-                counters = extract_counters("\n".join(formula_texts), gpu_series)
+                counters, _ = extract_counters_and_variables(
+                    "\n".join(formula_texts), gpu_series
+                )
                 # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
                 # injected automatically by the profiler for level counters
                 counters = {c for c in counters if not c.endswith("_ACCUM")}

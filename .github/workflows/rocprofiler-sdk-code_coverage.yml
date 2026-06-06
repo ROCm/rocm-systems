@@ -81,7 +81,7 @@ jobs:
       # fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', os: 'ubuntu-22.04', build-type: 'Release', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:

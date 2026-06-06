@@ -133,18 +133,18 @@ def test_num_xcds_cli_output():
             stderr=subprocess.PIPE,
             text=True,
         )
-    assert (
-        proc.returncode == 0
-    ), f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    assert proc.returncode == 0, (
+        f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    )
 
     # 3. strip ANSI, parse table
     clean = common.strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected
-    assert (
-        "Compute Partition" in return_dict
-    ), "Spec 'Compute Partition' not found in table"
+    assert "Compute Partition" in return_dict, (
+        "Spec 'Compute Partition' not found in table"
+    )
     assert "Num XCDs" in return_dict, "Spec 'Num XCDs' not found in table"
 
     compute_partition_actual = return_dict["Compute Partition"]

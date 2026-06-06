@@ -19,12 +19,16 @@ public:
     std::string_view get_iteration_multiplexing_mode() override;
     std::string_view get_kernel_filter_include_regex() override;
     std::string_view get_kernel_filter_range() override;
+    std::string_view get_pc_sampling_method() override;
+    std::string_view get_pc_sampling_beta_enabled() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
     void set_iteration_multiplexing_mode(const std::string& mode);
     void set_kernel_filter_include_regex(const std::string& regex);
     void set_kernel_filter_range(const std::string& range);
+    void set_pc_sampling_method(const std::string& method);
+    void set_pc_sampling_beta_enabled(const std::string& value);
 
     void unset_output_path();
     void unset_requested_counters();
@@ -39,6 +43,8 @@ private:
     std::string m_iteration_multiplexing_mode = m_non_empty_str;
     std::string m_kernel_filter_include_regex = m_non_empty_str;
     std::string m_kernel_filter_range         = m_non_empty_str;
+    std::string m_pc_sampling_method;
+    std::string m_pc_sampling_beta_enabled;
 
     bool m_output_path_set                 = true;
     bool m_requested_counters_set          = true;
@@ -142,4 +148,13 @@ public:
 
 private:
     std::vector<write_counters_info> m_write_counters_args;
+};
+
+class MockPcSamplingCollector : public rocprofiler_compute_tool::pc_sampling_collector_t
+{
+public:
+    void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
+    void write(rocprofiler_compute_tool::code_object_writer_t& writer) override;
+
+    int load_count = 0;
 };

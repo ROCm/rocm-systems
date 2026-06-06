@@ -194,6 +194,7 @@ def _build_metric_table_df(
     is_simple_box = data_config.get("cli_style") == "simple_box"
 
     headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
+    header_keys: set[str] = set(data_config["header"]) - {"metric", "expr"}
     if is_simple_box:
         headers.extend(simple_box)
         for key, tile in data_config["header"].items():
@@ -229,11 +230,11 @@ def _build_metric_table_df(
                     for bv in simple_box.values():
                         values.append(bv[0] + v + bv[1])
                     eqn_content.append(v)
-                elif k != "alias":
+                elif k not in {"coll_level", "alias"} and k in header_keys:
                     values.append(v)
         else:
             for k, v in entries.items():
-                if k != "alias":
+                if k not in {"coll_level", "alias"} and k in header_keys:
                     values.append(v)
                     eqn_content.append(v)
         expressions.extend(

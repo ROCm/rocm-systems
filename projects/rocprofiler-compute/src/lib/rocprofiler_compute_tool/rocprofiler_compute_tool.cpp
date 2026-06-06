@@ -18,13 +18,22 @@
 
 using namespace rocprofiler_compute_tool;
 
-static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
-static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
-static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
-static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
-static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
-static std::atomic<bool>                                    g_tool_shutting_down{false};
-static std::atomic<bool>                                    g_hsa_intercept_done{false};
+// Heap-allocated and never destroyed on purpose: rocprofiler-sdk calls our
+// callbacks and tool_fini from its own _dl_fini, after this library's static
+// destructors would have freed them. Process lifetime avoids a teardown
+// use-after-destruction.
+static std::shared_ptr<InputParameters>& g_input_parameters = *new std::shared_ptr<InputParameters>(
+    std::make_shared<EnvInputParameters>());
+static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrapper>(
+    std::make_shared<SdkWrapperImpl>());
+static std::shared_ptr<SdkCallbacks>& g_sdk_callbacks = *new std::shared_ptr<SdkCallbacks>(
+    std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper));
+static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr<CountersWriter>(
+    std::make_shared<CsvCountersWriter>());
+static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
+    *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
+static std::atomic<bool> g_tool_shutting_down{false};
+static std::atomic<bool> g_hsa_intercept_done{false};
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -146,15 +155,13 @@ void generate_output(tool_data_t* tool_data)
                                                         }),
                                          tool_data->counter_records.end());
     }
-    if (tool_data->counter_records.empty())
-    {
-        return;
-    }
-    // Write collected counter records and clean up
-    if (!tool_data->output_filename.empty())
+    if (!tool_data->counter_records.empty() && !tool_data->output_filename.empty())
     {
         g_counters_writer->write_counters(tool_data);
     }
+
+    if (tool_data->pc_sampling.enabled())
+        tool_data->pc_sampling.finalize();
 }
 
 void tool_fini(void* user_data)
@@ -172,21 +179,30 @@ void tool_fini(void* user_data)
 
 }  // namespace rocprofiler_compute_tool
 
-static std::string generate_output_filename(std::string_view output_path)
+static std::string generate_output_filename(std::string_view output_path, std::string_view suffix)
 {
     std::string filename{output_path};
     if (filename.back() != '/')
         filename += '/';
-
-    std::string base_filename = std::to_string(getpid()) + "_native_counter_collection.csv";
-    return filename + base_filename;
+    filename += std::to_string(getpid());
+    filename.append(suffix);
+    return filename;
 }
 
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
 
-    tool_data->output_filename = generate_output_filename(g_input_parameters->get_output_path());
+    const auto output_path = g_input_parameters->get_output_path();
+    tool_data->output_filename = generate_output_filename(output_path, "_native_counter_collection.csv");
+
+    if (!g_input_parameters->get_pc_sampling_beta_enabled().empty())
+    {
+        const auto pc_mode = parse_pc_sampling_mode(
+            std::string{g_input_parameters->get_pc_sampling_method()});
+        tool_data->pc_sampling =
+            pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
+    }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
     tool_data->requested_counters = std::string{g_input_parameters->get_requested_counters()};
