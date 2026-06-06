@@ -211,9 +211,9 @@ release(bool, AMD_GRAPH_CPU_AFFINITY, false,                                  \
         "Scope GPU-local NUMA CPU affinity to each hipGraph launch (set on "  \
         "entry, restored on return) instead of the process-wide AMD_CPU_AFFINITY pin") \
 release(bool, AMD_GRAPH_CPU_AFFINITY_HOLD, false,                             \
-        "AMD_GRAPH_CPU_AFFINITY mode: 0 = scope per launch (pin on entry, "   \
-        "restore on exit); 1 = hold (pin once, re-pin on node change, restore " \
-        "at hipGraphExecDestroy)")                                            \
+        "AMD_GRAPH_CPU_AFFINITY_HOLD: 0 = scope affinity per graph launch "   \
+        "(pin on entry, restore on exit); 1 = hold the pin across launches "  \
+        "(re-pin on node change, restore at hipGraphExecDestroy)")            \
 release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \

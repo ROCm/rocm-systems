@@ -1305,30 +1305,32 @@ static const std::vector<uint64_t>& CachedNodeCpuMask(uint32_t node) {
 // ================================================================================================
 // Scope-mode graph pin (AMD_GRAPH_CPU_AFFINITY): pin the calling thread to `node`
 // for one graph launch.
-//   - captures the thread's original mask once (cached in TLS), then trusts it;
-//   - respects an app/launcher/cpuset-set mask (checked once, then remembered);
-//   - does nothing when the thread is already on the node (e.g. numactl-bound);
+//   - re-reads the caller's current mask each launch and captures it as the mask
+//     to restore, so an app that re-pins between launches is never clobbered;
+//   - respects an app/launcher/cpuset-set restricted mask (skips pinning);
 //   - the node CPU mask is read from sysfs once per node and cached globally, so
-//     the steady-state cost is one sched_setaffinity here + one in
-//     RestoreGraphAffinity, with no per-launch reads.
+//     the only per-launch cost is sched_getaffinity + sched_setaffinity here and
+//     one sched_setaffinity in RestoreGraphAffinity (no per-launch sysfs).
 // Returns true iff a pin was applied (caller must call RestoreGraphAffinity).
 bool ApplyGraphAffinity(uint32_t node) {
   ThreadAffinityState& st = GetThreadAffinityState();
   if (st.graph_app_owned) {
     return false;
   }
-  if (!st.original_affinity_mask_valid) {
-    if (!GetCurrentThreadAffinity(&st.original_affinity_mask)) {
-      return false;
-    }
-    if (!IsUnrestrictedAffinity(st.original_affinity_mask)) {
-      st.graph_app_owned = true;  // respect app/launcher/cpuset mask; never pin
-      return false;
-    }
-    st.original_affinity_mask_valid = true;
+  std::vector<uint64_t> current_affinity;
+  if (!GetCurrentThreadAffinity(&current_affinity)) {
+    return false;
   }
+  if (!IsUnrestrictedAffinity(current_affinity)) {
+    st.graph_app_owned = true;  // respect app/launcher/cpuset mask; never pin
+    return false;
+  }
+  // Capture the caller's current mask for this launch, so restores don't clobber
+  // affinity changes made by the application between graph launches.
+  st.original_affinity_mask = current_affinity;
+  st.original_affinity_mask_valid = true;
   const std::vector<uint64_t>& node_mask = CachedNodeCpuMask(node);
-  if (node_mask.empty() || IsSameAffinity(st.original_affinity_mask, node_mask)) {
+  if (node_mask.empty() || IsSameAffinity(current_affinity, node_mask)) {
     return false;  // unknown node, or already on the node -> nothing to do
   }
   if (!SetCurrentThreadAffinity(node_mask)) {
@@ -1344,7 +1346,7 @@ void RestoreGraphAffinity() {
     return;
   }
   SetCurrentThreadAffinity(st->original_affinity_mask);
-  st->graph_applied = false;  // keep original_affinity_mask cached for next launch
+  st->graph_applied = false;  // next launch re-reads and re-captures the original
 }
 
 // ================================================================================================
@@ -1392,6 +1394,16 @@ void HoldGraphAffinity(uint32_t node) {
 void RestoreHeldGraphAffinity() {
   ThreadAffinityState* st = GetThreadAffinityStatePtr();
   if (st == nullptr || !st->graph_hold_applied) {
+    return;
+  }
+  // If the application changed this thread's affinity after ROCclr pinned it, do
+  // not override the application's choice during restore.
+  std::vector<uint64_t> current_affinity;
+  const std::vector<uint64_t>& held_mask = CachedNodeCpuMask(st->graph_hold_node);
+  if (!held_mask.empty() && GetCurrentThreadAffinity(&current_affinity) &&
+      !IsSameAffinity(current_affinity, held_mask)) {
+    st->graph_hold_applied = false;
+    st->graph_hold_node = static_cast<uint32_t>(-1);
     return;
   }
   SetCurrentThreadAffinity(st->original_affinity_mask);
