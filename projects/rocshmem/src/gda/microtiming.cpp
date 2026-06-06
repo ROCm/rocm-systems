@@ -88,20 +88,24 @@ __host__ void microtiming_print() {
   //   T6: doorbell rung         T7: after put_nbi returns
   //   T8: after putmem_nbi returns (app side)
   static constexpr int NUM_SECTIONS = 13;
-  const char* section_names[NUM_SECTIONS] = {
-    "dispatch",      // T1-T0: app -> putmem_nbi entry
-    "ipc_check",     // T2-T1: IPC availability check
-    "wf_info+qp",    // T3-T2: ActiveWFInfo + get_qp_index + offset
-    "put_nbi_call",  // T4-T3: put_nbi wrapper -> post_wqe_rma entry
-    "wqe+lock+cq",   // T5-T4: CQ poll + lock + WQE build + SQ write
-    "doorbell",      // T6-T5: doorbell ring
-    "put_nbi_ret",   // T7-T6: post_wqe_rma return -> put_nbi return
-    "return_path",   // T8-T7: putmem_nbi return -> app
-    "total",         // T8-T0: end-to-end
-    "post_wqe_rma",  // T6-T4: post_wqe_rma entry to doorbell
-    "entry_ovhd",    // T4-T0: app call to post_wqe_rma entry
-    "ret_ovhd",      // T8-T6: doorbell to app return
-    "lib_overhead",  // entry_ovhd + ret_ovhd
+  struct section_info {
+    const char* name;
+    const char* description;
+  };
+  const section_info sections_info[NUM_SECTIONS] = {
+    {"dispatch",     "T1-T0  app -> putmem_nbi entry"},
+    {"ipc_check",    "T2-T1  IPC availability check"},
+    {"wf_info+qp",   "T3-T2  ActiveWFInfo + QP select + offset (ipc: L_offset)"},
+    {"put_nbi_call", "T4-T3  put_nbi -> post_wqe_rma dispatch (ipc: skipped)"},
+    {"wqe+lock+cq",  "T5-T4  CQ poll + lock + WQE + SQ write (ipc: ipcCopy)"},
+    {"doorbell",     "T6-T5  doorbell ring (ipc: skipped)"},
+    {"put_nbi_ret",  "T7-T6  post_wqe_rma -> put_nbi return (ipc: skipped)"},
+    {"return_path",  "T8-T7  putmem_nbi return -> app"},
+    {"total",        "T8-T0  end-to-end"},
+    {"post_wqe_rma", "T6-T4  post_wqe_rma entry to doorbell (ipc: ipcCopy)"},
+    {"entry_ovhd",   "T4-T0  app call to post_wqe_rma entry (ipc: to ipcCopy entry)"},
+    {"ret_ovhd",     "T8-T6  doorbell to app return (ipc: ipcCopy return to app)"},
+    {"lib_overhead", "entry_ovhd + ret_ovhd"},
   };
 
   std::vector<double> sections[NUM_SECTIONS];
@@ -145,13 +149,17 @@ __host__ void microtiming_print() {
 
   if (valid == 0) return;
 
-  printf("%-14s  %10s  %10s  %10s  %10s\n",
-         "section", "min(ns)", "P50(ns)", "P99(ns)", "max(ns)");
+  printf("%-14s  %10s  %10s  %10s  %10s  %s\n",
+         "section", "min(ns)", "P50(ns)", "P99(ns)", "max(ns)", "description");
 
   for (int s = 0; s < NUM_SECTIONS; s++) {
+    if (s == 8)
+      printf("%-14s  %10s  %10s  %10s  %10s\n",
+             "--------------", "----------", "----------", "----------", "----------");
     auto st = compute_stats(sections[s]);
-    printf("%-14s  %10.0f  %10.0f  %10.0f  %10.0f\n",
-           section_names[s], st.min, st.p50, st.p99, st.max);
+    printf("%-14s  %10.0f  %10.0f  %10.0f  %10.0f  %s\n",
+           sections_info[s].name, st.min, st.p50, st.p99, st.max,
+           sections_info[s].description);
   }
 
   if (host_copy.quiet_start && host_copy.quiet_end) {
