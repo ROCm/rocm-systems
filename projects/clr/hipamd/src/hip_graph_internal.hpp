@@ -802,6 +802,7 @@ class Graph {
                                                    dev_info.virtualMemAllocGranularityRecommended_);
     if (ptr == nullptr) {
       LogError("Failed to reserve Virtual Address");
+      return nullptr;
     }
 
     // Set Access to read write for all devices.
@@ -1898,6 +1899,15 @@ class GraphMemcpyNode : public GraphNode {
     }
     return false;
   }
+
+  // Returns true when this memcpy will NOT use the SDMA engine, so no
+  // cross-engine sync (system-scope flush + attached completion signal)
+  // is needed when this node follows a captured flat batch.
+  //
+  // Default false (conservatively assumes SDMA) preserves existing behavior
+  // for generic 3D memcpys; GraphMemcpyNode1D overrides with a precise check
+  // based on MemcpyType and copy size.
+  virtual bool WillBypassSdmaEngine() const { return false; }
 };
 
 class GraphMemcpyNode1D : public GraphMemcpyNode {
@@ -2174,6 +2184,49 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       return false;
     }
     return false;
+  }
+
+  // Predicts whether this 1D memcpy will bypass the SDMA engine so the
+  // caller can skip SDMA-specific cross-engine sync setup.
+  //
+  // The H2D/D2H size threshold deliberately mirrors GPU_FORCE_BLIT_COPY_SIZE
+  // used by KernelBlitManager::{read,write}Buffer. That flag is a process-wide
+  // runtime constant, so sharing it keeps both decisions in sync without
+  // introducing a separate source of truth.
+  virtual bool WillBypassSdmaEngine() const override {
+    size_t sOffset = 0, dOffset = 0;
+    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
+    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
+
+    hip::MemcpyType type = hipHostToHost;
+    if (srcMemory != nullptr && dstMemory != nullptr) {
+      type = ihipGetMemcpyType(srcMemory, dstMemory, kind_);
+    } else if (dstMemory != nullptr) {
+      type = ihipGetMemcpyType(src_, dstMemory);  // H2D
+    } else if (srcMemory != nullptr) {
+      type = ihipGetMemcpyType(srcMemory, dst_);  // D2H
+    } else {
+      // Pure H2H runs on the CPU — no GPU engine involved, so no SDMA sync needed.
+      return true;
+    }
+
+    switch (type) {
+      case hipCopyBuffer:
+        // GraphMemcpyNode1D::CreateCommand pins the engine preference to
+        // BLIT for hipCopyBuffer, so D2D in a graph always takes the
+        // shader staging-blit path.
+        return true;
+      case hipWriteBuffer:
+      case hipReadBuffer:
+        // H2D/D2H fall through to the shader path when the transfer is at
+        // or below sdmaCopyThreshold_ (GPU_FORCE_BLIT_COPY_SIZE * Ki).
+        return count_ <= GPU_FORCE_BLIT_COPY_SIZE * Ki;
+      case hipCopyBufferSDMA:
+      case hipCopyBufferP2P:
+      case hipHostToHost:
+      default:
+        return false;
+    }
   }
 };
 
@@ -2941,13 +2994,16 @@ class GraphMemAllocNode final : public GraphNode {
       hip::Stream* stream = launch_stream;
       if (stream == nullptr) {
         auto device_id = phys ? phys->getUserData().deviceId : 0;
-        stream = g_devices[device_id]->NullStream();
+        // wait=false: skip WaitActiveStreams — not needed since GPU is already done
+        // when called from the async events loop callback (DecrementRefCount), and
+        // waiting deadlocks if called from the async events loop thread.
+        stream = g_devices[device_id]->NullStream(false);
       }
       auto cmd = new amd::VirtualMapCommand(
           *stream, amd::Command::EventWaitList{},
           node_params_.dptr, sub_obj->getSize(), nullptr);
       cmd->enqueue();
-      if (launch_stream == nullptr) {
+      if (!AMD_DIRECT_DISPATCH) {
         cmd->awaitCompletion();
       }
       cmd->release();

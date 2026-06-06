@@ -40,9 +40,17 @@ namespace mi400::quick_scan
 // tokens, the excess are silently dropped (callers should size out_cap
 // generously — observed counts are O(50) per 15 MB of trace).
 //
+// Precondition: caller has confirmed AVX-512 availability via the export
+// probe (quick_scan::avx512_available() in quick_scan_export.hpp, or
+// rocprof_trace_decoder_quick_scan with data=nullptr). The scanner is
+// SIMD-only (AVX-512) and built only on GCC/clang x86-64; calling it
+// without that confirmation has undefined behavior.
+//
 // Single-threaded, no exceptions. The buffer is read up to position
 // `size`; the windowed inner loop loads 8 bytes at a time, so a tail
 // fallback handles the last <16 bytes safely.
-size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* out, size_t out_cap);
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap);
+#endif
 
 } // namespace mi400::quick_scan

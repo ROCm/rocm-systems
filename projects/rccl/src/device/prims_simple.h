@@ -125,7 +125,11 @@ private:
     // loads data using volatile so it doesn't see stale data in L1.
     //
     // To be revisited for correctness on gfx1250
-#if defined(__gfx1200__) || defined(__gfx1201__)
+#if defined(__gfx950__)
+    // NET no-GDR can publish host-staged payloads from the CPU proxy.
+    // Acquire the tail before GPU workers consume the payload.
+    return ld_acquire_sys_global(ptr);
+#elif defined(__gfx1200__) || defined(__gfx1201__)
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
     return __atomic_load_n(ptr, __ATOMIC_RELAXED);
