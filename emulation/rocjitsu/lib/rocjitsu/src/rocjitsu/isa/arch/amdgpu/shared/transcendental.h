@@ -119,6 +119,13 @@ inline float cos_f32(float x) {
   return std::cos(x * TWO_PI);
 }
 
+/// @brief Hyperbolic tangent (single-precision, correctly-rounded libm reference).
+inline float tanh_f32(float x) {
+  if (std::isnan(x))
+    return x;
+  return std::tanh(x);
+}
+
 /// @brief 1.0 / x (double-precision reciprocal, ~1 ULP).
 inline double rcp_f64(double x) {
   if (std::isnan(x))

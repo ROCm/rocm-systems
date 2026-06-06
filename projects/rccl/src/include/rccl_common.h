@@ -61,9 +61,11 @@ typedef enum {
 
 typedef enum {
   RCCL_DIRECT_ALLGATHER = NCCL_NUM_ALGORITHMS, // Direct AllGather
+  RCCL_HIERARCHICAL_ALLGATHER, // Hierarchical AllGather
 #ifdef ENABLE_WARP_SPEED
   RCCL_WARP_SPEED,
 #endif
+  RCCL_SYMMETRIC,
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -113,9 +115,11 @@ void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]);
 void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads);
 void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]);
 NCCL_API(ncclResult_t, rcclGetAlgoInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, int collNetSupport, int nvlsSupport, int numPipeOps, int* algo, int* protocol, int* maxChannels);
+NCCL_API(ncclResult_t, rcclSymKGetInfo, struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, ncclRedOp_t op, int* algo, int* protocol, int* maxChannels);
 NCCL_API(ncclResult_t, rcclGetAlgoName, int algo, const char** algoName);
 NCCL_API(ncclResult_t, rcclGetProtocolName, int protocol, const char** algoName);
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize);
+bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize);
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize);
 bool rcclUseAlltoAllGda(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable);

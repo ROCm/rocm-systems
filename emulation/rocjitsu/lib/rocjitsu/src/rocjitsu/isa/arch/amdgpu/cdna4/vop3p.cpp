@@ -5,7 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna4/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna4/mfma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"

@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace util {
 
@@ -90,6 +91,34 @@ inline uint16_t f32_to_f16(float val) {
   return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | mant);
 }
 
+/// @brief Convert a float to 16-bit IEEE 754 half-precision, rounding toward zero.
+inline uint16_t f32_to_f16_rtz(float val) {
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 16) & 0x8000;
+  uint32_t f_exp = (f >> 23) & 0xFF;
+  uint32_t f_mant = f & 0x7FFFFF;
+
+  if (f_exp == 0xFF) {
+    if (f_mant)
+      return static_cast<uint16_t>(sign | 0x7C00 | (f_mant >> 13) | 1);
+    return static_cast<uint16_t>(sign | 0x7C00);
+  }
+
+  int32_t exp = static_cast<int32_t>(f_exp) - 127 + 15;
+  if (exp <= 0) {
+    if (exp < -10)
+      return static_cast<uint16_t>(sign);
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 14 - exp;
+    return static_cast<uint16_t>(sign | (mant >> shift));
+  }
+
+  if (exp >= 31)
+    return static_cast<uint16_t>(sign | 0x7BFF);
+
+  return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | (f_mant >> 13));
+}
+
 // BFloat16 (BF16) conversion
 
 /// @brief Convert a 16-bit BFloat16 value to float.
@@ -104,6 +133,17 @@ inline uint16_t f32_to_bf16(float val) {
   return static_cast<uint16_t>(f >> 16);
 }
 
+/// @brief Convert a float to 16-bit BFloat16 with round-to-nearest-even.
+inline uint16_t f32_to_bf16_rne(float val) {
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  if ((f & 0x7f800000u) != 0x7f800000u) {
+    f += 0x7fffu + ((f >> 16) & 1u);
+  } else if (f & 0xffffu) {
+    f |= 0x10000u;
+  }
+  return static_cast<uint16_t>(f >> 16);
+}
+
 // FP8 (E4M3) conversion - 1 sign, 4 exponent, 3 mantissa bits
 
 /// @brief Convert an 8-bit E4M3 FP8 value to float.
@@ -114,11 +154,9 @@ inline float fp8_e4m3_to_f32(uint8_t v) {
   if (exp == 0 && mant == 0)
     return std::bit_cast<float>(sign << 31);
   if (exp == 15) {
-    // E4M3: NaN when exp=15 and mant!=0; no infinity
-    if (mant != 0)
+    // E4M3FN has a single NaN encoding when exponent and mantissa are all ones.
+    if (mant == 7)
       return std::bit_cast<float>((sign << 31) | 0x7FC00000u);
-    // exp=15, mant=0 → max normal value
-    return std::bit_cast<float>((sign << 31) | ((15 + 127 - 7) << 23) | (0 << 20));
   }
   if (exp == 0) {
     // Denormalized
@@ -140,6 +178,33 @@ inline uint8_t f32_to_fp8_e4m3(float val) {
   if (exp >= 15)
     return static_cast<uint8_t>(sign | 0x7E); // max normal
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}
+
+/// @brief Convert a float to 8-bit E4M3FN FP8 with round-to-nearest-even.
+inline uint8_t f32_to_fp8_e4m3_rne(float val) {
+  uint32_t bits = std::bit_cast<uint32_t>(val);
+  uint8_t sign = static_cast<uint8_t>((bits >> 24) & 0x80u);
+  uint32_t abs_bits = bits & 0x7FFFFFFFu;
+  if (abs_bits > 0x7F800000u)
+    return static_cast<uint8_t>(sign | 0x7Fu);
+  if (abs_bits == 0x7F800000u)
+    return static_cast<uint8_t>(sign | 0x7Fu);
+
+  float abs_val = std::bit_cast<float>(abs_bits);
+  if (abs_val > 464.0f)
+    return static_cast<uint8_t>(sign | 0x7Fu);
+
+  uint8_t best = 0;
+  float best_diff = std::numeric_limits<float>::infinity();
+  for (uint8_t code = 0; code <= 0x7Eu; ++code) {
+    float candidate = fp8_e4m3_to_f32(code);
+    float diff = std::fabs(abs_val - candidate);
+    if (diff < best_diff || (diff == best_diff && ((code & 1u) == 0u) && ((best & 1u) != 0u))) {
+      best = code;
+      best_diff = diff;
+    }
+  }
+  return static_cast<uint8_t>(sign | best);
 }
 
 // BF8 (E5M2) conversion - 1 sign, 5 exponent, 2 mantissa bits
@@ -175,6 +240,194 @@ inline uint8_t f32_to_bf8_e5m2(float val) {
   if (exp >= 31)
     return static_cast<uint8_t>(sign | 0x7C | (mant ? 0x1 : 0));
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}
+
+/// @brief Convert a float to 8-bit E5M2 BF8 with round-to-nearest-even.
+inline uint8_t f32_to_bf8_e5m2_rne(float val) {
+  uint32_t bits = std::bit_cast<uint32_t>(val);
+  uint8_t sign = static_cast<uint8_t>((bits >> 24) & 0x80u);
+  uint32_t abs_bits = bits & 0x7FFFFFFFu;
+  if (abs_bits > 0x7F800000u)
+    return static_cast<uint8_t>(sign | 0x7Fu);
+  if (abs_bits == 0x7F800000u)
+    return static_cast<uint8_t>(sign | 0x7Cu);
+
+  float abs_val = std::bit_cast<float>(abs_bits);
+  if (abs_val >= 61440.0f)
+    return static_cast<uint8_t>(sign | 0x7Cu);
+
+  uint8_t best = 0;
+  float best_diff = std::numeric_limits<float>::infinity();
+  for (uint8_t code = 0; code <= 0x7Bu; ++code) {
+    float candidate = bf8_e5m2_to_f32(code);
+    float diff = std::fabs(abs_val - candidate);
+    if (diff < best_diff || (diff == best_diff && ((code & 1u) == 0u) && ((best & 1u) != 0u))) {
+      best = code;
+      best_diff = diff;
+    }
+  }
+  return static_cast<uint8_t>(sign | best);
+}
+
+inline uint32_t f32_to_binary_float_sr(float val, uint32_t seed, uint32_t exp_bits,
+                                       uint32_t mant_bits, int32_t bias, int32_t max_exp,
+                                       int32_t min_exp, uint32_t nan_code, uint32_t inf_code) {
+  const uint32_t bits = std::bit_cast<uint32_t>(val);
+  const uint32_t sign_bit = bits >> 31;
+  const uint32_t sign = sign_bit << (exp_bits + mant_bits);
+  const uint32_t abs_bits = bits & 0x7FFFFFFFu;
+  const uint32_t exp_field = (bits >> 23) & 0xFFu;
+  uint32_t src_mant = bits & 0x7FFFFFu;
+
+  if (abs_bits > 0x7F800000u)
+    return sign | nan_code;
+  if (abs_bits == 0x7F800000u)
+    return sign | inf_code;
+  if ((abs_bits & 0x7FFFFFFFu) == 0)
+    return sign;
+
+  const int32_t src_exp =
+      static_cast<int32_t>((exp_field == 0 && src_mant != 0) ? 1u : exp_field) - 127;
+  int32_t exp = src_exp;
+  uint32_t mant = src_mant;
+  bool subnorm = false;
+
+  if (exp > max_exp)
+    return sign | inf_code;
+
+  if (exp < min_exp) {
+    subnorm = true;
+    exp = 0;
+    const uint32_t diff = static_cast<uint32_t>(min_exp - src_exp);
+    if (diff >= 32u) {
+      mant = 0;
+      src_mant = 0;
+    } else {
+      src_mant |= 1u << 23;
+      src_mant >>= diff;
+      mant = src_mant;
+    }
+  }
+
+  const uint32_t sr_shift = (32u - 23u) + mant_bits;
+  mant += seed >> sr_shift;
+  if (mant >= (1u << 23))
+    ++exp;
+  mant >>= 23u - mant_bits;
+  mant &= (1u << mant_bits) - 1u;
+
+  if (exp > max_exp)
+    return sign | inf_code;
+
+  uint32_t biased_exp = static_cast<uint32_t>(exp);
+  if (!subnorm)
+    biased_exp = static_cast<uint32_t>(exp + bias);
+  biased_exp &= (1u << exp_bits) - 1u;
+
+  return sign | (biased_exp << mant_bits) | mant;
+}
+
+/// @brief Convert a float to 16-bit IEEE 754 half-precision with stochastic rounding.
+inline uint16_t f32_to_f16_sr(float val, uint32_t seed) {
+  return static_cast<uint16_t>(
+      f32_to_binary_float_sr(val, seed, 5, 10, 15, 15, -14, 0x7FFFu, 0x7C00u));
+}
+
+/// @brief Convert a float to 16-bit BFloat16 with stochastic rounding.
+inline uint16_t f32_to_bf16_sr(float val, uint32_t seed) {
+  return static_cast<uint16_t>(
+      f32_to_binary_float_sr(val, seed, 8, 7, 127, 127, -126, 0x7FFFu, 0x7F80u));
+}
+
+/// @brief Convert a float to 8-bit E4M3FN FP8 with stochastic rounding.
+inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {
+  return static_cast<uint8_t>(f32_to_binary_float_sr(val, seed, 4, 3, 7, 8, -6, 0x7Fu, 0x7Fu));
+}
+
+/// @brief Convert a float to 8-bit E5M2 BF8 with stochastic rounding.
+inline uint8_t f32_to_bf8_e5m2_sr(float val, uint32_t seed) {
+  return static_cast<uint8_t>(f32_to_binary_float_sr(val, seed, 5, 2, 15, 15, -14, 0x7Fu, 0x7Cu));
+}
+
+// OCP MX low-precision formats used by gfx1250 WMMA matrix format fields.
+// Encoding parameters match HIP's amd_hip_ocp_host.hpp fallback model.
+inline float ocp_mx_to_f32(uint32_t raw, uint32_t exp_bits, uint32_t mant_bits, int32_t bias) {
+  uint32_t sign = (raw >> (exp_bits + mant_bits)) & 1;
+  uint32_t exp = (raw >> mant_bits) & ((1u << exp_bits) - 1u);
+  uint32_t mant = raw & ((1u << mant_bits) - 1u);
+  if (exp == 0 && mant == 0)
+    return std::bit_cast<float>(sign << 31);
+
+  float significand;
+  int32_t exponent;
+  if (exp == 0) {
+    significand = static_cast<float>(mant) / static_cast<float>(1u << mant_bits);
+    exponent = 1 - bias;
+  } else {
+    significand = 1.0f + static_cast<float>(mant) / static_cast<float>(1u << mant_bits);
+    exponent = static_cast<int32_t>(exp) - bias;
+  }
+
+  float value = std::ldexp(significand, exponent);
+  return sign ? -value : value;
+}
+
+inline uint8_t f32_to_ocp_mx_rne(float val, uint32_t exp_bits, uint32_t mant_bits, int32_t bias) {
+  const uint32_t sign_bit = 1u << (exp_bits + mant_bits);
+  const uint32_t positive_max = sign_bit - 1u;
+  uint32_t bits = std::bit_cast<uint32_t>(val);
+  uint8_t sign = static_cast<uint8_t>((bits >> 31) ? sign_bit : 0u);
+  uint32_t abs_bits = bits & 0x7FFFFFFFu;
+  if (abs_bits > 0x7F800000u)
+    return static_cast<uint8_t>(sign | positive_max);
+  if (abs_bits == 0x7F800000u)
+    return static_cast<uint8_t>(sign | positive_max);
+
+  float abs_val = std::bit_cast<float>(abs_bits);
+  uint8_t best = 0;
+  float best_diff = std::numeric_limits<float>::infinity();
+  for (uint32_t code = 0; code <= positive_max; ++code) {
+    float candidate = ocp_mx_to_f32(code, exp_bits, mant_bits, bias);
+    float diff = std::fabs(abs_val - candidate);
+    if (diff < best_diff || (diff == best_diff && ((code & 1u) == 0u) && ((best & 1u) != 0u))) {
+      best = static_cast<uint8_t>(code);
+      best_diff = diff;
+    }
+  }
+  return static_cast<uint8_t>(sign | best);
+}
+
+/// @brief Convert a 4-bit OCP FP4 E2M1 value to float.
+inline float fp4_e2m1_to_f32(uint8_t v) { return ocp_mx_to_f32(v & 0xFu, 2, 1, 1); }
+
+/// @brief Convert a float to 4-bit OCP FP4 E2M1 with round-to-nearest-even.
+inline uint8_t f32_to_fp4_e2m1_rne(float v) { return f32_to_ocp_mx_rne(v, 2, 1, 1); }
+
+/// @brief Convert a float to 4-bit OCP FP4 E2M1 with stochastic rounding.
+inline uint8_t f32_to_fp4_e2m1_sr(float v, uint32_t seed) {
+  return static_cast<uint8_t>(f32_to_binary_float_sr(v, seed, 2, 1, 1, 2, 0, 0x7u, 0x7u));
+}
+
+/// @brief Convert a 6-bit OCP FP6 E2M3 value to float.
+inline float fp6_e2m3_to_f32(uint8_t v) { return ocp_mx_to_f32(v & 0x3Fu, 2, 3, 1); }
+
+/// @brief Convert a float to 6-bit OCP FP6 E2M3 with round-to-nearest-even.
+inline uint8_t f32_to_fp6_e2m3_rne(float v) { return f32_to_ocp_mx_rne(v, 2, 3, 1); }
+
+/// @brief Convert a float to 6-bit OCP FP6 E2M3 with stochastic rounding.
+inline uint8_t f32_to_fp6_e2m3_sr(float v, uint32_t seed) {
+  return static_cast<uint8_t>(f32_to_binary_float_sr(v, seed, 2, 3, 1, 2, 0, 0x3Fu, 0x3Fu));
+}
+
+/// @brief Convert a 6-bit OCP BF6 E3M2 value to float.
+inline float bf6_e3m2_to_f32(uint8_t v) { return ocp_mx_to_f32(v & 0x3Fu, 3, 2, 3); }
+
+/// @brief Convert a float to 6-bit OCP BF6 E3M2 with round-to-nearest-even.
+inline uint8_t f32_to_bf6_e3m2_rne(float v) { return f32_to_ocp_mx_rne(v, 3, 2, 3); }
+
+/// @brief Convert a float to 6-bit OCP BF6 E3M2 with stochastic rounding.
+inline uint8_t f32_to_bf6_e3m2_sr(float v, uint32_t seed) {
+  return static_cast<uint8_t>(f32_to_binary_float_sr(v, seed, 3, 2, 3, 4, -2, 0x3Fu, 0x3Fu));
 }
 
 } // namespace util

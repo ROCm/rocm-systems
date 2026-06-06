@@ -991,7 +991,7 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
 void FlatAtomicCmpswapFlat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
@@ -1680,7 +1680,7 @@ FlatAtomicAddF64Flat::FlatAtomicAddF64Flat(const MachineInst *inst)
 void FlatAtomicAddF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FADD;
@@ -1732,7 +1732,7 @@ FlatAtomicMinF64Flat::FlatAtomicMinF64Flat(const MachineInst *inst)
 void FlatAtomicMinF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
@@ -1784,7 +1784,7 @@ FlatAtomicMaxF64Flat::FlatAtomicMaxF64Flat(const MachineInst *inst)
 void FlatAtomicMaxF64Flat::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
-  d->elem_size = 4;
+  d->elem_size = 8;
   d->num_elems = 1;
   d->is_load = (inst_.sc0 != 0);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
