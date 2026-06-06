@@ -844,6 +844,7 @@ ncclResult_t ncclDevrCommCreateInternal(
   bool ginExclusiveContexts = false;
   void* outDevCommPreserve;
   struct ncclDevComm outDevCommTmp;
+  struct ncclTeam ginBarrierTeam;
 
   ncclGinConnectionType_t requestedConnectionType = reqs->ginConnectionType;
 
@@ -959,7 +960,7 @@ ncclResult_t ncclDevrCommCreateInternal(
   // FULL GIN device kernels (e.g. alltoallPureKernel) sync with ncclTeamWorld and expect
   // nBarriers * world.nRanks signal cells. RAIL allocation (nBarriers * rail.nRanks) is
   // too small when lsaSize > 1 and causes barrier waitSignal to spin forever.
-  ncclTeam ginBarrierTeam = ncclTeamRail(comm);
+  ginBarrierTeam = ncclTeamRail(comm);
   if (requestedConnectionType != NCCL_GIN_CONNECTION_RAIL) {
     ginBarrierTeam = world;
   }
