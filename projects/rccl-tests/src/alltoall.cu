@@ -162,6 +162,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         return testInternalError;
       }
       reqs->ginContextCount = 1;
+      reqs->barrierCount = 1;
       reqs->railGinBarrierCount = 1;
       reqs->ginSignalCount = 1;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
@@ -194,6 +195,7 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: // GinAlltoAllKernel
       reqs->ginContextCount = 1;
+      reqs->barrierCount = 1;
       reqs->railGinBarrierCount = 1;
       reqs->ginSignalCount = 1;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
@@ -331,11 +333,11 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   ncclGin gin { devComm, ginContext };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
-  // GIN-only cross-rank barrier (see GinDeviceMPITests alltoallPureKernel / 02_gin_alltoall_pure).
-  // ncclBarrierSession uses LSA inbox stores that fault on Anvil when peer resource pointers
-  // are not wired; ncclGinBarrierSession syncs via GIN signals + shadows instead.
-  ncclGinBarrierSession<ncclCoopCta> bar {
-    ncclCoopCta(), gin, ncclTeamWorld(devComm), devComm.railGinBarrier, blockIdx.x};
+  // LSA inbox + GIN-rail barrier (Hybrid pattern). Pure ncclGinBarrierSession on World
+  // costs O(nRanks) imported-signal round trips per sync; on single-node Anvil that is ~2× slower
+  // than ROCSHMEM. LSA inbox sync is the fast path when all peers are on-node.
+  ncclBarrierSession<ncclCoopCta> bar {
+    ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -374,7 +376,6 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
   gin.flush(ncclCoopCta());
 
-  /* GIN barrier for LSA write visibility (ncclBarrierSession LSA inbox faults on Anvil). */
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
