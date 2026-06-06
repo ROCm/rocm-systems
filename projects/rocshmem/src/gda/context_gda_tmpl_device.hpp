@@ -1059,17 +1059,17 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
  */
 __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
     ActiveWFInfo wf_info) {
+  // Fast path: single QP per PE, no round-robin needed
+  if (num_qps_per_pe == 1) return pe;
 
-  uint32_t qp_index   {0};
+  uint32_t qp_index{0};
 
-  if(wf_info.pe_group_logical_lane_id == 0) {
-    // Only the leader lane updates the counter (Does it require atomics?)
-    // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
-    //                                        __ATOMIC_RELAXED,
-    //                                        __HIP_MEMORY_SCOPE_AGENT);
-    // local_qp_counter %= num_qps_per_pe;
-    // qp_index = (local_qp_counter * num_pes) + pe;
-    qp_index = (qp_counter[pe]++ % num_qps_per_pe) * constmem.num_pes + pe;
+  if (wf_info.pe_group_logical_lane_id == 0) {
+    // Only the leader lane updates the counter
+    // Not using atomics: load balancing between wfs may not be perfect and drift, its a cost tradeof.
+    // Offset by wavefront ID so concurrent wavefronts spread across QPs
+    uint32_t wf_id = get_flat_block_id() / WF_SIZE;
+    qp_index = ((qp_counter[pe]++ + wf_id) % num_qps_per_pe) * constmem.num_pes + pe;
   }
 
   // Broadcast the qp_index value to other lanes in the wavefront
