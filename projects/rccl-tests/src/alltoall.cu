@@ -29,31 +29,51 @@
 // Called via test_pre_init_callback from common.cu's main(), after MPI_Init.
 static bool rocshmemTestPreInitialized = false;
 
+static long parseGinTypeEnv() {
+  const char* ginTypeEnv = getenv("NCCL_GIN_TYPE");
+  if (!ginTypeEnv) return -1;
+  char* end = nullptr;
+  long ginType = strtol(ginTypeEnv, &end, 0);
+  if (end == ginTypeEnv) return -1;
+  return ginType;
+}
+
 static bool shouldSkipRocshmemPreInit() {
   const char* skip = getenv("RCCL_TEST_SKIP_ROCSHMEM_PREINIT");
   if (skip && skip[0] == '1') return true;
 
-  // GIN_ROCSHMEM (NCCL_GIN_TYPE=4) needs rocshmem initialized before ncclCommInit.
-  // librccl is built with ENABLE_ROCSHMEM_GIN only (not ENABLE_ROCSHMEM), so init.cc
-  // never calls rocshmem_init for the test binary.
-  // GIN_ANVIL (NCCL_GIN_TYPE=5) uses RCCL's built-in Anvil SDMA plugin only; do not
-  // call rocshmem init/finalize here (IPC teardown aborts after a successful run).
-  const char* ginTypeEnv = getenv("NCCL_GIN_TYPE");
-  if (ginTypeEnv) {
-    char* end = nullptr;
-    long ginType = strtol(ginTypeEnv, &end, 0);
-    if (end != ginTypeEnv && ginType == 4) return false;
-    if (end != ginTypeEnv && ginType == 5) return true;
-  }
+  // GIN_ROCSHMEM (type 4): test must rocshmem_init before ncclCommInit so bootstrap
+  // runs under MPI ordering; librccl reuses it (ncclGinRocshmemEnsureInit). Init-only
+  // here — finalize is RCCL-owned (see shouldSkipRocshmemTestFinalize).
+  // GIN_ANVIL (type 5): Anvil SDMA only; no rocshmem lifecycle in the test binary.
+  long ginType = parseGinTypeEnv();
+  if (ginType == 4) return false;
+  if (ginType == 5) return true;
 
-  // GIN proxy/anvil and other RCCL GIN tests set RCCL_ROCSHMEM_ENABLE explicitly.
+  // GIN proxy and other RCCL GIN tests set RCCL_ROCSHMEM_ENABLE explicitly.
   // When RCCL owns rocSHMEM (1) preinit double-inits; when disabled (0) RCCL never
   // calls rocshmem_finalize and VMM tracking maps self-destruct at exit (double-free
   // when librccl.so also embeds rocshmem). Skip preinit whenever the env is set.
   const char* rcclRocshmem = getenv("RCCL_ROCSHMEM_ENABLE");
   if (rcclRocshmem != nullptr) return true;
   // Device-API GIN tests (NCCL_GIN_ENABLE=1) initialize transport via RCCL, not the
-  // test binary. Pre-init here leaves rocSHMEM unfinalized at exit and corrupts heap.
+  // test binary — except GIN_ROCSHMEM (type 4) handled above.
+  const char* ginEnable = getenv("NCCL_GIN_ENABLE");
+  if (ginEnable && ginEnable[0] == '1') return true;
+  return false;
+}
+
+static bool shouldSkipRocshmemTestFinalize() {
+  const char* skip = getenv("RCCL_TEST_SKIP_ROCSHMEM_PREINIT");
+  if (skip && skip[0] == '1') return true;
+
+  // GIN_ROCSHMEM / GIN_ANVIL: librccl finalizes (or never initialized) rocSHMEM.
+  // Test-side rocshmem_finalize after a successful run aborts in IPC teardown.
+  long ginType = parseGinTypeEnv();
+  if (ginType == 4 || ginType == 5) return true;
+
+  const char* rcclRocshmem = getenv("RCCL_ROCSHMEM_ENABLE");
+  if (rcclRocshmem != nullptr) return true;
   const char* ginEnable = getenv("NCCL_GIN_ENABLE");
   if (ginEnable && ginEnable[0] == '1') return true;
   return false;
@@ -81,6 +101,10 @@ static void rocshmemPreInit(int rank, int nranks) {
 
 static void rocshmemTestFinalize() {
   if (!rocshmemTestPreInitialized) return;
+  if (shouldSkipRocshmemTestFinalize()) {
+    rocshmemTestPreInitialized = false;
+    return;
+  }
   rocshmem::rocshmem_finalize();
   rocshmemTestPreInitialized = false;
 }
