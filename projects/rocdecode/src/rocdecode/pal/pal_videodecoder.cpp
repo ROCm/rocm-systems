@@ -587,7 +587,7 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
     ici.fragments = 1;
 #endif
-    ici.tiling = Pal::ImageTiling::Optimal;
+    ici.tiling = Pal::ImageTiling::Linear;
     // TODO: PAL version mismatch - videoDecodeTarget not found
     // ici.usageFlags.videoDecodeTarget = 1;
 
@@ -616,10 +616,14 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
     Pal::GpuMemoryCreateInfo mem_ci = {};
     mem_ci.size = mem_reqs.size;
     mem_ci.alignment = mem_reqs.alignment;
+    // GpuHeapInvisible: pure VRAM with no CPU aperture — optimal for VCN decode targets.
+    // interprocess=1: required for KMT handle export (ExportExternalHandle) for HIP interop.
+    // GpuHeapLocal (CPU-visible VRAM) + interprocess=1 is ErrorInvalidFlags on Windows PAL;
+    // GpuHeapInvisible has no CPU mapping so the KMD can issue a KMT handle without issue.
     mem_ci.flags.interprocess = 1;
-    mem_ci.flags.shareable = 1;
+    mem_ci.flags.shareable = 0;
     mem_ci.heapCount = 1;
-    mem_ci.heaps[0] = Pal::GpuHeapGartCacheable;
+    mem_ci.heaps[0] = Pal::GpuHeapInvisible;
 
     size_t gpu_mem_size = device_->GetGpuMemorySize(mem_ci, &res);
     if (Util::IsErrorResult(res)) {
