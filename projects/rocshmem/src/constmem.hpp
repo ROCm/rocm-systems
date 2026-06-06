@@ -36,12 +36,20 @@ namespace rocshmem {
 struct constmem_t {
   BackendType backend_type;
   GDAProvider gda_provider;
-  uint64_t alltoall_wg_algo;
-  int my_pe;
-  int num_pes;
+  // Heap bases (hot path: every put/get)
+  char *heap_local_base;  // base_heap[my_pe], constant after init
+  char *const *heap_bases; // pointer to heap base addresses array
+  // IPC bases (hot path: IPC conduit)
+  char *ipc_local_base;   // ipc_bases[shm_rank], constant after init
+  char **ipc_bases;       // pointer to IPC base addresses array
+  // IPC availability check (constmem scalar loads)
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
   int ipc_shm_size;
+  int my_pe;
+  int num_pes;
+  // Collective algorithm selection
+  int alltoall_wg_algo;
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;

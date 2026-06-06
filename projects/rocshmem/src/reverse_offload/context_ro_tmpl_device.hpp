@@ -28,6 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "commands_types.hpp"
 #include "context_ro_device.hpp"
+#include "constmem.hpp"
 #include "queue_proxy.hpp"
 #include "ro_net_team.hpp"
 #include "log.hpp"
@@ -147,9 +148,9 @@ __device__ void ROContext::put_nbi(T *dest, const T *source, size_t nelems,
 template <typename T>
 __device__ void ROContext::p(T *dest, T value, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-    long L_offset{reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
-    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
+    long L_offset{reinterpret_cast<char *>(dest) - constmem.ipc_local_base};
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(constmem.ipc_bases[local_pe] + L_offset,
                      reinterpret_cast<void *>(&value), sizeof(T), local_pe);
   } else {
     build_queue_element(RO_NET_P, dest, &value, sizeof(T), pe, 0, 0, 0, nullptr,
@@ -161,11 +162,11 @@ __device__ void ROContext::p(T *dest, T value, int pe) {
 template <typename T>
 __device__ T ROContext::g(const T *source, int pe) {
   int local_pe{-1};
-  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
     const char *src_typed{reinterpret_cast<const char *>(source)};
-    long L_offset{const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank]};
+    long L_offset{const_cast<char *>(src_typed) - constmem.ipc_local_base};
     T dest;
-    ipcImpl_.ipcCopy<MemcpyKind::Get>(&dest, ipcImpl_.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&dest, constmem.ipc_bases[local_pe] + L_offset, sizeof(T), local_pe);
     return dest;
   } else {
     auto dest{get_g_ret_buf()};

@@ -32,6 +32,12 @@ void init_constant_memory(void) {
   // Non-zero when IPC is available, regardless of stride pattern.
   constmem_values.ipc_shm_size = (backend->ipcImpl.pes_with_ipc_avail != nullptr)
                                  ? backend->ipcImpl.shm_size : 0;
+  constmem_values.ipc_local_base = (backend->ipcImpl.ipc_bases != nullptr)
+                                   ? backend->ipcImpl.ipc_bases[backend->ipcImpl.shm_rank]
+                                   : nullptr;
+  constmem_values.ipc_bases = backend->ipcImpl.ipc_bases;
+  constmem_values.heap_local_base = backend->heap.get_heap_bases()[backend->my_pe];
+  constmem_values.heap_bases = backend->heap.get_heap_bases().data();
 
   constmem_values.backend_type = backend->get_type();
 #if defined(USE_GDA)
