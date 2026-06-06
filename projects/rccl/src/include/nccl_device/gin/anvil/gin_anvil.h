@@ -22,7 +22,7 @@ NCCL_DEVICE_INLINE static ncclGinAnvilGPUContext* ncclGinAnvilGetCtx(ncclGinCtx 
   return &((ncclGinAnvilGPUContext*)handle)[ctx.contextId];
 }
 
-// Indexed signal cell on peer P via imported cuMem (local RW VA for SDMA atomics).
+// Indexed signal cell on peer P via imported cuMem (local RW VA for GPU atomics).
 NCCL_DEVICE_INLINE static uint64_t* ncclGinAnvilPeerSignalPtr(ncclGinAnvilGPUContext* aCtx, int peer,
                                                                ncclGinSignal_t signalId) {
   using nccl::utility::loadConst;
@@ -49,18 +49,32 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilLocalSignalOp(uint64_t* sigPtr, ncclG
     atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
 }
 
+// Remote signal cells: GPU system-scope atomics on the imported cuMem view. SDMA atomics
+// to import VAs fault on MI355X; owner VAs are not valid in the submitter's SDMA space.
+NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteGpuSignalOp(uint64_t* sigPtr, ncclGinSignalOp_t signalOp,
+                                                               uint64_t signalOpArg) {
+  if (sigPtr == nullptr) return;
+  if (signalOp == ncclGinSignalInc) signalOpArg = 1;
+  if (signalOp == ncclGinSignalInc || signalOp == ncclGinSignalAdd) {
+#if defined(__HIP_PLATFORM_AMD__)
+    __hip_atomic_fetch_add((unsigned long long*)sigPtr, (unsigned long long)signalOpArg,
+                           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
+    atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
+#endif
+  }
+}
+
 NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteSignalOp(rocshmem::anvil::SdmaQueueDeviceHandle& q,
                                                             ncclGinAnvilGPUContext* aCtx, int peer,
                                                             ncclGinSignal_t signalId,
                                                             ncclGinSignalOp_t signalOp,
                                                             uint64_t signalOpArg) {
+  (void)q;
+  (void)aCtx;
+  (void)peer;
   uint64_t* sigPtr = ncclGinAnvilPeerSignalPtr(aCtx, peer, signalId);
-  if (sigPtr == nullptr) return;
-  if (signalOp == ncclGinSignalInc) {
-    rocshmem::anvil::signal(q, sigPtr);
-  } else if (signalOp == ncclGinSignalAdd) {
-    atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
-  }
+  ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
 }
 
 template <>
@@ -142,10 +156,11 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     uint64_t* counterPtr = nullptr;
     if (hasCounter) counterPtr = (uint64_t*)(loadConst(&aCtx->counters) + counterId);
 
-    if (hasSignal && hasCounter) {
-      rocshmem::anvil::putSignalCounter(*q, dst, src, bytes, sigPtr, counterPtr);
-    } else if (hasSignal) {
-      rocshmem::anvil::putSignal(*q, dst, src, bytes, sigPtr);
+    if (hasSignal) {
+      rocshmem::anvil::put(*q, dst, src, bytes);
+      rocshmem::anvil::quiet(*q);
+      ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
+      if (hasCounter) atomicAdd((unsigned long long*)counterPtr, 1ULL);
     } else if (hasCounter) {
       rocshmem::anvil::putCounter(*q, dst, src, bytes, counterPtr);
     } else {

@@ -39,8 +39,7 @@ static size_t ginAnvilAlignCuMemBytes(size_t bytes, int cudaDev) {
   return bytes;
 }
 
-// SDMA signal atomics target the peer's native GPU VA. Grant each same-node peer
-// READWRITE access on this rank's signal allocation (owner mapping only had local access).
+// Grant peer GPUs READWRITE on this rank's signal owner mapping (for import + GPU atomics).
 static ncclResult_t ginAnvilGrantSignalPeerAccess(struct ncclComm* comm, void* signalsLocal,
                                                   size_t signalsBytes) {
   if (signalsLocal == nullptr || signalsBytes == 0) return ncclSuccess;
@@ -105,7 +104,7 @@ static void freeSignalBases(ginAnvilCtx* ctx) {
 }
 
 // Exchange cuMem handles and map peer signal allocs into this GPU (imported RW view).
-// Remote signal updates use GPU atomics on the import; SDMA is used for data puts only.
+// Remote signal updates use GPU system-scope atomics on the import; SDMA is for data puts only.
 struct ginAnvilSignalExport {
   ncclIpcDesc ipcDesc;
   void* directPtr;
