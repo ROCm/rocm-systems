@@ -1644,39 +1644,6 @@ inline void execute_s_floor_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
 }
 
 template <typename Inst>
-inline void execute_s_getreg_b32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint16_t hwreg = inst.simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
-  uint32_t reg_val = 0;
-  switch (reg_id) {
-  case 1:
-    reg_val = wf.status_raw();
-    break;
-  case 4:
-    reg_val = static_cast<uint32_t>(wf.cu().id());
-    break;
-  case 5:
-    reg_val = static_cast<uint32_t>(wf.cu().id() >> 16);
-    break;
-  case 6:
-    reg_val = (wf.sgpr_alloc().count & 0xFFu) | ((wf.sgpr_alloc().base & 0xFFu) << 8);
-    break;
-  case 7:
-    reg_val = (wf.vgpr_alloc().count & 0xFFu) | ((wf.vgpr_alloc().base & 0xFFu) << 8);
-    break;
-  default:
-    util::Logger::warn("s_getreg_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  inst.sdst.write_scalar(wf, (reg_val >> offset) & mask);
-}
-
-template <typename Inst>
 inline void execute_s_fmac_f16_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   float result = std::fma(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))),
                           util::f16_to_f32(static_cast<uint16_t>(inst.ssrc1.read_scalar(wf))),
@@ -1825,25 +1792,6 @@ inline void execute_s_max_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 }
 
 template <typename Inst>
-inline void execute_s_memrealtime_smem([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  static thread_local uint64_t counter = 0;
-  counter += 100;
-  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
-  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));
-  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
-}
-
-template <typename Inst>
-inline void execute_s_memtime_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  static thread_local uint64_t counter = 0;
-  counter += 100;
-  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
-  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));
-  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
-}
-
-template <typename Inst>
 inline void execute_s_maximum_f16_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   float result = [&]() {
@@ -1871,6 +1819,25 @@ inline void execute_s_maximum_f32_sop2([[maybe_unused]] Inst &inst,
     return a > b ? a : b;
   }();
   inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
+}
+
+template <typename Inst>
+inline void execute_s_memrealtime_smem([[maybe_unused]] Inst &inst,
+                                       [[maybe_unused]] Wavefront &wf) {
+  static thread_local uint64_t counter = 0;
+  counter += 100;
+  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
+  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));
+  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
+}
+
+template <typename Inst>
+inline void execute_s_memtime_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  static thread_local uint64_t counter = 0;
+  counter += 100;
+  uint32_t dst = wf.sgpr_alloc().base + inst.inst_.sdata;
+  wf.cu().write_sgpr(dst, static_cast<uint32_t>(counter));
+  wf.cu().write_sgpr(dst + 1, static_cast<uint32_t>(counter >> 32));
 }
 
 template <typename Inst>
@@ -2418,53 +2385,6 @@ inline void execute_s_setkill_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_setprio_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_setreg_b32_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint16_t hwreg = inst.simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  uint32_t src = inst.sdst.read_scalar(wf);
-  switch (reg_id) {
-  case 1: {
-    uint32_t s = wf.status_raw();
-    s = (s & ~(mask << offset)) | ((src & mask) << offset);
-    wf.set_status_raw(s);
-    break;
-  }
-  default:
-    util::Logger::warn("s_setreg_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
-}
-
-template <typename Inst>
-inline void execute_s_setreg_imm32_b32_sopk([[maybe_unused]] Inst &inst,
-                                            [[maybe_unused]] Wavefront &wf) {
-  uint16_t hwreg = inst.simm16.encoding_value_;
-  uint32_t reg_id = hwreg & 0x3Fu;
-  uint32_t offset = (hwreg >> 6) & 0x1Fu;
-  uint32_t size = ((hwreg >> 11) & 0x1Fu) + 1;
-  if (offset + size > 32)
-    size = 32 - offset;
-  uint32_t mask = (size == 32) ? 0xFFFFFFFFu : ((1u << size) - 1u);
-  uint32_t src = inst.literal_;
-  switch (reg_id) {
-  case 1: {
-    uint32_t s = wf.status_raw();
-    s = (s & ~(mask << offset)) | ((src & mask) << offset);
-    wf.set_status_raw(s);
-    break;
-  }
-  default:
-    util::Logger::warn("s_setreg_imm32_b32: unhandled hwreg id=", reg_id);
-    break;
-  }
-}
 
 template <typename Inst>
 inline void execute_s_sext_i32_i16_sop1([[maybe_unused]] Inst &inst,
@@ -16271,33 +16191,6 @@ inline void execute_v_perm_b32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
 }
 
 template <typename Inst>
-inline void execute_v_permlane16_b32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  constexpr bool fi = false, bound_ctrl = false;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    snap[i] = inst.src0.read_lane(wf, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t sel_word = (lane < 32) ? inst.src1.read_scalar(wf) : inst.src2.read_scalar(wf);
-    uint32_t sub = lane & 0xF;
-    uint32_t sel = (sel_word >> (sub * 2)) & 0xF;
-    uint32_t src_lane = (lane & ~0xFu) | ((sel) & 0xFu);
-    if (src_lane >= wf.wf_size())
-      continue;
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl)
-        inst.vdst.write_lane(wf, lane, 0);
-      continue;
-    }
-    inst.vdst.write_lane(wf, lane, snap[src_lane]);
-  }
-}
-
-template <typename Inst>
 inline void execute_v_permlane64_b32_vop1([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = wf.exec();
@@ -16310,33 +16203,6 @@ inline void execute_v_permlane64_b32_vop1([[maybe_unused]] Inst &inst,
     uint32_t partner = lane ^ 32;
     if (partner < wf.wf_size())
       inst.vdst.write_lane(wf, lane, snap[partner]);
-  }
-}
-
-template <typename Inst>
-inline void execute_v_permlanex16_b32_vop3([[maybe_unused]] Inst &inst,
-                                           [[maybe_unused]] Wavefront &wf) {
-  constexpr bool fi = false, bound_ctrl = false;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    snap[i] = inst.src0.read_lane(wf, i);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t sel_word = (lane < 32) ? inst.src1.read_scalar(wf) : inst.src2.read_scalar(wf);
-    uint32_t sub = lane & 0xF;
-    uint32_t sel = (sel_word >> (sub * 2)) & 0xF;
-    uint32_t src_lane = (lane & ~0xFu) | ((sel ^ 0x10) & 0xFu);
-    if (src_lane >= wf.wf_size())
-      continue;
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl)
-        inst.vdst.write_lane(wf, lane, 0);
-      continue;
-    }
-    inst.vdst.write_lane(wf, lane, snap[src_lane]);
   }
 }
 

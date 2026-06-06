@@ -3391,7 +3391,6 @@ class CodeGenerator:
         data_dwords = sem.num_elems or 1
 
         L = []
-        acc = self._acc_vgpr_expr
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -3405,21 +3404,25 @@ class CodeGenerator:
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
-        L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
+        is_cmpswap = sem.operation == 'cmpswap'
+        L.append(
+            f"  uint32_t data_base = {self._vgpr_base_expr('data0', role='Src1')};"
+        )
+        if is_cmpswap:
+            L.append(
+                f"  uint32_t data1_base = {self._vgpr_base_expr('data1', role='Src2')};"
+            )
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        is_cmpswap = sem.operation == 'cmpswap'
         half = data_dwords // 2
         for i in range(data_dwords):
             if is_cmpswap and i >= half:
-                reg = f'inst_.data1 + {i - half}'
+                data_source = f'data1_base + {i - half}'
             else:
-                reg = f'inst_.data0 + {i}'
-            L.append(
-                f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + {reg}, lane);'
-            )
+                data_source = f'data_base + {i}'
+            L.append(f'    uint32_t val{i} = cu.read_vgpr({data_source}, lane);')
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);'
             )
