@@ -288,7 +288,9 @@ def extract_machine_info() -> dict[str, Any]:
 
 @demarcate
 def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
-    is_partition_supported = MIGPUSpecs.is_partition_supported(gpu_arch)
+    is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
+        gpu_arch=gpu_arch, gpu_model=None
+    )
 
     result: dict[str, Optional[str]] = {
         "vbios": None,

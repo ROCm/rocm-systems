@@ -65,9 +65,18 @@ class TestMIGPUSpecs:
     # -- is_partition_supported ----------------------------------------------
 
     def test_is_partition_supported_true(self):
-        for arch in ("gfx942", "gfx950", "GFX942", "GFX950"):
-            assert MIGPUSpecs.is_partition_supported(arch), (
-                f"is_partition_supported({arch!r}) should be True"
+        for arch in (
+            "gfx940",
+            "gfx941",
+            "gfx942",
+            "gfx950",
+            "GFX940",
+            "GFX941",
+            "GFX942",
+            "GFX950",
+        ):
+            assert MIGPUSpecs.is_partition_supported(gpu_arch=arch, gpu_model=None), (
+                f"is_partition_supported(gpu_arch={arch!r}) should be True"
             )
 
     def test_is_partition_supported_false(self):
@@ -81,8 +90,25 @@ class TestMIGPUSpecs:
             "",
             "junk",
         ):
-            assert not MIGPUSpecs.is_partition_supported(arch), (
-                f"is_partition_supported({arch!r}) should be False"
+            assert not MIGPUSpecs.is_partition_supported(
+                gpu_arch=arch, gpu_model=None
+            ), f"is_partition_supported(gpu_arch={arch!r}) should be False"
+
+    def test_is_partition_supported_by_model(self):
+        supported_models = ["mi300a_a1", "mi300x_a1", "mi325x", "mi350"]
+        for model in supported_models:
+            assert MIGPUSpecs.is_partition_supported(gpu_arch=None, gpu_model=model), (
+                f"is_partition_supported(gpu_arch=None, gpu_model={model!r})"
+                " should be True"
+            )
+
+        unsupported_models = ["mi100", "mi210", "mi250", "mi250x", None, "", "junk"]
+        for model in unsupported_models:
+            assert not MIGPUSpecs.is_partition_supported(
+                gpu_arch=None, gpu_model=model
+            ), (
+                f"is_partition_supported(gpu_arch=None, gpu_model={model!r})"
+                " should be False"
             )
 
     # -- get_num_xcds --------------------------------------------------------
