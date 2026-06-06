@@ -81,6 +81,21 @@ __host__ void microtiming_print() {
 
   double ns_per_tick = get_ns_per_tick();
 
+  // Compute per-record overhead from calibration data
+  double record_overhead_ns = 0.0;
+  {
+    std::vector<double> deltas;
+    deltas.reserve(MICROTIMING_CALIB_SAMPLES - 1);
+    for (int i = 1; i < MICROTIMING_CALIB_SAMPLES; i++) {
+      if (host_copy.calib[i] > host_copy.calib[i - 1])
+        deltas.push_back((host_copy.calib[i] - host_copy.calib[i - 1]) * ns_per_tick);
+    }
+    if (!deltas.empty()) {
+      std::sort(deltas.begin(), deltas.end());
+      record_overhead_ns = deltas[deltas.size() / 2];
+    }
+  }
+
   // Compute per-section durations from 9 timestamps:
   //   T0: app call site          T1: before IPC check
   //   T2: before ActiveWFInfo    T3: before put_nbi
@@ -115,15 +130,30 @@ __host__ void microtiming_print() {
 
   for (int i = 0; i < iters; i++) {
     int base = i * MICROTIMING_STAMPS_PER_ITER;
-    uint64_t t0 = host_copy.ts[base + 0];
-    uint64_t t1 = host_copy.ts[base + 1];
-    uint64_t t2 = host_copy.ts[base + 2];
-    uint64_t t3 = host_copy.ts[base + 3];
-    uint64_t t4 = host_copy.ts[base + 4];
-    uint64_t t5 = host_copy.ts[base + 5];
-    uint64_t t6 = host_copy.ts[base + 6];
-    uint64_t t7 = host_copy.ts[base + 7];
-    uint64_t t8 = host_copy.ts[base + 8];
+    uint64_t t[MICROTIMING_STAMPS_PER_ITER];
+    for (int s = 0; s < MICROTIMING_STAMPS_PER_ITER; s++)
+      t[s] = host_copy.ts[base + s];
+
+    // Skip iterations with zero endpoints (incomplete recording)
+    if (t[0] == 0 || t[MICROTIMING_STAMPS_PER_ITER - 1] == 0) continue;
+
+    // Fill unrecorded slots (zero) from nearest recorded neighbor so
+    // unrecorded sections compute as zero duration.  For a gap between
+    // two recorded slots, the left half copies the left neighbor and
+    // the right half copies the right neighbor.
+    for (int s = 0; s < MICROTIMING_STAMPS_PER_ITER; ) {
+      if (t[s] != 0) { s++; continue; }
+      int gap_start = s;
+      while (s < MICROTIMING_STAMPS_PER_ITER && t[s] == 0) s++;
+      uint64_t left  = (gap_start > 0) ? t[gap_start - 1] : t[s];
+      uint64_t right = (s < MICROTIMING_STAMPS_PER_ITER) ? t[s] : left;
+      int mid = gap_start + (s - gap_start) / 2;
+      for (int j = gap_start; j < mid; j++) t[j] = left;
+      for (int j = mid; j < s; j++) t[j] = right;
+    }
+
+    uint64_t t0 = t[0], t1 = t[1], t2 = t[2], t3 = t[3], t4 = t[4];
+    uint64_t t5 = t[5], t6 = t[6], t7 = t[7], t8 = t[8];
 
     // Skip iterations with zero timestamps (incomplete recording)
     if (t0 == 0 || t8 == 0) continue;
@@ -144,21 +174,43 @@ __host__ void microtiming_print() {
   }
 
   int valid = static_cast<int>(sections[0].size());
-  printf("=== Microtiming: %d/%d valid iterations (wall_clk=%.0f ns/tick) ===\n",
-         valid, iters, ns_per_tick);
+  printf("=== Microtiming: %d/%d valid iterations (wall_clk=%.0f ns/tick, "
+         "record_overhead=%.0f ns) ===\n",
+         valid, iters, ns_per_tick, record_overhead_ns);
 
   if (valid == 0) return;
 
-  printf("%-14s  %10s  %10s  %10s  %10s  %s\n",
-         "section", "min(ns)", "P50(ns)", "P99(ns)", "max(ns)", "description");
+  // Number of s_memrealtime calls contributing to each section.
+  // Individual sections (0-7): 1 each (the record at the end boundary).
+  // Aggregates span multiple boundaries.
+  const int records_per_section[NUM_SECTIONS] = {
+    1,  // dispatch:     T1
+    1,  // ipc_check:    T2
+    1,  // wf_info+qp:   T3
+    1,  // put_nbi_call: T4
+    1,  // wqe+lock+cq:  T5
+    1,  // doorbell:     T6
+    1,  // put_nbi_ret:  T7
+    1,  // return_path:  T8
+    8,  // total:        T1..T8
+    2,  // post_wqe_rma: T5, T6
+    4,  // entry_ovhd:   T1..T4
+    2,  // ret_ovhd:     T7, T8
+    6,  // lib_overhead: T1..T4 + T7, T8
+  };
+
+  printf("%-14s  %10s  %10s  %10s  %10s  %10s  %s\n",
+         "section", "min(ns)", "P50(ns)", "P99(ns)", "max(ns)", "adj P50", "description");
 
   for (int s = 0; s < NUM_SECTIONS; s++) {
     if (s == 8)
-      printf("%-14s  %10s  %10s  %10s  %10s\n",
-             "--------------", "----------", "----------", "----------", "----------");
+      printf("%-14s  %10s  %10s  %10s  %10s  %10s\n",
+             "--------------", "----------", "----------", "----------",
+             "----------", "----------");
     auto st = compute_stats(sections[s]);
-    printf("%-14s  %10.0f  %10.0f  %10.0f  %10.0f  %s\n",
-           sections_info[s].name, st.min, st.p50, st.p99, st.max,
+    double adj = std::max(0.0, st.p50 - records_per_section[s] * record_overhead_ns);
+    printf("%-14s  %10.0f  %10.0f  %10.0f  %10.0f  %10.0f  %s\n",
+           sections_info[s].name, st.min, st.p50, st.p99, st.max, adj,
            sections_info[s].description);
   }
 

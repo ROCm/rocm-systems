@@ -44,10 +44,10 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
   int wf_id = t_id / wf_size;
 
   if (is_thread_zero_in_block()) {
-    microtiming_init_shared(&shared_microtiming);
+    microtiming_init_shared((microtiming_shared_ptr)&shared_microtiming);
   }
   __syncthreads();
-  microtiming_t *mt = &shared_microtiming;  // LDS pointer, kept in VGPR
+  microtiming_shared_ptr mt = (microtiming_shared_ptr)&shared_microtiming;
 
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -79,6 +79,7 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
       if (is_thread_zero_in_block()) {
         mt->iter = 0;
         mt->enabled = 1;
+        microtiming_calibrate(mt);
       }
       __syncthreads();
       // Capture the start time of each wavefront to identify the earliest one

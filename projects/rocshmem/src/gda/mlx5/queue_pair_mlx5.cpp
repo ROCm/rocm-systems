@@ -261,7 +261,7 @@ __device__ void QueuePair::mlx5_quiet_single() {
 // can be called with all active lanes using any number of different QPs, don't assume anything
 __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t laddr, uintptr_t raddr,
                                              uint8_t opcode, ActiveWFInfo &wf_info,
-                                             microtiming_t *mt) {
+                                             microtiming_shared_ptr mt) {
   microtiming_record(mt, 4);  // T4: post_wqe_rma entry
 
   if (wf_info.is_pe_group_last) {

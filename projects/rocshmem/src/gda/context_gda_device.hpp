@@ -28,6 +28,7 @@
 #include "context.hpp"
 #include "team.hpp"
 #include "queue_pair.hpp"
+#include "microtiming.hpp"
 
 namespace rocshmem {
 
@@ -49,7 +50,7 @@ class GDAContext : public Context {
                              int pe);
 
   __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
-                             int pe, struct microtiming_t *mt);
+                             int pe, microtiming_shared_ptr mt);
 
   __device__ void getmem_nbi(void *dest, const void *source, size_t size,
                              int pe);

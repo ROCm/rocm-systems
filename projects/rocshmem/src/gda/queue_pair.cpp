@@ -143,7 +143,7 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
  *****************************************************************************/
 __device__ void QueuePair::post_wqe_rma([[maybe_unused]] int pe, int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
-    microtiming_t *mt) {
+    microtiming_shared_ptr mt) {
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -286,7 +286,7 @@ __device__ void QueuePair::quiet_single() {
  *****************************************************************************/
 __device__ void QueuePair::put_nbi(void *dest, const void *source,
     size_t nelems, int pe, ActiveWFInfo &wf_info,
-    microtiming_t *mt) {
+    microtiming_shared_ptr mt) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_rma(pe, nelems, src, dst, gda_op_rdma_write, wf_info, mt);

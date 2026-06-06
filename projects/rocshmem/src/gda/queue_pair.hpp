@@ -38,6 +38,7 @@
 #include "endian.h"
 #include "constants.hpp"
 #include "util.hpp"
+#include "microtiming.hpp"
 
 #include "ibv_wrapper.hpp"
 
@@ -171,7 +172,7 @@ class QueuePair {
    */
   __device__ void put_nbi(void *dest, const void *source, size_t nelems,
       int pe, ActiveWFInfo &wf_info,
-      struct microtiming_t *mt = nullptr);
+      microtiming_shared_ptr mt = nullptr);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
       bool ring_db);
@@ -291,7 +292,7 @@ class QueuePair {
   __device__ __attribute__((noinline)) void
   post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
       uint8_t opcode, ActiveWFInfo &wf_info,
-      struct microtiming_t *mt = nullptr);
+      microtiming_shared_ptr mt = nullptr);
 
   __device__ __attribute__((noinline)) void
   post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
@@ -306,7 +307,7 @@ class QueuePair {
       bool fetch);
   __device__ void mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info,
-      struct microtiming_t *mt = nullptr);
+      microtiming_shared_ptr mt = nullptr);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void mlx5_quiet();

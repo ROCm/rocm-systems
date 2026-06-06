@@ -114,20 +114,29 @@ __device__ void GDAContext::getmem(void *dest, const void *source, size_t nelems
 
 __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe) {
-  putmem_nbi(dest, source, nelems, pe, nullptr);
+  int local_pe{-1};
+  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+    uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
+    return;
+  }
+  ActiveWFInfo wf_info(pe);
+  int qp_index = get_qp_index(pe, wf_info);
+  uint64_t L_offset = reinterpret_cast<char*>(dest) - base_heap[my_pe];
+  qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info);
 }
 
 __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe,
-                                       microtiming_t *mt) {
+                                       microtiming_shared_ptr mt) {
   microtiming_record(mt, 1);  // T1: before IPC check
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
-  microtiming_record(mt, 2);
+    microtiming_record(mt, 2);
     uint64_t L_offset = reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-  microtiming_record_and_skip(mt, 3, 4);
+    microtiming_record(mt, 3);
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset, const_cast<void *>(source), nelems, local_pe);
-  microtiming_record_and_skip(mt, 5, 7);
+    microtiming_record(mt, 7);
     return;
   }
   microtiming_record(mt, 2);  // T2: before ActiveWFInfo
@@ -138,6 +147,7 @@ __device__ void GDAContext::putmem_nbi(void *dest, const void *source,
   qps[qp_index].put_nbi(base_heap[pe] + L_offset, source, nelems, pe, wf_info, mt);
   microtiming_record(mt, 7);  // T7: after put_nbi
 }
+
 
 __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
                                        size_t nelems, int pe) {

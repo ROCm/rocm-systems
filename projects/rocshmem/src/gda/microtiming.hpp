@@ -37,15 +37,20 @@ static constexpr int MICROTIMING_MAX_ITERS = 256;  // fits in LDS (~18.5 KB)
 static constexpr int MICROTIMING_ARRAY_SIZE =
     MICROTIMING_STAMPS_PER_ITER * MICROTIMING_MAX_ITERS;
 
+static constexpr int MICROTIMING_CALIB_SAMPLES = 64;
+
 struct microtiming_t {
   uint64_t ts[MICROTIMING_ARRAY_SIZE];
   uint64_t quiet_start;
   uint64_t quiet_end;
-  uint64_t e2e_start;   // s_memrealtime at measurement start (matches wall_clock64 start)
-  uint64_t e2e_end;     // s_memrealtime at measurement end (matches wall_clock64 end)
-  int iter;     // current iteration (0-based)
-  int enabled;  // nonzero to record
+  uint64_t e2e_start;
+  uint64_t e2e_end;
+  uint64_t calib[MICROTIMING_CALIB_SAMPLES];
+  int iter;
+  int enabled;
 };
+
+using microtiming_shared_ptr = microtiming_t __attribute__((address_space(3))) *;
 
 /**
  * Global storage for host readback. Kernel copies shared data here before exit.
@@ -66,7 +71,18 @@ __device__ static inline uint64_t microtiming_clock() {
  * Record a timestamp. The pointer version avoids any global memory access —
  * the pointer is kept in a VGPR by the caller.
  */
-__device__ static inline void microtiming_record(microtiming_t* mt, int slot) {
+__device__ static inline void microtiming_record(microtiming_shared_ptr mt, int slot) {
+  if (!mt->enabled || threadIdx.x != 0) return;
+  int idx = mt->iter * MICROTIMING_STAMPS_PER_ITER + slot;
+  if (idx < MICROTIMING_ARRAY_SIZE) {
+    mt->ts[idx] = microtiming_clock();
+  }
+}
+
+/**
+ * Fallback: record via flat pointer (for non-LDS paths, e.g. global).
+ */
+__device__ static inline void microtiming_record_flat(microtiming_t* mt, int slot) {
   if (!mt || !mt->enabled) return;
   int idx = mt->iter * MICROTIMING_STAMPS_PER_ITER + slot;
   if (idx < MICROTIMING_ARRAY_SIZE) {
@@ -75,45 +91,43 @@ __device__ static inline void microtiming_record(microtiming_t* mt, int slot) {
 }
 
 /**
- * Skip slots [from, to] by writing the same timestamp to all of them.
- */
-__device__ static inline void microtiming_record_and_skip(microtiming_t* mt,
-                                               int from, int to) {
-  if (!mt || !mt->enabled) return;
-  uint64_t t = microtiming_clock();
-  int base = mt->iter * MICROTIMING_STAMPS_PER_ITER;
-  for (int s = from; s <= to; s++) {
-    int idx = base + s;
-    if (idx < MICROTIMING_ARRAY_SIZE) {
-      mt->ts[idx] = t;
-    }
-  }
-}
-
-/**
  * Fallback: load pointer from global. Used by call sites that don't
  * thread the pointer (e.g., quiet).
  */
 __device__ static inline void microtiming_record(int slot) {
-  microtiming_record(g_microtiming_ptr, slot);
+  microtiming_record_flat(g_microtiming_ptr, slot);
 }
 
-__device__ static inline void microtiming_next_iter(microtiming_t* mt) {
-  if (!mt || !mt->enabled) return;
+__device__ static inline void microtiming_next_iter(microtiming_shared_ptr mt) {
+  if (!mt->enabled || threadIdx.x != 0) return;
   mt->iter++;
 }
 
 __device__ static inline void microtiming_next_iter() {
-  microtiming_next_iter(g_microtiming_ptr);
+  microtiming_t* mt = g_microtiming_ptr;
+  if (!mt || !mt->enabled) return;
+  mt->iter++;
 }
 
 /**
  * Call from kernel thread 0 to set up shared memory storage.
  * Must be called before any microtiming_record calls.
  */
-__device__ static inline void microtiming_init_shared(microtiming_t* shared_buf) {
-  memset(shared_buf, 0, sizeof(microtiming_t));
-  g_microtiming_ptr = shared_buf;
+__device__ static inline void microtiming_init_shared(microtiming_shared_ptr shared_buf) {
+  memset((void*)shared_buf, 0, sizeof(microtiming_t));
+  g_microtiming_ptr = (microtiming_t*)shared_buf;
+}
+
+/**
+ * Run a calibration loop to measure s_memrealtime + LDS store overhead.
+ * Records back-to-back timestamps into the calib[] array; the host
+ * computes the median delta as the per-record cost.
+ */
+__device__ static inline void microtiming_calibrate(microtiming_shared_ptr mt) {
+  #pragma unroll 1
+  for (int i = 0; i < MICROTIMING_CALIB_SAMPLES; i++) {
+    mt->calib[i] = microtiming_clock();
+  }
 }
 
 /**
