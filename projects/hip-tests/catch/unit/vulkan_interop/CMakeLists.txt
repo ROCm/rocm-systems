@@ -13,6 +13,7 @@ set(TEST_SRC
     hipSignalExternalSemaphoresAsync.cc
     hipImportExternalSemaphore.cc
     hipDestroyExternalSemaphore.cc
+    hipVulkanImageDataVerification.cc
    )
 
 if(UNIX)
