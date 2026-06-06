@@ -5260,7 +5260,7 @@ hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBy
  *  @note If host or dst are not pinned, the memory copy will be performed synchronously. For
  * best performance, use hipHostMalloc to allocate host memory that is transferred asynchronously.
  *
- *  @param[in,out] dst Data being copy to
+ *  @param[out] dst Data being copy to
  *  @param[in]  src Data being copy from
  *  @param[in]  sizeBytes Data size in bytes
  *  @param[in]  kind  Type of memory transfer
