@@ -20,6 +20,47 @@
 #include <hip/hip_runtime.h>
 #include <map>
 
+// Match ncclCuMemAlloc / ncclP2pImportShareableBuffer granularity alignment.
+static size_t ginAnvilAlignCuMemBytes(size_t bytes, int cudaDev) {
+  CUmemAllocationProp prop = {};
+  size_t granularity = 0;
+  CUdevice dev;
+  CUCHECK(cuDeviceGet(&dev, cudaDev));
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+  prop.type = hipMemAllocationTypeUncached;
+#else
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+#endif
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  prop.requestedHandleTypes = ncclCuMemHandleType;
+  prop.location.id = dev;
+  CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+  ALIGN_SIZE(bytes, granularity);
+  return bytes;
+}
+
+// SDMA signal atomics target the peer's native GPU VA. Grant each same-node peer
+// READWRITE access on this rank's signal allocation (owner mapping only had local access).
+static ncclResult_t ginAnvilGrantSignalPeerAccess(struct ncclComm* comm, void* signalsLocal,
+                                                  size_t signalsBytes) {
+  if (signalsLocal == nullptr || signalsBytes == 0) return ncclSuccess;
+  for (int r = 0; r < comm->nRanks; r++) {
+    if (r == comm->rank) continue;
+    if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) continue;
+    int peerDev = comm->peerInfo[r].cudaDev;
+    if (peerDev == comm->cudaDev) continue;
+    CUmemAccessDesc accessDesc = {};
+    accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+    accessDesc.location.id = peerDev;
+    accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+    CUCHECK(cuMemSetAccess((CUdeviceptr)signalsLocal, signalsBytes, &accessDesc, 1));
+    INFO(NCCL_INIT | NCCL_NET,
+         "GIN anvil: granted peer rank %d dev %d RW access to signals %p bytes %zu", r, peerDev,
+         signalsLocal, signalsBytes);
+  }
+  return ncclSuccess;
+}
+
 struct ginAnvilCtx {
   struct ncclComm* comm;
   void* collComm;
@@ -63,8 +104,8 @@ static void freeSignalBases(ginAnvilCtx* ctx) {
   ctx->signalsBaseHost = nullptr;
 }
 
-// Exchange each rank's signal allocation address. Anvil SDMA atomics to a peer must
-// use that peer's native GPU VA (owner directPtr), not a local cuMem import mapping.
+// Exchange each rank's signal owner GPU VA. Peers receive cuMemSetAccess on the owner
+// allocation so Anvil SDMA atomics can write the peer-native address.
 static ncclResult_t setupSignalBases(ginAnvilCtx* ctx, struct ncclComm* comm, uint64_t* signalsLocal) {
   ncclResult_t ret = ncclSuccess;
   void** allDirectPtrs = nullptr;
@@ -137,6 +178,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   if (nSignals > 0) {
     ctx->signalsBytes = (size_t)nSignals * (size_t)nContexts * sizeof(uint64_t);
+    ctx->signalsBytes = ginAnvilAlignCuMemBytes(ctx->signalsBytes, comm->cudaDev);
     NCCLCHECKGOTO(ncclP2pAllocateShareableBuffer(ctx->signalsBytes, /*refcount=*/0, &ctx->signalsIpcDesc,
                                                  (void**)&signalsLocal, /*peerRank=*/-1, comm->memManager,
                                                  ncclMemPersist),
@@ -144,6 +186,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     ctx->signalsAlloc = signalsLocal;
     ctx->signalsShareable = true;
     CUDACHECKGOTO(cudaMemset(signalsLocal, 0, ctx->signalsBytes), ret, fail);
+    NCCLCHECKGOTO(ginAnvilGrantSignalPeerAccess(comm, signalsLocal, ctx->signalsBytes), ret, fail);
   }
   if (nCounters > 0) {
     size_t countersBytes = (size_t)nCounters * (size_t)nContexts * sizeof(uint64_t);
