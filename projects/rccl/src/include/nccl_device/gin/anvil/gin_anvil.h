@@ -16,12 +16,14 @@ NCCL_DEVICE_INLINE static uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uin
   return rank0Base + (uintptr_t)rank * (uintptr_t)strideBytes;
 }
 
-// Intra-rank / local-LSA copy (alltoall self slice). Avoid byte-wise loops — they dominate
-// latency for multi-KiB messages and made GIN_ANVIL ~10x slower than GIN_ROCSHMEM.
+// Intra-rank / local-LSA copy (Put self path and other single-thread callers).
 NCCL_DEVICE_INLINE static void ncclGinAnvilMemcpy(void* dst, void const* src, size_t bytes) {
+  if (bytes == 0) return;
+#if defined(__HIPCC__) || defined(__clang__)
+  __builtin_memcpy(dst, src, bytes);
+#else
   char* d = (char*)dst;
   char const* s = (char const*)src;
-  if (bytes == 0) return;
   if (((uintptr_t)d | (uintptr_t)s) % alignof(uint64_t) == 0) {
     uint64_t* d64 = (uint64_t*)d;
     uint64_t const* s64 = (uint64_t const*)s;
@@ -32,6 +34,7 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilMemcpy(void* dst, void const* src, si
     return;
   }
   for (size_t i = 0; i < bytes; ++i) d[i] = s[i];
+#endif
 }
 
 NCCL_DEVICE_INLINE static ncclGinAnvilGPUContext* ncclGinAnvilGetCtx(ncclGinCtx ctx) {

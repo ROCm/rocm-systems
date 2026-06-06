@@ -38,12 +38,12 @@ fi
 docker run --rm ${DOCKER_IMAGE} bash -lc "
   echo '=== workspace ==='
   pwd
-  ls -la /workspace
+  ls -la /workspace 2>/dev/null || true
   ls -la /workspace/rocshmem/bin 2>/dev/null || true
   ls -la /workspace/rccl/lib 2>/dev/null || true
   ls -la /workspace/rccl-tests/alltoall_perf 2>/dev/null || true
-  echo '=== alltoall_perf anvil symbol export ==='
-  nm -D /workspace/rccl-tests/alltoall_perf 2>/dev/null | grep anvil || echo 'MISSING anvil symbols'
+  # echo '=== alltoall_perf anvil symbol export ==='
+  # nm -D /workspace/rccl-tests/alltoall_perf 2>/dev/null | grep anvil || echo 'MISSING anvil symbols'
 "
 
 if [ 1 -eq 1 ]; then
@@ -114,7 +114,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x ROCSHMEM_HEAP_SIZE=1073741824 \
   -x ROCSHMEM_SDMA_ENABLED=1 \
   -x NCCL_GIN_TYPE=4 \
-  -x NCCL_DEBUG=INFO \
+  -x NCCL_DEBUG=VERSION \
   -x NCCL_DEBUG_SUBSYS=INIT \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
@@ -135,8 +135,8 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=5 \
-  -x NCCL_DEBUG=INFO \
-  -x NCCL_DEBUG_SUBSYS=INIT,NET \
+  -x NCCL_DEBUG=VERSION \
+  -x NCCL_DEBUG_SUBSYS=INIT \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
   -x NCCL_DMABUF_ENABLE=1 \

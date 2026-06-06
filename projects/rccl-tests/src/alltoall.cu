@@ -343,9 +343,27 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 
   /* send to all peers via GIN */
   const size_t size = count * sizeof(T);
-  for (int r=tid; r<devComm.nRanks; r+=nthreads) {
+  const int self = devComm.rank;
+
+  /* Self slice: parallel local copy. gin.put defaults to ncclCoopThread, so a self Put
+   * runs the Anvil memcpy on one thread — O(bytes) and ~100x slower than rocshmem SDMA
+   * at multi-MiB (see ddai-perf.log). Remote peers still use gin.put (SDMA + signal). */
+  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+  T* recvLocal = (T*)ncclGetLocalPointer(recvwin, recvoffset);
+  for (size_t i = tid; i < count; i += nthreads) {
+    recvLocal[self * count + i] = sendLocal[self * count + i];
+  }
+  if (tid == self) {
+    gin.put(ncclTeamWorld(devComm), self,
+        recvwin, recvoffset + self * size,
+        sendwin, sendoffset + self * size,
+        0, ncclGin_SignalInc{signalIndex});
+  }
+
+  for (int r = tid; r < devComm.nRanks; r += nthreads) {
+    if (r == self) continue;
     gin.put(ncclTeamWorld(devComm), r,
-        recvwin, recvoffset + devComm.rank * size,
+        recvwin, recvoffset + self * size,
         sendwin, sendoffset + r * size,
         size, ncclGin_SignalInc{signalIndex});
   }
