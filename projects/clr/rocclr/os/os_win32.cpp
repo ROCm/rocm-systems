@@ -842,6 +842,18 @@ bool resetThreadAffinity() {
   return false;
 }
 
+// ================================================================================================
+// AMD_GRAPH_CPU_AFFINITY is a no-op on Windows for now.
+bool ApplyGraphAffinity(uint32_t /*node*/) {
+  return false;
+}
+
+void RestoreGraphAffinity() {}
+
+void HoldGraphAffinity(uint32_t /*node*/) {}
+
+void RestoreHeldGraphAffinity() {}
+
 }  // namespace numa
 
 }  // namespace amd

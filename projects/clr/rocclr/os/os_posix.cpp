@@ -36,6 +36,7 @@
 #endif  // DT_GNU_HASH
 #include <atomic>
 #include <vector>
+#include <unordered_map>
 #include <string>
 #include <sstream>
 #include <cstring>  // for strncmp
@@ -56,6 +57,13 @@ struct ThreadAffinityState {
   uint32_t runtime_set_affinity_node = static_cast<uint32_t>(-1);
   std::vector<uint64_t> original_affinity_mask;
   bool original_affinity_mask_valid = false;
+  // Graph-scoped (AMD_GRAPH_CPU_AFFINITY) state:
+  bool graph_app_owned = false;  //!< app/launcher set a restricted mask -> never pin
+  // Scope mode (default): pin per launch, restore on launch exit.
+  bool graph_applied = false;    //!< this launch pinned -> restore on Run exit
+  // Hold mode (AMD_GRAPH_CPU_AFFINITY_HOLD): pin once, restore at hipGraphExecDestroy.
+  bool graph_hold_applied = false;                       //!< holding a pin -> restore at ExecDestroy
+  uint32_t graph_hold_node = static_cast<uint32_t>(-1);  //!< node currently held (skip re-pin)
 };
 
 ThreadAffinityState*& GetThreadAffinityStatePtr() {
@@ -1241,6 +1249,154 @@ bool resetThreadAffinity() {
   const bool restored = SetCurrentThreadAffinity(affinity_state->original_affinity_mask);
   ReleaseThreadAffinityState();
   return restored;
+}
+
+// ================================================================================================
+// Read a NUMA node's CPU set from sysfs into a sched_setaffinity-compatible mask
+// (same word width as GetCurrentThreadAffinity). Parses /sys/.../nodeN/cpulist
+// ("0-63" / "0-15,32-47"). Returns empty on failure.
+static std::vector<uint64_t> ReadNodeCpuMask(uint32_t node) {
+  const uint32_t bytes = CPU_ALLOC_SIZE(amd::Os::processorCount());
+  std::vector<uint64_t> mask((bytes + sizeof(uint64_t) - 1) / sizeof(uint64_t), 0);
+  std::ifstream file("/sys/devices/system/node/node" + std::to_string(node) + "/cpulist");
+  if (!file) {
+    return {};
+  }
+  std::string line;
+  std::getline(file, line);
+  size_t pos = 0;
+  while (pos < line.size()) {
+    const size_t comma = line.find(',', pos);
+    const std::string tok =
+        line.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+    if (!tok.empty()) {
+      const size_t dash = tok.find('-');
+      const uint32_t lo = static_cast<uint32_t>(std::stoul(tok.substr(0, dash)));
+      const uint32_t hi = (dash == std::string::npos)
+          ? lo : static_cast<uint32_t>(std::stoul(tok.substr(dash + 1)));
+      for (uint32_t cpu = lo; cpu <= hi; ++cpu) {
+        const uint32_t w = cpu / kBitsPerUInt64;
+        if (w < mask.size()) {
+          mask[w] |= (static_cast<uint64_t>(1) << (cpu % kBitsPerUInt64));
+        }
+      }
+    }
+    if (comma == std::string::npos) {
+      break;
+    }
+    pos = comma + 1;
+  }
+  return mask;
+}
+
+// Process-wide cache: node index -> CPU mask. Topology is fixed for the process,
+// so the sysfs read happens once per node, not once per graph launch.
+static const std::vector<uint64_t>& CachedNodeCpuMask(uint32_t node) {
+  static std::mutex cache_lock;
+  static std::unordered_map<uint32_t, std::vector<uint64_t>> cache;
+  std::scoped_lock lk(cache_lock);
+  auto it = cache.find(node);
+  if (it == cache.end()) {
+    it = cache.emplace(node, ReadNodeCpuMask(node)).first;
+  }
+  return it->second;  // unordered_map element refs are stable across later inserts
+}
+
+// ================================================================================================
+// Scope-mode graph pin (AMD_GRAPH_CPU_AFFINITY): pin the calling thread to `node`
+// for one graph launch.
+//   - captures the thread's original mask once (cached in TLS), then trusts it;
+//   - respects an app/launcher/cpuset-set mask (checked once, then remembered);
+//   - does nothing when the thread is already on the node (e.g. numactl-bound);
+//   - the node CPU mask is read from sysfs once per node and cached globally, so
+//     the steady-state cost is one sched_setaffinity here + one in
+//     RestoreGraphAffinity, with no per-launch reads.
+// Returns true iff a pin was applied (caller must call RestoreGraphAffinity).
+bool ApplyGraphAffinity(uint32_t node) {
+  ThreadAffinityState& st = GetThreadAffinityState();
+  if (st.graph_app_owned) {
+    return false;
+  }
+  if (!st.original_affinity_mask_valid) {
+    if (!GetCurrentThreadAffinity(&st.original_affinity_mask)) {
+      return false;
+    }
+    if (!IsUnrestrictedAffinity(st.original_affinity_mask)) {
+      st.graph_app_owned = true;  // respect app/launcher/cpuset mask; never pin
+      return false;
+    }
+    st.original_affinity_mask_valid = true;
+  }
+  const std::vector<uint64_t>& node_mask = CachedNodeCpuMask(node);
+  if (node_mask.empty() || IsSameAffinity(st.original_affinity_mask, node_mask)) {
+    return false;  // unknown node, or already on the node -> nothing to do
+  }
+  if (!SetCurrentThreadAffinity(node_mask)) {
+    return false;
+  }
+  st.graph_applied = true;
+  return true;
+}
+
+void RestoreGraphAffinity() {
+  ThreadAffinityState* st = GetThreadAffinityStatePtr();
+  if (st == nullptr || !st->graph_applied) {
+    return;
+  }
+  SetCurrentThreadAffinity(st->original_affinity_mask);
+  st->graph_applied = false;  // keep original_affinity_mask cached for next launch
+}
+
+// ================================================================================================
+// Hold-mode graph pin (AMD_GRAPH_CPU_AFFINITY_HOLD): pin the calling thread to
+// `node` and keep it pinned across launches; re-pin only when the launch node
+// changes. The mask is restored once, from the hipGraphExecDestroy path
+// (RestoreHeldGraphAffinity), which runs on the app's destroying thread -- a
+// deterministic, correct-thread boundary (unlike ~GraphExec, which may run on an
+// async completion thread when the exec is destroyed with work still in flight).
+// The pin is held from the first launch until ExecDestroy, so this mode does not
+// restore the mask between launches.
+void HoldGraphAffinity(uint32_t node) {
+  ThreadAffinityState& st = GetThreadAffinityState();
+  if (st.graph_app_owned || st.graph_hold_node == node) {
+    return;  // app owns the mask, or already held on this node -> nothing to do
+  }
+  if (!st.original_affinity_mask_valid) {
+    if (!GetCurrentThreadAffinity(&st.original_affinity_mask)) {
+      return;
+    }
+    if (!IsUnrestrictedAffinity(st.original_affinity_mask)) {
+      st.graph_app_owned = true;  // respect app/launcher/cpuset mask; never pin
+      return;
+    }
+    st.original_affinity_mask_valid = true;
+  }
+  const std::vector<uint64_t>& node_mask = CachedNodeCpuMask(node);
+  if (node_mask.empty()) {
+    return;
+  }
+  if (IsSameAffinity(st.original_affinity_mask, node_mask)) {
+    st.graph_hold_node = node;  // already on the node (e.g. numactl-bound); just remember
+    return;
+  }
+  if (!SetCurrentThreadAffinity(node_mask)) {
+    return;
+  }
+  st.graph_hold_node = node;
+  st.graph_hold_applied = true;  // restored later from hipGraphExecDestroy on this thread
+}
+
+// Restore a hold-mode pin. Called from hipGraphExecDestroy on the app's
+// destroying thread; no-op if this thread isn't holding a graph pin (e.g. a
+// different thread destroys the exec, or hold mode was not used).
+void RestoreHeldGraphAffinity() {
+  ThreadAffinityState* st = GetThreadAffinityStatePtr();
+  if (st == nullptr || !st->graph_hold_applied) {
+    return;
+  }
+  SetCurrentThreadAffinity(st->original_affinity_mask);
+  st->graph_hold_applied = false;
+  st->graph_hold_node = static_cast<uint32_t>(-1);
 }
 }  // namespace numa
 

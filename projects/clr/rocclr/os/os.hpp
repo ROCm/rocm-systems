@@ -309,6 +309,25 @@ uint32_t getCurrentNumaNode();
 //! Restore the current thread affinity if it was changed by the runtime
 bool resetThreadAffinity();
 
+//! Graph-scoped (AMD_GRAPH_CPU_AFFINITY) lean pin: pin the current thread to
+//! `node` for a single graph launch. Returns true iff a pin was applied (the
+//! caller must then call RestoreGraphAffinity on scope exit). Caches the
+//! thread's original mask and the node CPU mask so the steady-state cost is one
+//! sched_setaffinity here + one in RestoreGraphAffinity.
+bool ApplyGraphAffinity(uint32_t node);
+
+//! Restore the mask saved by a prior ApplyGraphAffinity that returned true.
+void RestoreGraphAffinity();
+
+//! Hold variant (AMD_GRAPH_CPU_AFFINITY_HOLD): pin the current thread to `node`
+//! and keep it pinned across launches; re-pins only when `node` changes; no
+//! per-launch restore -- the mask is restored from hipGraphExecDestroy.
+void HoldGraphAffinity(uint32_t node);
+
+//! Restore a HoldGraphAffinity pin from the hipGraphExecDestroy path. Runs on
+//! the app's destroying thread; no-op unless that thread holds the pin.
+void RestoreHeldGraphAffinity();
+
 /*! \brief Manage Numa policy.
  *
  *  \note Works in Linux only, dummy in Windows.
@@ -384,18 +403,24 @@ inline void Os::resetPreferredNumaNode() {
 //! forks/spawns between launches. Gated by AMD_GRAPH_CPU_AFFINITY.
 class ScopedGraphCpuAffinity {
  public:
+  //! \param node GPU-local NUMA node to pin to for this launch.
   explicit ScopedGraphCpuAffinity(uint32_t node) {
     // Mutually exclusive with the process-wide pin: if AMD_CPU_AFFINITY already
     // owns this thread's mask, do nothing -- otherwise our restore would tear
     // down its TLS affinity state after the first launch.
     if (AMD_GRAPH_CPU_AFFINITY && !AMD_CPU_AFFINITY) {
-      numa::NumaNode numaNode(node);
-      active_ = numaNode.SchedSetAffinityIfAllowed();
+      if (AMD_GRAPH_CPU_AFFINITY_HOLD) {
+        // Hold mode: pin and keep it; restored at hipGraphExecDestroy, not here.
+        numa::HoldGraphAffinity(node);
+      } else {
+        // Scope mode (default): pin now, restore on scope exit.
+        active_ = numa::ApplyGraphAffinity(node);
+      }
     }
   }
   ~ScopedGraphCpuAffinity() {
     if (active_) {
-      numa::resetThreadAffinity();
+      numa::RestoreGraphAffinity();
     }
   }
   ScopedGraphCpuAffinity(const ScopedGraphCpuAffinity&) = delete;

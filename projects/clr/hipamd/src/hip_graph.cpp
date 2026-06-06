@@ -1715,6 +1715,9 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t pGraphExec) {
     hip::GraphExecBase::graphExecSet_.erase(ge);
   }
   ge->release();
+  // Restore a hold-mode (AMD_GRAPH_CPU_AFFINITY_HOLD) GPU-local pin on this (the
+  // app's destroying) thread. No-op in scope mode or if this thread holds none.
+  amd::numa::RestoreHeldGraphAffinity();
   HIP_RETURN(hipSuccess);
 }
 
