@@ -20,17 +20,14 @@
 #include <hip/hip_runtime.h>
 #include <map>
 
-// Match ncclCuMemAlloc / ncclP2pImportShareableBuffer granularity alignment.
-static size_t ginAnvilAlignCuMemBytes(size_t bytes, int cudaDev) {
+// Signal buffers must be pinned (cached) device memory: SDMA putSignal atomics fault on
+// uncached cuMem imports (MI355X). LSA/window memory uses uncached separately via devr.
+static size_t ginAnvilAlignSignalCuMemBytes(size_t bytes, int cudaDev) {
   CUmemAllocationProp prop = {};
   size_t granularity = 0;
   CUdevice dev;
   CUCHECK(cuDeviceGet(&dev, cudaDev));
-#if defined(HIP_VMM_UNCACHED_MEMORY)
-  prop.type = hipMemAllocationTypeUncached;
-#else
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-#endif
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   prop.requestedHandleTypes = ncclCuMemHandleType;
   prop.location.id = dev;
@@ -104,7 +101,8 @@ static void freeSignalBases(ginAnvilCtx* ctx) {
 }
 
 // Exchange cuMem handles and map peer signal allocs into this GPU (imported RW view).
-// Remote signal updates use GPU system-scope atomics on the import; SDMA is for data puts only.
+// Signal cells use pinned cuMem so SDMA putSignal can target the imported VA; GPU atomics
+// remain the fallback on the same view.
 struct ginAnvilSignalExport {
   ncclIpcDesc ipcDesc;
   void* directPtr;
@@ -182,7 +180,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   if (nSignals > 0) {
     ctx->signalsBytes = (size_t)nSignals * (size_t)nContexts * sizeof(uint64_t);
-    ctx->signalsBytes = ginAnvilAlignCuMemBytes(ctx->signalsBytes, comm->cudaDev);
+    ctx->signalsBytes = ginAnvilAlignSignalCuMemBytes(ctx->signalsBytes, comm->cudaDev);
     NCCLCHECKGOTO(ncclP2pAllocateShareableBuffer(ctx->signalsBytes, /*refcount=*/0, &ctx->signalsIpcDesc,
                                                  (void**)&signalsLocal, /*peerRank=*/-1, comm->memManager,
                                                  ncclMemPersist),

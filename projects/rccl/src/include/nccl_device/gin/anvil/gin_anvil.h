@@ -70,8 +70,7 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilLocalSignalOp(uint64_t* sigPtr, ncclG
     atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
 }
 
-// Remote signal cells: GPU system-scope atomics on the imported cuMem view. SDMA atomics
-// to import VAs fault on MI355X; owner VAs are not valid in the submitter's SDMA space.
+// Remote signal fallback: GPU atomics on the imported cuMem view when SDMA putSignal is unavailable.
 NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteGpuSignalOp(uint64_t* sigPtr, ncclGinSignalOp_t signalOp,
                                                                uint64_t signalOpArg) {
   if (sigPtr == nullptr) return;
@@ -79,8 +78,7 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteGpuSignalOp(uint64_t* sigPtr, n
   if (signalOp == ncclGinSignalInc || signalOp == ncclGinSignalAdd) {
 #if defined(__HIP_PLATFORM_AMD__)
     __hip_atomic_fetch_add((unsigned long long*)sigPtr, (unsigned long long)signalOpArg,
-                           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-    __threadfence_system();
+                           __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 #else
     atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
 #endif
@@ -129,6 +127,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
       if (hasSignal)
         ncclGinAnvilLocalSignalOp(ncclGinAnvilLocalSignalPtr(aCtx, signalId), signalOp, signalOpArg);
+
       if (hasCounter)
         atomicAdd((unsigned long long*)(loadConst(&aCtx->counters) + counterId), 1ULL);
       return;

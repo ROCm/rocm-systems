@@ -14,7 +14,8 @@
 // Device-resident context handle for Anvil-SDMA based GIN.
 // - queues[peer] points to an SDMA queue handle for issuing ops to that peer.
 // - signalsBase[peer] is this GPU's imported cuMem view of peer P's signal alloc (RW local VA).
-//   Remote signal updates use GPU system-scope atomics on that view; SDMA is for data puts only.
+//   Signal cells use pinned cuMem so SDMA putSignal can fuse copy+atomic; GPU atomics remain
+//   the fallback on the same imported view.
 // - signalsContextOffset selects this GIN context's slice within the peer signal allocation.
 struct ncclGinAnvilGPUContext {
   void** queues;              // device array [nRanks] of rocshmem::anvil::SdmaQueueDeviceHandle*
