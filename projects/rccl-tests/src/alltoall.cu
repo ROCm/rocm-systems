@@ -156,16 +156,16 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
     case 2: // NvlAlltoAllKernelOptimized
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
-    case 3: // GinAlltoAllKernel — matches GinDeviceMPITests alltoallPureKernel (1 CTA)
+    case 3: // GinAlltoAllKernel — testLaunchDeviceKernel uses deviceCtaCount CTAs
       if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
       reqs->ginContextCount = 1;
-      reqs->lsaBarrierCount = 1;
-      reqs->barrierCount = 1;
-      reqs->railGinBarrierCount = 1;
-      reqs->ginSignalCount = 1;
+      reqs->lsaBarrierCount = deviceCtaCount;
+      reqs->barrierCount = deviceCtaCount;
+      reqs->railGinBarrierCount = deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return testSuccess;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
@@ -196,10 +196,10 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: // GinAlltoAllKernel
       reqs->ginContextCount = 1;
-      reqs->lsaBarrierCount = 1;
-      reqs->barrierCount = 1;
-      reqs->railGinBarrierCount = 1;
-      reqs->ginSignalCount = 1;
+      reqs->lsaBarrierCount = deviceCtaCount;
+      reqs->barrierCount = deviceCtaCount;
+      reqs->railGinBarrierCount = deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
@@ -357,34 +357,13 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   int nthreads = blockDim.x * gridDim.x;
 
   if (allLocal) {
-    // Single-node: LSA barriers; avoid GIN signal/wait/flush on the hot path.
+    // Single-node: LSA barriers + LSA copies only (no GIN signal/wait/flush).
     ncclLsaBarrierSession<ncclCoopCta> lsaBar {
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    // Anvil: direct xGMI SDMA beats LSA scalar stores for large per-peer slices.
-    constexpr size_t kAnvilSdmaAlltoAllBytes = 65536;
-    const bool anvilSdma = devComm.ginNetDeviceTypes[ginContext] == NCCL_NET_DEVICE_GIN_ANVIL &&
-                         size >= kAnvilSdmaAlltoAllBytes;
-    if (anvilSdma) {
-      ncclGin gin { devComm, ginContext };
-      const int self = world.rank;
-      T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-      T* recvLocal = (T*)ncclGetLocalPointer(recvwin, recvoffset);
-      for (size_t i = tid; i < count; i += nthreads)
-        recvLocal[self * count + i] = sendLocal[self * count + i];
-      for (int r = tid; r < world.nRanks; r += nthreads) {
-        if (r == self) continue;
-        gin.put(world, r,
-            recvwin, recvoffset + (size_t)self * size,
-            sendwin, sendoffset + (size_t)r * size,
-            size);
-      }
-      gin.flush(ncclCoopCta());
-    } else {
-      AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
-                         lsa.nRanks, tid, nthreads);
-    }
+    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
+                       lsa.nRanks, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;

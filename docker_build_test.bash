@@ -46,7 +46,7 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
   # nm -D /workspace/rccl-tests/alltoall_perf 2>/dev/null | grep anvil || echo 'MISSING anvil symbols'
 "
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 #####
 # rocSHMEM IPC alltoall (reference)
 echo "=== rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -102,7 +102,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 1 -A 1
 fi
 
-if [ 0 -eq 1 ]; then
+if [ 1 -eq 1 ]; then
 #####
 # RCCL AlltoAll: GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA path
 echo "=== RCCL AlltoAll: GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -126,7 +126,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 3 -A 1
 fi
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 #####
 # RCCL AlltoAll: GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA path
 echo "=== RCCL AlltoAll: GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -149,7 +149,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   /workspace/rccl-tests/alltoall_perf \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 4 -A 1
 fi
-if [ 0 -eq 1 ]; then
+if [ 1 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
 echo "=== RCCL AlltoAll: GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -170,7 +170,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 3 -A 1
 fi
 
-if [ 1 -eq 1 ]; then
+if [ 0 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
 echo "=== RCCL AlltoAll: GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
