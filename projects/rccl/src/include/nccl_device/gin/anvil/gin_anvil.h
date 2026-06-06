@@ -16,6 +16,24 @@ NCCL_DEVICE_INLINE static uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uin
   return rank0Base + (uintptr_t)rank * (uintptr_t)strideBytes;
 }
 
+// Intra-rank / local-LSA copy (alltoall self slice). Avoid byte-wise loops — they dominate
+// latency for multi-KiB messages and made GIN_ANVIL ~10x slower than GIN_ROCSHMEM.
+NCCL_DEVICE_INLINE static void ncclGinAnvilMemcpy(void* dst, void const* src, size_t bytes) {
+  char* d = (char*)dst;
+  char const* s = (char const*)src;
+  if (bytes == 0) return;
+  if (((uintptr_t)d | (uintptr_t)s) % alignof(uint64_t) == 0) {
+    uint64_t* d64 = (uint64_t*)d;
+    uint64_t const* s64 = (uint64_t const*)s;
+    size_t n = bytes / sizeof(uint64_t);
+    for (size_t i = 0; i < n; ++i) d64[i] = s64[i];
+    size_t tail = n * sizeof(uint64_t);
+    for (size_t i = tail; i < bytes; ++i) d[i] = s[i];
+    return;
+  }
+  for (size_t i = 0; i < bytes; ++i) d[i] = s[i];
+}
+
 NCCL_DEVICE_INLINE static ncclGinAnvilGPUContext* ncclGinAnvilGetCtx(ncclGinCtx ctx) {
   void* handle = nccl::utility::loadConst(&ctx.handle);
   if (handle == nullptr) return nullptr;
@@ -66,18 +84,6 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteGpuSignalOp(uint64_t* sigPtr, n
   }
 }
 
-NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteSignalOp(rocshmem::anvil::SdmaQueueDeviceHandle& q,
-                                                            ncclGinAnvilGPUContext* aCtx, int peer,
-                                                            ncclGinSignal_t signalId,
-                                                            ncclGinSignalOp_t signalOp,
-                                                            uint64_t signalOpArg) {
-  (void)q;
-  (void)aCtx;
-  (void)peer;
-  uint64_t* sigPtr = ncclGinAnvilPeerSignalPtr(aCtx, peer, signalId);
-  ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
-}
-
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
   template <typename Coop>
@@ -116,7 +122,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
       char* dst = (char*)(ncclGinAnvilRankPtr(dstRank0Base, stride, ctx.rank) + dstOff);
       char* src = (char*)(ncclGinAnvilRankPtr(srcRank0Base, stride, ctx.rank) + srcOff);
-      for (size_t i = 0; i < bytes; ++i) dst[i] = src[i];
+      ncclGinAnvilMemcpy(dst, src, bytes);
 
       if (hasSignal)
         ncclGinAnvilLocalSignalOp(ncclGinAnvilLocalSignalPtr(aCtx, signalId), signalOp, signalOpArg);
@@ -138,7 +144,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     }
 
     if (!hasWins) {
-      if (hasSignal) ncclGinAnvilRemoteSignalOp(*q, aCtx, peer, signalId, signalOp, signalOpArg);
+      if (hasSignal) ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
       return;
     }
 
