@@ -262,14 +262,6 @@ class webui_analysis(OmniAnalyze_Base):
             soc = self.get_socs()
             if soc and self.arch in soc:
                 if is_roofline_valid:
-                    # Normalize user-facing "vL1D" to CSV column name "L1"
-                    mem_level = (
-                        args.mem_level
-                        if isinstance(args.mem_level, list)
-                        else [args.mem_level]
-                    )
-                    mem_level = [("L1" if m == "vL1D" else m) for m in mem_level]
-
                     matrix_ops_type = get_matrix_ops_type(
                         getattr(soc[self.arch]._mspec, "gpu_series", "unknown_series")
                     )
@@ -281,7 +273,7 @@ class webui_analysis(OmniAnalyze_Base):
                             "device_id": 0,
                             "gpu_arch": self.arch,
                             "sort_type": str(args.sort),
-                            "mem_level": mem_level,
+                            "mem_level": args.mem_level,
                             "include_kernel_names": True,
                             "roofline_data_type": self.__roofline_data_type,
                             # WebUI handles kernel filtering

@@ -246,7 +246,7 @@ Roofline Plot Points:
     unit: FLOPs/Byte
   AI L0:
     plain: Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
-    rst: Arithmetic Intensity relative to the L1 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
+    rst: Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.
     unit: FLOPs/Byte
   AI LDS:
     plain: Arithmetic Intensity relative to the Local Data Share (LDS). Higher values indicate more compute per byte of LDS traffic, suggesting effective reuse of shared data within a workgroup. Lower values suggest memory-bound behavior limited by LDS bandwidth or bank-conflict pressure.

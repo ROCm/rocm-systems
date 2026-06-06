@@ -209,6 +209,35 @@ def sanitize_ai_value(value: float) -> float:
     return value if value and value not in excluded_values else 0
 
 
+def sanitize_mem_level(mem_level: list | str, gpu_arch: str) -> list:
+    """
+    Ensure cache level requests through --mem-level roofline analysis option
+    are supported on the architecture, and have been normalized."
+    """
+    # Make mem_level a list if not already one
+    levels_raw = mem_level if isinstance(mem_level, list) else [mem_level]
+
+    # Remove any requested mem levels not supported in the profiled arch
+    levels = [m for m in levels_raw if m in CACHE_HIERARCHY[gpu_arch]]
+
+    if levels_raw != ["ALL"] and levels != levels_raw:
+        console_warning(
+            "roofline",
+            f"Cache levels requested with --mem-level for {gpu_arch} are not valid- "
+            "unsupported cache levels will not be displayed.",
+        )
+
+    # Step above removes all mem levels, including "ALL" which is the default.
+    # An empty list means the mem_level was originally ALL, or the user requested
+    # only unsupported levels and we should default back to ALL.
+    levels = CACHE_HIERARCHY[gpu_arch] if levels == [] else levels
+
+    # Normalize user-facing "vL1D" to CSV column name "L1"
+    levels = [("L1" if m == "vL1D" else m) for m in levels]
+
+    return levels
+
+
 # -------------------------------------------------------------------------------------
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
@@ -243,11 +272,8 @@ def calc_ceilings(
         "matrix_ops": [],
     }
 
-    mem_level = roofline_parameters["mem_level"]
-    cache_hierarchy = (
-        CACHE_HIERARCHY[roofline_parameters["gpu_arch"]]
-        if mem_level == "ALL" or mem_level == ["ALL"]
-        else mem_level
+    cache_hierarchy = sanitize_mem_level(
+        roofline_parameters["mem_level"], roofline_parameters["gpu_arch"]
     )
 
     x1 = y1 = x2 = y2 = -1
@@ -572,12 +598,10 @@ def construct_roof(
     if dtype in PEAK_OPS_DATATYPES:
         expected_columns.append(f"{dtype}{ops_flops}")
 
-    mem_level = roofline_parameters["mem_level"]
-    cache_hierarchy = (
-        CACHE_HIERARCHY[roofline_parameters["gpu_arch"]]
-        if mem_level == "ALL" or mem_level == ["ALL"]
-        else mem_level
+    cache_hierarchy = sanitize_mem_level(
+        roofline_parameters["mem_level"], roofline_parameters["gpu_arch"]
     )
+
     for cache_level in cache_hierarchy:
         expected_columns.append(f"{cache_level}Bw")
 
