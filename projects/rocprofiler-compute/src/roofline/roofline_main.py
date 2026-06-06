@@ -32,7 +32,7 @@ from utils.utils_analysis import get_matrix_ops_type
 
 # ROOFLINE_SUPPORTED lists the supported gfx architectures, check against this list
 # before doing any roofline-related work
-ROOFLINE_SUPPORTED = ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]
+ROOFLINE_SUPPORTED = ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950", "gfx1151"]
 
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
