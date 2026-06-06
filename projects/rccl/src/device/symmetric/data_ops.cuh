@@ -1,4 +1,8 @@
+#if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/primitives.h"
+#else
+#include "primitives.cuh"
+#endif
 
 struct SMemTag {}; // Shared memory
 struct GMemTag {}; // Global memory
