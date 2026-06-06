@@ -132,6 +132,9 @@ if [ 1 -eq 1 ]; then
 echo "=== RCCL AlltoAll: GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
+  -x RCCL_ROCSHMEM_ENABLE=0 \
+  -x RCCL_TEST_SKIP_ROCSHMEM_PREINIT=1 \
+  -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=5 \
   -x NCCL_DEBUG=INFO \
   -x NCCL_DEBUG_SUBSYS=INIT,NET \

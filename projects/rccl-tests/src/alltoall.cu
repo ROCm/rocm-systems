@@ -33,14 +33,17 @@ static bool shouldSkipRocshmemPreInit() {
   const char* skip = getenv("RCCL_TEST_SKIP_ROCSHMEM_PREINIT");
   if (skip && skip[0] == '1') return true;
 
-  // GIN_ROCSHMEM (NCCL_GIN_TYPE=4) and GIN_ANVIL (NCCL_GIN_TYPE=5) need rocshmem
-  // initialized before ncclCommInit. librccl is built with ENABLE_ROCSHMEM_GIN only
-  // (not ENABLE_ROCSHMEM), so init.cc never calls rocshmem_init.
+  // GIN_ROCSHMEM (NCCL_GIN_TYPE=4) needs rocshmem initialized before ncclCommInit.
+  // librccl is built with ENABLE_ROCSHMEM_GIN only (not ENABLE_ROCSHMEM), so init.cc
+  // never calls rocshmem_init for the test binary.
+  // GIN_ANVIL (NCCL_GIN_TYPE=5) uses RCCL's built-in Anvil SDMA plugin only; do not
+  // call rocshmem init/finalize here (IPC teardown aborts after a successful run).
   const char* ginTypeEnv = getenv("NCCL_GIN_TYPE");
   if (ginTypeEnv) {
     char* end = nullptr;
     long ginType = strtol(ginTypeEnv, &end, 0);
-    if (end != ginTypeEnv && (ginType == 4 || ginType == 5)) return false;
+    if (end != ginTypeEnv && ginType == 4) return false;
+    if (end != ginTypeEnv && ginType == 5) return true;
   }
 
   // GIN proxy/anvil and other RCCL GIN tests set RCCL_ROCSHMEM_ENABLE explicitly.
