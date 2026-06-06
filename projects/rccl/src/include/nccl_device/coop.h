@@ -150,16 +150,17 @@ struct ncclCoopLanes { // Some lanes of this warp.
 #if defined(__HIP_PLATFORM_AMD__)
 // AMD has no named barriers, so emulate sub-block warp-span sync with a shared,
 // sense-reversing barrier keyed by span id. Init must zero the slots before use.
+constexpr int ncclCoopNamedBarrierSlots = 16; // mirrors CUDA's 16 hardware named barriers (ids 0-15)
 struct ncclCoopNamedBarrierSlot { uint32_t arrive; uint32_t sense; };
 
 NCCL_DEVICE_INLINE ncclCoopNamedBarrierSlot* ncclCoopNamedBarrierState() {
-  __shared__ ncclCoopNamedBarrierSlot slots[16];
+  __shared__ ncclCoopNamedBarrierSlot slots[ncclCoopNamedBarrierSlots];
   return slots;
 }
 
 NCCL_DEVICE_INLINE void ncclCoopNamedBarrierInit() {
   ncclCoopNamedBarrierSlot* slots = ncclCoopNamedBarrierState();
-  for (int i = threadIdx.x; i < 16; i += blockDim.x) { slots[i].arrive = 0; slots[i].sense = 0; }
+  for (int i = threadIdx.x; i < ncclCoopNamedBarrierSlots; i += blockDim.x) { slots[i].arrive = 0; slots[i].sense = 0; }
   __syncthreads();
 }
 #else
