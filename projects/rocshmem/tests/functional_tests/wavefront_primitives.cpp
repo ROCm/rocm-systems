@@ -25,6 +25,8 @@
 #include "wavefront_primitives.hpp"
 
 #include <rocshmem/rocshmem.hpp>
+#include "gda/context_gda_device.hpp"
+#include "gda/microtiming.hpp"
 
 #include <numeric>
 
@@ -40,7 +42,14 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
                                        ShmemContextType ctx_type,
                                        int wf_size) {
   __shared__ rocshmem_ctx_t ctx;
+  __shared__ microtiming_t shared_microtiming;
   int wg_id = get_flat_grid_id();
+
+  if (is_thread_zero_in_block()) {
+    microtiming_init_shared((microtiming_shared_ptr)&shared_microtiming);
+  }
+  __syncthreads();
+  microtiming_shared_ptr mt = (microtiming_shared_ptr)&shared_microtiming;
 
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -57,6 +66,13 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
       // Ensures all RMA calls from the skip loops are completed
       rocshmem_ctx_quiet(ctx);
       __syncthreads();
+      if (is_thread_zero_in_block()) {
+        mt->iter = 0;
+        mt->enabled = (wg_id == 0) ? 1 : 0;
+        if (wg_id == 0) microtiming_calibrate(mt);
+      }
+      __syncthreads();
+      if (wg_id == 0 && threadIdx.x == 0) mt->e2e_start = microtiming_clock();
       if (is_thread_zero_in_wave()) {
         start_time[idx] = wall_clock64();
       }
@@ -72,16 +88,27 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
         rocshmem_ctx_putmem_wave(ctx, dest, source, size, 1);
         break;
       case WAVEPutNBITestType:
-        rocshmem_ctx_putmem_nbi_wave(ctx, dest, source, size, 1);
+        microtiming_record(mt, 0);  // T0: before putmem_nbi_wave
+        static_cast<GDAContext*>(
+            static_cast<Context*>(ctx.ctx_opaque))->putmem_nbi_wave(
+            dest, source, size, 1, mt);
+        microtiming_record(mt, 8);  // T8: after putmem_nbi_wave returns
+        microtiming_next_iter(mt);
         break;
       default:
         break;
     }
   }
 
+  if (wg_id == 0 && threadIdx.x == 0) mt->e2e_end = microtiming_clock();
+  if (wg_id == 0 && threadIdx.x == 0) mt->quiet_start = microtiming_clock();
   rocshmem_ctx_quiet(ctx);
+  if (wg_id == 0 && threadIdx.x == 0) mt->quiet_end = microtiming_clock();
   if (is_thread_zero_in_wave()) {
     end_time[idx] = wall_clock64();
+  }
+  if (is_thread_zero_in_block() && wg_id == 0) {
+    microtiming_flush_to_global();
   }
 
   rocshmem_wg_ctx_destroy(&ctx);
@@ -150,6 +177,9 @@ void WaveFrontPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                      stream, loop, args.skip, start_time, end_time,
                      source, dest, size, _type, _shmem_context,
                      wf_size);
+
+  CHECK_HIP(hipStreamSynchronize(stream));
+  microtiming_print();
 
   num_msgs = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;

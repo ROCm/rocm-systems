@@ -204,6 +204,9 @@ class GDAContext : public Context {
   __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
                                   int pe);
 
+  __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
+                                  int pe, microtiming_shared_ptr mt);
+
   __device__ void getmem_nbi_wave(void *dest, const void *source, size_t size,
                                   int pe);
 

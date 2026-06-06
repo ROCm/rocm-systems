@@ -78,12 +78,12 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
       // Enable microtiming for the measured iterations
       if (is_thread_zero_in_block()) {
         mt->iter = 0;
-        mt->enabled = 1;
-        microtiming_calibrate(mt);
+        mt->enabled = (wg_id == 0) ? 1 : 0;
+        if (wg_id == 0) microtiming_calibrate(mt);
       }
       __syncthreads();
       // Capture the start time of each wavefront to identify the earliest one
-      mt->e2e_start = microtiming_clock();
+      if (wg_id == 0 && threadIdx.x == 0) mt->e2e_start = microtiming_clock();
       wf_start_time[wf_id] = wall_clock64();
     }
 
@@ -121,19 +121,21 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
   }
 
   __syncthreads();
+  if (wg_id == 0 && threadIdx.x == 0) mt->quiet_start = microtiming_clock();
   if(is_thread_zero_in_block()) {
     rocshmem_ctx_quiet(ctx);
   }
+  if (wg_id == 0 && threadIdx.x == 0) mt->quiet_end = microtiming_clock();
 
   /**
    * End time of the last wavefront is recorded by overwriting
    * the value previously set by earlier wavefronts.
    */
-  mt->e2e_end = microtiming_clock();
+  if (wg_id == 0 && threadIdx.x == 0) mt->e2e_end = microtiming_clock();
   end_time[wg_id] = wall_clock64();
 
   if (is_thread_zero_in_block()) {
-    microtiming_flush_to_global();
+    if (wg_id == 0) microtiming_flush_to_global();
   }
 
   // Find the earliest start time
