@@ -956,7 +956,15 @@ ncclResult_t ncclDevrCommCreateInternal(
   lsaBarReq.next = resReqsHead;
   resReqsHead = &lsaBarReq;
 
-  ncclGinBarrierCreateRequirement(comm, ncclTeamRail(comm), std::max(reqs->barrierCount, reqs->railGinBarrierCount), &outDevComm->railGinBarrier, &railGinBarrierReq);
+  // FULL GIN device kernels (e.g. alltoallPureKernel) sync with ncclTeamWorld and expect
+  // nBarriers * world.nRanks signal cells. RAIL allocation (nBarriers * rail.nRanks) is
+  // too small when lsaSize > 1 and causes barrier waitSignal to spin forever.
+  ncclTeam ginBarrierTeam = ncclTeamRail(comm);
+  if (requestedConnectionType != NCCL_GIN_CONNECTION_RAIL) {
+    ginBarrierTeam = world;
+  }
+  ncclGinBarrierCreateRequirement(comm, ginBarrierTeam, std::max(reqs->barrierCount, reqs->railGinBarrierCount),
+                                  &outDevComm->railGinBarrier, &railGinBarrierReq);
   railGinBarrierReq.next = resReqsHead;
   resReqsHead = &railGinBarrierReq;
 

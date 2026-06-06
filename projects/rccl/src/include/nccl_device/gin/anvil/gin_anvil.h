@@ -59,6 +59,7 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilRemoteGpuSignalOp(uint64_t* sigPtr, n
 #if defined(__HIP_PLATFORM_AMD__)
     __hip_atomic_fetch_add((unsigned long long*)sigPtr, (unsigned long long)signalOpArg,
                            __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __threadfence_system();
 #else
     atomicAdd((unsigned long long*)sigPtr, (unsigned long long)signalOpArg);
 #endif
@@ -158,7 +159,6 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
 
     if (hasSignal) {
       rocshmem::anvil::put(*q, dst, src, bytes);
-      rocshmem::anvil::quiet(*q);
       ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
       if (hasCounter) atomicAdd((unsigned long long*)counterPtr, 1ULL);
     } else if (hasCounter) {

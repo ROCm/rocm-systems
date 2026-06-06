@@ -139,13 +139,14 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
     case 2: // NvlAlltoAllKernelOptimized
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
-    case 3: // GinAlltoAllKernel — matches 02_gin_alltoall_pure (GIN barrier only)
+    case 3: // GinAlltoAllKernel — matches GinDeviceMPITests alltoallPureKernel (1 CTA)
       if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
-      reqs->railGinBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginContextCount = 1;
+      reqs->railGinBarrierCount = 1;
+      reqs->ginSignalCount = 1;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return testSuccess;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
@@ -175,8 +176,9 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       return true;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
     case 3: // GinAlltoAllKernel
-      reqs->railGinBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginContextCount = 1;
+      reqs->railGinBarrierCount = 1;
+      reqs->ginSignalCount = 1;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
@@ -306,8 +308,8 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
 template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
-  // One GIN context per CTA (matches ginContextCount / railGinBarrierCount from devComm reqs).
-  int ginContext = blockIdx.x;
+  // Match alltoallPureKernel reference: one GIN context / one CTA (see case 3 reqs).
+  constexpr int ginContext = 0;
   unsigned int signalIndex = 0;
   ncclGin gin { devComm, ginContext };
   uint64_t signalValue = gin.readSignal(signalIndex);
@@ -429,9 +431,17 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         return testSuccess;
 #endif
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-      case 3:
-        TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
+      case 3: {
+        auto ginKernel = SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op);
+        if (ginKernel == nullptr) return testNotImplemented;
+        ncclDevComm* devComm = (ncclDevComm*)comm;
+        ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
+        ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
+        constexpr int kGinCTAs = 1;
+        constexpr int kGinThreads = 512;
+        ginKernel<<<kGinCTAs, kGinThreads, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm);
         return testSuccess;
+      }
       case 4:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
