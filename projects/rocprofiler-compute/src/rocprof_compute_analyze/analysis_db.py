@@ -14,6 +14,7 @@ import pandas as pd
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
 from utils.analysis_orm import Database
 from utils.file_io import load_pc_sampling_results, process_pc_sampling_kernel_trace
@@ -56,7 +57,6 @@ from utils.roofline_calc import (
 from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
-    get_matrix_ops_type,
 )
 from utils.utils_common import get_uuid, get_version
 from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
@@ -349,8 +349,14 @@ class db_analysis(OmniAnalyze_Base):
         roofline_ceilings_per_workload: dict[str, dict[str, Any]] = {}
 
         for workload_path in self._runs.keys():
+            sys_row = self._runs[workload_path].sys_info.iloc[0]
+            gpu_arch = sys_row["gpu_arch"]
+
+            if gpu_arch not in ROOFLINE_SUPPORTED:
+                console_warning(f"Roofline not supported for {workload_path}.")
+                continue
             if not (Path(workload_path) / "roofline.csv").exists():
-                console_warning(f"Roofline ceilings not found for {workload_path}.")
+                console_warning(f"Roofline ceilings not found for {gpu_arch}.")
                 continue
 
             roofline_dict = (
@@ -358,17 +364,11 @@ class db_analysis(OmniAnalyze_Base):
             )
             keys: list[str] = []
 
-            matrix_ops_type = get_matrix_ops_type(
-                self._runs[workload_path].sys_info.iloc[0]["gpu_series"]
-            )
+            matrix_ops_type = utils_analysis.get_matrix_ops_type(sys_row["gpu_series"])
 
-            for mem_level in CACHE_HIERARCHY[
-                self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
-            ]:
+            for mem_level in CACHE_HIERARCHY[gpu_arch]:
                 keys.append(f"{mem_level}Bw")
-            for dtype in SUPPORTED_DATATYPES[
-                self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
-            ]:
+            for dtype in SUPPORTED_DATATYPES[gpu_arch]:
                 if dtype in PEAK_OPS_DATATYPES:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         keys.append(f"{dtype}Flops")
@@ -377,8 +377,8 @@ class db_analysis(OmniAnalyze_Base):
                 if dtype in MATRIX_DATATYPES:
                     if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
-                        dtype = dtype.replace("FP", "F")
-                        keys.append(f"{matrix_ops_type}{dtype}Flops")
+                        matrix_dtype = dtype.replace("FP", "F")
+                        keys.append(f"{matrix_ops_type}{matrix_dtype}Flops")
                     elif dtype.startswith("I"):
                         keys.append(f"{matrix_ops_type}{dtype}Ops")
             roofline_ceilings_per_workload[workload_path] = {

@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
-from utils.roofline_calc import calc_ai_analyze, sanitize_ai_value
+from utils.roofline_calc import (
+    CACHE_HIERARCHY,
+    calc_ai_analyze,
+    sanitize_ai_value,
+    sanitize_mem_level,
+)
 
 
 def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
@@ -175,3 +180,52 @@ def test_sanitize_ai_value_replaces_invalid_values_with_zero():
     assert sanitize_ai_value("") == 0
     assert sanitize_ai_value(None) == 0
     assert sanitize_ai_value(1.5) == 1.5
+
+
+##############################################################################
+# sanitize_mem_level Tests
+##############################################################################
+
+
+def test_sanitize_mem_level_all_falls_back_to_hierarchy():
+    """'ALL' results in full cache hierarchy."""
+    result = sanitize_mem_level("ALL", "gfx90a")
+    assert result == CACHE_HIERARCHY["gfx90a"]
+
+
+def test_sanitize_mem_level_all_list_falls_back_to_hierarchy():
+    """['ALL'] behaves the same as 'ALL'."""
+    result = sanitize_mem_level(["ALL"], "gfx90a")
+    assert result == CACHE_HIERARCHY["gfx90a"]
+
+
+def test_sanitize_mem_level_supported_string():
+    """A supported single string level is returned as a single-item list."""
+    result = sanitize_mem_level("HBM", "gfx90a")
+    assert result == ["HBM"]
+
+
+def test_sanitize_mem_level_supported_list():
+    """A list of supported levels is returned unchanged."""
+    result = sanitize_mem_level(["HBM", "L2"], "gfx90a")
+    assert result == ["HBM", "L2"]
+
+
+def test_sanitize_mem_level_unsupported_falls_back_to_hierarchy():
+    """Fully unsupported input falls back to the full cache hierarchy."""
+    result = sanitize_mem_level("HBM", "gfx1151")
+    assert result == CACHE_HIERARCHY["gfx1151"]
+
+
+def test_sanitize_mem_level_mixed_filters_unsupported():
+    """Unsupported levels in a mixed list are filtered out."""
+    # gfx1151 supports L0, L2, LDS — not HBM
+    result = sanitize_mem_level(["HBM", "L2"], "gfx1151")
+    assert "HBM" not in result
+    assert "L2" in result
+
+
+def test_sanitize_mem_level_vl1d_normalised():
+    """'vL1D' is normalised to 'L1' after filtering."""
+    result = sanitize_mem_level("vL1D", "gfx90a")
+    assert result == ["L1"]
