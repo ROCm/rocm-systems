@@ -4267,7 +4267,7 @@ get_sigaction_function()
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
-int signal_handler_timeout = rocprofiler::tool::get_env("ROCPROF_SIGNAL_HANDLER_TIMEOUT", 10);
+int signal_handler_timeout = rocprofiler::tool::get_env("ROCPROF_SIGNAL_HANDLER_TIMEOUT", 0);
 
 }  // namespace
 
@@ -4531,15 +4531,33 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     }
 
     // Wait for worker with bounded timeout via futex syscall instead of a std::mutex
-    // to guarantee async signal-safe communication
+    // Wait for worker to complete finalization.
+    // Uses exponential backoff (5, 10, 30, 60s) with periodic logging.
     if(worker_notified)
     {
-        struct timespec timeout = {};
-        timeout.tv_sec          = sw.timeout_sec;
+        static constexpr auto backoff_sec = std::array{5, 10, 30, 60};
+
+        int attempt = 0;
+
         while(sw.finalize_done.load(std::memory_order_acquire) == 0)
         {
+            auto timeout   = timespec{};
+            timeout.tv_sec = backoff_sec[attempt < 4 ? attempt : 3];
+
             syscall(SYS_futex, &sw.finalize_done, FUTEX_WAIT, 0, &timeout, nullptr, 0);
-            break;
+
+            if(sw.finalize_done.load(std::memory_order_acquire) != 0) break;
+
+            // Still waiting — log progress
+            auto elapsed = backoff_sec[0];
+            for(int j = 1; j <= attempt && j < 4; j++)
+                elapsed += backoff_sec[j];
+
+            // technically unsafe, but otherwise the process looks hung to users
+            ROCP_WARNING << fmt::format(
+                "signalhangler: waiting for worker thread to flush profiling data: ~{}s elapsed...",
+                elapsed);
+            attempt++;
         }
     }
 
