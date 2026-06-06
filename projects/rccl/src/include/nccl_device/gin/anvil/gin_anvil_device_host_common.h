@@ -25,6 +25,7 @@ struct ncclGinAnvilGPUContext {
   uint32_t signalsContextOffset; // cell offset of this context within each rank's signal alloc
   uint32_t nSignals;
   uint32_t nCounters;
+  uint32_t sdmaDirtyMask;     // peers that issued SDMA puts since last flush (device-maintained)
   int nRanks;
   int rank;
   int myNode;                 // rankToNode[rank]; peers on other nodes have null queues

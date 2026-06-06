@@ -185,6 +185,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     } else {
       rocshmem::anvil::put(*q, dst, src, bytes);
     }
+    if (peer >= 0 && peer < 32)
+      atomicOr((unsigned int*)&aCtx->sdmaDirtyMask, 1u << peer);
   }
 };
 
@@ -248,8 +250,9 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
     if (aCtx == nullptr) return;
     void** queues = (void**)loadConst(&aCtx->queues);
     if (queues == nullptr) return;
+    uint32_t dirty = atomicExch((unsigned int*)&aCtx->sdmaDirtyMask, 0u);
     for (int p = 0; p < ctx.nRanks; p++) {
-      if (p == ctx.rank) continue;
+      if (p == ctx.rank || (dirty & (1u << p)) == 0) continue;
       auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[p]);
       if (q == nullptr) continue;
       rocshmem::anvil::quiet(*q);

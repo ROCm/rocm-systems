@@ -341,40 +341,41 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
 
-  /* send to all peers via GIN */
+  ncclTeam world = ncclTeamWorld(devComm);
+  ncclTeam lsa = ncclTeamLsa(devComm);
+  const int startLsa = world.rank - lsa.rank;
   const size_t size = count * sizeof(T);
-  const int self = devComm.rank;
 
-  /* Self slice: parallel copy for large messages; single-thread for small (CTA sync cost). */
-  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  T* recvLocal = (T*)ncclGetLocalPointer(recvwin, recvoffset);
-  char* selfDst = (char*)&recvLocal[self * count];
-  char* selfSrc = (char*)&sendLocal[self * count];
-  if (size <= 256) {
-    if (tid == self && size > 0) __builtin_memcpy(selfDst, selfSrc, size);
-  } else if ((size | (uintptr_t)selfDst | (uintptr_t)selfSrc) % sizeof(uint64_t) == 0) {
-    uint64_t* d64 = (uint64_t*)selfDst;
-    uint64_t* s64 = (uint64_t*)selfSrc;
-    size_t n64 = size / sizeof(uint64_t);
-    for (size_t i = tid; i < n64; i += nthreads) d64[i] = s64[i];
-  } else {
-    for (size_t i = tid; i < count; i += nthreads)
-      recvLocal[self * count + i] = sendLocal[self * count + i];
+  /* Remote peers via GIN (inter-node / non-LSA). */
+  for (int r = tid; r < startLsa; r += nthreads) {
+    gin.put(world, r,
+        recvwin, recvoffset + world.rank * size,
+        sendwin, sendoffset + r * size,
+        size, ncclGin_SignalInc{signalIndex});
   }
-  if (tid == self) {
-    gin.signal(ncclTeamWorld(devComm), self, ncclGin_SignalInc{signalIndex});
-  }
-
-  for (int r = tid; r < devComm.nRanks; r += nthreads) {
-    if (r == self) continue;
-    gin.put(ncclTeamWorld(devComm), r,
-        recvwin, recvoffset + self * size,
+  for (int r = startLsa + lsa.nRanks + tid; r < world.nRanks; r += nthreads) {
+    gin.put(world, r,
+        recvwin, recvoffset + world.rank * size,
         sendwin, sendoffset + r * size,
         size, ncclGin_SignalInc{signalIndex});
   }
 
-  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + devComm.nRanks);
+  /* On-node peers via LSA (single-node Anvil avoids per-peer GIN Put + flush quiet). */
+  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+  for (size_t offset = tid; offset < count; offset += nthreads) {
+    for (int lp = 0; lp < lsa.nRanks; lp++) {
+      int wr = startLsa + lp;
+      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
+      recvPtr[world.rank * count + offset] = sendLocal[wr * count + offset];
+    }
+  }
+
+  int numRemotePeers = world.nRanks - lsa.nRanks;
+  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
   gin.flush(ncclCoopCta());
+
+  /* GIN barrier for LSA write visibility (ncclBarrierSession LSA inbox faults on Anvil). */
+  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
 }
 
 template <typename T>
