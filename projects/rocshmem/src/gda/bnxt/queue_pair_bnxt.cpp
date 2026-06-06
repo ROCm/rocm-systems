@@ -102,11 +102,11 @@ __device__ void* QueuePairBNXT::get_hwqe(const bnxt_device_sq& sq, uint32_t idx)
   idx += sq.tail;
   if (idx >= sq.depth)
     idx -= sq.depth;
-  return (void *)((char*)&sq.buf + (idx << 4));
+  return (void *)((char*)sq.buf + (idx << 4));
 }
 
 __device__ static inline struct bnxt_re_msns* bnxt_re_pull_psn_buff(const bnxt_device_sq& sq) {
-  return (struct bnxt_re_msns*)(((char *) &sq.msntbl) + ((sq.msn) << sq.psn_sz_log2));
+  return (struct bnxt_re_msns*)(((char *) sq.msntbl) + ((sq.msn) << sq.psn_sz_log2));
 }
 
 __device__ static inline uint64_t bnxt_re_update_msn_tbl(uint32_t st_idx, uint32_t npsn,
