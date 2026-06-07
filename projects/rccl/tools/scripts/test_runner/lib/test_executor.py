@@ -518,13 +518,25 @@ class TestExecutor:
         if not self.args.coverage_report:
             if "--enable-code-coverage" in install_flags:
                 install_flags.remove("--enable-code-coverage")
+            # Device coverage implies code coverage, so strip it on the same path.
+            if "--enable-device-coverage" in install_flags:
+                install_flags.remove("--enable-device-coverage")
             # Explicitly disable to override any cached CMake value from prior builds
             if cmake_options:
-                cmake_options += " -DENABLE_CODE_COVERAGE=OFF"
+                cmake_options += " -DENABLE_CODE_COVERAGE=OFF -DENABLE_DEVICE_COVERAGE=OFF"
             else:
-                cmake_options = "-DENABLE_CODE_COVERAGE=OFF"
+                cmake_options = "-DENABLE_CODE_COVERAGE=OFF -DENABLE_DEVICE_COVERAGE=OFF"
             print("NOTE: Code coverage instrumentation disabled in build "
                   "(use --coverage-report to enable)")
+        else:
+            # Coverage report requested: enable device-side coverage so the
+            # report includes device data. install.sh's --enable-device-coverage
+            # implies --enable-code-coverage and forwards -DENABLE_DEVICE_COVERAGE=ON
+            # (overriding any cached OFF from a prior --no_clean build).
+            if "--enable-device-coverage" not in install_flags:
+                install_flags.append("--enable-device-coverage")
+                print("NOTE: Device coverage instrumentation enabled in build "
+                      "(--coverage-report)")
 
         # Build install.sh command
         install_script = os.path.join(workdir, "install.sh")
@@ -1265,15 +1277,35 @@ class TestExecutor:
             for profraw in glob.glob(os.path.join(rawfiles_dir, "*.profraw")):
                 f.write(f"{profraw}\n")
 
-        # Get ROCm path for LLVM tools
+        # Resolve LLVM coverage tools. PATH takes precedence: the .profraw files
+        # were produced by the toolchain that built the instrumented binaries, so
+        # llvm-profdata/llvm-cov MUST be the matching version (e.g. a custom
+        # ~/.local/llvm/bin on PATH). Fall back to {rocm_path}/lib/llvm/bin only
+        # when the tool is not found on PATH.
         rocm_path = self.paths.get("rocm_path", "/opt/rocm")
-        llvm_profdata = os.path.join(rocm_path, "lib", "llvm", "bin", "llvm-profdata")
-        llvm_cov = os.path.join(rocm_path, "lib", "llvm", "bin", "llvm-cov")
+        rocm_llvm_bin = os.path.join(rocm_path, "lib", "llvm", "bin")
+
+        def _resolve_llvm_tool(name):
+            found = shutil.which(name)
+            if found:
+                return found
+            fallback = os.path.join(rocm_llvm_bin, name)
+            if os.path.isfile(fallback):
+                return fallback
+            print(f"ERROR: '{name}' not found on PATH and not present at {fallback}")
+            print(f"       Add the LLVM toolchain that built the instrumented "
+                  f"binaries to PATH (e.g. ~/.local/llvm/bin).")
+            return None
+
+        llvm_profdata = _resolve_llvm_tool("llvm-profdata")
+        llvm_cov = _resolve_llvm_tool("llvm-cov")
+        if not llvm_profdata or not llvm_cov:
+            return
 
         if self.args.verbose:
             print(f"ROCm path:      {rocm_path}")
-            print(f"llvm-profdata:  {llvm_profdata} (exists: {os.path.isfile(llvm_profdata)})")
-            print(f"llvm-cov:       {llvm_cov} (exists: {os.path.isfile(llvm_cov)})")
+            print(f"llvm-profdata:  {llvm_profdata}")
+            print(f"llvm-cov:       {llvm_cov}")
             print(f"Rawfiles dir:   {rawfiles_dir}")
 
         # Create the merged profdata
@@ -1324,6 +1356,17 @@ class TestExecutor:
                 object_files.extend(["--object", binary_path])
                 if self.args.verbose:
                     print(f"Found binary: {binary_path}")
+
+        # Add device code objects: device kernels' coverage mapping lives in the
+        # per-arch amdgcn ELF (device-<arch>.elf), not in the host librccl.so.
+        device_elfs = sorted(glob.glob(os.path.join(self.build_dir, "device-*.elf")))
+        for device_elf in device_elfs:
+            object_files.extend(["--object", device_elf])
+            if self.args.verbose:
+                print(f"Found device object: {device_elf}")
+        if not device_elfs and self.args.verbose:
+            print("NOTE: no device-*.elf found next to librccl.so; device-side "
+                  "coverage will not appear (was the build ENABLE_DEVICE_COVERAGE=ON?)")
 
         if not object_files:
             print("WARNING: No object files found for coverage report")
