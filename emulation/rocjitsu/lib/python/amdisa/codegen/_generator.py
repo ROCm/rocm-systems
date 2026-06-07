@@ -2394,7 +2394,8 @@ class CodeGenerator:
         """Return a target-specific generated operand size override."""
         if (
             sem is not None
-            and sem.semantic_class in ('vector_cmp', 'vector_cmp_class')
+            and sem.semantic_class
+            in ('vector_cmp', 'vector_cmpx', 'vector_cmp_class', 'vector_cmpx_class')
             and enc_name.upper() == 'ENC_VOP3'
             and opnd.is_output
             and opnd.name in ('vdst', 'sdst')

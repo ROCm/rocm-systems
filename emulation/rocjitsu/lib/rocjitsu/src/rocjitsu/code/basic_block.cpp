@@ -7,9 +7,11 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/except.h"
 
 #include <algorithm>
 #include <cassert>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -372,6 +374,135 @@ BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
       blocks.push_back(std::move(block));
   }
 
+  return blocks;
+}
+
+std::vector<std::unique_ptr<BasicBlock>>
+BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder,
+                            std::span<const uint64_t> entry_offsets) {
+  std::vector<std::unique_ptr<BasicBlock>> blocks;
+  if (entry_offsets.empty())
+    return blocks;
+
+  for (const auto *sec : co.text_sections()) {
+    const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
+    const std::size_t inst_data_size = sec->size() / sizeof(uint32_t);
+    const uint64_t section_end = inst_data_size * sizeof(uint32_t);
+    if (section_end == 0)
+      continue;
+
+    std::vector<uint32_t> padded(inst_data, inst_data + inst_data_size);
+    padded.resize(padded.size() + 2);
+
+    std::map<uint64_t, std::unique_ptr<Instruction>> decoded;
+    std::set<uint64_t> leaders;
+    std::unordered_set<uint64_t> enqueued;
+    std::vector<uint64_t> worklist;
+
+    auto enqueue = [&](uint64_t offset) {
+      if (offset >= section_end)
+        return;
+      if (offset % sizeof(uint32_t) != 0)
+        throw util::InvalidInst("unaligned branch target", "Invalid CFG: ");
+      leaders.insert(offset);
+      if (enqueued.insert(offset).second)
+        worklist.push_back(offset);
+    };
+
+    for (uint64_t entry : entry_offsets)
+      enqueue(entry);
+
+    for (size_t work_index = 0; work_index < worklist.size(); ++work_index) {
+      uint64_t offset = worklist[work_index];
+      while (offset < section_end) {
+        if (offset % sizeof(uint32_t) != 0)
+          throw util::InvalidInst("unaligned instruction offset", "Invalid CFG: ");
+
+        auto decoded_it = decoded.find(offset);
+        if (decoded_it == decoded.end()) {
+          auto *raw_inst =
+              decoder.decode(&padded[offset / sizeof(uint32_t)], offset);
+          std::unique_ptr<Instruction> inst(raw_inst);
+          if (!inst || inst->size() <= 0)
+            throw util::InvalidInst("zero-sized instruction", "Invalid CFG: ");
+          if (offset + static_cast<uint64_t>(inst->size()) > section_end)
+            throw util::InvalidInst("truncated instruction", "Invalid CFG: ");
+          decoded_it = decoded.emplace(offset, std::move(inst)).first;
+        }
+
+        const Instruction &inst = *decoded_it->second;
+        const uint64_t next_offset = offset + static_cast<uint64_t>(inst.size());
+        const auto branch_delta = inst.branch_offset_bytes();
+        assert((!(inst.flags() & (BRANCH | COND_BRANCH)) || branch_delta.has_value()) &&
+               "direct branch is missing branch_offset_bytes()");
+
+        if (branch_delta) {
+          const int64_t target =
+              static_cast<int64_t>(next_offset) + static_cast<int64_t>(*branch_delta);
+          if (target >= 0 && static_cast<uint64_t>(target) < section_end)
+            enqueue(static_cast<uint64_t>(target));
+        }
+
+        if (is_block_terminator(inst)) {
+          if (!has_no_static_successor(inst) && !is_unconditional_branch(inst) &&
+              next_offset < section_end)
+            enqueue(next_offset);
+          break;
+        }
+        if (next_offset >= section_end)
+          break;
+        if (leaders.contains(next_offset)) {
+          enqueue(next_offset);
+          break;
+        }
+        offset = next_offset;
+      }
+    }
+
+    std::vector<std::unique_ptr<BasicBlock>> section_blocks;
+    for (auto it = decoded.begin(); it != decoded.end();) {
+      auto current = std::make_unique<BasicBlock>(it->first);
+      while (it != decoded.end()) {
+        const uint64_t inst_offset = it->first;
+        const uint64_t next_offset =
+            inst_offset + static_cast<uint64_t>(it->second->size());
+        const bool terminates = is_block_terminator(*it->second);
+        current->add_instruction(std::move(it->second));
+        ++it;
+        if (terminates || it == decoded.end() || it->first != next_offset ||
+            leaders.contains(next_offset))
+          break;
+      }
+      section_blocks.push_back(std::move(current));
+    }
+
+    std::unordered_map<uint64_t, BasicBlock *> block_by_offset;
+    for (auto &block : section_blocks)
+      block_by_offset.emplace(block->start_offset(), block.get());
+    for (auto &block_ptr : section_blocks) {
+      BasicBlock &block = *block_ptr;
+      const Instruction *term = block.terminator();
+      if (term == nullptr || has_no_static_successor(*term))
+        continue;
+      if (const auto branch_delta = term->branch_offset_bytes()) {
+        const int64_t target = static_cast<int64_t>(block.end_offset()) +
+                               static_cast<int64_t>(*branch_delta);
+        if (target >= 0) {
+          if (auto target_it = block_by_offset.find(static_cast<uint64_t>(target));
+              target_it != block_by_offset.end())
+            block.add_successor(*target_it->second);
+        }
+      }
+      if (!is_unconditional_branch(*term)) {
+        if (auto fallthrough_it = block_by_offset.find(block.end_offset());
+            fallthrough_it != block_by_offset.end())
+          block.add_successor(*fallthrough_it->second);
+      }
+    }
+
+    for (auto &block : section_blocks)
+      blocks.push_back(std::move(block));
+  }
   return blocks;
 }
 

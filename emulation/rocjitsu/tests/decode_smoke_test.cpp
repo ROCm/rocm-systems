@@ -1061,6 +1061,86 @@ TEST(Gfx1250DecodeTest, GlobalStoreUsesScalarOffsetVaddrWidth) {
   InstDefUse def_use(*inst);
   EXPECT_TRUE(def_use.uses.contains({RegClass::VGPR, 10, 1}));
   EXPECT_FALSE(def_use.uses.contains({RegClass::VGPR, 10, 2}));
+TEST(Rdna4DecodeTest, VopdXyConsumesThreeDwords) {
+  const uint32_t words[] = {
+      0xCA240080u, // v_dual_mov_b32 v5, 0 :: v_dual_and_b32 v4, 0x3ff, v31
+      0x05043EFFu,
+      0x000003FFu,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_dual_mov_b32 :: v_dual_and_b32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+  EXPECT_NE(inst->disassemble().find("v_dual_mov_b32"), std::string::npos);
+  EXPECT_NE(inst->disassemble().find("v_dual_and_b32"), std::string::npos);
+}
+
+TEST(Rdna4DecodeTest, GlobalCacheMaintenanceConsumesThreeDwords) {
+  struct CacheMaintenanceCase {
+    const char *mnemonic;
+    uint32_t words[3];
+  };
+
+  const CacheMaintenanceCase cases[] = {
+      {"global_inv", {0xEE0AC07Cu, 0x00000000u, 0x00000000u}},
+      {"global_wb", {0xEE0B007Cu, 0x00000000u, 0x00000000u}},
+      {"global_wbinv", {0xEE13C07Cu, 0x00000000u, 0x00000000u}},
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &tc : cases) {
+    std::unique_ptr<Instruction> inst(decoder->decode(tc.words));
+    ASSERT_NE(inst, nullptr) << tc.mnemonic;
+    EXPECT_EQ(inst->mnemonic(), tc.mnemonic);
+    EXPECT_EQ(inst->size(), sizeof(tc.words));
+  }
+}
+
+TEST(Rdna4DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {
+  const uint32_t words[] = {
+      0xD44C0002u, // v_cmp_gt_u32 s2, s5, v12
+      0x02021805u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_cmp_gt_u32");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  const std::string disasm = inst->disassemble();
+  EXPECT_NE(disasm.find("s2"), std::string::npos) << disasm;
+  EXPECT_EQ(disasm.find("s[2:3]"), std::string::npos) << disasm;
+
+  InstDefUse def_use(*inst);
+  EXPECT_TRUE(def_use.defs.contains({RegClass::SGPR, 2, 1}));
+  EXPECT_FALSE(def_use.defs.contains({RegClass::SGPR, 3, 1}));
+}
+
+TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesFourDwords) {
+  const uint32_t words[] = {
+      0xCC350000u,
+      0x02020900u,
+      0xCC336006u,
+      0x02024912u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_wmma_scale_f32_16x16x128_f8f6f4");
+  EXPECT_EQ(inst->size(), sizeof(words));
+
+  const std::string disasm = inst->disassemble();
+  EXPECT_NE(disasm.find("v[6:13]"), std::string::npos) << disasm;
+  EXPECT_NE(disasm.find("matrix_a_fmt:MATRIX_FMT_FP4"), std::string::npos) << disasm;
+  EXPECT_NE(disasm.find("matrix_b_fmt:MATRIX_FMT_FP4"), std::string::npos) << disasm;
 }
 
 TEST(Gfx1250DecodeTest, Vop3CompareWritesSingleScalarMaskRegister) {

@@ -11,6 +11,8 @@ real hardware. Supports three execution strategies:
   applications compiled for one GPU architecture to run on another.
 - **Dynamic Binary Instrumentation (DBI)** — Runtime instrumentation
   of GPU kernels for profiling, tracing, and analysis.
+- **Waitcheck** — Object-code wait-hazard checking through an offline CLI
+  and an HSA `LD_PRELOAD` shim. See [docs/waitcheck/README.md](docs/waitcheck/README.md).
 
 ## Supported architectures
 

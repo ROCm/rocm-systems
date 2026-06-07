@@ -126,6 +126,14 @@ public:
   build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
         std::span<const uint64_t> extra_leaders = {});
 
+  /// @brief Build only basic blocks reachable from externally-known entries.
+  ///
+  /// @details Unlike build(), this avoids decoding padding and data embedded in
+  /// executable sections of library code objects.
+  static std::vector<std::unique_ptr<BasicBlock>>
+  build_reachable(const CodeObject &co, Decoder &decoder,
+                  std::span<const uint64_t> entry_offsets);
+
 private:
   void add_instruction(std::unique_ptr<Instruction> inst);
   void add_successor(BasicBlock &successor);
