@@ -486,6 +486,17 @@ AMDSMI_COMPUTE_PARTITION_QPX = 4
 AMDSMI_COMPUTE_PARTITION_CPX = 5
 amdsmi_compute_partition_type_t = ctypes.c_uint32 # enum
 
+# values for enumeration 'amdsmi_compute_partition_mem_alloc_mode_t'
+amdsmi_compute_partition_mem_alloc_mode_t__enumvalues = {
+    0: 'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID',
+    1: 'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING',
+    2: 'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL',
+}
+AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID = 0
+AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING = 1
+AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL = 2
+amdsmi_compute_partition_mem_alloc_mode_t = ctypes.c_uint32 # enum
+
 # values for enumeration 'amdsmi_memory_partition_type_t'
 amdsmi_memory_partition_type_t__enumvalues = {
     0: 'AMDSMI_MEMORY_PARTITION_UNKNOWN',
@@ -3914,6 +3925,18 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_compute_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_get_gpu_compute_partition_mem_alloc_mode
+    amdsmi_get_gpu_compute_partition_mem_alloc_mode.restype = amdsmi_status_t
+    amdsmi_get_gpu_compute_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_compute_partition_mem_alloc_mode_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_gpu_compute_partition_mem_alloc_mode = _libraries['libamd_smi.so'].amdsmi_set_gpu_compute_partition_mem_alloc_mode
+    amdsmi_set_gpu_compute_partition_mem_alloc_mode.restype = amdsmi_status_t
+    amdsmi_set_gpu_compute_partition_mem_alloc_mode.argtypes = [amdsmi_processor_handle, amdsmi_compute_partition_mem_alloc_mode_t]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_memory_partition = _libraries['libamd_smi.so'].amdsmi_get_gpu_memory_partition
     amdsmi_get_gpu_memory_partition.restype = amdsmi_status_t
     amdsmi_get_gpu_memory_partition.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), uint32_t]
@@ -4670,6 +4693,9 @@ __all__ = \
     'AMDSMI_COARSE_GRAIN_MEM_ACTIVITY',
     'AMDSMI_COMPUTE_PARTITION_CPX', 'AMDSMI_COMPUTE_PARTITION_DPX',
     'AMDSMI_COMPUTE_PARTITION_INVALID',
+    'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL',
+    'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING',
+    'AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID',
     'AMDSMI_COMPUTE_PARTITION_QPX', 'AMDSMI_COMPUTE_PARTITION_SPX',
     'AMDSMI_COMPUTE_PARTITION_TPX', 'AMDSMI_CONTAINER_DOCKER',
     'AMDSMI_CONTAINER_LXC', 'AMDSMI_CPER_NOTIFY_TYPE_BOOT',
@@ -5061,6 +5087,7 @@ __all__ = \
     'amdsmi_get_gpu_bad_page_threshold', 'amdsmi_get_gpu_bdf_id',
     'amdsmi_get_gpu_board_info', 'amdsmi_get_gpu_busy_percent',
     'amdsmi_get_gpu_cache_info', 'amdsmi_get_gpu_compute_partition',
+    'amdsmi_get_gpu_compute_partition_mem_alloc_mode',
     'amdsmi_get_gpu_compute_process_gpus',
     'amdsmi_get_gpu_compute_process_info',
     'amdsmi_get_gpu_compute_process_info_by_pid',
@@ -5177,6 +5204,7 @@ __all__ = \
     'amdsmi_set_gpu_accelerator_partition_profile',
     'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_clk_range',
     'amdsmi_set_gpu_compute_partition',
+    'amdsmi_set_gpu_compute_partition_mem_alloc_mode',
     'amdsmi_set_gpu_event_notification_mask',
     'amdsmi_set_gpu_fan_speed', 'amdsmi_set_gpu_memory_partition',
     'amdsmi_set_gpu_memory_partition_mode',

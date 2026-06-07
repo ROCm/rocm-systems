@@ -660,7 +660,7 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Local device data buffer to be reduced
-    @param[out] recvbuff      Data buffer where result is stored (only for *root* rank).  May be null for other ranks.
+    @param[in,out] recvbuff      Data buffer where result is stored (only for *root* rank).  May be null for other ranks.
     @param[in]  count         Number of elements in every send buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator type
@@ -702,7 +702,7 @@ ncclResult_t pncclBcast(void* buff, size_t count, ncclDataType_t datatype, int r
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to copy (if *root*).  May be NULL for other ranks
-    @param[in]  recvbuff      Data array to store received array
+    @param[in,out] recvbuff   Data array to store received array
     @param[in]  count         Number of elements in data buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  root          Rank of broadcast root
@@ -722,7 +722,7 @@ ncclResult_t pncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, 
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to reduce
-    @param[out] recvbuff      Data array to store reduced result array
+    @param[in,out] recvbuff      Data array to store reduced result array
     @param[in]  count         Number of elements in data buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator
@@ -742,7 +742,7 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to reduce
-    @param[out] recvbuff      Data array to store reduced result array
+    @param[in,out] recvbuff      Data array to store reduced result array
     @param[in]  count         Number of elements in data buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator
@@ -766,7 +766,7 @@ ncclResult_t pncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to reduce
-    @param[out] recvbuff      Data array to store reduced result subarray
+    @param[in,out] recvbuff      Data array to store reduced result subarray
     @param[in]  recvcount     Number of elements each rank receives
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator
@@ -790,7 +790,7 @@ ncclResult_t pncclReduceScatter(const void* sendbuff, void* recvbuff,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Input data array to send
-    @param[out] recvbuff      Data array to store the gathered result
+    @param[in,out] recvbuff      Data array to store the gathered result
     @param[in]  sendcount     Number of elements each rank sends
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
@@ -810,7 +810,7 @@ ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  count         Number of elements to send between each pair of ranks
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
@@ -834,7 +834,7 @@ ncclResult_t pncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
     @param[in]  sendcounts    Array containing number of elements to send to each participating rank
     @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  recvcounts    Array containing number of elements to receive from each participating rank
     @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
     @param[in]  datatype      Data buffer element datatype
@@ -859,7 +859,7 @@ ncclResult_t pncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send
-    @param[in]  recvbuff      Data array to recv
+    @param[in,out] recvbuff   Data array to recv
     @param[in]  count         Number of elements
     @param[in]  datatype      Data buffer element datatype
     @param[in]  root          Rank of gather root
@@ -882,7 +882,7 @@ ncclResult_t pncclGather(const void* sendbuff, void* recvbuff, size_t count,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send
-    @param[in]  recvbuff      Data array to recv
+    @param[in,out] recvbuff   Data array to recv
     @param[in]  count         Number of elements
     @param[in]  datatype      Data buffer element datatype
     @param[in]  root          Rank of scatter root
@@ -905,7 +905,7 @@ ncclResult_t pncclScatter(const void* sendbuff, void* recvbuff, size_t count,
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  count         Number of elements to send between each pair of ranks
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
@@ -931,7 +931,7 @@ ncclResult_t pncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  sendbuff      Data array to send (contains blocks for each other rank)
     @param[in]  sendcounts    Array containing number of elements to send to each participating rank
     @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
-    @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
+    @param[in,out] recvbuff      Data array to receive (contains blocks from each other rank)
     @param[in]  recvcounts    Array containing number of elements to receive from each participating rank
     @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
     @param[in]  datatype      Data buffer element datatype
@@ -978,7 +978,7 @@ ncclResult_t pncclSend(const void* sendbuff, size_t count, ncclDataType_t dataty
                 ncclGroupEnd section.
     @return     Result code. See @ref rccl_result_code for more details.
 
-    @param[out] recvbuff      Data array to receive
+    @param[in,out] recvbuff      Data array to receive
     @param[in]  count         Number of elements to receive
     @param[in]  datatype      Data buffer element datatype
     @param[in]  peer          Peer rank to send to
@@ -1070,7 +1070,7 @@ ncclResult_t pmscclLoadAlgo(const char *mscclAlgoFilePath, mscclAlgoHandle_t *ms
     @param[in]  sendBuff         Data array to send
     @param[in]  sendCounts       Array containing number of elements to send to each participating rank
     @param[in]  sDisPls          Array of offsets into *sendbuff* for each participating rank
-    @param[out] recvBuff         Data array to receive
+    @param[in,out] recvBuff      Data array to receive
     @param[in]  recvCounts       Array containing number of elements to receive from each participating rank
     @param[in]  rDisPls          Array of offsets into *recvbuff* for each participating rank
     @param[in]  count            Number of elements

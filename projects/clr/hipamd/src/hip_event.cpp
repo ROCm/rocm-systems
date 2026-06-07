@@ -339,7 +339,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   HIP_INIT_API(hipEventCreateWithFlags, event, flags);
 
   if (event == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, flags), *event);
@@ -350,7 +350,7 @@ hipError_t hipEventCreate(hipEvent_t* event) {
   HIP_INIT_API(hipEventCreate, event);
 
   if (event == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   HIP_RETURN(ihipEventCreateWithFlags(event, 0), *event);
@@ -366,7 +366,7 @@ hipError_t hipEventDestroy(hipEvent_t event) {
 
   std::unique_lock lock(hip::eventSetLock);
   if (hip::eventSet.erase(event) == 0) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
 
   auto* e = reinterpret_cast<hip::Event*>(event);
