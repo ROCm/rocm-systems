@@ -826,7 +826,6 @@ ncclResult_t ncclDevrCommCreateInternal(
   struct ncclDevrState* devr = &comm->devrState;
   struct ncclTeam world = ncclTeamWorld(comm);
   struct ncclTeam lsa = ncclTeamInnerFactor(world, devr->lsaSize);
-  bool ginActivated = false;
   struct ncclDevrTeam* tmLsa;
   size_t bufSizeTotal;
   int nGinConnections = 0;
@@ -857,12 +856,15 @@ ncclResult_t ncclDevrCommCreateInternal(
   }
 
   bool requestedGinResources = ncclGinResourcesRequested(reqs);
-  if (requestedGinResources && requestedConnectionType == NCCL_GIN_CONNECTION_NONE) {
+  bool requestGinTransport = requestedConnectionType != NCCL_GIN_CONNECTION_NONE;
+  if (requestedGinResources && !requestGinTransport) {
     WARN("User requested GIN resources but did not request GIN to be enabled!");
     return ncclInvalidArgument;
   }
 
-  if (requestedConnectionType != NCCL_GIN_CONNECTION_NONE) {
+  // Connect GIN transport (e.g. GIN_ANVIL SDMA queues — GPU-initiated, proxy-free) without
+  // necessarily allocating devComm GIN barriers/signals or registering windows with GIN.
+  if (requestGinTransport) {
     if (comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE) {
       WARN("User requested GIN but not all ranks in the communicator support GIN");
       return ncclInvalidArgument;
@@ -878,16 +880,19 @@ ncclResult_t ncclDevrCommCreateInternal(
       }
     }
 
-    ginActivated = !devr->ginEnabled;
-    devr->ginEnabled = true;
+    if (!comm->sharedRes->ginState.connected) {
+      int ginContextCount = std::max(reqs->ginContextCount, 1);
+      NCCLCHECKGOTO(ncclGinConnectOnce(comm, requestedConnectionType, ginContextCount, reqs->ginQueueDepth), ret, fail);
+    }
   }
 
-  if (ginActivated) {
-    NCCLCHECKGOTO(ncclGinConnectOnce(comm, requestedConnectionType, reqs->ginContextCount, reqs->ginQueueDepth), ret, fail);
-    // Register all preexisting memories with GIN. Update the windows later when
-    // we have a stream.
-    for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
-      NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail);
+  if (requestedGinResources) {
+    if (!devr->ginEnabled) {
+      devr->ginEnabled = true;
+      // Register all preexisting memories with GIN. Update the windows later when we have a stream.
+      for (struct ncclDevrMemory* mem = devr->memHead; mem != nullptr; mem = mem->next) {
+        NCCLCHECKGOTO(symMemoryRegisterGin(comm, mem), ret, fail);
+      }
     }
   }
   if (devr->ginEnabled) {
@@ -991,7 +996,7 @@ ncclResult_t ncclDevrCommCreateInternal(
 
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, fail);
 
-  if (ginActivated) {
+  if (devr->ginEnabled) {
     // Now update the GIN handles in all existing windows. Registration of memories happened above.
     for (int i=0; i < devr->winSortedCount; i++) {
       struct ncclDevrWindow* win = devr->winSorted[i].win;

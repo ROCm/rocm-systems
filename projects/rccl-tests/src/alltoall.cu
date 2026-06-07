@@ -147,6 +147,24 @@ void AlltoAllGetBw(size_t count, int typesize, double sec, double* algBw, double
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+// Single-node: LSA barriers only in devComm, but connect GIN_ANVIL transport (GPU-initiated
+// SDMA queues, needsProxyProgress=0). RCCL connects transport without GIN window registration
+// or devComm GIN barrier/signal allocation when barrier/signal counts are zero.
+static inline void AlltoAllSetSingleNodeTransportDevCommReqs(ncclDevCommRequirements* reqs) {
+  reqs->lsaBarrierCount = deviceCtaCount;
+  reqs->ginContextCount = 1;
+  reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+}
+
+static inline void AlltoAllSetGinHybridDevCommReqs(ncclDevCommRequirements* reqs) {
+  reqs->ginContextCount = 1;
+  reqs->lsaBarrierCount = deviceCtaCount;
+  reqs->barrierCount = deviceCtaCount;
+  reqs->railGinBarrierCount = deviceCtaCount;
+  reqs->ginSignalCount = deviceCtaCount;
+  reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+}
+
 // set devComm reqs for alltoall device kernels
 testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
   if (!reqs || !commProperties) return testInternalError;
@@ -161,12 +179,11 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
-      reqs->ginContextCount = 1;
-      reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->barrierCount = deviceCtaCount;
-      reqs->railGinBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
-      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+      if (commProperties->nLsaTeams == 1) {
+        AlltoAllSetSingleNodeTransportDevCommReqs(reqs);
+      } else {
+        AlltoAllSetGinHybridDevCommReqs(reqs);
+      }
       return testSuccess;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
@@ -183,12 +200,11 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
-      reqs->ginContextCount = 1;
-      reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->barrierCount = deviceCtaCount;
-      reqs->railGinBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
-      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+      if (commProperties->nLsaTeams == 1) {
+        AlltoAllSetSingleNodeTransportDevCommReqs(reqs);
+      } else {
+        AlltoAllSetGinHybridDevCommReqs(reqs);
+      }
       return testSuccess;
     default:
       return testNotImplemented;
