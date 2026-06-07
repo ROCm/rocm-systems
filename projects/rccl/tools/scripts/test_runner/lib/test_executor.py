@@ -757,6 +757,7 @@ class TestExecutor:
         - rccl_home:      Path to the RCCL install/build to link against. Defaults to
                           the RCCL build_dir produced by build_rccl(). Exported as both
                           NCCL_HOME and RCCL_HOME for the build.
+        - parallel_jobs:  Number of parallel compilation jobs (passed via -j).
         - env_variables:  Extra environment variables to set during the build.
 
         Returns:
