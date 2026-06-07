@@ -1,0 +1,779 @@
+{
+  "system_configurations": {
+    "name": "RCCL-EnvVar-Coverage-MI300X",
+    "description": "Runs rccl-tests perf binaries while sweeping the RCCL environment variables that, per RCCL_Functional-Testing.csv, contribute the highest function/line/branch coverage. Each test exercises one or more env vars with distinct values. Vars for removed subsystems (MSCCL/MSCCLPP) and NVLS (not compiled on AMD) are intentionally excluded; all listed vars are verified present in the current branch source."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_DEBUG": "WARN"
+  },
+  "build_configuration": {
+    "install_flags": [
+      "--debug",
+      "-t",
+      "-l",
+      "--log-trace",
+      "--enable-code-coverage",
+      "--enable-mpi-tests",
+      "--enable-device-coverage",
+      "--no_clean"
+    ],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi"
+    ],
+    "rccl_home": "${RCCL_HOME:-${WORKDIR:-$PWD}/build/debug}",
+    "parallel_jobs": 64,
+    "env_variables": {}
+  },
+  "test_configurations": {
+    "perf_base": {
+      "is_gtest": false,
+      "binary": "all_reduce_perf",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1",
+      "env_variables": {}
+    },
+    "tuning_algo_proto": {
+      "extends": "perf_base",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1",
+      "tests": [
+        {
+          "name": "Tuning_Algo_Ring_Simple",
+          "description": "force Ring algo + SIMPLE proto",
+          "env_variables": {
+            "NCCL_ALGO": "Ring",
+            "NCCL_PROTO": "Simple"
+          }
+        },
+        {
+          "name": "Tuning_Algo_Tree_LL",
+          "description": "Tree algo + LL proto path",
+          "env_variables": {
+            "NCCL_ALGO": "Tree",
+            "NCCL_PROTO": "LL"
+          }
+        },
+        {
+          "name": "Tuning_Proto_LL128",
+          "description": "LL128 proto + LL128 thread count override",
+          "env_variables": {
+            "NCCL_PROTO": "LL128",
+            "NCCL_LL128_NTHREADS": "640"
+          }
+        },
+        {
+          "name": "Tuning_Thread_Thresholds",
+          "description": "NCCL_THREAD_THRESHOLDS thread-count thresholds",
+          "env_variables": {
+            "NCCL_THREAD_THRESHOLDS": "8192,8192,8192",
+            "NCCL_NTHREADS": "256"
+          }
+        },
+        {
+          "name": "Tuning_PAT_Enable",
+          "description": "NCCL_PAT_ENABLE + NCCL_NET_OVERHEAD tuning knobs",
+          "env_variables": {
+            "NCCL_PAT_ENABLE": "1",
+            "NCCL_NET_OVERHEAD": "1000"
+          }
+        }
+      ]
+    },
+    "enqueue_thresholds": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "Enqueue_GraphRegister_On",
+          "description": "NCCL_GRAPH_REGISTER on + L1 carveout",
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "1",
+            "NCCL_L1_SHARED_MEMORY_CARVEOUT": "0"
+          }
+        },
+        {
+          "name": "Enqueue_GraphRegister_Off",
+          "description": "NCCL_GRAPH_REGISTER off",
+          "env_variables": {
+            "NCCL_GRAPH_REGISTER": "0"
+          }
+        },
+        {
+          "name": "Enqueue_P2P_Thresholds",
+          "description": "NCCL_P2P_LL_THRESHOLD + RCCL_P2P_NET_THRESHOLD + NCCL_CHUNK_SIZE",
+          "binary": "sendrecv_perf",
+          "env_variables": {
+            "NCCL_P2P_LL_THRESHOLD": "16384",
+            "RCCL_P2P_NET_THRESHOLD": "65536",
+            "NCCL_CHUNK_SIZE": "262144"
+          }
+        },
+        {
+          "name": "Enqueue_Intranet_Threshold",
+          "description": "RCCL_INTRANET_THRESHOLD + RCCL_ENABLE_INTRANET",
+          "env_variables": {
+            "RCCL_INTRANET_THRESHOLD": "4194304",
+            "RCCL_ENABLE_INTRANET": "1"
+          }
+        }
+      ]
+    },
+    "channels_rings": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "Channels_Min_Max_NRings",
+          "description": "NCCL_MIN_NRINGS / NCCL_MAX_NRINGS",
+          "env_variables": {
+            "NCCL_MIN_NRINGS": "4",
+            "NCCL_MAX_NRINGS": "8"
+          }
+        },
+        {
+          "name": "Channels_Min_Max_NChannels",
+          "description": "NCCL_MIN_NCHANNELS / NCCL_MAX_NCHANNELS",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "16"
+          }
+        },
+        {
+          "name": "Channels_Unpack_Double",
+          "description": "NCCL_UNPACK_DOUBLE_NCHANNELS toggle off (default enabled)",
+          "env_variables": {
+            "NCCL_UNPACK_DOUBLE_NCHANNELS": "0"
+          }
+        },
+        {
+          "name": "Channels_P2P_NChannels",
+          "description": "NCCL_MIN_P2P_NCHANNELS / NCCL_MAX_P2P_NCHANNELS",
+          "binary": "alltoall_perf",
+          "env_variables": {
+            "NCCL_MIN_P2P_NCHANNELS": "2",
+            "NCCL_MAX_P2P_NCHANNELS": "8"
+          }
+        }
+      ]
+    },
+    "paths_topo": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "Paths_NetGdrLevel",
+          "description": "NCCL_NET_GDR_LEVEL",
+          "env_variables": {
+            "NCCL_NET_GDR_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "Paths_PxnDisable",
+          "description": "NCCL_PXN_DISABLE",
+          "env_variables": {
+            "NCCL_PXN_DISABLE": "0"
+          }
+        },
+        {
+          "name": "Paths_NetDisableIntra",
+          "description": "NCCL_NET_DISABLE_INTRA off + NCCL_NET_GDR_READ",
+          "env_variables": {
+            "NCCL_NET_DISABLE_INTRA": "0",
+            "NCCL_NET_GDR_READ": "1"
+          }
+        },
+        {
+          "name": "Paths_NvbDisable",
+          "description": "NCCL_NVB_DISABLE + NCCL_IGNORE_DISABLED_P2P",
+          "env_variables": {
+            "NCCL_NVB_DISABLE": "1",
+            "NCCL_IGNORE_DISABLED_P2P": "1"
+          }
+        },
+        {
+          "name": "Search_CrossNic_Pxn",
+          "description": "NCCL_CROSS_NIC + NCCL_P2P_PXN_LEVEL",
+          "env_variables": {
+            "NCCL_CROSS_NIC": "1",
+            "NCCL_P2P_PXN_LEVEL": "0"
+          }
+        }
+      ]
+    },
+    "model_matching": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "Rome_ModelMatchingDisable",
+          "description": "RCCL_MODEL_MATCHING_DISABLE",
+          "env_variables": {
+            "RCCL_MODEL_MATCHING_DISABLE": "1"
+          }
+        },
+        {
+          "name": "Rome_DisableRailTrees",
+          "description": "RCCL_DISABLE_RAIL_TREES + RCCL_MODEL_REVERSAL_DISABLE",
+          "env_variables": {
+            "RCCL_DISABLE_RAIL_TREES": "1",
+            "RCCL_MODEL_REVERSAL_DISABLE": "1"
+          }
+        },
+        {
+          "name": "Rome_DumpModel",
+          "description": "RCCL_DUMP_ROME_MODEL_FILE writes detected topology model",
+          "env_variables": {
+            "RCCL_DUMP_ROME_MODEL_FILE": "rccl_rome_model.xml"
+          }
+        },
+        {
+          "name": "Graph_File_Dump",
+          "description": "NCCL_GRAPH_DUMP_FILE (and NCCL_GRAPH_FILE reload path)",
+          "env_variables": {
+            "NCCL_GRAPH_DUMP_FILE": "rccl_graph.xml"
+          }
+        }
+      ]
+    },
+    "ib_transport": {
+      "extends": "perf_base",
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "IB_Pkey",
+          "description": "NCCL_IB_PKEY",
+          "env_variables": {
+            "NCCL_IB_PKEY": "0"
+          }
+        },
+        {
+          "name": "IB_MergeVfs",
+          "description": "NCCL_IB_MERGE_VFS off",
+          "env_variables": {
+            "NCCL_IB_MERGE_VFS": "0"
+          }
+        },
+        {
+          "name": "IB_WarnRailLocal",
+          "description": "NCCL_IB_WARN_RAIL_LOCAL",
+          "env_variables": {
+            "NCCL_IB_WARN_RAIL_LOCAL": "1"
+          }
+        },
+        {
+          "name": "IB_PciRelaxedOrdering",
+          "description": "NCCL_IB_PCI_RELAXED_ORDERING + NCCL_IB_RETURN_ASYNC_EVENTS",
+          "env_variables": {
+            "NCCL_IB_PCI_RELAXED_ORDERING": "1",
+            "NCCL_IB_RETURN_ASYNC_EVENTS": "1"
+          }
+        },
+        {
+          "name": "IB_QoS_Tc_Sl",
+          "description": "NCCL_IB_TC + NCCL_IB_SL quality-of-service knobs",
+          "env_variables": {
+            "NCCL_IB_TC": "96",
+            "NCCL_IB_SL": "0"
+          }
+        },
+        {
+          "name": "IB_SplitData_Qps",
+          "description": "NCCL_IB_SPLIT_DATA_ON_QPS + NCCL_IB_QPS_PER_CONNECTION",
+          "env_variables": {
+            "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+            "NCCL_IB_QPS_PER_CONNECTION": "2"
+          }
+        },
+        {
+          "name": "IB_Gid_Timeout_Retry",
+          "description": "NCCL_IB_GID_INDEX + NCCL_IB_TIMEOUT + NCCL_IB_RETRY_CNT",
+          "env_variables": {
+            "NCCL_IB_GID_INDEX": "3",
+            "NCCL_IB_TIMEOUT": "22",
+            "NCCL_IB_RETRY_CNT": "7"
+          }
+        },
+        {
+          "name": "IB_GdrFlush_Async",
+          "description": "NCCL_GDR_FLUSH_DISABLE + RCCL_FORCE_ENABLE_GDRDMA",
+          "env_variables": {
+            "NCCL_GDR_FLUSH_DISABLE": "1",
+            "RCCL_FORCE_ENABLE_GDRDMA": "1"
+          }
+        }
+      ]
+    },
+    "ibvwrap_retry": {
+      "extends": "perf_base",
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0"
+      },
+      "tests": [
+        {
+          "name": "IBV_MQP_RetrySleep",
+          "description": "NCCL_IB_MQP_RETRY_SLEEP_MSEC",
+          "env_variables": {
+            "NCCL_IB_MQP_RETRY_ALL": "1",
+            "NCCL_IB_MQP_RETRY_SLEEP_MSEC": "200"
+          }
+        },
+        {
+          "name": "IBV_MQP_RetryCnt",
+          "description": "NCCL_IB_MQP_RETRY_CNT",
+          "env_variables": {
+            "NCCL_IB_MQP_RETRY_ALL": "1",
+            "NCCL_IB_MQP_RETRY_CNT": "20"
+          }
+        }
+      ]
+    },
+    "socket_transport": {
+      "extends": "perf_base",
+      "env_variables": {
+        "NCCL_IB_DISABLE": "1",
+        "NCCL_NET": "Socket"
+      },
+      "tests": [
+        {
+          "name": "Socket_RetryCnt",
+          "description": "NCCL_SOCKET_RETRY_CNT",
+          "env_variables": {
+            "NCCL_SOCKET_RETRY_CNT": "50"
+          }
+        },
+        {
+          "name": "Socket_RetrySleep",
+          "description": "NCCL_SOCKET_RETRY_SLEEP_MSEC",
+          "env_variables": {
+            "NCCL_SOCKET_RETRY_SLEEP_MSEC": "200"
+          }
+        },
+        {
+          "name": "Socket_Threads",
+          "description": "NCCL_NSOCKS_PERTHREAD + NCCL_SOCKET_NTHREADS",
+          "env_variables": {
+            "NCCL_NSOCKS_PERTHREAD": "4",
+            "NCCL_SOCKET_NTHREADS": "2"
+          }
+        }
+      ]
+    },
+    "shm_transport": {
+      "extends": "perf_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "binary": "sendrecv_perf",
+      "tests": [
+        {
+          "name": "SHM_Default",
+          "description": "shared-memory transport enabled (baseline path)",
+          "env_variables": {
+            "NCCL_SHM_DISABLE": "0"
+          }
+        },
+        {
+          "name": "SHM_CudaMemcpy_SendSide",
+          "description": "NCCL_SHM_USE_CUDA_MEMCPY + send-side locality/mode",
+          "env_variables": {
+            "NCCL_SHM_USE_CUDA_MEMCPY": "1",
+            "NCCL_SHM_MEMCPY_MODE": "1",
+            "NCCL_SHM_LOCALITY": "1"
+          }
+        },
+        {
+          "name": "SHM_CudaMemcpy_RecvSide",
+          "description": "receive-side memcpy mode/locality",
+          "env_variables": {
+            "NCCL_SHM_USE_CUDA_MEMCPY": "1",
+            "NCCL_SHM_MEMCPY_MODE": "2",
+            "NCCL_SHM_LOCALITY": "2"
+          }
+        },
+        {
+          "name": "SHM_Disable",
+          "description": "NCCL_SHM_DISABLE forces alternate transport selection",
+          "env_variables": {
+            "NCCL_SHM_DISABLE": "1"
+          }
+        }
+      ]
+    },
+    "p2p_transport": {
+      "extends": "perf_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "binary": "sendrecv_perf",
+      "tests": [
+        {
+          "name": "P2P_DirectDisable",
+          "description": "NCCL_P2P_DIRECT_DISABLE",
+          "env_variables": {
+            "NCCL_P2P_DIRECT_DISABLE": "1"
+          }
+        },
+        {
+          "name": "P2P_CudaMemcpy",
+          "description": "NCCL_P2P_USE_CUDA_MEMCPY",
+          "env_variables": {
+            "NCCL_P2P_USE_CUDA_MEMCPY": "1"
+          }
+        },
+        {
+          "name": "P2P_Level",
+          "description": "NCCL_P2P_LEVEL distance gating",
+          "env_variables": {
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    },
+    "gdr_copy": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "GdrCopy_Enable",
+          "description": "NCCL_GDRCOPY_ENABLE + FIFO",
+          "env_variables": {
+            "NCCL_GDRCOPY_ENABLE": "1",
+            "NCCL_GDRCOPY_FIFO_ENABLE": "1"
+          }
+        },
+        {
+          "name": "GdrCopy_SyncFlush",
+          "description": "NCCL_GDRCOPY_SYNC_ENABLE + NCCL_GDRCOPY_FLUSH_ENABLE",
+          "env_variables": {
+            "NCCL_GDRCOPY_ENABLE": "1",
+            "NCCL_GDRCOPY_SYNC_ENABLE": "1",
+            "NCCL_GDRCOPY_FLUSH_ENABLE": "1"
+          }
+        },
+        {
+          "name": "Net_HdpFlush",
+          "description": "RCCL_NET_HDP_FLUSH",
+          "env_variables": {
+            "RCCL_NET_HDP_FLUSH": "1"
+          }
+        }
+      ]
+    },
+    "bootstrap_oob": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "Bootstrap_OobNetEnable",
+          "description": "NCCL_OOB_NET_ENABLE",
+          "env_variables": {
+            "NCCL_OOB_NET_ENABLE": "1"
+          }
+        },
+        {
+          "name": "Bootstrap_OobNetIfname",
+          "description": "NCCL_OOB_NET_IFNAME",
+          "env_variables": {
+            "NCCL_OOB_NET_ENABLE": "1",
+            "NCCL_OOB_NET_IFNAME": "eth0"
+          }
+        },
+        {
+          "name": "Bootstrap_UidStagger",
+          "description": "NCCL_UID_STAGGER_RATE + NCCL_UID_STAGGER_THRESHOLD",
+          "env_variables": {
+            "NCCL_UID_STAGGER_RATE": "5000",
+            "NCCL_UID_STAGGER_THRESHOLD": "128"
+          }
+        }
+      ]
+    },
+    "debug_observability": {
+      "extends": "perf_base",
+      "command_args": "-b 8 -e 64M -f 4 -g 1 -n 3 -w 1 -c 1",
+      "tests": [
+        {
+          "name": "Debug_Info_Subsys",
+          "description": "NCCL_DEBUG=INFO + NCCL_DEBUG_SUBSYS subsystem filter",
+          "env_variables": {
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,COLL,NET,TUNING"
+          }
+        },
+        {
+          "name": "Debug_File_ThreadName",
+          "description": "NCCL_DEBUG_FILE + NCCL_SET_THREAD_NAME",
+          "env_variables": {
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_FILE": "rccl_debug.%h.%p.log",
+            "NCCL_SET_THREAD_NAME": "1"
+          }
+        },
+        {
+          "name": "Debug_LogRoctx",
+          "description": "RCCL_LOG_ROCTX",
+          "env_variables": {
+            "RCCL_LOG_ROCTX": "1"
+          }
+        },
+        {
+          "name": "Debug_GraphMixing",
+          "description": "NCCL_GRAPH_MIXING_SUPPORT",
+          "env_variables": {
+            "NCCL_GRAPH_MIXING_SUPPORT": "1"
+          }
+        },
+        {
+          "name": "Debug_SignalHandler",
+          "description": "RCCL_ENABLE_SIGNALHANDLER",
+          "env_variables": {
+            "RCCL_ENABLE_SIGNALHANDLER": "1"
+          }
+        }
+      ]
+    },
+    "init_runtime": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "Init_KernelCollTrace",
+          "description": "RCCL_KERNEL_COLL_TRACE_ENABLE + thread variant",
+          "env_variables": {
+            "RCCL_KERNEL_COLL_TRACE_ENABLE": "1",
+            "RCCL_KERNEL_COLL_TRACE_THREAD_ENABLE": "1"
+          }
+        },
+        {
+          "name": "Init_CtaBounds",
+          "description": "NCCL_MIN_CTAS / NCCL_MAX_CTAS",
+          "env_variables": {
+            "NCCL_MIN_CTAS": "1",
+            "NCCL_MAX_CTAS": "16"
+          }
+        },
+        {
+          "name": "Init_FineGrainPcie",
+          "description": "HSA_FORCE_FINE_GRAIN_PCIE",
+          "env_variables": {
+            "HSA_FORCE_FINE_GRAIN_PCIE": "1"
+          }
+        },
+        {
+          "name": "Init_BuffSize_Channels",
+          "description": "NCCL_BUFFSIZE + NCCL_NCHANNELS_PER_NET_PEER",
+          "env_variables": {
+            "NCCL_BUFFSIZE": "8388608",
+            "NCCL_NCHANNELS_PER_NET_PEER": "2"
+          }
+        },
+        {
+          "name": "Init_LaunchMode_Group",
+          "description": "NCCL_LAUNCH_MODE group launch path",
+          "env_variables": {
+            "NCCL_LAUNCH_MODE": "GROUP"
+          }
+        }
+      ]
+    },
+    "collective_variants": {
+      "extends": "perf_base",
+      "tests": [
+        {
+          "name": "Coll_PivotAlltoall",
+          "description": "RCCL_ALL_TO_ALL_PIVOT_ENABLE + RCCL_PIVOT_ALLTOALL_ENABLE off",
+          "binary": "alltoall_perf",
+          "env_variables": {
+            "RCCL_ALL_TO_ALL_PIVOT_ENABLE": "1",
+            "RCCL_PIVOT_ALLTOALL_ENABLE": "0"
+          }
+        },
+        {
+          "name": "Coll_LL128_Force",
+          "description": "RCCL_LL128_FORCE_ENABLE forces LL128 proto",
+          "binary": "all_gather_perf",
+          "env_variables": {
+            "RCCL_LL128_FORCE_ENABLE": "1"
+          }
+        },
+        {
+          "name": "Coll_P2pNetDisable",
+          "description": "RCCL_P2P_NET_DISABLE toggled off (default 1)",
+          "binary": "reduce_scatter_perf",
+          "env_variables": {
+            "RCCL_P2P_NET_DISABLE": "0"
+          }
+        },
+        {
+          "name": "Coll_Broadcast_Output_Trees",
+          "description": "RCCL_OUTPUT_TREES diagnostic dump on broadcast path",
+          "binary": "broadcast_perf",
+          "env_variables": {
+            "RCCL_OUTPUT_TREES": "1"
+          }
+        }
+      ]
+    },
+    "registration_matrix": {
+      "extends": "perf_base",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1",
+      "env_variables": {
+        "NCCL_DMABUF_ENABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "Reg_Local_Legacy_DMABUF",
+          "description": "Local registration + legacy CUDA register, no graph (-R 1), DMABUF enabled",
+          "command_args": "-R 1",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "1",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "0",
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "Reg_Local_Cumem_DMABUF",
+          "description": "Local registration + CUMEM, no graph (-R 1), DMABUF enabled",
+          "command_args": "-R 1",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "0",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "0",
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
+          "name": "Reg_Graph_Local_Legacy_DMABUF",
+          "description": "Graph + local registration + legacy CUDA register (-R 1 -G 2), DMABUF enabled",
+          "command_args": "-R 1 -G 2",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "1",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "1",
+            "NCCL_CUMEM_ENABLE": "0"
+          }
+        },
+        {
+          "name": "Reg_Graph_Local_Cumem_DMABUF",
+          "description": "Graph + local registration + CUMEM (-R 1 -G 2), DMABUF enabled",
+          "command_args": "-R 1 -G 2",
+          "env_variables": {
+            "NCCL_LEGACY_CUDA_REGISTER": "0",
+            "NCCL_LOCAL_REGISTER": "1",
+            "NCCL_GRAPH_REGISTER": "1",
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "Tuning / Algo / Proto",
+      "description": "Env vars (NCCL_ALGO, NCCL_PROTO, NCCL_THREAD_THRESHOLDS, NCCL_LL128_NTHREADS, NCCL_PAT_ENABLE, NCCL_NET_OVERHEAD, NCCL_NTHREADS)",
+      "config": "tuning_algo_proto",
+      "enabled": true
+    },
+    {
+      "name": "Enqueue Thresholds",
+      "description": "Env vars (NCCL_GRAPH_REGISTER, NCCL_P2P_LL_THRESHOLD, RCCL_P2P_NET_THRESHOLD, NCCL_CHUNK_SIZE, NCCL_L1_SHARED_MEMORY_CARVEOUT, RCCL_INTRANET_THRESHOLD)",
+      "config": "enqueue_thresholds",
+      "enabled": true
+    },
+    {
+      "name": "Channels / Rings",
+      "description": "Channel/ring env vars (NCCL_MIN/MAX_NRINGS, NCCL_MIN/MAX_NCHANNELS, NCCL_UNPACK_DOUBLE_NCHANNELS, NCCL_MIN/MAX_P2P_NCHANNELS)",
+      "config": "channels_rings",
+      "enabled": true
+    },
+    {
+      "name": "Paths / Topology",
+      "description": "Env vars (NCCL_NET_GDR_LEVEL, NCCL_PXN_DISABLE, NCCL_NET_DISABLE_INTRA, NCCL_NET_GDR_READ, NCCL_NVB_DISABLE, NCCL_IGNORE_DISABLED_P2P, NCCL_CROSS_NIC, NCCL_P2P_PXN_LEVEL)",
+      "config": "paths_topo",
+      "enabled": true
+    },
+    {
+      "name": "Rome Model Matching",
+      "description": "Env vars (RCCL_MODEL_MATCHING_DISABLE, RCCL_DISABLE_RAIL_TREES, RCCL_MODEL_REVERSAL_DISABLE, RCCL_DUMP_ROME_MODEL_FILE, NCCL_GRAPH_DUMP_FILE)",
+      "config": "model_matching",
+      "enabled": true
+    },
+    {
+      "name": "IB Transport",
+      "description": "Env vars (NCCL_IB_PKEY, NCCL_IB_MERGE_VFS, NCCL_IB_WARN_RAIL_LOCAL, NCCL_IB_PCI_RELAXED_ORDERING, NCCL_IB_RETURN_ASYNC_EVENTS, NCCL_IB_TC, NCCL_IB_SL, NCCL_IB_SPLIT_DATA_ON_QPS, NCCL_IB_QPS_PER_CONNECTION, NCCL_IB_GID_INDEX, NCCL_IB_TIMEOUT, NCCL_IB_RETRY_CNT, NCCL_GDR_FLUSH_DISABLE, RCCL_FORCE_ENABLE_GDRDMA) - requires IB hardware",
+      "config": "ib_transport",
+      "enabled": true
+    },
+    {
+      "name": "IB MQP Retry (ibvwrap)",
+      "description": "Env vars (NCCL_IB_MQP_RETRY_ALL, NCCL_IB_MQP_RETRY_CNT, NCCL_IB_MQP_RETRY_SLEEP_MSEC) - requires IB hardware",
+      "config": "ibvwrap_retry",
+      "enabled": true
+    },
+    {
+      "name": "Socket Transport",
+      "description": "Env vars (NCCL_SOCKET_RETRY_CNT, NCCL_SOCKET_RETRY_SLEEP_MSEC, NCCL_NSOCKS_PERTHREAD, NCCL_SOCKET_NTHREADS)",
+      "config": "socket_transport",
+      "enabled": true
+    },
+    {
+      "name": "SHM Transport",
+      "description": "Env vars (NCCL_SHM_DISABLE, NCCL_SHM_USE_CUDA_MEMCPY, NCCL_SHM_MEMCPY_MODE, NCCL_SHM_LOCALITY)",
+      "config": "shm_transport",
+      "enabled": true
+    },
+    {
+      "name": "P2P Transport",
+      "description": "Env vars (NCCL_P2P_DIRECT_DISABLE, NCCL_P2P_USE_CUDA_MEMCPY, NCCL_P2P_LEVEL)",
+      "config": "p2p_transport",
+      "enabled": true
+    },
+    {
+      "name": "GDR Copy / HDP Flush",
+      "description": "Env vars (NCCL_GDRCOPY_ENABLE, NCCL_GDRCOPY_FIFO_ENABLE, NCCL_GDRCOPY_SYNC_ENABLE, NCCL_GDRCOPY_FLUSH_ENABLE, RCCL_NET_HDP_FLUSH)",
+      "config": "gdr_copy",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap / OOB Net",
+      "description": "Env vars (NCCL_OOB_NET_ENABLE, NCCL_OOB_NET_IFNAME, NCCL_UID_STAGGER_RATE, NCCL_UID_STAGGER_THRESHOLD)",
+      "config": "bootstrap_oob",
+      "enabled": true
+    },
+    {
+      "name": "Debug / Observability",
+      "description": "Env vars (NCCL_DEBUG, NCCL_DEBUG_SUBSYS, NCCL_DEBUG_FILE, NCCL_SET_THREAD_NAME, RCCL_LOG_ROCTX, NCCL_GRAPH_MIXING_SUPPORT, RCCL_ENABLE_SIGNALHANDLER)",
+      "config": "debug_observability",
+      "enabled": true
+    },
+    {
+      "name": "Init / Runtime",
+      "description": "Env vars (RCCL_KERNEL_COLL_TRACE_ENABLE, RCCL_KERNEL_COLL_TRACE_THREAD_ENABLE, NCCL_MIN_CTAS, NCCL_MAX_CTAS, HSA_FORCE_FINE_GRAIN_PCIE, NCCL_BUFFSIZE, NCCL_NCHANNELS_PER_NET_PEER, NCCL_LAUNCH_MODE)",
+      "config": "init_runtime",
+      "enabled": true
+    },
+    {
+      "name": "Collective Variants",
+      "description": "Env vars across alltoall/allgather/reducescatter/broadcast (RCCL_ALL_TO_ALL_PIVOT_ENABLE, RCCL_PIVOT_ALLTOALL_ENABLE, RCCL_LL128_FORCE_ENABLE, RCCL_P2P_NET_DISABLE, RCCL_OUTPUT_TREES)",
+      "config": "collective_variants",
+      "enabled": true
+    },
+    {
+      "name": "Registration Matrix (DMABUF enabled)",
+      "description": "Buffer registration matrix with DMABUF on (NCCL_DMABUF_ENABLE=1): local+legacy, local+cumem, graph+local+legacy, graph+local+cumem (NCCL_LOCAL_REGISTER, NCCL_GRAPH_REGISTER, NCCL_LEGACY_CUDA_REGISTER, NCCL_CUMEM_ENABLE; rccl-tests -R 1 and -G 2 flags)",
+      "config": "registration_matrix",
+      "enabled": true
+    }
+  ]
+}
