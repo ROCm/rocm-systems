@@ -2056,8 +2056,15 @@ bool VirtualGPU::create() {
 
   // Initialize timestamp conversion factor
   if (Timestamp::getGpuTicksToTime() == 0) {
-    uint64_t frequency;
+    uint64_t frequency = 0;
     Hsa::system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &frequency);
+    if (frequency == 0) {
+      // A zero frequency would make ticksToTime_ +inf and corrupt every
+      // GPU->CPU timestamp conversion (inf/NaN). Fall back to 100 MHz, the
+      // fixed timestamp clock on current AMD GPUs (e.g. MI300X).
+      LogError("HSA returned a timestamp frequency of 0; using 100 MHz fallback.");
+      frequency = 100000000;  // 100 MHz
+    }
     Timestamp::setGpuTicksToTime(1e9 / double(frequency));
   }
 
