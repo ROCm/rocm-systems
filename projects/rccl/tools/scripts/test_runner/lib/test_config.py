@@ -246,7 +246,11 @@ class TestConfigProcessor:
         Returns:
             list: Tests with defaults applied
         """
-        # Fields that can have defaults at config level
+        # Fields that can have defaults at config level.
+        # NOTE: "command_args" is intentionally NOT inherited here. The suite-level
+        # "command_args" is treated as a base and a test's own "command_args" is
+        # appended to it at execution time (see test_executor.run_test), so it must
+        # remain un-merged at this stage to avoid clobbering the base.
         default_fields = ["is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout"]
 
         processed_tests = []
@@ -372,6 +376,16 @@ class TestConfigProcessor:
             dict: Build configuration with CMake options, environment variables, etc.
         """
         return self.config.get("build_configuration", {})
+
+    def get_rccl_tests_build_config(self):
+        """
+        Get the rccl-tests build configuration settings.
+
+        Returns:
+            dict: rccl-tests build configuration (source_dir, install_flags,
+                  parallel_jobs, env_variables, etc.). Empty dict if not present.
+        """
+        return self.config.get("rccl_tests_build_configuration", {})
 
     def validate_config(self):
         """

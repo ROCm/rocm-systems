@@ -222,6 +222,7 @@ class TestExecutor:
                 available = list(system_env.keys()) if isinstance(system_env, dict) else []
                 print(f"WARNING: No system_env_variables for '{system}'. Available: {available}")
         self.build_config = config_processor.get_build_config()
+        self.rccl_tests_build_config = config_processor.get_rccl_tests_build_config()
 
         # Setup directories
         self.setup_directories()
@@ -605,6 +606,128 @@ class TestExecutor:
             print(f"ERROR: Build failed with exception: {e}")
             return False
 
+    def build_rccl_tests(self):
+        """
+        Build rccl-tests (the perf binaries: all_reduce_perf, all_gather_perf, ...)
+        using its own build system, mirroring build_rccl().
+
+        The rccl_tests_build_configuration in the JSON config specifies:
+        - enabled:        Set to false to skip this step entirely (default true if the
+                          section is present; absent section => skipped).
+        - source_dir:     Path to the rccl-tests checkout (env vars/~ expanded).
+        - install_script: Build script relative to source_dir (default "install.sh").
+        - install_flags:  List of flags passed to the build script (e.g. ["--mpi"]).
+        - build_command:  Optional full shell command that overrides install_script/
+                          install_flags (run with cwd=source_dir).
+        - rccl_home:      Path to the RCCL install/build to link against. Defaults to
+                          the RCCL build_dir produced by build_rccl(). Exported as both
+                          NCCL_HOME and RCCL_HOME for the build.
+        - parallel_jobs:  Number of parallel compilation jobs (passed via -j).
+        - env_variables:  Extra environment variables to set during the build.
+
+        Returns:
+            bool: True if the build succeeded or was intentionally skipped.
+        """
+        cfg = self.rccl_tests_build_config
+
+        # No section => nothing to build (backward compatible with existing configs).
+        if not cfg:
+            return True
+
+        if not cfg.get("enabled", True):
+            if self.args.verbose:
+                print("SKIP: rccl-tests build disabled (rccl_tests_build_configuration.enabled=false)")
+            return True
+
+        if self.args.no_build:
+            if self.args.verbose:
+                print("SKIP: rccl-tests build skipped (--no-build)")
+            return True
+
+        print("="*80)
+        print("BUILDING rccl-tests")
+        print("="*80)
+
+        workdir = self.paths.get("workdir", os.getcwd())
+        rocm_path = self.paths.get("rocm_path", "/opt/rocm")
+        mpi_path = self.paths.get("mpi_path", "")
+
+        def _expand(p):
+            return os.path.expanduser(os.path.expandvars(str(p)))
+
+        source_dir = _expand(cfg.get("source_dir", os.path.join(workdir, "rccl-tests")))
+        if not os.path.isdir(source_dir):
+            print(f"ERROR: rccl-tests source directory not found: {source_dir}")
+            print("       Set rccl_tests_build_configuration.source_dir or the "
+                  "RCCL_TESTS_DIR environment variable.")
+            return False
+
+        # RCCL to link against: explicit rccl_home, else the RCCL build_dir we built.
+        rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
+
+        install_flags = list(cfg.get("install_flags", []))
+        parallel_jobs = cfg.get("parallel_jobs")
+        build_env_vars = cfg.get("env_variables", {})
+
+        # Build the command: explicit build_command wins, otherwise install.sh + flags.
+        build_command = cfg.get("build_command")
+        if build_command:
+            cmd = build_command
+            use_shell = True
+        else:
+            install_script = os.path.join(source_dir, cfg.get("install_script", "install.sh"))
+            if not os.path.isfile(install_script):
+                print(f"ERROR: rccl-tests build script not found: {install_script}")
+                print("       Provide rccl_tests_build_configuration.build_command or "
+                      "install_script.")
+                return False
+            cmd = [install_script] + install_flags
+            if parallel_jobs:
+                cmd.extend(["-j", str(parallel_jobs)])
+            use_shell = False
+
+        # Setup environment: point rccl-tests at the RCCL we just built.
+        env = os.environ.copy()
+        env['ROCM_PATH'] = rocm_path
+        if mpi_path:
+            env['MPI_PATH'] = mpi_path
+            env['MPI_HOME'] = mpi_path
+        env['NCCL_HOME'] = rccl_home
+        env['RCCL_HOME'] = rccl_home
+        for key, value in build_env_vars.items():
+            env[key] = str(value)
+
+        if self.args.verbose:
+            print(f"Source directory: {source_dir}")
+            print(f"ROCm path:        {rocm_path}")
+            print(f"MPI path:         {mpi_path}")
+            print(f"RCCL home:        {rccl_home}")
+            print(f"Command:          {cmd if use_shell else ' '.join(cmd)}")
+            if build_env_vars:
+                print("Build environment variables:")
+                for key, value in build_env_vars.items():
+                    print(f"  {key}={value}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=source_dir,
+                env=env,
+                shell=use_shell,
+                capture_output=False
+            )
+
+            if result.returncode != 0:
+                print("ERROR: rccl-tests build failed")
+                return False
+
+            print("rccl-tests build completed successfully")
+            return True
+
+        except Exception as e:
+            print(f"ERROR: rccl-tests build failed with exception: {e}")
+            return False
+
     def _resolve_binary_path(self, binary, test_config):
         """
         Resolve the test binary path using multiple strategies:
@@ -693,8 +816,13 @@ class TestExecutor:
         timeout = test_config.get("timeout", 0)
         env_vars = test_config.get("env_variables", {})
 
-        # Support custom command arguments for non-gtest or specialized tests
-        custom_args = test_config.get("command_args", "")
+        # Support custom command arguments for non-gtest or specialized tests.
+        # The suite-level "command_args" is a shared base; a test's own
+        # "command_args" is appended to it, so a test can add flags
+        # (e.g. "-R 1 -G 2") without restating the shared base args.
+        base_args = suite_config.get("command_args", "")
+        test_args = test_config.get("command_args", "")
+        custom_args = f"{base_args} {test_args}".strip()
 
         # Merge environment variables
         merged_env = {
