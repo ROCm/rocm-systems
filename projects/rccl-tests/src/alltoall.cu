@@ -183,7 +183,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
-      reqs->ginContextCount = deviceCtaCount;
+      reqs->ginContextCount = 1;
       reqs->lsaBarrierCount = deviceCtaCount;
       reqs->barrierCount = deviceCtaCount;
       reqs->railGinBarrierCount = deviceCtaCount;
@@ -221,7 +221,7 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
     case 5: // GinAdaptiveAlltoAllKernel (LSA-only intra-node + hybrid inter-node)
-      reqs->ginContextCount = deviceCtaCount;
+      reqs->ginContextCount = 1;
       reqs->lsaBarrierCount = deviceCtaCount;
       reqs->barrierCount = deviceCtaCount;
       reqs->railGinBarrierCount = deviceCtaCount;
@@ -265,95 +265,167 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
+// Vectorized alltoall copy for full NVL peer sets (single-node / all-local paths).
+template <typename T>
+__device__ __forceinline__ void AlltoAllNvlCopyOptimized(ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int tid, int nthreads) {
+  using TN = typename VectorTypeMapping<T>::Type;
+  constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
+  constexpr int UNROLL_FACTOR = 128/sizeof(TN);
+  constexpr int PEER_UNROLL = 2;
+
+  T* sendPtr = (T*)ncclGetLsaPointer(sendwin, sendoffset, rank);
+
+  bool canVectorize = (sizeof(TN) > sizeof(T)) &&
+                      (reinterpret_cast<uintptr_t>(sendPtr) % sizeof(TN) == 0) &&
+                      ((count * sizeof(T)) % sizeof(TN) == 0);
+
+  if (!canVectorize) {
+    AlltoAllScalarImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, tid, nthreads);
+    return;
+  }
+
+  size_t vector_count = count / VECTOR_FACTOR;
+  int elements_per_iteration = nthreads * UNROLL_FACTOR;
+  size_t aligned_vector_count = (vector_count / elements_per_iteration) * elements_per_iteration;
+
+  for (size_t base_offset = tid; base_offset < aligned_vector_count; base_offset += elements_per_iteration) {
+    for (int peerBase = 0; peerBase < nRanks; peerBase += PEER_UNROLL) {
+      int peersInGroup = min(PEER_UNROLL, nRanks - peerBase);
+
+      #pragma unroll
+      for (int p = 0; p < peersInGroup; p++) {
+        int peer = peerBase + p;
+        TN* sendVecPtr = (TN*)(sendPtr + peer * count);
+        TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count);
+        TN values[UNROLL_FACTOR];
+
+        #pragma unroll
+        for (int i = 0; i < UNROLL_FACTOR; i++) {
+          size_t offset = base_offset + i * nthreads;
+          values[i] = sendVecPtr[offset];
+        }
+        #pragma unroll
+        for (int i = 0; i < UNROLL_FACTOR; i++) {
+          size_t offset = base_offset + i * nthreads;
+          recvVecPtr[offset] = values[i];
+        }
+      }
+    }
+  }
+
+  for (size_t base_offset = aligned_vector_count + tid; base_offset < vector_count; base_offset += nthreads) {
+    for (int peer = 0; peer < nRanks; peer++) {
+      TN* sendVecPtr = (TN*)(sendPtr + peer * count);
+      TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count);
+      recvVecPtr[base_offset] = sendVecPtr[base_offset];
+    }
+  }
+
+  size_t scalar_start = vector_count * VECTOR_FACTOR;
+  for (size_t offset = scalar_start + tid; offset < count; offset += nthreads) {
+    for (int peer = 0; peer < nRanks; peer++) {
+      T value = sendPtr[peer * count + offset];
+      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, peer);
+      recvPtr[rank * count + offset] = value;
+    }
+  }
+}
+
 // Device implementation #2 - optimized NVL kernel using vectorization and unrolling
 template <typename T>
 __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   ncclLsaBarrierSession<ncclCoopCta> bar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-  using TN = typename VectorTypeMapping<T>::Type;
-  constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
-  constexpr int UNROLL_FACTOR = 128/sizeof(TN);
-  constexpr int PEER_UNROLL = 2;
-
   int rank = devComm.rank, nRanks = devComm.nRanks;
   int tid = threadIdx.x + blockDim.x * blockIdx.x;
   int nthreads = blockDim.x * gridDim.x;
 
-  T* sendPtr = (T*)ncclGetLsaPointer(sendwin, sendoffset, rank);
-
-  // alignment check: can we use vectorized operations?
-  bool canVectorize = (sizeof(TN) > sizeof(T)) &&  // Only if vectorization helps
-                      (reinterpret_cast<uintptr_t>(sendPtr) % sizeof(TN) == 0) &&  // Base aligned
-                      ((count * sizeof(T)) % sizeof(TN) == 0);  // Stride compatible
-
-  if (canVectorize) {
-    size_t vector_count = count / VECTOR_FACTOR;
-    int elements_per_iteration = nthreads * UNROLL_FACTOR;
-
-    // process aligned vectorized elements without bounds checks
-    size_t aligned_vector_count = (vector_count / elements_per_iteration) * elements_per_iteration;
-    for (size_t base_offset = tid; base_offset < aligned_vector_count; base_offset += elements_per_iteration) {
-      // unroll a limited number of peers at a time
-      for (int peerBase = 0; peerBase < nRanks; peerBase += PEER_UNROLL) {
-        int peersInGroup = min(PEER_UNROLL, nRanks - peerBase);
-
-        #pragma unroll
-        for (int p = 0; p < peersInGroup; p++) {
-          int peer = peerBase + p;
-          TN* sendVecPtr = (TN*)(sendPtr + peer * count);
-          TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count);
-          TN values[UNROLL_FACTOR];
-
-          // split load/store into separate loops for better overlap and ILP
-          #pragma unroll
-          for (int i = 0; i < UNROLL_FACTOR; i++) {
-            size_t offset = base_offset + i * nthreads;
-            values[i] = sendVecPtr[offset];
-          }
-          #pragma unroll
-          for (int i = 0; i < UNROLL_FACTOR; i++) {
-            size_t offset = base_offset + i * nthreads;
-            recvVecPtr[offset] = values[i];
-          }
-        }
-      }
-    }
-
-    // handle remaining vectorized elements that didn't fit in aligned chunks
-    for (size_t base_offset = aligned_vector_count + tid; base_offset < vector_count; base_offset += nthreads) {
-      for (int peer = 0; peer < nRanks; peer++) {
-        TN* sendVecPtr = (TN*)(sendPtr + peer * count);
-        TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count);
-        recvVecPtr[base_offset] = sendVecPtr[base_offset];
-      }
-    }
-
-    // handle any remaining elements not divisible by vectorization factor
-    size_t scalar_start = vector_count * VECTOR_FACTOR;
-    for (size_t offset = scalar_start + tid; offset < count; offset += nthreads) {
-      for (int peer = 0; peer < nRanks; peer++) {
-        T value = sendPtr[peer * count + offset];
-        T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, peer);
-        recvPtr[rank * count + offset] = value;
-      }
-    }
-  } else {
-    // simple scalar fallback for unaligned data (identical to simple kernel)
-    AlltoAllScalarImpl<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, tid, nthreads);
-  }
+  AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, tid, nthreads);
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// LSA alltoall copy shared by NVL and GIN single-node fast paths.
+// Scalar LSA alltoall copy fallback.
 template <typename T>
-__device__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin,
-                                size_t recvoffset, size_t count, int recvRank, int startLsa,
-                                int lsaSize, int tid, int nthreads) {
+__device__ void AlltoAllLsaCopyScalar(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin,
+                                      size_t recvoffset, size_t count, int recvRank, int startLsa,
+                                      int lsaSize, int tid, int nthreads) {
   T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
   for (size_t offset = tid; offset < count; offset += nthreads) {
+    for (int lp = 0; lp < lsaSize; lp++) {
+      int wr = startLsa + lp;
+      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
+      recvPtr[recvRank * count + offset] = sendLocal[wr * count + offset];
+    }
+  }
+}
+
+// LSA alltoall copy shared by NVL and GIN single-node fast paths.
+template <typename T>
+__device__ __forceinline__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin,
+                                size_t recvoffset, size_t count, int recvRank, int startLsa,
+                                int lsaSize, int tid, int nthreads) {
+  using TN = typename VectorTypeMapping<T>::Type;
+  constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
+  constexpr int UNROLL_FACTOR = 128/sizeof(TN);
+  constexpr int PEER_UNROLL = 2;
+
+  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+
+  bool canVectorize = (sizeof(TN) > sizeof(T)) &&
+                      (reinterpret_cast<uintptr_t>(sendLocal) % sizeof(TN) == 0) &&
+                      ((count * sizeof(T)) % sizeof(TN) == 0);
+
+  if (!canVectorize) {
+    AlltoAllLsaCopyScalar<T>(sendwin, sendoffset, recvwin, recvoffset, count, recvRank, startLsa,
+                             lsaSize, tid, nthreads);
+    return;
+  }
+
+  size_t vector_count = count / VECTOR_FACTOR;
+  int elements_per_iteration = nthreads * UNROLL_FACTOR;
+  size_t aligned_vector_count = (vector_count / elements_per_iteration) * elements_per_iteration;
+
+  for (size_t base_offset = tid; base_offset < aligned_vector_count; base_offset += elements_per_iteration) {
+    for (int peerBase = 0; peerBase < lsaSize; peerBase += PEER_UNROLL) {
+      int peersInGroup = min(PEER_UNROLL, lsaSize - peerBase);
+
+      #pragma unroll
+      for (int p = 0; p < peersInGroup; p++) {
+        int lp = peerBase + p;
+        int wr = startLsa + lp;
+        TN* sendVecPtr = (TN*)(sendLocal + wr * count);
+        TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, lp) + recvRank * count);
+        TN values[UNROLL_FACTOR];
+
+        #pragma unroll
+        for (int i = 0; i < UNROLL_FACTOR; i++) {
+          size_t offset = base_offset + i * nthreads;
+          values[i] = sendVecPtr[offset];
+        }
+        #pragma unroll
+        for (int i = 0; i < UNROLL_FACTOR; i++) {
+          size_t offset = base_offset + i * nthreads;
+          recvVecPtr[offset] = values[i];
+        }
+      }
+    }
+  }
+
+  for (size_t base_offset = aligned_vector_count + tid; base_offset < vector_count; base_offset += nthreads) {
+    for (int lp = 0; lp < lsaSize; lp++) {
+      int wr = startLsa + lp;
+      TN* sendVecPtr = (TN*)(sendLocal + wr * count);
+      TN* recvVecPtr = (TN*)((T*)ncclGetLsaPointer(recvwin, recvoffset, lp) + recvRank * count);
+      recvVecPtr[base_offset] = sendVecPtr[base_offset];
+    }
+  }
+
+  size_t scalar_start = vector_count * VECTOR_FACTOR;
+  for (size_t offset = scalar_start + tid; offset < count; offset += nthreads) {
     for (int lp = 0; lp < lsaSize; lp++) {
       int wr = startLsa + lp;
       T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
@@ -382,8 +454,8 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
-                       lsa.nRanks, tid, nthreads);
+    AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
+                                world.nRanks, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
@@ -453,15 +525,8 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
         size, ncclGin_SignalInc{signalIndex});
   }
 
-  /* handle local peers with LSA */
-  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
-  for (size_t offset = tid; offset < count; offset += nthreads) {
-    for (int lp = 0; lp < lsa.nRanks; lp++) {
-      int wr = startLsa + lp;
-      T* recvPtr = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp);
-      recvPtr[world.rank * count + offset] = sendLocal[wr * count + offset];
-    }
-  }
+  AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
+                     lsaSize, tid, nthreads);
 
   int numRemotePeers = world.nRanks - lsa.nRanks;
   gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
@@ -490,14 +555,14 @@ __global__ void GinAdaptiveAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffse
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
-                       lsaSize, tid, nthreads);
+    AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
+                                world.nRanks, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
   }
 
-  int ginContext = blockIdx.x;
+  int ginContext = (devComm.ginContextCount > 0) ? (blockIdx.x % devComm.ginContextCount) : 0;
   unsigned int signalIndex = 0;
   ncclGin gin { devComm, ginContext };
   uint64_t signalValue = gin.readSignal(signalIndex);
