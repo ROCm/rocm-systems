@@ -191,4 +191,25 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 4 -A 1
 fi
 
+if [ 1 -eq 1 ]; then
+# --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
+# Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
+echo "=== RCCL AlltoAll (-D 5): GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
+docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
+  mpirun ${MPIRUN_BASE} \
+  -x RCCL_ROCSHMEM_ENABLE=0 \
+  -x NCCL_GIN_ENABLE=1 \
+  -x NCCL_GIN_TYPE=5 \
+  -x NCCL_DEBUG=VERSION \
+  -x NCCL_DEBUG_SUBSYS=INIT \
+  -x NCCL_CUMEM_ENABLE=1 \
+  -x RCCL_ENABLE_INTRANET=1 \
+  -x NCCL_DMABUF_ENABLE=1 \
+  -x NCCL_MSCCL_ENABLE=0 \
+  -x HSA_NO_SCRATCH_RECLAIM=1 \
+  -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
+  /workspace/rccl-tests/alltoall_perf \
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 5 -A 1
+fi
+
 set +x
