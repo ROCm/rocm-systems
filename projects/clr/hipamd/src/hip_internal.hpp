@@ -97,12 +97,6 @@ const char* ihipGetErrorName(hipError_t hip_error);
 
 } // namespace hip
 
-#if defined(__GNUC__) || defined(__clang__)
-extern "C" __attribute__((visibility("default"))) void __hipOnError(const void *err_info);
-#else
-extern "C" void __hipOnError(const void *err_info);
-#endif
-
 // Helper: set up TLS device pointer on first use.
 #define HIP_INIT_TLS_DEVICE()                                                                      \
   if (hip::tls.device_ == nullptr && !hip::g_devices.empty()) {                                    \
@@ -178,22 +172,6 @@ extern "C" void __hipOnError(const void *err_info);
   } else if (hip::tls.last_command_error_ != hipSuccess &&                                         \
              hip::tls.last_command_error_ != hipErrorNotReady) {                                   \
     hip::tls.last_error_ = hip::tls.last_command_error_;                                           \
-  }                                                                                                \
-  if (hip::tls.last_command_error_ != hipSuccess &&                                                \
-      hip::tls.last_command_error_ != hipErrorNotReady) {                                          \
-    /* The debugger may place a breakpoint at __hipOnError to catch failed API calls */            \
-    struct {                                                                                       \
-      uint32_t version;                                                                            \
-      uint32_t code;                                                                               \
-      const char *name;                                                                            \
-      const char *desc;                                                                            \
-    } err_info = {                                                                                 \
-      1,                                                                                           \
-      hip::tls.last_command_error_,                                                                \
-      hipGetErrorName(hip::tls.last_command_error_),                                               \
-      hipGetErrorString(hip::tls.last_command_error_)                                              \
-    };                                                                                             \
-    __hipOnError((void *) &err_info);                                                              \
   }
 
 #define HIP_RETURN_DURATION(ret, ...)                                                              \

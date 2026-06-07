@@ -27,7 +27,6 @@ considered stopped.
               │ for each node n │
               │   mkfifo stdin  │
               │   open stdout   │
-              │   open stderr   │
               │   spawn(child)  │
               │   write pid     │
               └────────┬────────┘
