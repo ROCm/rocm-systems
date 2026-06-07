@@ -842,7 +842,6 @@ install(
     DIRECTORY src/utils
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-    PATTERN "_install_metadata.py.in" EXCLUDE
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
