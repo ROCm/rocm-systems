@@ -1,0 +1,424 @@
+=== workspace ===
+/workspace
+total 24
+drwxr-xr-x 1 root root 4096 Jun  7 00:02 .
+drwxr-xr-x 1 root root 4096 Jun  7 00:22 ..
+drwxr-xr-x 1 root root 4096 Jun  7 00:02 rccl
+drwxr-xr-x 5 root root 4096 Jun  7 00:03 rccl-tests
+drwxr-xr-x 1 root root 4096 Jun  7 00:01 rdma-perftest
+drwxr-xr-x 1 root root 4096 Jun  7 00:02 rocshmem
+total 18716
+drwxr-xr-x 2 root root     4096 Jun  7 00:02 .
+drwxr-xr-x 1 root root     4096 Jun  7 00:02 ..
+-rwxr-xr-x 1 root root 12623712 Jun  7 00:02 rocshmem_functional_tests
+-rwxr-xr-x 1 root root  6531000 Jun  7 00:02 rocshmem_info
+total 3924
+drwxr-xr-x 3 root root    4096 Jun  7 00:02 .
+drwxr-xr-x 1 root root    4096 Jun  7 00:02 ..
+drwxr-xr-x 3 root root    4096 Jun  7 00:02 cmake
+lrwxrwxrwx 1 root root      12 Jun  7 00:02 librccl.so -> librccl.so.1
+lrwxrwxrwx 1 root root      14 Jun  7 00:02 librccl.so.1 -> librccl.so.1.0
+-rw-r--r-- 1 root root 4004928 Jun  7 00:02 librccl.so.1.0
+-rwxr-xr-x 1 root root 11981728 Jun  7 00:03 /workspace/rccl-tests/alltoall_perf
+=== RCCL AlltoAll: GIN proxy (NCCL_GIN_TYPE=2, inter-node capable) np=8 max_bytes=268435456 ===
+# rccl-tests version 2.17.9-Unknown  rccl-headers=22907 rccl-library=22907
+# Collective test starting: alltoall_perf
+# nThread 1 nGpus 1 minBytes 128 maxBytes 268435456 step: 2(factor) warmup iters: 1 iters: 20 agg iters: 1 validation: 1 graph: 0
+#
+# Using devices
+#  Rank  0 Group  0 Pid     10 on smci355-ccs-aus-m03-17 device  0 [0000:75:00] AMD Instinct MI355X
+#  Rank  1 Group  0 Pid     11 on smci355-ccs-aus-m03-17 device  1 [0000:05:00] AMD Instinct MI355X
+#  Rank  2 Group  0 Pid     12 on smci355-ccs-aus-m03-17 device  2 [0000:65:00] AMD Instinct MI355X
+#  Rank  3 Group  0 Pid     13 on smci355-ccs-aus-m03-17 device  3 [0000:15:00] AMD Instinct MI355X
+#  Rank  4 Group  0 Pid     14 on smci355-ccs-aus-m03-17 device  4 [0000:f5:00] AMD Instinct MI355X
+#  Rank  5 Group  0 Pid     15 on smci355-ccs-aus-m03-17 device  5 [0000:85:00] AMD Instinct MI355X
+#  Rank  6 Group  0 Pid     16 on smci355-ccs-aus-m03-17 device  6 [0000:e5:00] AMD Instinct MI355X
+#  Rank  7 Group  0 Pid     17 on smci355-ccs-aus-m03-17 device  7 [0000:95:00] AMD Instinct MI355X
+RCCL version : 2.29.7-Unknown 
+HIP version  : 7.13.99004-3309c611
+ROCm version : 7.13.0.0-9999-3309c611
+Hostname     : smci355-ccs-aus-m03-17
+Librccl path : /workspace/rccl/lib/librccl.so.1
+#
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong algo      proto      nchannels 
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)             (us)  (GB/s)  (GB/s)                                      
+         128             4     float    none      -1    30.16    0.00    0.00       0    26.78    0.00    0.00    N/A     N/A       N/A         N/A
+         256             8     float    none      -1    26.14    0.01    0.01       0    26.11    0.01    0.01    N/A     N/A       N/A         N/A
+         512            16     float    none      -1    26.22    0.02    0.02       0    27.16    0.02    0.02    N/A     N/A       N/A         N/A
+        1024            32     float    none      -1    29.08    0.04    0.03       0    26.25    0.04    0.03    N/A     N/A       N/A         N/A
+        2048            64     float    none      -1    27.43    0.07    0.07       0    26.08    0.08    0.07    N/A     N/A       N/A         N/A
+        4096           128     float    none      -1    26.57    0.15    0.13       0    25.64    0.16    0.14    N/A     N/A       N/A         N/A
+        8192           256     float    none      -1    30.41    0.27    0.24       0    26.58    0.31    0.27    N/A     N/A       N/A         N/A
+       16384           512     float    none      -1    28.99    0.57    0.49       0    29.77    0.55    0.48    N/A     N/A       N/A         N/A
+       32768          1024     float    none      -1    34.13    0.96    0.84       0    33.67    0.97    0.85    N/A     N/A       N/A         N/A
+       65536          2048     float    none      -1    36.41    1.80    1.57       0    35.65    1.84    1.61    N/A     N/A       N/A         N/A
+      131072          4096     float    none      -1    37.30    3.51    3.07       0    37.19    3.52    3.08    N/A     N/A       N/A         N/A
+      262144          8192     float    none      -1    42.87    6.11    5.35       0    42.52    6.17    5.40    N/A     N/A       N/A         N/A
+      524288         16384     float    none      -1    56.48    9.28    8.12       0    55.50    9.45    8.27    N/A     N/A       N/A         N/A
+     1048576         32768     float    none      -1    57.41   18.26   15.98       0    58.19   18.02   15.77    N/A     N/A       N/A         N/A
+     2097152         65536     float    none      -1    86.78   24.17   21.15       0    85.14   24.63   21.55    N/A     N/A       N/A         N/A
+     4194304        131072     float    none      -1   142.56   29.42   25.74       0   141.75   29.59   25.89    N/A     N/A       N/A         N/A
+     8388608        262144     float    none      -1   246.37   34.05   29.79       0   242.62   34.58   30.25    N/A     N/A       N/A         N/A
+    16777216        524288     float    none      -1   418.28   40.11   35.10       0   416.62   40.27   35.24    N/A     N/A       N/A         N/A
+    33554432       1048576     float    none      -1   754.36   44.48   38.92       0   730.65   45.92   40.18    N/A     N/A       N/A         N/A
+    67108864       2097152     float    none      -1  1410.37   47.58   41.63       0  1355.63   49.50   43.32    N/A     N/A       N/A         N/A
+   134217728       4194304     float    none      -1  2730.81   49.15   43.01       0  2608.30   51.46   45.03    N/A     N/A       N/A         N/A
+   268435456       8388608     float    none      -1  5310.32   50.55   44.23       0  5094.45   52.69   46.11    N/A     N/A       N/A         N/A
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 14.5242 
+#
+# Collective test concluded: alltoall_perf
+#
+
+=== RCCL AlltoAll: GIN proxy (NCCL_GIN_TYPE=2, intra-node only) np=8 max_bytes=268435456 ===
+# rccl-tests version 2.17.9-Unknown  rccl-headers=22907 rccl-library=22907
+# Collective test starting: alltoall_perf
+# nThread 1 nGpus 1 minBytes 128 maxBytes 268435456 step: 2(factor) warmup iters: 1 iters: 20 agg iters: 1 validation: 1 graph: 0
+#
+# Using devices
+#  Rank  0 Group  0 Pid     10 on smci355-ccs-aus-m03-17 device  0 [0000:75:00] AMD Instinct MI355X
+#  Rank  1 Group  0 Pid     11 on smci355-ccs-aus-m03-17 device  1 [0000:05:00] AMD Instinct MI355X
+#  Rank  2 Group  0 Pid     12 on smci355-ccs-aus-m03-17 device  2 [0000:65:00] AMD Instinct MI355X
+#  Rank  3 Group  0 Pid     13 on smci355-ccs-aus-m03-17 device  3 [0000:15:00] AMD Instinct MI355X
+#  Rank  4 Group  0 Pid     14 on smci355-ccs-aus-m03-17 device  4 [0000:f5:00] AMD Instinct MI355X
+#  Rank  5 Group  0 Pid     15 on smci355-ccs-aus-m03-17 device  5 [0000:85:00] AMD Instinct MI355X
+#  Rank  6 Group  0 Pid     16 on smci355-ccs-aus-m03-17 device  6 [0000:e5:00] AMD Instinct MI355X
+#  Rank  7 Group  0 Pid     17 on smci355-ccs-aus-m03-17 device  7 [0000:95:00] AMD Instinct MI355X
+RCCL version : 2.29.7-Unknown 
+HIP version  : 7.13.99004-3309c611
+ROCm version : 7.13.0.0-9999-3309c611
+Hostname     : smci355-ccs-aus-m03-17
+Librccl path : /workspace/rccl/lib/librccl.so.1
+#
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong algo      proto      nchannels 
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)             (us)  (GB/s)  (GB/s)                                      
+         128             4     float    none      -1     9.32    0.01    0.01       0    10.39    0.01    0.01    N/A     N/A       N/A         N/A
+         256             8     float    none      -1     9.97    0.03    0.02       0    10.35    0.02    0.02    N/A     N/A       N/A         N/A
+         512            16     float    none      -1     9.81    0.05    0.05       0    10.31    0.05    0.04    N/A     N/A       N/A         N/A
+        1024            32     float    none      -1     9.86    0.10    0.09       0    10.05    0.10    0.09    N/A     N/A       N/A         N/A
+        2048            64     float    none      -1    11.38    0.18    0.16       0    10.09    0.20    0.18    N/A     N/A       N/A         N/A
+        4096           128     float    none      -1     9.86    0.42    0.36       0    10.13    0.40    0.35    N/A     N/A       N/A         N/A
+        8192           256     float    none      -1    10.09    0.81    0.71       0    10.18    0.80    0.70    N/A     N/A       N/A         N/A
+       16384           512     float    none      -1     9.93    1.65    1.44       0    10.35    1.58    1.38    N/A     N/A       N/A         N/A
+       32768          1024     float    none      -1    10.10    3.24    2.84       0    10.96    2.99    2.62    N/A     N/A       N/A         N/A
+       65536          2048     float    none      -1    10.27    6.38    5.58       0    10.47    6.26    5.48    N/A     N/A       N/A         N/A
+      131072          4096     float    none      -1    10.46   12.53   10.97       0    10.70   12.25   10.72    N/A     N/A       N/A         N/A
+      262144          8192     float    none      -1    12.98   20.19   17.67       0    10.96   23.92   20.93    N/A     N/A       N/A         N/A
+      524288         16384     float    none      -1    15.81   33.15   29.01       0    16.16   32.45   28.39    N/A     N/A       N/A         N/A
+     1048576         32768     float    none      -1    25.00   41.93   36.69       0    26.70   39.27   34.36    N/A     N/A       N/A         N/A
+     2097152         65536     float    none      -1    44.68   46.93   41.07       0    48.11   43.59   38.14    N/A     N/A       N/A         N/A
+     4194304        131072     float    none      -1    81.49   51.47   45.03       0    91.98   45.60   39.90    N/A     N/A       N/A         N/A
+     8388608        262144     float    none      -1   156.66   53.55   46.85       0   180.55   46.46   40.65    N/A     N/A       N/A         N/A
+    16777216        524288     float    none      -1   308.48   54.39   47.59       0   360.90   46.49   40.68    N/A     N/A       N/A         N/A
+    33554432       1048576     float    none      -1   605.62   55.41   48.48       0   725.42   46.25   40.47    N/A     N/A       N/A         N/A
+    67108864       2097152     float    none      -1  1205.54   55.67   48.71       0  1454.12   46.15   40.38    N/A     N/A       N/A         N/A
+   134217728       4194304     float    none      -1  2406.06   55.78   48.81       0  2910.24   46.12   40.35    N/A     N/A       N/A         N/A
+   268435456       8388608     float    none      -1  4806.60   55.85   48.87       0  5680.91   47.25   41.35    N/A     N/A       N/A         N/A
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 20.6413 
+#
+# Collective test concluded: alltoall_perf
+#
+
+=== RCCL AlltoAll (-D 3): GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=8 max_bytes=268435456 ===
+[32mI-001h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0001h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0001h rocSHMEM[0m rank 1 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0002h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0002h rocSHMEM[0m rank 2 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0003h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0003h rocSHMEM[0m rank 3 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0004h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0004h rocSHMEM[0m rank 4 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0005h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0005h rocSHMEM[0m rank 5 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0006h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0006h rocSHMEM[0m rank 6 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0007h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0007h rocSHMEM[0m rank 7 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0000h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0000h rocSHMEM[0m rank 0 nranks 8 - connecting to 10.235.27.98<57767>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 0 total 1/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 2 total 2/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 4 total 3/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 3 total 4/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 1 total 5/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 7 total 6/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 6 total 7/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 5 total 8/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0006h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+################################################################################
+#                   rocSHMEM Environment Variables                             #
+################################################################################
+# ROCSHMEM_DEBUG_LEVEL=INFO:noversion
+# ROCSHMEM_HEAP_SIZE=1073741824
+# ROCSHMEM_BACKEND=ipc
+################################################################################
+[32mI0000h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0007h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0001h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0002h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0003h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0004h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0005h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0003h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0004h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0005h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0006h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0000h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0002h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0007h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0001h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+# rccl-tests version 2.17.9-Unknown  rccl-headers=22907 rccl-library=22907
+# Collective test starting: alltoall_perf
+# nThread 1 nGpus 1 minBytes 128 maxBytes 268435456 step: 2(factor) warmup iters: 1 iters: 20 agg iters: 1 validation: 1 graph: 0
+#
+# Using devices
+#  Rank  0 Group  0 Pid     10 on smci355-ccs-aus-m03-17 device  0 [0000:75:00] AMD Instinct MI355X
+#  Rank  1 Group  0 Pid     11 on smci355-ccs-aus-m03-17 device  1 [0000:05:00] AMD Instinct MI355X
+#  Rank  2 Group  0 Pid     12 on smci355-ccs-aus-m03-17 device  2 [0000:65:00] AMD Instinct MI355X
+#  Rank  3 Group  0 Pid     13 on smci355-ccs-aus-m03-17 device  3 [0000:15:00] AMD Instinct MI355X
+#  Rank  4 Group  0 Pid     14 on smci355-ccs-aus-m03-17 device  4 [0000:f5:00] AMD Instinct MI355X
+#  Rank  5 Group  0 Pid     15 on smci355-ccs-aus-m03-17 device  5 [0000:85:00] AMD Instinct MI355X
+#  Rank  6 Group  0 Pid     16 on smci355-ccs-aus-m03-17 device  6 [0000:e5:00] AMD Instinct MI355X
+#  Rank  7 Group  0 Pid     17 on smci355-ccs-aus-m03-17 device  7 [0000:95:00] AMD Instinct MI355X
+RCCL version : 2.29.7-Unknown 
+HIP version  : 7.13.99004-3309c611
+ROCm version : 7.13.0.0-9999-3309c611
+Hostname     : smci355-ccs-aus-m03-17
+Librccl path : /workspace/rccl/lib/librccl.so.1
+#
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong algo      proto      nchannels 
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)             (us)  (GB/s)  (GB/s)                                      
+         128             4     float    none      -1    10.67    0.01    0.01       0    11.29    0.01    0.01    N/A     N/A       N/A         N/A
+         256             8     float    none      -1     9.95    0.03    0.02       0    11.22    0.02    0.02    N/A     N/A       N/A         N/A
+         512            16     float    none      -1    10.23    0.05    0.04       0    10.70    0.05    0.04    N/A     N/A       N/A         N/A
+        1024            32     float    none      -1    10.47    0.10    0.09       0    10.35    0.10    0.09    N/A     N/A       N/A         N/A
+        2048            64     float    none      -1    13.04    0.16    0.14       0    10.32    0.20    0.17    N/A     N/A       N/A         N/A
+        4096           128     float    none      -1    10.11    0.41    0.35       0    10.68    0.38    0.34    N/A     N/A       N/A         N/A
+        8192           256     float    none      -1    10.33    0.79    0.69       0    10.84    0.76    0.66    N/A     N/A       N/A         N/A
+       16384           512     float    none      -1    10.23    1.60    1.40       0    10.78    1.52    1.33    N/A     N/A       N/A         N/A
+       32768          1024     float    none      -1    15.20    2.16    1.89       0    17.05    1.92    1.68    N/A     N/A       N/A         N/A
+       65536          2048     float    none      -1    24.86    2.64    2.31       0    26.14    2.51    2.19    N/A     N/A       N/A         N/A
+      131072          4096     float    none      -1    45.53    2.88    2.52       0    47.87    2.74    2.40    N/A     N/A       N/A         N/A
+      262144          8192     float    none      -1    86.53    3.03    2.65       0    91.82    2.86    2.50    N/A     N/A       N/A         N/A
+      524288         16384     float    none      -1   162.98    3.22    2.81       0   180.05    2.91    2.55    N/A     N/A       N/A         N/A
+     1048576         32768     float    none      -1   324.88    3.23    2.82       0   357.11    2.94    2.57    N/A     N/A       N/A         N/A
+     2097152         65536     float    none      -1   645.36    3.25    2.84       0   711.01    2.95    2.58    N/A     N/A       N/A         N/A
+     4194304        131072     float    none      -1  1288.74    3.25    2.85       0  1420.90    2.95    2.58    N/A     N/A       N/A         N/A
+     8388608        262144     float    none      -1  2584.92    3.25    2.84       0  2841.08    2.95    2.58    N/A     N/A       N/A         N/A
+    16777216        524288     float    none      -1  5161.04    3.25    2.84       0  5668.65    2.96    2.59    N/A     N/A       N/A         N/A
+    33554432       1048576     float    none      -1  10314.7    3.25    2.85       0  11335.7    2.96    2.59    N/A     N/A       N/A         N/A
+    67108864       2097152     float    none      -1  21845.3    3.07    2.69       0  22623.2    2.97    2.60    N/A     N/A       N/A         N/A
+   134217728       4194304     float    none      -1  41568.3    3.23    2.83       0  44875.0    2.99    2.62    N/A     N/A       N/A         N/A
+   268435456       8388608     float    none      -1  82476.5    3.25    2.85       0  87854.1    3.06    2.67    N/A     N/A       N/A         N/A
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 1.76573 
+#
+# Collective test concluded: alltoall_perf
+#
+
+=== RCCL AlltoAll (-D 4): GIN_ROCSHMEM (NCCL_GIN_TYPE=4) + rocSHMEM SDMA np=8 max_bytes=268435456 ===
+[32mI-001h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0002h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0002h rocSHMEM[0m rank 2 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0003h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0003h rocSHMEM[0m rank 3 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0004h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0004h rocSHMEM[0m rank 4 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0005h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0005h rocSHMEM[0m rank 5 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0006h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0006h rocSHMEM[0m rank 6 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0007h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0007h rocSHMEM[0m rank 7 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0000h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0000h rocSHMEM[0m rank 0 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0001h rocSHMEM[0m TcpBootstrap : Using enp81s0f1:10.235.27.98<0>	[90mnetInit@src/bootstrap/bootstrap.cpp:464[0m
+[32mI0001h rocSHMEM[0m rank 1 nranks 8 - connecting to 10.235.27.98<45189>	[90minitialize@src/bootstrap/bootstrap.cpp:297[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 2 total 1/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 0 total 2/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 4 total 3/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 6 total 4/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 7 total 5/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 5 total 6/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 1 total 7/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0000h rocSHMEM[0m Received connect from rank 3 total 8/8	[90mbootstrapRoot@src/bootstrap/bootstrap.cpp:414[0m
+[32mI0002h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0003h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0004h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0005h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0006h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+################################################################################
+#                   rocSHMEM Environment Variables                             #
+################################################################################
+# ROCSHMEM_DEBUG_LEVEL=INFO:noversion
+# ROCSHMEM_HEAP_SIZE=1073741824
+# ROCSHMEM_BACKEND=ipc
+################################################################################
+[32mI0000h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0001h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0007h rocSHMEM[0m Initializing IPC backend with TCP bootstrapping	[90mlibrary_init@src/rocshmem.cpp:346[0m
+[32mI0000h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0001h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0002h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0003h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0004h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0005h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0006h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+[32mI0007h rocSHMEM[0m SDMA init with threshold=256, channels=1, local_size=8	[90msdmaHostInit@src/sdma_policy.cpp:58[0m
+# rccl-tests version 2.17.9-Unknown  rccl-headers=22907 rccl-library=22907
+# Collective test starting: alltoall_perf
+# nThread 1 nGpus 1 minBytes 128 maxBytes 268435456 step: 2(factor) warmup iters: 1 iters: 20 agg iters: 1 validation: 1 graph: 0
+#
+# Using devices
+#  Rank  0 Group  0 Pid     10 on smci355-ccs-aus-m03-17 device  0 [0000:75:00] AMD Instinct MI355X
+#  Rank  1 Group  0 Pid     11 on smci355-ccs-aus-m03-17 device  1 [0000:05:00] AMD Instinct MI355X
+#  Rank  2 Group  0 Pid     12 on smci355-ccs-aus-m03-17 device  2 [0000:65:00] AMD Instinct MI355X
+#  Rank  3 Group  0 Pid     13 on smci355-ccs-aus-m03-17 device  3 [0000:15:00] AMD Instinct MI355X
+#  Rank  4 Group  0 Pid     14 on smci355-ccs-aus-m03-17 device  4 [0000:f5:00] AMD Instinct MI355X
+#  Rank  5 Group  0 Pid     15 on smci355-ccs-aus-m03-17 device  5 [0000:85:00] AMD Instinct MI355X
+#  Rank  6 Group  0 Pid     16 on smci355-ccs-aus-m03-17 device  6 [0000:e5:00] AMD Instinct MI355X
+#  Rank  7 Group  0 Pid     17 on smci355-ccs-aus-m03-17 device  7 [0000:95:00] AMD Instinct MI355X
+RCCL version : 2.29.7-Unknown 
+HIP version  : 7.13.99004-3309c611
+ROCm version : 7.13.0.0-9999-3309c611
+Hostname     : smci355-ccs-aus-m03-17
+Librccl path : /workspace/rccl/lib/librccl.so.1
+#
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong algo      proto      nchannels 
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)             (us)  (GB/s)  (GB/s)                                      
+         128             4     float    none      -1    16.04    0.01    0.01       0    16.60    0.01    0.01    N/A     N/A       N/A         N/A
+         256             8     float    none      -1    16.57    0.02    0.01       0    16.78    0.02    0.01    N/A     N/A       N/A         N/A
+         512            16     float    none      -1    17.44    0.03    0.03       0    17.62    0.03    0.03    N/A     N/A       N/A         N/A
+        1024            32     float    none      -1    18.17    0.06    0.05       0    18.38    0.06    0.05    N/A     N/A       N/A         N/A
+        2048            64     float    none      -1    18.34    0.11    0.10       0    18.68    0.11    0.10    N/A     N/A       N/A         N/A
+        4096           128     float    none      -1    18.79    0.22    0.19       0    18.65    0.22    0.19    N/A     N/A       N/A         N/A
+        8192           256     float    none      -1    19.49    0.42    0.37       0    19.07    0.43    0.38    N/A     N/A       N/A         N/A
+       16384           512     float    none      -1    19.80    0.83    0.72       0    20.29    0.81    0.71    N/A     N/A       N/A         N/A
+       32768          1024     float    none      -1    20.30    1.61    1.41       0    20.62    1.59    1.39    N/A     N/A       N/A         N/A
+       65536          2048     float    none      -1    20.96    3.13    2.74       0    21.25    3.08    2.70    N/A     N/A       N/A         N/A
+      131072          4096     float    none      -1    21.39    6.13    5.36       0    21.47    6.10    5.34    N/A     N/A       N/A         N/A
+      262144          8192     float    none      -1    21.82   12.01   10.51       0    21.48   12.20   10.68    N/A     N/A       N/A         N/A
+      524288         16384     float    none      -1    29.97   17.49   15.31       0    31.36   16.72   14.63    N/A     N/A       N/A         N/A
+     1048576         32768     float    none      -1    48.10   21.80   19.07       0    50.79   20.65   18.07    N/A     N/A       N/A         N/A
+     2097152         65536     float    none      -1    83.41   25.14   22.00       0    90.07   23.28   20.37    N/A     N/A       N/A         N/A
+     4194304        131072     float    none      -1   244.16   17.18   15.03       0   265.03   15.83   13.85    N/A     N/A       N/A         N/A
+     8388608        262144     float    none      -1   384.49   21.82   19.09       0   330.96   25.35   22.18    N/A     N/A       N/A         N/A
+    16777216        524288     float    none      -1   579.43   28.95   25.34       0   726.13   23.10   20.22    N/A     N/A       N/A         N/A
+    33554432       1048576     float    none      -1  1300.42   25.80   22.58       0  1283.32   26.15   22.88    N/A     N/A       N/A         N/A
+    67108864       2097152     float    none      -1  2218.79   30.25   26.46       0  3227.97   20.79   18.19    N/A     N/A       N/A         N/A
+   134217728       4194304     float    none      -1  4958.60   27.07   23.68       0  5121.75   26.21   22.93    N/A     N/A       N/A         N/A
+   268435456       8388608     float    none      -1  8839.98   30.37   26.57       0  10217.6   26.27   22.99    N/A     N/A       N/A         N/A
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 10.3296 
+#
+# Collective test concluded: alltoall_perf
+#
+
+=== RCCL AlltoAll (-D 3): GIN_ANVIL (NCCL_GIN_TYPE=5) np=8 max_bytes=268435456 ===
+# rccl-tests version 2.17.9-Unknown  rccl-headers=22907 rccl-library=22907
+# Collective test starting: alltoall_perf
+# nThread 1 nGpus 1 minBytes 128 maxBytes 268435456 step: 2(factor) warmup iters: 1 iters: 20 agg iters: 1 validation: 1 graph: 0
+#
+# Using devices
+#  Rank  0 Group  0 Pid     10 on smci355-ccs-aus-m03-17 device  0 [0000:75:00] AMD Instinct MI355X
+#  Rank  1 Group  0 Pid     11 on smci355-ccs-aus-m03-17 device  1 [0000:05:00] AMD Instinct MI355X
+#  Rank  2 Group  0 Pid     12 on smci355-ccs-aus-m03-17 device  2 [0000:65:00] AMD Instinct MI355X
+#  Rank  3 Group  0 Pid     13 on smci355-ccs-aus-m03-17 device  3 [0000:15:00] AMD Instinct MI355X
+#  Rank  4 Group  0 Pid     14 on smci355-ccs-aus-m03-17 device  4 [0000:f5:00] AMD Instinct MI355X
+#  Rank  5 Group  0 Pid     15 on smci355-ccs-aus-m03-17 device  5 [0000:85:00] AMD Instinct MI355X
+#  Rank  6 Group  0 Pid     16 on smci355-ccs-aus-m03-17 device  6 [0000:e5:00] AMD Instinct MI355X
+#  Rank  7 Group  0 Pid     17 on smci355-ccs-aus-m03-17 device  7 [0000:95:00] AMD Instinct MI355X
+RCCL version : 2.29.7-Unknown 
+HIP version  : 7.13.99004-3309c611
+ROCm version : 7.13.0.0-9999-3309c611
+Hostname     : smci355-ccs-aus-m03-17
+Librccl path : /workspace/rccl/lib/librccl.so.1
+#
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong algo      proto      nchannels 
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)             (us)  (GB/s)  (GB/s)                                      
+         128             4     float    none      -1     9.67    0.01    0.01       0    10.68    0.01    0.01    N/A     N/A       N/A         N/A
+         256             8     float    none      -1    10.08    0.03    0.02       0    10.86    0.02    0.02    N/A     N/A       N/A         N/A
+         512            16     float    none      -1    10.14    0.05    0.04       0    10.58    0.05    0.04    N/A     N/A       N/A         N/A
+        1024            32     float    none      -1    10.12    0.10    0.09       0    10.43    0.10    0.09    N/A     N/A       N/A         N/A
+        2048            64     float    none      -1    10.45    0.20    0.17       0    10.41    0.20    0.17    N/A     N/A       N/A         N/A
+        4096           128     float    none      -1    10.20    0.40    0.35       0    10.39    0.39    0.34    N/A     N/A       N/A         N/A
+        8192           256     float    none      -1    10.33    0.79    0.69       0    10.47    0.78    0.68    N/A     N/A       N/A         N/A
+       16384           512     float    none      -1    10.37    1.58    1.38       0    10.58    1.55    1.36    N/A     N/A       N/A         N/A
+       32768          1024     float    none      -1    15.01    2.18    1.91       0    15.87    2.06    1.81    N/A     N/A       N/A         N/A
+       65536          2048     float    none      -1    24.67    2.66    2.32       0    26.60    2.46    2.16    N/A     N/A       N/A         N/A
+      131072          4096     float    none      -1    45.64    2.87    2.51       0    48.26    2.72    2.38    N/A     N/A       N/A         N/A
+      262144          8192     float    none      -1    86.41    3.03    2.65       0    92.10    2.85    2.49    N/A     N/A       N/A         N/A
+      524288         16384     float    none      -1   163.07    3.22    2.81       0   181.29    2.89    2.53    N/A     N/A       N/A         N/A
+     1048576         32768     float    none      -1   323.04    3.25    2.84       0   357.42    2.93    2.57    N/A     N/A       N/A         N/A
+     2097152         65536     float    none      -1   642.33    3.26    2.86       0   711.50    2.95    2.58    N/A     N/A       N/A         N/A
+     4194304        131072     float    none      -1  1288.57    3.26    2.85       0  1421.69    2.95    2.58    N/A     N/A       N/A         N/A
+     8388608        262144     float    none      -1  2574.52    3.26    2.85       0  2837.58    2.96    2.59    N/A     N/A       N/A         N/A
+    16777216        524288     float    none      -1  5146.19    3.26    2.85       0  5678.02    2.95    2.59    N/A     N/A       N/A         N/A
+    33554432       1048576     float    none      -1  10303.7    3.26    2.85       0  11357.0    2.95    2.59    N/A     N/A       N/A         N/A
+    67108864       2097152     float    none      -1  20611.5    3.26    2.85       0  22657.6    2.96    2.59    N/A     N/A       N/A         N/A
+   134217728       4194304     float    none      -1  41248.9    3.25    2.85       0  44808.7    3.00    2.62    N/A     N/A       N/A         N/A
+   268435456       8388608     float    none      -1  82373.5    3.26    2.85       0  87841.2    3.06    2.67    N/A     N/A       N/A         N/A
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 1.77443 
+#
+# Collective test concluded: alltoall_perf
+#
+
+=== RCCL AlltoAll (-D 4): GIN_ANVIL (NCCL_GIN_TYPE=5) np=8 max_bytes=268435456 ===
+# rccl-tests version 2.17.9-Unknown  rccl-headers=22907 rccl-library=22907
+# Collective test starting: alltoall_perf
+# nThread 1 nGpus 1 minBytes 128 maxBytes 268435456 step: 2(factor) warmup iters: 1 iters: 20 agg iters: 1 validation: 1 graph: 0
+#
+# Using devices
+#  Rank  0 Group  0 Pid     10 on smci355-ccs-aus-m03-17 device  0 [0000:75:00] AMD Instinct MI355X
+#  Rank  1 Group  0 Pid     11 on smci355-ccs-aus-m03-17 device  1 [0000:05:00] AMD Instinct MI355X
+#  Rank  2 Group  0 Pid     12 on smci355-ccs-aus-m03-17 device  2 [0000:65:00] AMD Instinct MI355X
+#  Rank  3 Group  0 Pid     13 on smci355-ccs-aus-m03-17 device  3 [0000:15:00] AMD Instinct MI355X
+#  Rank  4 Group  0 Pid     14 on smci355-ccs-aus-m03-17 device  4 [0000:f5:00] AMD Instinct MI355X
+#  Rank  5 Group  0 Pid     15 on smci355-ccs-aus-m03-17 device  5 [0000:85:00] AMD Instinct MI355X
+#  Rank  6 Group  0 Pid     16 on smci355-ccs-aus-m03-17 device  6 [0000:e5:00] AMD Instinct MI355X
+#  Rank  7 Group  0 Pid     17 on smci355-ccs-aus-m03-17 device  7 [0000:95:00] AMD Instinct MI355X
+RCCL version : 2.29.7-Unknown 
+HIP version  : 7.13.99004-3309c611
+ROCm version : 7.13.0.0-9999-3309c611
+Hostname     : smci355-ccs-aus-m03-17
+Librccl path : /workspace/rccl/lib/librccl.so.1
+#
+#                                                              out-of-place                       in-place          
+#       size         count      type   redop    root     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong algo      proto      nchannels 
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)             (us)  (GB/s)  (GB/s)                                      
+         128             4     float    none      -1    23.91    0.01    0.00       0    24.29    0.01    0.00    N/A     N/A       N/A         N/A
+         256             8     float    none      -1    24.10    0.01    0.01       0    24.20    0.01    0.01    N/A     N/A       N/A         N/A
+         512            16     float    none      -1    24.56    0.02    0.02       0    24.73    0.02    0.02    N/A     N/A       N/A         N/A
+        1024            32     float    none      -1    25.22    0.04    0.04       0    25.50    0.04    0.04    N/A     N/A       N/A         N/A
+        2048            64     float    none      -1    25.39    0.08    0.07       0    25.56    0.08    0.07    N/A     N/A       N/A         N/A
+        4096           128     float    none      -1    25.60    0.16    0.14       0    25.91    0.16    0.14    N/A     N/A       N/A         N/A
+        8192           256     float    none      -1    26.07    0.31    0.27       0    26.21    0.31    0.27    N/A     N/A       N/A         N/A
+       16384           512     float    none      -1    28.27    0.58    0.51       0    28.16    0.58    0.51    N/A     N/A       N/A         N/A
+       32768          1024     float    none      -1    27.43    1.19    1.05       0    28.12    1.17    1.02    N/A     N/A       N/A         N/A
+       65536          2048     float    none      -1    27.67    2.37    2.07       0    28.79    2.28    1.99    N/A     N/A       N/A         N/A
+      131072          4096     float    none      -1    27.87    4.70    4.12       0    28.56    4.59    4.02    N/A     N/A       N/A         N/A
+      262144          8192     float    none      -1    27.62    9.49    8.31       0    28.04    9.35    8.18    N/A     N/A       N/A         N/A
+      524288         16384     float    none      -1    36.26   14.46   12.65       0    37.04   14.15   12.38    N/A     N/A       N/A         N/A
+     1048576         32768     float    none      -1    53.88   19.46   17.03       0    56.18   18.67   16.33    N/A     N/A       N/A         N/A
+     2097152         65536     float    none      -1    88.68   23.65   20.69       0    95.26   22.02   19.26    N/A     N/A       N/A         N/A
+     4194304        131072     float    none      -1   156.33   26.83   23.48       0   175.36   23.92   20.93    N/A     N/A       N/A         N/A
+     8388608        262144     float    none      -1   296.01   28.34   24.80       0   337.93   24.82   21.72    N/A     N/A       N/A         N/A
+    16777216        524288     float    none      -1   576.94   29.08   25.44       0   663.67   25.28   22.12    N/A     N/A       N/A         N/A
+    33554432       1048576     float    none      -1  1116.34   30.06   26.30       0  1281.82   26.18   22.90    N/A     N/A       N/A         N/A
+    67108864       2097152     float    none      -1  2213.88   30.31   26.52       0  2554.64   26.27   22.99    N/A     N/A       N/A         N/A
+   134217728       4194304     float    none      -1  4420.39   30.36   26.57       0  5101.35   26.31   23.02    N/A     N/A       N/A         N/A
+   268435456       8388608     float    none      -1  8835.23   30.38   26.58       0  10165.6   26.41   23.11    N/A     N/A       N/A         N/A
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 10.6295 
+#
+# Collective test concluded: alltoall_perf
+#
+
