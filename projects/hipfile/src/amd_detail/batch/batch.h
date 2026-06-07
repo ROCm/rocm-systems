@@ -258,6 +258,14 @@ namespace batchOperationState {
 /// @brief Represents a single IO Request
 class BatchOperation {
 public:
+    // Don't allow copying
+    BatchOperation(const BatchOperation &)            = delete;
+    BatchOperation &operator=(const BatchOperation &) = delete;
+
+    // Don't allow moving
+    BatchOperation(BatchOperation &&)            = delete;
+    BatchOperation &operator=(BatchOperation &&) = delete;
+
     /// @brief Create an operation to handle and track an IO request.
     /// @param [in] params IO parameters
     /// @param [in] buffer Buffer corresponding to params->u.batch.devPtr_base
@@ -312,6 +320,14 @@ public:
 
 class BatchContext : public IBatchContext {
 public:
+    // Don't allow copying
+    BatchContext(const BatchContext &)            = delete;
+    BatchContext &operator=(const BatchContext &) = delete;
+
+    // Don't allow moving
+    BatchContext(BatchContext &&)            = delete;
+    BatchContext &operator=(BatchContext &&) = delete;
+
     ///
     /// @brief Return the max number of concurrent operations supported by this BatchContext.
     ///
