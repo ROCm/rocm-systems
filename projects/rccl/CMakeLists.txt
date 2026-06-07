@@ -278,7 +278,11 @@ if(NOT "${HIP_COMPILER}" MATCHES "clang")
 endif()
 
 ## Check for compiler version
-find_program(compiler_executable ${COMPILER_EXE_NAME})
+# Prefer the directory that contains CMAKE_CXX_COMPILER so that a custom
+# toolchain (e.g. ~/.local/llvm) is found before any system ROCm on PATH.
+get_filename_component(_cxx_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+find_program(compiler_executable ${COMPILER_EXE_NAME}
+  HINTS "${_cxx_compiler_dir}")
 message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
 execute_process(
   COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"

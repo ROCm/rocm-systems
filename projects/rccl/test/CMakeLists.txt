@@ -323,6 +323,13 @@ if(BUILD_TESTS)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
+
+    # Test TUs with __global__ kernels do their own embedded device link, which
+    # must resolve __llvm_profile_instrument_gpu from the device profile RT.
+    if(ENABLE_DEVICE_COVERAGE AND RCCL_DEVICE_PROFILE_RT)
+      target_compile_options(${test_executable} PRIVATE
+        "SHELL:-Xoffload-linker ${RCCL_DEVICE_PROFILE_RT}")
+    endif()
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)
       target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)

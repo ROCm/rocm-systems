@@ -35,9 +35,18 @@ else()
   find_program(DL_CLANG NAMES amdclang++ clang++
     HINTS "${_dl_compiler_dir}" "${ROCM_PATH}/bin" REQUIRED)
 endif()
+# Pick clang-offload-bundler from the SAME toolchain as DL_CLANG: a bundler from a
+# different LLVM build can load a foreign libclang-cpp.so and crash at startup.
+get_filename_component(_dl_clang_dir "${DL_CLANG}" REALPATH)
+get_filename_component(_dl_clang_dir "${_dl_clang_dir}" DIRECTORY)
 find_program(DL_BUNDLER NAMES clang-offload-bundler
-  HINTS "${_dl_compiler_dir}" "${_dl_compiler_dir}/../lib/llvm/bin"
-        "${ROCM_PATH}/llvm/bin" REQUIRED)
+  HINTS "${_dl_clang_dir}" "${_dl_clang_dir}/../lib/llvm/bin"
+  NO_DEFAULT_PATH)
+if(NOT DL_BUNDLER)
+  find_program(DL_BUNDLER NAMES clang-offload-bundler
+    HINTS "${ROCM_PATH}/llvm/bin" REQUIRED)
+endif()
+message(STATUS "Device Linker: clang-offload-bundler = ${DL_BUNDLER}")
 
 # Extract --hip-path and --hip-device-lib-path from CMAKE_CXX_FLAGS.
 # TheRock's amd-hip toolchain injects these so amdclang++ can locate HIP
@@ -114,17 +123,62 @@ if(ENABLE_DEVICE_COVERAGE)
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE _dl_amdgcn_resource_rc)
   if(NOT _dl_amdgcn_resource_rc EQUAL 0 OR _dl_amdgcn_resource_dir STREQUAL "")
-    message(WARNING "Device Linker: failed to query amdgcn resource-dir from ${DL_CLANG}")
+    message(FATAL_ERROR
+      "Device Linker: ENABLE_DEVICE_COVERAGE=ON but '${DL_CLANG} --target=amdgcn-amd-amdhsa -print-resource-dir' failed.\n"
+      "Ensure the compiler is a full LLVM build that includes the amdgcn-amd-amdhsa compiler-rt runtimes.\n"
+      "See: cmake -DLLVM_RUNTIME_TARGETS=amdgcn-amd-amdhsa "
+      "-DRUNTIMES_amdgcn-amd-amdhsa_COMPILER_RT_BUILD_PROFILE=ON ...")
   else()
-    set(_dl_candidate "${_dl_amdgcn_resource_dir}/lib/amdgcn-amd-amdhsa/libclang_rt.profile.a")
-    if(EXISTS "${_dl_candidate}")
-      set(DL_DEVICE_PROFILE_RT "${_dl_candidate}")
-      message(STATUS "Device Linker: coverage enabled, device profile RT = ${DL_DEVICE_PROFILE_RT}")
-    else()
-      message(WARNING "Device Linker: ENABLE_DEVICE_COVERAGE=ON but no archive at ${_dl_candidate}")
+    # The device profile RT archive may land in one of two layouts depending
+    # on how compiler-rt was built:
+    #   * per-target runtimes (LLVM_RUNTIME_TARGETS=amdgcn-amd-amdhsa):
+    #       <resource-dir>/lib/amdgcn-amd-amdhsa/libclang_rt.profile.a
+    #   * GPU runtime build (COMPILER_RT_BUILD_GPU_RUNTIME=ON, GPU_ARCHS=...):
+    #       <resource-dir>/lib/linux/libclang_rt.profile-amdgcn.a
+    # Accept either so both LLVM configurations work.
+    set(_dl_profile_rt_candidates
+      "${_dl_amdgcn_resource_dir}/lib/amdgcn-amd-amdhsa/libclang_rt.profile.a"
+      "${_dl_amdgcn_resource_dir}/lib/linux/libclang_rt.profile-amdgcn.a")
+    foreach(_dl_candidate ${_dl_profile_rt_candidates})
+      if(EXISTS "${_dl_candidate}")
+        set(DL_DEVICE_PROFILE_RT "${_dl_candidate}")
+        message(STATUS "Device Linker: coverage enabled, device profile RT = ${DL_DEVICE_PROFILE_RT}")
+        break()
+      endif()
+    endforeach()
+    if(NOT DL_DEVICE_PROFILE_RT)
+      string(REPLACE ";" "\n  " _dl_searched "${_dl_profile_rt_candidates}")
+      message(FATAL_ERROR
+        "Device Linker: ENABLE_DEVICE_COVERAGE=ON but no device profile runtime archive was found.\n"
+        "Searched:\n  ${_dl_searched}\n"
+        "The LLVM build at '${DL_CLANG}' lacks an amdgcn compiler-rt profile runtime.\n"
+        "Rebuild compiler-rt for the GPU device target then re-run cmake. Either:\n\n"
+        "  # per-target runtimes layout\n"
+        "  cmake <build> -DLLVM_RUNTIME_TARGETS=amdgcn-amd-amdhsa \\\n"
+        "    -DRUNTIMES_amdgcn-amd-amdhsa_COMPILER_RT_BUILD_PROFILE=ON ...\n\n"
+        "  # or GPU runtime layout\n"
+        "  cmake <build> -DCOMPILER_RT_BUILD_GPU_RUNTIME=ON -DCOMPILER_RT_GPU_ARCHS=gfx942 ...\n\n"
+        "Then: make runtimes-amdgcn-amd-amdhsa && make install-runtimes")
     endif()
   endif()
 endif()
+
+# Standalone fat-object compiles (onerank.o, collectives.o, dda_all_reduce_ipc.o,
+# sym_*.o) are built as full `-x hip` objects, so each -c step performs its own
+# embedded device link (clang-linker-wrapper -> ld.lld). That link must resolve
+# __llvm_profile_instrument_gpu from the device profile RT. The rccl-device-compile
+# --link path passes the archive to ld.lld directly; here we forward it to the
+# clang driver's offload linker via -Xoffload-linker.
+set(DL_DEVICE_PROFILE_RT_LINK_FLAGS "")
+if(DL_DEVICE_PROFILE_RT)
+  set(DL_DEVICE_PROFILE_RT_LINK_FLAGS -Xoffload-linker "${DL_DEVICE_PROFILE_RT}")
+endif()
+
+# Expose the resolved device profile RT to other subdirectories (e.g. test/),
+# whose -x hip TUs that contain __global__ kernels need the same archive in
+# their offload device link to resolve __llvm_profile_instrument_gpu.
+set(RCCL_DEVICE_PROFILE_RT "${DL_DEVICE_PROFILE_RT}"
+  CACHE INTERNAL "Resolved amdgcn device profile runtime archive for coverage")
 
 # ---------------------------------------------------------------------------
 # INTERFACE library: shared definitions and includes for device compilation.
@@ -547,6 +601,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_COVERAGE_FLAGS}
+    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -582,6 +637,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_COVERAGE_FLAGS}
+      ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
       -std=c++17
       -fPIC
       -w
@@ -604,6 +660,7 @@ else()
       ${_host_inc_flags}
       ${DL_OPT_FLAGS}
       ${DL_COVERAGE_FLAGS}
+      ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
       -std=c++17
       -fPIC
       -w
@@ -632,6 +689,7 @@ add_custom_command(
     ${_host_inc_flags}
     ${DL_OPT_FLAGS}
     ${DL_COVERAGE_FLAGS}
+    ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
     -std=c++17
     -fPIC
     -w
@@ -677,6 +735,7 @@ if(GENERATE_SYM_KERNELS)
         ${_host_inc_flags}
         ${DL_OPT_FLAGS}
         ${DL_COVERAGE_FLAGS}
+        ${DL_DEVICE_PROFILE_RT_LINK_FLAGS}
         -std=c++17
         -fPIC
         -w
