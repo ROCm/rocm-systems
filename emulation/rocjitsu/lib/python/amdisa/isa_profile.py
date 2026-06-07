@@ -1496,6 +1496,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def vop3_cmp_sdst_size_bits(self) -> int | None:
+        return 32
+
+    @property
     def vopd_slot_ops(self) -> tuple[VopdSlotOp, ...]:
         return _RDNA4_VOPD_SLOT_OPS
 
