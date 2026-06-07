@@ -212,4 +212,33 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 5 -A 1
 fi
 
+# 
+if [ 0 -eq 1 ]; then
+# Example: 2 nodes × 8 GPUs = 16 ranks (adjust -n and --hostfile)
+#
+# --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
+# Matches Dockerfile-rccl-gin-anvil example; multi-node only (IB/GDA device required).
+echo "=== RCCL AlltoAll (-D 5): GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
+docker run --rm --shm-size 64G --network host \
+  --device /dev/dri --device /dev/kfd --device /dev/infiniband \
+  --ipc host --group-add video --cap-add SYS_PTRACE \
+  --security-opt seccomp=unconfined --privileged \
+  gin-anvil:latest \
+  mpirun -n 16 --hostfile /path/to/hostfile \
+    --allow-run-as-root -mca pml ob1 -mca btl ^openib \
+    -x NCCL_GIN_ENABLE=1 \
+    -x NCCL_GIN_TYPE=4 \
+    -x ROCSHMEM_BACKEND=ro \
+    -x ROCSHMEM_SDMA_ENABLED=1 \
+    -x ROCSHMEM_HEAP_SIZE=1073741824 \
+    -x NCCL_CUMEM_ENABLE=1 \
+    -x RCCL_ENABLE_INTRANET=1 \
+    -x NCCL_DMABUF_ENABLE=1 \
+    -x NCCL_MSCCL_ENABLE=0 \
+    -x HSA_NO_SCRATCH_RECLAIM=1 \
+    -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
+    /workspace/rccl-tests/alltoall_perf \
+    -b 128 -e 268435456 -f 2 -g 1 -R 2 -A 1 -D 5
+fi
+
 set +x
