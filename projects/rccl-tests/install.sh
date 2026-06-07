@@ -14,7 +14,8 @@ function display_help()
     echo "    [--rocm_home] Specify custom path for ROCm installation (default: /opt/rocm)"
     echo "    [--rccl_home] Specify custom path for RCCL installation (default: /opt/rocm)"
     echo "    [--mpi_home] Specify path to your MPI installation."
-    echo "    [--hip_compiler] Specify path to HIP compiler (default: /opt/rocm/llvm/bin/amdclang++)"
+    echo "    [--hip_compiler] Specify path to HIP compiler (default: \$HIP_COMPILER if set,"
+    echo "                     else /opt/rocm/llvm/bin/amdclang++)"
     echo "    [--gpu_targets] Specify GPU targets (default:gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201)"
 }
 
@@ -27,7 +28,9 @@ mpi_enabled=false
 rocm_dir=${ROCM_PATH}
 rccl_dir=${rocm_dir}
 mpi_dir=""
-hip_compiler=${rocm_dir}/llvm/bin/amdclang++
+# Default the HIP compiler from $HIP_COMPILER, else ROCm's amdclang++;
+# overridable via --hip_compiler.
+hip_compiler=${HIP_COMPILER:-${rocm_dir}/llvm/bin/amdclang++}
 gpu_targets=""
 
 # #################################################
