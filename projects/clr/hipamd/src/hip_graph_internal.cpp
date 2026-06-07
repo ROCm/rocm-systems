@@ -622,11 +622,11 @@ void GraphExecSegmented::BuildSyncPlan() {
   if (signalManager_ == nullptr) {
     signalManager_ = new GraphSignalManager();
   }
-  if (sync_plan_.num_hw_events > 0) {
+  if (sync_plan_.num_segments > 0) {
     // Pre-create a few sets to cover a small amount of launch overlap; the pool
     // grows on demand if more launches are concurrently in flight.
     constexpr int kPrecreatedSets = 16;
-    signalManager_->Prepopulate(device, sync_plan_.num_hw_events, kPrecreatedSets);
+    signalManager_->Prepopulate(device, sync_plan_.num_segments, kPrecreatedSets);
   }
 
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
@@ -2418,10 +2418,10 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   const bool recycle = (out_signal_set != nullptr);
 
   std::vector<void*> segment_hw_events;
-  if (sync_plan_.num_hw_events > 0) {
+  if (sync_plan_.num_segments > 0) {
     const bool ok = recycle
-        ? signalManager_->AcquireSet(device, sync_plan_.num_hw_events, segment_hw_events)
-        : device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events);
+        ? signalManager_->AcquireSet(device, sync_plan_.num_segments, segment_hw_events)
+        : device->CreateHwEvents(sync_plan_.num_segments, segment_hw_events);
     if (!ok) {
       if (out_status != nullptr) {
         *out_status = hipErrorOutOfMemory;
