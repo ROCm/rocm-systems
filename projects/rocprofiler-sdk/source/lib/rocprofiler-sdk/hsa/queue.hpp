@@ -170,6 +170,7 @@ public:
     {
         return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
     }
+
     void sync() const;
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);

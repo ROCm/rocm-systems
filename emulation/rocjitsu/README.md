@@ -251,7 +251,7 @@ shared templates for instructions that have identical semantics across multiple 
 Single-ISA mode (`--gen-all` without `--multi`) will generate inline execute bodies
 without shared templates, resulting in larger files with duplicated code.
 
-Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
+Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
 
 You can find the MR ISA in `rocm-systems/shared/machine-readable-isa/isa`.

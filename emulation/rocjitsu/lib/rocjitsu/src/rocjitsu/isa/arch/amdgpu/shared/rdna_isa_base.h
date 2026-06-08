@@ -21,9 +21,10 @@
 /// to 106 SGPRs per wavefront (two fewer than the encodable maximum of 108
 /// to avoid aliasing with the trap temporaries TTMP0–TTMP15).
 ///
-/// WF_SIZE / WF_SIZE_MAX: RDNA default wave size is Wave32 (`WF_SIZE = 32`);
-/// Wave64 is supported on all RDNA generations via ENABLE_WAVEFRONT_SIZE32=0
-/// in the kernel descriptor (`WF_SIZE_MAX = 64`).
+/// WF_SIZE / WF_SIZE_MAX: RDNA default wave size is Wave32 (`WF_SIZE = 32`).
+/// Most RDNA targets supported here also allow Wave64 via
+/// ENABLE_WAVEFRONT_SIZE32=0 in the kernel descriptor (`WF_SIZE_MAX = 64`);
+/// target-specific `isa.h` files can shadow `WF_SIZE_MAX` when needed.
 
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_RDNA_ISA_BASE_H_
