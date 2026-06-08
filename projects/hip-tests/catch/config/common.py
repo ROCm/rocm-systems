@@ -4,6 +4,7 @@
 
 import glob
 import os
+import sys
 
 import yaml
 
@@ -16,9 +17,10 @@ NON_UNIT_GROUPS = [
     "TypeQualifiers",
 ]
 
-WARNING = "\033[0;33m"
-ERROR = "\033[0;31m"
-RESET = "\033[0m"
+_use_color = sys.stderr.isatty() and not os.environ.get("NO_COLOR")
+WARNING = "\033[0;33m" if _use_color else ""
+ERROR = "\033[0;31m" if _use_color else ""
+RESET = "\033[0m" if _use_color else ""
 
 
 def parse_size_string(size_str):
