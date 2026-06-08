@@ -2247,8 +2247,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
   // introducing a separate source of truth.
   virtual bool WillBypassSdmaEngine() const override {
     size_t sOffset = 0, dOffset = 0;
-    amd::Memory* srcMemory = getMemoryObject(src_, sOffset);
-    amd::Memory* dstMemory = getMemoryObject(dst_, dOffset);
+    amd::Memory* srcMemory = getMemoryObjectForCurrentDevice(src_, sOffset);
+    amd::Memory* dstMemory = getMemoryObjectForCurrentDevice(dst_, dOffset);
 
     hip::MemcpyType type = hipHostToHost;
     if (srcMemory != nullptr && dstMemory != nullptr) {
