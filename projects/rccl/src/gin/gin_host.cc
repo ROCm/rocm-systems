@@ -92,9 +92,9 @@ void* ncclGinProgress(struct ncclGinState* ginState_) {
         if (ginState->ginType == NCCL_GIN_TYPE_PROXY) {
           ret = ncclGinProxyProgress(ginState->ncclGin, ginState->ginCtx[n]);
 #ifdef ENABLE_ROCSHMEM_GIN
-        } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+        } else if (ginState->ginType == NCCL_GIN_TYPE_ROCSHMEM) {
           ret = ncclGinRocshmemProgress(ginState->ncclGin, ginState->ginCtx[n]);
-        } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+        } else if (ginState->ginType == NCCL_GIN_TYPE_ANVIL) {
           ret = ncclGinAnvilProgress(ginState->ncclGin, ginState->ginCtx[n]);
 #endif
         } else {
@@ -253,12 +253,12 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm, ncclGinConnectionType_t r
                                               &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
 #ifdef ENABLE_ROCSHMEM_GIN
-    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+    } else if (ginState->ginType == NCCL_GIN_TYPE_ROCSHMEM) {
       NCCLCHECKGOTO(ncclGinRocshmemCreateContext(comm, ginState->ginComms[n], localGinDevs[n % nLocalGinDevs],
                                                   ginState->signalSpaceSize, ginState->counterSpaceSize,
                                                   &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
-    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+    } else if (ginState->ginType == NCCL_GIN_TYPE_ANVIL) {
       NCCLCHECKGOTO(ginState->ncclGin->connect(comm->ginContext, handles, nGinRanks, myGinRank,
             nContextsPerComm, ginState->ginQueueDepth, listenComm, ginState->ginComms + n),
           ret, fail);
@@ -367,7 +367,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
     }
   }
 #ifdef ENABLE_ROCSHMEM_GIN
-  if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+  if (ginState->ginType == NCCL_GIN_TYPE_ROCSHMEM) {
     for (int n = 0; n < ginState->ginCommCount; n++) {
       if (ginState->ginCtx[n] != NULL) {
         NCCLCHECK(ncclGinRocshmemDestroyContext(ginState->ncclGin, ginState->ginCtx[n]));
@@ -376,7 +376,7 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
     }
     NCCLCHECK(ncclGinRocshmemFinalizeIfOwned(comm));
   }
-  if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+  if (ginState->ginType == NCCL_GIN_TYPE_ANVIL) {
     for (int n = 0; n < ginState->ginCommCount; n++) {
       if (ginState->ginCtx[n] != NULL) {
         NCCLCHECK(ncclGinAnvilDestroyContext(ginState->ncclGin, ginState->ginCtx[n]));
@@ -410,10 +410,10 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
       NCCLCHECK(ncclGinProxyRegister(ginState->ncclGin, ginState->ginCtx[n], address, size,
                                      NCCL_PTR_CUDA, mrFlags, &ginHostWins[n], &ginDevWins[n]));
 #ifdef ENABLE_ROCSHMEM_GIN
-    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+    } else if (ginState->ginType == NCCL_GIN_TYPE_ROCSHMEM) {
       NCCLCHECK(ncclGinRocshmemRegister(ginState->ncclGin, ginState->ginCtx[n], address, size,
                                          NCCL_PTR_CUDA, 0, &ginHostWins[n], &ginDevWins[n]));
-    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+    } else if (ginState->ginType == NCCL_GIN_TYPE_ANVIL) {
       NCCLCHECK(ncclGinAnvilRegister(ginState->ncclGin, ginState->ginCtx[n], address, size,
                                      NCCL_PTR_CUDA, 0, &ginHostWins[n], &ginDevWins[n]));
 #endif
@@ -436,9 +436,9 @@ ncclResult_t ncclGinDeregister(struct ncclComm* comm, void* ginHostWins[NCCL_GIN
     if (ginState->ginType == NCCL_GIN_TYPE_PROXY) {
       NCCLCHECK(ncclGinProxyDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
 #ifdef ENABLE_ROCSHMEM_GIN
-    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
+    } else if (ginState->ginType == NCCL_GIN_TYPE_ROCSHMEM) {
       NCCLCHECK(ncclGinRocshmemDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
-    } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL) {
+    } else if (ginState->ginType == NCCL_GIN_TYPE_ANVIL) {
       NCCLCHECK(ncclGinAnvilDeregister(ginState->ncclGin, ginState->ginCtx[n], ginHostWins[n]));
 #endif
     } else {
@@ -487,9 +487,9 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState* ginState, bool* hasError
     if (ginState->ginType == NCCL_GIN_TYPE_PROXY)
       NCCLCHECK(ncclGinProxyQueryLastError(ginState->ncclGin, ginState->ginCtx[n], &hasError_));
 #ifdef ENABLE_ROCSHMEM_GIN
-    else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM)
+    else if (ginState->ginType == NCCL_GIN_TYPE_ROCSHMEM)
       NCCLCHECK(ncclGinRocshmemQueryLastError(ginState->ncclGin, ginState->ginCtx[n], &hasError_));
-    else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ANVIL)
+    else if (ginState->ginType == NCCL_GIN_TYPE_ANVIL)
       NCCLCHECK(ncclGinAnvilQueryLastError(ginState->ncclGin, ginState->ginCtx[n], &hasError_));
 #endif
     else

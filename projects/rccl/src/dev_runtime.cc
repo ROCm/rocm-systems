@@ -1211,6 +1211,8 @@ typedef enum : uint8_t {
   NCCL_GIN_TYPE_NONE_v22902 = 0,
   NCCL_GIN_TYPE_PROXY_v22902 = 2,
   NCCL_GIN_TYPE_GDAKI_v22902 = 3,
+  NCCL_GIN_TYPE_ROCSHMEM_v22902 = 4,
+  NCCL_GIN_TYPE_ANVIL_v22902 = 5,
 } ncclGinType_t_v22902;
 
 struct ncclCommProperties_v22902 {

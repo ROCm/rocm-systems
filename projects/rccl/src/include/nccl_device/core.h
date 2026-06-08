@@ -145,6 +145,8 @@ typedef enum {
   NCCL_GIN_TYPE_NONE = 0,
   NCCL_GIN_TYPE_PROXY = 2, // intentially not 1. Must match NCCL_NET_DEVICE_GIN_PROXY for backward compatibility
   NCCL_GIN_TYPE_GDAKI = 3, // intentially not 2. Must match NCCL_NET_DEVICE_GIN_GDAKI for backward compatibility
+  NCCL_GIN_TYPE_ROCSHMEM = 4, // Must match NCCL_NET_DEVICE_GIN_ROCSHMEM
+  NCCL_GIN_TYPE_ANVIL = 5, // Must match NCCL_NET_DEVICE_GIN_ANVIL
 } ncclGinType_t;
 
 struct ncclCommProperties {
