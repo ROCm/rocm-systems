@@ -255,7 +255,6 @@ TEST(spm_core, check_packet_generation)
                 EXPECT_EQ(get_spm_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
                     << "Unable to generate packet";
                 EXPECT_TRUE(pkt) << "Expected a packet to be generated";
-                pkt.reset();
                 ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(cfg_id),
                                  "Could not delete profile id");
             }

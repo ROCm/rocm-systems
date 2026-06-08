@@ -487,7 +487,7 @@ SPMPacket::~SPMPacket()
     if(!sym) return;
 
     running.wlock([&](auto& _running) {
-        if(!_running) return;
+        if(_running == false) return;
         auto status = sym->spm_stop(this->handle);
         ROCP_WARNING_IF(status != HSA_STATUS_SUCCESS)
             << "spm_stop failed with HSA status: " << status;
