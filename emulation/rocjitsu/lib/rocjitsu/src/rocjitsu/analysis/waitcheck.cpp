@@ -208,6 +208,7 @@ struct PendingEvent {
   std::string instruction;
   bool check_memory_order = false;
   bool check_program_end = false;
+  uint32_t min_younger = 0;
 
   bool operator==(const PendingEvent &) const = default;
 };
@@ -276,12 +277,34 @@ struct VgprMsbState {
   bool operator==(const VgprMsbState &) const = default;
 };
 
+enum class DelayAluEffect : uint8_t {
+  None,
+  Valu,
+  Salu,
+};
+
+struct PendingDelayAlu {
+  uint8_t countdown = 0;
+  DelayAluEffect effect = DelayAluEffect::None;
+
+  bool operator==(const PendingDelayAlu &) const = default;
+};
+
+struct ExpertSchedulingState {
+  bool enabled = false;
+  bool known = true;
+
+  bool operator==(const ExpertSchedulingState &) const = default;
+};
+
 struct PendingState {
   std::array<std::vector<PendingEvent>, kCounterCount> pending;
   std::array<bool, kCounterCount> uncertain_order{};
   SgprHazardState sgpr_hazards;
   VaVdstHazardState va_vdst_hazards;
   VgprMsbState vgpr_msb;
+  std::vector<PendingDelayAlu> delay_alu;
+  ExpertSchedulingState expert_scheduling;
 
   bool operator==(const PendingState &) const = default;
 };
@@ -299,6 +322,7 @@ struct Analyzer {
     }
 
     PendingState state;
+    state.expert_scheduling.enabled = true;
     std::vector<uint32_t> padded(words.begin(), words.end());
     padded.resize(padded.size() + 2);
 
@@ -379,9 +403,24 @@ private:
     return static_cast<size_t>(counter);
   }
 
+  [[nodiscard]] static bool same_event_identity(const PendingEvent &lhs, const PendingEvent &rhs) {
+    PendingEvent lhs_key = lhs;
+    PendingEvent rhs_key = rhs;
+    lhs_key.min_younger = 0;
+    rhs_key.min_younger = 0;
+    return lhs_key == rhs_key;
+  }
+
+  [[nodiscard]] static auto find_event(std::vector<PendingEvent> &events,
+                                       const PendingEvent &event) {
+    return std::ranges::find_if(
+        events, [&](const PendingEvent &existing) { return same_event_identity(existing, event); });
+  }
+
   [[nodiscard]] static bool contains_event(const std::vector<PendingEvent> &events,
                                            const PendingEvent &event) {
-    return std::ranges::find(events, event) != events.end();
+    return std::ranges::any_of(
+        events, [&](const PendingEvent &existing) { return same_event_identity(existing, event); });
   }
 
   [[nodiscard]] bool diagnostics_available() const { return !report_.diagnostics_truncated; }
@@ -429,12 +468,20 @@ private:
     for (size_t i = 0; i < kCounterCount; ++i) {
       dst.uncertain_order[i] = dst.uncertain_order[i] || src.uncertain_order[i];
       for (const auto &event : src.pending[i]) {
-        if (!contains_event(dst.pending[i], event))
+        auto existing = find_event(dst.pending[i], event);
+        if (existing == dst.pending[i].end()) {
           dst.pending[i].push_back(event);
+        } else {
+          existing->min_younger = std::min(existing->min_younger, event.min_younger);
+        }
       }
     }
     merge_sgpr_hazards(dst.sgpr_hazards, src.sgpr_hazards);
     merge_va_vdst_hazards(dst.va_vdst_hazards, src.va_vdst_hazards);
+    for (const PendingDelayAlu &delay : src.delay_alu) {
+      if (std::find(dst.delay_alu.begin(), dst.delay_alu.end(), delay) == dst.delay_alu.end())
+        dst.delay_alu.push_back(delay);
+    }
   }
 
   [[nodiscard]] static PendingState
@@ -447,11 +494,18 @@ private:
 
     std::array<std::optional<std::vector<PendingEvent>>, kCounterCount> first_source;
     std::optional<VgprMsbState> first_vgpr_msb;
+    std::optional<ExpertSchedulingState> first_expert_scheduling;
     for (const BasicBlock *pred : block.predecessors()) {
       const auto pred_it = block_index.find(pred);
       if (pred_it == block_index.end())
         continue;
       const PendingState &pred_out = outputs[pred_it->second];
+      if (!first_expert_scheduling) {
+        first_expert_scheduling = pred_out.expert_scheduling;
+      } else if (*first_expert_scheduling != pred_out.expert_scheduling) {
+        first_expert_scheduling->known = false;
+        first_expert_scheduling->enabled = true;
+      }
       if (!first_vgpr_msb) {
         first_vgpr_msb = pred_out.vgpr_msb;
       } else if (*first_vgpr_msb != pred_out.vgpr_msb) {
@@ -471,6 +525,8 @@ private:
     }
     if (first_vgpr_msb)
       merged.vgpr_msb = *first_vgpr_msb;
+    if (first_expert_scheduling)
+      merged.expert_scheduling = *first_expert_scheduling;
     return merged;
   }
 
@@ -500,12 +556,10 @@ private:
       state.uncertain_order[idx] = false;
       return;
     }
-    if (state.uncertain_order[idx])
-      return;
-    if (count >= pending.size())
-      return;
-    const size_t completed = pending.size() - count;
-    pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(completed));
+    std::erase_if(pending,
+                  [count](const PendingEvent &event) { return event.min_younger >= count; });
+    if (pending.empty())
+      state.uncertain_order[idx] = false;
   }
 
   [[nodiscard]] static bool vm_vsrc_event_implied_by_wait(WaitEventKind kind,
@@ -527,16 +581,14 @@ private:
     }
   }
 
-  static void apply_implied_vm_vsrc_wait(PendingState &state, WaitCounterKind counter,
-                                         uint32_t count) {
+  template <typename Predicate>
+  static void apply_filtered_vm_vsrc_wait(PendingState &state, Predicate is_implied,
+                                          uint32_t count) {
     const size_t idx = counter_index(WaitCounterKind::VmVsrc);
     auto &pending = state.pending[idx];
     if (pending.empty())
       return;
 
-    auto is_implied = [&](const PendingEvent &event) {
-      return vm_vsrc_event_implied_by_wait(event.kind, counter);
-    };
     const size_t matching = static_cast<size_t>(std::ranges::count_if(pending, is_implied));
     if (matching == 0)
       return;
@@ -562,9 +614,40 @@ private:
                   pending.end());
   }
 
+  static void apply_implied_vm_vsrc_wait(PendingState &state, WaitCounterKind counter,
+                                         uint32_t count) {
+    apply_filtered_vm_vsrc_wait(
+        state,
+        [&](const PendingEvent &event) {
+          return vm_vsrc_event_implied_by_wait(event.kind, counter);
+        },
+        count);
+  }
+
+  [[nodiscard]] static bool vm_vsrc_event_implied_by_xcnt(WaitEventKind kind) {
+    return kind == WaitEventKind::VmemNoSamplerLoad || kind == WaitEventKind::FlatLoad ||
+           kind == WaitEventKind::VmemStore || kind == WaitEventKind::FlatStore;
+  }
+
+  static void apply_xcnt_wait(PendingState &state, uint32_t count) {
+    apply_filtered_vm_vsrc_wait(
+        state, [](const PendingEvent &event) { return vm_vsrc_event_implied_by_xcnt(event.kind); },
+        count);
+  }
+
   static void apply_memory_wait(PendingState &state, WaitCounterKind counter, uint32_t count) {
     apply_wait(state, counter, count);
     apply_implied_vm_vsrc_wait(state, counter, count);
+  }
+
+  [[nodiscard]] static bool expert_waits_enabled(const PendingState &state) {
+    return !state.expert_scheduling.known || state.expert_scheduling.enabled;
+  }
+
+  static void clear_expert_wait_state(PendingState &state) {
+    state.pending[counter_index(WaitCounterKind::VmVsrc)].clear();
+    state.uncertain_order[counter_index(WaitCounterKind::VmVsrc)] = false;
+    clear_va_vdst_hazards(state.va_vdst_hazards);
   }
 
   static void clear_salu_sgpr_hazards(SgprHazardState &state) {
@@ -634,12 +717,71 @@ private:
       clear_valu_sgpr_hazards(state);
   }
 
+  [[nodiscard]] static DelayAluEffect decode_delay_alu_effect(uint32_t instid) {
+    if (instid >= 1 && instid <= 8)
+      return DelayAluEffect::Valu;
+    if (instid >= 9 && instid <= 11)
+      return DelayAluEffect::Salu;
+    return DelayAluEffect::None;
+  }
+
+  static void append_delay_alu(PendingState &state, uint32_t countdown, DelayAluEffect effect) {
+    if (effect == DelayAluEffect::None)
+      return;
+    PendingDelayAlu delay{static_cast<uint8_t>(countdown), effect};
+    if (std::find(state.delay_alu.begin(), state.delay_alu.end(), delay) == state.delay_alu.end())
+      state.delay_alu.push_back(delay);
+  }
+
+  static void apply_s_delay_alu(PendingState &state, const Instruction &inst) {
+    constexpr uint32_t kInstidMask = 0xfu;
+    constexpr uint32_t kInstskipShift = 4;
+    constexpr uint32_t kInstskipMask = 0x7u;
+    constexpr uint32_t kInstid1Shift = 7;
+
+    const Operand *op = inst.src_operand(0);
+    const uint32_t value = op ? static_cast<uint32_t>(op->encoding_value()) : 0;
+    append_delay_alu(state, 0, decode_delay_alu_effect(value & kInstidMask));
+    append_delay_alu(state, (value >> kInstskipShift) & kInstskipMask,
+                     decode_delay_alu_effect((value >> kInstid1Shift) & kInstidMask));
+    state.sgpr_hazards.consecutive_ds_nops = 0;
+  }
+
+  static void apply_due_delay_alu(PendingState &state) {
+    for (const PendingDelayAlu &delay : state.delay_alu) {
+      if (delay.countdown != 0)
+        continue;
+      switch (delay.effect) {
+      case DelayAluEffect::Valu:
+        clear_valu_sgpr_hazards(state.sgpr_hazards);
+        clear_valu_vcc_hazard(state.sgpr_hazards);
+        break;
+      case DelayAluEffect::Salu:
+        clear_salu_sgpr_hazards(state.sgpr_hazards);
+        break;
+      case DelayAluEffect::None:
+        break;
+      }
+    }
+    std::erase_if(state.delay_alu,
+                  [](const PendingDelayAlu &delay) { return delay.countdown == 0; });
+  }
+
+  static void advance_delay_alu(PendingState &state) {
+    for (PendingDelayAlu &delay : state.delay_alu) {
+      if (delay.countdown > 0)
+        --delay.countdown;
+    }
+  }
+
   void apply_waitcnt(PendingState &state, const Instruction &inst) {
     const auto mnemonic = inst.mnemonic();
     if (mnemonic == "s_wait_idle") {
       VgprMsbState vgpr_msb = state.vgpr_msb;
+      ExpertSchedulingState expert_scheduling = state.expert_scheduling;
       state = {};
       state.vgpr_msb = vgpr_msb;
+      state.expert_scheduling = expert_scheduling;
       return;
     }
 
@@ -666,6 +808,8 @@ private:
       apply_memory_wait(state, WaitCounterKind::Bvh, value);
     } else if (mnemonic == "s_wait_expcnt") {
       apply_wait(state, WaitCounterKind::Exp, value);
+    } else if (mnemonic == "s_wait_xcnt") {
+      apply_xcnt_wait(state, value);
     } else if (mnemonic == "s_wait_loadcnt_dscnt") {
       apply_memory_wait(state, WaitCounterKind::Load, (value >> 4) & 0xFu);
       apply_memory_wait(state, WaitCounterKind::Ds, value & 0xFu);
@@ -691,6 +835,40 @@ private:
     state.vgpr_msb.mode = value ? static_cast<uint8_t>(*value) : 0;
     state.vgpr_msb.known = true;
     return true;
+  }
+
+  static void apply_expert_scheduling_mode(PendingState &state, const Instruction &inst,
+                                           rj_code_arch_t arch) {
+    if (arch != ROCJITSU_CODE_ARCH_GFX1250 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+      return;
+    if (inst.mnemonic() != "s_setreg_imm32_b32" && inst.mnemonic() != "s_setreg_b32")
+      return;
+
+    constexpr uint32_t kHwRegWaveSchedMode = 26;
+    constexpr uint32_t kSchedModeValue = 2;
+    const Operand *hwreg = inst.dst_operand(0);
+    if (hwreg == nullptr)
+      return;
+
+    const uint32_t value = static_cast<uint32_t>(hwreg->encoding_value());
+    const uint32_t reg_id = value & 0x3fu;
+    const uint32_t offset = (value >> 6u) & 0x1fu;
+    const uint32_t size = ((value >> 11u) & 0x1fu) + 1u;
+    if (reg_id != kHwRegWaveSchedMode || offset >= 2)
+      return;
+
+    if (inst.mnemonic() != "s_setreg_imm32_b32" || inst.raw_encoding() == nullptr ||
+        inst.size() < 2 * static_cast<int>(sizeof(uint32_t)) || offset != 0 || size < 2) {
+      state.expert_scheduling.known = false;
+      state.expert_scheduling.enabled = true;
+      return;
+    }
+
+    state.expert_scheduling.known = true;
+    state.expert_scheduling.enabled =
+        ((inst.raw_encoding()[1] >> offset) & 0x3u) == kSchedModeValue;
+    if (!state.expert_scheduling.enabled)
+      clear_expert_wait_state(state);
   }
 
   [[nodiscard]] static bool is_exec_masked_def(RegisterRef ref) {
@@ -746,6 +924,9 @@ private:
     for (int i = 0; i < inst.num_src_operands(); ++i) {
       const Operand *op = inst.src_operand(i);
       if (op == nullptr)
+        continue;
+      const std::string_view mnemonic = inst.mnemonic();
+      if (i == 0 && mnemonic.compare(0, 8, "scratch_") == 0 && op->encoding_value() == 0)
         continue;
       if (auto ref = op->to_register_ref())
         expand_vgpr_msb_ref(du.uses, *ref, *op, state, arch);
@@ -951,8 +1132,6 @@ private:
     if (is_vmem_store(mnemonic)) {
       events.push_back({WaitCounterKind::Store, WaitEventKind::VmemStore,
                         TrackedRegisterSource::None, false, false});
-      events.push_back({WaitCounterKind::Exp, WaitEventKind::VmemStore,
-                        TrackedRegisterSource::StoreDataUses, false, true});
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemStore,
                         TrackedRegisterSource::VectorUses, false, true});
       return events;
@@ -964,10 +1143,6 @@ private:
       events.push_back({WaitCounterKind::Ds, WaitEventKind::Ds});
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Ds,
                         TrackedRegisterSource::VectorUses, false, true});
-      if (is_ds_store(mnemonic)) {
-        events.push_back({WaitCounterKind::Exp, WaitEventKind::Ds,
-                          TrackedRegisterSource::StoreDataUses, false, true});
-      }
       return events;
     }
 
@@ -1252,7 +1427,6 @@ private:
                           uint64_t file_offset) {
     for (size_t counter_idx = 0; counter_idx < state.pending.size(); ++counter_idx) {
       const auto &events = state.pending[counter_idx];
-      const size_t pending_count = events.size();
       for (size_t i = 0; i < events.size(); ++i) {
         const PendingEvent &event = events[i];
         std::optional<RegisterRef> reg;
@@ -1286,8 +1460,7 @@ private:
         if (access == WaitcheckAccessKind::Def && ordered_waw(event, current_events))
           continue;
 
-        const auto required_count =
-            state.uncertain_order[counter_idx] ? 0u : static_cast<uint32_t>(pending_count - i - 1);
+        const auto required_count = event.min_younger;
         emit_diagnostic(inst, event, *reg, access, required_count, section_offset, file_offset);
       }
     }
@@ -1297,13 +1470,11 @@ private:
 
     for (size_t counter_idx = 0; counter_idx < state.pending.size(); ++counter_idx) {
       const auto &events = state.pending[counter_idx];
-      const size_t pending_count = events.size();
       for (size_t i = 0; i < events.size(); ++i) {
         const PendingEvent &event = events[i];
         if (!event.check_exec_defs)
           continue;
-        const auto required_count =
-            state.uncertain_order[counter_idx] ? 0u : static_cast<uint32_t>(pending_count - i - 1);
+        const auto required_count = event.min_younger;
         emit_diagnostic(inst, event, RegisterRef{RegClass::EXEC, 0, 1}, WaitcheckAccessKind::Def,
                         required_count, section_offset, file_offset);
       }
@@ -1577,8 +1748,16 @@ private:
     event.check_memory_order = classification.check_memory_order;
     event.check_program_end = classification.check_program_end;
     const size_t idx = counter_index(classification.counter);
-    if (!contains_event(state.pending[idx], event))
+    for (PendingEvent &pending_event : state.pending[idx]) {
+      if (pending_event.min_younger != std::numeric_limits<uint32_t>::max())
+        ++pending_event.min_younger;
+    }
+    if (auto existing = find_event(state.pending[idx], event);
+        existing != state.pending[idx].end()) {
+      existing->min_younger = 0;
+    } else {
       state.pending[idx].push_back(std::move(event));
+    }
     if (record_stats)
       ++report_.memory_events_tracked;
   }
@@ -1588,35 +1767,61 @@ private:
                            uint64_t file_offset, rj_code_arch_t arch, bool emit_diagnostics) {
     const bool record_stats = emit_diagnostics;
     const bool emit_report_diagnostics = emit_diagnostics && diagnostics_available();
+    if (inst.mnemonic() == "s_delay_alu") {
+      apply_s_delay_alu(state, inst);
+      return;
+    }
+    apply_due_delay_alu(state);
+    auto finish_instruction = [&]() { advance_delay_alu(state); };
     if (apply_sgpr_hazard_ds_nop_cull(state.sgpr_hazards, inst.mnemonic())) {
       clear_va_vdst_hazards(state.va_vdst_hazards);
+      finish_instruction();
       return;
     }
     if (inst.is_waitcnt()) {
       apply_waitcnt(state, inst);
+      finish_instruction();
       return;
     }
-    if (apply_vgpr_msb_mode(state, inst, arch))
+    if (apply_vgpr_msb_mode(state, inst, arch)) {
+      finish_instruction();
       return;
+    }
+    apply_expert_scheduling_mode(state, inst, arch);
     clear_matching_barrier_scc_write(state, inst);
     apply_sgpr_hazard_memory_cull(state.sgpr_hazards, inst.mnemonic());
     apply_embedded_waitcnt(state, inst);
 
     InstDefUse du = inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch);
     auto events = classify_events(inst);
+    if (!expert_waits_enabled(state)) {
+      std::erase_if(events, [](const ClassifiedEvent &event) {
+        return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
+      });
+    }
     if (emit_report_diagnostics) {
       check_dependencies(state, inst, du, events, section_offset, file_offset);
-      check_va_vdst_hazard(state.va_vdst_hazards, inst, du, section_offset, file_offset);
+      if (expert_waits_enabled(state))
+        check_va_vdst_hazard(state.va_vdst_hazards, inst, du, section_offset, file_offset);
     }
-    update_sgpr_hazards(state.sgpr_hazards, inst, du, section_name, section_offset, file_offset,
-                        emit_report_diagnostics);
-    update_va_vdst_hazards(state.va_vdst_hazards, inst, du, section_name, section_offset,
-                           file_offset);
+    if (arch != ROCJITSU_CODE_ARCH_GFX1250) {
+      update_sgpr_hazards(state.sgpr_hazards, inst, du, section_name, section_offset, file_offset,
+                          emit_report_diagnostics);
+    }
+    if (expert_waits_enabled(state))
+      update_va_vdst_hazards(state.va_vdst_hazards, inst, du, section_name, section_offset,
+                             file_offset);
+
+    if (is_program_end(inst.mnemonic())) {
+      state = {};
+      return;
+    }
 
     for (const ClassifiedEvent &event : events) {
       add_event(state, event, inst, du, section_name, section_offset, file_offset,
                 inst.disassemble(), arch, record_stats);
     }
+    finish_instruction();
   }
 
   void set_analysis_error(std::string_view section_name, uint64_t section_offset,
