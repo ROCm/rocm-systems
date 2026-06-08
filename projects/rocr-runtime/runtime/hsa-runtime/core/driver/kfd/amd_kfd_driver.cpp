@@ -655,13 +655,20 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
    * We converted mem into a driver handle. The driver handle will keep the reference count
    * inside the KMD so we can free the original KFD allocation.
    */
-  HSAKMT_CALL(hsaKmtFreeMemory(mem, size));
+  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
+    DestroyMemoryHandle(&targetHandle);
+    rocr::os::DmaBufClose(shareable_fd);
+    return HSA_STATUS_ERROR;
+  }
 #endif
 
   const auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
   const auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(targetHandle.handle);
-  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS)
+  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, &handle->mmap_offset)) != HSAKMT_STATUS_SUCCESS) {
+    DestroyMemoryHandle(&targetHandle);
+    rocr::os::DmaBufClose(shareable_fd);
     return HSA_STATUS_ERROR;
+  }
 
   handle->handle = targetHandle.handle;
   handle->dmabuf_fd = shareable_fd;

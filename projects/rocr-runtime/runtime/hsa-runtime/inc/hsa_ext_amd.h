@@ -4336,10 +4336,11 @@ typedef struct hsa_fabric_handle_s {
 
 
 /**
- * Get a globaly-unique exportable shareable handle for a memory_handle.
+ * Get a globally-unique exportable shareable handle for a memory_handle.
  * This shareable handle can then be used to re-create a virtual memory handle
  * using hsa_amd_vmem_import_shareable_handle. Once all shareable handles are
  * closed, the memory_handle is released.
+ * This is only supported on handles allocated on GPU agents.
  *
  * @param[out] fabric_handle fabric handle
  * @param[in] handle previously allocated virtual memory handle

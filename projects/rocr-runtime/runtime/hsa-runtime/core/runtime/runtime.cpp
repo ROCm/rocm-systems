@@ -823,10 +823,13 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       break;
     }
     case HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED: {
-      bool ret = true;
-      for (auto agent : gpu_agents_) {
-        AMD::GpuAgent* gpu = (AMD::GpuAgent*)agent;
-        ret &= (gpu->properties().FabricHandleSupported == 1);
+      bool ret = false;
+      if (!gpu_agents_.empty()) {
+        ret = true;
+        for (auto agent : gpu_agents_) {
+          AMD::GpuAgent* gpu = (AMD::GpuAgent*)agent;
+          ret &= (gpu->properties().FabricHandleSupported == 1);
+        }
       }
       *(bool*)value = ret;
       break;
