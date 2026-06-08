@@ -35,7 +35,9 @@ void init_constant_memory(void) {
 
   constmem_values.backend_type = backend->get_type();
 #if defined(USE_GDA)
-  constmem_values.gda_provider = static_cast<GDABackend*>(backend)->get_gda_provider();
+  if (constmem_values.backend_type == BackendType::GDA_BACKEND) {
+    constmem_values.gda_provider = static_cast<GDABackend*>(backend)->get_gda_provider();
+  }
 #endif
 
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &constmem_values, sizeof(constmem_t)));
