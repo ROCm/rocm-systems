@@ -371,6 +371,15 @@ ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float*
   while(g < system->nodes[GPU].count && system->nodes[GPU].nodes[g].gpu.rank != rank) g++;
   if(g == system->nodes[GPU].count) return ncclInternalError;
 
+  // GPUs with no reachable NET node have a minimum net bw of 0.
+  int localNets[NCCL_TOPO_MAX_NODES];
+  int localNetCount = 0;
+  NCCLCHECK(ncclTopoGetLocal(system, GPU, g, NET, localNets, &localNetCount, NULL));
+  if (localNetCount == 0) {
+    *bw = 0.0;
+    return ncclSuccess;
+  }
+
   int64_t firstNetId = 0;
   float minBw = FLT_MAX;
   for (int c = 0; c < MAXCHANNELS; c++) {
