@@ -15,7 +15,7 @@
     "NCCL_DEBUG": "INFO"
   },
   "build_configuration": {
-    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--enable-device-coverage", "--no_clean"],
     "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942",
     "parallel_jobs": 64
   },
@@ -2599,6 +2599,22 @@
             "NCCL_PROTO": "LL128",
             "NCCL_LL128_NTHREADS": "640"
           }
+        },
+        {
+          "name": "Tuning_Thread_Thresholds",
+          "description": "NCCL_THREAD_THRESHOLDS thread-count thresholds",
+          "env_variables": {
+            "NCCL_THREAD_THRESHOLDS": "8192,8192,8192",
+            "NCCL_NTHREADS": "256"
+          }
+        },
+        {
+          "name": "Tuning_PAT_Enable",
+          "description": "NCCL_PAT_ENABLE + NCCL_NET_OVERHEAD tuning knobs",
+          "env_variables": {
+            "NCCL_PAT_ENABLE": "1",
+            "NCCL_NET_OVERHEAD": "1000"
+          }
         }
       ]
     },
@@ -2632,6 +2648,15 @@
             "NCCL_P2P_LL_THRESHOLD": "16384",
             "RCCL_P2P_NET_THRESHOLD": "65536",
             "NCCL_CHUNK_SIZE": "262144"
+          }
+        },
+        {
+          "name": "Enqueue_Intranet_Threshold",
+          "description": "RCCL_INTRANET_THRESHOLD + RCCL_ENABLE_INTRANET",
+          "command_args": "-o all",
+          "env_variables": {
+            "RCCL_INTRANET_THRESHOLD": "4194304",
+            "RCCL_ENABLE_INTRANET": "1"
           }
         }
       ]
