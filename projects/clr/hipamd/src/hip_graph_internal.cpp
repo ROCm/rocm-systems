@@ -1213,6 +1213,9 @@ hipError_t GraphExec::Init() {
 
     // For graph nodes capture AQL packets to dispatch them directly during graph launch.
     status = CaptureAQLPackets();
+    if (status == hipSuccess && CanUseReplayBuffer()) {
+      BuildReplayBuffer();
+    }
   }
 
   static_cast<ReferenceCountedObject*>(hip::getCurrentDevice())->retain();
@@ -1456,8 +1459,12 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
         currentSegBatch.packet_batches.push_back(std::move(newBatch));
         i = j - 1;  // for-loop will ++i to j
       } else {
-        // Non-capturable node
-        currentSegBatch.has_uncaptured_nodes = true;
+        // Non-capturable node. EMPTY nodes are synchronization-only barriers
+        // that produce no GPU work — on a single stream they are no-ops and
+        // should not force the segment into the slower uncaptured dispatch path.
+        if (node->GetType() != hipGraphNodeTypeEmpty) {
+          currentSegBatch.has_uncaptured_nodes = true;
+        }
         currentSegBatch.node_capture_status[i] = false;
       }
     }
@@ -1793,6 +1800,44 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
 }
 
 // Carries the per-launch state needed by the completion callback: the graph
+// ================================================================================================
+bool GraphExec::CanUseReplayBuffer() const {
+  if (max_streams_dev_.size() != 1) return false;
+  for (const auto& seg : segments_) {
+    if (seg.child_graph_ptr != nullptr) return false;
+  }
+  for (const auto& [id, sb] : segmentBatches_) {
+    if (sb.has_uncaptured_nodes) return false;
+  }
+  return true;
+}
+
+void GraphExec::BuildReplayBuffer() {
+  replayBuffer_.valid = false;
+  replayBuffer_.flatData.clear();
+  replayBuffer_.fullHeaders.clear();
+  replayBuffer_.kernelNames.clear();
+  for (int level = 0; level <= max_dependency_level_; ++level) {
+    auto it = segments_per_level_.find(level);
+    if (it == segments_per_level_.end()) continue;
+    for (int seg_id : it->second) {
+      auto sbIt = segmentBatches_.find(seg_id);
+      if (sbIt == segmentBatches_.end()) continue;
+      for (const auto& batch : sbIt->second.packet_batches) {
+        if (batch.flatPacketData.empty()) continue;
+        replayBuffer_.flatData.insert(replayBuffer_.flatData.end(),
+            batch.flatPacketData.begin(), batch.flatPacketData.end());
+        replayBuffer_.fullHeaders.insert(replayBuffer_.fullHeaders.end(),
+            batch.validPacketFullHeaders.begin(), batch.validPacketFullHeaders.end());
+        replayBuffer_.kernelNames.insert(replayBuffer_.kernelNames.end(),
+            batch.dispatchKernelNames.begin(), batch.dispatchKernelNames.end());
+      }
+    }
+  }
+  replayBuffer_.valid = !replayBuffer_.flatData.empty();
+}
+
+// ================================================================================================
 // whose refcount to drop, plus the signal set (and its device) to re-arm and
 // return to the pool now that the launch's GPU work is done.
 struct GraphLaunchCleanup {
@@ -2459,17 +2504,19 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       launch_stream->vdev()->HiddenHeapInit();
     }
     amd::Command* last_cmd = nullptr;
-    if (max_streams_dev_.size() == 1) {
-      // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph
+    if (replayBuffer_.valid) {
+      auto* accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+      launch_stream->vdev()->dispatchAqlPacketBatchFlat(
+          replayBuffer_.flatData, replayBuffer_.fullHeaders,
+          accumulate, false, &replayBuffer_.kernelNames, true);
+      accumulate->enqueue();
+      last_cmd = accumulate;
+    } else if (max_streams_dev_.size() == 1) {
       last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status, &launch_signal_set);
     } else {
-      // Multi-device: pass empty vector, will use parallel_streams_ internally
       last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status, &launch_signal_set);
     }
 
-    // Drive OnLaunchComplete off this command's completion (its leaf-sync deps
-    // already imply all parallel work is done). Our reference is released after
-    // the callback is registered below; the queue keeps it alive until done.
     completion_cmd = last_cmd;
   } else if (max_streams_ == 1 && instantiateDeviceId_ != launch_stream->DeviceId()) {
     for (int i = 0; i < topoOrder_.size(); i++) {

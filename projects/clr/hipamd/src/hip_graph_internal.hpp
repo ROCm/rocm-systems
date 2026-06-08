@@ -1176,6 +1176,16 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   SyncPlan sync_plan_;
 
   void BuildSyncPlan();
+
+  struct ReplayBuffer {
+    std::vector<uint8_t> flatData;
+    std::vector<uint32_t> fullHeaders;
+    std::vector<const std::string*> kernelNames;
+    bool valid = false;
+  };
+  ReplayBuffer replayBuffer_;
+  bool CanUseReplayBuffer() const;
+  void BuildReplayBuffer();
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
