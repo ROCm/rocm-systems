@@ -1013,15 +1013,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
 	}
 
 	uint32_t gpu_id;
-	HSAKMT_STATUS result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
-	if (result != HSAKMT_STATUS_SUCCESS)
-		return result;
+	hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
 
 	int drm_fd = -1;
 	uint32_t vm_timeline_syncobj = 0;
 	uint64_t vm_timeline_seqnum = 0;
 
-	result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
+	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
@@ -1056,11 +1054,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
 	uw.syncobj_timeline_handles     = (uintptr_t)&vm_timeline_syncobj;
 	uw.syncobj_timeline_points      = (uintptr_t)&vm_timeline_seqnum;
 	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_USERQ_WAIT, &uw, sizeof(uw));
-
-	// TODO: Remove after testing with userq kernel patch
-	// ret = drmSyncobjTimelineWait(drm_fd, &vm_timeline_syncobj,
-	// 			     &vm_timeline_seq_num, 1,
-	// 			     INT64_MAX, 0, NULL);
 					 
 	if (ret) {
 		pr_err("[%s] DRM_AMDGPU_USERQ_WAIT failed after MAP: %d\n", __func__, ret);
@@ -1081,15 +1074,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
 	}
 
 	uint32_t gpu_id;
-	HSAKMT_STATUS result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
-	if (result != HSAKMT_STATUS_SUCCESS)
-		return result;
+	hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
 
 	int drm_fd = -1;
 	uint32_t vm_timeline_syncobj = 0;
 	uint64_t vm_timeline_seqnum = 0;
 
-	result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
+	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
@@ -1123,11 +1114,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
 	uw.syncobj_timeline_handles     = (uintptr_t)&vm_timeline_syncobj;
 	uw.syncobj_timeline_points      = (uintptr_t)&vm_timeline_seqnum;
 	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_USERQ_WAIT, &uw, sizeof(uw));
-
-	// TODO: Remove after testing with userq kernel patch
-	// ret = drmSyncobjTimelineWait(drm_fd, &vm_timeline_syncobj,
-	// 			     &vm_timeline_seqnum, 1,
-	// 			     INT64_MAX, 0, NULL);
 					 
 	if (ret) {
 		pr_err("[%s] drmSyncobjTimelineWait failed after UNMAP: %d\n", __func__, ret);
