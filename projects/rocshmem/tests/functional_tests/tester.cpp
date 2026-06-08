@@ -71,6 +71,9 @@
 #include "device_bitcode_tester.hpp"
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
+#include "tile_rma_tester.hpp"
+#include "reduce_on_stream_tester.hpp"
+#include "host_ctx_create_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -650,6 +653,70 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Fence PutWaveNbiChunks Ordering";
       testers.push_back(new FenceOrderingTester(args));
       break;
+    case TilePutContiguousTestType:
+      test_name = "Tile Put Contiguous";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutRowMajorTestType:
+      test_name = "Tile Put Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutColumnMajorTestType:
+      test_name = "Tile Put Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutArbitraryTestType:
+      test_name = "Tile Put Arbitrary Strides";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveContiguousTestType:
+      test_name = "Tile Put Wave-Collective Contiguous";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGContiguousTestType:
+      test_name = "Tile Put Workgroup-Collective Contiguous";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetContiguousTestType:
+      test_name = "Tile Get Contiguous";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGContiguousTestType:
+      test_name = "Tile Get Workgroup-Collective Contiguous";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePut1DTestType:
+      test_name = "Tile Put 1D Tensor";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGet1DTestType:
+      test_name = "Tile Get 1D Tensor";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveContiguousTestType:
+      test_name = "Tile Get Wave-Collective Contiguous";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetRowMajorTestType:
+      test_name = "Tile Get Row-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetColumnMajorTestType:
+      test_name = "Tile Get Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetArbitraryTestType:
+      test_name = "Tile Get Arbitrary Strides";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case ReduceOnStreamTestType:
+      test_name = "Reduce On Stream";
+      testers.push_back(new ReduceOnStreamTester(args));
+      break;
+    case HostCtxCreateTestType:
+      test_name = "Host CTX Create";
+      testers.push_back(new HostCtxCreateTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -736,7 +803,8 @@ void Tester::execute() {
         _type != TeamCtxInfraBlockTestType  &&
         _type != TeamCtxInfraOddEvenTestType &&
         _type != TeamCtxSharedInfraTestType &&
-        _type != TeamCtxSubsetParentInfraTestType ) {
+        _type != TeamCtxSubsetParentInfraTestType &&
+        _type != HostCtxCreateTestType) {
       print(size);
     }
   }
@@ -752,6 +820,7 @@ bool Tester::peLaunchesKernel() {
    * Some test types are active on both sides.
    */
   switch (_type) {
+    case ReduceOnStreamTestType:
     case TeamReductionTestType:
     case TeamBroadcastTestType:
     case TeamCtxInfraTestType:
@@ -868,12 +937,16 @@ void flush_hdp() {
   CHECK_HIP(hipGetDevice(&hip_dev_id));
   CHECK_HIP(hipDeviceGetAttribute(reinterpret_cast<int*>(&hdp_flush_ptr_),
                         hipDeviceAttributeHdpMemFlushCntl, hip_dev_id));
-  __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  if (hdp_flush_ptr_ != nullptr) {
+    __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  }
 }
 
 void Tester::barrier() {
   rocshmem_barrier_all();
+#if defined USE_HDP_FLUSH
   flush_hdp();
+#endif
 }
 
 double Tester::gpuCyclesToMicroseconds(long long int cycles) {

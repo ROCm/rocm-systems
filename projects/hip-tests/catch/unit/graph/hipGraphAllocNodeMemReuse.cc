@@ -859,8 +859,12 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
   HIP_CHECK(hipGraphExecDestroy(execB));
 
 #if HT_AMD
+  // GraphExec reference count decrement is done asynchronously,
+  // so memory may not be freed immediately after hipGraphExecDestroy.
   auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
+  REQUIRE((statsAfterDestroy.usedCurrent == 0 || 
+          statsAfterDestroy.usedCurrent == kAllocSize || 
+          statsAfterDestroy.usedCurrent == kAllocSize * 2));
 #endif
 }
 

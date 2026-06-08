@@ -217,7 +217,7 @@ HIP catch tests utilize the Catch2 testing framework.
 
 #. Build a standalone HIP catch test.
 
-   For detailed instructions on building the standalone Catch tests, consult the `hip-tests README.md <https://github.com/ROCm/rocm-systems/tree/release/therock-7.13/projects/hip-tests/README.md>`_.
+   For detailed instructions on building the standalone Catch tests, consult the `hip-tests README.md <https://github.com/ROCm/rocm-systems/blob/develop/projects/hip-tests/README.md>`_.
 
 Run HIP
 =================================================

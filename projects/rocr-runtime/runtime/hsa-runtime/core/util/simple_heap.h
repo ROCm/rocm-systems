@@ -240,6 +240,7 @@ template <typename Allocator> class SimpleHeap {
     if (fragment == frag_map.end() || isFree(fragment->second)) return false;
 
     bool discard = fragment->second.discard;
+    fragment->second.free = true;
 
     // Merge lower
     if (fragment != frag_map.begin()) {

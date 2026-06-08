@@ -28,10 +28,30 @@ from amdisa.sema_ast import (
 )
 
 _DS_ATOMIC_PREFIXES = (
-    'DS_ADD_', 'DS_SUB_', 'DS_RSUB_', 'DS_MIN_', 'DS_MAX_',
-    'DS_AND_', 'DS_OR_', 'DS_XOR_', 'DS_MSKOR_', 'DS_CMPSTORE_',
-    'DS_INC_', 'DS_DEC_', 'DS_PK_ADD_', 'DS_COND_SUB_',
+    'DS_ADD_',
+    'DS_SUB_',
+    'DS_RSUB_',
+    'DS_MIN_',
+    'DS_MAX_',
+    'DS_AND_',
+    'DS_OR_',
+    'DS_XOR_',
+    'DS_MSKOR_',
+    'DS_CMPSTORE_',
+    'DS_INC_',
+    'DS_DEC_',
+    'DS_PK_ADD_',
+    'DS_COND_SUB_',
     'DS_SUB_CLAMP_',
+)
+
+_NO_DST_MODIFIER_INSTRUCTIONS = frozenset(
+    {
+        'V_CVT_F16_BF8',
+        'V_CVT_F16_FP8',
+        'V_CVT_NORM_I16_F16',
+        'V_CVT_NORM_U16_F16',
+    }
 )
 
 
@@ -72,6 +92,8 @@ def enrich_block(
     body = _fix_non_rtn_atomics(name, body)
 
     if enc_field_names:
+        if name in _NO_DST_MODIFIER_INSTRUCTIONS:
+            enc_field_names = enc_field_names - frozenset({'clamp', 'omod'})
         body = _add_vop3_modifiers(body, enc_field_names, block.pragma)
 
     result = SemaBlock(
@@ -93,8 +115,7 @@ def _fix_non_rtn_atomics(name: str, body: SemaNode) -> SemaNode:
         return body
 
     new_children = tuple(
-        stmt for stmt in body.children
-        if not _is_return_data_assign(stmt)
+        stmt for stmt in body.children if not _is_return_data_assign(stmt)
     )
 
     if len(new_children) == len(body.children):
@@ -110,7 +131,7 @@ def _is_return_data_assign(node: SemaNode) -> bool:
     lhs = node.children[0]
     while lhs.kind == SemaNodeKind.CAST and lhs.children:
         lhs = lhs.children[0]
-    return (lhs.kind == SemaNodeKind.ID and lhs.id_name == 'RETURN_DATA')
+    return lhs.kind == SemaNodeKind.ID and lhs.id_name == 'RETURN_DATA'
 
 
 def _add_vop3_modifiers(
@@ -150,16 +171,22 @@ def _add_vop3_modifiers(
 
 
 def _wrap_src_modifiers(
-    node: SemaNode, has_neg: bool, has_abs: bool,
+    node: SemaNode,
+    has_neg: bool,
+    has_abs: bool,
 ) -> SemaNode:
     """Recursively wrap INSTOPERAND(S, N) reads with src modifier application."""
-    if (node.kind == SemaNodeKind.CAST
-            and node.children
-            and node.children[0].kind == SemaNodeKind.INSTOPERAND):
+    if (
+        node.kind == SemaNodeKind.CAST
+        and node.children
+        and node.children[0].kind == SemaNodeKind.INSTOPERAND
+    ):
         inner = node.children[0]
-        if (inner.children
-                and inner.children[0].kind == SemaNodeKind.ID
-                and inner.children[0].id_name == 'S'):
+        if (
+            inner.children
+            and inner.children[0].kind == SemaNodeKind.ID
+            and inner.children[0].id_name == 'S'
+        ):
             idx_node = inner.children[1] if len(inner.children) > 1 else None
             idx_lit = idx_node.lit_value if idx_node else '0'
             return SemaNode(
@@ -170,10 +197,8 @@ def _wrap_src_modifiers(
                     SemaNode(SemaNodeKind.ID, id_name='apply_src_mod'),
                     node,
                     SemaNode(SemaNodeKind.LIT, lit_value=idx_lit),
-                    SemaNode(SemaNodeKind.LIT,
-                             lit_value='1' if has_neg else '0'),
-                    SemaNode(SemaNodeKind.LIT,
-                             lit_value='1' if has_abs else '0'),
+                    SemaNode(SemaNodeKind.LIT, lit_value='1' if has_neg else '0'),
+                    SemaNode(SemaNodeKind.LIT, lit_value='1' if has_abs else '0'),
                 ),
             )
 
@@ -189,7 +214,9 @@ def _wrap_src_modifiers(
 
 
 def _wrap_dst_modifiers(
-    node: SemaNode, has_clamp: bool, has_omod: bool,
+    node: SemaNode,
+    has_clamp: bool,
+    has_omod: bool,
 ) -> SemaNode:
     """Wrap the RHS of the top-level ASSIGN with OMOD then CLAMP."""
     if node.kind == SemaNodeKind.ASSIGN and len(node.children) == 2:

@@ -1,18 +1,65 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "comm.h"
 #include "register_inline.h"
 #include <algorithm>
+#include <atomic>
 #include <cuda.h>
 #include "rocmwrap.h"
 #include "ce_coll.h"
 #include "alloc.h"
+#include "ce_fault_inject.h"
+
+#ifdef ENABLE_FAULT_INJECTION
+// Common fault check helper
+static ncclResult_t ceFaultCheck(struct ncclComm* comm, uint32_t bit, const char* fnName) {
+  if (comm->ceColl.ceFaults & bit) {
+    WARN("CE: fault injection: %s returning ncclSystemError (rank %d)", fnName, comm->rank);
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+#endif
 
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
+RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
+
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+// Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
+//   ROCm 7.12+   → >= 71200000
+//   ROCm 7.0.2.x → [70051831, 70060000)  (backport range; no device-attribute
+//                  probe exists for the batch API, so the version range is the
+//                  only runtime guard and must include the backport runtime)
+static int ncclCeBatchAsyncSupported() {
+  int driverVersion;
+  if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return 0;
+  return (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000));
+}
+#endif
+
+static int ncclCeBatchAsyncEnable() {
+  // Called once per CE collective; warn at most once to avoid flooding the log.
+  static std::atomic<bool> warnedUnsupported{false};
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+  int param = rcclParamCeBatchAsyncEnable();
+  int supported = ncclCeBatchAsyncSupported();
+  if (param > 0 && !supported) {
+    if (!warnedUnsupported.exchange(true))
+      WARN("RCCL_CE_BATCH_ASYNC_ENABLE=1 is set but hipMemcpyBatchAsync is not supported at runtime; disabling CE batch path");
+    return 0;
+  }
+  return param >= 0 ? param : (param == -2 && supported);
+#else
+  if (rcclParamCeBatchAsyncEnable() > 0 && !warnedUnsupported.exchange(true))
+    WARN("RCCL_CE_BATCH_ASYNC_ENABLE=1 is set but CE batch API not available; disabling");
+  return 0;
+#endif
+}
 // Static constant for graph synchronization
 static const uint32_t GRAPH_SYNC_VALUE = 1;
 
@@ -32,6 +79,10 @@ static void ceDestroyCopyStreams(struct ncclComm* comm, int nPairs) {
 
 ncclResult_t ncclCeInit(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
+
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_INIT, "ncclCeInit"));
+#endif
 
   uint8_t* ceDevBase = nullptr;
   size_t ceDevBaseSize = alignUp(comm->nRanks*sizeof(uint32_t), 16) * 2;
@@ -111,16 +162,44 @@ ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
 exit:
   return ret;
 fail:
+  // [RCCL] In ncclCeFinalize there are no ceWinDev/ceDevBase locals, so the
+  // cleanup uses the comm->ceColl.* members directly. The NCCLCHECKIGNORE
+  // helpers tolerate null pointers safely.
   goto exit;
+}
+
+bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
+
+bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty, ncclSymRegType_t winRegType) {
+  if (!ncclCeImplemented(coll, red, ty)) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: not implemented");
+    return false;
+  }
+  if (comm->nNodes > 1) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: comm is not a single node");
+    return false;
+  }
+  if (!comm->symmetricSupport) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: symmetric support is not enabled");
+    return false;
+  }
+  if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendNonregRecvReg) {
+    TRACE(NCCL_TUNING, "Skipping CE collective: window registration type %d is not supported", winRegType);
+    return false;
+  }
+  return true;
 }
 
 bool ncclCeImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty) {
   int driverVersion;
   if (ncclCudaDriverVersion(&driverVersion) != ncclSuccess) return false;
 
-  // CE is supported in ROCm 7.12 and later
-  // hipDriverGetVersion() returns 71200000 for ROCm 7.12
-  if (driverVersion >= 71200000) {
+  // CE is supported in ROCm 7.12+ and the 7.0.2.x range [7.0.2.2, 7.0.3.0).
+  // hipDriverGetVersion() encodes as MAJOR*10000000 + MINOR*100000 + PATCH*1000 + BUILD;
+  //   ROCm 7.12.0   → 71200000
+  //   ROCm 7.0.2.2  → 70051831  (lower bound of the 7.0.2.x backport range)
+  //   ROCm 7.0.3.0  → 70060000  (exclusive upper bound)
+  if (driverVersion >= 71200000 || (driverVersion >= 70051831 && driverVersion < 70060000)) {
     switch (coll) {
     case ncclFuncAllGather:
     case ncclFuncAlltoAll:
@@ -184,6 +263,10 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
                                size_t* opIdx) {
   ncclResult_t ret = ncclSuccess;
 
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_SYNC_PREP, "ncclPrepUCSync"));
+#endif
+
   uint32_t* readyPtrs    = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
   uint32_t* completePtrs = (uint32_t*)comm->ceColl.baseUCSymComplPtr;
 
@@ -215,7 +298,7 @@ ncclResult_t ncclPrepUCSync(struct ncclComm* comm, bool isComplete,
     batchParams[*opIdx] = {};
     batchParams[*opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
     batchParams[*opIdx].waitValue.address  = (CUdeviceptr)(isComplete ? (void*)&completePtrs[r] : (void*)&readyPtrs[r]);
-    batchParams[*opIdx].waitValue.value = waitValue;
+    batchParams[*opIdx].waitValue.value = capturing ? GRAPH_SYNC_VALUE : currentSeq;
     batchParams[*opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
     (*opIdx)++;
   }
@@ -227,8 +310,9 @@ fail:
 }
 
 
-ncclResult_t ncclMemOpSync(struct ncclComm* comm, cudaStream_t stream) {
+ncclResult_t ncclMemOpSync(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
+  void* ceSyncHandle = NULL;
 
   // Get pointers to the ready and complete synchronization arrays
   uint32_t* readyPtrs = (uint32_t*)comm->ceColl.baseUCSymReadyPtr;
@@ -284,7 +368,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   params->sizes = nullptr;
   params->numOps = 0;
   params->intraBatchSync = false;
-#if ROCM_VERSION >= 71200
+#ifdef CE_BATCH_ASYNC_SUPPORTED
   params->attrs = nullptr;
   params->attrIdxs = nullptr;
   params->numAttrs = 0;
@@ -293,7 +377,7 @@ ncclResult_t ncclCeInitBatchOpsParams(struct ncclCeBatchOpsParams* params, int n
   NCCLCHECKGOTO(ncclCalloc(&params->srcs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->dsts, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->sizes, nRanks), ret, fail);
-#if ROCM_VERSION >= 71200
+#ifdef CE_BATCH_ASYNC_SUPPORTED
   NCCLCHECKGOTO(ncclCalloc(&params->attrs, nRanks), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&params->attrIdxs, nRanks), ret, fail);
 #endif
@@ -307,29 +391,41 @@ void ncclCeFreeBatchOpsParams(struct ncclCeBatchOpsParams* params) {
   if (params->srcs) free(params->srcs);
   if (params->dsts) free(params->dsts);
   if (params->sizes) free(params->sizes);
-#if ROCM_VERSION >= 71200
+#ifdef CE_BATCH_ASYNC_SUPPORTED
   if (params->attrs) free(params->attrs);
   if (params->attrIdxs) free(params->attrIdxs);
 #endif
 }
 
-ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsParams* params, cudaStream_t stream) {
+ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeCollArgs* args,
+                                  struct ncclCeBatchOpsParams* params, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
+  bool capturing;
+  void* ceBatchHandle = NULL;
+
+#ifdef ENABLE_FAULT_INJECTION
+  NCCLCHECK(ceFaultCheck(comm, CE_FAULT_LAUNCH_OP, "ncclCeLaunchBatchOps"));
+#endif
+
+  // cudaMemcpyBatchAsync does not accept the legacy null stream (e.g. PyTorch null stream).
+  // Fall back to cudaMemcpyAsync per-op when stream is NULL.
+  bool isLegacyStream;
+  NCCLCHECKGOTO(ncclCudaStreamIsLegacyNull(stream, &isLegacyStream), ret, fail);
+
+  // Start CE batch profiling
+  NCCLCHECKGOTO(ncclProfilerStartCeBatchEvent(comm, args, params, stream, &ceBatchHandle),
+                ret, fail);
 
   // Check if there are any operations to perform
-  if (params->numOps == 0) {
-    return ncclSuccess;
-  }
+  if (params->numOps == 0) goto exit;
 
   // Check if we are in a CUDA graph capture
-  bool capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
+  capturing = ncclCudaGraphValid(comm->planner.capturingGraph);
 
-  int driverVersion;
-  NCCLCHECKGOTO(ncclCudaDriverVersion(&driverVersion), ret, fail);
-
-  //--------------Graph capture--------------
-  // cudaMemcpyBatchAsync is not supported during CUDA graph capture
-  if (capturing) {
+  //--------------Graph capture / legacy stream--------------
+  // cudaMemcpyBatchAsync is not supported during CUDA graph capture or with the
+  // legacy null stream (e.g. PyTorch's null stream); fall back to per-op cudaMemcpyAsync.
+  if (capturing || isLegacyStream) {
     for (int i =0; i < params->numOps; i++) {
       CUDACHECKGOTO(cudaMemcpyAsync(
         (void*)params->dsts[i],
@@ -339,19 +435,22 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
         stream), ret, fail);
 
       if (params->intraBatchSync && ((i+1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i+1) < params->numOps)) {
-        NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+        NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
       }
     }
   }
   //--------------No graph capture--------------
   else {
-    // driverVersion is reported as 71200000 for ROCm 7.12 when using hipDriverGetVersion().
-    if (ROCM_VERSION >= 71200 && driverVersion >= 71200000) {
-#if ROCM_VERSION >= 71200
-    // For ROCm 7.12+, use batch memory copy for better performance
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    if (ncclCeBatchAsyncEnable()) {
     params->attrs[0] = {};
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    params->attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+    params->attrs[0].flags = hipMemcpyFlagPreferOverlapWithCompute;
+#else
     params->attrs[0].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
     params->attrs[0].flags = cudaMemcpyFlagPreferOverlapWithCompute;
+#endif
     params->attrIdxs[0] = 0;
     params->numAttrs = 1;
 
@@ -360,24 +459,33 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
       int batchSize = comm->ceColl.intraBatchSyncFreq;
       for (int i = 0; i < params->numOps; i += batchSize) {
         int currentBatchSize = (i + batchSize <= params->numOps) ? batchSize : params->numOps - i;
-        INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (cudaMemcpyBatchAsync, intraBatchSync), numOps=%zu, batchSize=%d", comm->rank, params->numOps, currentBatchSize);
+        INFO(NCCL_COLL, "CE: rank %d -> Batch path with intraBatchSync (hipMemcpyBatchAsync, intraBatchSync), numOps=%zu, batchSize=%d", comm->rank, params->numOps, currentBatchSize);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+        CUDACHECKGOTO(hipMemcpyBatchAsync(
+#else
         CUDACHECKGOTO(cudaMemcpyBatchAsync(
+#endif
           (void**)&params->dsts[i], (void**)&params->srcs[i], &params->sizes[i], currentBatchSize,
           params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
         // Sync after each batch
         if (i + batchSize < params->numOps) {
-          NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+          NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
         }
       }
     } else {
       // Use single batch for all operations
-      INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (cudaMemcpyBatchAsync), numOps=%zu", comm->rank, params->numOps);
+      INFO(NCCL_COLL, "CE: rank %d -> Batch path without intraBatchSync (hipMemcpyBatchAsync), numOps=%zu", comm->rank, params->numOps);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      CUDACHECKGOTO(hipMemcpyBatchAsync(
+#else
       CUDACHECKGOTO(cudaMemcpyBatchAsync(
+#endif
         (void**)params->dsts, (void**)params->srcs, params->sizes, params->numOps,
         params->attrs, params->attrIdxs, params->numAttrs, nullptr, stream), ret, fail);
     }
-#endif
-    } else if (comm->ceColl.nCopyStreams > 0 && (int)params->numOps > 1 && !params->intraBatchSync) {
+    } else  // CE batch async disabled — fall through to non-batch paths below
+#endif // CE_BATCH_ASYNC_SUPPORTED
+    if (comm->ceColl.nCopyStreams > 0 && (int)params->numOps > 1 && !params->intraBatchSync) {
       int nStreams = comm->ceColl.nCopyStreams;
       int activeStreams = ((int)params->numOps < nStreams) ? (int)params->numOps : nStreams;
       INFO(NCCL_COLL, "CE: rank %d -> No-Batch Multi-Stream path (%d streams), numOps=%zu", comm->rank, activeStreams, params->numOps);
@@ -416,34 +524,35 @@ ncclResult_t ncclCeLaunchBatchOps(struct ncclComm* comm, struct ncclCeBatchOpsPa
           stream), ret, fail);
 
         if (params->intraBatchSync && ((i+1) % comm->ceColl.intraBatchSyncFreq == 0) && ((i+1) < params->numOps)) {
-          NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+          NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
         }
       }
     }
   }
 
 exit:
+  // Stop CE batch profiling - always attempt if started, even on error
+  ncclProfilerStopCeBatchEvent(comm, ceBatchHandle, stream);
   return ret;
 fail:
   goto exit;
 }
 
 
-ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
+ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args,
+                             cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
-
-  // Calculate the size of each rank's data chunk
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff + comm->rank * chunkBytes;
   void* peerRecvBuff;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
+
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   // Copy own data to receive buffer if operation is out-of-place
   if (myRecvBuff != mySendBuff) {
@@ -468,10 +577,11 @@ ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args,
   batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq && chunkBytes*batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream),
+                ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -489,12 +599,11 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
   void* peerRecvBuff;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
-  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks * comm->nRanks), ret, fail);
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   // Copy data to other ranks: send data chunk for each destination rank
   for (int r = 0; r < comm->nRanks; r++) {
@@ -523,10 +632,10 @@ ncclResult_t ncclCeAlltoAll(struct ncclComm* comm, struct ncclCeCollArgs* args, 
   batchOpsParams.intraBatchSync = (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq && chunkBytes*batchOpsParams.numOps >= comm->ceColl.intraBatchSyncMsgThreshold);
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream), ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -538,19 +647,18 @@ fail:
 ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  // Calculate the size of data root sends to each rank
+  // Calculate the size of data each rank sends to every other rank
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
   int rootRank = args->rootRank;
   void* peerDstPtr;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   if (comm->rank == rootRank) {
     // Check if this is an in-place scatter operation
@@ -583,10 +691,10 @@ ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, c
   // Non-root ranks don't need to perform any copy operations
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream), ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -598,19 +706,18 @@ fail:
 ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
 
-  // Calculate the size of data each rank sends to root
+  // Calculate the size of data each rank sends to every other rank
   const size_t chunkBytes = args->nElts * args->eltSize;
   uint8_t* mySendBuff = (uint8_t*)args->sendBuff;
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
   int rootRank = args->rootRank;
   void* peerRecvBuff;
   size_t offset;
-
   struct ncclCeBatchOpsParams batchOpsParams = {};
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, 1), ret, fail);
 
   // Ensure all ranks are ready before starting transfers
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
   if (comm->rank == rootRank) {
     // Root rank copies its own data to the correct position in receive buffer
@@ -633,10 +740,10 @@ ncclResult_t ncclCeGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cu
   }
 
   // Launch the batch operations
-  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream), ret, fail);
+  NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, args, &batchOpsParams, stream), ret, fail);
 
   // Ensure all transfers are complete across all ranks
-  NCCLCHECKGOTO(ncclMemOpSync(comm, stream), ret, fail);
+  NCCLCHECKGOTO(ncclMemOpSync(comm, args, stream), ret, fail);
 
 exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
@@ -650,24 +757,34 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
   cudaStream_t stream = comm->planner.streams->stream;
   struct ncclCeCollArgs* args = plan->ceCollArgs;
 
+  // Start CE collective profiling
+  NCCLCHECKGOTO(ncclProfilerStartCeCollEvent(comm, args, stream),
+                ret, fail);
+
   switch (args->func) {
     case ncclFuncAllGather:
-      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeAllGather(comm, args, stream),
+                    ret, fail);
       break;
     case ncclFuncAlltoAll:
-      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeAlltoAll(comm, args, stream),
+                    ret, fail);
       break;
     case ncclFuncScatter:
-      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeScatter(comm, args, stream),
+                    ret, fail);
       break;
     case ncclFuncGather:
-      NCCLCHECKGOTO(ncclCeGather(comm, args, stream), ret, fail);
+      NCCLCHECKGOTO(ncclCeGather(comm, args, stream),
+                    ret, fail);
       break;
     default:
       ret = ncclInvalidUsage;
   }
 
 exit:
+  // Stop CE collective profiling - always attempt if started, even on error
+  ncclProfilerStopCeCollEvent(comm, args, stream);
   return ret;
 fail:
   goto exit;

@@ -26,9 +26,9 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that '[fib][builtin.py:13]' has a total of 445 calls.",
-                    "error_message": "'[fib][builtin.py:13]' does not have 445 total calls, as expected.",
-                    "expected_result": 445,
+                    "description": "Verify that '[fib][builtin.py:13]' has a total of 885 calls.",
+                    "error_message": "'[fib][builtin.py:13]' does not have 885 total calls, as expected (5 iterations of naive fib(10) = 5 * 177 frames).",
+                    "expected_result": 885,
                     "query": "SELECT total_calls FROM top WHERE name = '[fib][builtin.py:13]';"
                 },
                 {
@@ -66,9 +66,9 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that '[fib][builtin.py:13]' has a total of 445 calls.",
-                    "error_message": "'[fib][builtin.py:13] does not have 445 total calls, as expected.",
-                    "expected_result": 445,
+                    "description": "Verify that '[fib][builtin.py:13]' has a total of 885 calls.",
+                    "error_message": "'[fib][builtin.py:13]' does not have 885 total calls, as expected (5 iterations of naive fib(10) = 5 * 177 frames).",
+                    "expected_result": 885,
                     "query": "SELECT COUNT(*) FROM regions WHERE name = '[fib][builtin.py:13]';"
                 }
             ]
