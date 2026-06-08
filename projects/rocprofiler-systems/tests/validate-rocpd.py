@@ -493,7 +493,8 @@ if __name__ == "__main__":
 
     gpu_category_to_skip = set(args.gpu_category_to_skip)
     if gpu_category_to_skip:
-        print("GPU category to skip: " f"{', '.join(sorted(gpu_category_to_skip))}")
+        categories = ", ".join(sorted(gpu_category_to_skip))
+        print(f"GPU category to skip: {categories}")
 
     print(f"Validating ROCPD. Database file: {args.database}")
 
