@@ -42,7 +42,7 @@ _framework_roots: list[str] = []
 
 # Frames under the package directory are skipped during caller-location
 # resolution.
-_PACKAGE_ROOT: str = str(Path(__file__).resolve().parent) + "/"
+_PACKAGE_ROOT: str = str(Path(__file__).resolve().parent) + os.sep
 
 
 def set_python_tier_io(

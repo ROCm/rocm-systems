@@ -393,12 +393,15 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     const auto captured = stop_capture();
     ASSERT_FALSE(captured.empty());
 
-    bool        saw_aten_top    = false;
-    bool        saw_aten_nested = false;
-    bool        saw_bwd_leaf    = false;
-    bool        saw_legacy      = false;
-    std::size_t bwd_total       = 0;
-    std::size_t bwd_under_scope = 0;
+    bool        saw_aten_top      = false;
+    bool        saw_aten_nested   = false;
+    bool        saw_bwd_leaf      = false;
+    bool        saw_legacy        = false;
+    bool        saw_torch_backend = false;
+    std::size_t bwd_total         = 0;
+    std::size_t bwd_under_scope   = 0;
+
+    const std::string backend_suffix = "|torch";
 
     for (const auto& m : captured)
     {
@@ -410,6 +413,16 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
             saw_bwd_leaf = true;
         if (m.find("dispatcher:0") != std::string::npos)
             saw_legacy = true;
+
+        const bool is_recordfn_op = m.find("aten:0") != std::string::npos ||
+                                    m.find("aten.nested:0") != std::string::npos ||
+                                    m.find("autograd.bwd:0") != std::string::npos ||
+                                    m.find("autograd.engine:0") != std::string::npos;
+        if (is_recordfn_op && m.size() >= backend_suffix.size() &&
+            m.compare(m.size() - backend_suffix.size(), backend_suffix.size(), backend_suffix) == 0)
+        {
+            saw_torch_backend = true;
+        }
 
         if (m.find("autograd.bwd:0") != std::string::npos ||
             m.find("autograd.engine:0") != std::string::npos)
@@ -427,6 +440,7 @@ TEST_F(RoctxRecordFnRealOpsTest, CaptureLeafLabelsAndUserScope)
     EXPECT_TRUE(saw_aten_top);
     EXPECT_TRUE(saw_aten_nested);
     EXPECT_TRUE(saw_bwd_leaf);
+    EXPECT_TRUE(saw_torch_backend);
     ASSERT_GT(bwd_total, 0u);
     EXPECT_GT(bwd_under_scope, 0u);
     EXPECT_GT(g_n_userscope_inherits.load(), 0u);

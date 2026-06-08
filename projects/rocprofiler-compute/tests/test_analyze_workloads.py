@@ -118,7 +118,7 @@ def test_analyze_workload(
 def test_analyze_torch_trace_list_operators_MI350(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/api_trace/MI350")
+    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -145,7 +145,7 @@ def test_analyze_torch_trace_list_operators_MI350(
 def test_analyze_torch_trace_filter_operator_MI350(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/api_trace/MI350")
+    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -170,7 +170,7 @@ def test_analyze_torch_trace_filter_operator_MI350(
 def test_analyze_torch_trace_multi_operator_MI350(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/api_trace/MI350")
+    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -195,7 +195,7 @@ def test_analyze_torch_trace_multi_operator_MI350(
 def test_analyze_torch_trace_invalid_operator_MI350(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/api_trace/MI350")
+    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -216,7 +216,7 @@ def test_analyze_torch_trace_invalid_operator_MI350(
 def test_analyze_torch_trace_hierarchy_path_MI350(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/api_trace/MI350")
+    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
 
     hierarchy = "*nn.Module.SimpleNet.forward/torch.nn.functional.relu/torch.relu*"
     code = binary_handler_analyze_rocprof_compute([
@@ -241,7 +241,7 @@ def test_analyze_torch_trace_hierarchy_path_MI350(
 def test_analyze_torch_trace_torch_prefix_MI350(
     binary_handler_analyze_rocprof_compute, capsys
 ):
-    workload_dir = common.setup_workload_dir("tests/workloads/api_trace/MI350")
+    workload_dir = common.setup_workload_dir("tests/workloads/torch_trace/MI350")
 
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",

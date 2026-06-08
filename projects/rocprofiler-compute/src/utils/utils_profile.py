@@ -754,7 +754,7 @@ _BACKEND_SUFFIX_RE = re.compile(
 )
 
 
-def _parse_function_backend(function_value: str) -> tuple[str, str]:
+def _parse_function_backend(function_value: Optional[str]) -> tuple[str, str]:
     """Return (clean_function, backend) for one Function cell.
 
     Untagged or unrecognized values return "unknown".
