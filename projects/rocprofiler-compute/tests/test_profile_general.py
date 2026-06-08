@@ -1417,10 +1417,9 @@ def test_bench_only_mutual_exclusion(
 def test_pc_sampling_requires_experimental(binary_handler_profile_rocprof_compute):
     """
     --pc-sampling must be rejected at argparse time when --experimental is
-    not also passed (ExperimentalAction gating).
+    not also passed (ExperimentalAction gating). This fires before hardware
+    detection, so it is intentionally not gated on SoC support.
     """
-    common.skip_unsupported_pc_sampling_soc()
-
     options = ["--pc-sampling"]
     workload_dir = common.get_output_dir()
 
@@ -2323,7 +2322,7 @@ def test_live_attach_detach_pc_sampling(
 ):
     common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
 
-    options = ["--experimental", "--pc-sampling", "-b", "21"]
+    options = ["--experimental", "--pc-sampling"]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,

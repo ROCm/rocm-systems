@@ -188,7 +188,7 @@ class RocProfCompute:
         # When --pc-sampling is set, inject "21" into filter_blocks so the
         # profiling config yaml records it and downstream code is unchanged.
         if self.__mode == "profile" and self.__args.pc_sampling:
-            current = self.__args.filter_blocks or []
+            current = list(self.__args.filter_blocks or [])
             if "21" not in current:
                 current.append("21")
             self.__args.filter_blocks = current
