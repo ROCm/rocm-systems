@@ -30,7 +30,7 @@
 #include "latency_profiler/CollTrace.h"
 #include "rccl_common.h"
 #include "recorder.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 #include "mem_manager.h"
 
 #ifdef ENABLE_ROCSHMEM
@@ -563,6 +563,7 @@ typedef enum ncclGroupTaskType {
 
 struct ncclCommSymTeams;
 class ncclIpcMemHandler;
+class ncclFabricMemHandler;
 
 // NCCL_CHECK_MODE=DEBUG_LOCAL/DEBUG_GLOBAL
 // ncclCheckModeDebugLocal : check the input args/pointers locally, it replaces ncclParamCheckPointers()
@@ -604,12 +605,21 @@ struct ncclComm {
   void* bootstrap;
   bool isGrow; // true if this comm is created via ncclCommGrow
 
-  // DDA IPC all-reduce: per-rank device scratch + IPC handles (see ncclDdaIpcCommInit)
-  ncclIpcMemHandler* ddaIpcMemHandler;
-  void* ddaIpcScratch;
-  size_t ddaIpcScratchBytes;
-  void* ddaIpcPeerPtrsDev;
-  nccl_dda_ipc_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* see ncclDdaIpcCommInit */
+  // DDA all-reduce. The scratch buffer and peer-pointer table below are shared
+  // by both the IPC path (ncclDdaIpcCommInit) and the fabric/VMM path
+  // (ncclDdaFabricCommInit); only one path is active per comm. The handler and
+  // barrier-state pointers are path-specific.
+  ncclIpcMemHandler* ddaIpcMemHandler;       /* IPC path only */
+  ncclFabricMemHandler* ddaFabricMemHandler; /* fabric path only */
+  void* ddaScratch;
+  size_t ddaScratchBytes;
+  void* ddaPeerPtrsDev;
+  nccl_dda_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* IPC path only */
+  nccl_dda_detail::DdaFabricBarrierState* ddaFabricBarrierState; /* fabric path only */
+  int ddaFabricMaxBlocks;
+  // True when ddaScratch is VMM (cuMem) backed (fabric path); selects the
+  // matching deallocator at teardown.
+  bool ddaScratchIsVmm;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;

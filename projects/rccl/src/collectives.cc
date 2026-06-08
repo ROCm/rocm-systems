@@ -13,7 +13,7 @@
 #include "api_trace.h"
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_ag_shuffle.h"
-#include "dda_all_reduce_ipc.h"
+#include "dda_all_reduce.h"
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -381,6 +381,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   // RCCL update slice steps for AllReduce if single node
   const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
   const bool isGfx942 = IsArchMatch(comm->archName, "gfx942");
+  const bool isGfx1250 = IsArchMatch(comm->archName, "gfx1250");
   int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLREDUCE_CHUNKSTEPS;
   int sliceSteps = comm->rcclUseOneSlice
       ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
@@ -395,20 +396,39 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
   size_t ddaThreshold =  rcclParamDdaThreshold();
   if (isGfx942) {
      ddaThreshold = (size_t)(8388608);
-  } else if (!isGfx950) {
+  } else if (!isGfx950 && !isGfx1250) {
      ddaThreshold = 0;	
   }
 
-  if (!ncclParamLaunchOrderImplicit() && rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
-    NCCLCHECK(ncclAllReduceDdaIpc(
-        sendbuff,
-        recvbuff,
-        count,
-        datatype,
-        op,
-        comm,
-        stream));
-    return ncclSuccess;
+  if (!ncclParamLaunchOrderImplicit() && rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclGroupDepth == 0) {
+    if (isGfx1250) {
+      if (ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        INFO(NCCL_COLL,
+             "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
+             comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
+        NCCLCHECK(ncclAllReduceDdaFabric(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+    } else {
+      if (ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+        NCCLCHECK(ncclAllReduceDdaIpc(
+            sendbuff,
+            recvbuff,
+            count,
+            datatype,
+            op,
+            comm,
+            stream));
+        return ncclSuccess;
+      }
+    }
   }
 
   return ncclEnqueueCheck(&info);
