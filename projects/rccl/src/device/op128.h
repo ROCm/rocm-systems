@@ -409,20 +409,12 @@ DEFINE_ld_st_16__space(global, uintptr_t, l)
 
 __device__ __forceinline__ uint64_t ld_volatile_global(uint64_t *ptr) {
   uint64_t ans;
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  #else
-  ans = __builtin_nontemporal_load(ptr);
-  #endif
   return ans;
 }
 __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t *ptr) {
   uint64_t ans;
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  #else
-  ans = __builtin_nontemporal_load(ptr);
-  #endif
   return ans;
 }
 
@@ -438,34 +430,18 @@ __device__ __forceinline__ uint64_t ld_relaxed_sys_global(uint64_t *ptr) {
 
 __device__ __forceinline__ uint64_t ld_acquire_sys_global(uint64_t *ptr) {
   uint64_t ans;
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   ans = __hip_atomic_load((__attribute__((address_space(1)))uint64_t *)ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
-  #else
-  ans = __atomic_load_n(ptr ,__ATOMIC_SEQ_CST);
-  #endif
   return ans;
 }
 
 __device__ __forceinline__ void st_volatile_global(uint64_t *ptr, uint64_t val) {
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  #else
-  __builtin_nontemporal_store(val, ptr);
-  #endif
 }
 __device__ __forceinline__ void st_relaxed_sys_global(uint64_t *ptr, uint64_t val) {
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-  #else
-  __builtin_nontemporal_store(val, ptr);
-  #endif
 }
 __device__ __forceinline__ void st_release_sys_global(uint64_t *ptr, uint64_t val) {
-  #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   __hip_atomic_store((__attribute__((address_space(1)))uint64_t *)ptr, val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-  #else
-  __atomic_store_n(ptr, val, __ATOMIC_SEQ_CST);
-  #endif
 }
 
 __device__ __forceinline__ void fence_acq_rel_sys() {

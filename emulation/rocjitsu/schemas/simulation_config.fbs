@@ -90,6 +90,11 @@ table KfdDeviceInfo {
   num_sdma_xgmi_engines: uint32 = 0;
   num_cp_queues: uint32 = 128;
   max_engine_clk_fcompute: uint32 = 2100; // MHz
+
+  // PCI topology (from kfd_topology.c, used by RCCL for busId uniqueness)
+  location_id: uint32 = 768;  // PCI BDF: 0x0300 = bus 3, dev 0, func 0.
+  hive_id: uint64 = 0;        // XGMI hive ID (shared by GPUs in same node).
+  domain: uint32 = 0;         // PCI domain.
 }
 
 /// Top-level AMDGPU configuration.
@@ -99,6 +104,7 @@ table AmdgpuConfig {
   xcd: XcdConfig;                // Shared XCD configuration for all XCDs.
   memory: GpuMemoryConfig;
   device: KfdDeviceInfo;         // KFD device identity for sysfs topology.
+  num_gpus: uint32 = 1;          // Number of simulated GPU instances.
 }
 
 /// A dispatch packet describing a kernel launch.

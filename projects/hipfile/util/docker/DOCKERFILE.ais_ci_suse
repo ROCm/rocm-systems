@@ -58,7 +58,6 @@ RUN zypper --gpg-auto-import-keys refresh
 # graphviz - Dozygen dependency
 # Defaults to gcc7. Use gcc13 to match Ubuntu24.
 RUN zypper install -y \
-        libboost_program_options1_66_0-devel \
         clang19 \
         cmake \
         doxygen \

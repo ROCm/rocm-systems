@@ -85,7 +85,43 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     return (intptr_t)ptr;
   });
   m.def("rocshmem_free", [](intptr_t ptr) { rocshmem_free((void *)ptr); });
-  
+
+  m.def("rocshmem_calloc", [](size_t count, size_t size) -> intptr_t {
+    void *ptr = rocshmem_calloc(count, size);
+    if (ptr == nullptr) {
+      throw std::runtime_error("rocshmem_calloc failed");
+    }
+    return (intptr_t)ptr;
+  }, "Collective: allocate count*size zero-initialized bytes on the symmetric heap.",
+     py::arg("count"), py::arg("size"));
+
+  m.def("rocshmem_align", [](size_t alignment, size_t size) -> intptr_t {
+    void *ptr = rocshmem_align(alignment, size);
+    if (ptr == nullptr) {
+      throw std::runtime_error(
+          "rocshmem_align failed (invalid alignment or allocation failure)");
+    }
+    return (intptr_t)ptr;
+  }, "Collective: allocate size bytes aligned to alignment on the symmetric "
+     "heap. alignment must be a power of two and a multiple of sizeof(void*).",
+     py::arg("alignment"), py::arg("size"));
+
+  m.def("rocshmem_buffer_register", [](intptr_t addr, size_t length) -> int {
+    return rocshmem_buffer_register((void *)addr, length);
+  }, "Register a non-symmetric user buffer with the active backend. "
+     "Returns ROCSHMEM_SUCCESS (0) on success.",
+     py::arg("addr"), py::arg("length"));
+
+  m.def("rocshmem_buffer_unregister", [](intptr_t addr) -> int {
+    return rocshmem_buffer_unregister((void *)addr);
+  }, "Deregister a previously registered non-symmetric buffer. "
+     "Returns ROCSHMEM_SUCCESS (0) on success.",
+     py::arg("addr"));
+
+  m.def("rocshmem_buffer_unregister_all", []() {
+    rocshmem_buffer_unregister_all();
+  }, "Deregister all previously registered non-symmetric buffers.");
+
   m.def("rocshmem_ptr", [](intptr_t dest, int pe) -> intptr_t {
     void* remote_ptr = rocshmem_ptr((const void *)dest, pe);
     if (remote_ptr == nullptr) {
