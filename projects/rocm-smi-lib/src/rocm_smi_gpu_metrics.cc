@@ -35,6 +35,7 @@
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -3882,6 +3883,27 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t*
   }
 
   *smu = external_metrics;
+
+  // Sanitize temperature fields: clamp physically impossible values to
+  // UINT16_MAX (interpreted as N/A by all consumers).  Firmware can
+  // produce transient corrupt readings (e.g. 2112 °C) when the PMFW
+  // updates the gpu_metrics struct while the kernel is reading it.
+  auto clamp_temp = [](uint16_t& t) {
+    constexpr uint16_t kMaxPlausibleTempC = 500;
+    if (t > kMaxPlausibleTempC && t != std::numeric_limits<uint16_t>::max()) {
+      t = std::numeric_limits<uint16_t>::max();
+    }
+  };
+  clamp_temp(smu->temperature_edge);
+  clamp_temp(smu->temperature_hotspot);
+  clamp_temp(smu->temperature_mem);
+  clamp_temp(smu->temperature_vrgfx);
+  clamp_temp(smu->temperature_vrsoc);
+  clamp_temp(smu->temperature_vrmem);
+  for (auto& t : smu->temperature_hbm) {
+    clamp_temp(t);
+  }
+
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
      << " | Success "
      << " | Device #: " << dv_ind << " | Returning = " << getRSMIStatusString(status_code) << " |";
