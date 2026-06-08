@@ -305,6 +305,7 @@ if(HSA_RUNTIME64)
             hsa_translate_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main
@@ -355,6 +356,7 @@ if(HSA_RUNTIME64)
             cdna4_to_cdna3_dispatch_test
             PRIVATE
                 ${RJ_OBJECT_LIBS}
+                util
                 ${HSA_RUNTIME64}
                 GTest::gtest
                 GTest::gtest_main

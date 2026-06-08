@@ -223,6 +223,7 @@ target_link_libraries(
         rocjitsu_plugin_logging
         rocjitsu_vm_risc_v
         rocjitsu_config
+        util
         flatbuffers
         Threads::Threads
 )

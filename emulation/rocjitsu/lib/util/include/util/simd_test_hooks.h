@@ -10,8 +10,8 @@ namespace util {
 
 /// Test-only: override the process force-scalar gate in-process so a single
 /// test can drive both the scalar and SIMD execute paths and compare results.
-/// Production code never includes this header.
-inline void set_force_scalar_for_testing(bool v) { detail::g_force_scalar = v; }
+/// Defined in util/src/simd.cpp. Production code never includes this header.
+void set_force_scalar_for_testing(bool v);
 
 } // namespace util
 
