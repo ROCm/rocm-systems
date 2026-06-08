@@ -580,14 +580,14 @@ rocp_add_registered_library_api_table(const char*                        common_
     {
         // Insert rocattach at index 0 so that rocp_invoke_registrations always propagates
         // it before any other API table. Shift existing entries right to make room.
-        auto end = registered.begin();
+        auto* end = registered.begin();
         while(end != registered.end() && *end)
             ++end;
         if(end == registered.end()) return nullptr;
-        for(auto itr = end; itr != registered.begin(); --itr)
+        for(auto* itr = end; itr != registered.begin(); --itr)
             *itr = std::move(*(itr - 1));
         registered[0] = std::move(_entry);
-        return &registered[0];
+        return registered.data();
     }
 
     for(auto& itr : registered)
