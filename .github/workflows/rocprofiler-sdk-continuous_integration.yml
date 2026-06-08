@@ -140,20 +140,19 @@ jobs:
           git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
           awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          # collect submodule paths for cache 'path'
+          # cache scoped submodule working trees plus their .git/modules gitdirs
           awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+          for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
         uses: actions/cache@v4
         with:
           path: |
-            .git/modules
             ${{ steps.submods.outputs.paths }}
-          key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
           restore-keys: |
-            submods-${{ runner.os }}-
-            submods-
+            submods-scoped-v1-${{ runner.os }}-
 
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
@@ -366,20 +365,19 @@ jobs:
           git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
           awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          # collect submodule paths for cache 'path'
+          # cache scoped submodule working trees plus their .git/modules gitdirs
           awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+          for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
         uses: actions/cache@v4
         with:
           path: |
-            .git/modules
             ${{ steps.submods.outputs.paths }}
-          key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
           restore-keys: |
-            submods-${{ runner.os }}-
-            submods-
+            submods-scoped-v1-${{ runner.os }}-
 
       - name: Init/Update submodules
         run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
@@ -511,20 +509,19 @@ jobs:
         git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
         awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
         echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-        # collect submodule paths for cache 'path'
+        # cache scoped submodule working trees plus their .git/modules gitdirs
         awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+        for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
       uses: actions/cache@v4
       with:
         path: |
-          .git/modules
           ${{ steps.submods.outputs.paths }}
-        key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+        key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
         restore-keys: |
-          submods-${{ runner.os }}-
-          submods-
+          submods-scoped-v1-${{ runner.os }}-
 
     - name: Init/Update submodules
       run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
