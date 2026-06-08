@@ -411,6 +411,8 @@ TEST_F(TimeoutMPITest, ErrorStringConsistentAcrossRanks)
     ASSERT_TRUE(validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit));
     const char* s = ncclGetErrorString(ncclTimeout);
     ASSERT_MPI_TRUE(s != nullptr && std::strcmp(s, "timeout") == 0);
+    // Verify every rank produced the same string length via AllReduce(min/max).
+    // If any rank returns a different string, min != max and the test fails.
     int len = static_cast<int>(std::strlen(s));
     int lenMin = len, lenMax = len;
     MPI_Allreduce(MPI_IN_PLACE, &lenMin, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
