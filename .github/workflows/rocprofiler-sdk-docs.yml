@@ -50,8 +50,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: projects/rocprofiler-sdk
-          submodules: true
+          submodules: false
           set-safe-directory: true
+      - name: Init/Update submodules
+        run: |
+          git config --global --add safe.directory '*'
+          git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
       - name: Create Docs Directory
         run: |
           git config --global --add safe.directory '*'
