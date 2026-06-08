@@ -218,8 +218,13 @@ TEST_F(DriverNoInit, hipFileBatchIOSubmit)
 
 TEST_F(DriverNoInit, hipFileBatchIOGetStatusNullArgs)
 {
+#ifdef __HIP_PLATFORM_AMD__
+    ASSERT_EQ(hipFileBatchIOGetStatus(nullptr, 0, nullptr, nullptr, nullptr),
+              HipFileOpError(hipFileInvalidValue));
+#else
     ASSERT_EQ(hipFileBatchIOGetStatus(nullptr, 0, nullptr, nullptr, nullptr),
               HipFileOpError(hipFileInternalError));
+#endif
 }
 
 TEST_F(DriverNoInit, hipFileBatchIOGetStatus)
@@ -231,7 +236,11 @@ TEST_F(DriverNoInit, hipFileBatchIOGetStatus)
         0, 0
     };
 
+#ifdef __HIP_PLATFORM_AMD__
+    ASSERT_EQ(hipFileBatchIOGetStatus(handle, 0, &nr, &event, &ts), HipFileOpError(hipFileInvalidValue));
+#else
     ASSERT_EQ(hipFileBatchIOGetStatus(handle, 0, &nr, &event, &ts), HipFileOpError(hipFileInternalError));
+#endif
 }
 
 TEST_F(DriverNoInit, hipFileBatchIOCancelNullArgs)

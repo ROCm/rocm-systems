@@ -40,6 +40,9 @@ public:
                 (const hipFileIOParams_t *params, const unsigned num_params,
                  IBatchOperationFactory *operation_factory),
                 (override));
+    MOCK_METHOD(void, getStatus,
+                (unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, struct timespec *timeout),
+                (override));
 };
 
 }

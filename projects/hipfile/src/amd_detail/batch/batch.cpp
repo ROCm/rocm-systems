@@ -12,6 +12,8 @@
 #include "state.h"
 #include "thread-pool.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <mutex>
@@ -36,6 +38,27 @@ namespace {
     using batchOperationState::Running;
     using batchOperationState::Timeout;
     using batchOperationState::Waiting;
+
+    bool is_zero_timeout(const struct timespec *timeout) noexcept
+    {
+        return timeout != nullptr && timeout->tv_sec == 0 && timeout->tv_nsec == 0;
+    }
+
+    void validate_timeout(const struct timespec *timeout)
+    {
+        if (timeout == nullptr) {
+            return;
+        }
+        if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000L) {
+            throw std::invalid_argument("Invalid batch status timeout");
+        }
+    }
+
+    std::chrono::steady_clock::time_point timeout_deadline(const struct timespec *timeout)
+    {
+        return std::chrono::steady_clock::now() + std::chrono::seconds{timeout->tv_sec} +
+               std::chrono::nanoseconds{timeout->tv_nsec};
+    }
 
 }
 
@@ -348,9 +371,88 @@ BatchContext::submitOperations(const hipFileIOParams_t *params, unsigned num_par
     }
     outstanding_ops.insert(pending_ops.begin(), pending_ops.end());
 
+    auto self = shared_from_this();
     for (const auto &op : pending_ops) {
-        task_group->run([op]() { op->run(); });
+        task_group->run([self, op]() {
+            op->run();
+            {
+                std::shared_lock<std::shared_mutex> _slock{self->context_mutex};
+                self->status_cv.notify_all();
+            }
+        });
     }
+}
+
+void
+BatchContext::getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, struct timespec *timeout)
+{
+    if (iocbp == nullptr) {
+        throw std::invalid_argument("Event buffer cannot be null");
+    }
+    if (nr == nullptr) {
+        throw std::invalid_argument("Number of events cannot be null");
+    }
+    if (*nr == 0) {
+        throw std::invalid_argument("Number of events cannot be zero");
+    }
+    if (min_nr > *nr) {
+        throw std::invalid_argument("Minimum event count exceeds event buffer capacity");
+    }
+    validate_timeout(timeout);
+
+    const unsigned event_capacity = *nr;
+    *nr                           = 0;
+
+    std::unique_lock<std::shared_mutex> ulock{context_mutex};
+
+    auto terminal_count = [this]() {
+        unsigned count = 0;
+        for (const auto &op : outstanding_ops) {
+            if (op->isTerminal()) {
+                count++;
+            }
+        }
+        return count;
+    };
+
+    auto collect_terminal_events = [this, event_capacity, nr, iocbp]() {
+        unsigned copied = 0;
+        for (auto op_iter = outstanding_ops.begin();
+             op_iter != outstanding_ops.end() && copied < event_capacity;) {
+            if (!(*op_iter)->isTerminal()) {
+                ++op_iter;
+                continue;
+            }
+
+            iocbp[copied++] = (*op_iter)->event();
+            op_iter         = outstanding_ops.erase(op_iter);
+        }
+        *nr = copied;
+        return copied;
+    };
+
+    // Cap to what's actually outstanding so an over-large min_nr does not block forever.
+    min_nr                = std::min(min_nr, static_cast<unsigned>(outstanding_ops.size()));
+    unsigned num_terminal = terminal_count();
+
+    if (num_terminal >= min_nr || num_terminal == outstanding_ops.size() || is_zero_timeout(timeout)) {
+        collect_terminal_events();
+        return;
+    }
+
+    auto ready = [&terminal_count, min_nr, this]() {
+        unsigned num_terminal_now = terminal_count();
+        return num_terminal_now >= min_nr || num_terminal_now == outstanding_ops.size();
+    };
+
+    if (timeout == nullptr) {
+        status_cv.wait(ulock, ready);
+    }
+    else {
+        status_cv.wait_until(ulock, timeout_deadline(timeout), ready);
+    }
+
+    collect_terminal_events();
 }
 
 void

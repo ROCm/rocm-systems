@@ -7,7 +7,7 @@
 
 #include "hipfile.h"
 
-#include <cstddef>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -370,9 +370,11 @@ public:
     virtual unsigned getCapacity() const noexcept                                          = 0;
     virtual void     submitOperations(const hipFileIOParams_t *params, unsigned num_params,
                                       IBatchOperationFactory *operation_factory = nullptr) = 0;
+    virtual void     getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
+                               struct timespec *timeout)                                   = 0;
 };
 
-class BatchContext : public IBatchContext {
+class BatchContext : public IBatchContext, public std::enable_shared_from_this<BatchContext> {
 public:
     // Don't allow copying
     BatchContext(const BatchContext &)            = delete;
@@ -402,12 +404,25 @@ public:
     void submitOperations(const hipFileIOParams_t *params, const unsigned num_params,
                           IBatchOperationFactory *operation_factory = nullptr) override;
 
+    ///
+    /// @brief Poll for completed operations from this Context.
+    /// @param [in]     min_nr  Minimum number of events requested before returning.
+    /// @param [in,out] nr      Input event capacity and output number of events returned.
+    /// @param [out]    iocbp   Event output buffer.
+    /// @param [in]     timeout Maximum amount of time to wait.
+    ///
+    void getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
+                   struct timespec *timeout) override;
+
 private:
     const unsigned capacity;
 
     /// Per-Context mutex to limit access to one caller at a time.
     /// Shared as internally we can be more strategic about concurrent access.
     mutable std::shared_mutex context_mutex;
+
+    /// Wakes callers waiting for operations to become terminal.
+    std::condition_variable_any status_cv;
 
     /// An outstanding operation is a BatchOperation that has been submitted
     /// but is not yet complete or completed but not yet retrieved by the
