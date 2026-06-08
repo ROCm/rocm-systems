@@ -68,6 +68,7 @@ constexpr size_t num_dump_config_options = TOTAL;
 
 extern bool              debug_msg;
 extern bool              csv;
+extern bool              json;
 extern bool              markdown;
 extern bool              case_insensitive;
 extern bool              regex_hl;
@@ -84,6 +85,7 @@ struct format_options
 {
     std::string  delim          = "|";
     bool         csv            = false;
+    bool         json           = false;
     bool         markdown       = false;
     bool         alphabetical   = false;
     bool         available_only = false;

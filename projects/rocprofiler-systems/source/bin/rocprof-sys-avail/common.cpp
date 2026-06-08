@@ -18,6 +18,7 @@
 using settings = ::tim::settings;
 
 bool              csv                 = false;
+bool              json                = false;
 bool              markdown            = false;
 bool              case_insensitive    = false;
 bool              regex_hl            = false;

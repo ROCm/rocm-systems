@@ -409,6 +409,26 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         self.assert_file_exists(log_file)
 
     @pytest.mark.timeout(45)
+    def test_all_json(self):
+        import json
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--settings", "--json"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result)
+
+        payload = json.loads(result.test_output)
+        assert isinstance(payload, dict)
+        assert "settings" in payload
+        assert isinstance(payload["settings"], list)
+        assert len(payload["settings"]) > 0
+        assert "environ" in payload["settings"][0]
+        assert "value" in payload["settings"][0]
+
+    @pytest.mark.timeout(45)
     def test_all_csv(self):
         pass_regex = [
             r"COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#[\s\S]*"

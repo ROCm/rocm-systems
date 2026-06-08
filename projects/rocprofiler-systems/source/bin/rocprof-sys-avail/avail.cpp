@@ -14,6 +14,8 @@
 
 #include "hw_counter_query.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
@@ -91,18 +93,21 @@ wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fm
 template <size_t N = num_component_options>
 void
 write_component_info(std::ostream&, const array_t<bool, N>&, const array_t<bool, N>&,
-                     const array_t<string_t, N>&, format_options& fmt_opts);
+                     const array_t<string_t, N>&, format_options& fmt_opts,
+                     nlohmann::json* json_out = nullptr);
 
 template <size_t N = num_settings_options>
 void
 write_settings_info(std::ostream&, format_options& fmt_opts, const array_t<bool, N>& = {},
-                    const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
+                    const array_t<bool, N>& = {}, const array_t<string_t, N>& = {},
+                    nlohmann::json* json_out = nullptr);
 
 template <size_t N = num_hw_counter_options>
 void
 write_hw_counter_info(std::ostream&, format_options& fmt_opts,
                       const array_t<bool, N>& = {}, const array_t<bool, N>& = {},
-                      const array_t<string_t, N>& = {});
+                      const array_t<string_t, N>& = {},
+                      nlohmann::json* json_out    = nullptr);
 
 namespace
 {
@@ -552,6 +557,12 @@ main(int argc, char** argv)
             csv          = fmt_opts.csv;
             if(!p.exists("csv-separator")) fmt_opts.delim = ",";
         });
+    parser.add_argument({ "--json" }, "Write data in JSON")
+        .max_count(1)
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.json = p.get<bool>("json");
+            json          = fmt_opts.json;
+        });
     parser
         .add_argument({ "--csv-separator" },
                       "Use the provided string instead of a ',' to separate values")
@@ -669,6 +680,12 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    if(parser.exists("json") && (parser.exists("markdown") || parser.exists("csv")))
+    {
+        std::cerr << "Error! '--json' cannot be combined with '--markdown' or '--csv'\n";
+        return EXIT_FAILURE;
+    }
+
     if(parser.exists("list-categories") || parser.exists("list-keys") ||
        parser.exists("list-operations") || parser.exists("list-domains"))
         return EXIT_SUCCESS;
@@ -723,9 +740,12 @@ main(int argc, char** argv)
 
     if(!os) os = &std::cout;
 
+    nlohmann::json _json_output = nlohmann::json::object();
+    auto*          _json_ptr    = fmt_opts.json ? &_json_output : nullptr;
+
     if(include_components)
     {
-        write_component_info(*os, options, use_mark, fields, fmt_opts);
+        write_component_info(*os, options, use_mark, fields, fmt_opts, _json_ptr);
     }
     dump_log();
 
@@ -733,7 +753,8 @@ main(int argc, char** argv)
     {
         write_settings_info(
             *os, fmt_opts,
-            { options[VAL], options[LANG], options[DESC], options[CATEGORY] });
+            { options[VAL], options[LANG], options[DESC], options[CATEGORY] }, {}, {},
+            _json_ptr);
     }
     dump_log();
 
@@ -742,9 +763,15 @@ main(int argc, char** argv)
         write_hw_counter_info(*os, fmt_opts,
                               { true, true,
                                 !fmt_opts.force_brief && !fmt_opts.available_only,
-                                !fmt_opts.force_brief && !options[DESC], options[DESC] });
+                                !fmt_opts.force_brief && !options[DESC], options[DESC] },
+                              {}, {}, _json_ptr);
     }
     dump_log();
+
+    if(fmt_opts.json)
+    {
+        *os << _json_output.dump(2) << "\n";
+    }
 
     const_cast<std::shared_ptr<tim::settings>&>(tim::settings::shared_instance()).reset();
 
@@ -761,7 +788,7 @@ template <size_t N>
 void
 write_component_info(std::ostream& os, const array_t<bool, N>& options,
                      const array_t<bool, N>& _mark, const array_t<string_t, N>& fields,
-                     format_options& fmt_opts)
+                     format_options& fmt_opts, nlohmann::json* json_out)
 {
     static_assert(N >= num_component_options,
                   "Error! Too few component options + fields");
@@ -835,6 +862,54 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
         std::sort(_info.begin(), _info.end(), [](const auto& lhs, const auto& rhs) {
             return std::get<0>(lhs) < std::get<0>(rhs);
         });
+    }
+
+    if(json_out)
+    {
+        static const array_t<std::pair<size_t, const char*>, TOTAL> _field_keys = {
+            { { VAL, "value_type" },
+              { ENUM, "enumeration" },
+              { LANG, "aliases" },
+              { CID, "string_ids" },
+              { FNAME, "filename" },
+              { DESC, "description" },
+              { CATEGORY, "category" } }
+        };
+
+        nlohmann::json _entries = nlohmann::json::array();
+        for(const auto& itr : _info)
+        {
+            int _selected = 0;
+            _selected += (is_selected(std::get<0>(itr))) ? 1 : 0;
+            if(_available_column)
+            {
+                std::stringstream _avss{};
+                _avss << std::boolalpha << std::get<1>(itr);
+                _selected += (is_selected(_avss.str())) ? 1 : 0;
+            }
+            for(size_t i = 0; i < std::get<2>(itr).size(); ++i)
+            {
+                if(!options[i]) continue;
+                _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
+            }
+            if(!category_regex_keys.empty())
+                _selected +=
+                    (is_category_selected(std::get<2>(itr).at(CATEGORY))) ? 1 : 0;
+            if(_selected == 0) continue;
+
+            nlohmann::json _entry;
+            _entry["name"]      = remove(std::get<0>(itr), { "tim::", "component::" });
+            _entry["available"] = std::get<1>(itr);
+            for(size_t i = 0; i < _field_keys.size(); ++i)
+            {
+                if(!options[i]) continue;
+                _entry[_field_keys.at(i).second] =
+                    remove(std::get<2>(itr).at(i), { "tim::", "component::" });
+            }
+            _entries.push_back(std::move(_entry));
+        }
+        (*json_out)["components"] = std::move(_entries);
+        return;
     }
 
     // compute the widths
@@ -964,7 +1039,7 @@ template <size_t N>
 void
 write_settings_info(std::ostream& os, format_options& fmt_opts,
                     const array_t<bool, N>& opts, const array_t<bool, N>&,
-                    const array_t<string_t, N>&)
+                    const array_t<string_t, N>&, nlohmann::json* json_out)
 {
     static_assert(N >= num_settings_options, "Error! Too few settings options + fields");
 
@@ -1106,6 +1181,31 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
         if(!_tmp.at(0).empty()) _results.push_back(_tmp);
     }
 
+    if(json_out)
+    {
+        nlohmann::json _entries = nlohmann::json::array();
+        for(const auto& itr : _results)
+        {
+            int _selected = 0;
+            for(size_t i = 0; i < itr.size(); ++i)
+            {
+                if(!_wusing.at(i)) continue;
+                _selected += (is_selected(itr.at(i))) ? 1 : 0;
+            }
+            if(_selected == 0) continue;
+
+            nlohmann::json _entry;
+            for(size_t i = 0; i < _keys.size(); ++i)
+            {
+                if(!_wusing.at(i)) continue;
+                _entry[_keys.at(i)] = itr.at(i);
+            }
+            _entries.push_back(std::move(_entry));
+        }
+        (*json_out)["settings"] = std::move(_entries);
+        return;
+    }
+
     for(const auto& itr : _results)
     {
         // save the widths in case this gets filtered
@@ -1182,7 +1282,7 @@ template <size_t N>
 void
 write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
                       const array_t<bool, N>& options, const array_t<bool, N>&,
-                      const array_t<string_t, N>&)
+                      const array_t<string_t, N>&, nlohmann::json* json_out)
 {
     static_assert(N >= num_hw_counter_options,
                   "Error! Too few hw counter options + fields");
@@ -1286,6 +1386,33 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
                                                      0);
                                          }),
                           fitr.second.end());
+    }
+
+    if(json_out)
+    {
+        nlohmann::json _devices = nlohmann::json::object();
+        for(const auto& fitr : fields)
+        {
+            if(!fitr.first.empty() && fitr.second.empty()) continue;
+
+            nlohmann::json _entries = nlohmann::json::array();
+            for(const auto& itr : fitr.second)
+            {
+                nlohmann::json _entry;
+                if(options[0]) _entry["symbol"] = itr.symbol();
+                if(options[1]) _entry["device"] = fitr.first;
+                if(options[2]) _entry["available"] = itr.available();
+                if(options[3]) _entry["summary"] = itr.short_description();
+                if(options[4]) _entry["description"] = itr.long_description();
+                _entries.push_back(std::move(_entry));
+            }
+            if(!fitr.first.empty())
+                _devices[fitr.first] = std::move(_entries);
+            else if(!_entries.empty())
+                _devices["unknown"] = std::move(_entries);
+        }
+        (*json_out)["hw_counters"] = std::move(_devices);
+        return;
     }
 
     width_type _widths;
