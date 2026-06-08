@@ -24,6 +24,7 @@ pytestmark = [
     pytest.mark.rocattach,
     pytest.mark.gpu,
     pytest.mark.attach,
+    pytest.mark.rocm,
 ]
 
 
