@@ -723,8 +723,7 @@ class db_analysis(OmniAnalyze_Base):
         pct_of_peak_metric_ids: set[str],
         values_df: pd.DataFrame,
     ) -> list[dict]:
-        """Return new Percent of Peak rows for pct_of_peak-enabled metrics in
-        values_df."""
+        """Return new Percent of Peak rows for pct_of_peak-enabled metrics."""
         candidates = values_df[
             values_df["metric_id"].isin(pct_of_peak_metric_ids)
             & values_df["value_name"].isin([

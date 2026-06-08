@@ -597,15 +597,15 @@ class TestEvaluationPipeline:
         })
         return {1: df}, {1: "metric_table"}
 
-    def test_compute_pct_of_peak_pct_of_peak_true_writes_correct_value(self):
-        """A pct_of_peak=True row gets 100 * value / peak written into Pct of Peak."""
+    def test_compute_pct_of_peak_true_writes_correct_value(self):
+        """A pct_of_peak=True row writes 100 * value / peak into Percent of Peak."""
         dfs, dfs_type = self.make_pct_of_peak_dfs(
             pct_of_peak_flags=[True], avg_values=[50.0], peak_values=[200.0]
         )
         compute_pct_of_peak(dfs, dfs_type)
         assert dfs[1].loc[0, "Percent of Peak"] == pytest.approx(25.0)
 
-    def test_compute_pct_of_peak_pct_of_peak_false_writes_empty_string(self):
+    def test_compute_pct_of_peak_false_writes_empty_string(self):
         """A pct_of_peak=False row gets an empty string in Percent of Peak."""
         dfs, dfs_type = self.make_pct_of_peak_dfs(
             pct_of_peak_flags=[False], avg_values=[50.0], peak_values=[200.0]

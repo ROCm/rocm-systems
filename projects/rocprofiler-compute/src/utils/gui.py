@@ -239,7 +239,7 @@ def build_table_chart(
     formatted_columns = []
     for col in display_df.columns:
         col_lower = str(col).lower()
-        if col_lower in {"pct", "pop", "percent", "percent of peak"}:
+        if col_lower in {"pct", "percent", "percent of peak"}:
             formatted_columns.append({
                 "id": col,
                 "name": col,
