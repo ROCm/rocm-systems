@@ -24,12 +24,12 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
 Prerequisites
 =============
 
-hipFile requires the following to build and run:
+hipFile requires the following software to build and run:
 
-* **Linux** with KFD support (hipFile is Linux-only)
-* **AMD ROCm** — specifically the ``hsa-runtime64`` and HIP (``libamdhip64``) packages
-* **CMake** 3.21 or later
-* A C++17 or C++20 compiler (controlled by the ``AIS_CXX_STANDARD`` CMake option)
+- ``ROCm`` with ``hsa-runtime64`` and HIP runtime
+- ``CMake`` 3.21 or later
+- ``C++17`` compiler (Clang or GCC)
+- ``libmount`` (from ``util-linux``)
 
 For Python bindings:
 
@@ -105,7 +105,7 @@ Source download
 hipFile lives in the ``rocm-systems`` super-repository. Use a sparse checkout
 to fetch only the hipFile project:
 
-.. code-block:: shell
+.. code:: shell
 
    git clone --filter=blob:none --sparse \
        https://github.com/ROCm/rocm-systems.git
@@ -131,7 +131,7 @@ Build commands
 
 Configure, build, and install with the standard CMake workflow:
 
-.. code-block:: shell
+.. code:: shell
 
    cmake -B build \
        -DCMAKE_HIP_PLATFORM=amd \

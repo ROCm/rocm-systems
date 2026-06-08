@@ -8,10 +8,9 @@
 hipFile documentation
 =====================
 
-hipFile is an AMD Infinity Storage library that enables direct GPU IO, allowing data to be transferred between storage devices and AMD GPU memory without CPU staging buffers. It provides a cuFile-equivalent API framework for high-performance IO operations that bypass traditional CPU memory paths, reducing latency and improving throughput for IO-bound workloads such as AI training and scientific simulations. hipFile supports AMD ROCm platforms via a fastpath that uses direct GPU DMA and an automatic fallback to POSIX IO when the fast path is unavailable, and also supports NVIDIA platforms via cuFile. Both a C API and Python bindings are provided.
+hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. It bypasses the CPU for data transfers between storage and GPU memory. The library exposes a C API and Python bindings for registering files and GPU buffers, then performing synchronous, asynchronous, and batch read/write operations directly into device memory. The AMD backend uses a fastpath through HIP runtime extensions, with automatic fallback to POSIX I/O. An NVIDIA backend wraps cuFile for compatibility.
 
-The hipFile public repository is located at
-`ROCm/rocm-systems <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_.
+The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROCm/rocm-systems/tree/develop/projects/hipfile>`_.
 
 .. grid:: 2
    :gutter: 3
@@ -19,25 +18,32 @@ The hipFile public repository is located at
    .. grid-item-card:: Install
 
       * :doc:`Install hipFile <install/install>`
-
-   .. grid-item-card:: Conceptual
-
-      * :doc:`IO backend architecture <conceptual/io-backends>`
-      * :doc:`Registration and driver lifecycle <conceptual/registration-lifecycle>`
-      * :doc:`Environment variable reference <conceptual/environment-variables>`
+      * :doc:`Build hipFile from source <install/build-from-source>`
+      * :doc:`Install the hipFile Python bindings <install/python-bindings>`
 
    .. grid-item-card:: How to
 
-      * :doc:`Collect IO statistics with ais-stats <how-to/collect-io-statistics>`
-      * :doc:`Benchmark hipFile with fio <how-to/use-with-fio>`
-      * :doc:`Use the Python API <how-to/use-python-api>`
-      * :doc:`Use hipFile with NVIDIA (cuFile compatibility) <how-to/nvidia-cufile-compat>`
+      * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
+      * :doc:`Configure the I/O backend <how-to/configure-io-backend>`
+      * :doc:`Collect I/O statistics with ais-stats <how-to/collect-io-statistics>`
+      * :doc:`Use the ais-stats tool <how-to/ais-stats-tool>`
 
    .. grid-item-card:: Tutorials
 
-      * :doc:`Synchronous GPU-mediated file copy (aiscp example) <tutorials/synchronous-file-copy>`
-      * :doc:`Async multi-stream IO with registered streams <tutorials/async-multistream-io>`
-      * :doc:`Python file copy through GPU memory <tutorials/python-file-copy>`
+      * :doc:`Copy a file via GPU memory using hipFile <tutorials/copy-a-file>`
+      * :doc:`Query the hipFile version <tutorials/get-version>`
+      * :doc:`Perform GPU I/O with the Python bindings <tutorials/python-gpu-io>`
+
+   .. grid-item-card:: Reference
+
+      * :doc:`I/O backend architecture <reference/io-backends>`
+      * :doc:`File system and file type requirements <reference/filesystem-requirements>`
+      * :doc:`Driver lifecycle and reference counting <reference/driver-lifecycle>`
+      * :doc:`I/O statistics collection <reference/statistics-collection>`
+      * :doc:`hipFile environment variables <reference/environment-variables>`
+      * :doc:`API reference <reference/api-reference>`
+      * :doc:`Errors and error handling <reference/errors>`
+      * :doc:`Python bindings API reference <reference/python-api-reference>`
 
    .. grid-item-card:: Reference
 
@@ -52,4 +58,4 @@ The hipFile public repository is located at
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
-Licensing information can be found on the :doc:`License <license>` page.
+Licensing information is in the `LICENSE.md <https://github.com/ROCm/rocm-systems/blob/develop/projects/hipfile/LICENSE.md>`_ file in the repository.
