@@ -583,6 +583,12 @@ class AmdSmiComputePartitionType(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_INVALID
 
 
+class AmdSmiComputePartitionMemAllocModeType(IntEnum):
+    INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID
+    CAPPING = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING
+    ALL = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL
+
+
 class AmdSmiMemoryPartitionType(IntEnum):
     NPS1 = amdsmi_wrapper.AMDSMI_MEMORY_PARTITION_NPS1
     NPS2 = amdsmi_wrapper.AMDSMI_MEMORY_PARTITION_NPS2
@@ -4498,6 +4504,33 @@ def amdsmi_set_gpu_compute_partition(
         raise AmdSmiParameterException(compute_partition, AmdSmiComputePartitionType)
 
     _check_res(amdsmi_wrapper.amdsmi_set_gpu_compute_partition(processor_handle, compute_partition))
+
+
+def amdsmi_get_gpu_compute_partition_mem_alloc_mode(processor_handle: processor_handle_t):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    mode = amdsmi_wrapper.amdsmi_compute_partition_mem_alloc_mode_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+            processor_handle, ctypes.byref(mode)
+        )
+    )
+    return AmdSmiComputePartitionMemAllocModeType(mode.value).name
+
+
+def amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+    processor_handle: processor_handle_t, mode: AmdSmiComputePartitionMemAllocModeType
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(mode, AmdSmiComputePartitionMemAllocModeType):
+        raise AmdSmiParameterException(mode, AmdSmiComputePartitionMemAllocModeType)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_compute_partition_mem_alloc_mode(processor_handle, mode)
+    )
 
 
 def amdsmi_set_gpu_accelerator_partition_profile(

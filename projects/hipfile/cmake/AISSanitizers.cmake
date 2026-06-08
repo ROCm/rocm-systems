@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+include_guard(GLOBAL)
+
 option(AIS_USE_SANITIZERS "Build with sanitizers (clang only - see docs for a list)" OFF)
 option(AIS_USE_THREAD_SANITIZER "Build with -fsanitize=thread (clang only - not compatible with AIS_USE_SANITIZERS)" OFF)
 
@@ -16,6 +18,11 @@ function(ais_add_sanitizers target)
 
     if(AIS_USE_SANITIZERS AND AIS_USE_THREAD_SANITIZER)
         message(FATAL_ERROR "AIS_USE_SANITIZERS is not compatible with AIS_USE_THREAD_SANITIZER")
+    endif()
+
+    get_target_property(aliased_target "${target}" ALIASED_TARGET)
+    if(aliased_target)
+        set(target "${aliased_target}")
     endif()
 
     if(AIS_USE_SANITIZERS)

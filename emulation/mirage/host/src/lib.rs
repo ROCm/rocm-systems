@@ -8,7 +8,7 @@
 //!
 //! A host owns exactly one session directory. While running, it:
 //!
-//! 1. Writes `host.pid` (its own pid) and an initial `health.json`
+//! 1. Writes `node/0/pid` (its own pid) and an initial `health.json`
 //!    (`healthy=true`, `state="ready"`) once startup is complete.
 //! 2. Polls `exec/` for new exec definitions (i.e. directories that
 //!    have a `def.json` but no `status.json` yet).
@@ -30,7 +30,7 @@
 //! notifications are notoriously platform-dependent; a 50ms cadence
 //! gives interactive-feeling latency without burning CPU.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -38,22 +38,66 @@ use std::time::Duration;
 
 use chrono::Utc;
 use mirage_core::common::MaybeRef;
+use mirage_core::container::{
+    ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_RANK, container_name,
+};
+use mirage_core::emulator::{Emulator, EmulatorKind};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};
-use mirage_core::profile::ProfileDef;
-use mirage_core::session::{SessionDef, SessionHealth, SessionId};
-use mirage_core::state::{read_json, read_small_str, write_bytes, write_json};
+use mirage_core::profile::{FileMount, ProfileDef};
+use mirage_core::session::{HEALTH_HEARTBEAT_INTERVAL, SessionDef, SessionHealth, SessionId};
+use mirage_core::state::{read_json, read_json_opt, read_small_str, write_bytes, write_json};
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
 use tokio::sync::Notify;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// Path the mirage binary is bind-mounted at inside every node
+/// container; also the container's entrypoint (`mirage host`).
+const CONTAINER_MIRAGE_BIN: &str = "/mnt/mirage/bin/mirage";
+
+/// Mirage runtime root inside every node container. The session's
+/// runtime directory is bind-mounted under here and `MIRAGE_RUNTIME`
+/// points at it so the in-container host and the orchestrator share the
+/// same on-disk session state.
+const CONTAINER_RUNTIME_DIR: &str = "/mnt/mirage/runtime";
+
+/// Mirage config root inside every node container. The orchestrator's
+/// config directory is bind-mounted here read-only and `MIRAGE_CONFIG`
+/// points at it so the in-container host can resolve profiles and
+/// topologies that are stored *by reference* (rather than inline) in the
+/// session definition.
+const CONTAINER_CONFIG_DIR: &str = "/mnt/mirage/config";
+
+/// Mirage state root inside every node container. Set via `MIRAGE_STATE`
+/// so the in-container host resolves state at a deterministic location
+/// instead of falling back to a non-existent in-container XDG path.
+const CONTAINER_STATE_DIR: &str = "/mnt/mirage/state";
+
+/// Mirage cache root inside every node container. Set via `MIRAGE_CACHE`
+/// so the in-container host resolves its cache at a deterministic
+/// location instead of a non-existent in-container XDG path.
+const CONTAINER_CACHE_DIR: &str = "/mnt/mirage/cache";
+
 /// Configuration for running a host.
 #[derive(Debug, Clone)]
 pub struct HostConfig {
     pub session: SessionId,
+    /// Node rank this host serves, or `None` for the orchestrator host.
+    ///
+    /// * `None` — the orchestrator host, run on the real host by the
+    ///   control plane. It brings up the per-node containers (for a
+    ///   containerised session) and, for a *non*-containerised session,
+    ///   runs every node's exec directly. For a containerised session it
+    ///   delegates exec execution to the per-node hosts and just waits,
+    ///   then tears the containers down.
+    /// * `Some(rank)` — a per-node host, run *inside* a node's container
+    ///   (the container's entrypoint is `mirage host --rank <rank>`). It
+    ///   runs only its own node's execs as direct local children and
+    ///   never manages containers.
+    pub rank: Option<u32>,
 }
 
 /// Run the host for `session_id` until shutdown is signalled.
@@ -65,13 +109,56 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     if !layout.def().exists() {
         return Err(MirageError::SessionNotFound(config.session.to_string()));
     }
+    tracing::info!(session = %config.session, rank = ?config.rank, "host starting");
 
-    // Publish pid + initial health.
-    write_bytes(
-        &layout.host_pid(),
-        std::process::id().to_string().as_bytes(),
-    )?;
-    publish_health(&layout, true, "ready", None)?;
+    // A per-node host runs inside a container and owns only its rank; the
+    // orchestrator host runs on the real host and owns containers and
+    // session-level health.
+    let is_node_host = config.rank.is_some();
+    let manages_session = !is_node_host;
+
+    // Publish this host's pid. The orchestrator is node 0's host; a
+    // per-node host records its own node's pid.
+    let pid_rank = config.rank.unwrap_or(0);
+    let pid_node = layout.node(pid_rank);
+    std::fs::create_dir_all(&pid_node.root).map_err(|e| MirageError::Io {
+        path: pid_node.root.clone(),
+        source: e,
+    })?;
+    write_bytes(&pid_node.pid(), std::process::id().to_string().as_bytes())?;
+
+    // Only the orchestrator brings up containers: it pulls the image,
+    // creates the per-session network, starts one container per node
+    // (each running its own `mirage host --rank <n>`), and persists the
+    // runtime record + per-node cids. A per-node host is already inside
+    // its container, so it skips this entirely.
+    if manages_session {
+        if let Err(e) = maybe_bring_up_containers(&config.session, &layout) {
+            // A containerised session that cannot start is fatal: surface
+            // it as terminal health so clients stop waiting, and abort.
+            // `e` already names the phase that failed (e.g. "pulling
+            // image … failed: <provider error>").
+            let h = SessionHealth {
+                timestamp: Utc::now(),
+                healthy: false,
+                state: Some("failed".to_string()),
+                terminal: true,
+                message: Some(e.to_string()),
+            };
+            let _ = write_json(&layout.health(), &h);
+            return Err(e);
+        }
+        publish_health(&layout, true, "ready", None)?;
+        tracing::info!(session = %config.session, "host ready");
+    }
+
+    // Whether *this* host runs execs locally. The orchestrator runs them
+    // only for a non-containerised session (a containerised session's
+    // execs are run by the per-node hosts inside the containers). A
+    // per-node host always runs its own rank's execs.
+    let containerized = layout.container_json().exists();
+    let run_execs_here = is_node_host || !containerized;
+    let host_rank = config.rank;
 
     // Install signal handlers.
     let sig_shutdown = shutdown.clone();
@@ -90,38 +177,56 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     let mut seen: HashSet<ExecId> = HashSet::new();
     let mut tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
+    // Heartbeat: the orchestrator re-stamps session health periodically
+    // so readers can tell a live host from a crashed one. A host that
+    // stops beating is reported as `stalled` and then terminally `dead`
+    // (see `SessionHealth::escalate_if_stale`). Per-node hosts do not own
+    // session-level health, so only the orchestrator beats.
+    let mut last_heartbeat = tokio::time::Instant::now();
+
     loop {
-        // Discover new execs.
-        if let Ok(rd) = std::fs::read_dir(layout.exec_root()) {
-            for e in rd.flatten() {
-                let name = e.file_name().to_string_lossy().to_string();
-                let Ok(eid) = ExecId::new(name.clone()) else {
-                    continue;
-                };
-                if seen.contains(&eid) {
-                    continue;
-                }
-                let exec_layout = layout.exec(&eid);
-                if !exec_layout.def().exists() {
-                    continue;
-                }
-                if exec_layout.status().exists() {
-                    // already handled (possibly by a previous host run)
-                    seen.insert(eid);
-                    continue;
-                }
-                seen.insert(eid.clone());
-                let exec_layout_clone = exec_layout.clone();
-                tasks.push(tokio::spawn(async move {
-                    if let Err(err) = run_exec(exec_layout_clone).await {
-                        tracing::error!("exec failed: {err}");
+        // Discover new execs. The orchestrator host of a containerised
+        // session does not run execs itself (the per-node hosts do), so
+        // it skips discovery and merely waits for shutdown.
+        if run_execs_here {
+            if let Ok(rd) = std::fs::read_dir(layout.exec_root()) {
+                for e in rd.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let Ok(eid) = ExecId::new(name.clone()) else {
+                        continue;
+                    };
+                    if seen.contains(&eid) {
+                        continue;
                     }
-                }));
+                    let exec_layout = layout.exec(&eid);
+                    if !exec_layout.def().exists() {
+                        continue;
+                    }
+                    if exec_layout.status().exists() {
+                        // already handled (possibly by a previous host run)
+                        seen.insert(eid);
+                        continue;
+                    }
+                    seen.insert(eid.clone());
+                    tracing::info!(exec = %eid, "discovered new exec");
+                    let exec_layout_clone = exec_layout.clone();
+                    tasks.push(tokio::spawn(async move {
+                        if let Err(err) = run_exec(exec_layout_clone, host_rank).await {
+                            tracing::error!("exec failed: {err}");
+                        }
+                    }));
+                }
             }
         }
 
         // Handle pending signal requests across all execs.
         process_signal_requests(&layout);
+
+        // Re-stamp the heartbeat so readers know the host is still alive.
+        if manages_session && last_heartbeat.elapsed() >= HEALTH_HEARTBEAT_INTERVAL {
+            publish_health(&layout, true, "ready", None).ok();
+            last_heartbeat = tokio::time::Instant::now();
+        }
 
         // Wait for either shutdown or the next poll tick.
         let woke = tokio::select! {
@@ -134,7 +239,10 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     }
 
     // Shutdown path: mark unhealthy and signal in-flight execs.
-    publish_health(&layout, false, "stopping", None).ok();
+    tracing::info!(session = %config.session, "host shutting down");
+    if manages_session {
+        publish_health(&layout, false, "stopping", None).ok();
+    }
     signal_all_execs(&layout, nix::sys::signal::Signal::SIGTERM);
 
     // Give children a moment to exit, then cancel polling tasks.
@@ -144,7 +252,15 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         let _ = tokio::time::timeout(remaining.max(Duration::from_millis(10)), t).await;
     }
     signal_all_execs(&layout, nix::sys::signal::Signal::SIGKILL);
-    publish_health(&layout, false, "stopped", None).ok();
+    // Tear down any per-node containers and the per-session network.
+    // Only the orchestrator owns the containers, so only it tears them
+    // down. Idempotent and a no-op for non-containerised sessions; the
+    // control plane also calls this on `session destroy`, so a crashed
+    // host never leaks containers.
+    if manages_session {
+        mirage_core::container::teardown(&layout.container_json());
+        publish_health(&layout, false, "stopped", None).ok();
+    }
     Ok(())
 }
 
@@ -220,77 +336,265 @@ fn process_signal_requests(layout: &SessionLayout) {
     }
 }
 
-/// Resolve the emulator-level injection for a session by reading its
-/// on-disk definition, resolving its profile, and computing the env
-/// vars / `LD_PRELOAD` the configured emulator backend needs.
-///
-/// Returns an empty [`InjectionDef`] for emulators that need no
-/// injection (e.g. `noop`). Errors only when a configured emulator
-/// cannot produce its required assets (e.g. rocjitsu can't build its
-/// simulation config), so a misconfigured session fails loudly instead
-/// of silently running unemulated.
-fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
+/// Read a session's on-disk definition and resolve its profile (whether
+/// stored inline or referenced by name).
+fn resolve_profile(session: &SessionId) -> Result<ProfileDef> {
     let session_def: SessionDef = read_json(&SessionLayout::for_id(session).def())?;
-    let profile: ProfileDef = match session_def.profile {
-        MaybeRef::Owned(p) => p,
+    match session_def.profile {
+        MaybeRef::Owned(p) => Ok(p),
         MaybeRef::Ref(name) => {
             let p = mirage_core::paths::profile_path(&name);
             if !p.exists() {
                 return Err(MirageError::ProfileNotFound(name));
             }
-            read_json(&p)?
+            read_json(&p)
         }
-    };
-    let emulator = &profile.emulator;
-
-    match emulator.emulator.as_str() {
-        "rocjitsu" => {
-            // Extract embedded assets if they aren't on disk yet, then
-            // compute the preload + simulation config for this profile.
-            if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
-                tracing::warn!("rocjitsu: failed to extract assets: {e:#}");
-            }
-            let (config, schema) = match mirage_rocjitsu::kmd_config(emulator) {
-                Ok(paths) => paths,
-                Err(e) => {
-                    // Can't build the sim config (e.g. rocjitsu assets not
-                    // available on this machine). Warn and run unemulated
-                    // rather than failing the exec outright.
-                    tracing::warn!(
-                        "rocjitsu: could not build simulation config; \
-                         running without emulation env: {e:#}"
-                    );
-                    return Ok(InjectionDef::default());
-                }
-            };
-            let mut env = std::collections::BTreeMap::new();
-            env.insert("RJ_CONFIG".to_string(), config.display().to_string());
-            env.insert("RJ_SCHEMA".to_string(), schema.display().to_string());
-            let ld_preload = mirage_rocjitsu::kmd_preload().map(|p| p.display().to_string());
-            if ld_preload.is_none() {
-                tracing::warn!(
-                    "rocjitsu: no KMD preload library found; workload will not be emulated"
-                );
-            }
-            Ok(InjectionDef {
-                wrapper: None,
-                ld_preload,
-                files: Default::default(),
-                env,
-            })
-        }
-        // `noop` and any other emulator currently need no injection.
-        _ => Ok(InjectionDef::default()),
     }
 }
 
-async fn run_exec(layout: ExecLayout) -> Result<()> {
+/// Resolve the number of nodes a profile's topology describes (defaults
+/// to 1 for the common single-node case).
+fn resolve_node_count(profile: &ProfileDef) -> Result<u32> {
+    let topology = match &profile.emulator.topology {
+        MaybeRef::Owned(t) => t.clone(),
+        MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
+    };
+    Ok(topology.total_nodes().max(1))
+}
+
+/// Pick an ephemeral TCP port by binding to `127.0.0.1:0` and reading
+/// back the assigned port. Used as the head node's advertised port.
+fn pick_head_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()
+        .and_then(|l| l.local_addr().ok())
+        .map(|a| a.port())
+        // 0 is a harmless fallback: it just means no port was reserved.
+        .unwrap_or(0)
+}
+
+/// Bring up the per-node containers + network for a containerised
+/// session and persist the runtime record. A no-op when the profile is
+/// not containerised.
+fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Result<()> {
+    let profile = resolve_profile(session)?;
+    let Some(mut def) = profile.containerize.clone() else {
+        return Ok(());
+    };
+
+    // Merge the emulator-declared mounts (e.g. HotSwap's runtime + cache
+    // trees, bind-mounted under `/mnt/mirage`) and GPU device/group
+    // passthrough into the node containers so the injected
+    // `LD_PRELOAD`/env paths resolve and the workload can reach the GPU.
+    let injection = resolve_injection(session)?;
+    def.mounts.extend(injection.mounts.iter().cloned());
+    def.devices.extend(injection.devices.iter().cloned());
+    def.groups.extend(injection.groups.iter().cloned());
+
+    // Each container hosts itself: its entrypoint is `mirage host`, run
+    // from the mirage binary bind-mounted in read-only, against the
+    // session's runtime directory bind-mounted read-write. Mounting only
+    // this one session's directory (not the whole runtime root) keeps
+    // containers isolated from other sessions.
+    let mirage_bin = std::env::current_exe().map_err(|e| MirageError::other(format!("{e}")))?;
+    def.mounts.push(FileMount {
+        host_path: mirage_bin.to_string_lossy().into_owned(),
+        container_path: CONTAINER_MIRAGE_BIN.to_string(),
+        read_only: true,
+    });
+    let host_session_dir = mirage_core::paths::session_dir(session);
+    let container_session_dir = format!("{CONTAINER_RUNTIME_DIR}/session/{session}");
+    def.mounts.push(FileMount {
+        host_path: host_session_dir.to_string_lossy().into_owned(),
+        container_path: container_session_dir,
+        read_only: false,
+    });
+
+    // Mount the orchestrator's config directory read-only so the
+    // in-container host can resolve profiles and topologies that are
+    // referenced by name (not stored inline) in the session definition.
+    // Without this, `resolve_profile`/`resolve_node_count` inside the
+    // container would look in a non-existent XDG path and the per-node
+    // host would silently fail to run requested execs.
+    let host_config_dir = mirage_core::paths::mirage_config_dir();
+    if host_config_dir.exists() {
+        def.mounts.push(FileMount {
+            host_path: host_config_dir.to_string_lossy().into_owned(),
+            container_path: CONTAINER_CONFIG_DIR.to_string(),
+            read_only: true,
+        });
+    }
+
+    // Environment every node container inherits: the emulator's injected
+    // env (already remapped to container paths), its `LD_PRELOAD`, and
+    // the `MIRAGE_*` directory overrides so the in-container host
+    // resolves every mirage directory at its mounted (or deterministic
+    // in-container) location instead of a non-existent XDG fallback. The
+    // in-container host forwards this environment to the workload child,
+    // so no separate per-exec injection happens inside the container.
+    let mut injected_env: Vec<(String, String)> = injection
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if let Some(preload) = &injection.ld_preload {
+        injected_env.push(("LD_PRELOAD".to_string(), preload.clone()));
+    }
+    injected_env.push((
+        "MIRAGE_RUNTIME".to_string(),
+        CONTAINER_RUNTIME_DIR.to_string(),
+    ));
+    injected_env.push((
+        "MIRAGE_CONFIG".to_string(),
+        CONTAINER_CONFIG_DIR.to_string(),
+    ));
+    injected_env.push(("MIRAGE_STATE".to_string(), CONTAINER_STATE_DIR.to_string()));
+    injected_env.push(("MIRAGE_CACHE".to_string(), CONTAINER_CACHE_DIR.to_string()));
+
+    // Propagate the orchestrator's log level into each node container so
+    // the per-node `mirage host` (and thus its exec/node events) logs at
+    // the verbosity the user asked for via `-v`/`-vv`. Without this the
+    // in-container host defaults to `warn` and its events never appear in
+    // `podman logs`.
+    if let Ok(log) = std::env::var("MIRAGE_LOG") {
+        injected_env.push(("MIRAGE_LOG".to_string(), log));
+    }
+
+    publish_health(
+        layout,
+        false,
+        "preparing",
+        Some(format!(
+            "resolving container provider for image {}",
+            def.image
+        )),
+    )?;
+
+    let engine =
+        mirage_container::Engine::resolve(&def).map_err(|e| MirageError::other(format!("{e}")))?;
+    let node_count = resolve_node_count(&profile)?;
+    let head_port = pick_head_port();
+    let head_addr = container_name(session, 0);
+    let session_str = session.to_string();
+
+    // Track the most recent bring-up phase so that, if a step fails, the
+    // error we surface names exactly what mirage was doing (e.g. "while
+    // pulling image …") rather than a bare provider error.
+    let last_phase: std::cell::RefCell<Option<mirage_container::BringUpPhase>> =
+        std::cell::RefCell::new(None);
+
+    let (state, cids) = engine
+        .bring_up(
+            session,
+            &def,
+            node_count,
+            head_port,
+            |rank| {
+                let mut env = node_mirage_env(rank, &head_addr, head_port);
+                env.extend(injected_env.iter().cloned());
+                env
+            },
+            |rank| {
+                vec![
+                    CONTAINER_MIRAGE_BIN.to_string(),
+                    "host".to_string(),
+                    "--session".to_string(),
+                    session_str.clone(),
+                    "--rank".to_string(),
+                    rank.to_string(),
+                ]
+            },
+            |phase| {
+                // Mirror each bring-up phase into session health so
+                // clients see live, detailed progress (pulling the image,
+                // creating the network, starting each node).
+                let (state, message) = phase.health();
+                let _ = publish_health(layout, false, state, Some(message));
+                *last_phase.borrow_mut() = Some(phase);
+            },
+        )
+        .map_err(|e| {
+            // Name the phase that was in flight so the failure is
+            // actionable (e.g. a registry auth error while pulling, or a
+            // device-permission error while starting a node).
+            let context = match last_phase.into_inner() {
+                Some(p) => format!(
+                    "{} failed: {e}",
+                    p.message().trim_end_matches('…').trim_end()
+                ),
+                None => format!("container bring-up failed: {e}"),
+            };
+            MirageError::other(context)
+        })?;
+
+    // Persist the runtime record (used by execs and teardown) and the
+    // per-node container ids under each node's runtime directory.
+    write_json(&layout.container_json(), &state)?;
+    for (rank, cid) in &cids {
+        let nlayout = layout.node(*rank);
+        std::fs::create_dir_all(&nlayout.root).map_err(|e| MirageError::Io {
+            path: nlayout.root.clone(),
+            source: e,
+        })?;
+        write_bytes(&nlayout.cid(), cid.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Build the always-present mirage environment for a node of `rank`.
+///
+/// `MIRAGE_RANK` and `MIRAGE_HEAD_PORT` are set on every node.
+/// `MIRAGE_HEAD_ADDR` is also set on every node: worker nodes get the
+/// head's address, while the head (rank 0) gets `localhost` since it is
+/// itself the head. These are injected whether or not the session is
+/// containerised.
+fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, String)> {
+    let head = if rank == 0 { "localhost" } else { head_addr };
+    vec![
+        (ENV_RANK.to_string(), rank.to_string()),
+        (ENV_HEAD_PORT.to_string(), head_port.to_string()),
+        (ENV_HEAD_ADDR.to_string(), head.to_string()),
+    ]
+}
+
+/// Resolve the emulator-level injection for a session by reading its
+/// on-disk definition, resolving its profile, and dispatching to the
+/// configured [`EmulatorKind`]'s [`EmulatorBackend`] implementation to
+/// compute the env vars / `LD_PRELOAD` it needs.
+///
+/// Returns an empty [`InjectionDef`] for emulators that need no
+/// injection (`noop`). Errors when a configured emulator cannot produce
+/// its required assets or its runtime library is missing, so a
+/// misconfigured session fails loudly instead of silently running
+/// unemulated.
+fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
+    let profile = resolve_profile(session)?;
+    match profile.emulator.emulator {
+        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::new(profile).injection_def(session),
+        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::new(profile).injection_def(session),
+        EmulatorKind::Noop => mirage_core::emulator::Noop::new(profile).injection_def(session),
+    }
+}
+
+/// Run a single exec.
+///
+/// `host_rank` scopes which node(s) this host is responsible for:
+///
+/// * `None` — the orchestrator host of a *non*-containerised session:
+///   it spawns every node directly on the real host and aggregates the
+///   exec status. (The orchestrator of a containerised session never
+///   calls this; its per-node hosts do.)
+/// * `Some(rank)` — a per-node host running *inside* its container:
+///   it spawns only its own `rank` as a direct child of itself,
+///   inheriting the container's environment (which already carries the
+///   emulator injection). Rank 0 additionally aggregates every node's
+///   status; other ranks only publish their own node files.
+async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
     let def: ExecDef = read_json(&layout.def())?;
-    // Resolve the emulator-level injection (env vars, LD_PRELOAD, ...)
-    // for this exec's session. For a rocjitsu session this is what wires
-    // `LD_PRELOAD=librocjitsu_kmd.so` plus `RJ_CONFIG`/`RJ_SCHEMA` into
-    // every spawned child so the workload actually runs under emulation.
-    let injection = resolve_injection(&def.session)?;
+    // Only the aggregator (rank 0, or the non-containerised orchestrator)
+    // publishes the exec-wide `status.json`; other per-node hosts only
+    // write their own node files so concurrent hosts never race on it.
+    let is_aggregator = matches!(host_rank, None | Some(0));
     let mut status = ExecStatus {
         started: false,
         ended: false,
@@ -299,63 +603,155 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
         ended_at: None,
         nodes: Default::default(),
     };
-    write_json(&layout.status(), &status)?;
+    if is_aggregator {
+        write_json(&layout.status(), &status)?;
+    }
 
-    // Determine node count. For now: head is node 0; if worker_exec is
-    // set, spawn one worker on nodes 1..N where N comes from the
-    // session's profile. We don't have direct access to the profile
-    // here without a parse, so just spawn head-only for now and let
-    // workers be added when we wire emulator-level injection.
-    let mut handles = Vec::new();
-    let head_layout = layout.node(0);
-    std::fs::create_dir_all(&head_layout.root).map_err(|e| MirageError::Io {
-        path: head_layout.root.clone(),
-        source: e,
-    })?;
-    let head = match spawn_node(&def, 0, head_layout.clone(), &injection) {
-        Ok(head) => head,
+    // Resolve how many nodes to spawn and how they reach the head.
+    //
+    // * Containerised sessions: the container bring-up already decided
+    //   the node count and head port and recorded them, so we read that
+    //   back and run each node's command *inside* its container via the
+    //   provider's `exec`. The head is reachable by its container name.
+    // * Non-containerised sessions: the node count comes from the
+    //   profile's topology (defaulting to 1), the head listens on
+    //   loopback, and we pick an ephemeral port per exec.
+    let session_layout = SessionLayout::for_id(&def.session);
+    let container_state: Option<ContainerState> = read_json_opt(&session_layout.container_json())?;
+    let (node_count, head_port, head_addr) = match &container_state {
+        Some(state) => (
+            state.nodes.len().max(1) as u32,
+            state.head_port,
+            container_name(&def.session, 0),
+        ),
+        None => {
+            let profile = resolve_profile(&def.session)?;
+            (
+                resolve_node_count(&profile)?,
+                pick_head_port(),
+                "127.0.0.1".to_string(),
+            )
+        }
+    };
+
+    // This host runs only the rank(s) it owns: a per-node in-container
+    // host runs just its own rank; the non-containerised orchestrator
+    // runs every node.
+    let in_container = host_rank.is_some();
+    let ranks: Vec<u32> = match host_rank {
+        Some(r) => vec![r],
+        None => (0..node_count).collect(),
+    };
+
+    tracing::info!(
+        session = %def.session,
+        command = %def.exec.command,
+        nodes = ranks.len(),
+        "running exec"
+    );
+
+    // Resolve the emulator-level injection (env vars, LD_PRELOAD, ...)
+    // for this exec's session. For a rocjitsu session this is what wires
+    // `LD_PRELOAD=librocjitsu_kmd.so` plus `RJ_CONFIG`/`RJ_SCHEMA` into
+    // every spawned child so the workload actually runs under emulation.
+    //
+    // Crucially, this happens *after* the initial `status.json` and node
+    // ranks are known: when injection resolution fails (e.g. the
+    // emulator's runtime library is missing inside a node container) we
+    // must record a terminal failure for every rank we own. Otherwise the
+    // exec would have no `status.json` reporting `ended`, and an attached
+    // client (`mirage run`) would block forever waiting for an exit that
+    // never comes.
+    let injection = match resolve_injection(&def.session) {
+        Ok(injection) => injection,
         Err(e) => {
-            // Spawning the node failed (e.g. the command doesn't exist).
-            // Rather than leaving the exec stuck in a perpetual "started
-            // but never ended" state, surface the reason on the node's
-            // stderr (which attach clients tail) and finish the exec with
-            // the conventional 127 "command not found" exit code.
-            let msg = format!("mirage: {e}\n");
-            let _ = std::fs::write(head_layout.stderr(), msg.as_bytes());
-            let _ = write_bytes(&head_layout.exit_code(), b"127");
+            tracing::error!(session = %def.session, "exec setup failed: {e}");
+            for &rank in &ranks {
+                let nlayout = layout.node(rank);
+                let _ = std::fs::create_dir_all(&nlayout.root);
+                let _ = std::fs::write(nlayout.stdout(), format!("mirage: {e}\n").as_bytes());
+                let _ = write_bytes(&nlayout.exit_code(), b"127");
+                status.nodes.insert(
+                    rank,
+                    NodeStatus {
+                        pid: None,
+                        exit_code: Some(127),
+                    },
+                );
+            }
             status.started = true;
             status.ended = true;
             status.ended_at = Some(Utc::now());
             status.exit_code = Some(127);
-            status.nodes.insert(
-                0,
-                NodeStatus {
-                    pid: None,
-                    exit_code: Some(127),
-                },
-            );
-            write_json(&layout.status(), &status)?;
-            if !def.keep {
-                let _ = std::fs::remove_dir_all(&layout.root);
+            if is_aggregator {
+                write_json(&layout.status(), &status)?;
             }
             return Ok(());
         }
     };
-    status.started = true;
-    status.nodes.insert(
-        0,
-        NodeStatus {
-            pid: Some(head.pid),
-            exit_code: None,
-        },
-    );
-    write_json(&layout.status(), &status)?;
-    handles.push((0u32, head, head_layout));
 
-    let mut overall_code: i32 = 0;
+    let mut handles = Vec::new();
+    for rank in ranks {
+        let nlayout = layout.node(rank);
+        std::fs::create_dir_all(&nlayout.root).map_err(|e| MirageError::Io {
+            path: nlayout.root.clone(),
+            source: e,
+        })?;
+        let mirage_env = node_mirage_env(rank, &head_addr, head_port);
+        match spawn_node(
+            &def,
+            rank,
+            nlayout.clone(),
+            &injection,
+            &mirage_env,
+            in_container,
+        ) {
+            Ok(node) => {
+                status.started = true;
+                tracing::debug!(rank, pid = node.pid, "spawned node");
+                status.nodes.insert(
+                    rank,
+                    NodeStatus {
+                        pid: Some(node.pid),
+                        exit_code: None,
+                    },
+                );
+                handles.push((rank, node, nlayout));
+            }
+            Err(e) => {
+                // Spawning the node failed (e.g. the command doesn't
+                // exist). Rather than leaving the exec stuck in a
+                // perpetual "started but never ended" state, surface the
+                // reason on the node's stdout (which attach clients tail)
+                // and record the conventional 127 "command not found"
+                // exit code for this node.
+                let msg = format!("mirage: {e}\n");
+                let _ = std::fs::write(nlayout.stdout(), msg.as_bytes());
+                let _ = write_bytes(&nlayout.exit_code(), b"127");
+                status.started = true;
+                status.nodes.insert(
+                    rank,
+                    NodeStatus {
+                        pid: None,
+                        exit_code: Some(127),
+                    },
+                );
+            }
+        }
+    }
+    if is_aggregator {
+        write_json(&layout.status(), &status)?;
+    }
+
+    let mut overall_code: i32 = status
+        .nodes
+        .values()
+        .filter_map(|n| n.exit_code)
+        .fold(0, |acc, c| if c.abs() > acc.abs() { c } else { acc });
     for (node, child, nlayout) in handles {
         let code = wait_node(child).await;
         write_bytes(&nlayout.exit_code(), code.to_string().as_bytes())?;
+        tracing::debug!(node, code, "node exited");
         status.nodes.insert(
             node,
             NodeStatus {
@@ -367,10 +763,39 @@ async fn run_exec(layout: ExecLayout) -> Result<()> {
             overall_code = code;
         }
     }
+
+    // Rank 0 of a multi-node containerised session aggregates the other
+    // ranks: each per-node host writes its own `exit_code` file, so we
+    // wait for those to appear and fold them into the exec-wide status.
+    // (For a single-node session or the non-containerised orchestrator
+    // this loop has nothing to wait on.)
+    if is_aggregator {
+        for rank in 0..node_count {
+            if status.nodes.get(&rank).and_then(|n| n.exit_code).is_some() {
+                continue;
+            }
+            let nlayout = layout.node(rank);
+            let code = await_node_exit_code(&nlayout).await;
+            status.nodes.insert(
+                rank,
+                NodeStatus {
+                    pid: status.nodes.get(&rank).and_then(|s| s.pid),
+                    exit_code: Some(code),
+                },
+            );
+            if code.abs() > overall_code.abs() {
+                overall_code = code;
+            }
+        }
+    }
+
     status.ended = true;
     status.ended_at = Some(Utc::now());
     status.exit_code = Some(overall_code);
-    write_json(&layout.status(), &status)?;
+    if is_aggregator {
+        write_json(&layout.status(), &status)?;
+    }
+    tracing::info!(session = %def.session, exit_code = overall_code, "exec finished");
 
     // If the exec is keep=false, remove the directory.
     if !def.keep {
@@ -392,19 +817,36 @@ struct SpawnedNode {
     bridge: tokio::task::JoinHandle<()>,
 }
 
+/// Wait for a node's `exit_code` file (written by that node's own host)
+/// to appear and return the code it records. Used by rank 0 to collect
+/// the other ranks' results in a multi-node containerised session.
+async fn await_node_exit_code(nlayout: &mirage_core::paths::NodeLayout) -> i32 {
+    loop {
+        if let Ok(s) = std::fs::read_to_string(nlayout.exit_code()) {
+            if let Ok(code) = s.trim().parse::<i32>() {
+                return code;
+            }
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
 fn spawn_node(
     def: &ExecDef,
     node: u32,
     nlayout: mirage_core::paths::NodeLayout,
     injection: &InjectionDef,
+    mirage_env: &[(String, String)],
+    in_container: bool,
 ) -> Result<SpawnedNode> {
-    // Pick the args for this node.
+    // Pick the args for this node. The head (rank 0) runs `def.exec`;
+    // workers run `worker_exec` when set, otherwise they reuse the head's
+    // command so a multi-node session runs the same workload everywhere
+    // unless a distinct worker command was provided.
     let args = if node == 0 {
         &def.exec
-    } else if let Some(w) = &def.worker_exec {
-        w
     } else {
-        return Err(MirageError::other("no worker exec for non-head node"));
+        def.worker_exec.as_ref().unwrap_or(&def.exec)
     };
 
     // Create FIFO for stdin. The control plane (`session_stdin`) writes
@@ -414,23 +856,14 @@ fn spawn_node(
         mkfifo(&stdin_path, Mode::S_IRUSR | Mode::S_IWUSR)
             .map_err(|e| MirageError::other(format!("mkfifo {stdin_path:?}: {e}")))?;
     }
-    // Create the stdout file (the bridge appends merged PTY output here)
-    // and an empty stderr file (the PTY merges stderr into stdout, but
-    // attach clients still tail the stderr path, so it must exist).
+    // Create the stdout file (the bridge appends merged PTY output here;
+    // the child's stderr is merged into stdout by the PTY).
     let stdout_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(nlayout.stdout())
         .map_err(|e| MirageError::Io {
             path: nlayout.stdout(),
-            source: e,
-        })?;
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(nlayout.stderr())
-        .map_err(|e| MirageError::Io {
-            path: nlayout.stderr(),
             source: e,
         })?;
 
@@ -459,44 +892,85 @@ fn spawn_node(
         source: e,
     })?;
     let slave_err = slave.try_clone().map_err(|e| MirageError::Io {
-        path: nlayout.stderr(),
+        path: nlayout.stdout(),
         source: e,
     })?;
 
-    let mut cmd = tokio::process::Command::new(&args.command);
-    cmd.args(&args.args)
-        .stdin(Stdio::from(slave_in))
-        .stdout(Stdio::from(slave_out))
-        .stderr(Stdio::from(slave_err))
-        .env_clear()
-        // inherit a minimal environment by default
-        .envs(std::env::vars().filter(|(k, _)| {
-            matches!(
-                k.as_str(),
-                "PATH" | "HOME" | "USER" | "LANG" | "LC_ALL" | "TERM" | "TMPDIR"
-            )
-        }))
-        // Make sure programs that consult $TERM behave like a real
-        // terminal even if the host's own environment has none set.
-        .env("TERM", std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()))
-        // Emulator-provided env (e.g. rocjitsu's RJ_CONFIG / RJ_SCHEMA)
-        // is applied before the user's env so an explicit exec env can
-        // still override it if needed.
-        .envs(&injection.env)
-        .envs(&args.env);
-    // `LD_PRELOAD` is special: the emulator's interposer must stay on the
-    // preload list, so combine it with any user-supplied value rather than
-    // letting one clobber the other.
+    // Build the combined environment that the workload should see. The
+    // emulator injection is applied first, then the user's exec env, then
+    // the always-present mirage variables (rank/head addr/port), so the
+    // mirage variables can't be accidentally clobbered. `LD_PRELOAD` is
+    // special-cased so the emulator's interposer is preserved alongside
+    // any user-supplied value rather than one clobbering the other.
+    let mut workload_env: BTreeMap<String, String> = BTreeMap::new();
+    for (k, v) in &injection.env {
+        workload_env.insert(k.clone(), v.clone());
+    }
+    for (k, v) in &args.env {
+        workload_env.insert(k.clone(), v.clone());
+    }
+    for (k, v) in mirage_env {
+        workload_env.insert(k.clone(), v.clone());
+    }
     if let Some(preload) = &injection.ld_preload {
         let combined = match args.env.get("LD_PRELOAD") {
             Some(user) if !user.is_empty() => format!("{preload}:{user}"),
             _ => preload.clone(),
         };
-        cmd.env("LD_PRELOAD", combined);
+        workload_env.insert("LD_PRELOAD".to_string(), combined);
     }
-    if let Some(wd) = &args.workdir {
-        cmd.current_dir(wd);
-    }
+
+    let mut cmd = if in_container {
+        // Per-node host running *inside* its container: spawn the workload
+        // as a direct child of this host. We inherit the container's full
+        // environment (which the orchestrator populated with the emulator
+        // injection at `podman run -e`) and layer the per-exec workload
+        // env on top, so `LD_PRELOAD`/library paths resolve at their
+        // mounted container locations.
+        let mut cmd = tokio::process::Command::new(&args.command);
+        cmd.args(&args.args)
+            .stdin(Stdio::from(slave_in))
+            .stdout(Stdio::from(slave_out))
+            .stderr(Stdio::from(slave_err))
+            // Inherit the container environment as-is, then apply the
+            // workload env (rank/head/user/injection) over it.
+            .env(
+                "TERM",
+                std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()),
+            )
+            .envs(&workload_env);
+        if let Some(wd) = &args.workdir {
+            cmd.current_dir(wd);
+        }
+        cmd
+    } else {
+        // Non-containerised: run the workload directly on the host with a
+        // minimal inherited environment plus the computed workload env.
+        let mut cmd = tokio::process::Command::new(&args.command);
+        cmd.args(&args.args)
+            .stdin(Stdio::from(slave_in))
+            .stdout(Stdio::from(slave_out))
+            .stderr(Stdio::from(slave_err))
+            .env_clear()
+            // inherit a minimal environment by default
+            .envs(std::env::vars().filter(|(k, _)| {
+                matches!(
+                    k.as_str(),
+                    "PATH" | "HOME" | "USER" | "LANG" | "LC_ALL" | "TERM" | "TMPDIR"
+                )
+            }))
+            // Make sure programs that consult $TERM behave like a real
+            // terminal even if the host's own environment has none set.
+            .env(
+                "TERM",
+                std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".into()),
+            )
+            .envs(&workload_env);
+        if let Some(wd) = &args.workdir {
+            cmd.current_dir(wd);
+        }
+        cmd
+    };
 
     // After fork, in the child: start a new session and make the PTY our
     // controlling terminal. By the time these closures run, the standard
@@ -556,10 +1030,13 @@ fn spawn_node(
 
     // Make the master and FIFO read end non-blocking for AsyncFd.
     for fd in [master.as_raw_fd(), fifo_read.as_raw_fd()] {
-        unsafe {
-            let flags = libc::fcntl(fd, libc::F_GETFL);
-            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
-        }
+        let flags = nix::fcntl::fcntl(fd, nix::fcntl::FcntlArg::F_GETFL)
+            .map(nix::fcntl::OFlag::from_bits_truncate)
+            .unwrap_or(nix::fcntl::OFlag::empty());
+        let _ = nix::fcntl::fcntl(
+            fd,
+            nix::fcntl::FcntlArg::F_SETFL(flags | nix::fcntl::OFlag::O_NONBLOCK),
+        );
     }
 
     let bridge = tokio::spawn(async move {
@@ -573,24 +1050,14 @@ fn spawn_node(
     Ok(SpawnedNode { child, pid, bridge })
 }
 
-/// Read a fd into `buf`, mapping a negative return into the last OS error.
+/// Read a fd into `buf`, mapping a nix error into the last OS error.
 fn raw_read(fd: std::os::fd::RawFd, buf: &mut [u8]) -> std::io::Result<usize> {
-    let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-    if n < 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(n as usize)
-    }
+    nix::unistd::read(fd, buf).map_err(std::io::Error::from)
 }
 
-/// Write `buf` to a fd, mapping a negative return into the last OS error.
-fn raw_write(fd: std::os::fd::RawFd, buf: &[u8]) -> std::io::Result<usize> {
-    let n = unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len()) };
-    if n < 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(n as usize)
-    }
+/// Write `buf` to a fd, mapping a nix error into the last OS error.
+fn raw_write<Fd: std::os::fd::AsFd>(fd: Fd, buf: &[u8]) -> std::io::Result<usize> {
+    nix::unistd::write(fd, buf).map_err(std::io::Error::from)
 }
 
 /// Bridge a node's PTY for its whole lifetime:
@@ -657,10 +1124,9 @@ async fn write_all_to_master(
     master: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
     mut data: &[u8],
 ) -> std::io::Result<()> {
-    use std::os::fd::AsRawFd;
     while !data.is_empty() {
         let mut guard = master.writable().await?;
-        match guard.try_io(|inner| raw_write(inner.get_ref().as_raw_fd(), data)) {
+        match guard.try_io(|inner| raw_write(inner.get_ref(), data)) {
             Ok(Ok(0)) => break,
             Ok(Ok(n)) => data = &data[n..],
             Ok(Err(e)) => return Err(e),

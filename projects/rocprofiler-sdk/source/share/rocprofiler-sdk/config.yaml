@@ -10926,6 +10926,54 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TD_COALESCABLE_WAVEFRONT,sum)
+    - name: TD_INPUT_BUSY
+      description: TD input subblock is busy or waiting for data. This means the instruction, state 
+        or TC data fifos may not be empty or the TD is processing a wave. Perf_Windowing not 
+        supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 2
+    - name: TD_INPUT_BUSY_sum
+      description: TD input subblock is busy or waiting for data. This means the instruction, state 
+        or TC data fifos may not be empty or the TD is processing a wave. Perf_Windowing not 
+        supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_INPUT_BUSY,sum)
+    - name: TD_LDS_STALL
+      description: TD is stalled because it has run out of credits and it has data waiting to be 
+        sent out to the LDS. Perf_Windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 43
+    - name: TD_LDS_STALL_sum
+      description: TD is stalled because it has run out of credits and it has data waiting to be 
+        sent out to the LDS. Perf_Windowing not supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_LDS_STALL,sum)
     - name: TD_LOAD_WAVEFRONT
       description: Count the wavefronts with opcode = load, include atomics and store.
       properties: []
@@ -10955,6 +11003,106 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TD_LOAD_WAVEFRONT,sum)
+    - name: TD_NOFILTER_BUSY
+      description: TD no_filter subblock is busy. This means the TD's no_filter pipeline (decode, 
+        format, data swizzle, data packing) could be processing non-sampler data. Perf_Windowing not
+        supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 5
+    - name: TD_NOFILTER_BUSY_sum
+      description: TD no_filter subblock is busy. This means the TD's no_filter pipeline (decode, 
+        format, data swizzle, data packing) could be processing non-sampler data. Perf_Windowing not
+        supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_NOFILTER_BUSY,sum)
+    - name: TD_RAY_TRACING_BVH4_BUSY
+      description: TD ray tracing subblock is busy. This means the TD's raytracing pipeline (box and
+        triangle test pipeline) could be processing a thread. Perf_Windowing not supported for this 
+        counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 6
+    - name: TD_RAY_TRACING_BVH4_BUSY_sum
+      description: TD ray tracing subblock is busy. This means the TD's raytracing pipeline (box and
+        triangle test pipeline) could be processing a thread. Perf_Windowing not supported for this 
+        counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_RAY_TRACING_BVH4_BUSY,sum)
+    - name: TD_SAMPLER_LERP_BUSY
+      description: TD filter subblock is busy, which means any of the four lerps has pixel data 
+        flowing down its pipeline (blend, accumulation, format). Perf_Windowing not supported for 
+        this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 3
+    - name: TD_SAMPLER_LERP_BUSY_sum
+      description: TD filter subblock is busy, which means any of the four lerps has pixel data 
+        flowing down its pipeline (blend, accumulation, format). Perf_Windowing not supported for 
+        this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_SAMPLER_LERP_BUSY,sum)
+    - name: TD_SAMPLER_OUT_BUSY
+      description: TD sampler output subblock is busy. This means the TD's sampler output pipeline 
+        (accumulation, data swizzle, data packing) could be processing pixel data. Perf_Windowing 
+        not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 4
+    - name: TD_SAMPLER_OUT_BUSY_sum
+      description: TD sampler output subblock is busy. This means the TD's sampler output pipeline 
+        (accumulation, data swizzle, data packing) could be processing pixel data. Perf_Windowing 
+        not supported for this counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_SAMPLER_OUT_BUSY,sum)
     - name: TD_SPI_STALL
       description: TD is stalled SPI vinit
       properties: []
@@ -11009,10 +11157,62 @@ rocprofiler-sdk:
             - gfx942
             - gfx950
           expression: reduce(TD_STORE_WAVEFRONT,sum)
+    - name: TD_TA_DATA_STALL
+      description: TD is stalled waiting for TA data. Perf_Windowing not supported for this counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 40
+    - name: TD_TA_DATA_STALL_sum
+      description: TD is stalled waiting for TA data. Perf_Windowing not supported for this counter.
+        Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_TA_DATA_STALL,sum)
+    - name: TD_TC_RAM_STALL
+      description: TD is stalled waiting for a TC ram request. Perf_Windowing not supported for this
+        counter.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 42
+    - name: TD_TC_RAM_STALL_sum
+      description: TD is stalled waiting for a TC ram request. Perf_Windowing not supported for this
+        counter. Sum over TD instances.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          expression: reduce(TD_TC_RAM_STALL,sum)
     - name: TD_TC_STALL
       description: TD is stalled waiting for TC data.
       properties: []
       definitions:
+        - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
+          block: TD
+          event: 41
         - architectures:
             - gfx90a
             - gfx908
@@ -11030,6 +11230,10 @@ rocprofiler-sdk:
       properties: []
       definitions:
         - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
             - gfx90a
             - gfx908
             - gfx940
@@ -11043,6 +11247,10 @@ rocprofiler-sdk:
       properties: []
       definitions:
         - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
             - gfx90a
             - gfx908
             - gfx940
@@ -11057,6 +11265,10 @@ rocprofiler-sdk:
       properties: []
       definitions:
         - architectures:
+            - gfx1150
+            - gfx1151
+            - gfx1152
+            - gfx1153
             - gfx90a
             - gfx908
             - gfx940

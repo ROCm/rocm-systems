@@ -42,8 +42,11 @@ template <typename T, typename Op>
 inline util::native<T> read_simd(const Op &op, const Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_simd: T must be a 32-bit lane type");
   const uint32_t *p = SimdAccess::lane_ptr(op, wf, lane_base);
-  if (p)
+  if (p) {
+    constexpr auto W = static_cast<uint32_t>(util::native_width_v<T>);
+    SimdAccess::notify_read(op, wf, lane_base, lane_base + W, 0xF);
     return util::load<T>(p);
+  }
   return util::broadcast<T>(op.read_scalar(wf));
 }
 
