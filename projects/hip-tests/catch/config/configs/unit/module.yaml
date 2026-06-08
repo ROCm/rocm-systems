@@ -163,7 +163,7 @@ module:
     disabled: [nvidia_windows]
     tags: [load]
   Unit_hipModuleLoad_Positive_NoFdLeak:
-    <<: *level_2
+    <<: *level_default
     disabled: [windows, nvidia_windows]
     tags: [load]
   Unit_hipFuncSetSharedMemConfig_functional:
