@@ -852,7 +852,8 @@ class GpuAgent : public GpuAgentInt {
       const void* const* src_list,
       void* const* dst_list,
       const hsa_agent_t* dst_agent_list,
-      const size_t* size_list);
+      const size_t* size_list,
+      const size_t* dst_size_list);
 
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);

@@ -6019,6 +6019,38 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                size_t* failIdx, hipStream_t stream __dparm(0));
 
 /**
+ * @brief Perform Batch of 1D copies with extended operation support.
+ *
+ * Extended version of hipMemcpyBatchAsync with per-entry operation flags,
+ * asymmetric swap sizes, and optional GPU-side wait/signal conditions.
+ *
+ * @param [in] dsts        - Array of destination pointers.
+ * @param [in] srcs        - Array of source pointers.
+ * @param [in] sizesA      - Array of A-side copy sizes in bytes.
+ * @param [in] sizesB      - Array of B-side sizes for swap (NULL = symmetric).
+ * @param [in] waits       - Reserved for future use. Must be NULL.
+ * @param [in] signals     - Reserved for future use. Must be NULL.
+ * @param [in] ops         - Per-entry operation type (NULL = all linear copy).
+ *                            See hipExtMemcpyOp for valid values.
+ * @param [in] count       - Number of copy operations.
+ * @param [in] attrs       - Array of hipMemcpyAttributes (CUDA-compatible fields).
+ * @param [in] attrsIdxs   - Array mapping attributes to copy index ranges.
+ * @param [in] numAttrs    - Number of entries in attrs/attrsIdxs.
+ * @param [out] failIdx    - Index of first failed copy.
+ * @param [in] stream      - Stream to execute on.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ */
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizesA, size_t* sizesB,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  hipExtMemcpyOp* ops,
+                                  size_t count,
+                                  hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  size_t* failIdx, hipStream_t stream __dparm(0));
+
+/**
  * @brief Perform Batch of 3D copies
  *
  * @param [in] numOps  - Total number of memcpy operations.

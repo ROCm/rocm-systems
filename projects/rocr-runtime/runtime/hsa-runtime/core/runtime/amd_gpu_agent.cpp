@@ -1428,7 +1428,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     const void* const* src_list,
     void* const* dst_list,
     const hsa_agent_t* dst_agent_list,
-    const size_t* size_list) {
+    const size_t* size_list,
+    const size_t* dst_size_list) {
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
@@ -1589,7 +1590,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
         stat = engines[d].blit->SubmitLinearSwapBodyWaitSignal(
             dst_list[d], const_cast<void*>(src_list[d]),
-            size_list[d], size_list[d],
+            size_list[d], dst_size_list[d],
             *body_deps_ptr, out_signal);
         break;
       case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
@@ -1716,7 +1717,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = waitsignal_body
           ? engines[d].blit->SubmitLinearSwapBodyWaitSignal(
                 dst_list[d], const_cast<void*>(src_list[d]),
-                size_list[d], size_list[d],
+                size_list[d], dst_size_list[d],
                 body_deps, out_signal)
           : engines[d].blit->SubmitLinearSwapBody(
                 dst_list[d], const_cast<void*>(src_list[d]), size_list[d],
@@ -1829,7 +1830,7 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
 
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal, dep_signals,
                          num_entries, srcs.data(), op.dst_list,
-                         op.dst_agent_list, sizes.data());
+                         op.dst_agent_list, sizes.data(), sizes.data());
 }
 
 hsa_status_t GpuAgent::DmaCopyMulti(
@@ -1894,7 +1895,8 @@ hsa_status_t GpuAgent::DmaCopyMulti(
 
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR, out_signal, dep_signals,
                          num_entries, const_cast<const void* const*>(op.src_list),
-                         op.dst_list, op.dst_agent_list, op.size_list);
+                         op.dst_list, op.dst_agent_list,
+                         op.size_list, op.size_list);
 }
 
 hsa_status_t GpuAgent::DmaCopySwap(
@@ -1905,23 +1907,24 @@ hsa_status_t GpuAgent::DmaCopySwap(
   core::Signal& out_signal = *out_signal_obj;
 
   if (op.num_entries == 0) {
-    // Asymmetric swap is not yet supported here.
-    if (op.src_size != op.dst_size)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-
-    const void* src_arr[1] = { op.src };
-    void* dst_arr[1] = { op.dst };
-    hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
-    size_t size_arr[1] = { op.src_size };
+    // Single-entry swap with separate src_size/dst_size (asymmetric support).
+    const void* src_arr[] = {op.src};
+    void* dst_arr[] = {op.dst};
+    hsa_agent_t dst_agent_arr[] = {op.dst_agent};
+    size_t src_sizes[] = {op.src_size};
+    size_t dst_sizes[] = {op.dst_size};
     return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                            dep_signals, 1,
-                           src_arr, dst_arr, dst_agent_arr, size_arr);
+                           src_arr, dst_arr, dst_agent_arr,
+                           src_sizes, dst_sizes);
   }
 
+  // Multi-entry: symmetric swap, dst_size_list == size_list
   return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal,
                          dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),
-                         op.dst_list, op.dst_agent_list, op.size_list);
+                         op.dst_list, op.dst_agent_list,
+                         op.size_list, op.size_list);
 }
 
 hsa_status_t GpuAgent::DmaCopyIndirect(
@@ -1943,12 +1946,13 @@ hsa_status_t GpuAgent::DmaCopyIndirect(
     hsa_agent_t dst_agent_arr[1] = { op.dst_agent };
     size_t size_arr[1] = { op.size };
     return DmaCopyFanOutOp(op_type, out_signal, dep_signals, 1,
-                           src_arr, dst_arr, dst_agent_arr, size_arr);
+                           src_arr, dst_arr, dst_agent_arr, size_arr, size_arr);
   }
 
   return DmaCopyFanOutOp(op_type, out_signal, dep_signals, op.num_entries,
                          const_cast<const void* const*>(op.src_list),
-                         op.dst_list, op.dst_agent_list, op.size_list);
+                         op.dst_list, op.dst_agent_list,
+                         op.size_list, op.size_list);
 }
 
 hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,

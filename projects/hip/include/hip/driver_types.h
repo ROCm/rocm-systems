@@ -460,11 +460,56 @@ typedef enum hipMemcpyFlags {
   hipMemcpyFlagPreferOverlapWithCompute = 0x1, ///< Tries to overlap copy with compute work.
   hipMemcpyFlagExtPreferCE = 0x100,            ///< Prefer copy engine over compute engine.
   hipMemcpyFlagExtOpSwap = 0x200,              ///< Swap contents of src and dst.
-  hipMemcpyFlagExtOpIndirectSrc = 0x400,       ///< The src pointer holds the address of the real
-                                               ///< source pointer, read when the copy runs rather
-                                               ///< than when it is submitted.
-  hipMemcpyFlagExtOpIndirectDst = 0x800        ///< Same as IndirectSrc, but for the dst pointer.
 } hipMemcpyFlags;
+
+/**
+ * Comparison operations for hipExtMemcpyWait.
+ */
+typedef enum hipExtMemcpyWaitCmpOp {
+  hipExtMemcpyWaitCmpEQ = 0x3,  ///< Equal
+  hipExtMemcpyWaitCmpNE = 0x4,  ///< Not equal
+} hipExtMemcpyWaitCmpOp;
+
+/**
+ * Signal operations for hipExtMemcpySignal.
+ */
+typedef enum hipExtMemcpySignalOp {
+  hipExtMemcpySignalOpSub64b   = 0x70,  ///< 64-bit atomic subtract
+  hipExtMemcpySignalOpWrite32b = 0x20,  ///< 32-bit atomic write
+} hipExtMemcpySignalOp;
+
+/**
+ * Per-entry wait condition for hipExtMemcpyBatchAsync.
+ * The SDMA engine polls addr in hardware until ((*addr & mask) compareOp value).
+ */
+typedef struct hipExtMemcpyWait {
+  void*    addr;       ///< GPU address to poll (NULL = no wait, use stream ordering)
+  uint64_t value;      ///< Reference value for comparison
+  uint64_t mask;       ///< AND mask applied before comparison
+  uint32_t compareOp;  ///< Comparison function (hipExtMemcpyWaitCmpOp)
+} hipExtMemcpyWait;
+
+/**
+ * Per-entry signal-after-copy for hipExtMemcpyBatchAsync.
+ * The SDMA engine performs an atomic operation on addr after the copy completes.
+ */
+typedef struct hipExtMemcpySignal {
+  void*    addr;       ///< GPU address to signal (NULL = no signal)
+  uint64_t data;       ///< Data value for the atomic operation
+  uint32_t signalOp;   ///< Atomic operation (hipExtMemcpySignalOp)
+} hipExtMemcpySignal;
+
+/**
+ * Per-entry operation type for hipExtMemcpyBatchAsync.
+ * Values can be combined with bitwise OR for indirect operations.
+ */
+typedef enum hipExtMemcpyOp {
+  hipExtMemcpyOpDefault        = 0x0,  ///< Regular linear copy
+  hipExtMemcpyOpSwap           = 0x1,  ///< Swap contents of A and B
+  hipExtMemcpyOpIndirectSrc    = 0x2,  ///< src is void** (late-bound at execution)
+  hipExtMemcpyOpIndirectDst    = 0x4,  ///< dst is void** (late-bound at execution)
+} hipExtMemcpyOp;
+
 
 /**
  * Flags to specify order in which source pointer is accessed by Batch memcpy

@@ -622,6 +622,7 @@ global:
     hipStreamSetAttribute;
     hipModuleLoadFatBinary;
     hipMemcpyBatchAsync;
+    hipExtMemcpyBatchAsync;
     hipMemcpy3DBatchAsync;
     hipMemcpy3DPeer;
     hipMemcpy3DPeerAsync;

@@ -1153,18 +1153,34 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
 };
 
 //! Structure to hold individual copy operation info for batch copies
+struct BatchCopyWait {
+  void*    addr{nullptr};  //!< GPU address to poll (nullptr = no wait)
+  uint64_t value{0};       //!< Reference value
+  uint64_t mask{0};        //!< AND mask
+  uint32_t compareOp{0};   //!< Comparison function
+};
+
+struct BatchCopySignal {
+  void*    addr{nullptr};  //!< GPU address to signal (nullptr = no signal)
+  uint64_t data{0};        //!< Data for atomic op
+  uint32_t signalOp{0};    //!< Atomic operation
+};
+
 struct BatchCopyOp {
   Memory* srcMemory;       //!< Source memory object
   Memory* dstMemory;       //!< Destination memory object
   size_t srcOffset;        //!< Offset in source buffer
   size_t dstOffset;        //!< Offset in destination buffer
   size_t size;             //!< Size of the copy in bytes
+  size_t sizeB{0};         //!< For swap: B-side size (0 = symmetric, same as size)
   CopyMetadata metadata;   //!< Copy metadata for this operation
+  BatchCopyWait wait;      //!< Per-entry wait condition
+  BatchCopySignal signal;  //!< Per-entry signal-after-copy
 
   BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
-              size_t sz, CopyMetadata meta = CopyMetadata())
+              size_t sz, CopyMetadata meta = CopyMetadata(), size_t szB = 0)
       : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
-        dstOffset(dstOff), size(sz), metadata(meta) {}
+        dstOffset(dstOff), size(sz), sizeB(szB), metadata(meta) {}
 };
 
 /*! \brief  A batch copy memory command for multiple buffer-to-buffer copies

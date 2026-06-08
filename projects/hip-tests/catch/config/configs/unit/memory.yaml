@@ -791,6 +791,11 @@ memory:
   Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
   Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
   Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_swap_cp: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric_multi_attr: *level_2
+  Unit_hipMemcpyBatchAsync_swap_asymmetric_fallback: *level_2
+  Unit_hipExtMemcpyBatchAsync_entryFlags_swap: *level_2
   Unit_hipMemcpyBatchAsync_NegativeTsts:
     <<: *level_2
     tags: [transfer]

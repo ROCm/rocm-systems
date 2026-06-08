@@ -714,7 +714,7 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     case amd::CopyMetadata::kCopyOpSwap:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
       hsaOp.src_size = op.size;
-      hsaOp.dst_size = op.size;
+      hsaOp.dst_size = (op.sizeB > 0) ? op.sizeB : op.size;
       break;
     case amd::CopyMetadata::kCopyOpIndirectSrc:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC;
@@ -728,6 +728,19 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     default:
       hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
       break;
+    }
+
+    // Map per-entry wait/signal to HSA op fields
+    if (op.wait.addr != nullptr) {
+      hsaOp.wait.function = static_cast<uint16_t>(op.wait.compareOp);
+      hsaOp.wait.addr = op.wait.addr;
+      hsaOp.wait.value = op.wait.value;
+      hsaOp.wait.mask = op.wait.mask;
+    }
+    if (op.signal.addr != nullptr) {
+      hsaOp.signal.operation = static_cast<uint16_t>(op.signal.signalOp);
+      hsaOp.signal.addr = op.signal.addr;
+      hsaOp.signal.data = op.signal.data;
     }
 
     hsaCopyOps.push_back(hsaOp);
@@ -813,6 +826,7 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       std::vector<void*> dsts;
       std::vector<hsa_agent_t> dst_agents;
       std::vector<size_t> sizes;
+      std::vector<size_t> dst_sizes;  // For asymmetric swap
     };
 
     MultiArrays swapPending;
@@ -841,12 +855,12 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     for (const auto& op : ops) {
       if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
-        assert(op.src_size == op.dst_size && "Asymmetric swap not yet supported");
         if (swapPending.srcs.empty()) swapSrcAgent = op.src_agent;
         swapPending.srcs.push_back(op.src);
         swapPending.dsts.push_back(op.dst);
         swapPending.dst_agents.push_back(op.dst_agent);
         swapPending.sizes.push_back(op.src_size);
+        swapPending.dst_sizes.push_back(op.dst_size);
         continue;
       }
       const auto opType = static_cast<hsa_amd_memory_copy_op_type_t>(op.type);
@@ -882,19 +896,47 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 
     // --- Emit SWAP batch ---
     if (!swapPending.srcs.empty()) {
-      multiStore.push_back(std::move(swapPending));
-      auto& stored = multiStore.back();
+      // Check if any swap entry is asymmetric
+      bool has_asymmetric = false;
+      for (size_t i = 0; i < swapPending.sizes.size(); ++i) {
+        if (swapPending.sizes[i] != swapPending.dst_sizes[i]) {
+          has_asymmetric = true;
+          break;
+        }
+      }
 
-      hsa_amd_memory_copy_op_t swap = {};
-      swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
-      swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
-      swap.src_agent = swapSrcAgent;
-      swap.src_list = stored.srcs.data();
-      swap.dst_list = stored.dsts.data();
-      swap.dst_agent_list = stored.dst_agents.data();
-      swap.size_list = stored.sizes.data();
-      swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
-      finalOps.push_back(swap);
+      if (has_asymmetric) {
+        // Emit individual single-entry ops (num_entries=0) with separate
+        // src_size/dst_size to support asymmetric swap via ROCr.
+        for (size_t i = 0; i < swapPending.srcs.size(); ++i) {
+          hsa_amd_memory_copy_op_t swap = {};
+          swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+          swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+          swap.src_agent = swapSrcAgent;
+          swap.src = swapPending.srcs[i];
+          swap.dst = swapPending.dsts[i];
+          swap.dst_agent = swapPending.dst_agents[i];
+          swap.src_size = swapPending.sizes[i];
+          swap.dst_size = swapPending.dst_sizes[i];
+          swap.num_entries = 0;
+          finalOps.push_back(swap);
+        }
+      } else {
+        // Symmetric: batch into multi-entry op
+        multiStore.push_back(std::move(swapPending));
+        auto& stored = multiStore.back();
+
+        hsa_amd_memory_copy_op_t swap = {};
+        swap.version = HSA_AMD_MEMORY_COPY_OP_VERSION;
+        swap.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+        swap.src_agent = swapSrcAgent;
+        swap.src_list = stored.srcs.data();
+        swap.dst_list = stored.dsts.data();
+        swap.dst_agent_list = stored.dst_agents.data();
+        swap.size_list = stored.sizes.data();
+        swap.num_entries = static_cast<uint16_t>(stored.srcs.size());
+        finalOps.push_back(swap);
+      }
     }
 
     // --- Emit LINEAR / BROADCAST batches (one group per src_agent) ---
