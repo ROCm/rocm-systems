@@ -66,8 +66,8 @@ function(rj_configure_target target)
             PRIVATE
                 ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
                 ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src
-                ${HSA_INCLUDE_DIR}
         )
+        target_include_directories(${target} SYSTEM PRIVATE ${HSA_INCLUDE_DIR})
     endif()
     if(ARG_GENERATED)
         target_include_directories(${target} PRIVATE ${GENERATED_DIR})

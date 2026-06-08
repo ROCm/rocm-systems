@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 #include <vector>
 
 namespace rocjitsu::fuzzer::afl::test {
@@ -24,10 +25,10 @@ inline constexpr uint64_t kMinimalAmdGpuElfKernelEntryOffset = kMinimalAmdGpuElf
 
 namespace detail {
 
-inline uint32_t add_elf_name(std::vector<uint8_t> &table, const char *name) {
+inline uint32_t add_elf_name(std::vector<uint8_t> &table, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(table.size());
-  const auto *bytes = reinterpret_cast<const uint8_t *>(name);
-  table.insert(table.end(), bytes, bytes + std::strlen(name) + 1);
+  table.insert(table.end(), name.begin(), name.end());
+  table.push_back('\0');
   return offset;
 }
 
