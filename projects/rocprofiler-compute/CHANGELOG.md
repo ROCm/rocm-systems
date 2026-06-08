@@ -8,9 +8,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available but rocprofiler-sdk is not.
 
-* Added LDS arithmetic intensity as a roofline plot point and analysis database field.
-
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
+
+* PC sampling analysis now lists, for each sampled instruction, the prior instructions it waits on (derived from `s_waitcnt` instructions), so you can see which preceding instructions a sampled instruction depends on when reasoning about stalls.
 
 ### Changed
 
@@ -25,13 +25,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Number of kernel dispatches
     * Min/Max/Mean and Total duration of kernel dispatches
 
-* `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed. The first run builds and caches a helper under `~/.cache/rocprofiler-compute/`, so it takes longer than later runs.
-
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 
 * Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
 
 * Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
+
+* PC sampling collection now uses the native collection tool by default on ROCm >= 7.x. Opt out with `--no-native-tool` to use the prior rocprofiler-sdk path.
+
+* PC sampling records are now collected by the rocprof-compute native tool for both `stochastic` and `host_trap` sampling.
 
 ### Removed
 

@@ -14,6 +14,8 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 
 using namespace rocprofiler_compute_tool;
@@ -116,11 +118,19 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
-    g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                dispatch_callback,
-                                                                user_data,
-                                                                record_callback,
-                                                                user_data);
+    // Configuring the dispatch counting service forces the SDK to parse the
+    // counter definitions file. In PC-sampling-only mode no counters are
+    // requested and that service is unused, so skip it -- otherwise a missing
+    // counter_defs.yaml aborts the run even though no counters are collected.
+    auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+    if (!tool_data->requested_counters.empty())
+    {
+        g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                    dispatch_callback,
+                                                                    user_data,
+                                                                    record_callback,
+                                                                    user_data);
+    }
     g_sdk_wrapper->start_context(get_client_ctx());
 }
 
@@ -135,6 +145,14 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       0,
                                                       tool_tracing_callback,
                                                       user_data);
+
+    auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+    if (tool_data->pc_sampling.enabled())
+    {
+        if (!tool_data->pc_sampling.configure(get_client_ctx(), *g_sdk_wrapper, user_data))
+            std::clog << "[rocprofiler-compute] ERROR: PC sampling method unsupported "
+                         "on this agent; no PC samples will be collected\n";
+    }
     return 0;
 }
 
@@ -161,7 +179,13 @@ void generate_output(tool_data_t* tool_data)
     }
 
     if (tool_data->pc_sampling.enabled())
+    {
+        // The context is stopped by tool_fini before generate_output runs.
+        // Drain the LOSSLESS delivery buffer so samples still below the
+        // watermark reach the record store before finalize() serializes it.
+        tool_data->pc_sampling.flush(*g_sdk_wrapper);
         tool_data->pc_sampling.finalize();
+    }
 }
 
 void tool_fini(void* user_data)
@@ -189,6 +213,29 @@ static std::string generate_output_filename(std::string_view output_path, std::s
     return filename;
 }
 
+static uint64_t parse_interval(std::string_view s)
+{
+    if (s.empty())
+        return 0;
+    try
+    {
+        return std::stoull(std::string{s});
+    }
+    catch (const std::exception&)
+    {
+        return 0;
+    }
+}
+
+static std::string ps_file_path(std::string_view output_path)
+{
+    std::string filename{output_path};
+    if (filename.back() != '/')
+        filename += '/';
+    filename += "ps_file_results.json";
+    return filename;
+}
+
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
@@ -201,7 +248,11 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
         const auto pc_mode = parse_pc_sampling_mode(
             std::string{g_input_parameters->get_pc_sampling_method()});
         tool_data->pc_sampling =
-            pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
+            pc_sampling_feature_t{pc_mode,
+                                  parse_interval(g_input_parameters->get_pc_sampling_interval()),
+                                  std::string{g_input_parameters->get_pc_sampling_unit()},
+                                  generate_output_filename(output_path, "_code_obj_info.json"),
+                                  ps_file_path(output_path)};
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."

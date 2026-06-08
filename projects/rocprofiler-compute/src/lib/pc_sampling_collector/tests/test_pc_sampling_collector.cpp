@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #include "test_pc_sampling_collector.h"
 
+#include "code_object_writer.h"
+#include "nlohmann/json.hpp"
+
 using namespace rocprofiler_compute_tool;
 
 TEST_F(test_pc_sampling_collector_t, ProvidedFileCodeObject_PassesItToDecode)
@@ -81,6 +84,47 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
     const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 0};
     m_translator->add_instruction(instruction);
     EXPECT_THROW(m_pc_sampling_collector->write(*m_writer), std::runtime_error);
+}
+
+TEST_F(test_pc_sampling_collector_t, WriteSerializesInstructionsToJson)
+{
+    // Drive write() through the real JSON writer (not the mock) so the
+    // serialized disassembly shape is exercised end to end.
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    const std::vector<symbol_t> symbols = {{"vecCopy", 0x10, 0x1000, 2}};
+    m_translator->add_symbols(m_file_info.code_object_id, symbols);
+    m_translator->add_instruction({"s_load_b64", "/src/k.hip:42", 0x1000, 0x10, 1});
+
+    code_object_writer_json_t json_writer;
+    m_pc_sampling_collector->write(json_writer);
+
+    const auto json = nlohmann::json::parse(json_writer.get_result());
+    ASSERT_EQ(json["code_objects"].size(), 1u);
+    EXPECT_EQ(json["code_objects"][0]["id"], m_file_info.code_object_id);
+    ASSERT_EQ(json["code_objects"][0]["symbols"].size(), 1u);
+    const auto& symbol = json["code_objects"][0]["symbols"][0];
+    EXPECT_EQ(symbol["name"], "vecCopy");
+    // A size-2 symbol with size-1 instructions yields two emitted instructions.
+    ASSERT_EQ(symbol["instructions"].size(), 2u);
+    EXPECT_EQ(symbol["instructions"][0]["name"], "s_load_b64");
+    EXPECT_EQ(symbol["instructions"][0]["comment"], "/src/k.hip:42");
+}
+
+TEST_F(test_pc_sampling_collector_t, WriteHarvestsSourcePathsForCollect)
+{
+    // write() harvests source paths during its walk; collect_source_paths()
+    // must then return them without a second traversal.
+    m_pc_sampling_collector->on_code_object_load(m_file_info);
+    const std::vector<symbol_t> symbols = {{"vecCopy", 0x10, 0x1000, 2}};
+    m_translator->add_symbols(m_file_info.code_object_id, symbols);
+    m_translator->add_instruction({"s_load_b64", "/src/k.hip:42", 0x1000, 0x10, 1});
+
+    code_object_writer_json_t json_writer;
+    m_pc_sampling_collector->write(json_writer);
+
+    const auto paths = m_pc_sampling_collector->collect_source_paths();
+    ASSERT_EQ(paths.size(), 1u);
+    EXPECT_EQ(paths[0], "/src/k.hip");
 }
 
 void test_pc_sampling_collector_t::SetUp()

@@ -48,7 +48,17 @@ std::string_view EnvInputParameters::get_kernel_filter_range()
 
 std::string_view EnvInputParameters::get_pc_sampling_method()
 {
-    return get("ROCPROF_PC_SAMPLING_METHOD", kDefaultPcSamplingMethod);
+    return get("ROCPROF_NATIVE_PC_SAMPLING_METHOD", kDefaultPcSamplingMethod);
+}
+
+std::string_view EnvInputParameters::get_pc_sampling_interval()
+{
+    return get("ROCPROF_NATIVE_PC_SAMPLING_INTERVAL", kDefaultPcSamplingInterval);
+}
+
+std::string_view EnvInputParameters::get_pc_sampling_unit()
+{
+    return get("ROCPROF_NATIVE_PC_SAMPLING_UNIT", kDefaultPcSamplingUnit);
 }
 
 std::string_view EnvInputParameters::get_pc_sampling_beta_enabled()

@@ -18,6 +18,10 @@ add_library(
     sdk_wrapper.cpp
     pc_sampling_feature.h
     pc_sampling_feature.cpp
+    pc_record_store.h
+    pc_record_store.cpp
+    pc_record_writer.h
+    pc_record_writer.cpp
 )
 
 target_include_directories(${target} PUBLIC .)

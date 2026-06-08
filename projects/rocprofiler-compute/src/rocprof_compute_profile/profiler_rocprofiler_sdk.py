@@ -10,7 +10,10 @@ from typing import Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
-from utils.utils_common import resolve_rocm_library_path
+from utils.utils_common import (
+    pc_sampling_unit,
+    resolve_rocm_library_path,
+)
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -23,7 +26,9 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         super().__init__(profiling_args, profiler_mode, soc)
 
     def get_profiler_options(
-        self, native_tool_path: Optional[str] = None
+        self,
+        native_tool_path: Optional[str] = None,
+        pc_sampling: bool = False,
     ) -> dict[str, Union[str, list[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
@@ -137,6 +142,42 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
         if not args.attach_pid:
             options["APP_CMD"] = app_cmd
+
+        if pc_sampling:
+            # This branch owns the complete PC sampling option set; the launcher
+            # merges it verbatim and must not re-derive any of these keys.
+            #
+            # PC sampling records are produced by the rocprof-compute NATIVE
+            # tool, NOT the rocprofiler-sdk standard tool. The native tool reads
+            # only the ROCPROF_NATIVE_PC_SAMPLING_* / ROCPROFILER_PC_SAMPLING_BETA_ENABLED
+            # env vars below. Leaving ROCPROF_PC_SAMPLING_METHOD UNSET disables
+            # librocprofiler-sdk-tool.so's PC pass (it gates on that var), so
+            # only the native tool writes ps_file_results.json -- guaranteeing
+            # exactly one ps_file_results.json is produced.
+            if not native_tool_path:
+                console_error(
+                    "Native PC sampling requires the rocprof-compute native "
+                    "tool, which is the only PC sampling record writer. No "
+                    "native tool path was provided."
+                )
+            method = args.pc_sampling_method
+            options.update({
+                # No counter collection on the PC sampling pass.
+                "ROCPROF_COUNTER_COLLECTION": "0",
+                "ROCPROF_KERNEL_TRACE": "1",
+                "ROCPROF_OUTPUT_FORMAT": "csv,json",
+                # PC sampling outputs land directly in the workload directory
+                # (ps_file_*), not under out/pmc_1 like the counter pass.
+                "ROCPROF_OUTPUT_PATH": args.output_directory,
+                # Native-only PC sampling knobs. The native tool is enabled by
+                # ROCPROFILER_PC_SAMPLING_BETA_ENABLED and configured by the
+                # ROCPROF_NATIVE_PC_SAMPLING_* vars.
+                "ROCPROF_NATIVE_PC_SAMPLING_METHOD": method,
+                "ROCPROF_NATIVE_PC_SAMPLING_INTERVAL": str(args.pc_sampling_interval),
+                "ROCPROF_NATIVE_PC_SAMPLING_UNIT": pc_sampling_unit(method),
+                "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
+            })
+
         return options
 
     # -----------------------

@@ -88,6 +88,16 @@ struct tool_data_t
     pc_sampling_feature_t pc_sampling{};
 };
 
+// Free buffer-tracing trampoline for PC sampling records. Matches
+// rocprofiler_buffer_tracing_cb_t; recovers tool_data_t* from user_data and
+// fans records into the PC sampling feature's record store.
+void pc_sampling_buffer_callback(rocprofiler_context_id_t      context,
+                                 rocprofiler_buffer_id_t       buffer_id,
+                                 rocprofiler_record_header_t** headers,
+                                 size_t                        num_headers,
+                                 void*                         user_data,
+                                 uint64_t                      drop_count);
+
 class SdkCallbacks
 {
 public:

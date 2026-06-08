@@ -263,6 +263,51 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].kernel_id, std::vector{kernel_id0});
 }
 
+// Regression guard for the PC sampling buffer-flush wiring: the LOSSLESS
+// delivery buffer is created below its watermark, so without an explicit flush
+// at shutdown short runs would serialize zero samples. tool_fini stops the
+// context and generate_output() must flush the configured buffer before
+// finalize() reads the record store.
+TEST_F(TestRocprofilerComputeTool, OnFiniWithPcSamplingEnabled_FlushesDeliveryBuffer)
+{
+    // Advertise a GPU agent with a stochastic config so configure() sets up a
+    // delivery buffer during tool_init.
+    rocprofiler_pc_sampling_configuration_t config{};
+    config.size         = sizeof(rocprofiler_pc_sampling_configuration_t);
+    config.method       = ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC;
+    config.unit         = ROCPROFILER_PC_SAMPLING_UNIT_CYCLES;
+    config.min_interval = 1;
+    config.max_interval = 1000;
+    config.flags        = ROCPROFILER_PC_SAMPLING_CONFIGURATION_FLAGS_NONE;
+    m_sdk_wrapper->set_pc_sampling_agent(/*agent_handle=*/5);
+    m_sdk_wrapper->add_pc_sampling_config(config);
+
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("stochastic");
+    m_input_parameters->set_pc_sampling_interval("256");
+
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_create_buffer_info().size(), 1u);
+    ASSERT_EQ(m_sdk_wrapper->get_configure_pc_sampling_service_info().size(), 1u);
+
+    cfg->finalize(cfg->tool_data);
+
+    ASSERT_EQ(m_sdk_wrapper->get_flushed_buffers().size(), 1u);
+    EXPECT_EQ(m_sdk_wrapper->get_flushed_buffers()[0],
+              m_sdk_wrapper->get_configure_pc_sampling_service_info()[0].buffer);
+}
+
+// PC-sampling-disabled runs configure no delivery buffer, so shutdown must not
+// attempt any flush.
+TEST_F(TestRocprofilerComputeTool, OnFiniWithPcSamplingDisabled_FlushesNothing)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    cfg->finalize(cfg->tool_data);
+    EXPECT_TRUE(m_sdk_wrapper->get_flushed_buffers().empty());
+}
+
 // Regression guard for the HSA-init-in-shell-then-fork deadlock: tool_init
 // must not call into HSA-touching SDK services. Counter collection setup and
 // context activation must only happen via the HSA intercept callback.
@@ -307,6 +352,23 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_IsIdempotent)
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
     EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
     EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
+}
+
+// PC-sampling-only runs request no counters. The dispatch counting service
+// forces the SDK to parse counter_defs.yaml, so it must be skipped when no
+// counters were requested -- but the context must still start so PC sampling
+// and code-object tracing remain active.
+TEST_F(TestRocprofilerComputeTool,
+       HsaInterceptCallback_NoCountersRequested_SkipsCountingServiceButStartsContext)
+{
+    m_input_parameters->unset_requested_counters();
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
+    EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
 }
 
 // If HSA loads after tool_fini has run, the callback must not dereference

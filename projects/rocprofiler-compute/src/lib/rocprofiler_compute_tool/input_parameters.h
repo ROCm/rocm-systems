@@ -20,6 +20,8 @@ public:
     virtual std::string_view get_kernel_filter_include_regex() = 0;
     virtual std::string_view get_kernel_filter_range()         = 0;
     virtual std::string_view get_pc_sampling_method()          = 0;
+    virtual std::string_view get_pc_sampling_interval()        = 0;
+    virtual std::string_view get_pc_sampling_unit()            = 0;
     virtual std::string_view get_pc_sampling_beta_enabled()    = 0;
 };
 
@@ -32,6 +34,8 @@ public:
     static constexpr std::string_view kDefaultKernelFilterIncludeRegex{""};
     static constexpr std::string_view kDefaultKernelFilterRange{""};
     static constexpr std::string_view kDefaultPcSamplingMethod{""};
+    static constexpr std::string_view kDefaultPcSamplingInterval{""};
+    static constexpr std::string_view kDefaultPcSamplingUnit{""};
     static constexpr std::string_view kDefaultPcSamplingBetaEnabled{""};
 
     explicit EnvInputParameters(std::shared_ptr<const EnvironCache> environ = EnvironCache::instance());
@@ -41,6 +45,8 @@ public:
     std::string_view get_kernel_filter_include_regex() override;
     std::string_view get_kernel_filter_range() override;
     std::string_view get_pc_sampling_method() override;
+    std::string_view get_pc_sampling_interval() override;
+    std::string_view get_pc_sampling_unit() override;
     std::string_view get_pc_sampling_beta_enabled() override;
 
 private:

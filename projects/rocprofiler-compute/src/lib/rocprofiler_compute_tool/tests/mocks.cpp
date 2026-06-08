@@ -4,6 +4,7 @@
 
 #include "gsl_assert.h"
 
+#include <stdexcept>
 #include <utility>
 
 std::string_view MockInputParameters::get_output_path()
@@ -46,6 +47,16 @@ std::string_view MockInputParameters::get_pc_sampling_method()
     return std::string_view{m_pc_sampling_method};
 }
 
+std::string_view MockInputParameters::get_pc_sampling_interval()
+{
+    return std::string_view{m_pc_sampling_interval};
+}
+
+std::string_view MockInputParameters::get_pc_sampling_unit()
+{
+    return std::string_view{m_pc_sampling_unit};
+}
+
 std::string_view MockInputParameters::get_pc_sampling_beta_enabled()
 {
     return std::string_view{m_pc_sampling_beta_enabled};
@@ -54,6 +65,16 @@ std::string_view MockInputParameters::get_pc_sampling_beta_enabled()
 void MockInputParameters::set_pc_sampling_method(const std::string& method)
 {
     m_pc_sampling_method = method;
+}
+
+void MockInputParameters::set_pc_sampling_interval(const std::string& interval)
+{
+    m_pc_sampling_interval = interval;
+}
+
+void MockInputParameters::set_pc_sampling_unit(const std::string& unit)
+{
+    m_pc_sampling_unit = unit;
 }
 
 void MockInputParameters::set_pc_sampling_beta_enabled(const std::string& value)
@@ -247,6 +268,101 @@ const std::vector<MockSdkWrapper::hsa_intercept_registration_info>&
 const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
+}
+
+void MockSdkWrapper::query_pc_sampling_agent_configurations(rocprofiler_agent_id_t /*agent_id*/,
+                                                            rocprofiler_available_pc_sampling_configurations_cb_t cb,
+                                                            void* user_data)
+{
+    // Simulate an SDK seam that fails (e.g. PC sampling NOT_IMPLEMENTED), where
+    // the real ROCPROFILER_CALL throws.
+    if (m_query_configs_should_throw)
+        throw std::runtime_error("simulated query pc sampling agent configurations failure");
+
+    // Advertise the injected configs (possibly none) for the agent.
+    cb(m_pc_sampling_configs.data(), m_pc_sampling_configs.size(), user_data);
+}
+
+void MockSdkWrapper::create_buffer(rocprofiler_context_id_t context_id,
+                                   size_t                   size,
+                                   size_t                   watermark,
+                                   rocprofiler_buffer_policy_t /*policy*/,
+                                   rocprofiler_buffer_tracing_cb_t callback,
+                                   void*                           callback_data,
+                                   rocprofiler_buffer_id_t*        buffer_id)
+{
+    m_create_buffer_info.push_back(
+        create_buffer_info{context_id.handle, size, watermark, callback, callback_data});
+    if (buffer_id != nullptr)
+        buffer_id->handle = m_next_buffer_handle++;
+}
+
+void MockSdkWrapper::configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
+                                                   rocprofiler_agent_id_t           agent_id,
+                                                   rocprofiler_pc_sampling_method_t method,
+                                                   rocprofiler_pc_sampling_unit_t   unit,
+                                                   uint64_t                         interval,
+                                                   rocprofiler_buffer_id_t          buffer_id,
+                                                   int                              flags)
+{
+    m_configure_pc_sampling_service_info.push_back(configure_pc_sampling_service_info{context_id.handle,
+                                                                                      agent_id.handle,
+                                                                                      method,
+                                                                                      unit,
+                                                                                      interval,
+                                                                                      buffer_id.handle,
+                                                                                      flags});
+}
+
+void MockSdkWrapper::flush_buffer(rocprofiler_buffer_id_t buffer_id)
+{
+    m_flushed_buffers.push_back(buffer_id.handle);
+}
+
+void MockSdkWrapper::iterate_agents(rocprofiler_query_available_agents_cb_t callback,
+                                    size_t /*agent_size*/,
+                                    void* user_data)
+{
+    if (!m_pc_sampling_agent_set)
+        return;
+
+    rocprofiler_agent_v0_t agent{};
+    agent.id.handle       = m_pc_sampling_agent_handle;
+    agent.type            = ROCPROFILER_AGENT_TYPE_GPU;
+    const void* agents[1] = {static_cast<const void*>(&agent)};
+    callback(ROCPROFILER_AGENT_INFO_VERSION_0, agents, 1, user_data);
+}
+
+void MockSdkWrapper::set_pc_sampling_agent(uint64_t agent_handle)
+{
+    m_pc_sampling_agent_set    = true;
+    m_pc_sampling_agent_handle = agent_handle;
+}
+
+void MockSdkWrapper::add_pc_sampling_config(const rocprofiler_pc_sampling_configuration_t& config)
+{
+    m_pc_sampling_configs.push_back(config);
+}
+
+void MockSdkWrapper::set_query_configs_should_throw(bool should_throw)
+{
+    m_query_configs_should_throw = should_throw;
+}
+
+const std::vector<MockSdkWrapper::create_buffer_info>& MockSdkWrapper::get_create_buffer_info() const
+{
+    return m_create_buffer_info;
+}
+
+const std::vector<MockSdkWrapper::configure_pc_sampling_service_info>&
+    MockSdkWrapper::get_configure_pc_sampling_service_info() const
+{
+    return m_configure_pc_sampling_service_info;
+}
+
+const std::vector<uint64_t>& MockSdkWrapper::get_flushed_buffers() const
+{
+    return m_flushed_buffers;
 }
 
 /////////////////////////////////////////////////////////////////////////

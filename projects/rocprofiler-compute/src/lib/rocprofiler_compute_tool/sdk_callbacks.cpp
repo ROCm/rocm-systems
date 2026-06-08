@@ -17,6 +17,26 @@ using namespace rocprofiler_compute_tool;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 using code_object_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
 
+void rocprofiler_compute_tool::pc_sampling_buffer_callback(rocprofiler_context_id_t /*context*/,
+                                                           rocprofiler_buffer_id_t /*buffer_id*/,
+                                                           rocprofiler_record_header_t** headers,
+                                                           size_t   num_headers,
+                                                           void*    user_data,
+                                                           uint64_t drop_count)
+{
+    auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+    if (tool_data == nullptr)
+        return;
+
+    if (drop_count > 0)
+    {
+        std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__ << "] WARNING: dropped "
+                  << drop_count << " PC sampling record(s) due to buffer overflow\033[0m" << std::endl;
+    }
+
+    tool_data->pc_sampling.on_pc_sample_records(headers, num_headers);
+}
+
 SdkCallbacksImpl::SdkCallbacksImpl(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     : m_sdk_wrapper(sdk_wrapper)
 {

@@ -3,9 +3,11 @@
 #include "pc_sampling_collector.h"
 
 #include "gsl_assert.h"
+#include "source_snapshot.h"
 
 #include <ios>
 #include <iostream>
+#include <unordered_set>
 
 using namespace rocprofiler_compute_tool;
 
@@ -38,8 +40,19 @@ void pc_sampling_collector_impl_t::on_code_object_load(
     }
 }
 
+void pc_sampling_collector_impl_t::record_source_path(const std::string& comment)
+{
+    if (auto path = parse_source_path(comment))
+    {
+        m_source_paths.insert(*path);
+    }
+}
+
 void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
 {
+    // Reset the harvest so a re-run reflects the current translator state.
+    m_source_paths.clear();
+
     for (const auto& id : m_translator->get_code_object_ids())
     {
         writer.start_code_obj(id);
@@ -53,6 +66,7 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
             {
                 const auto& inst = m_translator->get_instruction(id, pc);
                 Expects(inst.size);
+                record_source_path(inst.comment);
                 writer.write_instruction(inst);
                 pc += inst.size;
             }
@@ -60,4 +74,41 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
         }
         writer.end_code_obj();
     }
+
+    m_source_paths_collected = true;
+}
+
+std::vector<std::string> pc_sampling_collector_impl_t::collect_source_paths()
+{
+    // write() harvests source paths during its disassembly walk, so finalize()
+    // can reuse them instead of paying for a second full traversal. When write()
+    // has not run, walk once here so the method stays callable independently.
+    if (m_source_paths_collected)
+    {
+        return std::vector<std::string>(m_source_paths.begin(), m_source_paths.end());
+    }
+
+    for (const auto& id : m_translator->get_code_object_ids())
+    {
+        const auto& symbols = m_translator->get_symbols(id);
+        for (const auto& sym : symbols)
+        {
+            uint64_t       pc  = sym.virtual_address;
+            const uint64_t end = sym.virtual_address + sym.size;
+            while (pc < end)
+            {
+                const auto& inst = m_translator->get_instruction(id, pc);
+                if (inst.size == 0)
+                {
+                    // Best-effort: avoid an infinite loop without aborting the run.
+                    break;
+                }
+                record_source_path(inst.comment);
+                pc += inst.size;
+            }
+        }
+    }
+
+    m_source_paths_collected = true;
+    return std::vector<std::string>(m_source_paths.begin(), m_source_paths.end());
 }

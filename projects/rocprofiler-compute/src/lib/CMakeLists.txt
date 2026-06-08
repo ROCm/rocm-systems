@@ -11,6 +11,15 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} "/opt/rocm/")
 
+# When this directory is configured standalone (e.g. the CLI's runtime native
+# tool build does `cmake -S src/lib`), the top-level CMakeLists is not loaded,
+# so the asan_build_dependencies target referenced by the test executables is
+# undefined and CMake degrades it to a literal `-lasan_build_dependencies` link
+# flag. Include the module here too; it is guarded by `if(NOT TARGET ...)`.
+if(NOT TARGET asan_build_dependencies)
+    include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/asan_build_dependencies.cmake)
+endif()
+
 # libdw has no upstream CMake config and the SDK's bundled Findlibdw.cmake is
 # brittle across pkg-config / multiarch layouts. Define libdw::libdw via
 # pkg-config up front so the SDK's internal find_package(libdw) check finds
