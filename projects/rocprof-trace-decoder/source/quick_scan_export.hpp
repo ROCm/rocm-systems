@@ -32,6 +32,14 @@
 
 //#define GET_TIMING
 
+#ifndef ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+#    if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+#        define ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD 1
+#    else
+#        define ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD 0
+#    endif
+#endif
+
 namespace quick_scan
 {
 // Captured rare-token entry. `contents` is the full 64-bit window starting
@@ -57,19 +65,35 @@ struct QuickToken
     uint64_t offset : 48;
 };
 
-// Purpose-built fast scanner that walks a gfx9 SQTT token stream and
-// captures only the rare-token cluster (REG / REG_CS / EVENT / EVENT_CS /
-// REG_CS_PRIV) with full 64-bit contents. Skips everything else with a
-// 16-entry nibble-keyed length LUT — no Token{} construction, no
-// patch_time() lookahead (which only reorders TIME tokens, none of which
-// are in the rare cluster), no globaltime tracking.
+// The scanners are SIMD-only and built only on GCC/clang x86-64. On other
+// compilers (MSVC), other architectures (aarch64, non-x86), or x86 CPUs at
+// runtime that lack AVX-512, no implementation is available. Availability
+// is probed at the export entry point (rocprof_trace_decoder_quick_scan
+// with data=nullptr), which returns ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED
+// when the scanner cannot run. Callers must NOT invoke these scan_*
+// functions directly without first confirming availability via that probe.
+//
+// Purpose-built fast scanners that walk an SQTT token stream and capture
+// only the rare-token cluster (REG / REG_CS / EVENT / EVENT_CS /
+// REG_CS_PRIV for gfx9) with full 64-bit contents. Skips everything else
+// with a small length LUT — no Token{} construction, no patch_time()
+// lookahead, no globaltime tracking.
 //
 // The buffer must point AFTER the gfx9 8-byte header
 // (rocprof_trace_decoder_gfx9_header_t). Size is the post-header byte
 // count. See iterate_tokens.hpp:75-87 for the convention.
 //
-// Writes up to `out_cap` entries into `out` in stream order; returns the
-// number written. Single-threaded, no exceptions.
-size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
-size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap);
-};
+// Writes up to `out_cap` entries into `out` in stream order and returns
+// the number written. Single-threaded, no exceptions.
+#if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
+size_t scan_gfx9(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
+size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap);
+#endif
+
+// Returns true iff the running CPU supports AVX-512 (vbmi+bw+f) and the
+// TU was built for x86 with a compiler that has the SIMD paths. False on
+// MSVC, on non-x86 targets, or on x86 CPUs lacking AVX-512. Used by the
+// export to decide between dispatching the scanner and returning
+// ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED.
+bool avx512_available();
+}; // namespace quick_scan

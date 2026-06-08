@@ -3020,6 +3020,25 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(
   return ret_resp;
 }
 
+amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode) {
+  AMDSMI_CHECK_INIT();
+  std::ostringstream ss;
+  auto status = rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_get, processor_handle, 0,
+                             reinterpret_cast<rsmi_compute_partition_mem_alloc_mode_t*>(mode));
+  ss << __PRETTY_FUNCTION__ << " | rsmi_dev_compute_partition_mem_alloc_mode_get() returned: "
+     << smi_amdgpu_get_status_string(status, false);
+  LOG_INFO(ss);
+  return status;
+}
+
+amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode) {
+  AMDSMI_CHECK_INIT();
+  return rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_set, processor_handle, 0,
+                      static_cast<rsmi_compute_partition_mem_alloc_mode_t>(mode));
+}
+
 // Memory Partition functions
 amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                                 char* memory_partition, uint32_t len) {
@@ -8344,51 +8363,84 @@ amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t* info) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// Rebuild the initramfs so that newly written /etc/modprobe.d/*.conf options
+// are seen by modules loaded from initramfs (e.g. amdgpu / amdttm at early
+// boot). The right rebuild tool varies by distro:
+//   * dracut             - RHEL / Fedora / openSUSE / Alma / Rocky
+//   * update-initramfs   - Debian / Ubuntu
+//   * mkinitcpio         - Arch
+// The first available tool wins; if none is found we warn the user that a
+// manual rebuild is required and still return SUCCESS so that the modprobe.d
+// write is not rolled back.
 static amdsmi_status_t run_dracut_f() {
-  const char* dracut_paths[] = {"/usr/bin/dracut", "/bin/dracut", "/sbin/dracut"};
-  const char* dracut_path = nullptr;
-  for (const auto& path : dracut_paths) {
-    if (access(path, X_OK) == 0) {
-      dracut_path = path;
+  struct InitramfsTool {
+    const char* path;
+    const char* arg1;
+    const char* arg2;  // nullable
+  };
+  // Order: prefer dracut (when both dracut and update-initramfs are present
+  // the system is almost certainly a dracut-managed distro).
+  static const InitramfsTool kTools[] = {
+      {"/usr/bin/dracut", "-f", nullptr},        {"/bin/dracut", "-f", nullptr},
+      {"/sbin/dracut", "-f", nullptr},           {"/usr/sbin/update-initramfs", "-u", nullptr},
+      {"/sbin/update-initramfs", "-u", nullptr}, {"/usr/bin/mkinitcpio", "-P", nullptr},
+  };
+
+  const InitramfsTool* selected = nullptr;
+  for (const auto& t : kTools) {
+    if (access(t.path, X_OK) == 0) {
+      selected = &t;
       break;
     }
   }
 
-  if (dracut_path == nullptr) {
-    // dracut not found, skip rebuilding initramfs
+  if (selected == nullptr) {
+    std::cerr << "Warning: no initramfs rebuilder found (tried dracut, "
+                 "update-initramfs, mkinitcpio). The modprobe.d config has "
+                 "been written but will not take effect at boot until the "
+                 "initramfs is rebuilt manually (e.g. `sudo update-initramfs "
+                 "-u` on Debian/Ubuntu, `sudo dracut -f` on RHEL/Fedora, "
+                 "`sudo mkinitcpio -P` on Arch)."
+              << std::endl;
     return AMDSMI_STATUS_SUCCESS;
   }
 
   if (is_dry_run()) {
     std::ostringstream ss;
-    ss << "[DRY_RUN] Would rebuild initramfs with: " << dracut_path << " -f";
+    ss << "[DRY_RUN] Would rebuild initramfs with: " << selected->path << " " << selected->arg1;
+    if (selected->arg2 != nullptr) ss << " " << selected->arg2;
     LOG_INFO(ss);
     return AMDSMI_STATUS_SUCCESS;
   }
 
   pid_t pid = fork();
   if (pid == 0) {  // Child
-    // Close all inherited file descriptors except stdin/stdout/stderr
     for (int fd = 3; fd < 1024; ++fd) {
       close(fd);
     }
-
-    // Redirect stdout/stderr to /dev/null
     int dev_null = open("/dev/null", O_WRONLY);
     if (dev_null != -1) {
       dup2(dev_null, STDOUT_FILENO);
       dup2(dev_null, STDERR_FILENO);
       close(dev_null);
     }
-
-    char dracut_path_mutable[256];
-    strncpy(dracut_path_mutable, dracut_path, sizeof(dracut_path_mutable) - 1);
-    dracut_path_mutable[sizeof(dracut_path_mutable) - 1] = '\0';
-
-    char flag_mutable[] = "-f";
-    char* const args[] = {dracut_path_mutable, flag_mutable, nullptr};
-    execv(dracut_path, args);
-    _exit(1);            // Should not reach here
+    char tool_path_mutable[256];
+    strncpy(tool_path_mutable, selected->path, sizeof(tool_path_mutable) - 1);
+    tool_path_mutable[sizeof(tool_path_mutable) - 1] = '\0';
+    char arg1_mutable[16];
+    strncpy(arg1_mutable, selected->arg1, sizeof(arg1_mutable) - 1);
+    arg1_mutable[sizeof(arg1_mutable) - 1] = '\0';
+    char arg2_mutable[16];
+    if (selected->arg2 != nullptr) {
+      strncpy(arg2_mutable, selected->arg2, sizeof(arg2_mutable) - 1);
+      arg2_mutable[sizeof(arg2_mutable) - 1] = '\0';
+      char* const args[] = {tool_path_mutable, arg1_mutable, arg2_mutable, nullptr};
+      execv(selected->path, args);
+    } else {
+      char* const args[] = {tool_path_mutable, arg1_mutable, nullptr};
+      execv(selected->path, args);
+    }
+    _exit(1);
   } else if (pid > 0) {  // Parent
     int status;
     waitpid(pid, &status, 0);
@@ -8396,9 +8448,11 @@ static amdsmi_status_t run_dracut_f() {
       return AMDSMI_STATUS_SUCCESS;
     }
     if (WIFEXITED(status)) {
-      std::cerr << "Warning: dracut -f exited with code " << WEXITSTATUS(status) << std::endl;
+      std::cerr << "Warning: " << selected->path << " " << selected->arg1 << " exited with code "
+                << WEXITSTATUS(status) << std::endl;
     } else if (WIFSIGNALED(status)) {
-      std::cerr << "Warning: dracut -f killed by signal " << WTERMSIG(status) << std::endl;
+      std::cerr << "Warning: " << selected->path << " " << selected->arg1 << " killed by signal "
+                << WTERMSIG(status) << std::endl;
     }
     return AMDSMI_STATUS_API_FAILED;
   }
@@ -8448,7 +8502,7 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
   if (run_dracut_f() != AMDSMI_STATUS_SUCCESS) {
     // Log warning but don't fail - the modprobe.d file is written successfully
     // The system will still work after reboot, just without initramfs update
-    std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
+    std::cerr << "Warning: Failed to rebuild initramfs" << std::endl;
   }
 
   return AMDSMI_STATUS_SUCCESS;
@@ -8502,7 +8556,7 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
   if (run_dracut_f() != AMDSMI_STATUS_SUCCESS) {
     // Log warning but don't fail - the modprobe.d file is removed successfully
     // The system will still work after reboot, just without initramfs update
-    std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
+    std::cerr << "Warning: Failed to rebuild initramfs" << std::endl;
   }
 
   return AMDSMI_STATUS_SUCCESS;

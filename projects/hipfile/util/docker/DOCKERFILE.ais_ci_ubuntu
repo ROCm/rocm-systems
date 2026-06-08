@@ -82,7 +82,6 @@ RUN apt update && \
         doxygen \
         gdb \
         git \
-        libboost-program-options-dev \
         libmount-dev \
         llvm-dev \
         python3.12-dev \

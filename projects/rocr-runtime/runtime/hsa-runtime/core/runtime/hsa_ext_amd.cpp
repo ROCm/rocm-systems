@@ -1825,10 +1825,8 @@ hsa_status_t hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devi
                                     uint64_t *size_copied, int32_t *status) {
   TRY;
   IS_OPEN();
-
-  if (devicePtr == nullptr || size == 0) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
+  IS_BAD_PTR(devicePtr);
+  IS_VALID_FD(handle.fd);
 
   // Call the kernel module function through the thunk layer
   HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
@@ -1845,10 +1843,8 @@ hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devic
                                    uint64_t *size_copied, int32_t *status) {
   TRY;
   IS_OPEN();
-
-  if (devicePtr == nullptr || size == 0) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
+  IS_BAD_PTR(devicePtr);
+  IS_VALID_FD(handle.fd);
 
   // Call the kernel module function through the thunk layer
   HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,

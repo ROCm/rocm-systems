@@ -62,7 +62,6 @@ EOF
 #   Use gcc13 to match Ubuntu24.
 RUN dnf makecache && \
     dnf install -y \
-        boost-devel \
         clang \
         cmake \
         doxygen \
