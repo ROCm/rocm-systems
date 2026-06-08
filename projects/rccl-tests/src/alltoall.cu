@@ -687,8 +687,8 @@ __global__ void GinAdaptiveAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffse
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
-                             world.nRanks, blockIdx.x, gridDim.x, tid, nthreads);
+    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
+                       startLsa, lsaSize, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
