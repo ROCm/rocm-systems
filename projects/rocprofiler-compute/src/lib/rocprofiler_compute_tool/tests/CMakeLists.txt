@@ -15,7 +15,13 @@ add_executable(
 
 target_link_libraries(
     ${target}
-    PRIVATE rocprofiler-compute-tool gtest_main gmock gsl_assert fmt::fmt
+    PRIVATE
+        rocprofiler-compute-tool
+        gtest_main
+        gmock
+        gsl_assert
+        fmt::fmt
+        asan_build_dependencies
 )
 
 set_target_properties(

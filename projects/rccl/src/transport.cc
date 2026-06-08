@@ -154,8 +154,8 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
   NCCLCHECKGOTO(ncclCalloc(&recvData, maxPeers), ret, fail);
   NCCLCHECKGOTO(ncclCalloc(&sendData, maxPeers), ret, fail);
 
-  NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(), &comm->sharedRes->hostStream, /*concurrent=*/false, &hostStream), ret, fail);
-  NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(), &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), ret, fail);
+  NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false, &hostStream), ret, fail);
+  NCCLCHECKGOTO(ncclStrongStreamAcquire(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false, &deviceStream), ret, fail);
   // First time initialization
   for (int i=1; i<comm->nRanks; i++) {
     int bootstrapTag = (i<<8) + (graph ? graph->id+1 : 0);
@@ -350,8 +350,8 @@ exit:
   if (recvData) free(recvData);
 
   NCCLCHECK(ncclStreamWaitStream(deviceStream, hostStream, comm->sharedRes->scratchEvent));
-  NCCLCHECK(ncclStrongStreamRelease(ncclCudaGraphNone(), &comm->sharedRes->hostStream, /*concurrent=*/false));
-  NCCLCHECK(ncclStrongStreamRelease(ncclCudaGraphNone(), &comm->sharedRes->deviceStream, /*concurrent=*/false));
+  NCCLCHECK(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->hostStream, /*concurrent=*/false));
+  NCCLCHECK(ncclStrongStreamRelease(ncclCudaGraphNone(comm->config.graphUsageMode), &comm->sharedRes->deviceStream, /*concurrent=*/false));
   return ret;
 fail:
   goto exit;
@@ -456,12 +456,12 @@ ncclResult_t ncclTransportCollNetFree(struct ncclComm* comm) {
       if (ncclAtomicRefCountDecrement(&peer->refCount) == 0) {
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* send = peer->send + b;
-          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(send));
+          if (send->transportResources && send->transportComm) NCCLCHECK(send->transportComm->free(comm, send));
           send->transportResources = NULL; // avoid double free
         }
         for (int b=0; b<NCCL_MAX_CONNS; b++) {
           struct ncclConnector* recv = peer->recv + b;
-          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(recv));
+          if (recv->transportResources && recv->transportComm) NCCLCHECK(recv->transportComm->free(comm, recv));
           recv->transportResources = NULL; // avoid double free
         }
       }

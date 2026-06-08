@@ -358,11 +358,11 @@ class MIGPUSpecs:
         which do not have MCD concept like dGPUs- force to "1" to signal unified memory.
         """
         if cls.get_gpu_series(gpu_arch).lower() == "navi3":
-            return cls._gpu_design[gpu_model.lower()]["memory_die"]
+            return cls._gpu_design[gpu_model.lower()].get("memory_die", 1)
         else:
-            return (
-                cls._gpu_design[gpu_model.lower()]["physical_aid"]
-                * cls._gpu_design[gpu_model.lower()]["logical_partitions_per_die"]
+            design = cls._gpu_design.get(gpu_model.lower(), {})
+            return design.get("physical_aid", 1) * design.get(
+                "logical_partitions_per_die", 1
             )
 
     @classmethod

@@ -57,6 +57,14 @@ endif()
 # RCCL project
 #==================================================================================================
 project(rccl CXX)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(NCCL_OS_WINDOWS ON)
+    add_definitions(-DNCCL_OS_WINDOWS)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(NCCL_OS_LINUX ON)
+    add_definitions(-DNCCL_OS_LINUX)
+endif()
 set(ENV{NCCL_USE_CMAKE} "1")
 
 # Build options
@@ -76,7 +84,8 @@ option(ENABLE_CODE_COVERAGE                    "Enable code coverage"           
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
-option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
+option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -175,6 +184,20 @@ else()
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
+
+# Fail fast if we ended up with no GPU targets at all
+if(NOT GPU_TARGETS OR "${GPU_TARGETS}" STREQUAL "NOTFOUND")
+  message(FATAL_ERROR
+    "GPU_TARGETS is empty (resolved to '${GPU_TARGETS}').\n"
+    "This usually means ./install.sh -l was used on a host with no visible "
+    "AMD GPU (no /dev/kfd, no /dev/dri), so local-arch detection found "
+    "nothing to target.\n"
+    "\n"
+    "If you wish to build here anyway, re-run with an explicit GPU "
+    "architecture, e.g.:\n"
+    "    ./install.sh --amdgpu_targets gfx1201\n")
+endif()
+
 message(STATUS "Compiling for ${GPU_TARGETS}")
 
 ## NOTE: Reload rocm-cmake in order to update GPU_TARGETS
@@ -312,6 +335,9 @@ check_cxx_source_compiles("
   }
 " HIP_FABRIC_HANDLE_TYPE)
 
+### Check for hipMemcpyBatchAsync support (Copy Engine batch API)
+check_symbol_exists("hipMemcpyBatchAsync" "hip/hip_runtime_api.h" HIP_MEMCPY_BATCH_ASYNC)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support
@@ -333,6 +359,17 @@ if("${hip_version_string}" VERSION_GREATER_EQUAL "6.1.33591")
   message(STATUS "RCCL LL128 protocol enabled")
 else()
   message(STATUS "RCCL LL128 protocol disabled - requires HIP version >= 6.1.33591")
+endif()
+
+## Check for Copy Engine (CE) batch API support
+## hipMemcpyBatchAsync symbol presence is the sole gate: if the SDK exposes the
+## symbol, CE is supported regardless of the exact version string.
+if(HIP_MEMCPY_BATCH_ASYNC)
+  set(CE_ENABLED ON)
+  message(STATUS "Copy Engine (CE) batch API enabled")
+else()
+  set(CE_ENABLED OFF)
+  message(STATUS "Copy Engine (CE) batch API disabled - hipMemcpyBatchAsync not found in hip/hip_runtime_api.h")
 endif()
 
 ## Check for hsa-runtime64
@@ -571,6 +608,21 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 # Source directory contains library creation
 add_subdirectory(src)
 
+# LLVM IR / bitcode for nccl_device APIs (HIP / AMDGPU)
+#==================================================================================================
+# When EMIT_LLVM_IR=ON, build a standalone LLVM bitcode artifact (librccl_device.bc)
+# plus a C wrapper header (nccl_device_wrapper.h) from src/include/nccl_device/.
+# The bitcode is generated from the hipify-staged headers that librccl.so itself
+# is compiled from, so the IR is guaranteed to match the host library.
+if(EMIT_LLVM_IR)
+  add_subdirectory(bindings/ir)
+  # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
+  # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
+  add_dependencies(llvm_ir copy_nccl_device_headers)
+  # Convenience aggregate target: builds librccl.so together with the bitcode.
+  add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+endif()
+
 # Install settings
 #==================================================================================================
 ## Specify install targets
@@ -579,6 +631,25 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
+                         ${PROJECT_BINARY_DIR}/include/nccl_device.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
+## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
+## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
+## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
+## before install because rccl_with_ir is part of ALL.
+if(EMIT_LLVM_IR)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
+                           ${PROJECT_BINARY_DIR}/include/nccl_device.h
+                           ${PROJECT_BINARY_DIR}/include/nccl.h
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+  rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
+               DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+endif()
 ## Install tuner config directory for CSV-based tuner
 file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
@@ -639,9 +710,9 @@ if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
   if(BUILD_EXT_EXAMPLES)
-    add_subdirectory(ext-net/example)
-    add_subdirectory(ext-tuner/example)
-    add_subdirectory(ext-profiler/example)
+    add_subdirectory(plugins/net/example)
+    add_subdirectory(plugins/tuner/example)
+    add_subdirectory(plugins/profiler/example)
   endif()
   add_subdirectory(test)
 

@@ -69,6 +69,7 @@ lib/
         dbt/generated/  Auto-generated legalization tables and encoding translation data tables
       vm/               Virtual machine layer
         amdgpu/         AMD GPU hardware model (CU, SE, XCD, caches, pipelines)
+        plugins/        Execution plugins (e.g. kernel logging)
         risc_v/         RISC-V hart model
       kmd/linux/        KMD emulation: LD_PRELOAD interposer + simulated KFD driver
 lib/python/amdisa/      ISA code generation toolchain
@@ -168,9 +169,8 @@ It intercepts `/dev/kfd` and the KFD sysfs topology, routing all KFD ioctls
 to the simulator.
 
 ```bash
-# Required environment variables
+# Required environment variable
 export RJ_CONFIG=configs/amdgpu_cdna4.json
-export RJ_SCHEMA=schemas/simulation_config.fbs
 
 # Run an HSA application
 LD_PRELOAD=build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
@@ -252,10 +252,10 @@ shared templates for instructions that have identical semantics across multiple 
 Single-ISA mode (`--gen-all` without `--multi`) will generate inline execute bodies
 without shared templates, resulting in larger files with duplicated code.
 
-Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
+Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
 
-You can find the MR ISA in the artifacts directory.
+You can find the MR ISA in `rocm-systems/shared/machine-readable-isa/isa`.
 
 ### Regenerating DBT files
 
@@ -306,8 +306,7 @@ See `lib/python/amdisa/README.md` for details on the amdisa codegen pipeline.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/amdgpu_cdna4.json",
-             "schemas/simulation_config.fbs", &vm);
+rj_vm_create("configs/amdgpu_cdna4.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);

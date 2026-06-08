@@ -5,29 +5,48 @@
 
 #pragma once
 
-#include <boost/program_options.hpp>
-#include <boost/program_options/detail/parsers.hpp>
-#include <boost/program_options/options_description.hpp>
-#include <boost/program_options/value_semantic.hpp>
-#include <boost/program_options/variables_map.hpp>
+#include "args.h"
+
+#include <cstdlib>
 #include <cstdint>
+#include <iostream>
+#include <string>
+
+inline void
+parseCli(args::ArgumentParser &parser, int argc, char **argv)
+{
+    try {
+        parser.ParseCLI(argc, argv);
+    }
+    catch (const args::Help &) {
+        std::cout << parser;
+        std::exit(EXIT_SUCCESS);
+    }
+    catch (const args::Error &error) {
+        std::cerr << error.what() << '\n' << parser;
+        std::exit(EXIT_FAILURE);
+    }
+}
 
 struct SystemTestOptions {
     std::string ais_capable_dir;
     uint32_t    sleep_seconds;
     void        parseTestOptions(int argc, char **argv)
     {
-        namespace po = boost::program_options;
-        po::options_description desc("System test options");
-        desc.add_options()("ais-capable-dir", po::value<std::string>()->default_value("/tmp"),
-                           "Path to AIS capable directory");
-        desc.add_options()("sleep-on-exit", po::value<uint32_t>()->default_value(0),
-                           "Sleep before returning to main");
-        po::variables_map vm;
-        po::store(po::parse_command_line(argc, argv, desc), vm);
+        args::ArgumentParser            parser{"System test options"};
+        [[maybe_unused]] args::HelpFlag help_arg(parser, "help", "Show this help message",
+                                                 args::Matcher{'h', "help"});
+        args::ValueFlag<std::string>    ais_capable_dir_arg(parser, "path", "Path to AIS capable directory",
+                                                            args::Matcher{"ais-capable-dir"}, "/tmp",
+                                                            args::Options::Single);
+        args::ValueFlag<uint32_t>       sleep_on_exit_arg(parser, "seconds", "Sleep before returning to main",
+                                                          args::Matcher{"sleep-on-exit"}, 0U,
+                                                          args::Options::Single);
 
-        ais_capable_dir = vm["ais-capable-dir"].as<std::string>();
-        sleep_seconds   = vm["sleep-on-exit"].as<uint32_t>();
+        parseCli(parser, argc, argv);
+
+        ais_capable_dir = args::get(ais_capable_dir_arg);
+        sleep_seconds   = args::get(sleep_on_exit_arg);
     }
 };
 
@@ -35,13 +54,15 @@ struct UnitTestOptions {
     uint32_t sleep_seconds;
     void     parseTestOptions(int argc, char **argv)
     {
-        namespace po = boost::program_options;
-        po::options_description desc("System test options");
-        desc.add_options()("sleep-on-exit", po::value<uint32_t>()->default_value(0),
-                           "Sleep before returning to main");
-        po::variables_map vm;
-        po::store(po::parse_command_line(argc, argv, desc), vm);
+        args::ArgumentParser            parser{"Unit test options"};
+        [[maybe_unused]] args::HelpFlag help_arg(parser, "help", "Show this help message",
+                                                 args::Matcher{'h', "help"});
+        args::ValueFlag<uint32_t>       sleep_on_exit_arg(parser, "seconds", "Sleep before returning to main",
+                                                          args::Matcher{"sleep-on-exit"}, 0U,
+                                                          args::Options::Single);
 
-        sleep_seconds = vm["sleep-on-exit"].as<uint32_t>();
+        parseCli(parser, argc, argv);
+
+        sleep_seconds = args::get(sleep_on_exit_arg);
     }
 };

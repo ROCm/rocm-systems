@@ -147,7 +147,6 @@ _OP_TO_KIND: dict[str, SemaNodeKind] = {
 _CMP_OP_TO_KIND: dict[str, SemaNodeKind] = {
     'eq': SemaNodeKind.EQ,
     'ne': SemaNodeKind.NE,
-    'lg': SemaNodeKind.NE,
     'neq': SemaNodeKind.NE,
     'lt': SemaNodeKind.LT,
     'gt': SemaNodeKind.GT,
@@ -184,6 +183,15 @@ def _make_cmp(op: str, src0: SemaNode, src1: SemaNode) -> SemaNode:
             call_name='is_unordered',
             children=(_id('is_unordered'), src0, src1),
         )
+    if op == 'lg':
+        lt = SemaNode(SemaNodeKind.LT, ty=SemaType.U1, children=(src0, src1))
+        gt = SemaNode(SemaNodeKind.GT, ty=SemaType.U1, children=(src0, src1))
+        return SemaNode(SemaNodeKind.LOR, ty=SemaType.U1, children=(lt, gt))
+    if op == 'nlg':
+        lt = SemaNode(SemaNodeKind.LT, ty=SemaType.U1, children=(src0, src1))
+        gt = SemaNode(SemaNodeKind.GT, ty=SemaType.U1, children=(src0, src1))
+        lor = SemaNode(SemaNodeKind.LOR, ty=SemaType.U1, children=(lt, gt))
+        return SemaNode(SemaNodeKind.BOOLNEG, ty=SemaType.U1, children=(lor,))
     neg_kind = _CMP_NEGATED.get(op)
     if neg_kind is not None:
         inner = SemaNode(neg_kind, ty=SemaType.U1, children=(src0, src1))
@@ -252,9 +260,30 @@ class _ScalarUnary(_ScalarDeriver):
         # bitset0/1 are read-modify-write on dst — not expressible as
         # a simple unary template. Fall through to inline handler.
         if op in ('bitset0', 'bitset1'):
-            return SemaBlock(
-                sem.name, ExecModel.SCALAR, SemaNode(SemaNodeKind.SEQ, children=())
+            ty = _dtype_to_sema(sem.data_type)
+            bit_mask = '63u' if ty.size == 64 else '31u'
+            one_lit = '1' if ty.size == 64 else '1u'
+            src0 = _cast(_src(0), SemaType.U32)
+            dst_read = _cast(_dst(0), ty)
+            shifted = SemaNode(
+                SemaNodeKind.SHL,
+                ty=ty,
+                children=(
+                    _lit(one_lit, ty),
+                    SemaNode(
+                        SemaNodeKind.AND,
+                        ty=SemaType.U32,
+                        children=(src0, _lit(bit_mask)),
+                    ),
+                ),
             )
+            if op == 'bitset0':
+                neg = SemaNode(SemaNodeKind.BITNEG, ty=ty, children=(shifted,))
+                result = SemaNode(SemaNodeKind.AND, ty=ty, children=(dst_read, neg))
+            else:
+                result = SemaNode(SemaNodeKind.OR, ty=ty, children=(dst_read, shifted))
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.SCALAR, body)
         # 64-bit unary ops need 64-bit-specific templates. Use distinct
         # call names so the lowering selects the right implementation.
         dtype = sem.data_type
@@ -369,13 +398,45 @@ class _ScalarBinop(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         op = sem.operation
         ty = _dtype_to_sema(sem.data_type)
-        src0 = _cast(_src(0), ty)
-        src1 = _cast(_src(1), ty)
+        raw_carry_bits = sem.sets_scc in ('carry', 'borrow') and ty.base == 'I'
+        calc_ty = SemaType('U', ty.size) if raw_carry_bits else ty
+        src0 = _cast(_src(0), calc_ty)
+        src1 = _cast(_src(1), calc_ty)
         stmts: list[SemaNode] = []
 
         kind = _OP_TO_KIND.get(op or '', SemaNodeKind.CALL)
 
-        if op in ('shl', 'shr'):
+        scc_handled_by_template = op in (
+            'addc',
+            'subb',
+            'lshl1_add',
+            'lshl2_add',
+            'lshl3_add',
+            'lshl4_add',
+        )
+        needs_cached_ops = (
+            sem.sets_scc
+            and sem.sets_scc != 'none'
+            and not scc_handled_by_template
+            and sem.sets_scc in ('carry', 'borrow', 'overflow', 'compare')
+        )
+        if needs_cached_ops:
+            stmts.append(_assign(_id('s0', calc_ty), src0))
+            stmts.append(_assign(_id('s1', calc_ty), src1))
+            src0 = _id('s0', calc_ty)
+            src1 = _id('s1', calc_ty)
+
+        if op == 'mul' and ty.base == 'I':
+            mul_ty = SemaType.U32 if ty.size == 32 else SemaType.U64
+            result = SemaNode(
+                SemaNodeKind.MUL,
+                ty=mul_ty,
+                children=(
+                    _cast(src0, mul_ty),
+                    _cast(src1, mul_ty),
+                ),
+            )
+        elif op in ('shl', 'shr'):
             mask_val = '63u' if ty.size == 64 else '31u'
             masked = SemaNode(
                 SemaNodeKind.AND, ty=SemaType.U32, children=(src1, _lit(mask_val))
@@ -411,10 +472,22 @@ class _ScalarBinop(_ScalarDeriver):
                     SemaNode(SemaNodeKind.BITNEG, ty=ty, children=(src1,)),
                 ),
             )
-        elif op in ('min', 'max'):
-            fn = f'std::{op}'
+        elif op in ('min', 'max', 'min_num', 'max_num', 'minimum', 'maximum'):
+            fn = f'std::{op}' if op in ('min', 'max') else op
             result = SemaNode(
                 SemaNodeKind.CALL, ty=ty, call_name=fn, children=(_id(fn), src0, src1)
+            )
+        elif op == 'fmac':
+            result = SemaNode(
+                SemaNodeKind.FMA,
+                ty=ty,
+                children=(src0, src1, _cast(_dst(0), ty)),
+            )
+        elif op == 'fma':
+            result = SemaNode(
+                SemaNodeKind.FMA,
+                ty=ty,
+                children=(src0, src1, _cast(_src(2), ty)),
             )
         elif op == 'absdiff':
             result = SemaNode(
@@ -429,37 +502,17 @@ class _ScalarBinop(_ScalarDeriver):
                 fn = 'bfe_i64' if ty.base == 'I' else 'bfe64'
             elif fn == 'bfe' and ty.base == 'I':
                 fn = 'bfe_i32'
+            elif fn == 'bfm' and ty.size == 64:
+                fn = 'bfm64'
             result = SemaNode(
                 SemaNodeKind.CALL, ty=ty, call_name=fn, children=(_id(fn), src0, src1)
             )
         else:
             result = SemaNode(kind, ty=ty, children=(src0, src1))
 
-        scc_handled_by_template = op in (
-            'addc',
-            'subb',
-            'lshl1_add',
-            'lshl2_add',
-            'lshl3_add',
-            'lshl4_add',
-        )
-
-        needs_cached_ops = (
-            sem.sets_scc
-            and sem.sets_scc != 'none'
-            and not scc_handled_by_template
-            and sem.sets_scc in ('carry', 'borrow', 'overflow', 'compare')
-        )
-        if needs_cached_ops:
-            stmts.append(_assign(_id('s0', ty), src0))
-            stmts.append(_assign(_id('s1', ty), src1))
-            src0_scc = _id('s0', ty)
-            src1_scc = _id('s1', ty)
-        else:
-            src0_scc = src0
-            src1_scc = src1
-
-        result_ty = SemaType.F32 if ty.base in ('F', 'BF') and ty.size == 16 else ty
+        result_ty = calc_ty if raw_carry_bits else ty
+        if ty.base in ('F', 'BF') and ty.size == 16:
+            result_ty = SemaType.F32
         stmts.append(_assign(_id('result', result_ty), result))
         stmts.append(_assign(_cast(_dst(0), ty), _id('result', result_ty)))
 
@@ -469,8 +522,8 @@ class _ScalarBinop(_ScalarDeriver):
                     SemaNodeKind.ADD,
                     ty=SemaType.U64,
                     children=(
-                        _cast(src0_scc, SemaType.U64),
-                        _cast(src1_scc, SemaType.U64),
+                        _cast(src0, SemaType.U64),
+                        _cast(src1, SemaType.U64),
                     ),
                 )
                 scc_expr = SemaNode(
@@ -486,8 +539,8 @@ class _ScalarBinop(_ScalarDeriver):
                     SemaNodeKind.LT,
                     ty=SemaType.U1,
                     children=(
-                        src0_scc,
-                        src1_scc,
+                        src0,
+                        src1,
                     ),
                 )
             elif sem.sets_scc == 'overflow':
@@ -496,8 +549,8 @@ class _ScalarBinop(_ScalarDeriver):
                     overflow_kind,
                     ty=SemaType.I64,
                     children=(
-                        _cast(src0_scc, SemaType.I64),
-                        _cast(src1_scc, SemaType.I64),
+                        _cast(src0, SemaType.I64),
+                        _cast(src1, SemaType.I64),
                     ),
                 )
                 scc_expr = SemaNode(
@@ -514,8 +567,8 @@ class _ScalarBinop(_ScalarDeriver):
                     cmp_kind,
                     ty=SemaType.U1,
                     children=(
-                        src0_scc,
-                        src1_scc,
+                        src0,
+                        src1,
                     ),
                 )
             else:
@@ -569,17 +622,25 @@ class _ScalarBitcmp(_ScalarDeriver):
         op = sem.operation
         ty = _dtype_to_sema(sem.data_type)
         src0 = _cast(_src(0), ty)
-        src1 = _cast(_src(1), ty)
+        bit_mask = _lit('63' if ty.size == 64 else '31', SemaType.U32)
+        bit_index = SemaNode(
+            SemaNodeKind.AND,
+            ty=SemaType.U32,
+            children=(
+                _cast(_src(1), SemaType.U32),
+                bit_mask,
+            ),
+        )
 
         bit_extract = SemaNode(
             SemaNodeKind.AND,
             ty=SemaType.U1,
             children=(
-                SemaNode(SemaNodeKind.SHR, ty=ty, children=(src0, src1)),
-                _lit('1', SemaType.U1),
+                SemaNode(SemaNodeKind.SHR, ty=ty, children=(src0, bit_index)),
+                _lit('1', ty),
             ),
         )
-        if op == 'bitset0':
+        if op == 'bitcmp0':
             cmp = SemaNode(
                 SemaNodeKind.EQ,
                 ty=SemaType.U1,
@@ -656,25 +717,51 @@ class _ScalarSaveexec(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         op = sem.operation or 'and'
         stmts: list[SemaNode] = []
+        is_b32 = sem.data_type == 'b32'
+        src_ty = SemaType.U32 if is_b32 else SemaType.U64
 
-        # Cache source before writing dst (prevents aliasing when sdst == ssrc0).
-        src0 = _cast(_src(0), SemaType.U64)
+        # Cache source and EXEC before any writes (prevents aliasing).
+        src0 = _cast(_src(0), src_ty)
         stmts.append(_assign(_id('src', SemaType.U64), src0))
         cached_src = _id('src', SemaType.U64)
 
+        stmts.append(_assign(_id('old_exec', SemaType.U64), _id('EXEC', SemaType.U64)))
+        exec_read = _id('old_exec', SemaType.U64)
+
+        saved_exec = _cast(exec_read, SemaType.U32) if is_b32 else exec_read
         stmts.append(
             _assign(
-                _cast(_dst(0), SemaType.U64),
-                _id('EXEC', SemaType.U64),
+                _cast(_dst(0), src_ty),
+                saved_exec,
             )
         )
-
-        exec_read = _id('EXEC', SemaType.U64)
 
         kind = _OP_TO_KIND.get(op, SemaNodeKind.AND)
         if op in ('nand', 'nor', 'xnor'):
             inner = SemaNode(kind, ty=SemaType.U64, children=(exec_read, cached_src))
             new_exec = SemaNode(SemaNodeKind.BITNEG, ty=SemaType.U64, children=(inner,))
+        elif op == 'andn1':
+            new_exec = SemaNode(
+                SemaNodeKind.AND,
+                ty=SemaType.U64,
+                children=(
+                    exec_read,
+                    SemaNode(
+                        SemaNodeKind.BITNEG, ty=SemaType.U64, children=(cached_src,)
+                    ),
+                ),
+            )
+        elif op == 'orn1':
+            new_exec = SemaNode(
+                SemaNodeKind.OR,
+                ty=SemaType.U64,
+                children=(
+                    exec_read,
+                    SemaNode(
+                        SemaNodeKind.BITNEG, ty=SemaType.U64, children=(cached_src,)
+                    ),
+                ),
+            )
         elif op == 'andn2':
             new_exec = SemaNode(
                 SemaNodeKind.AND,
@@ -751,6 +838,13 @@ class _ScalarSaveexec(_ScalarDeriver):
         else:
             new_exec = SemaNode(kind, ty=SemaType.U64, children=(exec_read, cached_src))
 
+        if is_b32:
+            new_exec = SemaNode(
+                SemaNodeKind.AND,
+                ty=SemaType.U64,
+                children=(new_exec, _lit('0xffffffff', SemaType.U64)),
+            )
+
         stmts.append(_assign(_id('EXEC', SemaType.U64), new_exec))
         stmts.append(
             _scc_write(
@@ -784,10 +878,11 @@ _UNARY_KIND_MAP: dict[str, SemaNodeKind] = {
     'rcp': SemaNodeKind.CALL,
     'rcp_iflag': SemaNodeKind.CALL,
     'rsq': SemaNodeKind.CALL,
-    'sqrt': SemaNodeKind.SQRT,
-    'sin': SemaNodeKind.SIN,
-    'cos': SemaNodeKind.COS,
-    'log': SemaNodeKind.LOG2,
+    'sqrt': SemaNodeKind.CALL,
+    'sin': SemaNodeKind.CALL,
+    'cos': SemaNodeKind.CALL,
+    'log': SemaNodeKind.CALL,
+    'log2': SemaNodeKind.CALL,
     'exp': SemaNodeKind.CALL,
     'bcnt': SemaNodeKind.CALL,
     'ffbl': SemaNodeKind.CALL,
@@ -870,7 +965,12 @@ def _vec_binop_expr(
             children=(_id('mul_legacy'), src0, src1),
         )
     if op in ('ashr', 'ashrrev'):
-        call_name = 'ashr_i64' if ty.size == 64 else 'util::arithmetic_shr'
+        if ty.size == 64:
+            call_name = 'ashr_i64'
+        elif ty.size == 16:
+            call_name = 'util::arithmetic_shr_i16'
+        else:
+            call_name = 'util::arithmetic_shr'
         return SemaNode(
             SemaNodeKind.CALL,
             ty=ty,
@@ -928,6 +1028,19 @@ class _VectorUnary(_ScalarDeriver):
             body = _assign(_cast(_dst(0, SemaType.F64), SemaType.F64), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        _f64_transcendentals = {'rcp': 'rcp_f64', 'rsq': 'rsq_f64', 'sqrt': 'sqrt_f64'}
+        if op in _f64_transcendentals and ty.size == 64:
+            call_name = _f64_transcendentals[op]
+            src0 = _cast(_src(0, ty), ty)
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=ty,
+                call_name=call_name,
+                children=(_id(call_name), src0),
+            )
+            body = _assign(_cast(_dst(0, ty), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'
             src0 = _src(0)
@@ -938,6 +1051,24 @@ class _VectorUnary(_ScalarDeriver):
                     ty=SemaType.B32,
                     call_name=call_name,
                     children=(_id(call_name), src0),
+                ),
+            )
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op in (
+            'cvt_f16_fp8',
+            'cvt_f16_bf8',
+            'cvt_norm_i16_f16',
+            'cvt_norm_u16_f16',
+        ):
+            src0 = _src(0)
+            body = _assign(
+                _cast(_dst(0), SemaType.B32),
+                SemaNode(
+                    SemaNodeKind.CALL,
+                    ty=SemaType.B32,
+                    call_name=op,
+                    children=(_id(op), src0),
                 ),
             )
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
@@ -1056,6 +1187,32 @@ class _VectorTernary(_ScalarDeriver):
             body = _assign(_cast(_dst(0), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        if op in ('add_min', 'add_max') and dtype in ('i32', 'u32'):
+            call_name = f'{op}_{dtype}'
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=ty,
+                call_name=call_name,
+                children=(
+                    _id(call_name),
+                    _cast(_src(0), ty),
+                    _cast(_src(1), ty),
+                    _cast(_src(2), ty),
+                ),
+            )
+            body = _assign(_cast(_dst(0), ty), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op in ('ashr_pk_i8_i32', 'ashr_pk_u8_i32'):
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.B32,
+                call_name=op,
+                children=(_id(op), _src(0), _src(1), _src(2)),
+            )
+            body = _assign(_cast(_dst(0), SemaType.B32), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
         src2 = _cast(_src(2), ty)
@@ -1129,11 +1286,12 @@ class _VectorCmpClass(_ScalarDeriver):
         ty = _dtype_to_sema(sem.data_type)
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), SemaType.U32)
+        call_name = 'fp_class_test_f64' if ty.size == 64 else 'fp_class_test'
         result = SemaNode(
             SemaNodeKind.CALL,
             ty=SemaType.U1,
-            call_name='fp_class_test',
-            children=(_id('fp_class_test'), src0, src1),
+            call_name=call_name,
+            children=(_id(call_name), src0, src1),
         )
         body = _assign(
             SemaNode(
@@ -1156,11 +1314,12 @@ class _VectorCmpxClass(_ScalarDeriver):
         ty = _dtype_to_sema(sem.data_type)
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), SemaType.U32)
+        call_name = 'fp_class_test_f64' if ty.size == 64 else 'fp_class_test'
         result = SemaNode(
             SemaNodeKind.CALL,
             ty=SemaType.U1,
-            call_name='fp_class_test',
-            children=(_id('fp_class_test'), src0, src1),
+            call_name=call_name,
+            children=(_id(call_name), src0, src1),
         )
         body = _assign(
             SemaNode(
@@ -1879,9 +2038,11 @@ for _dot_cls in (
     'dot2_i32_i16',
     'dot2_u32_u16',
     'dot4_i32_i8',
+    'dot4_i32_iu8',
     'dot4_u32_u8',
     'dot4_f32_fp8',
     'dot8_i32_i4',
+    'dot8_i32_iu4',
     'dot8_u32_u4',
 ):
 
@@ -2198,6 +2359,24 @@ for _cvt_cls in (
             return _derive_cvt_pk(sem)
 
 
+@_register('scalar_cvt_pkrtz_f16_f32')
+class _ScalarCvtPkRtzF16F32(_ScalarDeriver):
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.B32,
+            call_name='cvt_pkrtz_f16_f32',
+            children=(
+                _id('cvt_pkrtz_f16_f32'),
+                _cast(_src(0), SemaType.F32),
+                _cast(_src(1), SemaType.F32),
+            ),
+        )
+        body = _assign(_cast(_dst(0), SemaType.B32), result)
+        return SemaBlock(sem.name, ExecModel.SCALAR, body)
+
+
 # --- Remaining scalar ops ---
 
 
@@ -2296,6 +2475,21 @@ class _ScalarCall(_ScalarDeriver):
             children=(_id('scalar_call'), _cast(_src(0), SemaType.U64)),
         )
         body = _assign(_cast(_dst(0), SemaType.U64), result)
+        return SemaBlock(sem.name, ExecModel.SCALAR, body)
+
+
+@_register('scalar_sendmsg_rtn')
+class _ScalarSendmsgRtn(_ScalarDeriver):
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        ty = _dtype_to_sema(sem.data_type)
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=ty,
+            call_name='scalar_sendmsg_rtn',
+            children=(_id('scalar_sendmsg_rtn'), _cast(_src(0), SemaType.U32)),
+        )
+        body = _assign(_cast(_dst(0), ty), result)
         return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
 
@@ -2405,6 +2599,11 @@ class _DcacheWb(_DcacheInv):
 
 @_register('gl1_inv')
 class _Gl1Inv(_DcacheInv):
+    pass
+
+
+@_register('gl1_wbinv')
+class _Gl1Wbinv(_DcacheInv):
     pass
 
 
