@@ -486,8 +486,7 @@ aqlprofile_spm_stop(aqlprofile_handle_t handle)
 PUBLIC_API void
 aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    if(auto* map = rocprofiler::common::static_object<SpmStateMap>::get())
-        map->remove(handle);
+    if(auto* map = rocprofiler::common::static_object<SpmStateMap>::get()) map->remove(handle);
 }
 
 struct consumer_thread_handle_t
