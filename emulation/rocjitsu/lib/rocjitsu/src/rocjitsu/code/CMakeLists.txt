@@ -5,6 +5,7 @@ rj_add_object_library(rocjitsu_code
     amdgpu_code_object.cpp
     basic_block.cpp
     executable.cpp
+    file_io.cpp
     kernel_symbol.cpp
     rj_code.cpp
     dbt/binary_translator.cpp

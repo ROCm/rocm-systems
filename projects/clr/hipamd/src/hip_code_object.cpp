@@ -151,7 +151,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name)
 
   auto it = functions_.find(func_name);
   if (it == functions_.end()) {
-    LogPrintfError("Cannot find the function: %s ", func_name.c_str());
+    LogPrintfInfo("Cannot find the function: %s", func_name.c_str());
     return hipErrorNotFound;
   }
 

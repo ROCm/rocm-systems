@@ -267,16 +267,21 @@ kfd_event_metadata_initialize(const client_data* tool_data)
     constexpr auto*  BLOCK       = "KFD";
     constexpr auto*  EXPRESSION  = "";
 
-    constexpr std::uint32_t DEVICE_ID = 0;
-
-    // Dropped events have no associated agent; pin to GPU 0 as a placeholder.
-    trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_type::GPU, DEVICE_ID, "GPU", EVENT_CODE, INSTANCE_ID,
-          trait::name<category::rocm_kfd_event_dropped_events>::value,
-          "KFD Dropped Events",
-          trait::name<category::rocm_kfd_event_dropped_events>::description,
-          "KFD dropped_events events", COMPONENT, "count", trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0, "{}" });
+    // Dropped events have no associated agent; pin them to the first GPU as a
+    // placeholder. Skip when no GPU agents are present - otherwise the metadata
+    // post-processor cannot resolve the GPU agent and aborts post-processing.
+    if(!tool_data->gpu_agents.empty())
+    {
+        const auto dropped_dev_id =
+            static_cast<std::uint32_t>(tool_data->gpu_agents.front().device_id);
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, dropped_dev_id, "GPU", EVENT_CODE, INSTANCE_ID,
+              trait::name<category::rocm_kfd_event_dropped_events>::value,
+              "KFD Dropped Events",
+              trait::name<category::rocm_kfd_event_dropped_events>::description,
+              "KFD dropped_events events", COMPONENT, "count", trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
+    }
 
     // All KFD event types carry an agent; register one PMC info entry per GPU
     // (and per CPU for page migrate) so events are correctly attributed.

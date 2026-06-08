@@ -15,8 +15,8 @@ subtrees:
 
 - caption: Conceptual
   entries:
-  - file: conceptual/video-decoding-pipeline.rst
-    title: Video decoding pipeline
+  - file: conceptual/rocDecode-decoding-pipelines.rst
+    title: Decoding pipeline
   - file: conceptual/rocDecode-memory-types.rst
     title: Surface memory locations
 
