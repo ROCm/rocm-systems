@@ -127,7 +127,3 @@
 [submodule "projects/rocprofiler-compute/src/lib/external/fmt"]
 	path = projects/rocprofiler-compute/src/lib/external/fmt
 	url = https://github.com/fmtlib/fmt.git
-[submodule "emulation/mirage/llvm-project-hotswap"]
-	path = emulation/mirage/llvm-project-hotswap
-	url = https://github.com/martin-luecke/llvm-project
-	branch = users/mluecke/hotswap-landing-parity
