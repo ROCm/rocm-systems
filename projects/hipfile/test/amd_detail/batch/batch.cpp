@@ -17,22 +17,33 @@
 #include "mthread-pool.h"
 #include "state.h"
 
+#include <array>
+#include <chrono>
 #include <functional>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <ratio>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
 using ::testing::_;
+using ::testing::AllOf;
 using ::testing::ByMove;
+using ::testing::Field;
 using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::Throw;
+using ::testing::UnorderedElementsAre;
 
 using namespace hipFile;
+
+static_assert(std::ratio_equal_v<std::chrono::steady_clock::period, std::nano>,
+              "Tests require a nanosecond steady_clock period");
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
 
@@ -338,6 +349,7 @@ struct HipFileBatchContext : public HipFileUnopened {
     unsigned                                 _context_capacity = 2;
     std::unique_ptr<StrictMock<MThreadPool>> mock_thread_pool;
     StrictMock<MTaskGroup>                  *mock_task_group = nullptr;
+    std::vector<std::function<void()>>       enqueued_tasks;
 
     void SetUp() override
     {
@@ -359,6 +371,31 @@ struct HipFileBatchContext : public HipFileUnopened {
         auto op = std::make_shared<StrictMock<MBatchOperation>>();
         EXPECT_CALL(*op, markPending()).Times(1);
         return op;
+    }
+
+    void submitMockOperations(const std::vector<std::shared_ptr<StrictMock<MBatchOperation>>> &ops)
+    {
+        EXPECT_CALL(*mock_task_group, run(_))
+            .Times(static_cast<int>(ops.size()))
+            .WillRepeatedly(
+                [this](std::function<void()> work) { enqueued_tasks.push_back(std::move(work)); });
+        _context->submitOperations(BatchOperations{ops.begin(), ops.end()});
+    }
+
+    /// Run the work queued for the operation submitted at @p index, which moves
+    /// the operation from submitted to completed.
+    void completeOperation(const std::shared_ptr<StrictMock<MBatchOperation>> &op, size_t index)
+    {
+        EXPECT_CALL(*op, run()).Times(1);
+        enqueued_tasks.at(index)();
+    }
+
+    /// Complete every operation of a single submission, in submission order.
+    void completeOperations(const std::vector<std::shared_ptr<StrictMock<MBatchOperation>>> &ops)
+    {
+        for (size_t i = 0; i < ops.size(); i++) {
+            completeOperation(ops[i], i);
+        }
     }
 };
 
@@ -421,6 +458,330 @@ TEST_F(HipFileBatchContext, SubmitOverCapacityOverMultipleSubmissions)
 
     auto op = std::make_shared<StrictMock<MBatchOperation>>();
     ASSERT_THROW(_context->submitOperations(BatchOperations{op}), BatchFull);
+}
+
+TEST_F(HipFileBatchContext, SubmittedWorkKeepsContextAliveUntilReleased)
+{
+    std::function<void()>        enqueued_work;
+    std::weak_ptr<IBatchContext> weak_context = _context;
+    auto                         op           = makeOperation();
+
+    // enqueued_work will capture the function that has been passed to the thread pool
+    EXPECT_CALL(*mock_task_group, run(_)).WillOnce([&enqueued_work](std::function<void()> work) {
+        enqueued_work = std::move(work);
+    });
+
+    ASSERT_NO_THROW(_context->submitOperations(BatchOperations{op}));
+    // enqueued_work has been assigned
+    ASSERT_TRUE(enqueued_work);
+
+    // Destroy the context and our shared_ptr to it
+    batch_map.destroyContext(_context.get());
+    _context.reset();
+
+    // BatchContext is still valid because it was captured by lambda
+    ASSERT_FALSE(weak_context.expired());
+
+    // Assigning empty function will call destructor for the lambda that was assigned
+    enqueued_work = {};
+
+    // The shared_ptr has been destroyed
+    ASSERT_TRUE(weak_context.expired());
+}
+
+TEST_F(HipFileBatchContext, GetStatusNoOutstandingReturnsNothing)
+{
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+
+    ASSERT_NO_THROW(
+        _context->getStatus(1, &nr, &event, std::chrono::steady_clock::now() + std::chrono::seconds{1}));
+    ASSERT_EQ(nr, 0);
+}
+
+TEST_F(HipFileBatchContext, GetStatusNullNumEventsThrowsInvalidArgument)
+{
+    hipFileIOEvents_t event{};
+
+    ASSERT_THROW(_context->getStatus(0, nullptr, &event, std::nullopt), std::invalid_argument);
+}
+
+TEST_F(HipFileBatchContext, GetStatusNullEventsThrowsInvalidArgument)
+{
+    unsigned nr = 0;
+
+    ASSERT_THROW(_context->getStatus(0, &nr, nullptr, std::nullopt), std::invalid_argument);
+}
+
+TEST_F(HipFileBatchContext, GetStatusMinimumExceedsCapacityThrowsInvalidArgument)
+{
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+
+    ASSERT_THROW(_context->getStatus(2, &nr, &event, std::nullopt), std::invalid_argument);
+}
+
+TEST_F(HipFileBatchContext, GetStatusMinimumExceedsBatchCapacityThrowsInvalidArgument)
+{
+    const unsigned                 min_nr = _context_capacity + 1;
+    unsigned                       nr     = min_nr;
+    std::vector<hipFileIOEvents_t> events(min_nr);
+
+    // The event buffer holds min_nr events, so only the batch capacity limit can reject this.
+    ASSERT_THROW(_context->getStatus(min_nr, &nr, events.data(), std::nullopt), std::invalid_argument);
+}
+
+TEST_F(HipFileBatchContext, GetStatusReturnsCompletedOperationAndConsumesIt)
+{
+    int               cookie{};
+    auto              op = makeOperation();
+    hipFileIOEvents_t completed_event{&cookie, hipFileComplete, 9};
+    EXPECT_CALL(*op, event()).WillOnce(Return(completed_event));
+    submitMockOperations({op});
+    completeOperation(op, 0);
+
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+    ASSERT_NO_THROW(_context->getStatus(1, &nr, &event, std::nullopt));
+
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event.cookie, &cookie);
+    ASSERT_EQ(event.status, hipFileComplete);
+    ASSERT_EQ(event.ret, 9);
+
+    nr = 1;
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, std::nullopt));
+    ASSERT_EQ(nr, 0);
+}
+
+TEST_F(HipFileBatchContext, GetStatusReturnsFailedAndCanceledOperations)
+{
+    int               failed_cookie{};
+    int               canceled_cookie{};
+    auto              failed_op      = makeOperation();
+    auto              canceled_op    = makeOperation();
+    hipFileIOEvents_t failed_event   = {&failed_cookie, hipFileFailed,
+                                        static_cast<size_t>(-hipFileInternalError)};
+    hipFileIOEvents_t canceled_event = {&canceled_cookie, hipFileCanceled, 0};
+    EXPECT_CALL(*failed_op, event()).WillRepeatedly(Return(failed_event));
+    EXPECT_CALL(*canceled_op, event()).WillRepeatedly(Return(canceled_event));
+    submitMockOperations({failed_op, canceled_op});
+    completeOperations({failed_op, canceled_op});
+
+    unsigned                         nr = 2;
+    std::array<hipFileIOEvents_t, 2> events{};
+    ASSERT_NO_THROW(_context->getStatus(2, &nr, events.data(), std::nullopt));
+
+    ASSERT_EQ(nr, 2);
+    ASSERT_THAT(events, UnorderedElementsAre(
+                            AllOf(Field(&hipFileIOEvents_t::cookie, static_cast<void *>(&failed_cookie)),
+                                  Field(&hipFileIOEvents_t::status, hipFileFailed),
+                                  Field(&hipFileIOEvents_t::ret, static_cast<size_t>(-hipFileInternalError))),
+                            AllOf(Field(&hipFileIOEvents_t::cookie, static_cast<void *>(&canceled_cookie)),
+                                  Field(&hipFileIOEvents_t::status, hipFileCanceled))));
+}
+
+TEST_F(HipFileBatchContext, GetStatusDoesNotReturnOperationUntilItCompletes)
+{
+    auto              op = makeOperation();
+    hipFileIOEvents_t completed_event{nullptr, hipFileComplete, 1};
+    EXPECT_CALL(*op, event()).WillOnce(Return(completed_event));
+    submitMockOperations({op});
+
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, std::chrono::steady_clock::now()));
+
+    ASSERT_EQ(nr, 0);
+
+    completeOperation(op, 0);
+
+    nr = 1;
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, std::nullopt));
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event.status, hipFileComplete);
+}
+
+TEST_F(HipFileBatchContext, GetStatusWaitsForOperationToComplete)
+{
+    int               cookie{};
+    auto              op = makeOperation();
+    hipFileIOEvents_t completed_event{&cookie, hipFileComplete, 3};
+    EXPECT_CALL(*op, event()).WillOnce(Return(completed_event));
+    submitMockOperations({op});
+
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+    std::thread       waiter{[this, &nr, &event]() { _context->getStatus(1, &nr, &event, std::nullopt); }};
+
+    completeOperation(op, 0);
+    waiter.join();
+
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event.cookie, &cookie);
+    ASSERT_EQ(event.status, hipFileComplete);
+    ASSERT_EQ(event.ret, 3);
+}
+
+TEST_F(HipFileBatchContext, CompletedOperationsOccupyCapacityUntilRetrieved)
+{
+    auto op1 = makeOperation();
+    auto op2 = makeOperation();
+    EXPECT_CALL(*op1, event()).WillOnce(Return(hipFileIOEvents_t{nullptr, hipFileComplete, 1}));
+    EXPECT_CALL(*op2, event()).WillOnce(Return(hipFileIOEvents_t{nullptr, hipFileComplete, 2}));
+    submitMockOperations({op1, op2});
+    completeOperations({op1, op2});
+
+    auto full_op = std::make_shared<StrictMock<MBatchOperation>>();
+    ASSERT_THROW(_context->submitOperations(BatchOperations{full_op}), BatchFull);
+
+    unsigned                         nr = 2;
+    std::array<hipFileIOEvents_t, 2> events{};
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, events.data(), std::nullopt));
+    ASSERT_EQ(nr, 2);
+
+    ASSERT_NO_THROW(submitMockOperations({makeOperation()}));
+}
+
+TEST_F(HipFileBatchContext, GetStatusReturnsAtMostCallerCapacity)
+{
+    auto op1 = makeOperation();
+    auto op2 = makeOperation();
+    EXPECT_CALL(*op1, event()).WillRepeatedly(Return(hipFileIOEvents_t{nullptr, hipFileComplete, 1}));
+    EXPECT_CALL(*op2, event()).WillRepeatedly(Return(hipFileIOEvents_t{nullptr, hipFileComplete, 2}));
+    submitMockOperations({op1, op2});
+    completeOperations({op1, op2});
+
+    unsigned          nr = 1;
+    hipFileIOEvents_t event{};
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, &event, std::nullopt));
+
+    ASSERT_EQ(nr, 1);
+
+    nr = 2;
+    std::array<hipFileIOEvents_t, 2> events{};
+    ASSERT_NO_THROW(_context->getStatus(0, &nr, events.data(), std::nullopt));
+    ASSERT_EQ(nr, 1);
+}
+
+TEST_F(HipFileBatchContext, GetStatusElapsedDeadlineWillReturnLessThanMin)
+{
+    int               cookie{};
+    auto              complete_op = makeOperation();
+    auto              pending_op  = makeOperation();
+    hipFileIOEvents_t completed_event{&cookie, hipFileComplete, 4};
+    EXPECT_CALL(*complete_op, event()).WillOnce(Return(completed_event));
+    submitMockOperations({complete_op, pending_op});
+    completeOperation(complete_op, 0);
+
+    unsigned          nr = 2;
+    hipFileIOEvents_t event[2];
+    ASSERT_NO_THROW(_context->getStatus(2, &nr, &event[0], std::chrono::steady_clock::now()));
+
+    ASSERT_EQ(nr, 1);
+    ASSERT_EQ(event[0].cookie, &cookie);
+    ASSERT_EQ(event[0].status, hipFileComplete);
+    ASSERT_EQ(event[0].ret, 4);
+}
+
+TEST(HipFileBatchDeadline, NullTimeoutHasNoDeadline)
+{
+    ASSERT_EQ(makeBatchDeadline(nullptr), std::nullopt);
+}
+
+TEST(HipFileBatchDeadline, ZeroTimeoutIsAnImmediateDeadline)
+{
+    const auto      now = std::chrono::steady_clock::time_point{std::chrono::seconds{123}};
+    struct timespec timeout {
+        0, 0
+    };
+
+    const auto deadline = makeBatchDeadline(&timeout, now);
+
+    ASSERT_TRUE(deadline.has_value());
+    ASSERT_EQ(*deadline, now);
+}
+
+TEST(HipFileBatchDeadline, PositiveTimeoutIsOffsetFromNow)
+{
+    const auto      now = std::chrono::steady_clock::time_point{std::chrono::seconds{123}};
+    struct timespec timeout {
+        1, 500000000L
+    };
+
+    const auto deadline = makeBatchDeadline(&timeout, now);
+
+    ASSERT_TRUE(deadline.has_value());
+    ASSERT_EQ(*deadline, now + std::chrono::milliseconds{1500});
+}
+
+TEST(HipFileBatchDeadline, MaximumTimeoutFits)
+{
+    const auto now =
+        std::chrono::steady_clock::time_point::max() - std::chrono::seconds{2} - std::chrono::nanoseconds{42};
+    struct timespec timeout {
+        2, 42
+    };
+
+    const auto deadline = makeBatchDeadline(&timeout, now);
+
+    ASSERT_TRUE(deadline.has_value());
+    ASSERT_EQ(*deadline, std::chrono::steady_clock::time_point::max());
+}
+
+TEST(HipFileBatchDeadline, NanosecondsPastMaximumTimeoutSaturates)
+{
+    const auto now =
+        std::chrono::steady_clock::time_point::max() - std::chrono::seconds{2} - std::chrono::nanoseconds{42};
+    struct timespec timeout {
+        2, 43
+    };
+
+    const auto deadline = makeBatchDeadline(&timeout, now);
+
+    ASSERT_TRUE(deadline.has_value());
+    ASSERT_EQ(*deadline, std::chrono::steady_clock::time_point::max());
+}
+
+TEST(HipFileBatchDeadline, SecondsPastMaximumTimeoutSaturates)
+{
+    const auto now =
+        std::chrono::steady_clock::time_point::max() - std::chrono::seconds{2} - std::chrono::nanoseconds{42};
+    struct timespec timeout {
+        3, 0
+    };
+
+    const auto deadline = makeBatchDeadline(&timeout, now);
+
+    ASSERT_TRUE(deadline.has_value());
+    ASSERT_EQ(*deadline, std::chrono::steady_clock::time_point::max());
+}
+
+TEST(HipFileBatchDeadline, NegativeSecondsThrowsInvalidArgument)
+{
+    struct timespec timeout {
+        - 1, 0
+    };
+
+    ASSERT_THROW(makeBatchDeadline(&timeout), std::invalid_argument);
+}
+
+TEST(HipFileBatchDeadline, NegativeNanosecondsThrowsInvalidArgument)
+{
+    struct timespec timeout {
+        0, -1
+    };
+
+    ASSERT_THROW(makeBatchDeadline(&timeout), std::invalid_argument);
+}
+
+TEST(HipFileBatchDeadline, UnnormalizedNanosecondsThrowsInvalidArgument)
+{
+    struct timespec timeout {
+        0, 1000000000L
+    };
+
+    ASSERT_THROW(makeBatchDeadline(&timeout), std::invalid_argument);
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

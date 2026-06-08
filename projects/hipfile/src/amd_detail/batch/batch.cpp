@@ -12,8 +12,11 @@
 #include "state.h"
 #include "thread-pool.h"
 
+#include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cstddef>
+#include <ctime>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -36,6 +39,34 @@ using batchOperationState::Pending;
 using batchOperationState::Running;
 using batchOperationState::Timeout;
 using batchOperationState::Waiting;
+
+BatchDeadline
+makeBatchDeadline(const struct timespec *timeout, std::chrono::time_point<std::chrono::steady_clock> now)
+{
+    if (timeout == nullptr) {
+        return std::nullopt;
+    }
+    if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000L) {
+        throw std::invalid_argument("Invalid batch status timeout");
+    }
+
+    using clock_duration = std::chrono::steady_clock::duration;
+    static_assert(std::is_integral_v<clock_duration::rep>,
+                  "steady_clock must use an integral representation");
+    static_assert(std::is_convertible_v<std::chrono::seconds, clock_duration>,
+                  "whole seconds must be representable");
+    auto maxWait    = std::chrono::steady_clock::time_point::max() - now;
+    auto maxSeconds = std::chrono::duration_cast<std::chrono::seconds>(maxWait);
+    auto maxNanos   = std::chrono::duration_cast<std::chrono::nanoseconds>(maxWait - maxSeconds);
+    if (std::cmp_greater(timeout->tv_sec, maxSeconds.count()) ||
+        (std::cmp_equal(timeout->tv_sec, maxSeconds.count()) &&
+         std::cmp_greater(timeout->tv_nsec, maxNanos.count()))) {
+        return std::chrono::steady_clock::time_point::max();
+    }
+
+    return now + std::chrono::duration_cast<clock_duration>(std::chrono::seconds(timeout->tv_sec)) +
+           std::chrono::ceil<clock_duration>(std::chrono::nanoseconds(timeout->tv_nsec));
+}
 
 InvalidStateTransition::InvalidStateTransition(const char *from, const char *to)
     : std::logic_error{std::string{"Invalid batch operation state transition: "} + from + " -> " + to}
@@ -313,7 +344,7 @@ BatchContext::submitOperations(BatchOperations pending_ops)
     {
         std::unique_lock<std::shared_mutex> context_lock{context_mutex};
 
-        if (pending_ops.size() > capacity - submitted_ops.size()) {
+        if (pending_ops.size() > capacity - (submitted_ops.size() + completed_ops.size())) {
             throw BatchFull();
         }
 
@@ -322,10 +353,66 @@ BatchContext::submitOperations(BatchOperations pending_ops)
         }
         submitted_ops.insert(pending_ops.begin(), pending_ops.end());
 
+        auto self = shared_from_this();
         for (const auto &op : pending_ops) {
-            task_group->run([op]() { op->run(); });
+            task_group->run([self, op]() {
+                op->run();
+                {
+                    std::unique_lock<std::shared_mutex> _ulock{self->context_mutex};
+
+                    auto node = self->submitted_ops.extract(op);
+                    self->completed_ops.push_back(std::move(node.value()));
+                }
+                self->status_cv.notify_all();
+            });
         }
     }
+}
+
+void
+BatchContext::getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, BatchDeadline deadline)
+{
+    if (nr == nullptr) {
+        throw std::invalid_argument("Number of events cannot be null");
+    }
+    if (*nr == 0) {
+        throw std::invalid_argument("Number of events cannot be zero");
+    }
+    if (iocbp == nullptr) {
+        throw std::invalid_argument("Event buffer cannot be null");
+    }
+    if (min_nr > *nr) {
+        throw std::invalid_argument("Minimum event count exceeds event buffer capacity");
+    }
+    if (min_nr > capacity) {
+        throw std::invalid_argument("Minimum event count exceeds batch capacity");
+    }
+
+    const unsigned event_capacity = *nr;
+    *nr                           = 0;
+
+    std::unique_lock<std::shared_mutex> ulock{context_mutex};
+
+    auto collect_completed_events = [this, event_capacity, nr, iocbp]() {
+        const auto copied = std::min(static_cast<size_t>(event_capacity), completed_ops.size());
+        for (size_t i = 0; i < copied; i++) {
+            iocbp[i] = completed_ops[i]->event();
+        }
+        completed_ops.erase(completed_ops.begin(),
+                            completed_ops.begin() + static_cast<std::ptrdiff_t>(copied));
+        *nr = static_cast<unsigned>(copied);
+    };
+
+    auto ready = [min_nr, this]() { return completed_ops.size() >= min_nr || submitted_ops.empty(); };
+
+    if (deadline.has_value()) {
+        status_cv.wait_until(ulock, *deadline, ready);
+    }
+    else {
+        status_cv.wait(ulock, ready);
+    }
+
+    collect_completed_events();
 }
 
 void
