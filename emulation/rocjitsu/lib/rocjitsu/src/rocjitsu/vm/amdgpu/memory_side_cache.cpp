@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 
+#include <algorithm>
 #include <bit>
 #include <cassert>
 #include <cstring>
@@ -44,21 +45,37 @@ void MemorySideCache::ensure_line(uint64_t addr) {
 }
 
 void MemorySideCache::read(uint64_t addr, uint8_t *dst, uint32_t size) {
-  std::lock_guard<std::mutex> lock(stripes_[stripe_index(addr)]);
-  ensure_line(addr);
-  cache_.read_line(addr, dst, CacheStore::line_offset(addr), size);
+  uint32_t copied = 0;
+  while (copied < size) {
+    const uint64_t ea = addr + copied;
+    const uint32_t line_offset = CacheStore::line_offset(ea);
+    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+
+    std::lock_guard<std::mutex> lock(stripes_[stripe_index(ea)]);
+    ensure_line(ea);
+    cache_.read_line(ea, dst + copied, line_offset, chunk);
+    copied += chunk;
+  }
 }
 
 void MemorySideCache::write(uint64_t addr, const uint8_t *src, uint32_t size) {
-  std::lock_guard<std::mutex> lock(stripes_[stripe_index(addr)]);
-  ensure_line(addr);
-  cache_.write_line(addr, src, CacheStore::line_offset(addr), size);
+  uint32_t copied = 0;
+  while (copied < size) {
+    const uint64_t ea = addr + copied;
+    const uint32_t line_offset = CacheStore::line_offset(ea);
+    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
 
-  simdojo::CacheTag *tag = nullptr;
-  cache_.lookup(addr, &tag);
-  assert(tag != nullptr && "ensure_line must guarantee hit");
-  tag->dirty = true;
-  tag->coherence = simdojo::CoherenceState::MODIFIED;
+    std::lock_guard<std::mutex> lock(stripes_[stripe_index(ea)]);
+    ensure_line(ea);
+    cache_.write_line(ea, src + copied, line_offset, chunk);
+
+    simdojo::CacheTag *tag = nullptr;
+    cache_.lookup(ea, &tag);
+    assert(tag != nullptr && "ensure_line must guarantee hit");
+    tag->dirty = true;
+    tag->coherence = simdojo::CoherenceState::MODIFIED;
+    copied += chunk;
+  }
 }
 
 void MemorySideCache::flush_all() {

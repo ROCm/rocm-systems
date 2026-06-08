@@ -42,6 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -2751,34 +2752,54 @@ get_rank_filter_logs()
 #endif
 
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+// Return the first env var in `env_var_options` that holds an unsigned integer.
+// `label` is used only for logging (e.g. "MPI rank", "MPI world size").
 std::optional<std::uint64_t>
-get_mpi_rank_from_env()
+get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
+                       const std::string&              label)
 {
-    const std::vector<std::string> rank_env_var_options = {
-        // rank env vars: user-provided then most generic to most runtime-specific
-        get_rank_filter_id(),  "MPI_RANK",
-        "MPI_LOCALRANKID",     "MPI_RANKID",
-        "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK"
-    };
-
-    for(const auto& env_var : rank_env_var_options)
+    for(const auto& env_var : env_var_options)
     {
-        const std::string rank_str = get_env(env_var, std::string{});
+        const std::string value_str = get_env(env_var, std::string{});
 
-        if(rank_str.empty()) continue;
-        try
+        if(value_str.empty()) continue;
+
+        std::uint64_t value  = 0;
+        const char*   first  = value_str.data();
+        const char*   last   = first + value_str.size();
+        const auto    result = std::from_chars(first, last, value);
+
+        if(result.ec != std::errc{} || result.ptr != last)
         {
-            const auto rank = std::stoul(rank_str);
-            LOG_DEBUG("MPI output filtering: using MPI rank = {} from {}", rank, env_var);
-            return rank;
-        } catch(const std::exception& e)
-        {
-            LOG_WARNING("MPI output filtering: failed to get MPI rank from {}='{}': {}",
-                        env_var, rank_str, e.what());
+            LOG_WARNING("MPI output filtering: failed to parse {} from {}='{}' as a "
+                        "non-negative integer",
+                        label, env_var, value_str);
+            continue;
         }
+
+        LOG_DEBUG("MPI output filtering: using {} = {} from {}", label, value, env_var);
+        return value;
     }
 
     return std::nullopt;
+}
+
+std::optional<std::uint64_t>
+get_mpi_rank_from_env()
+{
+    // global rank env-vars: user-provided, then runtime-specific
+    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
+                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
+                                    "SLURM_PROCID" },
+                                  "MPI rank");
+}
+
+std::optional<std::uint64_t>
+get_mpi_world_size_from_env()
+{
+    return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
+                                    "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
+                                  "MPI world size");
 }
 #endif
 }  // namespace
@@ -2805,8 +2826,49 @@ is_rank_in_filter(std::string enabled_ranks_str)
         return true;
     }
 
-    const auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
+    auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
+
+    // Check current_rank and enabled_ranks against total number of existing MPI ranks
+    const auto world_size = get_mpi_world_size_from_env();
+    if(world_size.has_value())
+    {
+        if(world_size.value() == 0)
+        {
+            LOG_WARNING("MPI output filtering DISABLED: total number of MPI ranks (world "
+                        "size) is 0");
+            return true;
+        }
+
+        for(auto it = enabled_ranks.begin(); it != enabled_ranks.end();)
+        {
+            if(*it < 0 || static_cast<std::uint64_t>(*it) >= world_size.value())
+            {
+                LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
+                            "existing ranks [0-{}]. Ignoring",
+                            *it, world_size.value() - 1);
+                it = enabled_ranks.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        if(current_rank.value() >= world_size.value())
+        {
+            LOG_WARNING("MPI output filtering DISABLED: MPI rank {} not in range of "
+                        "existing ranks [0-{}]",
+                        current_rank.value(), world_size.value() - 1);
+            return true;
+        }
+    }
+
+    if(enabled_ranks.empty())
+    {
+        LOG_WARNING("MPI output filtering DISABLED: no valid enabled ranks provided");
+        return true;
+    }
 
     const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),

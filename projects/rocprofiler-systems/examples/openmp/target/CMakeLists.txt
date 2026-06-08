@@ -108,6 +108,35 @@ target_compile_options(openmp-target PRIVATE -fopenmp -ggdb)
 target_link_options(openmp-target PUBLIC -fopenmp)
 add_offload_flags(openmp-target)
 
+# Only instinct GPUs are xnack-capable and ship a device-side AddressSanitizer runtime.
+# When building under a sanitizer on non-instinct arches, the OpenMP target offload
+# device image would otherwise be instrumented and fail to link with undefined
+# __asan_* device symbols, so we disable device-side instrumentation with
+# -fno-gpu-sanitize. Note: rocprofiler_systems_lookup_gfx defaults unknown arches to
+# 'instinct', so device instrumentation is only disabled when every target is
+# known-non-instinct (fail-safe).
+
+# NOTE: only inspects CMAKE_CXX_FLAGS. Sanitizers added via add_compile_options,
+# CMAKE_CXX_FLAGS_<CONFIG>, or a toolchain file will not be detected; pass
+# -fsanitize=... in CMAKE_CXX_FLAGS when building this example under a sanitizer.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _omp_target_sanitizer_pos)
+if(_omp_target_sanitizer_pos GREATER -1)
+    set(_omp_target_device_sanitizer OFF)
+    foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+        rocprofiler_systems_lookup_gfx(${arch} _gpu_categories)
+        if("instinct" IN_LIST _gpu_categories)
+            set(_omp_target_device_sanitizer ON)
+            break()
+        endif()
+    endforeach()
+    if(NOT _omp_target_device_sanitizer)
+        foreach(tgt openmp-target-lib openmp-target)
+            target_compile_options(${tgt} PRIVATE -fno-gpu-sanitize)
+            target_link_options(${tgt} PUBLIC -fno-gpu-sanitize)
+        endforeach()
+    endif()
+endif()
+
 foreach(tgt openmp-target-lib openmp-target)
     set_target_properties(
         ${tgt}

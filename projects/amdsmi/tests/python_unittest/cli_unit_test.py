@@ -275,6 +275,9 @@ class TestAmdSmiCli(unittest.TestCase):
                             elif sub_arg == "PARTITION":  # arg --memory-partition
                                 for memory_partition_mode in self.memory_partition_modes:
                                     options.append(f"{items[item_index]} {memory_partition_mode}")
+                            elif sub_arg == "MODE":  # arg --compute-partition-mem-alloc-mode
+                                for mem_alloc_mode in ["CAPPING", "ALL"]:
+                                    options.append(f"{items[item_index]} {mem_alloc_mode}")
                             elif sub_arg == "WATTS":  # arg --power-cap
                                 for power_type in self.power_types:
                                     options.append(f"--power-cap {{min_power}} {power_type}")
@@ -753,10 +756,20 @@ class TestAmdSmiCli(unittest.TestCase):
         # Find all available command line args
         cmd_args = []
         found = False
+        cmd_indent = None
         for line in lines:
             if found:
                 if not line:
                     break
+                indent = len(line) - len(line.lstrip())
+                # The first command establishes the command column. Lines that
+                # are indented further are wrapped description continuations
+                # (e.g. the "devices" tail of the long fabric help text) and
+                # must be skipped so they aren't parsed as subcommands.
+                if cmd_indent is None:
+                    cmd_indent = indent
+                elif indent > cmd_indent:
+                    continue
                 items = line.split()
                 cmd_args.append(items[0])
                 continue
@@ -841,6 +854,9 @@ class TestAmdSmiCli(unittest.TestCase):
             ("amd-smi set --memory-partition", self.FAIL),
             ("amd-smi set --memory-partition NPS3", self.FAIL),
             ("amd-smi set --memory-partition INVALID", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode HALF", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode INVALID", self.FAIL),
             ("amd-smi set --process-isolation", self.FAIL),
             ("amd-smi set --process-isolation 2", self.FAIL),
             ("amd-smi set --clk-limit", self.FAIL),
@@ -1133,6 +1149,21 @@ class TestAmdSmiCli(unittest.TestCase):
             if memory_partition != "N/A":
                 cmds.append(
                     (f"amd-smi set --memory-partition {memory_partition} --gpu {index}", self.PASS)
+                )
+
+            # set --compute-partition-mem-alloc-mode defaults
+            try:
+                mem_alloc_mode = self.static_data["gpu_data"][index]["partition"][
+                    "compute_partition_mem_alloc_mode"
+                ]
+            except (KeyError, TypeError):
+                mem_alloc_mode = "N/A"
+            if mem_alloc_mode not in ("N/A", "INVALID"):
+                cmds.append(
+                    (
+                        f"amd-smi set --compute-partition-mem-alloc-mode {mem_alloc_mode} --gpu {index}",
+                        self.PASS,
+                    )
                 )
 
             # set --power-cap defaults
@@ -1438,8 +1469,9 @@ if __name__ == "__main__":
     if verbose > common.VERBOSITY_QUIET:
         print("AMD SMI CLI Tests")
 
-    runner = unittest.TextTestRunner(
+    runner = common.GTestSummaryRunner(
         stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
     )
+
     unittest.main(testRunner=runner)
     sys.exit(0)

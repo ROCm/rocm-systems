@@ -27,12 +27,19 @@
 #include "gfx10/token_types.h"
 #include "gfx12parser.h"
 
-#if defined(__x86_64__) || defined(_M_X64)
+// SIMD-only scanner — no scalar fallback. The AVX-512 path uses GCC
+// function multiversioning (__attribute__((target("…")))) which MSVC does
+// not implement, so MSVC and non-x86 targets compile to a stub that
+// returns quick_scan::SCAN_NOT_IMPLEMENTED. x86 CPUs without AVX-512 also
+// resolve to the stub at runtime.
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
 #    include <immintrin.h>
 #    define GFX12_RARE_SCAN_HAS_X86 1
 #else
 #    define GFX12_RARE_SCAN_HAS_X86 0
 #endif
+
+#if GFX12_RARE_SCAN_HAS_X86
 
 namespace gfx12::quick_scan
 {
@@ -120,44 +127,6 @@ uint64_t load_contents64(const uint8_t* buf, size_t size, size_t nibble_pos)
     return (contents >> 4) | carry;
 }
 
-size_t scan_gfx12_scalar(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
-{
-    if (!buf || !out || out_cap == 0 || size == 0) return 0;
-
-    const Tables& T = tables();
-    const size_t size_nibbles = size * 2;
-    size_t pos = 0;
-    size_t n_out = 0;
-    bool ext = false;
-
-    while (pos < size_nibbles && n_out < out_cap)
-    {
-        const uint8_t key = load_key(buf, size, pos);
-
-        if (ext && (key & 1u))
-        {
-            pos += 2;
-            continue;
-        }
-
-        const uint8_t v = T.info[key];
-        const unsigned nibbles = v & INFO_LEN;
-
-        if (__builtin_expect(v & INFO_RARE, 0))
-        {
-            out[n_out++] = QuickToken{load_contents64(buf, size, pos), T.rare_type[key]};
-            if (n_out >= out_cap) break;
-        }
-
-        if ((v & INFO_NOP) == 0) ext = (v & INFO_EXT) != 0;
-        pos += nibbles;
-    }
-
-    return n_out;
-}
-
-#if GFX12_RARE_SCAN_HAS_X86
-
 __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx12_avx512vbmi(
     const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap
 )
@@ -189,20 +158,20 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
     const __m256i high_nibble_y = _mm256_set1_epi8(static_cast<char>(0xF0));
     const __m512i zero_v = _mm512_setzero_si512();
 
-#define GFX12_EXTRACT_SUCCESSOR(pos_, has_attention_, succ_, attention_mask_)                                          \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        const __m128i succ_0_15_ = _mm512_castsi512_si128((succ_));                                                    \
-        uint64_t succ_word_;                                                                                           \
-        if (__builtin_expect(entry < 8, 1))                                                                             \
-            succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(succ_0_15_));                                         \
-        else if (__builtin_expect(entry < 16, 1))                                                                       \
-            succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm_srli_si128(succ_0_15_, 8)));                      \
-        else                                                                                                           \
-            succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm512_extracti32x4_epi32((succ_), 1)));              \
-        (pos_) = static_cast<unsigned>((succ_word_ >> ((entry & 7u) * 8)) & 0xFFu);                                    \
-        (has_attention_) = (((attention_mask_) >> entry) & 1u) != 0;                                                    \
-    } while (false)
+#    define GFX12_EXTRACT_SUCCESSOR(pos_, has_attention_, succ_, attention_mask_)                                      \
+        do {                                                                                                           \
+            const __m128i succ_0_15_ = _mm512_castsi512_si128((succ_));                                                \
+            uint64_t succ_word_;                                                                                       \
+            if (__builtin_expect(entry < 8, 1))                                                                        \
+                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(succ_0_15_));                                     \
+            else if (__builtin_expect(entry < 16, 1))                                                                  \
+                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm_srli_si128(succ_0_15_, 8)));                  \
+            else                                                                                                       \
+                succ_word_ = static_cast<uint64_t>(_mm_cvtsi128_si64(_mm512_extracti32x4_epi32((succ_), 1)));          \
+            (pos_) = static_cast<unsigned>((succ_word_ >> ((entry & 7u) * 8)) & 0xFFu);                                \
+            (has_attention_) = (((attention_mask_) >> entry) & 1u) != 0;                                               \
+        }                                                                                                              \
+        while (false)
 
     size_t bp = 0;
     unsigned entry = 0;
@@ -332,34 +301,37 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,avx2,bmi2"))) size_t scan_gfx
         tail_pos += nibbles;
     }
 
-#undef GFX12_EXTRACT_SUCCESSOR
+#    undef GFX12_EXTRACT_SUCCESSOR
 
     return n_out;
 }
 
-#endif // GFX12_RARE_SCAN_HAS_X86
-
 using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
 
+// Returns nullptr if the x86 CPU lacks AVX-512.
 ScanFn select_scanner()
 {
-#if GFX12_RARE_SCAN_HAS_X86
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512bw") &&
         __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx2"))
         return &scan_gfx12_avx512vbmi;
-#endif
-    return &scan_gfx12_scalar;
+    return nullptr;
 }
 
 } // namespace
 } // namespace gfx12::quick_scan
 
+#endif // GFX12_RARE_SCAN_HAS_X86
+
 namespace quick_scan
 {
+#if GFX12_RARE_SCAN_HAS_X86
 size_t scan_gfx12(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
 {
     static const gfx12::quick_scan::ScanFn fn = gfx12::quick_scan::select_scanner();
+    if (!fn) throw std::exception();
+
     return fn(buf, size, out, out_cap);
 }
-};
+#endif
+}; // namespace quick_scan

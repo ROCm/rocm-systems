@@ -25,6 +25,16 @@
 #include "trace_decoder_instrument.h"
 #include "trace_decoder_types.h"
 
+#ifndef ROCPROF_TRACE_DECODER_API
+#    if defined(_WIN32) && defined(ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
+#        define ROCPROF_TRACE_DECODER_API __declspec(dllexport)
+#    elif defined(__GNUC__) && defined(ROCPROF_TRACE_DECODER_BUILDING_LIBRARY)
+#        define ROCPROF_TRACE_DECODER_API __attribute__((visibility("default")))
+#    else
+#        define ROCPROF_TRACE_DECODER_API
+#    endif
+#endif
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -95,9 +105,12 @@ typedef uint64_t (*rocprof_trace_decoder_se_data_callback_t)(uint8_t** buffer, u
  * @param[in] info The decoder info received
  * @retval null terminated string as description of "info".
  */
-const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info);
+ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info
+);
 
-const char* rocprof_trace_decoder_get_status_string(rocprofiler_thread_trace_decoder_status_t status);
+ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_status_string(
+    rocprofiler_thread_trace_decoder_status_t status
+);
 
 /**
  * @brief Parses thread trace data using callbacks (V1 API).
@@ -111,10 +124,12 @@ const char* rocprof_trace_decoder_get_status_string(rocprofiler_thread_trace_dec
  * @param[in] userdata Arbitrary data pointer passed back via callbacks.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA on malformed input.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
- * @deprecated Use the handle-based API (rocprof_trace_decoder_parse) instead.
+ * @retval
+ * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
+ * @deprecated Use the handle-based API
+ * (rocprof_trace_decoder_parse) instead.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(
     rocprof_trace_decoder_se_data_callback_t se_data_callback,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     rocprof_trace_decoder_isa_callback_t isa_callback,
@@ -152,15 +167,18 @@ typedef struct
  * @param[out] handle The handle to create.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle);
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_create_handle(rocprof_trace_decoder_handle_t* handle);
 
 /**
  * @brief Destroys a decoder handle and releases all loaded code objects.
  * @param[in] handle The handle to destroy.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
+ * @retval
+ * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_destroy_handle(rocprof_trace_decoder_handle_t handle);
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_destroy_handle(rocprof_trace_decoder_handle_t handle);
 
 /**
  * @brief Loads a code object for the decoder's built-in disassembly (Mode 1).
@@ -175,9 +193,10 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_destroy_handle(r
  * @param[in] data_size Size of the code object data in bytes.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED if COMGR is not available.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
+ * @retval
+ * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_load(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_load(
     rocprof_trace_decoder_handle_t handle,
     uint64_t load_id,
     uint64_t load_addr,
@@ -192,11 +211,11 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_load(
  * @param[in] load_id The load identifier of the code object to unload.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED if COMGR is not available.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
+ * @retval
+ * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_unload(
-    rocprof_trace_decoder_handle_t handle, uint64_t load_id
-);
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
+rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t handle, uint64_t load_id);
 
 /**
  * @brief Sets a custom ISA callback for trace parsing (Mode 2).
@@ -208,9 +227,10 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_codeobj_unload(
  * @param[in] handle The decoder handle.
  * @param[in] callback The ISA callback, or NULL to use built-in disassembly.
  * @param[in] userdata Userdata passed to the callback.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on
+ * success.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_isa_callback(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_isa_callback(
     rocprof_trace_decoder_handle_t handle, rocprof_trace_decoder_isa_callback_t callback, void* userdata
 );
 
@@ -226,9 +246,10 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_isa_callback
  * @param[in] handle The decoder handle.
  * @param[in] callback The SE data callback, or NULL to use data/data_size arguments.
  * @param[in] userdata Userdata passed to the callback.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on
+ * success.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_se_data_callback(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_se_data_callback(
     rocprof_trace_decoder_handle_t handle, rocprof_trace_decoder_se_data_callback_t callback, void* userdata
 );
 
@@ -247,9 +268,10 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_se_data_call
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED if no ISA source is
  * configured (no COMGR and no ISA callback set).
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA on malformed input.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
+ * @retval
+ * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
     rocprof_trace_decoder_handle_t handle,
     const void* data,
     uint64_t data_size,
@@ -287,11 +309,13 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse(
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for
  *   null/empty inputs.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA
- *   when the header does not describe a recognized trace.
+ *   when the header does not describe a
+ * recognized trace.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED for
- *   architectures whose quick scan is not yet wired up.
+ *   architectures
+ * whose quick scan is not yet wired up.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
     rocprof_trace_decoder_handle_t handle,
     uint64_t chunk_index,
     const void* data,
@@ -317,10 +341,12 @@ rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_quick_scan(
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for
  *   invalid chunk and/or handle.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED for
- *   architectures whose quick scan is not yet wired up.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES if insufficient size_out.
+ *   architectures whose quick scan is
+ * not yet wired up.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES if insufficient
+ * size_out.
  */
-rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build_standalone(
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_build_standalone(
     rocprof_trace_decoder_handle_t handle,
     uint64_t chunk_index,
     const void* data,

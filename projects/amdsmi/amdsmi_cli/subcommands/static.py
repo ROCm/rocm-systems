@@ -29,6 +29,13 @@ from amdsmi_helpers import AMDSMIHelpers
 from amdsmi import amdsmi_exception, amdsmi_interface
 
 
+# Canonical human-readable AMD vendor string, matching `lspci` / pci.ids (vendor 0x1002).
+# The board manufacturer name is reported as the raw AMD PCI vendor ID ("0x1002") when
+# the host pci.ids lookup is unavailable; the CLI translates it to this string for display
+# while the C/Python APIs continue to return the raw value unchanged.
+AMD_VENDOR_DISPLAY_NAME = "Advanced Micro Devices, Inc. [AMD/ATI]"
+
+
 class StaticCommands:
     def static_cpu(self, args, multiple_devices=False, cpu=None, interface_ver=None):
         """Get Static information for target cpu
@@ -715,6 +722,12 @@ class StaticCommands:
                     if isinstance(value, str):
                         if value.strip() == "":
                             board_info[key] = "N/A"
+                # manufacturer_name falls back to the raw AMD PCI vendor ID ("0x1002")
+                # when the host pci.ids lookup is unavailable. Translate it to the
+                # canonical vendor string for display, matching `lspci` / pci.ids.
+                manufacturer_name = board_info.get("manufacturer_name")
+                if isinstance(manufacturer_name, str) and manufacturer_name.strip() == "0x1002":
+                    board_info["manufacturer_name"] = AMD_VENDOR_DISPLAY_NAME
                 static_dict["board"] = board_info
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug(
@@ -823,6 +836,17 @@ class StaticCommands:
                     e.get_error_info(),
                 )
             try:
+                mem_alloc_mode = amdsmi_interface.amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+                    args.gpu
+                )
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                mem_alloc_mode = "N/A"
+                logging.debug(
+                    "Failed to get compute partition mem alloc mode for gpu %s | %s",
+                    gpu_id,
+                    e.get_error_info(),
+                )
+            try:
                 kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
                 partition_id = kfd_info["current_partition_id"]
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -833,6 +857,7 @@ class StaticCommands:
             static_dict["partition"] = {
                 "accelerator_partition": compute_partition,
                 "memory_partition": memory_partition,
+                "compute_partition_mem_alloc_mode": mem_alloc_mode,
                 "partition_id": partition_id,
             }
         if "soc_pstate" in current_platform_args:
