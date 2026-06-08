@@ -37,11 +37,11 @@ target_sources(
     topology.cpp
 )
 
-if(GDA_GENERIC)
+if(GDA_MUX)
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    queue_pair_generic.cpp
+    queue_pair_mux.cpp
 )
 endif()
 

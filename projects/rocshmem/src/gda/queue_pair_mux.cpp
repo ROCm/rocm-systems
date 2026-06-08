@@ -28,7 +28,7 @@
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
 #include "queue_pair_provider.hpp"
-#include "queue_pair_generic.hpp"
+#include "queue_pair_mux.hpp"
 
 #if defined(GDA_IONIC)
 #include "gda/ionic/queue_pair_ionic.hpp"
@@ -43,14 +43,14 @@
 namespace rocshmem {
 
 #if defined(GDA_IONIC)
-__host__ QueuePairGeneric::QueuePairGeneric(QueuePairIONIC&& ionic)
+__host__ QueuePairMux::QueuePairMux(QueuePairIONIC&& ionic)
   : qp{std::move(ionic)}, provider{GDAProvider::IONIC} { }
 
-__host__ QueuePairGeneric::QueuePairProvider::QueuePairProvider(QueuePairIONIC&& ionic)
+__host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairIONIC&& ionic)
   : ionic{std::move(ionic)} { }
 
-__host__ QueuePairGeneric::QueuePairProvider&
-QueuePairGeneric::QueuePairProvider::operator=(QueuePairIONIC&& ionic) {
+__host__ QueuePairMux::QueuePairUnion&
+QueuePairMux::QueuePairUnion::operator=(QueuePairIONIC&& ionic) {
   /* Assume that ionic subobject is currently active,
    * clean up its resources by calling the destructor */
   this->ionic.~QueuePairIONIC();
@@ -60,14 +60,14 @@ QueuePairGeneric::QueuePairProvider::operator=(QueuePairIONIC&& ionic) {
 #endif
 
 #if defined(GDA_BNXT)
-__host__ QueuePairGeneric::QueuePairGeneric(QueuePairBNXT&& bnxt)
+__host__ QueuePairMux::QueuePairMux(QueuePairBNXT&& bnxt)
   : qp{std::move(bnxt)}, provider{GDAProvider::BNXT} { }
 
-__host__ QueuePairGeneric::QueuePairProvider::QueuePairProvider(QueuePairBNXT&& bnxt)
+__host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairBNXT&& bnxt)
   : bnxt{std::move(bnxt)} { }
 
-__host__ QueuePairGeneric::QueuePairProvider&
-QueuePairGeneric::QueuePairProvider::operator=(QueuePairBNXT&& bnxt) {
+__host__ QueuePairMux::QueuePairUnion&
+QueuePairMux::QueuePairUnion::operator=(QueuePairBNXT&& bnxt) {
   /* Assume that bnxt subobject is currently active,
    * clean up its resources by calling the destructor */
   this->bnxt.~QueuePairBNXT();
@@ -77,14 +77,14 @@ QueuePairGeneric::QueuePairProvider::operator=(QueuePairBNXT&& bnxt) {
 #endif
 
 #if defined(GDA_MLX5)
-__host__ QueuePairGeneric::QueuePairGeneric(QueuePairMLX5&& mlx5)
+__host__ QueuePairMux::QueuePairMux(QueuePairMLX5&& mlx5)
   : qp{std::move(mlx5)}, provider{GDAProvider::MLX5} { }
 
-__host__ QueuePairGeneric::QueuePairProvider::QueuePairProvider(QueuePairMLX5&& mlx5)
+__host__ QueuePairMux::QueuePairUnion::QueuePairUnion(QueuePairMLX5&& mlx5)
   : mlx5{std::move(mlx5)} { }
 
-__host__ QueuePairGeneric::QueuePairProvider&
-QueuePairGeneric::QueuePairProvider::operator=(QueuePairMLX5&& mlx5) {
+__host__ QueuePairMux::QueuePairUnion&
+QueuePairMux::QueuePairUnion::operator=(QueuePairMLX5&& mlx5) {
   /* Assume that mlx5 subobject is currently active,
    * clean up its resources by calling the destructor */
   this->mlx5.~QueuePairMLX5();
@@ -93,8 +93,8 @@ QueuePairGeneric::QueuePairProvider::operator=(QueuePairMLX5&& mlx5) {
 }
 #endif
 
-__host__ QueuePairGeneric::QueuePairProvider QueuePairGeneric::QueuePairProvider::construct(
-    QueuePairProvider&& other, GDAProvider provider) {
+__host__ QueuePairMux::QueuePairUnion QueuePairMux::QueuePairUnion::construct(
+    QueuePairUnion&& other, GDAProvider provider) {
   switch (provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -114,7 +114,7 @@ __host__ QueuePairGeneric::QueuePairProvider QueuePairGeneric::QueuePairProvider
   }
 }
 
-__host__ void QueuePairGeneric::QueuePairProvider::destruct(GDAProvider provider) {
+__host__ void QueuePairMux::QueuePairUnion::destruct(GDAProvider provider) {
   /* Call destructor of active subobject, based on provider */
   switch (provider) {
 #if defined(GDA_IONIC)
@@ -139,14 +139,14 @@ __host__ void QueuePairGeneric::QueuePairProvider::destruct(GDAProvider provider
 }
 
 /* Note:
- * qp{QueuePairProvider::construct(std::move(other.qp), other.provider)}
+ * qp{QueuePairUnion::construct(std::move(other.qp), other.provider)}
  * only works in C++17 or later: the "guaranteed copy elision" prvalue semantics
  * mean that the qp subobject does not need to have an accessible copy or move constructor */
-__host__ QueuePairGeneric::QueuePairGeneric(QueuePairGeneric&& other)
-  : qp{QueuePairProvider::construct(std::move(other.qp), other.provider)},
+__host__ QueuePairMux::QueuePairMux(QueuePairMux&& other)
+  : qp{QueuePairUnion::construct(std::move(other.qp), other.provider)},
     provider{std::move(other.provider)} { }
 
-__host__ QueuePairGeneric& QueuePairGeneric::operator=(QueuePairGeneric&& other) {
+__host__ QueuePairMux& QueuePairMux::operator=(QueuePairMux&& other) {
   /* Step 1: clean up resources held by active subobject */
   qp.destruct(provider);
 
@@ -181,11 +181,11 @@ __host__ QueuePairGeneric& QueuePairGeneric::operator=(QueuePairGeneric&& other)
   return *this;
 }
 
-__host__ QueuePairGeneric::~QueuePairGeneric() {
+__host__ QueuePairMux::~QueuePairMux() {
   qp.destruct(provider);
 }
 
-__device__ void QueuePairGeneric::quiet_single() {
+__device__ void QueuePairMux::quiet_single() {
   switch (provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -205,7 +205,7 @@ __device__ void QueuePairGeneric::quiet_single() {
   }
 }
 
-__host__ int QueuePairGeneric::buffer_register(void *addr, size_t length) {
+__host__ int QueuePairMux::buffer_register(void *addr, size_t length) {
   switch (provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
@@ -225,7 +225,7 @@ __host__ int QueuePairGeneric::buffer_register(void *addr, size_t length) {
   }
 }
 
-__host__ int QueuePairGeneric::buffer_unregister(void *addr) {
+__host__ int QueuePairMux::buffer_unregister(void *addr) {
   switch (provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:

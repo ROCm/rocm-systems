@@ -126,7 +126,7 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   mlx5_cqe64* cq_buf   = reinterpret_cast<mlx5_cqe64*>(qp.cq);
   __be32*     cq_dbrec = qp.cq_dbrec;
 
-  /* QueuePair is either QueuePairMLX5 or QueuePairGeneric
+  /* QueuePair is either QueuePairMLX5 or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
    * so just use that instead of trying to figure out which one we're using */
   new (gpu_qp) QueuePair{QueuePairMLX5{qpn, base_heap, heap_size, lkey, rkey, pd,
