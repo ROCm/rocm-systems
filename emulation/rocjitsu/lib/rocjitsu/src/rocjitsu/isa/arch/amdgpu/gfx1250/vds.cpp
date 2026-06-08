@@ -51,7 +51,7 @@ void DsAddU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -90,7 +90,7 @@ void DsSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -129,7 +129,7 @@ void DsRsubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -168,7 +168,7 @@ void DsIncU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -207,7 +207,7 @@ void DsDecU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -246,7 +246,7 @@ void DsMinI32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -285,7 +285,7 @@ void DsMaxI32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -324,7 +324,7 @@ void DsMinU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -363,7 +363,7 @@ void DsMaxU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -402,7 +402,7 @@ void DsAndB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -441,7 +441,7 @@ void DsOrB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -480,7 +480,7 @@ void DsXorB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -710,14 +710,17 @@ void DsCmpstoreB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = cu.read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -752,7 +755,7 @@ void DsMinNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -792,7 +795,7 @@ void DsMaxNumF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -839,7 +842,7 @@ void DsAddF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -953,7 +956,7 @@ void DsAddRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -996,7 +999,7 @@ void DsSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1039,7 +1042,7 @@ void DsRsubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1082,7 +1085,7 @@ void DsIncRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1125,7 +1128,7 @@ void DsDecRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1168,7 +1171,7 @@ void DsMinRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1211,7 +1214,7 @@ void DsMaxRtnI32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1254,7 +1257,7 @@ void DsMinRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1297,7 +1300,7 @@ void DsMaxRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1340,7 +1343,7 @@ void DsAndRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1383,7 +1386,7 @@ void DsOrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1426,7 +1429,7 @@ void DsXorRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1520,7 +1523,7 @@ void DsStorexchgRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1566,7 +1569,7 @@ void DsStorexchg2addrRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1612,7 +1615,7 @@ void DsStorexchg2addrStride64RtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1658,14 +1661,17 @@ void DsCmpstoreRtnB32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    uint32_t val1 = cu.read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
@@ -1703,7 +1709,7 @@ void DsMinNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1746,7 +1752,7 @@ void DsMaxNumRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2094,7 +2100,7 @@ void DsAddU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2135,7 +2141,7 @@ void DsSubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2176,7 +2182,7 @@ void DsRsubU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2217,7 +2223,7 @@ void DsIncU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2258,7 +2264,7 @@ void DsDecU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2299,7 +2305,7 @@ void DsMinI64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2340,7 +2346,7 @@ void DsMaxI64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2381,7 +2387,7 @@ void DsMinU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2422,7 +2428,7 @@ void DsMaxU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2463,7 +2469,7 @@ void DsAndB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2504,7 +2510,7 @@ void DsOrB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2545,7 +2551,7 @@ void DsXorB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2791,7 +2797,10 @@ void DsCmpstoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2800,9 +2809,9 @@ void DsCmpstoreB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = cu.read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = cu.read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -2837,7 +2846,7 @@ void DsMinNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2879,7 +2888,7 @@ void DsMaxNumF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2920,7 +2929,7 @@ void DsAddF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -2987,7 +2996,7 @@ void DsAddRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3032,7 +3041,7 @@ void DsSubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3077,7 +3086,7 @@ void DsRsubRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3122,7 +3131,7 @@ void DsIncRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3167,7 +3176,7 @@ void DsDecRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3212,7 +3221,7 @@ void DsMinRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3257,7 +3266,7 @@ void DsMaxRtnI64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3302,7 +3311,7 @@ void DsMinRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3347,7 +3356,7 @@ void DsMaxRtnU64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3392,7 +3401,7 @@ void DsAndRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3437,7 +3446,7 @@ void DsOrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3482,7 +3491,7 @@ void DsXorRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3582,7 +3591,7 @@ void DsStorexchgRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3630,7 +3639,7 @@ void DsStorexchg2addrRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3678,7 +3687,7 @@ void DsStorexchg2addrStride64RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3726,7 +3735,10 @@ void DsCmpstoreRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3735,9 +3747,9 @@ void DsCmpstoreRtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = cu.read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = cu.read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -3775,7 +3787,7 @@ void DsMinNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3820,7 +3832,7 @@ void DsMaxNumRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -3865,7 +3877,7 @@ void DsAddRtnF64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4071,7 +4083,7 @@ void DsAddRtnF32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4114,7 +4126,10 @@ void DsCondxchg32RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
+  uint32_t data1_base =
+      wf.vgpr_alloc().base +
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data1, amdgpu::VgprMsbRole::Src2);
   d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4123,9 +4138,9 @@ void DsCondxchg32RtnB64Vds::execute_impl(amdgpu::Wavefront &wf) {
     std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    uint32_t val2 = cu.read_vgpr(data1_base + 0, lane);
     std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    uint32_t val3 = cu.read_vgpr(data1_base + 1, lane);
     std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
@@ -4160,7 +4175,7 @@ void DsCondSubU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4200,7 +4215,7 @@ void DsSubClampU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4240,7 +4255,7 @@ void DsPkAddF16Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4280,7 +4295,7 @@ void DsPkAddBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4567,7 +4582,7 @@ void DsCondSubRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4610,7 +4625,7 @@ void DsSubClampRtnU32Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4653,7 +4668,7 @@ void DsPkAddRtnF16Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4696,7 +4711,7 @@ void DsPkAddRtnBf16Vds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base =
       wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, data0.opr_type_, data0.encoding_value_, data0.vgpr_msb_role());
+      *Isa::resolved_vgpr_offset(wf, OperandType::OPR_VGPR, inst_.data0, amdgpu::VgprMsbRole::Src1);
   d->store_data.resize(wf.wf_size() * 4);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -4913,9 +4928,7 @@ DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
 
 void DsLoadTr4B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base =
-      wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;
@@ -4941,9 +4954,7 @@ DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
 
 void DsLoadTr6B96Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base =
-      wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 3;
   d->is_load = true;
@@ -4969,9 +4980,7 @@ DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
 
 void DsLoadTr16B128Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base =
-      wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 4;
   d->is_load = true;
@@ -4997,9 +5006,7 @@ DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
 
 void DsLoadTr8B64Vds::execute_impl(amdgpu::Wavefront &wf) {
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
-  d->dst_reg_base =
-      wf.vgpr_alloc().base +
-      *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
   d->num_elems = 2;
   d->is_load = true;

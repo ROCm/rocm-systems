@@ -196,7 +196,7 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
   if (pMemsetParams->height == 1) {
     size_t offset = 0;
-    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset);
+    amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset);
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
@@ -209,7 +209,7 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     auto sizeBytes =
         pMemsetParams->width * pMemsetParams->height * depth * pMemsetParams->elementSize;
     size_t offset = 0;
-    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset, sizeBytes);
+    amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset, sizeBytes);
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
@@ -2816,7 +2816,7 @@ hipError_t ihipGraphAddMemFreeNode(hip::GraphNode** graphNode, hip::Graph* graph
                                    void* dptr) {
   // Is memory passed to be free'd valid
   size_t offset = 0;
-  auto memory = getMemoryObject(dptr, offset);
+  auto memory = getMemoryObjectForCurrentDevice(dptr, offset);
   if (memory == nullptr) {
     if (HIP_MEM_POOL_USE_VM) {
       // When VM is on the address must be valid and may point to a VA object
@@ -3295,7 +3295,7 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       }
       // Is memory passed to be free'd valid
       offset = 0;
-      memory = getMemoryObject(nodeParams->free.dptr, offset);
+      memory = getMemoryObjectForCurrentDevice(nodeParams->free.dptr, offset);
       if (memory == nullptr) {
         if (HIP_MEM_POOL_USE_VM) {
           // When VM is on the address must be valid and may point to a VA object
@@ -3440,7 +3440,7 @@ hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGr
   }
   // Is memory passed to be free'd valid
   size_t offset = 0;
-  auto memory = getMemoryObject(dptr, offset);
+  auto memory = getMemoryObjectForCurrentDevice(dptr, offset);
   if (memory == nullptr) {
     if (HIP_MEM_POOL_USE_VM) {
       // When VM is on the address must be valid and may point to a VA object

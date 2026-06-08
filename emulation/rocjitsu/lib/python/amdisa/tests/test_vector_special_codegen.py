@@ -31,8 +31,14 @@ def test_permlane_imm_selectors_are_four_bits_per_lane():
         cross=False,
     )
 
-    assert 'uint32_t sel = (sel_word >> (sub * 4)) & 0xF;' in cpp
+    assert 'uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;' in cpp
     assert 'sub * 2' not in cpp
+
+    assert 'uint64_t exec = wf.exec();' in cpp
+    assert '!(exec & (1ULL << lane))' in cpp
+    assert 'bool src_active = (exec & (1ULL << src_lane)) != 0;' in cpp
+    assert '!src_active && !fi' in cpp
+    assert 'bound_ctrl' in cpp
 
 
 def test_permlanex16_fetches_from_other_half_row():
