@@ -1,0 +1,14 @@
+# ThreadSanitizer suppressions for hipFile.
+#
+# All entries here suppress races inside Intel oneTBB that we cannot fix from
+# this project. Keep this list as narrow as possible.
+
+# Races in TBB's per-process affinity-mask bookkeeping (misc_ex.cpp): the
+# arena worker reads the saved process mask in protect_affinity_mask() while
+# governor::release_resources() concurrently destroys it.
+race:tbb::detail::r1::destroy_process_mask
+race:tbb::detail::r1::affinity_helper::protect_affinity_mask
+
+# Catch-all for any other race that originates entirely inside libtbb. Narrow
+# this if TBB is updated and the more specific suppressions above stop matching.
+called_from_lib:libtbb.so

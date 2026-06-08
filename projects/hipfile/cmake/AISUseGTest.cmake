@@ -45,7 +45,29 @@ endif()
 include(GoogleTest)
 
 function(ais_gtest_discover_tests target)
-    cmake_language(CALL gtest_discover_tests ${ARGV})
+    set(_argv ${ARGV})
+
+    if(AIS_USE_THREAD_SANITIZER)
+        # Apply TSAN suppressions (for races in third-party code we can't
+        # control, e.g. inside libtbb) and keep TSAN strict otherwise.
+        # We splice an ENVIRONMENT entry into the PROPERTIES argument that
+        # gtest_discover_tests applies to every discovered test - going via
+        # the discovered test-list variable directly does not work because
+        # parameterized test names contain spaces/parens that get re-tokenized.
+        set(tsan_supp "${HIPFILE_ROOT_PATH}/cmake/tsan-suppressions.txt")
+        set(_tsan_env
+            "TSAN_OPTIONS=suppressions=${tsan_supp} halt_on_error=0 second_deadlock_stack=1"
+        )
+        list(FIND _argv "PROPERTIES" _props_idx)
+        if(_props_idx GREATER_EQUAL 0)
+            math(EXPR _insert_idx "${_props_idx} + 1")
+            list(INSERT _argv ${_insert_idx} "ENVIRONMENT" "${_tsan_env}")
+        else()
+            list(APPEND _argv PROPERTIES ENVIRONMENT "${_tsan_env}")
+        endif()
+    endif()
+
+    cmake_language(CALL gtest_discover_tests ${_argv})
 
     if(AIS_USE_CODE_COVERAGE)
         set(options)

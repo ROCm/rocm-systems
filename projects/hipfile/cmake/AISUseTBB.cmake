@@ -25,6 +25,7 @@ if(NOT TBB_FOUND)
 
     set(TBB_TEST OFF CACHE BOOL "" FORCE)
     set(TBB_INSTALL OFF CACHE BOOL "" FORCE)
+    set(TBBMALLOC_BUILD OFF CACHE BOOL "" FORCE)
 # lint_cmake: -readability/wonkycase
     FetchContent_MakeAvailable(TBB)
 # lint_cmake: +readability/wonkycase
