@@ -950,8 +950,7 @@ private:
 
     if (is_vmem_store(mnemonic)) {
       events.push_back({WaitCounterKind::Store, WaitEventKind::VmemStore,
-                        TrackedRegisterSource::None, false, false, false, std::nullopt,
-                        std::nullopt, false, !is_scratch_store(mnemonic)});
+                        TrackedRegisterSource::None, false, false});
       events.push_back({WaitCounterKind::Exp, WaitEventKind::VmemStore,
                         TrackedRegisterSource::StoreDataUses, false, true});
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemStore,
