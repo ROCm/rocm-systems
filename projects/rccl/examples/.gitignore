@@ -1,0 +1,14 @@
+# Build artifacts
+*.o
+*.obj
+*.d
+*.prehip
+
+# Built example binaries
+01_communicators/01_multiple_devices_single_process/multiple_devices_single_process
+01_communicators/02_one_device_per_pthread/one_device_per_pthread
+01_communicators/03_one_device_per_process_mpi/one_device_per_process_mpi
+02_point_to_point/01_ring_pattern/ring_pattern
+03_collectives/01_allreduce/allreduce
+04_user_buffer_registration/01_allreduce/allreduce_ub
+05_symmetric_memory/01_allreduce/allreduce_sm

@@ -149,3 +149,12 @@ public:
 private:
     std::vector<write_counters_info> m_write_counters_args;
 };
+
+class MockPcSamplingCollector : public rocprofiler_compute_tool::pc_sampling_collector_t
+{
+public:
+    void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
+    void write(rocprofiler_compute_tool::code_object_writer_t& writer) override;
+
+    int load_count = 0;
+};

@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2020-2021, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "gdrwrap.h"
 #include <mutex>
@@ -25,7 +26,10 @@ static int (*gdr_internal_copy_from_mapping)(gdr_mh_t handle, void *h_ptr, const
 
 
 // Used to make the GDR library calls thread safe
-pthread_mutex_t gdrLock = PTHREAD_MUTEX_INITIALIZER;
+std::mutex& getGdrMutex() {
+  static std::mutex gdrMutex;
+  return gdrMutex;
+}
 
 #define GDRAPI_LIBNAME "libgdrapi.so"
 

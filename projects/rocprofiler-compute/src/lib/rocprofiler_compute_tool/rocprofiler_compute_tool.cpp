@@ -18,13 +18,22 @@
 
 using namespace rocprofiler_compute_tool;
 
-static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
-static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
-static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
-static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
-static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
-static std::atomic<bool>                                    g_tool_shutting_down{false};
-static std::atomic<bool>                                    g_hsa_intercept_done{false};
+// Heap-allocated and never destroyed on purpose: rocprofiler-sdk calls our
+// callbacks and tool_fini from its own _dl_fini, after this library's static
+// destructors would have freed them. Process lifetime avoids a teardown
+// use-after-destruction.
+static std::shared_ptr<InputParameters>& g_input_parameters = *new std::shared_ptr<InputParameters>(
+    std::make_shared<EnvInputParameters>());
+static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrapper>(
+    std::make_shared<SdkWrapperImpl>());
+static std::shared_ptr<SdkCallbacks>& g_sdk_callbacks = *new std::shared_ptr<SdkCallbacks>(
+    std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper));
+static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr<CountersWriter>(
+    std::make_shared<CsvCountersWriter>());
+static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
+    *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
+static std::atomic<bool> g_tool_shutting_down{false};
+static std::atomic<bool> g_hsa_intercept_done{false};
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -87,20 +96,6 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                            rocprofiler_user_data_t* /*user_data*/,
                            void* callback_data)
 {
-    if (record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-        record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD && record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
-    {
-        assert(callback_data);
-        auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(callback_data)->get();
-        if (tool_data->pc_sampling.enabled())
-        {
-            assert(record.payload);
-            const auto* obj_data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(
-                record.payload);
-            tool_data->pc_sampling.on_code_object_load(*obj_data);
-        }
-        return;
-    }
     g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 

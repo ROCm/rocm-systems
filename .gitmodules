@@ -64,7 +64,7 @@
 [submodule "projects/rocprofiler-systems/external/timemory"]
 	path = projects/rocprofiler-systems/external/timemory
 	url = https://github.com/ROCm/timemory.git
-	branch = rocprofiler-systems
+	branch = rocprofiler-systems-cppstd20
 	shallow = true
 [submodule "projects/rocprofiler-systems/external/perfetto"]
 	path = projects/rocprofiler-systems/external/perfetto
@@ -105,7 +105,7 @@
 [submodule "projects/rocprofiler-systems/external/spdlog"]
 	path = projects/rocprofiler-systems/external/spdlog
 	url = https://github.com/gabime/spdlog.git
-	tag = v1.16.0
+	tag = v1.17.0
 	shallow = true
 [submodule "projects/rocprofiler-systems/external/json"]
 	path = projects/rocprofiler-systems/external/json

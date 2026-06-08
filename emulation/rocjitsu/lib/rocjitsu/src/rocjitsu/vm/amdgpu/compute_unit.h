@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/execution_plugin.h"
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
@@ -63,14 +64,15 @@ class CommandProcessor;
 /// to construct.
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
+  static constexpr uint32_t kFunctionalQuantum = 1024;
+
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch;             ///< ISA architecture (determines wave size, decoder).
-    uint32_t num_wf_slots;           ///< Number of hardware wavefront slots (contexts).
-    uint32_t sgprs_per_wf;           ///< Scalar GPRs per wavefront (allocation granularity).
-    uint32_t vgprs_per_wf;           ///< Vector GPRs per wavefront (allocation granularity).
-    uint32_t lds_size_kb;            ///< Local Data Share size in kilobytes.
-    uint32_t functional_quantum = 0; ///< Max instructions per advance() (0 = unbounded).
+    rj_code_arch_t arch;   ///< ISA architecture (determines wave size, decoder).
+    uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
+    uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
+    uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
+    uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
   };
 
   ~ComputeUnitCore() override = default;
@@ -119,17 +121,7 @@ public:
   /// @returns true if the CU has enough free slots, registers, and LDS.
   bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
 
-  /// @brief Execute work until the next scheduling boundary.
-  ///
-  /// @details In FUNCTIONAL mode, executes up to `functional_quantum`
-  /// instructions via step(), then yields back to the event loop. When
-  /// `functional_quantum` is 0 (the default), all active wavefronts are
-  /// drained in a single call. A non-zero quantum guarantees forward
-  /// progress for inter-CU synchronization (e.g., spin-locks on global
-  /// memory) by allowing other CUs' events to interleave.
-  /// In CLOCKED mode (future), processes one pipeline cycle.
-  /// @retval true More work remains; advance() should be called again.
-  /// @retval false No more active wavefronts; CU is idle.
+  /// @brief Execute up to kFunctionalQuantum instructions, then yield.
   virtual bool advance() = 0;
 
   /// @brief Signal that work has been dispatched; begin processing.
@@ -230,22 +222,21 @@ public:
   /// all dirty lines to the backing MemoryInterface (MSC or HBM).
   /// Note: prefer flush_l1() + per-XCD L2 flush to avoid redundant L2 flushes
   /// when multiple CUs share the same L2.
-  void flush_all() {
+  void flush_all(uint32_t vmid = 0) {
     util::Logger::vm([&](auto &os) {
       if (l1_vector_.store_count() > 0)
         os << std::format("CU {}@{} L1 stores: total={} active={} l2_writes={}", this->name(),
                           reinterpret_cast<uintptr_t>(this), l1_vector_.store_count(),
                           l1_vector_.store_active_count(), l1_vector_.store_l2_writes());
     });
-    l1_scalar_.writeback_all();
+    l1_scalar_.writeback_all(vmid);
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
-    l2_->flush_all();
+    l2_->flush_all(vmid);
   }
 
-  /// @brief Flush only the per-CU L1 caches.
-  void flush_l1() {
-    l1_scalar_.writeback_all();
+  void flush_l1(uint32_t vmid = 0) {
+    l1_scalar_.writeback_all(vmid);
     l1_scalar_.invalidate_all();
     l1_vector_.flush_all();
   }
@@ -254,7 +245,11 @@ public:
   ///
   /// Used by the config loader for deferred initialization.
   /// @param memory New GPU memory (not owned).
-  void set_memory(GpuMemory *memory) { memory_ = memory; }
+  void set_memory(GpuMemory *memory) {
+    memory_ = memory;
+    l1_vector_.set_memory(memory);
+    l1_scalar_.set_memory(memory);
+  }
 
   /// @brief Set (or replace) the L2 cache pointer.
   ///
@@ -266,6 +261,15 @@ public:
     l1_scalar_.set_l2(l2);
     l1_vector_.set_l2(l2);
     global_mem_pipeline_.set_l2(l2);
+  }
+
+  /// @brief Set flat-address-space aperture boundaries (SPI programs these once per node).
+  void set_apertures(uint64_t shared_base, uint64_t shared_limit, uint64_t private_base,
+                     uint64_t private_limit) {
+    shared_aperture_base_ = shared_base;
+    shared_aperture_limit_ = shared_limit;
+    private_aperture_base_ = private_base;
+    private_aperture_limit_ = private_limit;
   }
 
   /// @brief Query SRAM ECC mode. When true, D16 loads zero unused VGPR bits.
@@ -283,27 +287,6 @@ public:
   /// @param dst_sgpr Physical SGPR index to write the first loaded dword.
   /// @param dword_count Number of dwords to load (1, 2, 4, 8, or 16).
   /// @param mtype Memory type (default RW — Phase D fills in correct value).
-  void issue_scalar_mem(uint64_t addr, uint32_t dst_sgpr, uint32_t dword_count,
-                        Mtype mtype = Mtype::RW);
-
-  /// @brief Issue a per-lane global/buffer memory load through the L1 vector cache.
-  ///
-  /// @param addrs Per-lane byte addresses (only active lanes are accessed).
-  /// @param lane_mask Bitmask of active lanes.
-  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
-  /// @param dword_count Dwords per lane (1, 2, 3, or 4).
-  /// @param mtype Memory type (default RW — Phase D fills in correct value).
-  void issue_global_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask,
-                        uint32_t dst_vgpr, uint32_t dword_count, Mtype mtype = Mtype::RW);
-
-  /// @brief Issue a per-lane local (LDS) memory load.
-  ///
-  /// @param addrs Per-lane byte addresses into the LDS.
-  /// @param lane_mask Bitmask of active lanes.
-  /// @param dst_vgpr Physical VGPR index to write the first loaded dword.
-  /// @param dword_count Dwords per lane (1 or 2).
-  void issue_local_mem(const std::array<uint64_t, 64> &addrs, uint64_t lane_mask, uint32_t dst_vgpr,
-                       uint32_t dword_count);
 
   /// @brief Return the ISA architecture.
   /// @returns Architecture enum value.
@@ -323,9 +306,16 @@ public:
     return false;
   }
 
+  bool has_active_wfs_for_process(uint32_t process_id) const {
+    for (const auto &w : wfs_)
+      if (!w->is_halted() && w->process_id() == process_id)
+        return true;
+    return false;
+  }
+
   /// @brief Return the current round-robin scheduling index.
   /// @returns Index of the next wavefront slot to schedule.
-  size_t next_wf_index() const { return next_wf_; }
+  uint64_t cycle_count() const { return cycle_counter_; }
 
   /// @brief Read a scalar register from the physical SGPR file.
   /// @param reg_idx Physical register index.
@@ -411,7 +401,13 @@ protected:
   /// @brief Count the number of free VGPR allocation blocks.
   virtual uint32_t free_vgpr_blocks() const = 0;
 
-  /// @brief Tick all memory pipelines (called at the start of step).
+  /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
+  void update_wf_states();
+
+  /// @brief Fetch, decode, execute one instruction from the given wavefront.
+  void issue_instruction(Wavefront *wf);
+
+  /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
 
   /// @brief Route a memory instruction into the appropriate pipeline.
@@ -432,7 +428,8 @@ protected:
   std::unique_ptr<Decoder> decoder_;
   simdojo::RegisterFile<uint32_t> sgpr_file_{"sgpr"};
   std::vector<std::unique_ptr<Wavefront>> wfs_; ///< Pre-allocated wavefront slots.
-  size_t next_wf_ = 0;
+  std::unique_ptr<WavefrontScheduler> scheduler_ = std::make_unique<OldestFirstScheduler>();
+  uint64_t cycle_counter_ = 0;
 
   L2Cache *l2_;
   L1ScalarCache l1_scalar_;
@@ -450,27 +447,25 @@ protected:
   }
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
+  uint64_t shared_aperture_base_ = 0;
+  uint64_t shared_aperture_limit_ = 0;
+  uint64_t private_aperture_base_ = 0;
+  uint64_t private_aperture_limit_ = 0;
+
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   simdojo::Port *cpl_ = nullptr; ///< Completer port: dispatch activation from CP.
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
+  uint64_t step_count_ = 0;
 };
 
 /// @brief Execution-mode-aware compute unit shell.
 ///
 /// @details Adds event-driven activation on top of ComputeUnitCore.
 ///
-/// In FUNCTIONAL mode, advance() executes instructions via step() up to the
-/// configured `functional_quantum` limit (or unbounded if quantum is 0).
-/// When the quantum is reached with work remaining, advance() returns true
-/// and the work_event_ reschedules at `now + 1`, yielding to the simulation
-/// event loop. This interleaving ensures forward progress when wavefronts
-/// on different CUs synchronize via global memory (e.g., spin-locks,
-/// semaphores). activate() schedules the initial work event. When
-/// advance() returns false (no more work), the idle callback is notified
-/// so the command processor can detect completion.
-///
-/// In CLOCKED mode (future), advance() will process one pipeline cycle and
-/// activate() will resume the clock.
+/// In FUNCTIONAL mode, advance() executes up to kFunctionalQuantum
+/// instructions, then yields to the simulation event loop. This
+/// interleaving ensures forward progress when wavefronts on different
+/// CUs synchronize via global memory (e.g., spin-locks, semaphores).
 ///
 /// @tparam Mode Execution mode (FUNCTIONAL or CLOCKED).
 template <simdojo::ExecMode Mode> class ExecComputeUnit : public ComputeUnitCore {
@@ -478,53 +473,24 @@ public:
   using ComputeUnitCore::ComputeUnitCore;
 
   /// @brief Execute work up to the quantum limit, then yield.
-  ///
-  /// @details In FUNCTIONAL mode, executes up to `functional_quantum`
-  /// instructions (or all remaining if quantum is 0), retires halted
-  /// wavefronts, and returns whether more work remains. If the CU is
-  /// idle after execution, fires the on_idle callback.
-  /// @retval true More work remains; work_event_ will reschedule.
-  /// @retval false CU is idle; all wavefronts have been exhausted.
   bool advance() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      const uint32_t quantum = this->config_.functional_quantum;
-      if (quantum == 0) {
-        // Unbounded: drain all wavefronts in a single call.
-        while (step()) {
-        }
-      } else {
-        // Bounded: execute up to 'quantum' instructions, then yield
-        // back to the event loop so other CUs can make progress.
-        for (uint32_t i = 0; i < quantum && step(); ++i) {
-        }
+      for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
       }
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
     if (is_idle()) {
       notify_idle();
-      return false;
+      return !is_idle();
     }
     return true;
   }
 
-  /// @brief Run wavefronts on this CU.
-  ///
-  /// In unbounded functional mode (quantum == 0), advance directly — the CU
-  /// will drain all wavefronts before returning. This avoids scheduling an
-  /// engine event and waiting for the LBTS to advance, which can deadlock
-  /// when the engine is in await_primaries mode (KFD driver).
-  ///
-  /// In bounded mode (quantum > 0), schedule a work event to yield between
-  /// quanta, ensuring fair interleaving across CUs.
+  /// @brief Schedule CU execution via the event loop.
   void activate() override {
-    if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      if (this->config_.functional_quantum == 0) {
-        advance();
-        return;
-      }
-    }
-    this->schedule_event(&work_event_, this->engine()->global_time() + 1);
+    auto now = this->engine()->context(this->partition_id()).current_tick();
+    this->schedule_event(&work_event_, now + 1);
   }
 
 private:
