@@ -47,6 +47,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -279,13 +280,17 @@ private:
   // Lazily populated.
   std::unique_ptr<Decoder> decoder_;
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
+  // .text-relative byte offset -> decoded Instruction. Populated alongside
+  // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
+  // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
+  std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
-  [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset);
+  [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
 };
 
 } // namespace rocjitsu
