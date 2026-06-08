@@ -96,47 +96,32 @@ executable_freeze(hsa_executable_t executable, const char* options)
 
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
-            if(code_object.hsa_executable != executable)
-            {
-                return;
-            }
+            if(code_object.hsa_executable != executable) return;
 
             const auto& co = code_object.rocp_data;
 
             get_registries().wlock([&](set_type_t& t) {
                 for(auto* reg : t)
-                {
                     reg->ld_fn(co.rocp_agent, co.code_object_id, co.load_delta, co.load_size);
-                }
             });
         });
 
     return HSA_STATUS_SUCCESS;
 }
 
-void
-executable_destroy_internal(hsa_executable_t executable)
-{
-    rocprofiler::code_object::iterate_loaded_code_objects(
-        [&](const rocprofiler::code_object::hsa::code_object& code_object) {
-            if(code_object.hsa_executable != executable)
-            {
-                return;
-            }
-
-            get_registries().wlock([&](set_type_t& t) {
-                for(auto* reg : t)
-                {
-                    reg->unld_fn(code_object.rocp_data.code_object_id);
-                }
-            });
-        });
-}
-
 hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
-    executable_destroy_internal(executable);
+    rocprofiler::code_object::iterate_loaded_code_objects(
+        [&](const rocprofiler::code_object::hsa::code_object& code_object) {
+            if(code_object.hsa_executable != executable) return;
+
+            get_registries().wlock([&](set_type_t& t) {
+                for(auto* reg : t)
+                    reg->unld_fn(code_object.rocp_data.code_object_id);
+            });
+        });
+
     // Call underlying function
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
