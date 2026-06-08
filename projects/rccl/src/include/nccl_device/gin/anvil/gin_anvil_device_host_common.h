@@ -26,7 +26,7 @@ struct ncclGinAnvilGPUContext {
   uint32_t nSignals;
   uint32_t nCounters;
   uint32_t numSdmaChannels;   // SDMA queues per peer (1..8); queues[] is [nRanks * numSdmaChannels]
-  uint64_t sdmaDirtyMask;     // bit [peer * numSdmaChannels + ch] set when channel ch issued SDMA to peer
+  uint32_t sdmaDirtyMask;     // bit [peer] set when any channel issued SDMA to peer since last flush
   int nRanks;
   int rank;
   int myNode;                 // rankToNode[rank]; peers on other nodes have null queues

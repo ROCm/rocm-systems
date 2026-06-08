@@ -305,7 +305,7 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::put(
   coop.sync();
 }
 
-NCCL_DEVICE_INLINE void ncclGinPutValue(
+NCCL_DEVICE_INLINE void ncclGinPutValue_v2(
     ncclGin_C* net,
     ncclTeam team, int peer,
     ncclWindow_t dstWin, size_t dstOffset,

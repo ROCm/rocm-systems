@@ -41,12 +41,9 @@ NCCL_DEVICE_INLINE static rocshmem::anvil::SdmaQueueDeviceHandle* ncclGinAnvilPe
       &queues[(size_t)peer * numCh + (size_t)channel]);
 }
 
-NCCL_DEVICE_INLINE static void ncclGinAnvilMarkSdmaDirty(ncclGinAnvilGPUContext* aCtx, int peer, int channel) {
-  uint32_t numCh = nccl::utility::loadConst(&aCtx->numSdmaChannels);
-  if (numCh < 1) numCh = 1;
-  int bit = peer * (int)numCh + channel;
-  if (bit >= 0 && bit < 64)
-    atomicOr((unsigned long long*)&aCtx->sdmaDirtyMask, 1ULL << bit);
+NCCL_DEVICE_INLINE static void ncclGinAnvilMarkSdmaDirty(ncclGinAnvilGPUContext* aCtx, int peer) {
+  if (peer >= 0 && peer < 32)
+    atomicOr((unsigned int*)&aCtx->sdmaDirtyMask, 1u << peer);
 }
 
 // Enqueue one or more SDMA COPY_LINEAR packets; signal is issued separately by the caller.
@@ -234,7 +231,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     } else {
       ncclGinAnvilSdmaPutChunks(q, dst, src, bytes);
     }
-    ncclGinAnvilMarkSdmaDirty(aCtx, peer, sdmaChannel);
+    ncclGinAnvilMarkSdmaDirty(aCtx, peer);
   }
 };
 
@@ -296,18 +293,16 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
     using nccl::utility::loadConst;
     ncclGinAnvilGPUContext* aCtx = ncclGinAnvilGetCtx(ctx);
     if (aCtx == nullptr) return;
-    void** queues = (void**)loadConst(&aCtx->queues);
-    if (queues == nullptr) return;
     uint32_t numCh = loadConst(&aCtx->numSdmaChannels);
     if (numCh < 1) numCh = 1;
-    uint64_t dirty = atomicExch((unsigned long long*)&aCtx->sdmaDirtyMask, 0ULL);
-    int maxBit = ctx.nRanks * (int)numCh;
-    if (maxBit > 64) maxBit = 64;
-    for (int bit = coop.thread_rank(); bit < maxBit; bit += coop.size()) {
-      if ((dirty & (1ULL << bit)) == 0) continue;
-      auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[bit]);
-      if (q == nullptr) continue;
-      rocshmem::anvil::quiet(*q);
+    uint32_t dirty = atomicExch((unsigned int*)&aCtx->sdmaDirtyMask, 0u);
+    for (int p = coop.thread_rank(); p < ctx.nRanks; p += coop.size()) {
+      if (p == ctx.rank || (dirty & (1u << p)) == 0) continue;
+      for (int ch = 0; ch < (int)numCh; ch++) {
+        auto* q = ncclGinAnvilPeerQueue(aCtx, p, ch);
+        if (q == nullptr) continue;
+        rocshmem::anvil::quiet(*q);
+      }
     }
     coop.sync();
     (void)abortFlag;
