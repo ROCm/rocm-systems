@@ -23,7 +23,7 @@ import ctypes
 import pytest
 
 from conftest import requires_multi_pe  # noqa: E402
-from tests.hip_test_utils import HipStream, d2h, h2d, hip_sync  # noqa: E402
+from hip_test_utils import HipStream, d2h, h2d, hip_sync  # noqa: E402
 
 import rocshmem4py  # noqa: E402
 

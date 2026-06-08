@@ -32,7 +32,7 @@ from rocshmem4py import (
     rocshmem_getmem_on_stream,
 )
 from conftest import requires_multi_pe
-from tests.hip_test_utils import HipStream, load_u64, store_u64
+from hip_test_utils import HipStream, load_u64, store_u64
 
 # Wall-clock delay before the delayed team member enters a collective.
 # Override on slow CI hosts: ROCSHMEM_TEST_TEAM_DELAY_S=2.5 pytest ...
