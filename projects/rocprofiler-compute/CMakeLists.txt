@@ -429,6 +429,14 @@ add_test(
         tests/test_native_tool_finder.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_profile_torch_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION} -m torch_trace
+        --junitxml=tests/test_profile_torch_trace.xml ${COV_OPTION}
+        tests/test_profile_general.py ${WORKING_DIR_OPTION}
+)
+
 set_tests_properties(
     test_profile_kernel_execution
     test_profile_dispatch
@@ -443,6 +451,7 @@ set_tests_properties(
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
+    test_profile_torch_trace
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
 
@@ -633,6 +642,10 @@ add_test(
         tests/test_tui_components.py ${WORKING_DIR_OPTION}
 )
 
+# Build the roctx_recordfn pybind11 extension and its gtest.
+if(ENABLE_TESTS)
+    add_subdirectory(src/lib/roctx_recordfn)
+endif()
 # -----------------------------------
 # Torch trace tests
 # -----------------------------------
@@ -657,6 +670,15 @@ set_tests_properties(
     test_torch_trace_coverage
     PROPERTIES TIMEOUT 1800 LABELS "profile" RESOURCE_GROUPS gpus:1
 )
+
+add_test(
+    NAME test_inject_roctx_loader
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_inject_roctx_loader.xml ${COV_OPTION}
+        tests/test_inject_roctx_loader.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_inject_roctx_loader PROPERTIES TIMEOUT 300)
 
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
@@ -745,6 +767,8 @@ if(${ENABLE_COVERAGE})
         test_tui_components
         test_torch_trace_analysis
         test_torch_trace_coverage
+        test_profile_torch_trace
+        test_inject_roctx_loader
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -819,6 +843,17 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "rooflines*" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
+)
+# Install the roctx_recordfn sources so the runtime loader can rebuild
+# the extension against the user's PyTorch environment on first use.
+install(
+    DIRECTORY src/lib/roctx_recordfn
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
+    COMPONENT main
+    PATTERN "_build" EXCLUDE
+    PATTERN "build" EXCLUDE
+    PATTERN "tests" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
 # src/roofline
@@ -921,13 +956,15 @@ if(NOT SKIP_NATIVE_TOOL_BUILD)
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-compute COMPONENT main
     )
 else()
-    # Install source files for runtime compilation
+    # Install source files for runtime compilation. roctx_recordfn/ is
+    # installed by a dedicated rule above and excluded here.
     install(
         DIRECTORY src/lib/
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib
         COMPONENT main
         PATTERN "_build" EXCLUDE
         PATTERN "tests" EXCLUDE
+        PATTERN "roctx_recordfn" EXCLUDE
     )
 endif()
 

@@ -1054,7 +1054,7 @@ Example with hierarchical naming:
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
 :doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--torch-operator``) accepts PurePosixPath glob patterns (e.g. ``*conv2d``,
+(``--torch-operator``) accepts shell-style glob patterns (e.g. ``*conv2d``,
 ``torch.nn.functional.conv2d``, ``*/*conv2d``). To select all operators, pass
 no arguments, ``all``, ``*``, or ``**`` — all four forms are equivalent.
 

@@ -307,7 +307,7 @@ class cli_analysis(OmniAnalyze_Base):
                 "torch trace",
                 f"No operators matched the pattern(s): {pattern_list}",
             )
-            return
+            sys.exit(0)
 
         matched_df = consolidated_df[
             consolidated_df["Operator_Name"].isin(matched_names)
