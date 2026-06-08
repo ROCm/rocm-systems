@@ -132,17 +132,20 @@ static ncclResult_t ncclIbGetPciPath(char* devName, char** path, char* fullPath)
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
-  // set fullPath to empty if realpath returned NULL
+  // set fullPath to the raw real path (used for PCI ordering); empty if realpath returned NULL
   snprintf(fullPath, PATH_MAX, "%s", p ? p : "");
   if (p == NULL) {
     WARN("Could not find real path of %s (%s)", devName, devicePath);
+    if (path) *path = p;
   } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
+    // Store the normalized path so multi-port NICs and VFs share the same pciPath,
+    // which is what ncclIbMatchVfPath / ncclIbMakeVDeviceInternal rely on.
+    char* normalized = (char*)malloc(PATH_MAX);
+    if (normalized == NULL) return ncclSystemError;
+    ncclIbNormalizePciPath(p, normalized, PATH_MAX);
+    free(p);
+    if (path) *path = normalized;
   }
-  if (path) *path = p;
   return ncclSuccess;
 }
 

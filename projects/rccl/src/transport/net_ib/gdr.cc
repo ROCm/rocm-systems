@@ -126,6 +126,8 @@ static void ibDmaBufSupportInitOnce() {
   ncclIbDev* ibDev = ncclIbDevs + mergedDev->vProps.devs[0];
   struct ibv_pd* pd;
   struct ibv_context* ctx = ibDev->context;
+  res = rocmLibraryInit();
+  if (res != ncclSuccess) goto failure;
   NCCLCHECKGOTO(wrap_ibv_alloc_pd(&pd, ctx), res, failure);
   // Test kernel DMA-BUF support with a dummy call (fd=-1)
   (void)wrap_direct_ibv_reg_dmabuf_mr(pd, 0ULL /*offset*/, 0ULL /*len*/, 0ULL /*iova*/, -1 /*fd*/, 0 /*flags*/);

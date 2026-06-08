@@ -29,6 +29,7 @@
 #include <mutex>
 #define ENABLE_TIMER 0
 #include "timer.h"
+#include <sys/utsname.h>
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
@@ -129,6 +130,7 @@ struct ncclIbDevInfo {
 
   //remote dev info
   union ibv_gid remoteGid;
+  int ibv_dev_index;
 };
 
 // Retain local RoCE address for error logging
@@ -228,7 +230,7 @@ struct ncclIbNetCommDevBase {
   struct ncclIbGidInfo gidInfo;
 };
 
-struct ncclIbSendFifo {
+struct alignas(64) ncclIbSendFifo {
   uint64_t addr;
   uint64_t size;
   uint32_t rkeys[NCCL_IB_MAX_DEVS_PER_NIC];
