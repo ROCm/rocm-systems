@@ -3375,8 +3375,8 @@ tool_detach(void* /*tool_data*/)
     // kernel_rename_callback calls from adding new strings to kernel_rename_map
     // while generate_output builds the rocpd string table snapshot.
     flush();
-    rocprofiler_stop_context(get_client_ctx());
     rocprofiler_stop_context(get_kernel_rename_ctx());
+    rocprofiler_stop_context(get_client_ctx());
     flush();
 
     // Capture the fallback end timestamp after shutdown flushes complete so it

@@ -97,7 +97,6 @@ executable_destroy(hsa_executable_t executable)
     auto snapshot = std::vector<code_object_cb_entry_t>{};
     {
         std::lock_guard lg(registration->mutex);
-        snapshot  = std::vector<code_object_cb_entry_t>{registration->cb_list};
         auto pred = [&](const hsa_executable_t& a) { return a.handle == executable.handle; };
         auto itr  = std::find_if(
             registration->code_objects.begin(), registration->code_objects.end(), pred);
@@ -107,9 +106,14 @@ executable_destroy(hsa_executable_t executable)
         }
         else
         {
+            snapshot = std::vector<code_object_cb_entry_t>{registration->cb_list};
             registration->code_objects.erase(itr);
         }
     }
+
+    // Fire callbacks after erasing from the collection but before calling the real destroy.
+    // Erasing first prevents double-destroy races. Calling the real destroy last ensures the
+    // handle remains valid during callbacks, and that any handle still in code_objects is live.
     for(auto& entry : snapshot)
     {
         if(entry.cb)
@@ -169,6 +173,7 @@ remove_code_object_cb(rocprofiler_attach_code_object_cb_t cb)
     registration->cb_list.erase(
         std::remove_if(registration->cb_list.begin(), registration->cb_list.end(), pred),
         registration->cb_list.end());
+    // Returns SUCCESS whether or not cb was found, to simplify cleanup paths.
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

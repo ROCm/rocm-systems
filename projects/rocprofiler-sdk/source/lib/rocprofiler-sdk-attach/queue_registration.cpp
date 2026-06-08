@@ -167,15 +167,16 @@ create_queue(hsa_agent_t        agent,
     queue_entry_t entry{};
     entry.agent = agent;
 
-    auto snapshot = std::vector<queue_cb_entry_t>{};
+    queue_entry_t* write_interceptor_data = nullptr;
+    auto           snapshot               = std::vector<queue_cb_entry_t>{};
     {
         std::lock_guard lg(registration->mutex);
         ROCP_FATAL_IF(registration->queues.count(new_queue) > 0)
             << "Queue registration already contains an entry for new queue handle " << new_queue;
         registration->queues.insert({new_queue, entry});
-        snapshot = std::vector<queue_cb_entry_t>{registration->cb_list};
+        write_interceptor_data = &(registration->queues.at(new_queue));
+        snapshot               = std::vector<queue_cb_entry_t>{registration->cb_list};
     }
-    auto* write_interceptor_data = &(registration->queues.at(new_queue));
 
     // Pass queue_entry_t* as user data, used to directly call the user's write interceptor
     ROCP_ATTACH_HSA_TABLE_CALL(FATAL,
@@ -204,18 +205,14 @@ destroy_queue(hsa_queue_t* hsa_queue)
     auto* registration = get_queue_registration();
     if(registration)
     {
-        hsa_agent_t agent{};
-        bool        found    = false;
-        auto        snapshot = std::vector<queue_cb_entry_t>{};
+        auto node     = queue_collection_t::node_type{};
+        auto snapshot = std::vector<queue_cb_entry_t>{};
         {
             std::lock_guard lg(registration->mutex);
-            auto            it = registration->queues.find(hsa_queue);
-            if(it != registration->queues.end())
+            node = registration->queues.extract(hsa_queue);
+            if(!node.empty())
             {
-                agent    = it->second.agent;
-                found    = true;
                 snapshot = std::vector<queue_cb_entry_t>{registration->cb_list};
-                registration->queues.erase(it);
             }
             else
             {
@@ -223,17 +220,21 @@ destroy_queue(hsa_queue_t* hsa_queue)
                              << hsa_queue;
             }
         }
-        if(found)
+        if(!node.empty())
         {
             for(auto& cb_entry : snapshot)
             {
                 if(cb_entry.cb)
                 {
-                    cb_entry.cb(
-                        hsa_queue, agent, ROCPROFILER_ATTACH_QUEUE_DESTROYED, cb_entry.data);
+                    cb_entry.cb(hsa_queue,
+                                node.mapped().agent,
+                                ROCPROFILER_ATTACH_QUEUE_DESTROYED,
+                                cb_entry.data);
                 }
             }
         }
+        // node goes out of scope here: queue_entry_t is destroyed after callbacks (and
+        // any sync() called within them) have completed
     }
     return HSA_STATUS_SUCCESS;
 }
@@ -305,6 +306,7 @@ remove_queue_cb(rocprofiler_attach_queue_cb_t cb)
     registration->cb_list.erase(
         std::remove_if(registration->cb_list.begin(), registration->cb_list.end(), pred),
         registration->cb_list.end());
+    // Returns SUCCESS whether or not cb was found, to simplify cleanup paths.
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
