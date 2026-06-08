@@ -715,7 +715,9 @@ void Buffer::destroy() {
       }
     }
 
-    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain)) {
+    // Not counted on alloc, so don't add it back on free.
+    if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
+        !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), true);
     }
 
@@ -917,8 +919,9 @@ bool Buffer::create(bool alloc_local) {
       }
     }
 
+    // VA ranges only reserve addresses, not real memory, so don't count them.
     if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
-        (kind_ != MEMORY_KIND_ARENA)) {
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), false);
     }
 
