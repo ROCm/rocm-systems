@@ -30,10 +30,10 @@ namespace RcclUnitTesting
 static ncclComm_t MakeMagicComm()
 {
     ncclComm_t comm = new ncclComm();
-    memset(comm, 0, sizeof(ncclComm));
     comm->startMagic = NCCL_MAGIC;
     comm->endMagic   = NCCL_MAGIC;
-    comm->asyncResult = ncclSuccess;
+    // asyncResult is 0 == ncclSuccess by default; other fields zero-initialised
+    // by the compiler — explicit memset is not needed.
     return comm;
 }
 
