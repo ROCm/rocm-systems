@@ -19,6 +19,50 @@ NCCL_DEVICE_INLINE static uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uin
 // Match ROCSHMEM IPC SDMA policy (see ROCSHMEM_SDMA_THRESHOLD, default 256): below this
 // size, GPU load/store to peer-mapped LSA memory beats SDMA queue submit latency.
 constexpr size_t ncclGinAnvilSdmaThresholdBytes = 256;
+// Split large SDMA puts into chunks to pipeline ring-buffer reuse and spread load across channels.
+constexpr size_t ncclGinAnvilSdmaChunkBytes = 4 * 1024 * 1024;
+
+NCCL_DEVICE_INLINE static int ncclGinAnvilSelectSdmaChannel(ncclGinCtx ctx, ncclGinAnvilGPUContext* aCtx) {
+  using nccl::utility::loadConst;
+  uint32_t numCh = loadConst(&aCtx->numSdmaChannels);
+  if (numCh <= 1) return 0;
+  // Spread CTAs across channels; contextId is typically blockIdx.x for multi-CTA kernels.
+  return (int)(ctx.contextId % numCh);
+}
+
+NCCL_DEVICE_INLINE static rocshmem::anvil::SdmaQueueDeviceHandle* ncclGinAnvilPeerQueue(
+    ncclGinAnvilGPUContext* aCtx, int peer, int channel) {
+  using nccl::utility::loadConst;
+  void** queues = (void**)loadConst(&aCtx->queues);
+  if (queues == nullptr) return nullptr;
+  uint32_t numCh = loadConst(&aCtx->numSdmaChannels);
+  if (numCh < 1) numCh = 1;
+  return (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(
+      &queues[(size_t)peer * numCh + (size_t)channel]);
+}
+
+NCCL_DEVICE_INLINE static void ncclGinAnvilMarkSdmaDirty(ncclGinAnvilGPUContext* aCtx, int peer, int channel) {
+  uint32_t numCh = nccl::utility::loadConst(&aCtx->numSdmaChannels);
+  if (numCh < 1) numCh = 1;
+  int bit = peer * (int)numCh + channel;
+  if (bit >= 0 && bit < 64)
+    atomicOr((unsigned long long*)&aCtx->sdmaDirtyMask, 1ULL << bit);
+}
+
+// Enqueue one or more SDMA COPY_LINEAR packets; signal is issued separately by the caller.
+NCCL_DEVICE_INLINE static void ncclGinAnvilSdmaPutChunks(rocshmem::anvil::SdmaQueueDeviceHandle* q,
+                                                         void* dst, void* src, size_t bytes) {
+  if (bytes == 0) return;
+  char* d = (char*)dst;
+  char* s = (char*)src;
+  while (bytes > ncclGinAnvilSdmaChunkBytes) {
+    rocshmem::anvil::put(*q, d, s, ncclGinAnvilSdmaChunkBytes);
+    d += ncclGinAnvilSdmaChunkBytes;
+    s += ncclGinAnvilSdmaChunkBytes;
+    bytes -= ncclGinAnvilSdmaChunkBytes;
+  }
+  rocshmem::anvil::put(*q, d, s, bytes);
+}
 
 // Intra-rank / local-LSA copy (Put self path and sub-threshold remote puts).
 NCCL_DEVICE_INLINE static void ncclGinAnvilMemcpy(void* dst, void const* src, size_t bytes) {
@@ -142,9 +186,8 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
       return;
     }
 
-    void** queues = (void**)loadConst(&aCtx->queues);
-    if (queues == nullptr) return;
-    auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[peer]);
+    int sdmaChannel = ncclGinAnvilSelectSdmaChannel(ctx, aCtx);
+    auto* q = ncclGinAnvilPeerQueue(aCtx, peer, sdmaChannel);
     if (q == nullptr) return;
 
     uint64_t* sigPtr = nullptr;
@@ -182,16 +225,16 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
     }
 
     if (hasSignal) {
-      rocshmem::anvil::put(*q, dst, src, bytes);
+      ncclGinAnvilSdmaPutChunks(q, dst, src, bytes);
       ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
       if (hasCounter) atomicAdd((unsigned long long*)counterPtr, 1ULL);
     } else if (hasCounter) {
+      // putCounter does not support chunking; use single packet when counter is required.
       rocshmem::anvil::putCounter(*q, dst, src, bytes, counterPtr);
     } else {
-      rocshmem::anvil::put(*q, dst, src, bytes);
+      ncclGinAnvilSdmaPutChunks(q, dst, src, bytes);
     }
-    if (peer >= 0 && peer < 32)
-      atomicOr((unsigned int*)&aCtx->sdmaDirtyMask, 1u << peer);
+    ncclGinAnvilMarkSdmaDirty(aCtx, peer, sdmaChannel);
   }
 };
 
@@ -255,10 +298,14 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL> {
     if (aCtx == nullptr) return;
     void** queues = (void**)loadConst(&aCtx->queues);
     if (queues == nullptr) return;
-    uint32_t dirty = atomicExch((unsigned int*)&aCtx->sdmaDirtyMask, 0u);
-    for (int p = coop.thread_rank(); p < ctx.nRanks; p += coop.size()) {
-      if (p == ctx.rank || (dirty & (1u << p)) == 0) continue;
-      auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[p]);
+    uint32_t numCh = loadConst(&aCtx->numSdmaChannels);
+    if (numCh < 1) numCh = 1;
+    uint64_t dirty = atomicExch((unsigned long long*)&aCtx->sdmaDirtyMask, 0ULL);
+    int maxBit = ctx.nRanks * (int)numCh;
+    if (maxBit > 64) maxBit = 64;
+    for (int bit = coop.thread_rank(); bit < maxBit; bit += coop.size()) {
+      if ((dirty & (1ULL << bit)) == 0) continue;
+      auto* q = (rocshmem::anvil::SdmaQueueDeviceHandle*)loadConst(&queues[bit]);
       if (q == nullptr) continue;
       rocshmem::anvil::quiet(*q);
     }

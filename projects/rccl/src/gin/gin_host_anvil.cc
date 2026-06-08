@@ -18,7 +18,18 @@
 #include "sdma/anvil.hpp"
 
 #include <hip/hip_runtime.h>
+#include <cstdlib>
 #include <map>
+
+// SDMA channels per peer (1..8). Falls back to ROCSHMEM_SDMA_NUM_CHANNELS, default 4.
+static int ginAnvilParseNumSdmaChannels() {
+  const char* env = getenv("NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS");
+  if (env == nullptr) env = getenv("ROCSHMEM_SDMA_NUM_CHANNELS");
+  int numChannels = env ? (int)strtol(env, nullptr, 0) : 4;
+  if (numChannels < 1) numChannels = 1;
+  if (numChannels > 8) numChannels = 8;
+  return numChannels;
+}
 
 // Signal buffers must be pinned (cached) device memory: SDMA putSignal atomics fault on
 // uncached cuMem imports (MI355X). LSA/window memory uses uncached separately via devr.
@@ -63,10 +74,11 @@ struct ginAnvilCtx {
   ncclNetDeviceHandle_v11_t* devHandle;
 
   int nContexts;
+  int numSdmaChannels;
   ncclGinAnvilGPUContext* gpuCtxDev;
 
   // Device arrays
-  void** queuesDev;         // [nRanks]
+  void** queuesDev;         // [nRanks * numSdmaChannels]
   uint64_t** signalsBaseDev;// [nRanks]
 
   // Host mirrors
@@ -206,7 +218,9 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   }
 
   NCCLCHECKGOTO(setupSignalBases(ctx, comm, signalsLocal), ret, fail_signals);
-  NCCLCHECKGOTO(ncclCalloc(&ctx->queuesHost, comm->nRanks), ret, fail_signals);
+  ctx->numSdmaChannels = ginAnvilParseNumSdmaChannels();
+  size_t queueSlots = (size_t)comm->nRanks * (size_t)ctx->numSdmaChannels;
+  NCCLCHECKGOTO(ncclCalloc(&ctx->queuesHost, queueSlots), ret, fail_signals);
 
   if (!rocshmem::anvil::initEndpoint()) {
     WARN("GIN anvil: anvil initEndpoint failed");
@@ -214,21 +228,26 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     goto fail_signals;
   }
   for (int r = 0; r < comm->nRanks; r++) {
-    if (r == comm->rank) { ctx->queuesHost[r] = nullptr; continue; }
-    if (comm->rankToNode[r] != comm->rankToNode[comm->rank]) { ctx->queuesHost[r] = nullptr; continue; }
+    if (r == comm->rank || comm->rankToNode[r] != comm->rankToNode[comm->rank]) {
+      for (int ch = 0; ch < ctx->numSdmaChannels; ch++)
+        ctx->queuesHost[(size_t)r * ctx->numSdmaChannels + ch] = nullptr;
+      continue;
+    }
     int srcDev = comm->cudaDev;
     int dstDev = comm->peerInfo[r].cudaDev;
-    rocshmem::anvil::anvil.connect(srcDev, dstDev, /*numChannels=*/1);
-    auto* q = rocshmem::anvil::anvil.getSdmaQueue(srcDev, dstDev, 0);
-    if (q == nullptr) {
-      WARN("GIN anvil: getSdmaQueue failed for dev %d -> %d", srcDev, dstDev);
-      ret = ncclSystemError;
-      goto fail_signals;
+    rocshmem::anvil::anvil.connect(srcDev, dstDev, ctx->numSdmaChannels);
+    for (int ch = 0; ch < ctx->numSdmaChannels; ch++) {
+      auto* q = rocshmem::anvil::anvil.getSdmaQueue(srcDev, dstDev, ch);
+      if (q == nullptr) {
+        WARN("GIN anvil: getSdmaQueue failed for dev %d -> %d ch %d", srcDev, dstDev, ch);
+        ret = ncclSystemError;
+        goto fail_signals;
+      }
+      ctx->queuesHost[(size_t)r * ctx->numSdmaChannels + ch] = (void*)q->deviceHandle();
     }
-    ctx->queuesHost[r] = (void*)q->deviceHandle();
   }
 
-  NCCLCHECKGOTO(allocDeviceArray(&ctx->queuesDev, ctx->queuesHost, comm->nRanks), ret, fail_signals);
+  NCCLCHECKGOTO(allocDeviceArray(&ctx->queuesDev, ctx->queuesHost, queueSlots), ret, fail_signals);
   if (hipMalloc(&ctx->signalsBaseDev, comm->nRanks * sizeof(uint64_t*)) != hipSuccess) {
     ret = ncclSystemError;
     goto fail_signals;
@@ -250,6 +269,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     h->counters = countersLocal ? countersLocal + (size_t)contextId * (size_t)nCounters : nullptr;
     h->nSignals = nSignals;
     h->nCounters = nCounters;
+    h->numSdmaChannels = (uint32_t)ctx->numSdmaChannels;
     h->nRanks = comm->nRanks;
     h->rank = comm->rank;
     h->myNode = comm->rankToNode[comm->rank];
@@ -276,8 +296,9 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   *outGinCtx = ctx;
   *outDevHandle = ctx->devHandle;
-  INFO(NCCL_INIT, "GIN anvil: context created (%d signals, %d counters, %d contexts, signalsDev=%p gpuCtxDev=%p)",
-       nSignals, nCounters, nContexts, (void*)signalsLocal, (void*)ctx->gpuCtxDev);
+  INFO(NCCL_INIT,
+       "GIN anvil: context created (%d signals, %d counters, %d contexts, %d SDMA ch/peer, signalsDev=%p gpuCtxDev=%p)",
+       nSignals, nCounters, nContexts, ctx->numSdmaChannels, (void*)signalsLocal, (void*)ctx->gpuCtxDev);
   free(gpuCtxHostArr);
   gpuCtxHostArr = nullptr;
   return ncclSuccess;

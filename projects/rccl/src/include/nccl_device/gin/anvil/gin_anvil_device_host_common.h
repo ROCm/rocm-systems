@@ -18,14 +18,15 @@
 //   the fallback on the same imported view.
 // - signalsContextOffset selects this GIN context's slice within the peer signal allocation.
 struct ncclGinAnvilGPUContext {
-  void** queues;              // device array [nRanks] of rocshmem::anvil::SdmaQueueDeviceHandle*
+  void** queues;              // device array [nRanks * numSdmaChannels] of SdmaQueueDeviceHandle*
   uint64_t** signalsBase;     // device array [nRanks] of imported peer signal bases
   uint64_t* signals;          // device pointer to this rank's indexed signal array (this context)
   uint64_t* counters;         // device pointer to local counters array
   uint32_t signalsContextOffset; // cell offset of this context within each rank's signal alloc
   uint32_t nSignals;
   uint32_t nCounters;
-  uint32_t sdmaDirtyMask;     // peers that issued SDMA puts since last flush (device-maintained)
+  uint32_t numSdmaChannels;   // SDMA queues per peer (1..8); queues[] is [nRanks * numSdmaChannels]
+  uint64_t sdmaDirtyMask;     // bit [peer * numSdmaChannels + ch] set when channel ch issued SDMA to peer
   int nRanks;
   int rank;
   int myNode;                 // rankToNode[rank]; peers on other nodes have null queues

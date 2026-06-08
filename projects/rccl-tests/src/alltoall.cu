@@ -281,6 +281,68 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
+// Message slice size above which CTAs stripe peers (not offsets) for xGMI link parallelism.
+constexpr size_t kAlltoAllPeerParallelByteThreshold = 64 * 1024;
+// Hybrid GIN path: pipeline remote SDMA puts with local LSA copy in 1 MiB chunks.
+constexpr size_t kAlltoAllGinPipelineChunkBytes = 1 << 20;
+
+// Vectorized copy of one rank-slice to one peer (used by peer-parallel alltoall).
+template <typename T>
+__device__ __forceinline__ void AlltoAllCopyOnePeerVectorized(T* sendPeer, T* recvPeer, size_t count,
+                                                              int tid, int nthreads) {
+  using TN = typename VectorTypeMapping<T>::Type;
+  constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
+  constexpr int UNROLL_FACTOR = 128 / sizeof(TN);
+
+  bool canVectorize = (sizeof(TN) > sizeof(T)) &&
+                      (reinterpret_cast<uintptr_t>(sendPeer) % sizeof(TN) == 0) &&
+                      (reinterpret_cast<uintptr_t>(recvPeer) % sizeof(TN) == 0) &&
+                      ((count * sizeof(T)) % sizeof(TN) == 0);
+  if (!canVectorize) {
+    for (size_t offset = tid; offset < count; offset += nthreads)
+      recvPeer[offset] = sendPeer[offset];
+    return;
+  }
+
+  size_t vector_count = count / VECTOR_FACTOR;
+  int elements_per_iteration = nthreads * UNROLL_FACTOR;
+  size_t aligned_vector_count = (vector_count / elements_per_iteration) * elements_per_iteration;
+
+  TN* sendVec = (TN*)sendPeer;
+  TN* recvVec = (TN*)recvPeer;
+  for (size_t base_offset = tid; base_offset < aligned_vector_count; base_offset += elements_per_iteration) {
+    TN values[UNROLL_FACTOR];
+    #pragma unroll
+    for (int i = 0; i < UNROLL_FACTOR; i++) {
+      size_t offset = base_offset + i * nthreads;
+      values[i] = sendVec[offset];
+    }
+    #pragma unroll
+    for (int i = 0; i < UNROLL_FACTOR; i++) {
+      size_t offset = base_offset + i * nthreads;
+      recvVec[offset] = values[i];
+    }
+  }
+  for (size_t base_offset = aligned_vector_count + tid; base_offset < vector_count; base_offset += nthreads)
+    recvVec[base_offset] = sendVec[base_offset];
+  size_t scalar_start = vector_count * VECTOR_FACTOR;
+  for (size_t offset = scalar_start + tid; offset < count; offset += nthreads)
+    recvPeer[offset] = sendPeer[offset];
+}
+
+// CTA-peer striping: each block copies full slices to a subset of peers (large messages).
+template <typename T>
+__device__ __forceinline__ void AlltoAllNvlCopyPeerParallel(ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int blockId,
+    int nBlocks, int tid, int nthreads) {
+  T* sendPtr = (T*)ncclGetLsaPointer(sendwin, sendoffset, rank);
+  for (int peer = blockId; peer < nRanks; peer += nBlocks) {
+    T* sendPeer = sendPtr + peer * count;
+    T* recvPeer = (T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count;
+    AlltoAllCopyOnePeerVectorized<T>(sendPeer, recvPeer, count, tid, nthreads);
+  }
+}
+
 // Vectorized alltoall copy for full NVL peer sets (single-node / all-local paths).
 template <typename T>
 __device__ __forceinline__ void AlltoAllNvlCopyOptimized(ncclWindow_t sendwin, size_t sendoffset,
@@ -348,6 +410,19 @@ __device__ __forceinline__ void AlltoAllNvlCopyOptimized(ncclWindow_t sendwin, s
   }
 }
 
+template <typename T>
+__device__ __forceinline__ void AlltoAllNvlCopySelect(ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int blockId,
+    int nBlocks, int tid, int nthreads) {
+  if (count * sizeof(T) >= kAlltoAllPeerParallelByteThreshold && nBlocks > 1 && nRanks > 1) {
+    AlltoAllNvlCopyPeerParallel<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
+                                   blockId, nBlocks, tid, nthreads);
+  } else {
+    AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
+                                tid, nthreads);
+  }
+}
+
 // Device implementation #2 - optimized NVL kernel using vectorization and unrolling
 template <typename T>
 __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
@@ -358,7 +433,8 @@ __global__ void NvlAlltoAllKernelOptimized(ncclWindow_t sendwin, size_t sendoffs
   int tid = threadIdx.x + blockDim.x * blockIdx.x;
   int nthreads = blockDim.x * gridDim.x;
 
-  AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, tid, nthreads);
+  AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
+                           blockIdx.x, gridDim.x, tid, nthreads);
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
@@ -450,6 +526,69 @@ __device__ __forceinline__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sen
   }
 }
 
+// Element-range variant for pipelined hybrid alltoall chunks.
+template <typename T>
+__device__ __forceinline__ void AlltoAllLsaCopyRange(ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset, size_t count, size_t elemOff, size_t elemLen,
+    int recvRank, int startLsa, int lsaSize, int tid, int nthreads) {
+  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+  for (int lp = 0; lp < lsaSize; lp++) {
+    int wr = startLsa + lp;
+    T* sendPeer = sendLocal + wr * count + elemOff;
+    T* recvPeer = (T*)ncclGetLsaPointer(recvwin, recvoffset, lp) + recvRank * count + elemOff;
+    AlltoAllCopyOnePeerVectorized<T>(sendPeer, recvPeer, elemLen, tid, nthreads);
+  }
+}
+
+// Issue remote GIN puts for one byte slice of each rank's alltoall chunk.
+template <typename T>
+__device__ __forceinline__ void AlltoAllGinPutRemoteSlice(ncclGin& gin, ncclTeam world, int startLsa,
+    int lsaSize, int myRank, ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin,
+    size_t recvoffset, size_t rankSliceBytes, size_t sliceOff, size_t sliceBytes, int tid,
+    int nthreads, unsigned int signalIndex) {
+  for (int r = tid; r < startLsa; r += nthreads) {
+    gin.put(world, r,
+        recvwin, recvoffset + (size_t)myRank * rankSliceBytes + sliceOff,
+        sendwin, sendoffset + (size_t)r * rankSliceBytes + sliceOff,
+        sliceBytes, ncclGin_SignalInc{signalIndex});
+  }
+  for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
+    gin.put(world, r,
+        recvwin, recvoffset + (size_t)myRank * rankSliceBytes + sliceOff,
+        sendwin, sendoffset + (size_t)r * rankSliceBytes + sliceOff,
+        sliceBytes, ncclGin_SignalInc{signalIndex});
+  }
+}
+
+// Pipelined hybrid: for large messages, chunk remote SDMA puts and overlap with local LSA copy.
+template <typename T>
+__device__ __forceinline__ void AlltoAllHybridGinPipelined(ncclGin& gin, ncclTeam world, int startLsa,
+    int lsaSize, int myRank, ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin,
+    size_t recvoffset, size_t count, int tid, int nthreads, unsigned int signalIndex) {
+  const size_t rankSliceBytes = count * sizeof(T);
+  if (rankSliceBytes <= kAlltoAllGinPipelineChunkBytes) {
+    AlltoAllGinPutRemoteSlice<T>(gin, world, startLsa, lsaSize, myRank, sendwin, sendoffset,
+                                 recvwin, recvoffset, rankSliceBytes, 0, rankSliceBytes, tid,
+                                 nthreads, signalIndex);
+    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, myRank, startLsa, lsaSize,
+                       tid, nthreads);
+    return;
+  }
+
+  size_t elemPerChunk = kAlltoAllGinPipelineChunkBytes / sizeof(T);
+  if (elemPerChunk == 0) elemPerChunk = 1;
+  for (size_t elemOff = 0; elemOff < count; elemOff += elemPerChunk) {
+    size_t elemLen = min(elemPerChunk, count - elemOff);
+    size_t sliceBytes = elemLen * sizeof(T);
+    size_t sliceOff = elemOff * sizeof(T);
+    AlltoAllGinPutRemoteSlice<T>(gin, world, startLsa, lsaSize, myRank, sendwin, sendoffset,
+                                 recvwin, recvoffset, rankSliceBytes, sliceOff, sliceBytes, tid,
+                                 nthreads, signalIndex);
+    AlltoAllLsaCopyRange<T>(sendwin, sendoffset, recvwin, recvoffset, count, elemOff, elemLen,
+                            myRank, startLsa, lsaSize, tid, nthreads);
+  }
+}
+
 template <typename T>
 __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   constexpr int ginContext = 0;
@@ -470,8 +609,8 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
-                                world.nRanks, tid, nthreads);
+    AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
+                             world.nRanks, blockIdx.x, gridDim.x, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
@@ -486,23 +625,12 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
     ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x};
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
-  for (int r = tid; r < startLsa; r += nthreads) {
-    gin.put(world, r,
-        recvwin, recvoffset + world.rank * size,
-        sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
-  }
-  for (int r = startLsa + lsa.nRanks + tid; r < world.nRanks; r += nthreads) {
-    gin.put(world, r,
-        recvwin, recvoffset + world.rank * size,
-        sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
-  }
+  int numChunks = (int)((size + kAlltoAllGinPipelineChunkBytes - 1) / kAlltoAllGinPipelineChunkBytes);
+  int totalSignals = numRemotePeers * numChunks;
+  AlltoAllHybridGinPipelined<T>(gin, world, startLsa, lsa.nRanks, world.rank, sendwin, sendoffset,
+                                recvwin, recvoffset, count, tid, nthreads, signalIndex);
 
-  AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
-                     lsa.nRanks, tid, nthreads);
-
-  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
+  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + totalSignals);
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
@@ -526,26 +654,61 @@ __global__ void HybridAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, nc
   const int startLsa = world.rank - lsa.rank;
   const int lsaSize  = lsa.nRanks;
 
-  /* handle remote peers (i.e., non-LSA) using GIN */
   const size_t size = count * sizeof(T);
-  for (int r = tid; r < startLsa; r += nthreads) {
-    gin.put(world, r,
-        recvwin, recvoffset + world.rank * size,
-        sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
-  }
-  for (int r = startLsa + lsaSize + tid; r < world.nRanks; r += nthreads) {
-    gin.put(world, r,
-        recvwin, recvoffset + world.rank * size,
-        sendwin, sendoffset + r * size,
-        size, ncclGin_SignalInc{signalIndex});
-  }
-
-  AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank, startLsa,
-                     lsaSize, tid, nthreads);
-
   int numRemotePeers = world.nRanks - lsa.nRanks;
-  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + numRemotePeers);
+  int numChunks = (int)((size + kAlltoAllGinPipelineChunkBytes - 1) / kAlltoAllGinPipelineChunkBytes);
+  int totalSignals = numRemotePeers * numChunks;
+  AlltoAllHybridGinPipelined<T>(gin, world, startLsa, lsaSize, world.rank, sendwin, sendoffset,
+                                recvwin, recvoffset, count, tid, nthreads, signalIndex);
+
+  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + totalSignals);
+  gin.flush(ncclCoopCta());
+
+  bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+}
+
+// Device implementation #5 - adaptive GIN alltoall:
+//   single-node (all LSA peers): LSA barriers + LSA copy only (no GIN session), multi-CTA
+//   multi-node: hybrid GIN puts for remote peers + LSA copy for local peers (like -D 4)
+template <typename T>
+__global__ void GinAdaptiveAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
+  ncclTeam world = ncclTeamWorld(devComm);
+  ncclTeam lsa = ncclTeamLsa(devComm);
+  const int startLsa = world.rank - lsa.rank;
+  const int lsaSize = lsa.nRanks;
+  const int numRemotePeers = world.nRanks - lsa.nRanks;
+  const bool allLocal = (numRemotePeers == 0);
+
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  int nthreads = blockDim.x * gridDim.x;
+
+  if (allLocal) {
+    ncclLsaBarrierSession<ncclCoopCta> lsaBar {
+      ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+
+    AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
+                             world.nRanks, blockIdx.x, gridDim.x, tid, nthreads);
+
+    lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
+    return;
+  }
+
+  int ginContext = (devComm.ginContextCount > 0) ? (blockIdx.x % devComm.ginContextCount) : 0;
+  unsigned int signalIndex = 0;
+  ncclGin gin { devComm, ginContext };
+  uint64_t signalValue = gin.readSignal(signalIndex);
+
+  ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+
+  const size_t size = count * sizeof(T);
+  int numChunks = (int)((size + kAlltoAllGinPipelineChunkBytes - 1) / kAlltoAllGinPipelineChunkBytes);
+  int totalSignals = numRemotePeers * numChunks;
+  AlltoAllHybridGinPipelined<T>(gin, world, startLsa, lsaSize, world.rank, sendwin, sendoffset,
+                                recvwin, recvoffset, count, tid, nthreads, signalIndex);
+
+  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + totalSignals);
   gin.flush(ncclCoopCta());
 
   bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
