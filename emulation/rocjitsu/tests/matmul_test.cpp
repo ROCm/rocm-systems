@@ -384,7 +384,7 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(0x0000,  ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
@@ -435,7 +435,7 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
 // Multi-threaded topology-only: 1 thread per XCD, dispatch s_endpgm to all CUs.
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
-  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(0x0000,  ROCJITSU_CODE_ARCH_CDNA4);
+  constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();

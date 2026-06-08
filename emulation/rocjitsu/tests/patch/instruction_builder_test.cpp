@@ -106,9 +106,9 @@ TEST(ComputeSoppBranchSimm16, TargetNearUint64MaxFails) {
 
 TEST(InstructionBuilder, BuildSEndpgm) {
   constexpr uint32_t SOPP_S_ENDPGM_CDNA4 = 0xBF810000u;
-  EXPECT_EQ(build_s_endpgm(0x0000, ROCJITSU_CODE_ARCH_CDNA4), SOPP_S_ENDPGM_CDNA4);
+  EXPECT_EQ(build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4), SOPP_S_ENDPGM_CDNA4);
   constexpr uint32_t SOPP_S_ENDPGM_RDNA4 = 0xBFB00000u;
-  EXPECT_EQ(build_s_endpgm(0x0000, ROCJITSU_CODE_ARCH_RDNA4), SOPP_S_ENDPGM_RDNA4);
+  EXPECT_EQ(build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4), SOPP_S_ENDPGM_RDNA4);
 }
 
 } // namespace

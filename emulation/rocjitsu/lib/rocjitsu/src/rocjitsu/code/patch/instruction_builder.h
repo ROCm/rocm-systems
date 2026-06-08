@@ -178,8 +178,8 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 // opcode 1 on GFX9 (CDNA1-4) and opcode 48 (0x30) on GFX12 (RDNA4); the
 // sabotage path in tests/dbi/hsa_dbi_smoke_test.cpp currently hardcodes the
 // CDNA encoding 0xBF810000.
-[[nodiscard]] inline constexpr uint32_t build_s_endpgm(int16_t simm16, rj_code_arch_t arch) {
-  return pack_sopp(sopp_op_endpgm(arch), simm16);
+[[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
+  return pack_sopp(sopp_op_endpgm(arch), 0);
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.
