@@ -76,6 +76,7 @@ set(SRC_FILES
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
+  device/symmetric/tma_ptx.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc

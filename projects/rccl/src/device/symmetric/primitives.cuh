@@ -10,7 +10,7 @@
 #include "op128.h"
 #include "reduce_kernel.h"
 #include "common.h"
-#include "tma_ptx.cuh"
+#include "tma_ptx.h"
 
 template<typename Pack, int UnrollPacks, int UnrollPeers = 1>
 struct tmaSmemStruct {
