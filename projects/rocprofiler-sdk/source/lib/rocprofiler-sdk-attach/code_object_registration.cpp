@@ -63,9 +63,8 @@ get_code_object_registration()
 hsa_status_t
 executable_freeze(hsa_executable_t executable, const char* options)
 {
-    auto*           registration = CHECK_NOTNULL(get_code_object_registration());
-    std::lock_guard lg(registration->mutex);
-    auto            status = registration->hsa_executable_freeze_fn(executable, options);
+    auto* registration = CHECK_NOTNULL(get_code_object_registration());
+    auto  status       = registration->hsa_executable_freeze_fn(executable, options);
 
     if(status != HSA_STATUS_SUCCESS)
     {
@@ -73,8 +72,13 @@ executable_freeze(hsa_executable_t executable, const char* options)
     }
 
     ROCP_TRACE << "adding code_object " << executable.handle;
-    registration->code_objects.emplace_back(executable);
-    for(auto& entry : registration->cb_list)
+    auto snapshot = std::vector<code_object_cb_entry_t>{};
+    {
+        std::lock_guard lg(registration->mutex);
+        registration->code_objects.emplace_back(executable);
+        snapshot = std::vector<code_object_cb_entry_t>{registration->cb_list};
+    }
+    for(auto& entry : snapshot)
     {
         if(entry.cb)
         {
@@ -139,9 +143,13 @@ add_code_object_cb(rocprofiler_attach_code_object_cb_t cb, void* data)
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
-    auto  lg           = std::lock_guard{registration->mutex};
-    registration->cb_list.push_back({cb, data});
-    for(const auto& code_object : registration->code_objects)
+    auto  snapshot     = code_object_collection_t{};
+    {
+        auto lg = std::lock_guard{registration->mutex};
+        registration->cb_list.push_back({cb, data});
+        snapshot = code_object_collection_t{registration->code_objects};
+    }
+    for(const auto& code_object : snapshot)
     {
         cb(code_object, ROCPROFILER_ATTACH_CODE_OBJECT_CREATED, data);
     }

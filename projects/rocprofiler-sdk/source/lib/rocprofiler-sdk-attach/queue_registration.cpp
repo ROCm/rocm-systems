@@ -105,12 +105,20 @@ write_interceptor(const void*                             packets,
                   hsa_amd_queue_intercept_packet_writer_t writer)
 {
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a valid pointer";
-    const auto* entry = static_cast<const queue_entry_t*>(data);
+    auto*       registration = CHECK_NOTNULL(get_queue_registration());
+    const auto* entry        = static_cast<const queue_entry_t*>(data);
 
-    if(entry->user_write_interceptor_func)
+    write_interceptor_t func  = nullptr;
+    void*               udata = nullptr;
     {
-        entry->user_write_interceptor_func(
-            packets, pkt_count, unused, entry->user_write_interceptor_data, writer);
+        std::lock_guard lg(registration->mutex);
+        func  = entry->user_write_interceptor_func;
+        udata = entry->user_write_interceptor_data;
+    }
+
+    if(func)
+    {
+        func(packets, pkt_count, unused, udata, writer);
     }
     else
     {
@@ -248,6 +256,7 @@ int
 set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
+    auto  lg           = std::lock_guard{registration->mutex};
     auto  qr_pair      = registration->queues.find(queue);
     if(qr_pair == registration->queues.end())
     {
@@ -267,11 +276,18 @@ add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
     auto* registration = CHECK_NOTNULL(get_queue_registration());
-    auto  lg           = std::lock_guard{registration->mutex};
-    registration->cb_list.push_back({cb, data});
-    for(const auto& qr_pair : registration->queues)
+    auto  snapshot     = std::vector<std::pair<hsa_queue_t*, hsa_agent_t>>{};
     {
-        cb(qr_pair.first, qr_pair.second.agent, ROCPROFILER_ATTACH_QUEUE_CREATED, data);
+        auto lg = std::lock_guard{registration->mutex};
+        registration->cb_list.push_back({cb, data});
+        for(const auto& qr_pair : registration->queues)
+        {
+            snapshot.emplace_back(qr_pair.first, qr_pair.second.agent);
+        }
+    }
+    for(const auto& [queue, agent] : snapshot)
+    {
+        cb(queue, agent, ROCPROFILER_ATTACH_QUEUE_CREATED, data);
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
