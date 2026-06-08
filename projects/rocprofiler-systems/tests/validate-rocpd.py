@@ -119,6 +119,9 @@ def print_help():
 
     OPTIONAL ARGUMENTS:
         -r, --validation_rules PATH [PATH ...]  One or more JSON rules files (default: default_rules.json)
+        --gpu-category-to-skip CAT [CAT ...]    Skip validation queries tagged with these GPU
+                                                categories in the rules JSON via
+                                                "gpu_category_to_skip" (e.g. apu). Default: none.
         -h, --help                  Show this help message and exit
 
     EXAMPLES:
@@ -130,6 +133,9 @@ def print_help():
 
         # Validate database with multiple rules files
         {os.path.basename(__file__)} --database my_profile.db -r validation_rules.json amd_smi_rules.json
+
+        # Skip queries tagged for APUs (e.g. when shared HBM means no PAGE_MIGRATE events)
+        {os.path.basename(__file__)} --database my_profile.db --gpu-category-to-skip apu
 
     VALIDATION FEATURES:
         - Checks for presence of required tables
