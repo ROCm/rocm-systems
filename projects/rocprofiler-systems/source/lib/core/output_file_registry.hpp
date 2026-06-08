@@ -7,6 +7,7 @@
 
 #include <sys/types.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -16,15 +17,6 @@
 namespace rocprofsys
 {
 
-struct output_file
-{
-    std::string                   label;
-    std::string                   path;
-    std::string                   viewer;
-    pid_t                         pid{ -1 };
-    std::optional<std::uintmax_t> size_bytes{};
-};
-
 enum class output_format
 {
     perfetto,
@@ -33,6 +25,16 @@ enum class output_format
     text,
     causal_json,
     causal_text
+};
+
+struct output_file
+{
+    std::string                   label;
+    std::string                   path;
+    std::string                   viewer;
+    pid_t                         pid{ -1 };
+    std::optional<std::uintmax_t> size_bytes{};
+    output_format                 format{ output_format::perfetto };
 };
 
 // One registry per process: one output dir, one Output Summary, one
@@ -57,7 +59,8 @@ public:
 
     void register_file(std::string path, output_format format,
                        std::optional<pid_t> pid = std::nullopt);
-    void register_file(std::string path, output_format format, std::string component_name,
+    void register_file(std::string path, output_format format,
+                       const std::string&   component_name,
                        std::optional<pid_t> pid = std::nullopt);
 
     // Filtered to the current session. Older records stay in internal
@@ -68,6 +71,11 @@ public:
 
     // Upsert by pid within the current session.
     void record_process(output::process_metadata meta);
+
+    // Total GPU devices on the node, used by the Output Summary header
+    // to qualify the utilized-GPU set as "(all)". Unknown until set.
+    void                                     set_node_gpu_count(std::size_t count);
+    [[nodiscard]] std::optional<std::size_t> node_gpu_count() const;
 
     // Increments the session id and compacts records from prior
     // sessions. Race-safe against concurrent register_file: both
@@ -95,6 +103,7 @@ private:
     std::vector<versioned<output_file>>              m_files;
     std::vector<versioned<output::process_metadata>> m_processes;
     std::uint64_t                                    m_session_id{ 1 };
+    std::optional<std::size_t>                       m_node_gpu_count{};
 };
 
 }  // namespace rocprofsys

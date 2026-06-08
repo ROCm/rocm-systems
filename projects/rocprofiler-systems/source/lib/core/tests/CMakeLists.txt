@@ -20,6 +20,7 @@ add_library(
     perfetto_log_filter_tests.cpp
     process_tree_builder_tests.cpp
     role_classifier_tests.cpp
+    summarize_command_tests.cpp
     summary_renderer_pipeline_tests.cpp
     summary_renderer_tests.cpp
     wrap_to_width_tests.cpp

@@ -59,6 +59,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/output/emit_summary.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/helper_collapser.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/perfetto_log_filter.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/output/perfetto_log_filter_detail.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/process_metadata.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/process_tree_builder.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output/role_classifier.hpp

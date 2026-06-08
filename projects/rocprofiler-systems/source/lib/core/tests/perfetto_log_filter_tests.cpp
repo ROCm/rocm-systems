@@ -4,6 +4,7 @@
 #include "gtest/gtest.h"
 
 #include "core/output/perfetto_log_filter.hpp"
+#include "core/output/perfetto_log_filter_detail.hpp"
 
 #include <perfetto.h>
 
@@ -42,5 +43,17 @@ TEST(perfetto_log_filter, register_with_perfetto_logger_is_idempotent)
     // underlying SetLogMessageCallback so the second call is a no-op.
     filter::register_with_perfetto_logger();
     filter::register_with_perfetto_logger();
+    SUCCEED();
+}
+
+TEST(perfetto_log_filter, unregister_is_safe_with_and_without_prior_registration)
+{
+    // unregister clears perfetto's callback so a late worker-thread log
+    // cannot reach the destroyed spdlog logger. It must be safe to call
+    // repeatedly and without a preceding registration.
+    filter::unregister_from_perfetto_logger();
+    filter::register_with_perfetto_logger();
+    filter::unregister_from_perfetto_logger();
+    filter::unregister_from_perfetto_logger();
     SUCCEED();
 }

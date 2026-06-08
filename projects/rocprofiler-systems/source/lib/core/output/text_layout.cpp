@@ -62,6 +62,42 @@ wrap_to_width(std::string_view content, std::size_t width)
     return out;
 }
 
+std::size_t
+display_width(std::string_view text)
+{
+    std::size_t columns = 0;
+    for(char byte : text)
+        if((static_cast<unsigned char>(byte) & UTF8_CONTINUATION_MASK) !=
+           UTF8_CONTINUATION_BITS)
+            ++columns;
+    return columns;
+}
+
+std::string
+repeat_glyph(std::string_view glyph, std::size_t count)
+{
+    std::string out;
+    out.reserve(glyph.size() * count);
+    for(std::size_t index = 0; index < count; ++index)
+        out.append(glyph);
+    return out;
+}
+
+std::string
+summarize_command(std::string_view command)
+{
+    const std::string cleaned = strip_terminal_control_chars(command);
+    if(cleaned.empty()) return {};
+
+    const auto  token_end = cleaned.find_first_of(" \t");
+    std::string program =
+        (token_end == std::string::npos) ? cleaned : cleaned.substr(0, token_end);
+
+    const auto slash = program.find_last_of('/');
+    if(slash != std::string::npos) program = program.substr(slash + 1);
+    return program;
+}
+
 std::string
 format_gpu_ids(const std::vector<int>& gpu_ids)
 {

@@ -116,6 +116,39 @@ TEST(process_tree_builder, rows_sorted_descending_by_size)
     EXPECT_EQ(sorted_rows[2].path, "small");
 }
 
+TEST(process_tree_builder, compute_subtree_sizes_rolls_up_own_and_cumulative)
+{
+    std::vector<rocprofsys::output_file> rows{
+        make_row("p", 100, std::optional<std::uintmax_t>{ 1000 }),
+        make_row("c1", 200, std::optional<std::uintmax_t>{ 4096 }),
+        make_row("c2", 201, std::optional<std::uintmax_t>{ 2048 })
+    };
+    std::vector<rocprofsys::output::process_metadata> processes{ make_meta(100, -1),
+                                                                 make_meta(200, 100),
+                                                                 make_meta(201, 100) };
+    auto built = rocprofsys::output::build_tree(rows, processes);
+    rocprofsys::output::compute_subtree_sizes(built.roots);
+
+    ASSERT_EQ(built.roots.size(), 1u);
+    const auto& root = built.roots.front();
+    EXPECT_EQ(root.own_size_bytes, 1000u);
+    EXPECT_EQ(root.cumulative_size_bytes, 1000u + 4096u + 2048u);
+    ASSERT_EQ(root.children.size(), 2u);
+    EXPECT_EQ(root.children[0].own_size_bytes, 4096u);
+    EXPECT_EQ(root.children[0].cumulative_size_bytes, 4096u);
+}
+
+TEST(process_tree_builder, compute_subtree_sizes_ignores_unknown_sizes)
+{
+    std::vector<rocprofsys::output_file>              rows{ make_row("p", 100) };
+    std::vector<rocprofsys::output::process_metadata> processes{ make_meta(100, -1) };
+    auto built = rocprofsys::output::build_tree(rows, processes);
+    rocprofsys::output::compute_subtree_sizes(built.roots);
+    ASSERT_EQ(built.roots.size(), 1u);
+    EXPECT_EQ(built.roots.front().own_size_bytes, 0u);
+    EXPECT_EQ(built.roots.front().cumulative_size_bytes, 0u);
+}
+
 TEST(tree_visitor, for_each_post_visits_children_before_parent)
 {
     rocprofsys::output::process_node n4{};

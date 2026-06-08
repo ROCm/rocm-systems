@@ -22,6 +22,7 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output/emit_summary.hpp"
+#include "core/output/perfetto_log_filter.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
@@ -1298,6 +1299,11 @@ rocprofsys_finalize_hidden(void)
         rocprofsys::output::emit_summary(std::cout, _output_registry,
                                          lib_load_steady_time());
     }
+
+    // Clear perfetto's log callback before the spdlog function-local-static
+    // logger is destroyed at process exit; a late perfetto teardown message
+    // would otherwise dereference a destroyed logger.
+    rocprofsys::output::perfetto_log_filter::unregister_from_perfetto_logger();
 
     categories::shutdown();
 

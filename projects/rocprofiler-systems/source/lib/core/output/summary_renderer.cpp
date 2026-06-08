@@ -15,11 +15,13 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <ostream>
+#include <set>
 #include <string>
 #include <string_view>
-#include <tuple>
+#include <system_error>
 #include <vector>
 
 namespace rocprofsys::output
@@ -27,236 +29,241 @@ namespace rocprofsys::output
 
 namespace
 {
-constexpr const char*
-role_token(role_hint r) noexcept
+// Column at which a collapsed process line's "own / cumulative" sizes
+// begin, padding the label so sibling summaries roughly align.
+constexpr std::size_t COLLAPSED_SIZE_COLUMN = 44;
+constexpr std::size_t FORMAT_NAME_WIDTH     = 9;
+constexpr std::size_t FILE_SIZE_WIDTH       = 10;
+constexpr std::size_t MIN_BOX_WIDTH         = 40;
+// File rows are expanded for the main process and its direct children;
+// deeper processes collapse to a one-line own/cumulative summary.
+constexpr std::size_t MAX_EXPANDED_DEPTH = 1;
+
+struct format_badge
 {
-    switch(r)
+    const char* glyph;
+    const char* name;
+};
+
+[[nodiscard]] constexpr format_badge
+badge_for(output_format format) noexcept
+{
+    switch(format)
     {
-        case role_hint::main: return "*main";
-        case role_hint::gpu: return "*gpu";
-        case role_hint::engine: return "*engine";
+        case output_format::perfetto: return { "◈", "perfetto" };
+        case output_format::rocpd: return { "◆", "rocpd" };
+        case output_format::json: return { "▪", "json" };
+        case output_format::text: return { "▪", "text" };
+        case output_format::causal_json: return { "▪", "causal-json" };
+        case output_format::causal_text: return { "▪", "causal-text" };
+    }
+    return { "▪", "output" };
+}
+
+[[nodiscard]] constexpr const char*
+viewer_hint(output_format format) noexcept
+{
+    switch(format)
+    {
+        case output_format::perfetto: return "https://ui.perfetto.dev";
+        case output_format::rocpd: return "sqlite3 / AMD Visualizer (OPTIQ)";
+        case output_format::json:
+        case output_format::causal_json: return "jq";
+        case output_format::text:
+        case output_format::causal_text: return "cat";
     }
     return "";
 }
 
-const std::vector<int>&
-ids_for_role(const process_node& node, role_hint role)
-{
-    // Engine reports the union over its subtree; main/gpu report only
-    // what the process holds directly.
-    switch(role)
-    {
-        case role_hint::main:
-        case role_hint::gpu: return node.meta.gpu_ids;
-        case role_hint::engine: return node.effective_gpu_ids;
-    }
-    return node.meta.gpu_ids;
-}
-
 void
-emit_diagnostics(const build_diagnostics& diag)
+emit_diagnostics(const build_diagnostics& diagnostics)
 {
-    if(!diag.missing_metadata_pids.empty())
+    if(!diagnostics.missing_metadata_pids.empty())
     {
         LOG_WARNING("Output Summary: missing process metadata for pid(s) [{}]; "
                     "they render at root depth without role/parent",
-                    fmt::join(diag.missing_metadata_pids, ","));
+                    fmt::join(diagnostics.missing_metadata_pids, ","));
     }
 }
 
-std::string
-basename_of(const std::string& path)
+[[nodiscard]] std::string
+process_label(const process_node& node)
 {
-    return strip_terminal_control_chars(
-        std::filesystem::path{ path }.filename().string());
-}
-
-std::string
-node_label(const process_node& node)
-{
-    std::string label;
     if(node.collapsed)
-    {
-        label = fmt::format("[{}..{}] ({} short-lived helpers)", node.collapsed->min_pid,
-                            node.collapsed->max_pid, node.collapsed->count);
-    }
-    else if(node.meta.command.empty())
-    {
-        label = fmt::format("[{}]", node.meta.pid);
-    }
-    else
-    {
-        label = fmt::format("[{}] {}", node.meta.pid,
-                            strip_terminal_control_chars(node.meta.command));
-    }
-    if(node.role)
-    {
-        label += fmt::format("  {}{}*", role_token(*node.role),
-                             format_gpu_ids(ids_for_role(node, *node.role)));
-    }
+        return fmt::format("[{}..{}] ({} short-lived helpers)", node.collapsed->min_pid,
+                           node.collapsed->max_pid, node.collapsed->count);
+
+    const std::string program = summarize_command(node.meta.command);
+    std::string       label   = program.empty() ? fmt::format("[{}]", node.meta.pid)
+                                                : fmt::format("[{}] {}", node.meta.pid, program);
+
+    // Only the main process is annotated; GPU assignment is aggregated in
+    // the header, so per-process gpu/engine markers are intentionally gone.
+    if(node.role && *node.role == role_hint::main) label += "  main";
     return label;
 }
 
-// Single source of truth for column-aligned file rows.
-void
-render_file_row(std::string& msg, std::string_view prefix, const output_file& f)
+[[nodiscard]] std::string
+collapsed_sizes(const process_node& node)
 {
-    const std::string left = fmt::format("{}{}", prefix, f.label);
-    msg += fmt::format("  {:<{}} {:>{}}  {}\n", left, PROCESS_TREE_COL_WIDTH,
-                       common::format_size_human(f.size_bytes), SIZE_COL_WIDTH,
-                       basename_of(f.path));
+    return fmt::format("{} / {}", common::format_size_human(node.own_size_bytes),
+                       common::format_size_human(node.cumulative_size_bytes));
 }
 
-struct viewer_entry
+// Absolute path so the rendered row is clickable regardless of how the
+// registrar passed it; control characters stripped for terminal safety.
+[[nodiscard]] std::string
+display_path(const std::string& path)
 {
-    std::string label;
-    std::string viewer;
-    bool        operator<(const viewer_entry& o) const
-    {
-        return std::tie(label, viewer) < std::tie(o.label, o.viewer);
-    }
-    bool operator==(const viewer_entry& o) const
-    {
-        return label == o.label && viewer == o.viewer;
-    }
-};
+    std::error_code error;
+    const auto      absolute = std::filesystem::absolute(path, error);
+    return strip_terminal_control_chars(error ? path : absolute.string());
+}
+
+[[nodiscard]] std::string
+file_row_line(std::string_view branch, const output_file& file)
+{
+    const auto badge = badge_for(file.format);
+    return fmt::format("{}{} {:<{}} {:>{}}  {}", branch, badge.glyph, badge.name,
+                       FORMAT_NAME_WIDTH, common::format_size_human(file.size_bytes),
+                       FILE_SIZE_WIDTH, display_path(file.path));
+}
 
 void
-render_node(std::string& msg, std::vector<viewer_entry>& viewers,
-            const process_node& node, const std::string& indent, bool is_last)
+append_process_subtree(std::vector<std::string>& lines, std::set<output_format>& formats,
+                       const process_node& node, const std::string& connector,
+                       const std::string& child_prefix, std::size_t depth)
 {
-    const char* branch    = is_last ? "└─" : "├─";
-    const char* child_pad = is_last ? "  " : "│ ";
+    const bool expand_files = depth <= MAX_EXPANDED_DEPTH && !node.collapsed;
 
-    msg += fmt::format("  {}{} {}\n", indent, branch, node_label(node));
+    std::string line = connector + "● " + process_label(node);
+    if(!expand_files && !node.collapsed)
+    {
+        const std::size_t label_width = display_width(line);
+        if(label_width < COLLAPSED_SIZE_COLUMN)
+            line.append(COLLAPSED_SIZE_COLUMN - label_width, ' ');
+        line += collapsed_sizes(node);
+    }
+    lines.push_back(std::move(line));
 
     if(node.collapsed) return;
 
-    const std::string sub_indent = indent + child_pad + " ";
+    const std::size_t file_count        = expand_files ? node.rows.size() : 0;
+    const std::size_t child_count       = node.children.size();
+    const bool        children_expanded = (depth + 1) <= MAX_EXPANDED_DEPTH;
 
-    for(std::size_t i = 0; i < node.rows.size(); ++i)
+    for(std::size_t index = 0; index < file_count; ++index)
     {
-        const bool last_row = (i + 1 == node.rows.size()) && node.children.empty();
-        const auto prefix   = sub_indent + (last_row ? "└─" : "├─") + " ";
-        render_file_row(msg, prefix, node.rows[i]);
-        viewers.push_back({ node.rows[i].label, node.rows[i].viewer });
+        const bool last_entry = (index + 1 == file_count) && child_count == 0;
+        const auto branch     = child_prefix + (last_entry ? "└─ " : "├─ ");
+        lines.push_back(file_row_line(branch, node.rows[index]));
+        formats.insert(node.rows[index].format);
     }
 
-    for(std::size_t i = 0; i < node.children.size(); ++i)
-    {
-        const bool last_child = (i + 1 == node.children.size());
-        render_node(msg, viewers, node.children[i], sub_indent, last_child);
-    }
-}
+    // Blank rail line separates a visually heavy file block from the
+    // child processes, and separates expanded child subtrees from each
+    // other; collapsed one-line children stay tightly packed.
+    if(file_count > 0 && child_count > 0) lines.push_back(child_prefix + "│");
 
-void
-render_single_process_body(std::string& msg, std::vector<viewer_entry>& viewers,
-                           const process_node& root)
-{
-    // Single-process runs only get a header line when a role marker is
-    // set, so single-GPU workloads still see their main:<gpu-ids> tag.
-    if(root.role) msg += fmt::format("  {}\n", node_label(root));
-
-    for(const auto& row : root.rows)
+    for(std::size_t index = 0; index < child_count; ++index)
     {
-        render_file_row(msg, "", row);
-        viewers.push_back({ row.label, row.viewer });
+        if(index > 0 && children_expanded) lines.push_back(child_prefix + "│");
+        const bool        last_child  = (index + 1 == child_count);
+        const std::string child_conn  = child_prefix + (last_child ? "└─" : "├─");
+        const std::string next_prefix = child_prefix + (last_child ? "    " : "│   ");
+        append_process_subtree(lines, formats, node.children[index], child_conn,
+                               next_prefix, depth + 1);
     }
 }
 
-void
-render_header(std::string& msg, const run_metadata& meta, std::size_t process_count,
-              const std::string& output_dir_for_header)
+[[nodiscard]] std::vector<std::string>
+build_tree_lines(const summary_model& model, const std::vector<output_file>& rows,
+                 std::set<output_format>& formats)
 {
-    const std::string title = "Output Summary";
-    const std::string run_line =
-        fmt::format("Run: {}   Duration: {}   Processes: {}",
-                    meta.run_label.empty() ? std::string{ "?" } : meta.run_label,
-                    format_duration(meta.duration), process_count);
-    const std::string dir_line = fmt::format(
-        "Output dir: {}",
-        output_dir_for_header.empty() ? std::string{ "?" } : output_dir_for_header);
-
-    const std::size_t longest =
-        std::max({ title.size(), run_line.size(), dir_line.size() });
-    const std::size_t inner = std::clamp<std::size_t>(longest + 2, MIN_INNER, MAX_INNER);
-    const std::size_t content_width = inner - 2;
-
-    // ─ is 3-byte UTF-8.
-    std::string h_rule;
-    h_rule.reserve(inner * 3);
-    for(std::size_t i = 0; i < inner; ++i)
-        h_rule += "─";
-
-    auto box_line = [&](const std::string& content) {
-        return fmt::format("  │ {:<{}} │\n", content, content_width);
-    };
-
-    auto box_wrapped = [&](const std::string& content) {
-        for(const auto& chunk : wrap_to_width(content, content_width))
-            msg += box_line(chunk);
-    };
-
-    msg += "\n";
-    msg += fmt::format("  ┌{}┐\n", h_rule);
-    box_wrapped(title);
-    box_wrapped(run_line);
-    box_wrapped(dir_line);
-    msg += fmt::format("  └{}┘\n", h_rule);
-}
-
-void
-render_column_header(std::string& msg)
-{
-    msg += fmt::format("  {:<{}} {:>{}}  {}\n", "Process tree", PROCESS_TREE_COL_WIDTH,
-                       "Size", SIZE_COL_WIDTH, "Trace");
-    std::string sep;
-    sep.reserve(SEPARATOR_WIDTH * 3);
-    for(std::size_t i = 0; i < SEPARATOR_WIDTH; ++i)
-        sep += "═";
-    msg += fmt::format("  {}\n", sep);
-}
-
-void
-render_viewer_footer(std::string& msg, const std::vector<viewer_entry>& entries)
-{
-    if(entries.empty()) return;
-    msg += "\n";
-    for(const auto& e : entries)
-        msg += fmt::format("  Open {}: {}\n", e.label, e.viewer);
-}
-
-void
-dedup_viewers(std::vector<viewer_entry>& v)
-{
-    std::sort(v.begin(), v.end());
-    v.erase(std::unique(v.begin(), v.end()), v.end());
-}
-
-void
-render_body(std::string& msg, std::vector<viewer_entry>& viewers,
-            const summary_model& model, const std::vector<output_file>& rows)
-{
+    std::vector<std::string> lines;
     if(model.built.roots.empty())
     {
-        // Degenerate fallback: rows present, no tree shape.
-        for(const auto& r : rows)
+        // Degenerate fallback: rows present but no tree shape resolved.
+        for(const auto& row : rows)
         {
-            render_file_row(msg, "", r);
-            viewers.push_back({ r.label, r.viewer });
+            lines.push_back(file_row_line("", row));
+            formats.insert(row.format);
         }
-        return;
+        return lines;
     }
-    if(model.process_count == 1 && model.built.roots.size() == 1)
+    for(const auto& root : model.built.roots)
+        append_process_subtree(lines, formats, root, std::string{}, std::string{ "  " },
+                               0);
+    return lines;
+}
+
+[[nodiscard]] std::vector<std::string>
+build_header_lines(const run_metadata& meta, const summary_model& model)
+{
+    std::string run_line =
+        fmt::format("Run: {}   Duration: {}   Processes: {}",
+                    meta.run_label.empty() ? std::string{ "?" } : meta.run_label,
+                    format_duration(meta.duration), model.process_count);
+
+    if(!model.utilized_gpu_ids.empty())
     {
-        render_single_process_body(msg, viewers, model.built.roots.front());
-        return;
+        std::string gpus = format_gpu_ids(model.utilized_gpu_ids);
+        if(!gpus.empty() && gpus.front() == ':') gpus.erase(gpus.begin());
+
+        const bool all = model.node_gpu_count &&
+                         *model.node_gpu_count == model.utilized_gpu_ids.size();
+        run_line += fmt::format("   GPUs: {}{}", gpus, all ? " (all)" : "");
     }
-    for(std::size_t i = 0; i < model.built.roots.size(); ++i)
+    run_line += fmt::format("   Total output: {}",
+                            common::format_size_human(model.total_output_bytes));
+
+    std::string dir_line =
+        fmt::format("Output dir: {}",
+                    model.output_dir.empty() ? std::string{ "?" } : model.output_dir);
+
+    return { std::move(run_line), std::move(dir_line) };
+}
+
+[[nodiscard]] std::string
+build_legend(const std::set<output_format>& formats)
+{
+    std::string legend;
+    for(output_format format : formats)
     {
-        const bool last = (i + 1 == model.built.roots.size());
-        render_node(msg, viewers, model.built.roots[i], std::string{}, last);
+        const char* hint = viewer_hint(format);
+        if(hint[0] == '\0') continue;
+        if(!legend.empty()) legend += "    ";
+        legend += fmt::format("{} → {}", badge_for(format).name, hint);
     }
+    return legend;
+}
+
+[[nodiscard]] std::size_t
+box_width(const std::vector<std::string>& header_lines,
+          const std::vector<std::string>& tree_lines)
+{
+    std::size_t width = MIN_BOX_WIDTH;
+    for(const auto& line : header_lines)
+        width = std::max(width, display_width(line) + 2);  // + 2 for the "│ " rail
+    for(const auto& line : tree_lines)
+        width = std::max(width, display_width(line) + 2);
+    return width;
+}
+
+void
+append_box(std::string& out, std::string_view title,
+           const std::vector<std::string>& lines, std::size_t width)
+{
+    const std::string head      = fmt::format("╭─ {} ", title);
+    const std::size_t head_cols = display_width(head);
+    out += head;
+    if(width > head_cols) out += repeat_glyph("─", width - head_cols);
+    out += "\n";
+    for(const auto& line : lines)
+        out += fmt::format("│ {}\n", line);
+    out += "╰";
+    out += repeat_glyph("─", width > 0 ? width - 1 : 0);
+    out += "\n";
 }
 }  // namespace
 
@@ -277,16 +284,19 @@ print_summary(std::ostream& os, const output_file_registry& registry,
     auto model = build_summary_model(registry, meta);
     emit_diagnostics(model.built.diagnostics);
 
-    std::string               msg;
-    std::vector<viewer_entry> viewers;
-    render_header(msg, meta, model.process_count, model.output_dir);
-    msg += "\n";
-    render_column_header(msg);
-    render_body(msg, viewers, model, rows);
-    dedup_viewers(viewers);
-    render_viewer_footer(msg, viewers);
+    std::set<output_format> formats;
+    const auto              header_lines = build_header_lines(meta, model);
+    const auto              tree_lines   = build_tree_lines(model, rows, formats);
+    const std::string       legend       = build_legend(formats);
+    const std::size_t       width        = box_width(header_lines, tree_lines);
 
-    os << msg;
+    std::string out = "\n";
+    append_box(out, "Output Summary", header_lines, width);
+    out += "\n";
+    append_box(out, "Process tree", tree_lines, width);
+    if(!legend.empty()) out += fmt::format("\n  {}\n", legend);
+
+    os << out;
 }
 
 }  // namespace rocprofsys::output

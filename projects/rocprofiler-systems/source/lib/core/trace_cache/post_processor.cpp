@@ -56,34 +56,25 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
                      const data::enabled_formats_t&                   _formats,
                      output_file_registry&                            _registry)
 {
-    // Per-PID metadata into the registry so the Output Summary tree
-    // builder gets parent/child structure and the role classifier
-    // can fire the *gpu* hint for PIDs that registered GPU agents.
-    //
-    // Field mapping (info::process -> output::process_metadata):
-    //   pid     -> pid
-    //   ppid    -> ppid
-    //   command -> command
-    //   (info::process has 4 more fields — environment, extdata,
-    //    start, end — irrelevant to summary rendering.)
-    //   gpu_ids populated separately from the agent manager.
-    // If a new field is added to either side, update both this map
-    // and the renderer that consumes process_metadata.
+    // Feed the Output Summary its per-process metadata (tree shape +
+    // GPU aggregation) from the trace metadata and the agent manager.
     if(_config->_metadata_registry)
     {
-        const auto info = _config->_metadata_registry->get_process_info();
+        const auto process_info = _config->_metadata_registry->get_process_info();
         rocprofsys::output::process_metadata proc_meta{};
-        proc_meta.pid     = info.pid;
-        proc_meta.ppid    = info.ppid;
-        proc_meta.command = info.command;
+        proc_meta.pid     = process_info.pid;
+        proc_meta.ppid    = process_info.ppid;
+        proc_meta.command = process_info.command;
         if(_config->_agent_manager)
         {
-            for(const auto& gpu_agent :
-                _config->_agent_manager->get_agents_by_type(agent_type::GPU))
+            const auto gpu_agents =
+                _config->_agent_manager->get_agents_by_type(agent_type::GPU);
+            for(const auto& gpu_agent : gpu_agents)
             {
                 if(gpu_agent)
                     proc_meta.gpu_ids.push_back(gpu_agent->logical_node_type_id);
             }
+            _registry.set_node_gpu_count(gpu_agents.size());
         }
         _registry.record_process(std::move(proc_meta));
     }

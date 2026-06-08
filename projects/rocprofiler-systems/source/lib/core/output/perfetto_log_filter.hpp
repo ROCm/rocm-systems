@@ -3,39 +3,24 @@
 
 #pragma once
 
-#include <perfetto.h>
-
 namespace rocprofsys::output::perfetto_log_filter
 {
 
-// Decision taken for each incoming perfetto log message.
-enum class filter_action
-{
-    drop,     // kLogDebug, kLogInfo — silenced from user output.
-    warning,  // kLogImportant — forwarded as LOG_WARNING.
-    error,    // kLogError — forwarded as LOG_ERROR.
-    unknown,  // future SDK enum additions — forwarded as LOG_WARNING
-              // with a "unknown severity" prefix so the message is
-              // never silently dropped.
-};
-
-// Pure classifier. Exposed so the routing can be unit-tested
-// without exercising the actual logger.
-[[nodiscard]] filter_action
-classify(::perfetto::base::LogLev level);
-
-// Drops kLogDebug + kLogInfo, forwards kLogImportant -> LOG_WARNING
-// and kLogError -> LOG_ERROR. Signature matches the SDK typedef
-// perfetto::base::LogMessageCallback (by value).
-void
-filter_fn(::perfetto::base::LogMessageCallbackArgs args);
-
-// Registers filter_fn as perfetto's log message callback so all
+// Registers the filter as perfetto's log message callback so all
 // subsequent perfetto-side log emissions flow through classify() and
 // either drop or forward via the rocprof-sys logger. Idempotent
 // (std::call_once); must run before any perfetto::Tracing::Initialize
 // on the owning process.
 void
 register_with_perfetto_logger();
+
+// Disables the filter and clears perfetto's log message callback.
+// Must be called from finalize before the spdlog logger's
+// function-local-static destructor runs, otherwise a perfetto worker
+// thread emitting a late log message can dereference a destroyed
+// logger (use-after-destruction UB). Safe to call multiple times and
+// safe to call when no registration has happened.
+void
+unregister_from_perfetto_logger();
 
 }  // namespace rocprofsys::output::perfetto_log_filter

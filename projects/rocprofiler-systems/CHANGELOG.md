@@ -17,6 +17,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   later. The required KFD tracing domains are enabled automatically.
 - MPI-rank-based console output filtering features controlled with CLI arguments:
   `--rank-filter-logs` and `--rank-filter-id`.
+- Redesigned end-of-run Output Summary as a process tree for multi-process
+  and fork-heavy runs. Each artifact now shows its full, clickable absolute
+  path with a typed format glyph and size; the header aggregates the utilized
+  GPUs (e.g. `GPUs: 0-7 (all)`) and total output size; deep child processes
+  collapse to a one-line own/cumulative summary; and a compact per-format
+  viewer legend replaces the previous per-row footer.
 - GPU Hardware Performance Counter (PMC) sampling via the ROCProfiler-SDK device
   counting service. Periodic per-GPU hardware counters are collected alongside
   existing PMC sources and exposed in both Perfetto and RocPD outputs. Specify

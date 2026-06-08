@@ -76,6 +76,25 @@ attach_children_bottom_up(const subtree_walk&                      walk,
         dst.children.push_back(std::move(src));
     }
 }
+
+// Moves the root's subtree out of `nodes` (consuming those entries) and
+// returns it assembled. `nodes` is passed explicitly so the extraction
+// is visible at the call site rather than a captured side effect.
+process_node
+extract_subtree(std::unordered_map<pid_t, process_node>&             nodes,
+                const std::unordered_map<pid_t, std::vector<pid_t>>& children_by_ppid,
+                pid_t                                                root_pid)
+{
+    const auto walk = collect_subtree_order(root_pid, children_by_ppid);
+
+    std::unordered_map<pid_t, process_node> built;
+    built.reserve(walk.order.size());
+    for(pid_t pid : walk.order)
+        built.insert(nodes.extract(pid));
+
+    attach_children_bottom_up(walk, built, root_pid);
+    return std::move(built.at(root_pid));
+}
 }  // namespace
 
 build_result
@@ -147,26 +166,40 @@ build_tree(const std::vector<output_file>&      rows,
             root_pids.push_back(pid);
     }
 
-    auto take_subtree = [&](pid_t root_pid) -> process_node {
-        auto walk = collect_subtree_order(root_pid, children_by_ppid);
-
-        std::unordered_map<pid_t, process_node> built;
-        built.reserve(walk.order.size());
-        for(pid_t pid : walk.order)
-            built.insert(nodes.extract(pid));
-
-        attach_children_bottom_up(walk, built, root_pid);
-        return std::move(built.at(root_pid));
-    };
-
     result.roots.reserve(root_pids.size());
     for(pid_t pid : root_pids)
-        result.roots.push_back(take_subtree(pid));
+        result.roots.push_back(extract_subtree(nodes, children_by_ppid, pid));
 
     std::sort(result.diagnostics.missing_metadata_pids.begin(),
               result.diagnostics.missing_metadata_pids.end());
 
     return result;
+}
+
+namespace
+{
+std::uintmax_t
+sum_known_row_sizes(const std::vector<output_file>& rows)
+{
+    std::uintmax_t total = 0;
+    for(const auto& file : rows)
+        if(file.size_bytes) total += *file.size_bytes;
+    return total;
+}
+}  // namespace
+
+void
+compute_subtree_sizes(std::vector<process_node>& roots)
+{
+    for(auto& root : roots)
+    {
+        for_each_post(root, [](process_node& node) {
+            node.own_size_bytes        = sum_known_row_sizes(node.rows);
+            node.cumulative_size_bytes = node.own_size_bytes;
+            for(const auto& child : node.children)
+                node.cumulative_size_bytes += child.cumulative_size_bytes;
+        });
+    }
 }
 
 }  // namespace rocprofsys::output

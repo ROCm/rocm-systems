@@ -38,6 +38,10 @@ struct process_node
     std::vector<process_node>   children;
     // Sort-unique union over self + descendants, filled by classify().
     std::vector<int> effective_gpu_ids;
+    // Filled by compute_subtree_sizes(): own_size_bytes sums this node's
+    // known row sizes; cumulative_size_bytes adds every descendant.
+    std::uintmax_t own_size_bytes{ 0 };
+    std::uintmax_t cumulative_size_bytes{ 0 };
 };
 
 struct build_diagnostics
@@ -58,6 +62,11 @@ struct build_result
 [[nodiscard]] build_result
 build_tree(const std::vector<output_file>&      rows,
            const std::vector<process_metadata>& processes);
+
+// Post-order roll-up of own_size_bytes and cumulative_size_bytes over
+// the final (post-collapse) tree. Unknown row sizes contribute zero.
+void
+compute_subtree_sizes(std::vector<process_node>& roots);
 
 // Post-order visitor. `fn` is taken by lvalue so a stateful functor
 // is not moved-from between siblings.

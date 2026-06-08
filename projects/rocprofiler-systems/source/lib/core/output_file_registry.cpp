@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <system_error>
@@ -23,37 +24,46 @@ output_file
 output_file_registry::make_entry(std::string path, output_format format,
                                  const std::string& component_name)
 {
+    output_file entry{};
     switch(format)
     {
         case output_format::perfetto:
-            return { "Perfetto trace", std::move(path),
-                     "Open in https://ui.perfetto.dev" };
+            entry.label  = "Perfetto trace";
+            entry.viewer = "Open in https://ui.perfetto.dev";
+            break;
         case output_format::rocpd:
-            return { "RocPD database", std::move(path),
-                     "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided rocpd "
-                     "Python module for conversion to other formats" };
+            entry.label  = "RocPD database";
+            entry.viewer = "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided "
+                           "rocpd Python module for conversion to other formats";
+            break;
         case output_format::json:
-            return {
-                component_name.empty() ? "JSON output"
-                                       : fmt::format("JSON ({})", component_name),
-                path, fmt::format("jq . {}", output::escape_for_shell_single_quotes(path))
-            };
+            entry.label = component_name.empty()
+                              ? "JSON output"
+                              : fmt::format("JSON ({})", component_name);
+            entry.viewer =
+                fmt::format("jq . {}", output::escape_for_shell_single_quotes(path));
+            break;
         case output_format::text:
-            return {
-                component_name.empty() ? "Text profile"
-                                       : fmt::format("Profile ({})", component_name),
-                path, fmt::format("cat {}", output::escape_for_shell_single_quotes(path))
-            };
+            entry.label = component_name.empty()
+                              ? "Text profile"
+                              : fmt::format("Profile ({})", component_name);
+            entry.viewer =
+                fmt::format("cat {}", output::escape_for_shell_single_quotes(path));
+            break;
         case output_format::causal_json:
-            return { "Causal profile (JSON)", path,
-                     fmt::format("jq . {}",
-                                 output::escape_for_shell_single_quotes(path)) };
+            entry.label = "Causal profile (JSON)";
+            entry.viewer =
+                fmt::format("jq . {}", output::escape_for_shell_single_quotes(path));
+            break;
         case output_format::causal_text:
-            return { "Causal profile (text)", path,
-                     fmt::format("cat {}",
-                                 output::escape_for_shell_single_quotes(path)) };
+            entry.label = "Causal profile (text)";
+            entry.viewer =
+                fmt::format("cat {}", output::escape_for_shell_single_quotes(path));
+            break;
     }
-    return { "Unknown", std::move(path), "" };
+    entry.path   = std::move(path);
+    entry.format = format;
+    return entry;
 }
 
 namespace
@@ -96,7 +106,8 @@ output_file_registry::register_file(std::string path, output_format format,
 
 void
 output_file_registry::register_file(std::string path, output_format format,
-                                    std::string component_name, std::optional<pid_t> pid)
+                                    const std::string&   component_name,
+                                    std::optional<pid_t> pid)
 {
     push_entry(make_entry(std::move(path), format, component_name), pid);
 }
@@ -142,6 +153,20 @@ output_file_registry::processes() const
         if(v.session_id == current) out.push_back(v.value);
     }
     return out;
+}
+
+void
+output_file_registry::set_node_gpu_count(std::size_t count)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_node_gpu_count = count;
+}
+
+std::optional<std::size_t>
+output_file_registry::node_gpu_count() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_node_gpu_count;
 }
 
 std::uint64_t

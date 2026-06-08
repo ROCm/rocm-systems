@@ -17,7 +17,7 @@ struct run_metadata
 
     // ISO-8601 UTC label + wall-clock duration from a steady-clock
     // baseline (typically library-load time). output_dir_abs is left
-    // empty; the renderer derives it from a registered row when so.
+    // empty, in which case the renderer derives it from a registered row.
     [[nodiscard]] static run_metadata capture(
         std::chrono::steady_clock::time_point load_baseline);
 };
