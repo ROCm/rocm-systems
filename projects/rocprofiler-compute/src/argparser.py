@@ -448,38 +448,6 @@ Examples:
         help=("\t\t\tSet the format of output file of rocprof."),
     )
     profile_group.add_argument(
-        "--pc-sampling-method",
-        required=False,
-        metavar="",
-        dest="pc_sampling_method",
-        default="stochastic",
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="PC Sampling",
-        help=(
-            "\t\t\tSet the method of pc sampling, stochastic or host_trap. "
-            "Support stochastic only >= MI300"
-        ),
-    )
-    profile_group.add_argument(
-        "--pc-sampling-interval",
-        required=False,
-        metavar="",
-        dest="pc_sampling_interval",
-        default=1048576,
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="PC Sampling",
-        help=(
-            "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t  For stochastic sampling, the interval is in cycles.\n"
-            "\t\t\t  For host_trap sampling, the interval is in microsecond "
-            "(DEFAULT: 1048576)."
-        ),
-    )
-    profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
         type=resolve_rocm_library_path,
         dest="rocprofiler_sdk_tool_path",
@@ -599,6 +567,38 @@ Examples:
         nargs=0,
         const=True,
         help="\t\t\tEnable PC sampling (block 21) for profile mode.",
+    )
+    profile_group.add_argument(
+        "--pc-sampling-method",
+        required=False,
+        metavar="",
+        dest="pc_sampling_method",
+        default="stochastic",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="PC Sampling",
+        help=(
+            "\t\t\tSet the method of pc sampling, stochastic or host_trap. "
+            "Support stochastic only >= MI300"
+        ),
+    )
+    profile_group.add_argument(
+        "--pc-sampling-interval",
+        required=False,
+        metavar="",
+        dest="pc_sampling_interval",
+        default=1048576,
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="PC Sampling",
+        help=(
+            "\t\t\tSet the interval of pc sampling.\n"
+            "\t\t\t  For stochastic sampling, the interval is in cycles.\n"
+            "\t\t\t  For host_trap sampling, the interval is in microsecond "
+            "(DEFAULT: 1048576)."
+        ),
     )
 
     ## Analyze Command Line Options
