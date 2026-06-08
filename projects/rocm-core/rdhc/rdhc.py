@@ -11,6 +11,7 @@ import sys
 import textwrap
 import tempfile
 import stat
+import shutil
 from enum import Enum
 from pathlib import Path
 
@@ -2078,28 +2079,51 @@ class ROCMHealthCheck:
 
         return results
 
-    def run_tests(self, run_all=False, temp_dir=None):
-        """Run tests based on the run_all flag"""
+    def run_tests(self, run_all=False, temp_dir=None, cleanup=False):
+        """Run tests based on the run_all flag
+
+        Args:
+            run_all: If True, run component tests by building rocm-examples
+            temp_dir: Directory for temporary files. None = auto-generate
+            cleanup: If True and temp_dir was auto-generated, remove it after tests
+
+        Returns:
+            tuple: (results, actual_temp_dir) where actual_temp_dir is None if not created,
+                   or the path to the temporary directory if run_all=True
+        """
         # Always run default tests
         self.results = self.run_default_tests()
+        actual_temp_dir = None
+        temp_dir_was_auto_generated = False
 
         # Run component tests if run_all is True
         if run_all:
-            # Clone and configure rocm-examples repository if its not already done.
-            # self.logger.info("Cloning rocm-examples repository...")
-
             # Store original directory
             original_dir = os.getcwd()
 
             try:
                 # Create or validate temp directory
                 if temp_dir is None:
-                    temp_dir = tempfile.mkdtemp(prefix="rdhc-")
+                    actual_temp_dir = tempfile.mkdtemp(prefix="rdhc-")
+                    temp_dir = actual_temp_dir
+                    temp_dir_was_auto_generated = True
                     self.logger.info(f"Created temporary directory: {temp_dir}")
                 else:
                     # User-specified directory - create safely
-                    os.makedirs(temp_dir, mode=0o700, exist_ok=False)
-                    self.logger.info(f"Created user-specified directory: {temp_dir}")
+                    try:
+                        os.makedirs(temp_dir, mode=0o700, exist_ok=False)
+                        actual_temp_dir = temp_dir
+                        self.logger.info(
+                            f"Created user-specified directory: {temp_dir}"
+                        )
+                    except FileExistsError:
+                        self.logger.error(
+                            f"Directory already exists: {temp_dir}\n"
+                            f"For security reasons, --dir requires a non-existent directory.\n"
+                            f"Please remove the directory first: rm -rf {temp_dir}\n"
+                            f"Or omit -d to use an auto-generated temp directory."
+                        )
+                        raise
 
                 # Validate directory ownership and permissions
                 st = os.lstat(temp_dir)
@@ -2190,7 +2214,21 @@ class ROCMHealthCheck:
                 # Return to original directory
                 os.chdir(original_dir)
 
-        return self.results
+                # Clean up auto-generated temp directory if requested
+                if cleanup and temp_dir_was_auto_generated and actual_temp_dir:
+                    try:
+                        self.logger.info(
+                            f"Cleaning up auto-generated temp directory: {actual_temp_dir}"
+                        )
+                        shutil.rmtree(actual_temp_dir)
+                        self.logger.info("Cleanup completed successfully")
+                        actual_temp_dir = None
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Failed to clean up temp directory {actual_temp_dir}: {e}"
+                        )
+
+        return self.results, actual_temp_dir
 
     def _parse_rocm_example_targets(self, cmake_target_help_output):
         """Parse cmake target help output and categorize targets by component.
@@ -2293,8 +2331,11 @@ def main():
         + "# Export results to a specific JSON file\n"
         + "./rdhc.py --all --json rdhc-results.json\n"
         + "\n"
-        + "# Specify a directory for temp files and logs\n"
-        + "./rdhc.py -d /home/user/rdhc-dir/\n"
+        + "# Specify a directory for temp files (directory must not exist)\n"
+        + "./rdhc.py --all -d /home/user/rdhc-dir/\n"
+        + "\n"
+        + "# Auto-generate temp directory and clean it up after tests\n"
+        + "./rdhc.py --all --cleanup\n"
         + "\n"
         + "# Use a custom ROCm install prefix\n"
         + "./rdhc.py --rocm-install-prefix /usr/local/rocm\n"
@@ -2347,8 +2388,15 @@ def main():
         "-d",
         "--dir",
         metavar="DIR",
-        help="Directory path for temporary files (default: auto-generated secure temp directory)",
+        help="Directory path for temporary files. Must not already exist; will be created with mode 0700. "
+        "Default: auto-generated secure temp directory in /tmp (not auto-cleaned). "
+        "To reuse a directory, remove it first: rm -rf <dir>",
         default=None,
+    )
+    parser.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Remove auto-generated temp directory after tests complete (only applies when -d is not specified)",
     )
     parser.add_argument(
         "--rocm-install-prefix",
@@ -2430,13 +2478,20 @@ def main():
     )
 
     # Run tests with the temp_dir
-    health_check.run_tests(run_all=args.all, temp_dir=temp_dir)
+    results, actual_temp_dir = health_check.run_tests(
+        run_all=args.all, temp_dir=temp_dir, cleanup=args.cleanup
+    )
 
     # Generate and print report
     print("\nROCm Deployment Health Check Results:")
-    health_check.system_info["RDHC directory"] = (
-        temp_dir if temp_dir is not None else "auto-generated"
-    )
+    if actual_temp_dir is not None:
+        health_check.system_info["RDHC directory"] = actual_temp_dir
+    elif args.all and args.cleanup:
+        health_check.system_info["RDHC directory"] = "auto-generated (cleaned up)"
+    elif args.all:
+        health_check.system_info["RDHC directory"] = "N/A (creation failed)"
+    else:
+        health_check.system_info["RDHC directory"] = "N/A (quick mode)"
     health_check.system_info["Json output file"] = args.json
 
     table = generate_table_system_info(health_check.system_info)
