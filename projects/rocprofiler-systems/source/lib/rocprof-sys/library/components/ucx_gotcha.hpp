@@ -118,12 +118,11 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha<UCXPolicy>, void>
     static void audit(const gotcha_data&, tim::audit::incoming, void*, void*, size_t,
                       size_t*, const void*);
 
-    // Outgoing audit. These overloads must match the return types of the wrapped APIs;
-    // a missing overload makes the bundle's audit call a no-op for this component, so the
-    // region is never stopped and the call may not appear correctly in traces.
+    // Outgoing audit. These overloads must match the return types of the wrapped APIs
     static void audit(const gotcha_data&, tim::audit::outgoing);
     static void audit(const gotcha_data&, tim::audit::outgoing, void*);
     static void audit(const gotcha_data&, tim::audit::outgoing, int);
+    static void audit(const gotcha_data&, tim::audit::outgoing, long);
 
 private:
     static std::mutex s_mutex;
@@ -527,6 +526,13 @@ ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, voi
 template <typename UCXPolicy>
 void
 ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, int ret)
+{
+    UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
+}
+
+template <typename UCXPolicy>
+void
+ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, long ret)
 {
     UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }

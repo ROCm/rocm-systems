@@ -47,6 +47,7 @@ struct GMockCategoryRegion
     MOCK_METHOD(void, stop_generic, (std::string_view name));
     MOCK_METHOD(void, stop_ptr, (std::string_view name, void* ret));
     MOCK_METHOD(void, stop_int, (std::string_view name, int ret));
+    MOCK_METHOD(void, stop_long, (std::string_view name, long ret));
 };
 
 namespace test_globals
@@ -117,6 +118,11 @@ struct MockedCategoryRegion
     static void stop(std::string_view name, const char*, int ret)
     {
         test_globals::g_category_region_gmock->stop_int(name, ret);
+    }
+
+    static void stop(std::string_view name, const char*, long ret)
+    {
+        test_globals::g_category_region_gmock->stop_long(name, ret);
     }
 };
 
@@ -315,6 +321,24 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_int)
     ucx_gotcha_under_test_t::audit(data, tim::audit::outgoing{}, ret);
 }
 
+TEST_F(ucx_gotcha_test, test_audit_outgoing_long)
+{
+    MockedGotchaData data;
+    data.tool_id = "uct_ep_am_bcopy";
+
+    // ssize_t-returning UCT APIs decay to long; the value must not be truncated to int.
+    long ret = 5000000000L;
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, stop_long)
+        .Times(1)
+        .WillOnce([&](std::string_view name, long r) {
+            EXPECT_EQ(name, "uct_ep_am_bcopy");
+            EXPECT_EQ(r, 5000000000L);
+        });
+
+    ucx_gotcha_under_test_t::audit(data, tim::audit::outgoing{}, ret);
+}
+
 TEST_F(ucx_gotcha_test, test_audit_outgoing_null_ptr)
 {
     MockedGotchaData data;
@@ -369,7 +393,7 @@ TEST_F(ucx_gotcha_test, test_audit_incoming_rma_put)
 
 TEST_F(ucx_gotcha_test, test_different_gotcha_tool_ids)
 {
-    auto test_incoming = [this](const std::string& tool_id) {
+    auto test_incoming = [](const std::string& tool_id) {
         MockedGotchaData data;
         data.tool_id = tool_id;
         EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
