@@ -34,12 +34,7 @@ void init_constant_memory(void) {
   constmem_values.ipc_shm_size = (backend->ipcImpl.pes_with_ipc_avail != nullptr)
                                  ? backend->ipcImpl.shm_size : 0;
 
-  // Read back the default context pointer from the device symbol
-  rocshmem_ctx_t default_ctx_handle{};
-  CHECK_HIP(hipMemcpyFromSymbol(&default_ctx_handle,
-            HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT),
-            sizeof(rocshmem_ctx_t)));
-  constmem_values.default_ctx = default_ctx_handle.ctx_opaque;
+  constmem_values.default_ctx = backend->get_default_ctx_device_ptr();
 
   int nqp_default = envvar::gda::num_qps_per_pe_default_ctx.get_value();
   int nqp_usr = envvar::gda::num_qps_per_pe_usr_ctx.get_value();

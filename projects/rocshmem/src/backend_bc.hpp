@@ -124,6 +124,12 @@ class Backend {
   __host__ __device__ int getNumPEs() const { return num_pes; }
 
   /**
+   * @brief Returns the device pointer to the default context object,
+   * or nullptr if not applicable (e.g. before setup_ctxs).
+   */
+  __host__ virtual void* get_default_ctx_device_ptr() { return nullptr; }
+
+  /**
    * @brief Allocates and initializes device-side library state.
    *
    * Preallocates a single private context for this workgroup (thread-block)

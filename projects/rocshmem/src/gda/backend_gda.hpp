@@ -172,6 +172,10 @@ class GDABackend : public Backend {
   explicit GDABackend(MPI_Comm comm);
   explicit GDABackend(TcpBootstrap *bootstr);
 
+  __host__ void* get_default_ctx_device_ptr() override {
+    return default_context_proxy_.get();
+  }
+
   /**
    * @copydoc Backend::~Backend()
    */

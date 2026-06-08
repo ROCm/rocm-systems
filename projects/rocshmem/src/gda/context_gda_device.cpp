@@ -146,9 +146,15 @@ __device__ void GDAContext::fence() {
    * RDMA: A single QP already orders its own traffic through in-order
    * delivery; only the multi-QP case requires an explicit per-QP quiet.
    */
-  if (num_qps_per_pe > 1) {
+  uint32_t nqp = (this == constmem.default_ctx)
+      ? constmem.num_qps_per_pe_default_ctx
+      : constmem.num_qps_per_pe_usr_ctx;
+  if (nqp > 1) {
+    uint32_t total_qps = (this == constmem.default_ctx)
+        ? constmem.num_qps_default_ctx
+        : constmem.num_qps_usr_ctx;
     ActiveWFInfo wf_info(ctx_id_);
-    for (uint32_t i = 0; i < num_qps; i++) {
+    for (uint32_t i = 0; i < total_qps; i++) {
       qps[i].quiet(wf_info);
     }
   }
@@ -173,9 +179,12 @@ __device__ void GDAContext::fence(int pe) {
    * in-order delivery; only the multi-QP-per-PE case requires an explicit
    * quiet on each QP associated with `pe`.
    */
-  if (num_qps_per_pe > 1) {
+  uint32_t nqp = (this == constmem.default_ctx)
+      ? constmem.num_qps_per_pe_default_ctx
+      : constmem.num_qps_per_pe_usr_ctx;
+  if (nqp > 1) {
     ActiveWFInfo wf_info(ctx_id_);
-    for(uint32_t i = 0; i < num_qps_per_pe; i++) {
+    for(uint32_t i = 0; i < nqp; i++) {
       int qp_index = i * constmem.num_pes + pe;
       qps[qp_index].quiet(wf_info);
     }
@@ -200,15 +209,21 @@ __device__ void GDAContext::quiet() {
 }
 
 __device__ void GDAContext::internal_quiet(ActiveWFInfo &wf_info) {
-  for (uint32_t i = 0; i < num_qps; i++) {
+  uint32_t total_qps = (this == constmem.default_ctx)
+      ? constmem.num_qps_default_ctx
+      : constmem.num_qps_usr_ctx;
+  for (uint32_t i = 0; i < total_qps; i++) {
     qps[i].quiet(wf_info);
   }
   ipcImpl_.ipcQuiet();
 }
 
 __device__ void GDAContext::pe_quiet(size_t pe) {
+  uint32_t nqp = (this == constmem.default_ctx)
+      ? constmem.num_qps_per_pe_default_ctx
+      : constmem.num_qps_per_pe_usr_ctx;
   ActiveWFInfo wf_info(ctx_id_);
-  for(uint32_t i = 0; i < num_qps_per_pe; i++) {
+  for(uint32_t i = 0; i < nqp; i++) {
     int qp_index = i * constmem.num_pes + pe;
     qps[qp_index].quiet(wf_info);
   }
