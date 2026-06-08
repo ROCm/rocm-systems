@@ -104,6 +104,12 @@ write_hw_counter_info(std::ostream&, format_options& fmt_opts,
                       const array_t<bool, N>& = {}, const array_t<bool, N>& = {},
                       const array_t<string_t, N>& = {});
 
+template <size_t N = num_smi_metric_options>
+void
+write_smi_metric_info(std::ostream&, format_options& fmt_opts,
+                      const array_t<bool, N>& = {}, const array_t<bool, N>& = {},
+                      const array_t<string_t, N>& = {});
+
 namespace
 {
 // initialize HIP before main so that librocprof-sys is not HSA_TOOLS_LIB
@@ -149,6 +155,7 @@ main(int argc, char** argv)
     }
     _category_options.emplace("hw_counters::CPU");
     _category_options.emplace("hw_counters::GPU");
+    _category_options.emplace("smi_metrics::GPU");
 
     // Remove unused TIMEMORY third-party libraries
     _category_options.erase("component::tpls::openmp");
@@ -183,6 +190,7 @@ main(int argc, char** argv)
     bool include_settings    = false;
     bool include_components  = false;
     bool include_hw_counters = false;
+    bool include_smi_metrics = false;
 
     std::string file = {};
 
@@ -230,6 +238,10 @@ main(int argc, char** argv)
         .add_argument({ "-H", "--hw-counters", "--print-hw-counters" },
                       "Write the available hardware counters")
         .max_count(1);
+    parser
+        .add_argument({ "-m", "--smi-metrics", "--print-smi-metrics" },
+                      "Write the available AMD SMI GPU metrics")
+        .max_count(1);
 
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
@@ -244,6 +256,7 @@ main(int argc, char** argv)
                 include_components  = true;
                 include_settings    = true;
                 include_hw_counters = true;
+                include_smi_metrics = true;
             }
         });
 
@@ -615,6 +628,7 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_components, "components");
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
+    _parser_set_if_exists(include_smi_metrics, "smi-metrics");
 
     // Only query GPU devices and hardware counters when they are actually
     // requested. This avoids initializing the ROCm runtime for settings-only
@@ -644,6 +658,24 @@ main(int argc, char** argv)
             verbprintf(1,
                        "No HIP devices found. GPU HW counters will not be available\n");
         }
+    }
+
+    if(include_smi_metrics)
+    {
+        size_t _num_metrics = 0;
+        try
+        {
+            _num_metrics = rocprofsys::amd_smi::format_avail_entries(
+                               rocprofsys::amd_smi::probe_devices())
+                               .size();
+        } catch(std::runtime_error& _e)
+        {
+            verbprintf(0, "Retrieving AMD SMI metrics failed: %s", _e.what());
+        } catch(std::exception& _e)
+        {
+            verbprintf(0, "Exception retrieving AMD SMI metrics: %s", _e.what());
+        }
+        verbprintf(1, "Found %zu AMD SMI GPU metrics\n", _num_metrics);
     }
 
     if(parser.exists("generate-config"))
@@ -697,10 +729,12 @@ main(int argc, char** argv)
 
     if(category_view.empty()) category_view = _category_options;
 
-    if(!include_components && !include_settings && !include_hw_counters)
+    if(!include_components && !include_settings && !include_hw_counters &&
+       !include_smi_metrics)
         include_settings = true;
 
-    if(fmt_opts.markdown || include_hw_counters) fmt_opts.padding = 6;
+    if(fmt_opts.markdown || include_hw_counters || include_smi_metrics)
+        fmt_opts.padding = 6;
 
     std::ostream* os = nullptr;
     std::ofstream ofs;
@@ -743,6 +777,15 @@ main(int argc, char** argv)
                               { true, true,
                                 !fmt_opts.force_brief && !fmt_opts.available_only,
                                 !fmt_opts.force_brief && !options[DESC], options[DESC] });
+    }
+    dump_log();
+
+    if(include_smi_metrics)
+    {
+        write_smi_metric_info(*os, fmt_opts,
+                              { true, true,
+                                !fmt_opts.force_brief && !fmt_opts.available_only,
+                                !fmt_opts.force_brief && options[DESC], options[DESC] });
     }
     dump_log();
 
@@ -1371,6 +1414,171 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
             os << hl_selected(ss.str());
             os << "\n";
         }
+    }
+
+    dump_log();
+
+    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
+}
+
+//======================================================================================//
+//
+//                                  SMI METRICS
+//
+//======================================================================================//
+
+template <size_t N>
+void
+write_smi_metric_info(std::ostream& os, format_options& fmt_opts,
+                      const array_t<bool, N>& options, const array_t<bool, N>&,
+                      const array_t<string_t, N>&)
+{
+    static_assert(N >= num_smi_metric_options,
+                  "Error! Too few smi metric options + fields");
+
+    using width_type = array_t<std::int64_t, N>;
+    using width_bool = array_t<bool, N>;
+
+    auto _smi_metrics =
+        rocprofsys::amd_smi::format_avail_entries(rocprofsys::amd_smi::probe_devices());
+
+    if(fmt_opts.available_only)
+    {
+        _smi_metrics.erase(std::remove_if(_smi_metrics.begin(), _smi_metrics.end(),
+                                          [](const auto& itr) { return !itr.available; }),
+                           _smi_metrics.end());
+    }
+
+    if(!category_view.empty() && category_view.count("smi_metrics::GPU") == 0 &&
+       category_view.count("GPU") == 0)
+    {
+        _smi_metrics.clear();
+    }
+
+    array_t<string_t, N> _labels = { "SMI METRIC", "DEVICE", "AVAILABLE", "SUMMARY",
+                                     "CATEGORY" };
+    array_t<bool, N>     _center = { false, true, true, false, false };
+    array_t<bool, N>     _mark   = { true, false, false, false, false };
+
+    width_type _widths{};
+    width_bool _wusing{};
+    _widths.fill(0);
+    _wusing.fill(false);
+
+    for(size_t i = 0; i < _widths.size(); ++i)
+    {
+        if(i != 1 && i != 2) _widths.at(i) = _labels.at(i).length() + fmt_opts.padding;
+        _wusing.at(i) = options[i];
+    }
+
+    auto _valid_symbols = std::set<std::string>{};
+    for(const auto& itr : _smi_metrics)
+    {
+        int _selected = 0;
+        if(options[0]) _selected += (is_selected(itr.symbol)) ? 1 : 0;
+        if(options[2])
+        {
+            std::stringstream _avss{};
+            _avss << std::boolalpha << itr.available;
+            _selected += (is_selected(_avss.str())) ? 1 : 0;
+        }
+        for(size_t i = 3; i < N; ++i)
+        {
+            if(options[i])
+            {
+                _selected += (is_selected(i == 3 ? itr.summary : itr.category)) ? 1 : 0;
+            }
+        }
+        if(_selected > 0) _valid_symbols.emplace(itr.symbol);
+    }
+
+    _smi_metrics.erase(std::remove_if(_smi_metrics.begin(), _smi_metrics.end(),
+                                      [&_valid_symbols](const auto& itr) {
+                                          return _valid_symbols.count(itr.symbol) == 0;
+                                      }),
+                       _smi_metrics.end());
+
+    if(fmt_opts.alphabetical)
+    {
+        std::sort(
+            _smi_metrics.begin(), _smi_metrics.end(),
+            [](const auto& lhs, const auto& rhs) {
+                constexpr auto suffix      = std::string_view{ ":device=" };
+                const auto     metric_name = [suffix](const std::string& symbol) {
+                    if(const auto pos = symbol.rfind(suffix); pos != std::string::npos)
+                    {
+                        return symbol.substr(0, pos);
+                    }
+                    return symbol;
+                };
+                const auto device_index =
+                    [suffix](const std::string& symbol) -> std::size_t {
+                    if(const auto pos = symbol.rfind(suffix); pos != std::string::npos)
+                    {
+                        return static_cast<std::size_t>(
+                            std::stoull(symbol.substr(pos + suffix.size())));
+                    }
+                    return 0;
+                };
+
+                const auto lhs_name = metric_name(lhs.symbol);
+                const auto rhs_name = metric_name(rhs.symbol);
+                if(lhs_name != rhs_name) return lhs_name < rhs_name;
+                return device_index(lhs.symbol) < device_index(rhs.symbol);
+            });
+    }
+
+    for(const auto& itr : _smi_metrics)
+    {
+        width_type _w = { { static_cast<std::int64_t>(itr.symbol.length()),
+                            static_cast<std::int64_t>(3), static_cast<std::int64_t>(6),
+                            static_cast<std::int64_t>(itr.summary.length()),
+                            static_cast<std::int64_t>(itr.category.length()) } };
+        for(auto& witr : _w)
+            witr += fmt_opts.padding;
+
+        for(size_t i = 0; i < N; ++i)
+        {
+            if(_wusing.at(i))
+                _widths.at(i) = std::max<std::int64_t>(_widths.at(i), _w.at(i));
+        }
+    }
+
+    _widths = compute_max_columns(_widths, _wusing, fmt_opts);
+
+    if(!fmt_opts.markdown) os << banner(_widths, _wusing, fmt_opts, '-');
+    if(!fmt_opts.csv) os << fmt_opts.delim;
+
+    for(size_t i = 0; i < _labels.size(); ++i)
+    {
+        if(options[i])
+            write_entry(os, _labels.at(i), _widths.at(i), true, false, fmt_opts);
+    }
+    os << "\n" << banner(_widths, _wusing, fmt_opts, '-');
+
+    for(const auto& itr : _smi_metrics)
+    {
+        std::stringstream ss;
+        if(options[0])
+            write_entry(ss, itr.symbol, _widths.at(0), _center.at(0), _mark.at(0),
+                        fmt_opts);
+
+        write_entry(ss, "GPU", _widths.at(1), _center.at(1), _mark.at(1), fmt_opts);
+
+        if(options[2])
+            write_entry(ss, itr.available, _widths.at(2), _center.at(2), _mark.at(1),
+                        fmt_opts);
+
+        if(options[3])
+            write_wrap_entry(ss, itr.summary, _widths.at(3), _center.at(3), _mark.at(3),
+                             3, _widths, _wusing, fmt_opts);
+        if(options[4])
+            write_wrap_entry(ss, itr.category, _widths.at(4), _center.at(4), _mark.at(4),
+                             4, _widths, _wusing, fmt_opts);
+
+        if(!fmt_opts.csv) os << fmt_opts.delim;
+        os << hl_selected(ss.str());
+        os << "\n";
     }
 
     dump_log();

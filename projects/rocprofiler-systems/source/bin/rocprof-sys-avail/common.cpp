@@ -293,8 +293,9 @@ process_categories(parser_t& p, const str_set_t& _category_options)
     // Cache lowercase -> original category mapping to avoid repeated string conversions
     // Also pre-compute shorthand mappings (e.g., "wallclock" -> "component::WallClock")
     std::unordered_map<std::string, std::string> _category_map;
-    constexpr std::array<std::string_view, 3> _prefixes = { "component::", "settings::",
-                                                            "hw_counters::" };
+    constexpr std::array<std::string_view, 4>    _prefixes = {
+        "component::", "settings::", "hw_counters::", "smi_metrics::"
+    };
 
     for(const auto& opt : _category_options)
     {

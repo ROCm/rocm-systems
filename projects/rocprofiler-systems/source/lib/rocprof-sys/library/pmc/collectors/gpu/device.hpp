@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/amd_smi_probe.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
@@ -182,95 +183,63 @@ private:
 
     bool initialize_supported_metrics()
     {
+        static_assert(sizeof(enabled_metrics) ==
+                          sizeof(::rocprofsys::amd_smi::metric_availability),
+                      "enabled_metrics and metric_availability must match");
+
+        bool memory_supported = false;
         try
         {
             const auto usage = m_driver->get_memory_usage();
-            m_supported_metrics.bits.memory_usage =
-                is_metric_supported(usage, METRIC_VALUE_NOT_SUPPORTED_64) ? 1 : 0;
+            memory_supported = is_metric_supported(usage, METRIC_VALUE_NOT_SUPPORTED_64);
         } catch(const std::runtime_error&)
         {
-            m_supported_metrics.bits.memory_usage = 0;
+            memory_supported = false;
         }
 
-        metrics raw{};
+        ::rocprofsys::amd_smi::probe_input input{};
         try
         {
-            raw = m_driver->get_gpu_metrics();
+            const auto raw             = m_driver->get_gpu_metrics();
+            input.current_socket_power = raw.current_socket_power;
+            input.average_socket_power = raw.average_socket_power;
+            input.hotspot_temperature  = raw.hotspot_temperature;
+            input.edge_temperature     = raw.edge_temperature;
+            input.gfx_activity         = raw.gfx_activity;
+            input.umc_activity         = raw.umc_activity;
+            input.mm_activity          = raw.mm_activity;
+            input.gfx_clock_mhz        = raw.gfx_clock_mhz;
+            input.mem_clock_mhz        = raw.mem_clock_mhz;
+            input.vcn_activity         = raw.vcn_activity;
+            input.jpeg_activity        = raw.jpeg_activity;
+            for(std::size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
+            {
+                input.xcp_stats[xcp].vcn_busy  = raw.xcp_stats[xcp].vcn_busy;
+                input.xcp_stats[xcp].jpeg_busy = raw.xcp_stats[xcp].jpeg_busy;
+            }
+            input.xgmi.width          = raw.xgmi.link.width;
+            input.xgmi.speed          = raw.xgmi.link.speed;
+            input.xgmi.data_acc.read  = raw.xgmi.data_acc.read;
+            input.xgmi.data_acc.write = raw.xgmi.data_acc.write;
+            input.pcie.width          = raw.pcie.link.width;
+            input.pcie.speed          = raw.pcie.link.speed;
+            input.pcie.bandwidth.acc  = raw.pcie.bandwidth.acc;
+            input.pcie.bandwidth.inst = raw.pcie.bandwidth.inst;
         } catch(const std::runtime_error&)
         {
+            m_supported_metrics.value = memory_supported ? (1u << 2) : 0;
             return m_supported_metrics.value != 0;
         }
 
-        m_supported_metrics.bits.current_socket_power =
-            is_metric_supported(raw.current_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.average_socket_power =
-            is_metric_supported(raw.average_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.hotspot_temperature =
-            is_metric_supported(raw.hotspot_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.edge_temperature =
-            is_metric_supported(raw.edge_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.gfx_activity =
-            is_metric_supported(raw.gfx_activity, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.umc_activity =
-            is_metric_supported(raw.umc_activity, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.mm_activity =
-            is_metric_supported(raw.mm_activity, METRIC_VALUE_NOT_SUPPORTED_16);
-
-        m_supported_metrics.bits.vcn_busy =
-            std::any_of(raw.xcp_stats.begin(), raw.xcp_stats.end(),
-                        [](const metrics::xcp_metrics& xcp) {
-                            return std::any_of(xcp.vcn_busy.begin(), xcp.vcn_busy.end(),
-                                               [](std::uint16_t val) {
-                                                   return is_metric_supported(val);
-                                               });
-                        });
-
-        m_supported_metrics.bits.jpeg_busy =
-            std::any_of(raw.xcp_stats.begin(), raw.xcp_stats.end(),
-                        [](const metrics::xcp_metrics& xcp) {
-                            return std::any_of(xcp.jpeg_busy.begin(), xcp.jpeg_busy.end(),
-                                               [](std::uint16_t val) {
-                                                   return is_metric_supported(val);
-                                               });
-                        });
-
-        m_supported_metrics.bits.vcn_activity =
-            !m_supported_metrics.bits.vcn_busy &&
-            std::any_of(raw.vcn_activity.begin(), raw.vcn_activity.end(),
-                        [](std::uint16_t val) { return is_metric_supported(val); });
-
-        m_supported_metrics.bits.jpeg_activity =
-            !m_supported_metrics.bits.jpeg_busy &&
-            std::any_of(raw.jpeg_activity.begin(), raw.jpeg_activity.end(),
-                        [](std::uint16_t val) { return is_metric_supported(val); });
-
-        m_supported_metrics.bits.xgmi =
-            is_metric_supported(raw.xgmi.link.width) ||
-            is_metric_supported(raw.xgmi.link.speed) ||
-            std::any_of(raw.xgmi.data_acc.read.begin(), raw.xgmi.data_acc.read.end(),
-                        [](std::uint64_t val) { return is_metric_supported(val); });
-
-        m_supported_metrics.bits.pcie = is_metric_supported(raw.pcie.link.width) ||
-                                        is_metric_supported(raw.pcie.link.speed) ||
-                                        is_metric_supported(raw.pcie.bandwidth.acc) ||
-                                        is_metric_supported(raw.pcie.bandwidth.inst);
-
-        m_supported_metrics.bits.gfx_clock =
-            is_metric_supported(raw.gfx_clock_mhz, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.mem_clock =
-            is_metric_supported(raw.mem_clock_mhz, METRIC_VALUE_NOT_SUPPORTED_16);
-
-        initialize_sdma_support();
+        const bool sdma_supported = m_driver->is_sdma_supported();
+        m_supported_metrics.value = ::rocprofsys::amd_smi::compute_availability(
+                                        input, memory_supported, sdma_supported)
+                                        .value;
 
         LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
                   format_supported_metrics(m_supported_metrics));
 
         return m_supported_metrics.value != 0;
-    }
-
-    void initialize_sdma_support()
-    {
-        m_supported_metrics.bits.sdma_usage = m_driver->is_sdma_supported() ? 1 : 0;
     }
 
     void collect_sdma_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,

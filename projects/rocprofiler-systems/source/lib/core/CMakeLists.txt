@@ -29,6 +29,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/agent_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.hpp
     ${CMAKE_CURRENT_LIST_DIR}/amd_smi.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/amd_smi_probe.hpp
     ${CMAKE_CURRENT_LIST_DIR}/argparse.hpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common.hpp
