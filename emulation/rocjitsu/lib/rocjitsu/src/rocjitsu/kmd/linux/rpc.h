@@ -128,7 +128,11 @@ inline ssize_t rpc_send_msg(int sock, const void *data, size_t data_len, const i
     std::memcpy(CMSG_DATA(cmsg), fds, num_fds * sizeof(int));
   }
 
-  return sendmsg(sock, &msg, MSG_NOSIGNAL);
+  ssize_t bytes_sent;
+  do {
+    bytes_sent = sendmsg(sock, &msg, MSG_NOSIGNAL);
+  } while (bytes_sent < 0 && errno == EINTR);
+  return bytes_sent;
 }
 
 /// @brief Receive a message with optional ancillary file descriptors.
