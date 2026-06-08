@@ -48,7 +48,7 @@ TEST_CASE("TDM_Basic_load_2d")
     HIP_CHECK(hipGetDeviceProperties(&props, device));
     const std::string arch(props.gcnArchName);
     if (arch.find("gfx1250") == std::string::npos && arch.find("gfx1251") == std::string::npos) {
-        HipTest::HIP_SKIP_TEST("TDM_Basic_load_2d requires gfx1250 or gfx1251");
+        HIP_SKIP_TEST("TDM_Basic_load_2d requires gfx1250 or gfx1251");
         return;
     }
 #endif
