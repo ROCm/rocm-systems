@@ -1137,6 +1137,21 @@ rocprofiler_set_api_table(const char* name,
     static auto _once = std::once_flag{};
     std::call_once(_once, rocprofiler::registration::initialize);
 
+    // Verify that the rocattach table is always the first table registered when the attach
+    // feature is in use. Any table registered before rocattach means stream ID lookups for
+    // pre-existing streams may fire before supports_attachment() returns true.
+    static auto _non_rocattach_registered = std::atomic<bool>{false};
+    if(std::string_view{name} == "rocattach")
+    {
+        ROCP_CI_LOG_IF(WARNING, _non_rocattach_registered.load())
+            << "sdk-attach API table was not the first API table registered. The attach library "
+               "must be registered before all other API tables for correctness of traced objects.";
+    }
+    else
+    {
+        _non_rocattach_registered.store(true);
+    }
+
     // pass to ROCTx init
     ROCP_ERROR_IF(num_tables == 0) << "rocprofiler expected " << name
                                    << " library to pass at least one table, not " << num_tables;
