@@ -21,6 +21,13 @@ import copy
 from enum import IntEnum, Enum
 from pathlib import Path
 
+# Bash-style env-var expander (supports ${VAR:-default}); shared with the config
+# processor so binary/path resolution honors the same syntax used elsewhere.
+try:
+    from lib.test_config import expand_env_vars
+except ImportError:
+    from test_config import expand_env_vars
+
 # Make stdout unbuffered to prevent output ordering issues with subprocesses
 sys.stdout.reconfigure(line_buffering=True)
 
@@ -652,8 +659,11 @@ class TestExecutor:
         rocm_path = self.paths.get("rocm_path", "/opt/rocm")
         mpi_path = self.paths.get("mpi_path", "")
 
+        # Use the bash-aware expander so ${VAR:-default} (e.g. the computed
+        # RCCL_TESTS_DIR with a fallback) resolves; os.path.expandvars cannot
+        # handle the ":-" default syntax and would leave the path literal.
         def _expand(p):
-            return os.path.expanduser(os.path.expandvars(str(p)))
+            return os.path.expanduser(expand_env_vars(str(p)))
 
         source_dir = _expand(cfg.get("source_dir", os.path.join(workdir, "rccl-tests")))
         if not os.path.isdir(source_dir):
@@ -745,7 +755,7 @@ class TestExecutor:
         """
         # Strategy 1: Check if binary is already an absolute path
         if os.path.isabs(binary):
-            expanded_path = os.path.expandvars(binary)
+            expanded_path = expand_env_vars(binary)
             resolved = os.path.expanduser(expanded_path)
             if self.args.verbose:
                 print(f"  Binary resolved via absolute path: {resolved}")
@@ -753,7 +763,7 @@ class TestExecutor:
 
         # Strategy 2: Expand environment variables in binary path
         if '$' in binary or '~' in binary:
-            expanded_path = os.path.expandvars(binary)
+            expanded_path = expand_env_vars(binary)
             expanded_path = os.path.expanduser(expanded_path)
             # If after expansion it becomes absolute, use it
             if os.path.isabs(expanded_path):
@@ -767,7 +777,7 @@ class TestExecutor:
         test_binary_dir = test_config.get("test_binary_dir", "")
         if test_binary_dir:
             # Expand environment variables in test_binary_dir
-            test_binary_dir = os.path.expandvars(test_binary_dir)
+            test_binary_dir = expand_env_vars(test_binary_dir)
             test_binary_dir = os.path.expanduser(test_binary_dir)
             resolved = os.path.join(test_binary_dir, binary)
             if self.args.verbose:
@@ -778,7 +788,7 @@ class TestExecutor:
         if "test_binary_dir" in self.paths:
             test_binary_dir = self.paths["test_binary_dir"]
             # Expand environment variables in test_binary_dir
-            test_binary_dir = os.path.expandvars(test_binary_dir)
+            test_binary_dir = expand_env_vars(test_binary_dir)
             test_binary_dir = os.path.expanduser(test_binary_dir)
             resolved = os.path.join(test_binary_dir, binary)
             if self.args.verbose:
@@ -949,6 +959,13 @@ class TestExecutor:
             if key != 'LD_LIBRARY_PATH':
                 env[key] = str(value)
 
+        # Executable to invoke. Use the fully-resolved absolute path (not
+        # "./<binary>") so out-of-tree binaries work: gtest binaries live in
+        # cwd=<build_dir>/test, but rccl-tests perf binaries live under the
+        # rccl-tests build dir. test_binary_path was resolved above and verified
+        # to exist; shlex.quote handles any spaces.
+        exe = shlex.quote(test_binary_path)
+
         # Build command based on test type
         if num_ranks == 1:
             # Non-MPI test - prepend environment variables to the command.
@@ -963,16 +980,16 @@ class TestExecutor:
             if is_gtest:
                 # GTest-based test - use --gtest_filter syntax
                 if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{env_prefix}./{binary}"
+                    cmd = f"{env_prefix}{exe}"
                 else:
-                    cmd = f"{env_prefix}./{binary} --gtest_filter={test_filter}"
+                    cmd = f"{env_prefix}{exe} --gtest_filter={test_filter}"
 
                 # Add custom arguments if provided
                 if custom_args:
                     cmd += f" {custom_args}"
             else:
                 # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{env_prefix}./{binary}"
+                cmd = f"{env_prefix}{exe}"
                 if custom_args:
                     cmd += f" {custom_args}"
 
@@ -1047,15 +1064,15 @@ class TestExecutor:
             if is_gtest:
                 # GTest-based test - use --gtest_filter syntax
                 if test_filter == "ALL" or test_filter == "*":
-                    cmd = f"{mpi_cmd} {mpi_args} ./{binary}"
+                    cmd = f"{mpi_cmd} {mpi_args} {exe}"
                 else:
-                    cmd = f"{mpi_cmd} {mpi_args} ./{binary} --gtest_filter={test_filter}"
+                    cmd = f"{mpi_cmd} {mpi_args} {exe} --gtest_filter={test_filter}"
 
                 if custom_args:
                     cmd += f" {custom_args}"
             else:
                 # Non-gtest test (perf, custom, etc.) - run binary with args
-                cmd = f"{mpi_cmd} {mpi_args} ./{binary}"
+                cmd = f"{mpi_cmd} {mpi_args} {exe}"
                 if custom_args:
                     cmd += f" {custom_args}"
 

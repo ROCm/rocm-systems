@@ -14,12 +14,78 @@ from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
 
-# Set default WORKDIR to rccl root directory if not already defined
+# Compute canonical project roots so builds work regardless of the caller's $PWD.
 # This file is at: rccl/tools/scripts/test_runner/lib/test_config.py
-# rccl root is 5 directories up
+#   parents[4] -> the rccl root (".../projects/rccl")
+# rccl-tests is a sibling checkout of rccl (".../projects/rccl-tests"), so it is
+# resolved relative to the rccl root, NOT relative to $PWD (running the test
+# runner from the rccl directory would otherwise look for a non-existent
+# rccl/rccl-tests). Both can be overridden via the environment.
+_rccl_root = Path(__file__).resolve().parents[4]
 if "WORKDIR" not in os.environ:
-    _rccl_root = Path(__file__).resolve().parents[4]
     os.environ["WORKDIR"] = str(_rccl_root)
+if "RCCL_TESTS_DIR" not in os.environ:
+    os.environ["RCCL_TESTS_DIR"] = str(_rccl_root.parent / "rccl-tests")
+
+
+def expand_env_vars(value):
+    """
+    Expand environment variables in a string with bash-style default support.
+
+    Supports ${VAR}, $VAR, and ${VAR:-default} (including nested expansion in
+    the default value). Unlike os.path.expandvars, this honors the ":-" default
+    syntax. Unset ${VAR}/$VAR references are left intact.
+
+    This is a module-level function so it can be reused outside the config
+    processor (e.g. when the executor resolves test binary paths).
+
+    Args:
+        value: String that may contain environment variables
+
+    Returns:
+        str: String with environment variables expanded
+
+    Examples:
+        "${HOME}/code" -> "/home/user/code"
+        "$ROCM_PATH/bin" -> "/opt/rocm/bin"
+        "${UNDEFINED:-/default}" -> "/default" (bash-style default)
+        "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build" -> expands $PWD in the default
+    """
+    if not isinstance(value, str):
+        return value
+
+    # Replace ${VAR:-default} patterns (default value is recursively expanded).
+    def replace_with_default(match):
+        var_name = match.group(1)
+        default_value = match.group(2)
+        result = os.environ.get(var_name)
+        if result is None:
+            result = expand_env_vars(default_value)
+        return result
+
+    # All three forms are expanded together, repeatedly, until the string
+    # stabilizes. This resolves arbitrarily nested references such as
+    # "${RCCL_HOME:-${WORKDIR}/build/debug}" or
+    # "${RCCL_HOME:-${WORKDIR:-$PWD}/build/debug}": the inner ${WORKDIR}/$PWD is
+    # resolved on one pass, which turns the outer default brace-free so the
+    # ${VAR:-default} pattern can match it on the next pass. The default group
+    # excludes braces ([^{}]*) so the innermost default is always matched first.
+    # Unset references collapse to themselves, so iteration reaches a fixed
+    # point; the range() bound just guards against pathological input.
+    default_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*):-([^{}]*)\}')
+    braced_pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+    bare_pattern = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)')
+    resolve = lambda m: os.environ.get(m.group(1), m.group(0))
+
+    for _ in range(10):
+        new_value = default_pattern.sub(replace_with_default, value)
+        new_value = braced_pattern.sub(resolve, new_value)
+        new_value = bare_pattern.sub(resolve, new_value)
+        if new_value == value:
+            break
+        value = new_value
+
+    return value
 
 
 class TestConfigProcessor:
@@ -73,33 +139,7 @@ class TestConfigProcessor:
             "${UNDEFINED:-/default}" -> "/default" (bash-style default)
             "${WORKDIR:-$HOME/code}" -> expands $HOME in default if WORKDIR not set
         """
-        if not isinstance(value, str):
-            return value
-
-        # Pattern to match ${VAR}, ${VAR:-default}, or $VAR
-        # First, handle ${VAR:-default} pattern
-        def replace_with_default(match):
-            var_name = match.group(1)
-            default_value = match.group(2)
-            # Get the env var, or use default
-            result = os.environ.get(var_name)
-            if result is None:
-                # Recursively expand env vars in the default value
-                result = self._expand_env_var(default_value)
-            return result
-
-        # Replace ${VAR:-default} patterns
-        value = re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\}', replace_with_default, value)
-
-        # Replace ${VAR} patterns
-        value = re.sub(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}',
-                      lambda m: os.environ.get(m.group(1), m.group(0)), value)
-
-        # Replace $VAR patterns (but not ${ to avoid double replacement)
-        value = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)',
-                      lambda m: os.environ.get(m.group(1), m.group(0)), value)
-
-        return value
+        return expand_env_vars(value)
 
     def _expand_env_vars_in_dict(self, data):
         """
