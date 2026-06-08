@@ -3,6 +3,8 @@
 
 import argparse
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 from unittest.mock import patch
 
 import common
@@ -286,3 +288,121 @@ def test_attach_library_resolution_with_fallback():
             profiler.get_profiler_options()
 
     common.clean_output_dir(True, str(output_dir))
+
+
+# ---------------------------------------------------------------------------
+# run_profiling(): PC sampling gating / increment / delegation
+# ---------------------------------------------------------------------------
+def _make_run_profiling_profiler(tmp_path, filter_blocks, perfmon_files=0):
+    """Build a RocProfCompute_Base ready to drive run_profiling() in isolation.
+
+    Uses the rocprofv3 profiler mode so the native-tool path resolves to None
+    without touching the filesystem, and seeds `perfmon_files` empty pmc_perf
+    yaml files so total_runs reflects the counter-collection pass count.
+    """
+    if perfmon_files:
+        perfmon_dir = Path(tmp_path) / "perfmon"
+        perfmon_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(perfmon_files):
+            (perfmon_dir / f"pmc_perf_{i}.yaml").write_text("")
+
+    args = argparse.Namespace(
+        filter_blocks=filter_blocks,
+        output_directory=str(tmp_path),
+        roof_only=False,
+        no_native_tool=True,
+        iteration_multiplexing=None,
+        kernel=None,
+        dispatch=None,
+        remaining="-- ./app",
+    )
+    soc = SimpleNamespace(_mspec=SimpleNamespace(gpu_model="MI300"))
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofv3", soc=soc)
+    profiler._filter_blocks = filter_blocks
+    return profiler
+
+
+def test_run_profiling_delegates_to_pc_sampling_when_requested(tmp_path):
+    """When a PC sampling block is requested, run_profiling delegates to
+    PCSamplingProfiler.run() and does not emit the skip warning."""
+    profiler = _make_run_profiling_profiler(tmp_path, ["pc_sampling"])
+    base = "rocprof_compute_profile.profiler_base"
+    with (
+        mock.patch(f"{base}.PCSamplingProfiler") as mock_pc_cls,
+        mock.patch(f"{base}.print_status"),
+        mock.patch(f"{base}.console_log"),
+        mock.patch(f"{base}.console_debug"),
+        mock.patch(f"{base}.console_warning") as mock_warning,
+        mock.patch(f"{base}.get_job_rank_and_size", return_value=(None, None)),
+    ):
+        instance = mock_pc_cls.return_value
+        instance.is_exclusive.return_value = True
+        instance.is_requested.return_value = True
+
+        profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+
+        instance.run.assert_called_once()
+        for call in mock_warning.call_args_list:
+            assert "PC sampling data collection skipped" not in str(call)
+
+
+def test_run_profiling_skips_pc_sampling_when_not_requested(tmp_path):
+    """When no PC sampling block is requested, run_profiling emits the skip
+    warning and never calls PCSamplingProfiler.run()."""
+    profiler = _make_run_profiling_profiler(tmp_path, ["2"], perfmon_files=1)
+    base = "rocprof_compute_profile.profiler_base"
+    with (
+        mock.patch(f"{base}.PCSamplingProfiler") as mock_pc_cls,
+        mock.patch(f"{base}.print_status"),
+        mock.patch(f"{base}.console_log"),
+        mock.patch(f"{base}.console_debug"),
+        mock.patch(f"{base}.console_warning") as mock_warning,
+        mock.patch(f"{base}.get_job_rank_and_size", return_value=(None, None)),
+        mock.patch.object(RocProfCompute_Base, "profile", return_value=0.0),
+    ):
+        instance = mock_pc_cls.return_value
+        instance.is_exclusive.return_value = False
+        instance.is_requested.return_value = False
+
+        profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+
+        instance.run.assert_not_called()
+        skip_warned = any(
+            "PC sampling data collection skipped" in str(call)
+            for call in mock_warning.call_args_list
+        )
+        assert skip_warned
+
+
+def test_run_profiling_pc_sampling_increments_workload_runs_for_multirank(tmp_path):
+    """A requested PC sampling pass counts as an extra workload run, so with a
+    single counter-collection pass and >=2 ranks the multi-rank warning fires;
+    without PC sampling that same single pass stays at 1 run and is silent."""
+    base = "rocprof_compute_profile.profiler_base"
+
+    def run_with(filter_blocks, is_requested):
+        profiler = _make_run_profiling_profiler(
+            tmp_path, filter_blocks, perfmon_files=1
+        )
+        with (
+            mock.patch(f"{base}.PCSamplingProfiler") as mock_pc_cls,
+            mock.patch(f"{base}.print_status"),
+            mock.patch(f"{base}.console_log"),
+            mock.patch(f"{base}.console_debug"),
+            mock.patch(f"{base}.console_warning") as mock_warning,
+            mock.patch(f"{base}.get_job_rank_and_size", return_value=("0", 2)),
+            mock.patch.object(RocProfCompute_Base, "profile", return_value=0.0),
+        ):
+            instance = mock_pc_cls.return_value
+            instance.is_exclusive.return_value = False
+            instance.is_requested.return_value = is_requested
+            profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+            return any(
+                "Multi-rank application detected" in str(call)
+                for call in mock_warning.call_args_list
+            )
+
+    # PC sampling requested -> 1 counter pass + 1 PC sampling pass = 2 runs -> warn.
+    assert run_with(["21", "2"], is_requested=True) is True
+    # Not requested -> only the single counter pass -> no multi-rank warning.
+    assert run_with(["2"], is_requested=False) is False
