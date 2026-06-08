@@ -18,6 +18,11 @@ function(ais_add_sanitizers target)
         message(FATAL_ERROR "AIS_USE_SANITIZERS is not compatible with AIS_USE_THREAD_SANITIZER")
     endif()
 
+    get_target_property(aliased_target "${target}" ALIASED_TARGET)
+    if(aliased_target)
+        set(target "${aliased_target}")
+    endif()
+
     if(AIS_USE_SANITIZERS)
         set(SANITIZER_LIST address,float-divide-by-zero,integer,leak,local-bounds,nullability,undefined,vptr)
         target_compile_options(${target} PRIVATE
