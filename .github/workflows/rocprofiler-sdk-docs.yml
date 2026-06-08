@@ -35,6 +35,7 @@ env:
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
   ENABLE_AQLPROFILE_BUILD: "false"
   INSTALL_NIGHTLY_ROCM: "true"
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/rocr-runtime projects/clr projects/hip"
 
 jobs:
   build-docs:
@@ -119,7 +120,7 @@ jobs:
           git config --system --add safe.directory '*'
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16
+        run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
       - name: Setup
         shell: bash
