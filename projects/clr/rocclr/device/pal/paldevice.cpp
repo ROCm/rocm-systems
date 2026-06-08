@@ -2373,7 +2373,8 @@ bool Device::deviceAllowAccess(void* ptr) const {
 }
 
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
-                       void* svmPtr) const {
+                       void* svmPtr, const amd::SvmAllocHints& /*hints*/) const {
+  // PAL does not implement host-NUMA VMM; hints are ignored.
   constexpr bool kForceAllocation = true;
   alignment = std::max(alignment, static_cast<size_t>(info_.memBaseAddrAlign_));
 

@@ -44,6 +44,7 @@
 #include <shared_mutex>
 
 namespace amd {
+struct SvmAllocHints;  //!< defined in platform/memory.hpp
 class Command;
 class CommandQueue;
 class ReadMemoryCommand;
@@ -1967,7 +1968,7 @@ class Device : public RuntimeObject {
    * @copydoc amd::Context::svmAlloc
    */
   virtual void* svmAlloc(Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
-                         void* svmPtr) const = 0;
+                         void* svmPtr, const SvmAllocHints& hints) const = 0;
   /**
    * @copydoc amd::Context::svmFree
    */
@@ -2020,6 +2021,24 @@ class Device : public RuntimeObject {
    */
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) = 0;
+
+  /**
+   * Set Access permissions for a virtual memory object granted to a CPU agent on a
+   * specific NUMA node. Used for hipMemSetAccess with Host / HostNuma / HostNumaCurrent
+   * access descriptors against host-VMM-backed allocations.
+   *
+   * @param va_addr       Virtual Address ptr
+   * @param va_size       Virtual Address Size
+   * @param access_flags  Access permissions
+   * @param numa_id       NUMA node id to pick a CPU agent for; <0 selects the default
+   *                      CPU agent (closest to this GPU)
+   * @param numa_current  When true, ignore @p numa_id and use a CPU agent close to the
+   *                      calling thread (resolved by the ROCr backend)
+   */
+  virtual bool SetHostMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                                int numa_id = -1, bool numa_current = false) {
+    return false;
+  }
 
   /**
    * Get Access permisions for a virtual memory object.

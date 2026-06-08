@@ -29,6 +29,26 @@
     }                                                                                              \
   }
 
+// Probe host (NUMA) VMM support indirectly via hipMemGetAllocationGranularity. The HIP runtime
+// returns hipErrorNotSupported for HostNumaCurrent when the ROCr-side host VMM API is unavailable.
+// We skip rather than fail so the test suite is portable across ROCr versions and CUDA backends.
+#define checkHostVMMSupported(device)                                                              \
+  {                                                                                                \
+    checkVMMSupported(device);                                                                     \
+    hipMemAllocationProp _probe_prop{};                                                            \
+    _probe_prop.type = hipMemAllocationTypePinned;                                                 \
+    _probe_prop.location.type = hipMemLocationTypeHostNumaCurrent;                                 \
+    _probe_prop.location.id = 0;                                                                   \
+    size_t _probe_gran = 0;                                                                        \
+    hipError_t _probe_err =                                                                        \
+        hipMemGetAllocationGranularity(&_probe_gran, &_probe_prop,                                 \
+                                       hipMemAllocationGranularityMinimum);                        \
+    if (_probe_err == hipErrorNotSupported) {                                                      \
+      HIP_SKIP_TEST("Host (NUMA) VMM is not supported on this runtime.");                          \
+    }                                                                                              \
+    HIP_CHECK(_probe_err);                                                                         \
+  }
+
 #define checkDmaBufSupported(device)                                                               \
   {                                                                                                \
     int value = 0;                                                                                 \

@@ -526,7 +526,8 @@ bool Device::init() {
     if (amd::IS_HIP) {
       mg_sync_ = reinterpret_cast<address>(
           glb_ctx_->svmAlloc(kMGInfoSizePerDevice * devices.size(), kMGInfoSizePerDevice,
-                             (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS)));
+                             (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS),
+                             nullptr, nullptr, amd::SvmAllocHints{}));
       if (mg_sync_ == nullptr) {
         LogError("mgpu sync buffer alloc failed");
         return false;
@@ -2263,7 +2264,22 @@ bool Device::allowPeerAccess(device::Memory* memory) const {
   return true;
 }
 
-uint64_t Device::deviceVmemAlloc(size_t size, uint64_t flags) const {
+uint64_t Device::deviceVmemAlloc(size_t size, uint64_t flags, int numa_id,
+                                 bool numa_current) const {
+  // Host-NUMA placement is only reachable once ROCr exposes a CPU-agent-aware
+  // hsa_amd_vmem_handle_create variant. Until then the HIP-layer capability gate
+  // (info_.hostVirtualMemoryManagement_) prevents this path; if it is somehow taken,
+  // fail loudly rather than silently allocating device-local memory.
+  if (numa_id >= 0 || numa_current) {
+    // TODO(ROCr): replace with the CPU-agent variant, e.g.
+    //   hsa_agent_t cpu = numa_current ? <resolve current> : getCpuAgent(numa_id);
+    //   Hsa::vmem_handle_create_on_agent(cpu, size, MEMORY_TYPE_PINNED, 0, &handle);
+    LogPrintfError("Host-NUMA VMM not yet wired in CLR (numa_id=%d, numa_current=%d). "
+                   "ROCr CPU-agent vmem_handle_create needed.",
+                   numa_id, static_cast<int>(numa_current));
+    return 0;
+  }
+
   // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.
   const bool uncached = (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) != 0;
   const hsa_amd_memory_pool_t& pool = (uncached && gpu_ext_fine_grained_segment_.handle)
@@ -2398,7 +2414,7 @@ void Device::updateFreeMemory(size_t size, bool free) {
 
 // ================================================================================================
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
-                       void* svmPtr) const {
+                       void* svmPtr, const amd::SvmAllocHints& hints) const {
   amd::Memory* mem = nullptr;
   void* svmPtrUsed = reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr);
 
@@ -2422,6 +2438,11 @@ void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_
     LogError("failed to create a svm mem object!");
     return nullptr;
   }
+
+  // Forward host-NUMA placement hint to the PHYMEM allocation path in rocmemory.cpp
+  // (deviceVmemAlloc reads these back to bind the allocation to a CPU agent / NUMA node).
+  mem->getUserData().numa_id = hints.numa_id;
+  mem->getUserData().numa_current = hints.numa_current;
 
   if (!mem->create(nullptr)) {
     LogError("failed to create a svm hidden buffer!");
@@ -2494,6 +2515,31 @@ bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
     return false;
   }
 
+  return true;
+}
+
+bool Device::SetHostMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                              int numa_id, bool numa_current) {
+  if (!info_.hostVirtualMemoryManagement_) {
+    LogError("SetHostMemAccess: host VMM not supported by ROCr");
+    return false;
+  }
+
+  // For numa_current the spec says "node closest to the calling thread's CPU"; this
+  // requires per-thread resolution that lives in ROCr. Until that lands, fall back to
+  // this device's default CPU agent (the one with least NUMA distance to this GPU).
+  // For an explicit numa_id, getCpuAgent(idx) returns the CPU agent on that node and
+  // falls back to the default agent when idx is out of range.
+  hsa_amd_memory_access_desc_t desc;
+  desc.permissions = static_cast<hsa_access_permission_t>(access_flags);
+  desc.agent_handle = numa_current ? getCpuAgent() : getCpuAgent(numa_id);
+
+  hsa_status_t hsa_status = Hsa::vmem_set_access(va_addr, va_size, &desc, 1);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("Failed hsa_amd_vmem_set_access for host (numa_id=%d, numa_current=%d). "
+                   "status=%d", numa_id, static_cast<int>(numa_current), hsa_status);
+    return false;
+  }
   return true;
 }
 

@@ -83,7 +83,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_BasicAllocDealloc) {
   CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
+  checkHostVMMSupported(device);
 
   hipMemAllocationProp prop{};
   SECTION("HostNuma node 0") {
@@ -117,7 +117,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_PropRoundTrip) {
   CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
+  checkHostVMMSupported(device);
 
   const int node = firstAvailableNumaNode();
   hipMemAllocationProp prop = makeHostNumaProp(hipMemLocationTypeHostNuma, node);
@@ -152,7 +152,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_MapAndMemcpyRoundTrip) {
   CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
+  checkHostVMMSupported(device);
 
   hipMemAllocationProp prop{};
   SECTION("HostNuma node 0") {
@@ -206,7 +206,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_KernelLaunch) {
   CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
+  checkHostVMMSupported(device);
 
   hipMemAllocationProp prop =
       makeHostNumaProp(hipMemLocationTypeHostNuma, firstAvailableNumaNode());
@@ -257,7 +257,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_HostNuma_Negative) {
   CTX_CREATE();
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
-  checkVMMSupported(device);
+  checkHostVMMSupported(device);
 
   hipMemAllocationProp prop =
       makeHostNumaProp(hipMemLocationTypeHostNuma, firstAvailableNumaNode());

@@ -311,7 +311,7 @@ void Context::hostFree(void* ptr) const {
 }
 
 void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
-                        const amd::Device* curDev, void* svmPtr) {
+                        const amd::Device* curDev, void* svmPtr, const SvmAllocHints& hints) {
   unsigned int numSVMDev = svmAllocDevice_.size();
   if (numSVMDev < 1) {
     return nullptr;
@@ -324,7 +324,7 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
   if (curDev != nullptr) {
     if (!(flags & CL_MEM_SVM_ATOMICS) ||
         (curDev->info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS)) {
-      svmPtrAlloced = curDev->svmAlloc(*this, size, alignment, flags, svmPtrAlloced);
+      svmPtrAlloced = curDev->svmAlloc(*this, size, alignment, flags, svmPtrAlloced, hints);
       if (svmPtrAlloced == nullptr) {
         return nullptr;
       }
@@ -340,7 +340,7 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
     if ((flags & CL_MEM_SVM_ATOMICS) && !(dev->info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS)) {
       continue;
     }
-    svmPtrAlloced = dev->svmAlloc(*this, size, alignment, flags, svmPtrAlloced);
+    svmPtrAlloced = dev->svmAlloc(*this, size, alignment, flags, svmPtrAlloced, hints);
     if (svmPtrAlloced == nullptr) {
       return nullptr;
     }

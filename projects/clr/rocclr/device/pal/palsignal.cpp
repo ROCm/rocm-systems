@@ -37,7 +37,8 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
   ws_ = ws;
 
   void* buffer = dev_->GlbCtx().svmAlloc(sizeof(amd_signal_t), alignof(amd_signal_t),
-                                         CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS);
+                                         CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS,
+                                         nullptr, nullptr, amd::SvmAllocHints{});
   if (!buffer) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create amd_signal_t buffer");
     return false;

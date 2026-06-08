@@ -214,7 +214,8 @@ class NullDevice : public amd::Device {
                  size_t size,             //!< size of svm spaces
                  size_t alignment,        //!< alignment requirement of svm spaces
                  cl_svm_mem_flags flags,  //!< flags of creation svm spaces
-                 void* svmPtr             //!< existing svm pointer for mGPU case
+                 void* svmPtr,            //!< existing svm pointer for mGPU case
+                 const amd::SvmAllocHints& hints  //!< host-NUMA placement hints
   ) const override {
     ShouldNotReachHere();
     return nullptr;
@@ -447,7 +448,13 @@ class Device : public NullDevice {
 
   bool allowPeerAccess(device::Memory* memory) const override;
   void deviceVmemRelease(uint64_t mem_handle) const;
-  uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
+  //! Allocate a physical memory handle for hipMemCreate.
+  //! \param numa_id      NUMA node id when binding pages to a specific host node; <0 means
+  //!                     no NUMA hint (device-local pool).
+  //! \param numa_current When true, pin pages to the calling thread's NUMA node (numa_id
+  //!                     ignored). Mutually exclusive with a concrete numa_id.
+  uint64_t deviceVmemAlloc(size_t size, uint64_t flags, int numa_id = -1,
+                           bool numa_current = false) const;
 
   void* deviceLocalAlloc(size_t size,
                         const AllocationFlags& flags = AllocationFlags{}, bool allowAllAgentsAccess = true) const override;
@@ -456,7 +463,8 @@ class Device : public NullDevice {
   void memFree(void* ptr, size_t size) const;
 
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
-                         cl_svm_mem_flags flags = CL_MEM_READ_WRITE, void* svmPtr = nullptr) const override;
+                         cl_svm_mem_flags flags, void* svmPtr,
+                         const amd::SvmAllocHints& hints) const override;
 
   virtual void svmFree(void* ptr) const override;
 
@@ -471,6 +479,8 @@ class Device : public NullDevice {
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override;
+  virtual bool SetHostMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
+                                int numa_id = -1, bool numa_current = false) override;
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 

@@ -26,6 +26,7 @@ namespace amd {
 
 class GLFunctions;
 class DeviceQueue;
+struct SvmAllocHints;  //!< defined in platform/memory.hpp
 
 class Context : public RuntimeObject {
   std::vector<Device*> devices_;
@@ -138,8 +139,11 @@ class Context : public RuntimeObject {
    * @param flags The flags to create a svm space
    * @param curDev The current device
    */
-  void* svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags = CL_MEM_READ_WRITE,
-                 const amd::Device* curDev = nullptr, void* svmPtr = nullptr);
+  //! \note Callers must pass an explicit \p hints (e.g. SvmAllocHints{}). Default is omitted
+  //!       because SvmAllocHints is only forward-declared here to avoid a circular include
+  //!       with platform/memory.hpp.
+  void* svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
+                 const amd::Device* curDev, void* svmPtr, const SvmAllocHints& hints);
 
   /**
    * Release SVM buffer

@@ -3936,7 +3936,8 @@ void* VirtualGPU::getOrCreateHostcallBuffer() {
   auto align = amd::getHostcallBufferAlignment();
 
   hostcallBuffer_ = dev().svmAlloc(dev().context(), size, align,
-                                   CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, nullptr);
+                                   CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, nullptr,
+                                   amd::SvmAllocHints{});
   if (!hostcallBuffer_) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create hostcall buffer");
     return nullptr;

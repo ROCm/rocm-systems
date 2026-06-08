@@ -125,7 +125,8 @@ class NullDevice : public amd::Device {
   //! Get GPU device settings
   const pal::Settings& settings() const { return reinterpret_cast<pal::Settings&>(*settings_); }
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
-                         cl_svm_mem_flags flags, void* svmPtr) const {
+                         cl_svm_mem_flags flags, void* svmPtr,
+                         const amd::SvmAllocHints& /*hints*/) const {
     return NULL;
   }
   virtual void svmFree(void* ptr) const { return; }
@@ -558,7 +559,8 @@ class Device : public NullDevice {
 
   //! SVM allocation
   virtual void* svmAlloc(amd::Context& context, size_t size, size_t alignment,
-                         cl_svm_mem_flags flags, void* svmPtr) const;
+                         cl_svm_mem_flags flags, void* svmPtr,
+                         const amd::SvmAllocHints& hints) const;
 
   bool allowPeerAccess(device::Memory* memory) const;
 

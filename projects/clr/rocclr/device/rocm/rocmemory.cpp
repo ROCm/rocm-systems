@@ -795,9 +795,11 @@ bool Buffer::create(bool alloc_local) {
         return false;
       }
     } else {
-      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(owner()->getSize(),
-                                          memFlags & ROCCLR_MEM_HSA_UNCACHED
-                                          ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0);
+      const auto& ud = owner()->getUserData();
+      owner()->getUserData().hsa_handle = dev().deviceVmemAlloc(
+          owner()->getSize(),
+          memFlags & ROCCLR_MEM_HSA_UNCACHED ? HSA_AMD_MEMORY_POOL_UNCACHED_FLAG : 0,
+          ud.numa_id, ud.numa_current);
     }
 
     if (owner()->getUserData().hsa_handle == 0) {

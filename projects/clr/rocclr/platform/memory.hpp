@@ -152,6 +152,15 @@ class Memory : public amd::RuntimeObject {
     size_t depth_ = 0;   //!< Depth value
 
     bool sync_mem_ops_ = false;  //!< Memops sync, when set synchronize all mem operations.
+
+    //! Host-NUMA placement hint forwarded from hipMemCreate(HostNuma/HostNumaCurrent) to
+    //! the ROCr backend at deviceVmemAlloc time.
+    //! - numa_id == -1 and numa_current == false:  not a NUMA-bound host allocation
+    //! - numa_id >= 0 and numa_current == false:   pin pages to the given NUMA node
+    //! - numa_current == true:                     pin pages to the node closest to the
+    //!                                             calling thread (numa_id ignored)
+    int numa_id = -1;
+    bool numa_current = false;
   };
 
  protected:
@@ -665,12 +674,20 @@ class Image : public Memory {
   void setBytePitch(size_t bytePitch) { impl_.bp_ = bytePitch; }
 };
 
+//! Hints carried from hipMemCreate down to the per-device allocation path. Used today
+//! by the ROCr backend to bind host VMM allocations to a specific NUMA node.
+struct SvmAllocHints {
+  int numa_id = -1;           //!< NUMA node id; ignored unless > -1 or numa_current is true
+  bool numa_current = false;  //!< If true, pin pages to the calling thread's NUMA node
+};
+
 //! SVM-related functionality.
 class SvmBuffer : AllStatic {
  public:
   //! Allocate a shared buffer that is accessible by all devices in the context
   static void* malloc(Context& context, cl_svm_mem_flags flags, size_t size, size_t alignment,
-                      const amd::Device* curDev = nullptr, void* hostptr = nullptr);
+                      const amd::Device* curDev = nullptr, void* hostptr = nullptr,
+                      const SvmAllocHints& hints = {});
   //! Release shared buffer
   static void free(const Context& context, void* ptr);
 

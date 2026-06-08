@@ -7,6 +7,7 @@
 #include <hip/hip_runtime.h>
 #include "hip_internal.hpp"
 #include "hip_vm.hpp"
+#include "platform/memory.hpp"
 namespace hip {
 
 static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtNone) ==
@@ -136,8 +137,16 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  amd::SvmAllocHints hints{};
+  if (loc_type == hipMemLocationTypeHostNuma) {
+    hints.numa_id = prop->location.id;
+  } else if (loc_type == hipMemLocationTypeHostNumaCurrent) {
+    hints.numa_current = true;
+  }
+
   void* ptr = amd::SvmBuffer::malloc(*amdContext, ihipFlags, size, dev_info.memBaseAddrAlign_,
-                                     useHostDevice ? curDevContext->svmDevices()[0] : nullptr);
+                                     useHostDevice ? curDevContext->svmDevices()[0] : nullptr,
+                                     nullptr, hints);
 
   // Handle out of memory cases,
   if (ptr == nullptr) {
@@ -448,16 +457,15 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
   }
 
   for (size_t desc_idx = 0; desc_idx < count; ++desc_idx) {
-    hipMemLocationType accessLocationType = desc[desc_idx].location.type;
-    if (accessLocationType != hipMemLocationTypeDevice && accessLocationType != hipMemLocationTypeHost) {
+    const hipMemLocationType accessLocationType = desc[desc_idx].location.type;
+    const bool isHostLike = (accessLocationType == hipMemLocationTypeHost ||
+                             accessLocationType == hipMemLocationTypeHostNuma ||
+                             accessLocationType == hipMemLocationTypeHostNumaCurrent);
+
+    if (accessLocationType != hipMemLocationTypeDevice && !isHostLike) {
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    if (desc[desc_idx].location.id >= g_devices.size()) {
-      HIP_RETURN(hipErrorInvalidValue)
-    }
-
-    auto& dev = g_devices[desc[desc_idx].location.id];
     amd::Device::VmmAccess access_flags = static_cast<amd::Device::VmmAccess>(desc[desc_idx].flags);
     if (access_flags != amd::Device::VmmAccess::kNone &&
         access_flags != amd::Device::VmmAccess::kReadOnly &&
@@ -465,9 +473,35 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    if (!dev->devices()[0]->SetMemAccess(ptr, size, access_flags,
-                                         static_cast<amd::Device::VmmLocationType>(accessLocationType))) {
-      HIP_RETURN(hipErrorInvalidValue);
+    if (accessLocationType == hipMemLocationTypeDevice) {
+      if (desc[desc_idx].location.id >= g_devices.size()) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      auto& dev = g_devices[desc[desc_idx].location.id];
+      if (!dev->devices()[0]->SetMemAccess(
+              ptr, size, access_flags,
+              static_cast<amd::Device::VmmLocationType>(accessLocationType))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+    } else {
+      // Host / HostNuma / HostNumaCurrent: route to the host-NUMA-aware path on the
+      // current device. The descriptor's location.id is a NUMA node id (or ignored for
+      // Host / HostNumaCurrent) and is NOT a HIP device index.
+      int numa_id = -1;
+      bool numa_current = false;
+      if (accessLocationType == hipMemLocationTypeHostNuma) {
+        if (desc[desc_idx].location.id < 0) {
+          HIP_RETURN(hipErrorInvalidValue);
+        }
+        numa_id = desc[desc_idx].location.id;
+      } else if (accessLocationType == hipMemLocationTypeHostNumaCurrent) {
+        numa_current = true;
+      }
+
+      amd::Device* dev = hip::getCurrentDevice()->devices()[0];
+      if (!dev->SetHostMemAccess(ptr, size, access_flags, numa_id, numa_current)) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
     }
   }
 
