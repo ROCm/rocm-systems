@@ -75,8 +75,9 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
-#include "dda_all_reduce_ipc.h"
+#include "dda_all_reduce.h"
 #include "ipc_init.h"
+#include "fabric_init.h"
 #include  <cpuid.h>
 
 #ifndef STR2
@@ -501,7 +502,11 @@ static ncclResult_t commFree(ncclComm_t comm) {
   free(comm->collNetHeads);
   free(comm->clique.ranks);
 
-  NCCLCHECK(ncclDdaIpcCommFini(comm));
+  if (ncclDdaUseFabricPath(comm)) {
+    NCCLCHECK(ncclDdaFabricCommFini(comm));
+  } else {
+    NCCLCHECK(ncclDdaIpcCommFini(comm));
+  }
 
   if (comm->bootstrap)
     NCCLCHECK(bootstrapClose(comm->bootstrap));
@@ -653,11 +658,15 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->destructorHead = nullptr;
   
   comm->ddaIpcMemHandler = nullptr;
-  comm->ddaIpcScratch = nullptr;
-  comm->ddaIpcScratchBytes = 0;
-  comm->ddaIpcPeerPtrsDev = nullptr;
+  comm->ddaScratch = nullptr;
+  comm->ddaScratchBytes = 0;
+  comm->ddaScratchIsVmm = false;
+  comm->ddaPeerPtrsDev = nullptr;
   comm->ddaIpcBarrierState = nullptr;
-  
+  comm->ddaFabricBarrierState = nullptr;
+  comm->ddaFabricMemHandler = nullptr;
+  comm->ddaFabricMaxBlocks = 0;
+
   comm->rank = rank;
   comm->nRanks = ndev;
   comm->pxnDisable = RCCL_VALUE_UNSET;
@@ -2570,9 +2579,14 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
-  if (!job->parent && !job->isGrow && comm->nNodes == 1 && comm->nRanks == 8) {
-  	NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
-  }
+
+  if (!job->parent && !job->isGrow) {
+    if (ncclDdaUseFabricPath(comm)) {
+      NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
+    } else if (comm->nNodes == 1 && comm->nRanks == 8) {
+      NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+    }
+  } 
   // update communicator state
   comm->initState = ncclSuccess;
 

@@ -1,12 +1,12 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host path: launch meta::comms::ddaReduceScatterFlatIpc from ncclReduceScatter.
+ * Host entry points for the DDA reduce-scatter paths launched from ncclReduceScatter.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#ifndef DDA_REDUCE_SCATTER_IPC_H_
-#define DDA_REDUCE_SCATTER_IPC_H_
+#ifndef DDA_REDUCE_SCATTER_H_
+#define DDA_REDUCE_SCATTER_H_
 
 #include "nccl.h"
 
@@ -27,6 +27,30 @@ bool ncclReduceScatterDdaIpcEligible(
  * Execute DDA reduce-scatter operation using IPC
  */
 ncclResult_t ncclReduceScatterDdaIpc(
+    const void* sendbuff,
+    void* recvbuff,
+    size_t recvcount,
+    ncclDataType_t datatype,
+    ncclRedOp_t op,
+    ncclComm* comm,
+    cudaStream_t stream);
+
+/**
+ * Check if DDA reduce-scatter is eligible for the fabric/VMM path (runtime
+ * nRanks up to kDdaMaxNranks, single- or multi-node within an MNNVL clique).
+ */
+bool ncclReduceScatterDdaFabricEligible(
+    ncclComm* comm,
+    const void* sendbuff,
+    void* recvbuff,
+    size_t recvcount,
+    ncclDataType_t datatype,
+    ncclRedOp_t op);
+
+/**
+ * Execute DDA reduce-scatter operation using the fabric/VMM path
+ */
+ncclResult_t ncclReduceScatterDdaFabric(
     const void* sendbuff,
     void* recvbuff,
     size_t recvcount,
