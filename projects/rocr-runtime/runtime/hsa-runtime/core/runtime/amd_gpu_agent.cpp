@@ -611,12 +611,15 @@ void GpuAgent::ReserveScratch()
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
-    assert(reserved_base && "Could not allocate reserved memory");
+    if (reserved_base == nullptr)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
 
     if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
-    else
+    else {
+      scratch_pool_.free(reserved_base);
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+    }
   }
 }
 
@@ -668,7 +671,7 @@ void GpuAgent::InitDerivedCuid() {
   }
 
   // Query the derived CUID using the device handle
-  uint32_t cuid_length;
+  uint32_t cuid_length = sizeof(derived_cuid_);
   status = amdcuid_query_device_property(handle, AMDCUID_QUERY_DERIVED_CUID,
                                          derived_cuid_, &cuid_length);
 
@@ -936,7 +939,8 @@ void GpuAgent::InitDma() {
     // since there is no graceful way to handle lazy loading when the caller needs to know
     // the status of available SDMA HW resources without a fallback.
     // Call to isSDMA should be used as a proxy error check if !blit_copy_fallback.
-    auto ret = pending_copy_stat_check_ref_ ? new AMD::BlitKernel(NULL) :
+    auto ret = pending_copy_stat_check_ref_.load(std::memory_order_acquire) ?
+                                              new AMD::BlitKernel(NULL) :
                                               CreateBlitKernel((*queue).get());
     if (ret == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Blit creation failed.");
@@ -1061,24 +1065,28 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, const void* src, size_t size) {
 
 void GpuAgent::SetCopyRequestRefCount(bool set) {
   std::unique_lock<std::mutex> lock(blit_lock_);
-  while (pending_copy_stat_check_ref_) {
+  while (pending_copy_stat_check_ref_.load(std::memory_order_acquire)) {
     lock.unlock();
     os::YieldThread();
     lock.lock();
   }
-  if (!set && pending_copy_req_ref_) pending_copy_req_ref_--;
-  else pending_copy_req_ref_++;
+  if (!set && pending_copy_req_ref_.load(std::memory_order_relaxed))
+    pending_copy_req_ref_.fetch_sub(1, std::memory_order_release);
+  else
+    pending_copy_req_ref_.fetch_add(1, std::memory_order_release);
 }
 
 void GpuAgent::SetCopyStatusCheckRefCount(bool set) {
   std::unique_lock<std::mutex> lock(blit_lock_);
-  while (pending_copy_req_ref_) {
+  while (pending_copy_req_ref_.load(std::memory_order_acquire)) {
     lock.unlock();
     os::YieldThread();
     lock.lock();
   }
-  if (!set && pending_copy_stat_check_ref_) pending_copy_stat_check_ref_--;
-  else pending_copy_stat_check_ref_++;
+  if (!set && pending_copy_stat_check_ref_.load(std::memory_order_relaxed))
+    pending_copy_stat_check_ref_.fetch_sub(1, std::memory_order_release);
+  else
+    pending_copy_stat_check_ref_.fetch_add(1, std::memory_order_release);
 }
 
 // Assign direct peer gang factor to GPU
@@ -2377,7 +2385,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 
       for (const auto& r : regions()) availableBytes += ((AMD::MemoryRegion*)(r.get()))->GetCacheSize();
 
-      availableBytes += scratch_cache_.free_bytes() - scratch_cache_.reserved_bytes();
+      const size_t free_scratch = scratch_cache_.free_bytes();
+      const size_t reserved_scratch = scratch_cache_.reserved_bytes();
+      availableBytes += free_scratch - std::min(free_scratch, reserved_scratch);
 
       *((uint64_t*)value) = availableBytes;
       break;
@@ -2602,7 +2612,11 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
                                 metadata_queue, flags);
   *queue = aql_queue;
-  aql_queues_.push_back(aql_queue);
+
+  {
+    std::lock_guard<std::mutex> lock(aql_queues_lock_);
+    aql_queues_.push_back(aql_queue);
+  }
 
   if (doorbell_queue_map_) {
     // Calculate index of the queue doorbell within the doorbell aperture.
@@ -2613,6 +2627,23 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   scratchGuard.Dismiss();
   return HSA_STATUS_SUCCESS;
+}
+
+void GpuAgent::UnregisterAqlQueue(core::Queue* queue) {
+  std::lock_guard<std::mutex> lock(aql_queues_lock_);
+  auto queue_it = std::find(aql_queues_.begin(), aql_queues_.end(), queue);
+  if (queue_it != aql_queues_.end()) {
+    aql_queues_.erase(queue_it);
+
+    // Clear the doorbell queue map entry to prevent stale pointer dereference
+    // by the trap handler after queue destruction.
+    if (doorbell_queue_map_) {
+      auto aql_queue = static_cast<AqlQueue*>(queue);
+      auto doorbell_addr = uintptr_t(aql_queue->signal_.hardware_doorbell_ptr);
+      auto doorbell_idx = (doorbell_addr >> 3) & (MAX_NUM_DOORBELLS - 1);
+      doorbell_queue_map_[doorbell_idx] = nullptr;
+    }
+  }
 }
 
 void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
@@ -2900,7 +2931,12 @@ void GpuAgent::ReleaseScratch(void* base, size_t size, bool large) {
 
 // Go through all the AQL queues and try to release scratch memory
 void GpuAgent::AsyncReclaimScratchQueues() {
-  for (auto iter : aql_queues_) {
+  std::vector<core::Queue*> queues;
+  {
+    std::lock_guard<std::mutex> lock(aql_queues_lock_);
+    queues = aql_queues_;
+  }
+  for (auto iter : queues) {
     auto aqlQueue = static_cast<AqlQueue*>(iter);
     aqlQueue->AsyncReclaimMainScratch();
     aqlQueue->AsyncReclaimAltScratch();
@@ -2912,7 +2948,12 @@ hsa_status_t GpuAgent::SetAsyncScratchThresholds(size_t use_once_limit) {
 
   scratch_limit_async_threshold_ = use_once_limit;
 
-  for (auto iter : aql_queues_) {
+  std::vector<core::Queue*> queues;
+  {
+    std::lock_guard<std::mutex> lock(aql_queues_lock_);
+    queues = aql_queues_;
+  }
+  for (auto iter : queues) {
     auto aqlQueue = static_cast<AqlQueue*>(iter);
     aqlQueue->CheckScratchLimits();
   }
@@ -3111,7 +3152,9 @@ void GpuAgent::BindTrapHandler() {
     auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(amd_queue_v2_t*);
 
     doorbell_queue_map_ = (amd_queue_v2_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
-    assert(doorbell_queue_map_ != NULL && "Doorbell queue map allocation failed");
+    if (doorbell_queue_map_ == NULL)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                               "Doorbell queue map allocation failed.");
 
     memset(doorbell_queue_map_, 0, doorbell_queue_map_size);
 

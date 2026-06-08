@@ -525,7 +525,8 @@
       "num_gpus": 8,
       "timeout": 0,
       "env_variables": {
-        "NCCL_DEBUG": ""
+        "NCCL_DEBUG": "",
+        "UT_MIN_GPUS": "8"
       },
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"

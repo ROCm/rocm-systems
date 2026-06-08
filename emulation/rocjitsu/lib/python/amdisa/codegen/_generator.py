@@ -2039,8 +2039,9 @@ class CodeGenerator:
             L.append(
                 '  uint64_t wide = static_cast<uint64_t>(s0) + static_cast<uint64_t>(imm);'
             )
-            L.append(f'  {dst_ops[0]}.write_scalar(wf, static_cast<uint32_t>(wide));')
-            L.append('  wf.write_scc(wide > 0xFFFFFFFFULL);')
+            L.append('  uint32_t result = static_cast<uint32_t>(wide);')
+            L.append(f'  {dst_ops[0]}.write_scalar(wf, result);')
+            L.append('  wf.write_scc(wide > 0xFFFFFFFFu);')
             return '\n'.join(L)
 
         if cls == 'scalar_mulk':
@@ -3391,7 +3392,7 @@ class CodeGenerator:
         data_dwords = sem.num_elems or 1
 
         L = []
-        acc = self._acc_vgpr_expr
+        is_cmpswap = sem.operation == 'cmpswap'
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -3405,21 +3406,24 @@ class CodeGenerator:
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
-        L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
+        L.append(
+            f"  uint32_t data_base = {self._vgpr_base_expr('data0', role='Src1')};"
+        )
+        if is_cmpswap:
+            L.append(
+                f"  uint32_t data1_base = {self._vgpr_base_expr('data1', role='Src2')};"
+            )
         stride = data_dwords * 4
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
-        is_cmpswap = sem.operation == 'cmpswap'
         half = data_dwords // 2
         for i in range(data_dwords):
             if is_cmpswap and i >= half:
-                reg = f'inst_.data1 + {i - half}'
+                data_source = f'data1_base + {i - half}'
             else:
-                reg = f'inst_.data0 + {i}'
-            L.append(
-                f'    uint32_t val{i} = cu.read_vgpr(wf.vgpr_alloc().base + {acc} + {reg}, lane);'
-            )
+                data_source = f'data_base + {i}'
+            L.append(f'    uint32_t val{i} = cu.read_vgpr({data_source}, lane);')
             L.append(
                 f'    std::memcpy(&d->store_data[lane * {stride} + {i * 4}], &val{i}, 4);'
             )
@@ -6036,11 +6040,15 @@ class CodeGenerator:
             '    return static_cast<uint32_t>(wf.vcc() >> 32);\n'
             '  if (ev >= 108 && ev <= 123)\n'
             '    return wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev));\n'
-            '  if (ev == 124)\n'
-            '    return 0u; // NULL\n'
-            '  if (ev == 125)\n'
-            '    return wf.m0();\n'
-            '  if (ev == 126)\n'
+            + (
+                '  if (ev == 124)\n'
+                '    return 0u; // NULL\n'
+                '  if (ev == 125)\n'
+                '    return wf.m0();\n'
+                if arch in ('rdna4', 'gfx1250')
+                else '  if (ev == 124)\n' '    return wf.m0();\n'
+            )
+            + '  if (ev == 126)\n'
             '    return static_cast<uint32_t>(wf.exec());\n'
             '  if (ev == 127)\n'
             '    return static_cast<uint32_t>(wf.exec() >> 32);\n'
@@ -6096,11 +6104,18 @@ class CodeGenerator:
             '// throwing. Used by Isa::simd_capable_value() to keep the SIMD fast\n'
             '// path off operands whose scalar broadcast would throw at runtime.\n'
             'bool can_resolve_src_scalar(int ev) {\n'
-            '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
-            '         ev == 124 || ev == 125 || ev == 126 || ev == 127 ||\n'
-            '         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 ||\n'
-            '         (ev >= 240 && ev <= 253);\n'
-            '}\n'
+            + (
+                '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
+                '         ev == 124 || ev == 125 || ev == 126 || ev == 127 ||\n'
+                '         (ev >= 128 && ev <= 208) || ev == 230 || ev == 231 ||\n'
+                '         (ev >= 235 && ev <= 238) || (ev >= 240 && ev <= 253);\n'
+                if arch in ('rdna4', 'gfx1250')
+                else '  return (ev >= 0 && ev <= 107) || (ev >= 108 && ev <= 123) ||\n'
+                '         ev == 124 || ev == 126 || ev == 127 ||\n'
+                '         (ev >= 128 && ev <= 208) || (ev >= 235 && ev <= 238) ||\n'
+                '         (ev >= 240 && ev <= 253);\n'
+            )
+            + '}\n'
             '\n'
             'uint64_t resolve_src_scalar64(const amdgpu::Wavefront &wf, int ev) {\n'
             '  if (ev == 102)\n'
@@ -6117,11 +6132,15 @@ class CodeGenerator:
             '    uint32_t hi = wf.cu().read_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev + 1));\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
             '  }\n'
-            '  if (ev == 124)\n'
-            '    return 0u; // NULL\n'
-            '  if (ev == 125)\n'
-            '    return wf.m0();\n'
-            '  if (ev == 126)\n'
+            + (
+                '  if (ev == 124)\n'
+                '    return 0u; // NULL\n'
+                '  if (ev == 125)\n'
+                '    return wf.m0();\n'
+                if arch in ('rdna4', 'gfx1250')
+                else '  if (ev == 124)\n' '    return wf.m0();\n'
+            )
+            + '  if (ev == 126)\n'
             '    return wf.exec();\n'
             '  if (ev >= 128 && ev <= 192)\n'
             '    return static_cast<uint64_t>(ev - 128);\n'
@@ -6185,13 +6204,20 @@ class CodeGenerator:
             '    wf.cu().write_sgpr(wf.sgpr_alloc().base + static_cast<uint32_t>(ev), val);\n'
             '    return;\n'
             '  }\n'
-            '  if (ev == 124)\n'
-            '    return;\n'
-            '  if (ev == 125) {\n'
-            '    wf.set_m0(val);\n'
-            '    return;\n'
-            '  }\n'
-            '  if (ev == 126) {\n'
+            + (
+                '  if (ev == 124)\n'
+                '    return;\n'
+                '  if (ev == 125) {\n'
+                '    wf.set_m0(val);\n'
+                '    return;\n'
+                '  }\n'
+                if arch in ('rdna4', 'gfx1250')
+                else '  if (ev == 124) {\n'
+                '    wf.set_m0(val);\n'
+                '    return;\n'
+                '  }\n'
+            )
+            + '  if (ev == 126) {\n'
             '    wf.set_exec((wf.exec() & 0xFFFFFFFF00000000ULL) | val);\n'
             '    return;\n'
             '  }\n'

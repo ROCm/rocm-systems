@@ -261,12 +261,15 @@ void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
         break;
       }
     }
+    // FLAT ops targeting the shared aperture are routed to LDS (LGKMCNT,
+    // not VMCNT).  Scratch-targeting FLATs stay on the global path.
     if (probe >= shared_aperture_base_ && probe <= shared_aperture_limit_) {
       for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
         if (d.lane_mask & (1ULL << lane))
           d.per_lane_addr[lane] = (d.per_lane_addr[lane] - shared_aperture_base_) + wf.lds_base();
       }
       inst->data()->set_tag(LOCAL_MEM);
+      d.wait_counter_type = WaitCounterType::LGKMCNT;
       local_mem_pipeline_.issue(inst, wf);
       return;
     }

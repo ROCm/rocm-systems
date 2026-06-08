@@ -1344,6 +1344,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
 
         std::memcpy(reinterpret_cast<void *>(dst), reinterpret_cast<const void *>(src), count);
 
+        for (auto *l2 : l2_caches_)
+          l2->invalidate_range(dst, count);
+        for (auto *cu : cus_)
+          cu->l1_vector().invalidate_all();
+
         if (has_signal) {
           uint32_t signal_op = dw(SIGNAL_BASE) & 0x7F;
           uint64_t signal_addr = (static_cast<uint64_t>(dw(SIGNAL_BASE + 1) & ~0x7u)) |

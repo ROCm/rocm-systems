@@ -579,6 +579,10 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
         endforeach()
+        set_tests_properties(
+            RocblasGemmTest.Large_2048x2048
+            PROPERTIES TIMEOUT 300
+        )
         foreach(I RANGE 0 4)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
         endforeach()

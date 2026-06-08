@@ -1258,12 +1258,14 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'std::fmax': 'std::fmax({0}, {1})',
     'min_num': 'std::fmin({0}, {1})',
     'max_num': 'std::fmax({0}, {1})',
-    'minimum': '[&]() {{ float a = {0}; float b = {1};'
-    ' if (std::isnan(a) || std::isnan(b)) return std::numeric_limits<float>::quiet_NaN();'
+    'minimum': '[&]() {{ auto a = {0}; auto b = {1};'
+    ' if (std::isnan(a) || std::isnan(b))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
     ' if (a == b) return std::signbit(a) ? a : b;'
     ' return a < b ? a : b; }}()',
-    'maximum': '[&]() {{ float a = {0}; float b = {1};'
-    ' if (std::isnan(a) || std::isnan(b)) return std::numeric_limits<float>::quiet_NaN();'
+    'maximum': '[&]() {{ auto a = {0}; auto b = {1};'
+    ' if (std::isnan(a) || std::isnan(b))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
     ' if (a == b) return std::signbit(a) ? b : a;'
     ' return a > b ? a : b; }}()',
     'is_ordered': '(!std::isnan({0}) && !std::isnan({1}))',
@@ -1466,14 +1468,30 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
     ' r |= static_cast<uint32_t>(byte) << (i*8);'
     ' }} return r; }}()',
-    'minimum3': 'std::fmin(std::fmin({0}, {1}), {2})',
-    'maximum3': 'std::fmax(std::fmax({0}, {1}), {2})',
+    'minimum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }}()',
+    'maximum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
     'maxmin': 'std::fmin(std::fmax({0}, {1}), {2})',
     'minmax': 'std::fmax(std::fmin({0}, {1}), {2})',
     'maxmin_num': 'std::fmin(std::fmax({0}, {1}), {2})',
     'minmax_num': 'std::fmax(std::fmin({0}, {1}), {2})',
-    'maximumminimum': 'std::fmin(std::fmax({0}, {1}), {2})',
-    'minimummaximum': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maximumminimum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }}()',
+    'minimummaximum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
     'add_max_i32': '[&]() {{ uint32_t sum_bits = static_cast<uint32_t>({0}) + static_cast<uint32_t>({1});'
     ' int32_t sum = static_cast<int32_t>(sum_bits); int32_t clamp = static_cast<int32_t>({2});'
     ' return static_cast<uint32_t>(std::max(sum, clamp)); }}()',
