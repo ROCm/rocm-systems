@@ -23,10 +23,8 @@ struct KernelEntryProloguePlan {
 };
 
 [[nodiscard]] std::optional<KernelEntryProloguePlan>
-plan_kernel_entry_prologue(uint64_t cave_start, uint64_t cave_body_size,
-                           uint64_t entry_text_offset,
-                           std::span<const uint32_t> prologue_words,
-                           rj_code_arch_t arch);
+plan_kernel_entry_prologue(uint64_t cave_start, uint64_t cave_body_size, uint64_t entry_text_offset,
+                           std::span<const uint32_t> prologue_words, rj_code_arch_t arch);
 
 class CodeObjectPatcher {
 public:
@@ -44,7 +42,7 @@ public:
   void update_elf_flags(uint32_t new_flags);
 
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
-                                              std::span<const uint8_t> descriptor);
+                                             std::span<const uint8_t> descriptor);
   [[nodiscard]] bool patch_bytes(uint64_t file_offset, std::span<const uint8_t> bytes);
 
   /// @brief Replace an SHT_NOTE section with a larger payload.
@@ -54,7 +52,7 @@ public:
   /// LOAD segments, where shifting file offsets can break ELF loader
   /// invariants for dynamic code objects.
   [[nodiscard]] bool replace_note_section(uint64_t section_file_offset,
-                                           std::span<const uint8_t> section_bytes);
+                                          std::span<const uint8_t> section_bytes);
 
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///

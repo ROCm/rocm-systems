@@ -421,10 +421,8 @@ CodeObjectPatcher::CodeObjectPatcher(const AmdGpuCodeObject &obj)
 }
 
 std::optional<KernelEntryProloguePlan>
-plan_kernel_entry_prologue(uint64_t cave_start, uint64_t cave_body_size,
-                           uint64_t entry_text_offset,
-                           std::span<const uint32_t> prologue_words,
-                           rj_code_arch_t arch) {
+plan_kernel_entry_prologue(uint64_t cave_start, uint64_t cave_body_size, uint64_t entry_text_offset,
+                           std::span<const uint32_t> prologue_words, rj_code_arch_t arch) {
   assert(!prologue_words.empty() && "empty kernel entry prologue");
 
   // A kernel descriptor entry point is a hardware launch address, not an
@@ -507,8 +505,7 @@ bool CodeObjectPatcher::replace_note_section(uint64_t section_file_offset,
   Elf64_Ehdr header{};
   std::memcpy(&header, image_.data(), sizeof(header));
   if (header.e_shentsize != sizeof(Elf64_Shdr) || header.e_shoff > image_.size() ||
-      static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr) >
-          image_.size() - header.e_shoff) {
+      static_cast<uint64_t>(header.e_shnum) * sizeof(Elf64_Shdr) > image_.size() - header.e_shoff) {
     return false;
   }
   if (header.e_phnum != 0 &&
@@ -572,14 +569,13 @@ bool CodeObjectPatcher::replace_note_section(uint64_t section_file_offset,
     return false;
   std::vector<uint8_t> replacement_region;
   replacement_region.reserve(static_cast<size_t>(old_region_size + delta));
-  replacement_region.insert(
-      replacement_region.end(), image_.begin() + static_cast<std::ptrdiff_t>(old_region_offset),
-      image_.begin() + static_cast<std::ptrdiff_t>(old_section.sh_offset));
-  replacement_region.insert(replacement_region.end(), section_bytes.begin(),
-                            section_bytes.end());
-  replacement_region.insert(
-      replacement_region.end(), image_.begin() + static_cast<std::ptrdiff_t>(old_section_end),
-      image_.begin() + static_cast<std::ptrdiff_t>(old_region_end));
+  replacement_region.insert(replacement_region.end(),
+                            image_.begin() + static_cast<std::ptrdiff_t>(old_region_offset),
+                            image_.begin() + static_cast<std::ptrdiff_t>(old_section.sh_offset));
+  replacement_region.insert(replacement_region.end(), section_bytes.begin(), section_bytes.end());
+  replacement_region.insert(replacement_region.end(),
+                            image_.begin() + static_cast<std::ptrdiff_t>(old_section_end),
+                            image_.begin() + static_cast<std::ptrdiff_t>(old_region_end));
 
   const uint64_t new_region_offset = align_up(image_.size(), alignment);
   if (new_region_offset < image_.size())
@@ -709,9 +705,8 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
 
 std::optional<uint64_t> CodeObjectPatcher::append_kernel_entry_prologue(
     uint64_t entry_text_offset, std::span<const uint32_t> prologue_words, rj_code_arch_t arch) {
-  std::optional<KernelEntryProloguePlan> plan =
-      plan_kernel_entry_prologue(cave_start_, cave_body_size(), entry_text_offset,
-                                 prologue_words, arch);
+  std::optional<KernelEntryProloguePlan> plan = plan_kernel_entry_prologue(
+      cave_start_, cave_body_size(), entry_text_offset, prologue_words, arch);
   if (!plan)
     return std::nullopt;
 
