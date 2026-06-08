@@ -3,9 +3,6 @@
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 
-* CLI mode Roofline (block 4) plot legend may not appear if the legend has too many items (caused by amount of kernels in the workload) in relation to the user's terminal size- the height of the terminal restricts the height of the plot; therefore, the legend does not have the room to display itself within the plot.
-  * Users can view the same per-kernel roofline rate metrics and AI plot point details in block 4's preceeding tables.
-
 ## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
 
 ### Added
