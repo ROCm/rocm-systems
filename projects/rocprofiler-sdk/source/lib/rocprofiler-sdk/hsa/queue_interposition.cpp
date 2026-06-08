@@ -374,6 +374,11 @@ async_signal_handler(hsa_signal_t                            completion_signal,
                              starting_value,
                              niterations);
 
+    if(auto delay_us = common::get_env("ROCPROFILER_TEST_INLINE_ASYNC_DELAY_US", 0); delay_us > 0)
+    {
+        std::this_thread::sleep_for(std::chrono::microseconds{delay_us});
+    }
+
     for(auto& packet : session->packet_data)
     {
         auto dispatch_time = kernel_dispatch::get_dispatch_time(*session, packet);
