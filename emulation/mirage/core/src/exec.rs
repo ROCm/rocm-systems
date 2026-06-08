@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{common::MaybeRef, session::SessionId};
+use crate::{common::MaybeRef, profile::FileMount, session::SessionId};
 
 /// Concrete process arguments for one program invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +159,27 @@ pub struct InjectionDef {
     pub ld_preload: Option<String>,
     pub files: BTreeMap<String, MaybeRef<Vec<u8>>>,
     pub env: BTreeMap<String, String>,
+
+    /// Host paths the emulator needs bind-mounted into each node's
+    /// container so that the injected `LD_PRELOAD`/env paths resolve
+    /// inside it. Empty for non-containerised sessions (where the
+    /// injected paths are already host paths the workload can see). By
+    /// convention these target locations live under `/mnt/mirage`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mounts: Vec<FileMount>,
+
+    /// Host device nodes the emulator needs exposed to each node's
+    /// container (`--device`), e.g. `/dev/kfd` and `/dev/dri` for AMD
+    /// GPU access. Empty for non-containerised sessions and emulators
+    /// that need no device passthrough.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub devices: Vec<String>,
+
+    /// Supplementary groups the emulator needs added inside each node's
+    /// container (`--group-add`), e.g. `video`/`render` so the workload
+    /// may open the passed-through GPU device nodes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
 }
 
 #[cfg(test)]

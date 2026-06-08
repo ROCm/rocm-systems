@@ -1344,6 +1344,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
+  //!< Request a system-scope release fence on the next AQL packet (ROCm specific)
+  virtual void addSystemScope() {}
 
   //! Get the blit manager object
   device::BlitManager& blitMgr() const { return *blitMgr_; }
@@ -2119,6 +2121,16 @@ class Device : public RuntimeObject {
 
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
   virtual void DestroyHwEvent(void* hw_event) const {}
+
+  //! Re-arm already-allocated HW event signals so they can be reused by a new
+  //! graph launch (resets the signal value and cached timing). Used by the
+  //! graph signal pool to avoid create/destroy on every launch.
+  virtual void ResetHwEvents(const std::vector<void*>& hw_events) const {}
+
+  //! Mark pooled HW event signals as idle/completed (store the done value)
+  //! before they are destroyed. Pooled signals rest in the armed state, so this
+  //! prevents signal destruction from blocking on an armed-but-idle signal.
+  virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const {}
 
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
