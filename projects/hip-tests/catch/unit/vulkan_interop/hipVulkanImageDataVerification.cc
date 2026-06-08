@@ -4,305 +4,394 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <hip/hip_runtime.h>
-#include <hip_test_common.hh>
+/*
+ * Cross-side Vulkan-image ↔ HIP mipmapped-array data verification tests.
+ *
+ * Architecture:
+ *   - Create a real VkImage (DEVICE_LOCAL, externally exportable, N mip levels).
+ *   - One VkImageView per mip level.
+ *   - Export the image memory handle; import into HIP via hipImportExternalMemory.
+ *   - Staging VkBuffer (HOST_VISIBLE) per mip level for CPU access.
+ *   - Tests write on one side, read and verify on the other, for every mip level.
+ *
+ * VulkanWrite→HIPRead per level:
+ *   CPU fills staging → CopyBufferToImage(mip i) → hipGetMipmappedArrayLevel(i)
+ *                     → hipMemcpyFromArray → verify
+ *
+ * HIPWrite→VulkanRead per level:
+ *   hipMemcpyToArray(mip i) → hipDeviceSynchronize → CopyImageToBuffer(mip i) → verify staging
+ */
 
+#include <hip_test_common.hh>
 #include "vulkan_test.hh"
+
+#include <vector>
+#include <cstring>
 
 constexpr bool enable_validation = false;
 
-static constexpr uint32_t kWidth = 64;
-static constexpr uint32_t kHeight = 64;
-static constexpr uint32_t kNumPixels = kWidth * kHeight;
+static constexpr uint32_t kBaseWidth  = 64;
+static constexpr uint32_t kBaseHeight = 64;
+static constexpr uint32_t kNumLevels  = 3;   // 64×64, 32×32, 16×16
+static constexpr VkFormat kVkFormat   = VK_FORMAT_R8G8B8A8_UINT;
 
-// ── Device kernels ────────────────────────────────────────────────────────────
+__host__ __device__ static uint32_t pack_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+  return (uint32_t(a) << 24) | (uint32_t(b) << 16) | (uint32_t(g) << 8) | uint32_t(r);
+}
 
-__global__ static void kernel_fill_surface(hipSurfaceObject_t surf, uint32_t width,
-                                           uint32_t height, uchar4 color) {
-  const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+// Per-pixel expected value for a given (x, y, mip-level) — used by both host and device code.
+// Distinct primes per channel ensure no two pixels at different (x,y,lvl) produce the same word.
+__host__ __device__ static uint32_t PixelValue(uint32_t x, uint32_t y, uint32_t lvl) {
+  return pack_rgba(static_cast<uint8_t>((x * 3 + lvl * 17) & 0xFF),
+                   static_cast<uint8_t>((y * 5 + lvl * 13) & 0xFF),
+                   static_cast<uint8_t>((x + y + lvl *  7) & 0xFF),
+                   0xFF);
+}
+
+// ── Surface kernels (uint32_t packed RGBA, matching VK_FORMAT_R8G8B8A8_UINT) ─────────────────────
+
+/* Write per-pixel coord-encoded values to a surface (mip level passed to reproduce PixelValue). */
+__global__ void kernel_surf_write_coords(hipSurfaceObject_t surf, uint32_t lvl,
+                                          uint32_t width, uint32_t height) {
+#if !__HIP_NO_IMAGE_SUPPORT
+  uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
+  uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x >= width || y >= height) return;
-  surf2Dwrite(color, surf, x * sizeof(uchar4), y);
+  surf2Dwrite(PixelValue(x, y, lvl), surf,
+              static_cast<int>(x * sizeof(uint32_t)), static_cast<int>(y));
+#endif
 }
 
-__global__ static void kernel_read_surface(hipSurfaceObject_t surf, uint32_t width,
-                                           uint32_t height, uchar4* out) {
-  const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+/* Read every texel of a surface into a flat device buffer. */
+__global__ void kernel_surf_read(hipSurfaceObject_t surf, uint32_t* out,
+                                 uint32_t width, uint32_t height) {
+#if !__HIP_NO_IMAGE_SUPPORT
+  uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
+  uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x >= width || y >= height) return;
-  surf2Dread(&out[y * width + x], surf, x * sizeof(uchar4), y);
+  uint32_t px;
+  surf2Dread(&px, surf, static_cast<int>(x * sizeof(uint32_t)), static_cast<int>(y));
+  out[y * width + x] = px;
+#endif
 }
 
-__global__ static void kernel_write_unique(hipSurfaceObject_t surf, uint32_t width,
-                                           uint32_t height) {
-  const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (x >= width || y >= height) return;
-  uchar4 px{static_cast<uint8_t>(x & 0xFFu), static_cast<uint8_t>(y & 0xFFu),
-             static_cast<uint8_t>((x + y) & 0xFFu), 0xFFu};
-  surf2Dwrite(px, surf, x * sizeof(uchar4), y);
-}
+// ── Surface helper ────────────────────────────────────────────────────────────────────────────────
 
-__global__ static void kernel_invert_surface(hipSurfaceObject_t surf, uint32_t width,
-                                             uint32_t height) {
-  const uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
-  if (x >= width || y >= height) return;
-  uchar4 px;
-  surf2Dread(&px, surf, x * sizeof(uchar4), y);
-  px.x = 255u - px.x;
-  px.y = 255u - px.y;
-  px.z = 255u - px.z;
-  surf2Dwrite(px, surf, x * sizeof(uchar4), y);
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-static constexpr dim3 kBlock{16, 16, 1};
-
-static dim3 grid2d(uint32_t w, uint32_t h) {
-  return dim3((w + 15u) / 16u, (h + 15u) / 16u, 1u);
-}
-
-static hipSurfaceObject_t make_surface(hipArray_t array) {
-  hipResourceDesc res_desc{};
-  res_desc.resType = hipResourceTypeArray;
-  res_desc.res.array.array = array;
+static hipSurfaceObject_t MakeSurface(hipArray_t level_array) {
+  hipResourceDesc res = {};
+  res.resType         = hipResourceTypeArray;
+  res.res.array.array = level_array;
   hipSurfaceObject_t surf = 0;
-  HIP_CHECK(hipCreateSurfaceObject(&surf, &res_desc));
+  HIP_CHECK(hipCreateSurfaceObject(&surf, &res));
   return surf;
 }
 
-struct VkImageMem {
-  hipExternalMemory_t ext_mem = nullptr;
-  hipMipmappedArray_t mip_array = nullptr;
+static dim3 MipGrid(uint32_t w, uint32_t h) {
+  constexpr uint32_t kBlock = 16;
+  return dim3((w + kBlock - 1) / kBlock, (h + kBlock - 1) / kBlock);
+}
 
-  void destroy() {
-    if (mip_array) {
-      HIP_CHECK(hipFreeMipmappedArray(mip_array));
-      mip_array = nullptr;
+// ── Per-mip-level metadata ────────────────────────────────────────────────────────────────────
+
+static uint32_t MipWidth(uint32_t level)  { return std::max(1u, kBaseWidth  >> level); }
+static uint32_t MipHeight(uint32_t level) { return std::max(1u, kBaseHeight >> level); }
+static uint32_t MipPixels(uint32_t level) { return MipWidth(level) * MipHeight(level); }
+
+// ── VulkanMipmapImage: owns VkImage + per-level views + staging buffers ───────────────────────
+
+struct VulkanMipmapImage {
+  VkDevice            device       = VK_NULL_HANDLE;
+  VkImage             image        = VK_NULL_HANDLE;
+  VkDeviceMemory      image_memory = VK_NULL_HANDLE;
+  VkDeviceSize        image_size   = 0;
+  std::vector<VkImageView> level_views;          // one per mip level
+
+  // Per-level staging buffers (HOST_VISIBLE, one per mip level)
+  struct StagingLevel {
+    VkBuffer        buf  = VK_NULL_HANDLE;
+    VkDeviceMemory  mem  = VK_NULL_HANDLE;
+    uint32_t*       host = nullptr;
+  };
+  std::vector<StagingLevel> staging;
+
+  hipExternalMemory_t    ext_mem   = nullptr;
+  hipMipmappedArray_t    mip_array = nullptr;
+
+  bool valid() const { return image != VK_NULL_HANDLE && ext_mem != nullptr; }
+
+  void destroy(VulkanTest& vkt) {
+    if (mip_array) { HIP_CHECK(hipFreeMipmappedArray(mip_array)); mip_array = nullptr; }
+    if (ext_mem)   { HIP_CHECK(hipDestroyExternalMemory(ext_mem)); ext_mem = nullptr; }
+
+    for (auto& s : staging) {
+      if (s.host)  vkUnmapMemory(device, s.mem);
+      if (s.buf)   vkDestroyBuffer(device, s.buf, nullptr);
+      if (s.mem)   vkFreeMemory(device, s.mem, nullptr);
     }
-    if (ext_mem) {
-      HIP_CHECK(hipDestroyExternalMemory(ext_mem));
-      ext_mem = nullptr;
+    staging.clear();
+
+    for (auto v : level_views) {
+      if (v != VK_NULL_HANDLE) vkDestroyImageView(device, v, nullptr);
     }
+    level_views.clear();
+
+    if (image)        { vkDestroyImage(device, image, nullptr); image = VK_NULL_HANDLE; }
+    if (image_memory) { vkFreeMemory(device, image_memory, nullptr); image_memory = VK_NULL_HANDLE; }
   }
 };
 
-static VkImageMem ImportVulkanImage(VulkanTest& vkt, uint32_t width, uint32_t height,
-                                    uint32_t num_levels = 1) {
-  const auto vk_buf = vkt.CreateMappedStorage<uchar4>(width * height,
-                                                       VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
-  if (vk_buf.memory == nullptr) return {};
+// ── Factory ───────────────────────────────────────────────────────────────────────────────────
 
-  VkImageMem result;
-  const auto mem_desc = vkt.BuildMemoryDescriptor(vk_buf.memory, vk_buf.size);
+static VulkanMipmapImage CreateVulkanMipmapImage(VulkanTest& vkt) {
+  VulkanMipmapImage result;
+  result.device = vkt.GetDevice();
+
+  // Create VkImage with kNumLevels mip levels, DEVICE_LOCAL + externally exportable.
+  vkt.CreateImage(kBaseWidth, kBaseHeight, kNumLevels, kVkFormat,
+                  result.image, result.image_memory, result.image_size, /*external=*/true);
+
+  // Create one VkImageView per mip level.
+  result.level_views.resize(kNumLevels);
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    result.level_views[lvl] = vkt.CreateImageView(result.image, kVkFormat, lvl, 1);
+    REQUIRE(result.level_views[lvl] != VK_NULL_HANDLE);
+  }
+
+  // Create per-level HOST_VISIBLE staging buffers.
+  result.staging.resize(kNumLevels);
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const VkDeviceSize bytes = MipPixels(lvl) * sizeof(uint32_t);
+    vkt.CreateBuffer(bytes,
+                     static_cast<VkBufferUsageFlagBits>(VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     result.staging[lvl].buf, result.staging[lvl].mem, /*external=*/false);
+    VK_CHECK_RESULT(vkMapMemory(vkt.GetDevice(), result.staging[lvl].mem, 0, bytes, 0,
+                                 reinterpret_cast<void**>(&result.staging[lvl].host)));
+  }
+
+  // Import the exported Vulkan device memory via the standard HIP API.
+  auto mem_desc = vkt.BuildMemoryDescriptor(result.image_memory,
+                                             static_cast<uint32_t>(result.image_size));
   HIP_CHECK(hipImportExternalMemory(&result.ext_mem, &mem_desc));
 
-  hipExternalMemoryMipmappedArrayDesc arr_desc{};
-  arr_desc.extent = {width, height, 0};
-  arr_desc.formatDesc = hipCreateChannelDesc<uchar4>();
-  arr_desc.flags = hipArrayDefault;
-  arr_desc.numLevels = num_levels;
-  arr_desc.offset = 0;
-  HIP_CHECK(hipExternalMemoryGetMappedMipmappedArray(&result.mip_array, result.ext_mem, &arr_desc));
+  // Map as a mipmapped array using the standard HIP API (works for both Vulkan and D3D12).
+  hipExternalMemoryMipmappedArrayDesc arr_desc = {};
+  arr_desc.extent      = {kBaseWidth, kBaseHeight, 0};
+  arr_desc.formatDesc  = hipCreateChannelDesc<unsigned int>();
+  arr_desc.flags       = hipArraySurfaceLoadStore;
+  arr_desc.numLevels   = kNumLevels;
+  arr_desc.offset      = 0;
+  HIP_CHECK(hipExternalMemoryGetMappedMipmappedArray(
+      &result.mip_array, result.ext_mem, &arr_desc));
+
   return result;
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────────────────────────
 
-// Write a solid color via surf2Dwrite, read back via hipMemcpyFromArray and verify.
-HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_HIPWrite_HIPRead_SolidColor) {
+// Vulkan writes all mip levels first (per-pixel coord pattern), then HIP reads and verifies
+// the whole image via hipMemcpyFromArray.
+HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_VulkanWrite_HIPRead) {
   CHECK_IMAGE_SUPPORT
   VulkanTest vkt(enable_validation);
-  auto img = ImportVulkanImage(vkt, kWidth, kHeight);
-  REQUIRE(img.ext_mem != nullptr);
+  auto img = CreateVulkanMipmapImage(vkt);
+  REQUIRE(img.valid());
 
-  hipArray_t array = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&array, img.mip_array, 0));
-
-  const uchar4 color{128, 64, 32, 255};
-  auto surf = make_surface(array);
-  hipLaunchKernelGGL(kernel_fill_surface, grid2d(kWidth, kHeight), kBlock, 0, nullptr, surf,
-                     kWidth, kHeight, color);
-  HIP_CHECK(hipDeviceSynchronize());
-
-  std::vector<uchar4> host(kNumPixels);
-  HIP_CHECK(hipMemcpyFromArray(host.data(), array, 0, 0, kNumPixels * sizeof(uchar4),
-                               hipMemcpyDeviceToHost));
-  for (uint32_t i = 0; i < kNumPixels; ++i) {
-    REQUIRE(host[i].x == color.x);
-    REQUIRE(host[i].y == color.y);
-    REQUIRE(host[i].z == color.z);
-    REQUIRE(host[i].w == color.w);
-  }
-
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipFreeArray(array));
-  img.destroy();
-}
-
-// Write per-pixel unique values via surf2Dwrite, read back and verify each pixel.
-HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_HIPWrite_HIPRead_UniquePerPixel) {
-  CHECK_IMAGE_SUPPORT
-  VulkanTest vkt(enable_validation);
-  auto img = ImportVulkanImage(vkt, kWidth, kHeight);
-  REQUIRE(img.ext_mem != nullptr);
-
-  hipArray_t array = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&array, img.mip_array, 0));
-
-  auto surf = make_surface(array);
-  hipLaunchKernelGGL(kernel_write_unique, grid2d(kWidth, kHeight), kBlock, 0, nullptr, surf,
-                     kWidth, kHeight);
-  HIP_CHECK(hipDeviceSynchronize());
-
-  std::vector<uchar4> host(kNumPixels);
-  HIP_CHECK(hipMemcpyFromArray(host.data(), array, 0, 0, kNumPixels * sizeof(uchar4),
-                               hipMemcpyDeviceToHost));
-  for (uint32_t y = 0; y < kHeight; ++y) {
-    for (uint32_t x = 0; x < kWidth; ++x) {
-      const auto& px = host[y * kWidth + x];
-      REQUIRE(px.x == static_cast<uint8_t>(x & 0xFFu));
-      REQUIRE(px.y == static_cast<uint8_t>(y & 0xFFu));
-      REQUIRE(px.z == static_cast<uint8_t>((x + y) & 0xFFu));
-      REQUIRE(px.w == 0xFFu);
-    }
-  }
-
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipFreeArray(array));
-  img.destroy();
-}
-
-// Write via hipMemcpyToArray, read back via surf2Dread kernel and verify.
-HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_MemcpyWrite_SurfRead) {
-  CHECK_IMAGE_SUPPORT
-  VulkanTest vkt(enable_validation);
-  auto img = ImportVulkanImage(vkt, kWidth, kHeight);
-  REQUIRE(img.ext_mem != nullptr);
-
-  hipArray_t array = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&array, img.mip_array, 0));
-
-  const uchar4 fill{200, 100, 50, 255};
-  std::vector<uchar4> host_in(kNumPixels, fill);
-  HIP_CHECK(hipMemcpyToArray(array, 0, 0, host_in.data(), kNumPixels * sizeof(uchar4),
-                             hipMemcpyHostToDevice));
-
-  uchar4* d_out = nullptr;
-  HIP_CHECK(hipMalloc(&d_out, kNumPixels * sizeof(uchar4)));
-  auto surf = make_surface(array);
-  hipLaunchKernelGGL(kernel_read_surface, grid2d(kWidth, kHeight), kBlock, 0, nullptr, surf,
-                     kWidth, kHeight, d_out);
-  HIP_CHECK(hipDeviceSynchronize());
-
-  std::vector<uchar4> host_out(kNumPixels);
-  HIP_CHECK(hipMemcpy(host_out.data(), d_out, kNumPixels * sizeof(uchar4), hipMemcpyDeviceToHost));
-  for (uint32_t i = 0; i < kNumPixels; ++i) {
-    REQUIRE(host_out[i].x == fill.x);
-    REQUIRE(host_out[i].y == fill.y);
-    REQUIRE(host_out[i].z == fill.z);
-    REQUIRE(host_out[i].w == fill.w);
-  }
-
-  HIP_CHECK(hipFree(d_out));
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipFreeArray(array));
-  img.destroy();
-}
-
-// Write solid color, invert RGB channels via kernel, read back and verify.
-HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_RoundTrip_Invert) {
-  CHECK_IMAGE_SUPPORT
-  VulkanTest vkt(enable_validation);
-  auto img = ImportVulkanImage(vkt, kWidth, kHeight);
-  REQUIRE(img.ext_mem != nullptr);
-
-  hipArray_t array = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&array, img.mip_array, 0));
-
-  const uchar4 color{100, 150, 200, 255};
-  std::vector<uchar4> host_in(kNumPixels, color);
-  HIP_CHECK(hipMemcpyToArray(array, 0, 0, host_in.data(), kNumPixels * sizeof(uchar4),
-                             hipMemcpyHostToDevice));
-
-  auto surf = make_surface(array);
-  hipLaunchKernelGGL(kernel_invert_surface, grid2d(kWidth, kHeight), kBlock, 0, nullptr, surf,
-                     kWidth, kHeight);
-  HIP_CHECK(hipDeviceSynchronize());
-
-  std::vector<uchar4> host_out(kNumPixels);
-  HIP_CHECK(hipMemcpyFromArray(host_out.data(), array, 0, 0, kNumPixels * sizeof(uchar4),
-                               hipMemcpyDeviceToHost));
-  for (uint32_t i = 0; i < kNumPixels; ++i) {
-    REQUIRE(host_out[i].x == static_cast<uint8_t>(255u - color.x));
-    REQUIRE(host_out[i].y == static_cast<uint8_t>(255u - color.y));
-    REQUIRE(host_out[i].z == static_cast<uint8_t>(255u - color.z));
-    REQUIRE(host_out[i].w == color.w);
-  }
-
-  HIP_CHECK(hipDestroySurfaceObject(surf));
-  HIP_CHECK(hipFreeArray(array));
-  img.destroy();
-}
-
-// Fill each mip level with a distinct solid color and verify per-level.
-HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_Mipmap_MultiLevel) {
-  CHECK_IMAGE_SUPPORT
-  VulkanTest vkt(enable_validation);
-
-  constexpr uint32_t kNumLevels = 3;
-  // Allocate enough Vulkan memory to cover all mip levels (64*64 + 32*32 + 16*16) * sizeof(uchar4)
-  constexpr uint32_t kTotalCount =
-      kWidth * kHeight + (kWidth / 2) * (kHeight / 2) + (kWidth / 4) * (kHeight / 4);
-  const auto vk_buf =
-      vkt.CreateMappedStorage<uchar4>(kTotalCount, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
-  REQUIRE(vk_buf.memory != nullptr);
-
-  hipExternalMemory_t ext_mem = nullptr;
-  const auto mem_desc = vkt.BuildMemoryDescriptor(vk_buf.memory, vk_buf.size);
-  HIP_CHECK(hipImportExternalMemory(&ext_mem, &mem_desc));
-
-  hipExternalMemoryMipmappedArrayDesc arr_desc{};
-  arr_desc.extent = {kWidth, kHeight, 0};
-  arr_desc.formatDesc = hipCreateChannelDesc<uchar4>();
-  arr_desc.flags = hipArrayDefault;
-  arr_desc.numLevels = kNumLevels;
-  arr_desc.offset = 0;
-
-  hipMipmappedArray_t mip_array = nullptr;
-  HIP_CHECK(hipExternalMemoryGetMappedMipmappedArray(&mip_array, ext_mem, &arr_desc));
-
-  const uchar4 level_colors[kNumLevels] = {{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}};
-
+  // Write phase: Vulkan fills every pixel of every level via staging.
   for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
-    const uint32_t lw = kWidth >> lvl;
-    const uint32_t lh = kHeight >> lvl;
-    const uint32_t n = lw * lh;
-
-    hipArray_t array = nullptr;
-    HIP_CHECK(hipGetMipmappedArrayLevel(&array, mip_array, lvl));
-
-    auto surf = make_surface(array);
-    hipLaunchKernelGGL(kernel_fill_surface, grid2d(lw, lh), kBlock, 0, nullptr, surf, lw, lh,
-                       level_colors[lvl]);
-    HIP_CHECK(hipDeviceSynchronize());
-
-    std::vector<uchar4> host(n);
-    HIP_CHECK(
-        hipMemcpyFromArray(host.data(), array, 0, 0, n * sizeof(uchar4), hipMemcpyDeviceToHost));
-    for (uint32_t i = 0; i < n; ++i) {
-      REQUIRE(host[i].x == level_colors[lvl].x);
-      REQUIRE(host[i].y == level_colors[lvl].y);
-      REQUIRE(host[i].z == level_colors[lvl].z);
-      REQUIRE(host[i].w == level_colors[lvl].w);
-    }
-
-    HIP_CHECK(hipDestroySurfaceObject(surf));
-    HIP_CHECK(hipFreeArray(array));
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl);
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        img.staging[lvl].host[y * W + x] = PixelValue(x, y, lvl);
+    vkt.CopyBufferToImage(img.staging[lvl].buf, img.image, lvl, W, H);
   }
 
-  HIP_CHECK(hipFreeMipmappedArray(mip_array));
-  HIP_CHECK(hipDestroyExternalMemory(ext_mem));
+  // Verify phase: HIP reads every pixel of every level and compares.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl), N = MipPixels(lvl);
+    hipArray_t hip_level = nullptr;
+    HIP_CHECK(hipGetMipmappedArrayLevel(&hip_level, img.mip_array, lvl));
+
+    std::vector<uint32_t> hip_pixels(N, 0);
+    HIP_CHECK(hipMemcpyFromArray(hip_pixels.data(), hip_level, 0, 0,
+                                  N * sizeof(uint32_t), hipMemcpyDeviceToHost));
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        REQUIRE(hip_pixels[y * W + x] == PixelValue(x, y, lvl));
+  }
+
+  img.destroy(vkt);
+}
+
+// HIP writes all mip levels first (per-pixel coord pattern via hipMemcpyToArray), then Vulkan
+// reads and verifies the whole image via staging buffers.
+HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_HIPWrite_VulkanRead) {
+  CHECK_IMAGE_SUPPORT
+  VulkanTest vkt(enable_validation);
+  auto img = CreateVulkanMipmapImage(vkt);
+  REQUIRE(img.valid());
+
+  // Write phase: HIP copies per-pixel data into every level.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl), N = MipPixels(lvl);
+    hipArray_t hip_level = nullptr;
+    HIP_CHECK(hipGetMipmappedArrayLevel(&hip_level, img.mip_array, lvl));
+
+    std::vector<uint32_t> host_in(N);
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        host_in[y * W + x] = PixelValue(x, y, lvl);
+    HIP_CHECK(hipMemcpyToArray(hip_level, 0, 0, host_in.data(),
+                                N * sizeof(uint32_t), hipMemcpyHostToDevice));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Verify phase: Vulkan reads every pixel of every level via staging.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl);
+    vkt.CopyImageToBuffer(img.image, lvl, W, H, img.staging[lvl].buf);
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        REQUIRE(img.staging[lvl].host[y * W + x] == PixelValue(x, y, lvl));
+  }
+
+  img.destroy(vkt);
+}
+
+// Round-trip: Vulkan writes per-pixel data into all levels, HIP reads the whole image and
+// inverts all RGB channels across all levels, writes back, then Vulkan reads the whole image
+// and verifies every pixel of every level was inverted correctly.
+HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_RoundTrip) {
+  CHECK_IMAGE_SUPPORT
+  VulkanTest vkt(enable_validation);
+  auto img = CreateVulkanMipmapImage(vkt);
+  REQUIRE(img.valid());
+
+  // Write phase: Vulkan fills all levels with per-pixel coord patterns.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl);
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        img.staging[lvl].host[y * W + x] = PixelValue(x, y, lvl);
+    vkt.CopyBufferToImage(img.staging[lvl].buf, img.image, lvl, W, H);
+  }
+
+  // HIP modify phase: read all levels, invert RGB of every pixel, write all levels back.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t N = MipPixels(lvl);
+    hipArray_t hip_level = nullptr;
+    HIP_CHECK(hipGetMipmappedArrayLevel(&hip_level, img.mip_array, lvl));
+
+    std::vector<uint32_t> tmp(N);
+    HIP_CHECK(hipMemcpyFromArray(tmp.data(), hip_level, 0, 0,
+                                  N * sizeof(uint32_t), hipMemcpyDeviceToHost));
+    for (auto& px : tmp) {
+      const uint8_t r = 255u - (px        & 0xFFu);
+      const uint8_t g = 255u - ((px >>  8) & 0xFFu);
+      const uint8_t b = 255u - ((px >> 16) & 0xFFu);
+      const uint8_t a =         (px >> 24) & 0xFFu;
+      px = pack_rgba(r, g, b, a);
+    }
+    HIP_CHECK(hipMemcpyToArray(hip_level, 0, 0, tmp.data(),
+                                N * sizeof(uint32_t), hipMemcpyHostToDevice));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Verify phase: Vulkan reads the whole image and checks every pixel is RGB-inverted.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl);
+    vkt.CopyImageToBuffer(img.image, lvl, W, H, img.staging[lvl].buf);
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x) {
+        const uint32_t orig = PixelValue(x, y, lvl);
+        const uint32_t expected = pack_rgba(
+            static_cast<uint8_t>(255u - (orig        & 0xFFu)),
+            static_cast<uint8_t>(255u - ((orig >>  8) & 0xFFu)),
+            static_cast<uint8_t>(255u - ((orig >> 16) & 0xFFu)),
+            static_cast<uint8_t>(          (orig >> 24) & 0xFFu));
+        REQUIRE(img.staging[lvl].host[y * W + x] == expected);
+      }
+  }
+
+  img.destroy(vkt);
+}
+
+// HIP surface kernels write per-pixel coord data into all mip levels first, then Vulkan reads
+// the whole image and verifies every pixel.
+HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_SurfaceWrite_VulkanRead) {
+  CHECK_IMAGE_SUPPORT
+  VulkanTest vkt(enable_validation);
+  auto img = CreateVulkanMipmapImage(vkt);
+  REQUIRE(img.valid());
+
+  constexpr dim3 kBlock(16, 16);
+
+  // Write phase: GPU surface-writes per-pixel coord values into every level.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl);
+    hipArray_t hip_level = nullptr;
+    HIP_CHECK(hipGetMipmappedArrayLevel(&hip_level, img.mip_array, lvl));
+    hipSurfaceObject_t surf = MakeSurface(hip_level);
+    kernel_surf_write_coords<<<MipGrid(W, H), kBlock>>>(surf, lvl, W, H);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDestroySurfaceObject(surf));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Verify phase: Vulkan reads the whole image and checks every pixel.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl);
+    vkt.CopyImageToBuffer(img.image, lvl, W, H, img.staging[lvl].buf);
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        REQUIRE(img.staging[lvl].host[y * W + x] == PixelValue(x, y, lvl));
+  }
+
+  img.destroy(vkt);
+}
+
+// Vulkan writes per-pixel coord data into all mip levels first, then HIP surface kernels read
+// the whole image and verify every pixel.
+HIP_TEST_CASE(Unit_hipVulkanImageDataVerification_Positive_VulkanWrite_SurfaceRead) {
+  CHECK_IMAGE_SUPPORT
+  VulkanTest vkt(enable_validation);
+  auto img = CreateVulkanMipmapImage(vkt);
+  REQUIRE(img.valid());
+
+  constexpr dim3 kBlock(16, 16);
+
+  // Write phase: Vulkan fills all levels with per-pixel coord patterns via staging.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl);
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        img.staging[lvl].host[y * W + x] = PixelValue(x, y, lvl);
+    vkt.CopyBufferToImage(img.staging[lvl].buf, img.image, lvl, W, H);
+  }
+
+  // Verify phase: GPU surface-reads every pixel of every level and checks against PixelValue.
+  for (uint32_t lvl = 0; lvl < kNumLevels; ++lvl) {
+    const uint32_t W = MipWidth(lvl), H = MipHeight(lvl), N = MipPixels(lvl);
+    hipArray_t hip_level = nullptr;
+    HIP_CHECK(hipGetMipmappedArrayLevel(&hip_level, img.mip_array, lvl));
+    hipSurfaceObject_t surf = MakeSurface(hip_level);
+
+    uint32_t* d_out = nullptr;
+    HIP_CHECK(hipMalloc(&d_out, N * sizeof(uint32_t)));
+    kernel_surf_read<<<MipGrid(W, H), kBlock>>>(surf, d_out, W, H);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipDestroySurfaceObject(surf));
+
+    std::vector<uint32_t> h_out(N);
+    HIP_CHECK(hipMemcpy(h_out.data(), d_out, N * sizeof(uint32_t), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipFree(d_out));
+
+    for (uint32_t y = 0; y < H; ++y)
+      for (uint32_t x = 0; x < W; ++x)
+        REQUIRE(h_out[y * W + x] == PixelValue(x, y, lvl));
+  }
+
+  img.destroy(vkt);
 }
