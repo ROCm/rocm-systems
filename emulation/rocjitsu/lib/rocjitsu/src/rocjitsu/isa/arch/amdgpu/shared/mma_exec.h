@@ -733,6 +733,55 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
                  blgp);
 }
 
+/// Column (N) leading-dimension pitch rounding A/B/C buffers up to a SIMD-width
+/// multiple, so every matmul row starts W-aligned. Bounds every real WMMA shape
+/// (M,N <= 16, K <= 128); anything larger falls back to the scalar path.
+constexpr size_t WMMA_SIMD_MAX_AB = 2048;      // max M*K
+constexpr size_t WMMA_SIMD_MAX_BSTRIDE = 4096; // max K*stride
+constexpr size_t WMMA_SIMD_MAX_C = 1024;       // max M*stride
+
+/// Shared SIMD core for the WMMA/SWMMAC executors. For every (row,col),
+/// Cbuf[row*stride+col] += sum_k Abuf[row*K+k] * Bbuf[k*stride+col], run as
+/// native-width rows over the col (N) dimension with a scalar tail. A/B/C must
+/// already be hoisted into dense buffers (lane permutation, per-element scale,
+/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA
+/// (matching the hardware's single-rounding MACs; the scalar reference is
+/// non-fused, so f32 agrees to a few ULP and packed f16/bf16 rounds identically);
+/// integer MAC is exact, so the SIMD and scalar paths are bit-identical.
+/// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
+/// on a platform without <experimental/simd>.
+template <typename T>
+inline void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
+                             const T *Abuf, const T *Bbuf, T *Cbuf) {
+  for (uint32_t row = 0; row < M; ++row) {
+    uint32_t col = 0;
+    for (; col + W <= N; col += W) {
+      util::native<T> c;
+      c.copy_from(&Cbuf[row * stride + col], util::stdx::vector_aligned);
+      for (uint32_t k = 0; k < K; ++k) {
+        util::native<T> a(Abuf[row * K + k]);
+        util::native<T> bv;
+        bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
+        if constexpr (std::is_floating_point_v<T>)
+          c = util::stdx::fma(a, bv, c);
+        else
+          c += a * bv;
+      }
+      c.copy_to(&Cbuf[row * stride + col], util::stdx::vector_aligned);
+    }
+    for (; col < N; ++col) {
+      T acc = Cbuf[row * stride + col];
+      for (uint32_t k = 0; k < K; ++k) {
+        if constexpr (std::is_floating_point_v<T>)
+          acc = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], acc);
+        else
+          acc += Abuf[row * K + k] * Bbuf[k * stride + col];
+      }
+      Cbuf[row * stride + col] = acc;
+    }
+  }
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
                          uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
@@ -746,20 +795,62 @@ void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, ui
   };
   std::vector<Result> results;
   results.reserve(M * N);
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto out = wmma_output_loc_32(M, N, row, col);
-      float acc = (const_acc != ACC_FROM_VGPR)
-                      ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = wmma_input_loc(M, K, row, k, a_bits);
-        auto bl = wmma_input_loc(N, K, col, k, b_bits);
-        acc += ea(cu, s0, al) * eb(cu, s1, bl);
+
+  auto run_scalar = [&]() {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        float acc = (const_acc != ACC_FROM_VGPR)
+                        ? std::bit_cast<float>(const_acc)
+                        : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = wmma_input_loc(M, K, row, k, a_bits);
+          auto bl = wmma_input_loc(N, K, col, k, b_bits);
+          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        }
+        results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
-      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
     }
+  };
+
+  // SIMD fast path: hoist A/B/C into dense f32 buffers, then run the dense
+  // MxNxK matmul as native-width FMA rows over the N (column) dimension.
+  if constexpr (util::has_stdx_simd) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
+        static_cast<size_t>(K) * stride > WMMA_SIMD_MAX_BSTRIDE ||
+        static_cast<size_t>(M) * stride > WMMA_SIMD_MAX_C) {
+      run_scalar();
+    } else {
+      alignas(64) float Abuf[WMMA_SIMD_MAX_AB] = {};
+      alignas(64) float Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
+      alignas(64) float Cbuf[WMMA_SIMD_MAX_C] = {};
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          Cbuf[row * stride + col] =
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t k = 0; k < K; ++k)
+          Abuf[row * K + k] = ea(cu, s0, wmma_input_loc(M, K, row, k, a_bits));
+      for (uint32_t k = 0; k < K; ++k)
+        for (uint32_t col = 0; col < N; ++col)
+          Bbuf[k * stride + col] = eb(cu, s1, wmma_input_loc(N, K, col, k, b_bits));
+      wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(Cbuf[row * stride + col])});
+        }
+    }
+  } else {
+    run_scalar();
   }
+
   for (const auto &r : results)
     cu.write_vgpr(dst + r.reg, r.lane, r.val);
 }
@@ -780,29 +871,85 @@ void exec_wmma_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_
   };
   std::vector<Result> results;
   results.reserve(M * N);
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto out = wmma_output_loc_32(M, N, row, col);
-      float acc = (const_acc != ACC_FROM_VGPR)
-                      ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
-      const uint32_t a_scale_word = scale_a_word(wmma_scale_lane(row, matrix_a_scale));
-      const uint32_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = wmma_input_loc(M, K, row, k, a_bits);
-        auto bl = wmma_input_loc(N, K, col, k, b_bits);
-        const uint32_t a_scale_byte = wmma_scale_byte(al);
-        const uint32_t b_scale_byte =
-            (b_bits == 4) ? wmma_b_fp4_scale_byte(k) : wmma_scale_byte(bl);
-        const float a_scale = decode_wmma_scale_byte(
-            static_cast<uint8_t>((a_scale_word >> (a_scale_byte * 8)) & 0xffu), matrix_a_scale_fmt);
-        const float b_scale = decode_wmma_scale_byte(
-            static_cast<uint8_t>((b_scale_word >> (b_scale_byte * 8)) & 0xffu), matrix_b_scale_fmt);
-        acc += ea(cu, s0, al) * eb(cu, s1, bl) * a_scale * b_scale;
+
+  // Per-element A scale (folds into Abuf): f(row, k). Per-element B scale (folds
+  // into Bbuf): f(col, k). With both folded in, the product reduces to the plain
+  // dense matmul A*B that wmma_simd_matmul computes.
+  auto a_scale_for = [&](uint32_t a_scale_word, const InputLoc &al) -> float {
+    return decode_wmma_scale_byte(
+        static_cast<uint8_t>((a_scale_word >> (wmma_scale_byte(al) * 8)) & 0xffu),
+        matrix_a_scale_fmt);
+  };
+  auto b_scale_for = [&](uint32_t b_scale_word, const InputLoc &bl, uint32_t k) -> float {
+    const uint32_t b_scale_byte = (b_bits == 4) ? wmma_b_fp4_scale_byte(k) : wmma_scale_byte(bl);
+    return decode_wmma_scale_byte(
+        static_cast<uint8_t>((b_scale_word >> (b_scale_byte * 8)) & 0xffu), matrix_b_scale_fmt);
+  };
+
+  auto run_scalar = [&]() {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        float acc = (const_acc != ACC_FROM_VGPR)
+                        ? std::bit_cast<float>(const_acc)
+                        : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        const uint32_t a_scale_word = scale_a_word(wmma_scale_lane(row, matrix_a_scale));
+        const uint32_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = wmma_input_loc(M, K, row, k, a_bits);
+          auto bl = wmma_input_loc(N, K, col, k, b_bits);
+          acc += ea(cu, s0, al) * eb(cu, s1, bl) * a_scale_for(a_scale_word, al) *
+                 b_scale_for(b_scale_word, bl, k);
+        }
+        results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
-      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
     }
+  };
+
+  if constexpr (util::has_stdx_simd) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
+        static_cast<size_t>(K) * stride > WMMA_SIMD_MAX_BSTRIDE ||
+        static_cast<size_t>(M) * stride > WMMA_SIMD_MAX_C) {
+      run_scalar();
+    } else {
+      alignas(64) float Abuf[WMMA_SIMD_MAX_AB] = {};
+      alignas(64) float Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
+      alignas(64) float Cbuf[WMMA_SIMD_MAX_C] = {};
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          Cbuf[row * stride + col] =
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        }
+      for (uint32_t row = 0; row < M; ++row) {
+        const uint32_t a_scale_word = scale_a_word(wmma_scale_lane(row, matrix_a_scale));
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = wmma_input_loc(M, K, row, k, a_bits);
+          Abuf[row * K + k] = ea(cu, s0, al) * a_scale_for(a_scale_word, al);
+        }
+      }
+      for (uint32_t col = 0; col < N; ++col) {
+        const uint32_t b_scale_word = scale_b_word(wmma_scale_lane(col, matrix_b_scale));
+        for (uint32_t k = 0; k < K; ++k) {
+          auto bl = wmma_input_loc(N, K, col, k, b_bits);
+          Bbuf[k * stride + col] = eb(cu, s1, bl) * b_scale_for(b_scale_word, bl, k);
+        }
+      }
+      wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(Cbuf[row * stride + col])});
+        }
+    }
+  } else {
+    run_scalar();
   }
+
   for (const auto &r : results)
     cu.write_vgpr(dst + r.reg, r.lane, r.val);
 }
@@ -830,25 +977,72 @@ void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
   results.reserve(M * N);
 
   const uint32_t compressed_k = K / 2;
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto out = wmma_output_loc_32(M, N, row, col);
-      float acc = (const_acc != ACC_FROM_VGPR)
-                      ? std::bit_cast<float>(const_acc)
-                      : std::bit_cast<float>(cu.read_vgpr(acc_base + out.reg, out.lane));
-      for (uint32_t ck = 0; ck < compressed_k; ++ck) {
-        auto al = wmma_input_loc(M, K / 2, row, ck, a_bits);
-        const uint32_t metadata_lane = row + (ck / index_entries) * M;
-        const uint32_t local_ck = ck % index_entries;
-        const uint64_t index_set =
-            read_swmmac_index_set(cu, index_base, metadata_lane, index_entries, index_key);
-        const uint32_t dense_k = swmmac_dense_k(index_set, ck, local_ck);
-        auto bl = wmma_input_loc(N, K, col, dense_k, b_bits);
-        acc += ea(cu, s0, al) * eb(cu, s1, bl);
+
+  // dense_k depends on (row, ck) via the row's metadata, not on col — so the
+  // gathered B column is shared across all col for a fixed row. Resolve it once.
+  auto dense_k_for = [&](uint32_t row, uint32_t ck) -> uint32_t {
+    const uint32_t metadata_lane = row + (ck / index_entries) * M;
+    const uint32_t local_ck = ck % index_entries;
+    const uint64_t index_set =
+        read_swmmac_index_set(cu, index_base, metadata_lane, index_entries, index_key);
+    return swmmac_dense_k(index_set, ck, local_ck);
+  };
+
+  auto run_scalar = [&]() {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        float acc = (const_acc != ACC_FROM_VGPR)
+                        ? std::bit_cast<float>(const_acc)
+                        : std::bit_cast<float>(cu.read_vgpr(acc_base + out.reg, out.lane));
+        for (uint32_t ck = 0; ck < compressed_k; ++ck) {
+          auto al = wmma_input_loc(M, K / 2, row, ck, a_bits);
+          auto bl = wmma_input_loc(N, K, col, dense_k_for(row, ck), b_bits);
+          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        }
+        results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
-      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
     }
+  };
+
+  // SIMD fast path: because the B gather is row-dependent, hoist each row's A
+  // (compressed_k) and B (compressed_k x col, with dense_k folded in) into dense
+  // buffers, then run that single row through the shared matmul core (M=1).
+  if constexpr (util::has_stdx_simd) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    if (util::force_scalar() || static_cast<size_t>(compressed_k) > WMMA_SIMD_MAX_AB ||
+        static_cast<size_t>(compressed_k) * stride > WMMA_SIMD_MAX_BSTRIDE ||
+        stride > WMMA_SIMD_MAX_C) {
+      run_scalar();
+    } else {
+      alignas(64) float Abuf[WMMA_SIMD_MAX_AB] = {};
+      alignas(64) float Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
+      alignas(64) float Cbuf[WMMA_SIMD_MAX_C] = {};
+      for (uint32_t row = 0; row < M; ++row) {
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          Cbuf[col] = (const_acc != ACC_FROM_VGPR)
+                          ? std::bit_cast<float>(const_acc)
+                          : std::bit_cast<float>(cu.read_vgpr(acc_base + out.reg, out.lane));
+        }
+        for (uint32_t ck = 0; ck < compressed_k; ++ck) {
+          Abuf[ck] = ea(cu, s0, wmma_input_loc(M, K / 2, row, ck, a_bits));
+          const uint32_t dense_k = dense_k_for(row, ck);
+          for (uint32_t col = 0; col < N; ++col)
+            Bbuf[ck * stride + col] = eb(cu, s1, wmma_input_loc(N, K, col, dense_k, b_bits));
+        }
+        wmma_simd_matmul<float>(1, N, compressed_k, W, stride, Abuf, Bbuf, Cbuf);
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(Cbuf[col])});
+        }
+      }
+    }
+  } else {
+    run_scalar();
   }
+
   for (const auto &r : results)
     cu.write_vgpr(dst + r.reg, r.lane, r.val);
 }
@@ -876,19 +1070,61 @@ void exec_wmma_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
   };
   std::vector<Result> results;
   results.reserve(M * N);
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto out = wmma_output_loc_16(M, N, row, col);
-      float acc = (const_acc != ACC_FROM_VGPR)
-                      ? std::bit_cast<float>(const_acc)
-                      : read_acc(cu, s2 + out.reg, out.lane, out.sub_element);
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = wmma_input_loc(M, K, row, k, in_bits);
-        auto bl = wmma_input_loc(N, K, col, k, in_bits);
-        acc += ea(cu, s0, al) * eb(cu, s1, bl);
+
+  auto run_scalar = [&]() {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_16(M, N, row, col);
+        float acc = (const_acc != ACC_FROM_VGPR)
+                        ? std::bit_cast<float>(const_acc)
+                        : read_acc(cu, s2 + out.reg, out.lane, out.sub_element);
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = wmma_input_loc(M, K, row, k, in_bits);
+          auto bl = wmma_input_loc(N, K, col, k, in_bits);
+          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        }
+        results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
       }
-      results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
     }
+  };
+
+  // SIMD fast path: run the f32 matmul vectorized over N into a dense grid, then
+  // pack each result to 16 bits via the caller's pack_result. The masked 2-per-
+  // word scatter below is unchanged.
+  if constexpr (util::has_stdx_simd) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
+        static_cast<size_t>(K) * stride > WMMA_SIMD_MAX_BSTRIDE ||
+        static_cast<size_t>(M) * stride > WMMA_SIMD_MAX_C) {
+      run_scalar();
+    } else {
+      alignas(64) float Abuf[WMMA_SIMD_MAX_AB] = {};
+      alignas(64) float Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
+      alignas(64) float Cbuf[WMMA_SIMD_MAX_C] = {};
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_16(M, N, row, col);
+          Cbuf[row * stride + col] = (const_acc != ACC_FROM_VGPR)
+                                         ? std::bit_cast<float>(const_acc)
+                                         : read_acc(cu, s2 + out.reg, out.lane, out.sub_element);
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t k = 0; k < K; ++k)
+          Abuf[row * K + k] = ea(cu, s0, wmma_input_loc(M, K, row, k, in_bits));
+      for (uint32_t k = 0; k < K; ++k)
+        for (uint32_t col = 0; col < N; ++col)
+          Bbuf[k * stride + col] = eb(cu, s1, wmma_input_loc(N, K, col, k, in_bits));
+      wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_16(M, N, row, col);
+          results.push_back(
+              {out.reg, out.lane, out.sub_element, pack_result(Cbuf[row * stride + col])});
+        }
+    }
+  } else {
+    run_scalar();
   }
 
   uint32_t dst_regs = ((M * N) / WMMA_WAVE32 + 1) / 2;
@@ -933,24 +1169,67 @@ void exec_swmmac_packed16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
   results.reserve(M * N);
 
   const uint32_t compressed_k = K / 2;
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto out = wmma_output_loc_16(M, N, row, col);
-      float acc = (const_acc != ACC_FROM_VGPR)
-                      ? std::bit_cast<float>(const_acc)
-                      : read_acc(cu, acc_base + out.reg, out.lane, out.sub_element);
-      for (uint32_t ck = 0; ck < compressed_k; ++ck) {
-        auto al = wmma_input_loc(M, K / 2, row, ck, in_bits);
-        const uint32_t metadata_lane = row + (ck / index_entries) * M;
-        const uint32_t local_ck = ck % index_entries;
-        const uint64_t index_set =
-            read_swmmac_index_set(cu, index_base, metadata_lane, index_entries, index_key);
-        const uint32_t dense_k = swmmac_dense_k(index_set, ck, local_ck);
-        auto bl = wmma_input_loc(N, K, col, dense_k, in_bits);
-        acc += ea(cu, s0, al) * eb(cu, s1, bl);
+
+  auto dense_k_for = [&](uint32_t row, uint32_t ck) -> uint32_t {
+    const uint32_t metadata_lane = row + (ck / index_entries) * M;
+    const uint32_t local_ck = ck % index_entries;
+    const uint64_t index_set =
+        read_swmmac_index_set(cu, index_base, metadata_lane, index_entries, index_key);
+    return swmmac_dense_k(index_set, ck, local_ck);
+  };
+
+  auto run_scalar = [&]() {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_16(M, N, row, col);
+        float acc = (const_acc != ACC_FROM_VGPR)
+                        ? std::bit_cast<float>(const_acc)
+                        : read_acc(cu, acc_base + out.reg, out.lane, out.sub_element);
+        for (uint32_t ck = 0; ck < compressed_k; ++ck) {
+          auto al = wmma_input_loc(M, K / 2, row, ck, in_bits);
+          auto bl = wmma_input_loc(N, K, col, dense_k_for(row, ck), in_bits);
+          acc += ea(cu, s0, al) * eb(cu, s1, bl);
+        }
+        results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
       }
-      results.push_back({out.reg, out.lane, out.sub_element, pack_result(acc)});
     }
+  };
+
+  // SIMD fast path: per-row gather (dense_k is row-dependent) into dense f32
+  // buffers, single row through the matmul core (M=1), pack to 16 bits.
+  if constexpr (util::has_stdx_simd) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    if (util::force_scalar() || static_cast<size_t>(compressed_k) > WMMA_SIMD_MAX_AB ||
+        static_cast<size_t>(compressed_k) * stride > WMMA_SIMD_MAX_BSTRIDE ||
+        stride > WMMA_SIMD_MAX_C) {
+      run_scalar();
+    } else {
+      alignas(64) float Abuf[WMMA_SIMD_MAX_AB] = {};
+      alignas(64) float Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
+      alignas(64) float Cbuf[WMMA_SIMD_MAX_C] = {};
+      for (uint32_t row = 0; row < M; ++row) {
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_16(M, N, row, col);
+          Cbuf[col] = (const_acc != ACC_FROM_VGPR)
+                          ? std::bit_cast<float>(const_acc)
+                          : read_acc(cu, acc_base + out.reg, out.lane, out.sub_element);
+        }
+        for (uint32_t ck = 0; ck < compressed_k; ++ck) {
+          Abuf[ck] = ea(cu, s0, wmma_input_loc(M, K / 2, row, ck, in_bits));
+          const uint32_t dense_k = dense_k_for(row, ck);
+          for (uint32_t col = 0; col < N; ++col)
+            Bbuf[ck * stride + col] = eb(cu, s1, wmma_input_loc(N, K, col, dense_k, in_bits));
+        }
+        wmma_simd_matmul<float>(1, N, compressed_k, W, stride, Abuf, Bbuf, Cbuf);
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_16(M, N, row, col);
+          results.push_back({out.reg, out.lane, out.sub_element, pack_result(Cbuf[col])});
+        }
+      }
+    }
+  } else {
+    run_scalar();
   }
 
   uint32_t dst_regs = ((M * N) / WMMA_WAVE32 + 1) / 2;
@@ -1349,21 +1628,65 @@ inline void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
   };
   std::vector<Result> results;
   results.reserve(M * N);
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto out = wmma_output_loc_32(M, N, row, col);
-      int64_t acc =
-          (const_acc != ACC_FROM_VGPR)
-              ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-              : static_cast<int64_t>(static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane)));
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = wmma_input_loc(M, K, row, k, in_bits);
-        auto bl = wmma_input_loc(N, K, col, k, in_bits);
-        acc += static_cast<int64_t>(ea(cu, s0, al)) * static_cast<int64_t>(eb(cu, s1, bl));
+
+  auto run_scalar = [&]() {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        int64_t acc =
+            (const_acc != ACC_FROM_VGPR)
+                ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
+                : static_cast<int64_t>(static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane)));
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = wmma_input_loc(M, K, row, k, in_bits);
+          auto bl = wmma_input_loc(N, K, col, k, in_bits);
+          acc += static_cast<int64_t>(ea(cu, s0, al)) * static_cast<int64_t>(eb(cu, s1, bl));
+        }
+        results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
       }
-      results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
     }
+  };
+
+  // SIMD fast path: int32 accumulation is exact and cannot overflow for WMMA's
+  // i8/i4 inputs at K <= 128 (max |acc| ~1M << 2^31), so it matches the scalar
+  // int64+clamp result bit-for-bit; the final pack_i32_acc still clamps.
+  if constexpr (util::has_stdx_simd) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<int32_t>::size());
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    if (util::force_scalar() || static_cast<size_t>(M) * K > WMMA_SIMD_MAX_AB ||
+        static_cast<size_t>(K) * stride > WMMA_SIMD_MAX_BSTRIDE ||
+        static_cast<size_t>(M) * stride > WMMA_SIMD_MAX_C) {
+      run_scalar();
+    } else {
+      alignas(64) int32_t Abuf[WMMA_SIMD_MAX_AB] = {};
+      alignas(64) int32_t Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
+      alignas(64) int32_t Cbuf[WMMA_SIMD_MAX_C] = {};
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          Cbuf[row * stride + col] =
+              (const_acc != ACC_FROM_VGPR)
+                  ? static_cast<int32_t>(const_acc)
+                  : static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane));
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t k = 0; k < K; ++k)
+          Abuf[row * K + k] = ea(cu, s0, wmma_input_loc(M, K, row, k, in_bits));
+      for (uint32_t k = 0; k < K; ++k)
+        for (uint32_t col = 0; col < N; ++col)
+          Bbuf[k * stride + col] = eb(cu, s1, wmma_input_loc(N, K, col, k, in_bits));
+      wmma_simd_matmul<int32_t>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          results.push_back({out.reg, out.lane,
+                             pack_i32_acc(static_cast<int64_t>(Cbuf[row * stride + col]), clamp)});
+        }
+    }
+  } else {
+    run_scalar();
   }
+
   for (const auto &r : results)
     cu.write_vgpr(dst + r.reg, r.lane, r.val);
 }
@@ -1390,26 +1713,72 @@ inline void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N,
   results.reserve(M * N);
 
   const uint32_t compressed_k = K / 2;
-  for (uint32_t row = 0; row < M; ++row) {
-    for (uint32_t col = 0; col < N; ++col) {
-      auto out = wmma_output_loc_32(M, N, row, col);
-      int64_t acc = (const_acc != ACC_FROM_VGPR)
-                        ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
-                        : static_cast<int64_t>(
-                              static_cast<int32_t>(cu.read_vgpr(acc_base + out.reg, out.lane)));
-      for (uint32_t ck = 0; ck < compressed_k; ++ck) {
-        auto al = wmma_input_loc(M, K / 2, row, ck, in_bits);
-        const uint32_t metadata_lane = row + (ck / index_entries) * M;
-        const uint32_t local_ck = ck % index_entries;
-        const uint64_t index_set =
-            read_swmmac_index_set(cu, index_base, metadata_lane, index_entries, index_key);
-        const uint32_t dense_k = swmmac_dense_k(index_set, ck, local_ck);
-        auto bl = wmma_input_loc(N, K, col, dense_k, in_bits);
-        acc += static_cast<int64_t>(ea(cu, s0, al)) * static_cast<int64_t>(eb(cu, s1, bl));
+
+  auto dense_k_for = [&](uint32_t row, uint32_t ck) -> uint32_t {
+    const uint32_t metadata_lane = row + (ck / index_entries) * M;
+    const uint32_t local_ck = ck % index_entries;
+    const uint64_t index_set =
+        read_swmmac_index_set(cu, index_base, metadata_lane, index_entries, index_key);
+    return swmmac_dense_k(index_set, ck, local_ck);
+  };
+
+  auto run_scalar = [&]() {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        int64_t acc = (const_acc != ACC_FROM_VGPR)
+                          ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
+                          : static_cast<int64_t>(
+                                static_cast<int32_t>(cu.read_vgpr(acc_base + out.reg, out.lane)));
+        for (uint32_t ck = 0; ck < compressed_k; ++ck) {
+          auto al = wmma_input_loc(M, K / 2, row, ck, in_bits);
+          auto bl = wmma_input_loc(N, K, col, dense_k_for(row, ck), in_bits);
+          acc += static_cast<int64_t>(ea(cu, s0, al)) * static_cast<int64_t>(eb(cu, s1, bl));
+        }
+        results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
       }
-      results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
     }
+  };
+
+  // SIMD fast path: per-row gather, single row through the int32 matmul core
+  // (M=1). int32 accumulation is exact for i8/i4 inputs (no overflow), matching
+  // the scalar int64+clamp result; pack_i32_acc still clamps at the end.
+  if constexpr (util::has_stdx_simd) {
+    constexpr uint32_t W = static_cast<uint32_t>(util::native<int32_t>::size());
+    const uint32_t stride = ((N + W - 1) / W) * W;
+    if (util::force_scalar() || static_cast<size_t>(compressed_k) > WMMA_SIMD_MAX_AB ||
+        static_cast<size_t>(compressed_k) * stride > WMMA_SIMD_MAX_BSTRIDE ||
+        stride > WMMA_SIMD_MAX_C) {
+      run_scalar();
+    } else {
+      alignas(64) int32_t Abuf[WMMA_SIMD_MAX_AB] = {};
+      alignas(64) int32_t Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
+      alignas(64) int32_t Cbuf[WMMA_SIMD_MAX_C] = {};
+      for (uint32_t row = 0; row < M; ++row) {
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          Cbuf[col] = (const_acc != ACC_FROM_VGPR)
+                          ? static_cast<int32_t>(const_acc)
+                          : static_cast<int32_t>(cu.read_vgpr(acc_base + out.reg, out.lane));
+        }
+        for (uint32_t ck = 0; ck < compressed_k; ++ck) {
+          Abuf[ck] = ea(cu, s0, wmma_input_loc(M, K / 2, row, ck, in_bits));
+          const uint32_t dense_k = dense_k_for(row, ck);
+          for (uint32_t col = 0; col < N; ++col)
+            Bbuf[ck * stride + col] = eb(cu, s1, wmma_input_loc(N, K, col, dense_k, in_bits));
+        }
+        wmma_simd_matmul<int32_t>(1, N, compressed_k, W, stride, Abuf, Bbuf, Cbuf);
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = wmma_output_loc_32(M, N, row, col);
+          results.push_back(
+              {out.reg, out.lane, pack_i32_acc(static_cast<int64_t>(Cbuf[col]), clamp)});
+        }
+      }
+    }
+  } else {
+    run_scalar();
   }
+
   for (const auto &r : results)
     cu.write_vgpr(dst + r.reg, r.lane, r.val);
 }
