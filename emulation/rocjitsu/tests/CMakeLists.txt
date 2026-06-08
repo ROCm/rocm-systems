@@ -211,6 +211,11 @@ if(ROCMINFO_EXECUTABLE)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
     add_test(
+        NAME "RocminfoTest.ReportsMarketingName"
+        COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsMarketingName
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_test(
         NAME "RocminfoTest.ReportsWavefrontSize"
         COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsWavefrontSize
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -221,6 +226,7 @@ if(ROCMINFO_EXECUTABLE)
         "RocminfoTest.HsaSystemAttributes"
         "RocminfoTest.DetectsGpuAgent"
         "RocminfoTest.ReportsGfx950"
+        "RocminfoTest.ReportsMarketingName"
         "RocminfoTest.ReportsWavefrontSize"
         PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
     )
@@ -721,6 +727,20 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     )
 
     add_subdirectory(race-detector)
+
+    # --- Performance benchmark (standalone, no gtest) ---
+    set(PERF_BENCH_SRC ${CMAKE_CURRENT_SOURCE_DIR}/hip_perf_bench.cpp)
+    set(PERF_BENCH_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_perf_bench)
+    add_custom_command(
+        OUTPUT ${PERF_BENCH_BIN}
+        COMMAND
+            ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20 -o
+            ${PERF_BENCH_BIN} ${PERF_BENCH_SRC}
+        DEPENDS ${PERF_BENCH_SRC}
+        COMMENT "Building hip_perf_bench with hipcc"
+        VERBATIM
+    )
+    add_custom_target(hip_perf_bench_target ALL DEPENDS ${PERF_BENCH_BIN})
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()
