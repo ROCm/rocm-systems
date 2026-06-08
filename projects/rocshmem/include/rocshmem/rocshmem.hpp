@@ -224,6 +224,71 @@ __host__ void rocshmem_finalize();
 __host__ void *rocshmem_malloc(size_t size);
 
 /**
+ * @brief Allocate memory of \p size bytes from the symmetric heap with the
+ * requested \p alignment. This is a collective operation and must be called by
+ * all PEs with identical \p alignment and \p size arguments.
+ *
+ * The returned pointer (and, by symmetry, every peer's pointer for the same
+ * collective call) is aligned to \p alignment bytes.
+ *
+ * Constraints on @p alignment (matching OpenSHMEM ``shmem_align`` and POSIX
+ * ``posix_memalign`` semantics):
+ *   - \p alignment must be a power of two.
+ *   - \p alignment must be a multiple of ``sizeof(void *)``.
+ *
+ *   In practice, any power of two that is at least ``sizeof(void *)`` (i.e.
+ *   \c 8 on a 64-bit build) satisfies both rules. Therefore the smallest
+ *   accepted value is ``sizeof(void *)`` and accepted values are
+ *   ``sizeof(void *), 2*sizeof(void *), 4*sizeof(void *), ...``.
+ *
+ *   If \p alignment violates either rule (including \c 0, \c 1, \c 2, \c 4 on
+ *   64-bit, or any non power-of-two), this routine returns \c NULL and emits
+ *   a warning. The collective barrier is still entered so other PEs do not
+ *   deadlock.
+ *
+ *   \p alignment values less than or equal to the default symmetric-heap
+ *   alignment (128 bytes) yield a 128-byte aligned pointer (identical to
+ *   ::rocshmem_malloc).
+ *
+ * @param[in] alignment Required pointer alignment in bytes. Must be a power
+ *                      of two and a multiple of ``sizeof(void *)``.
+ * @param[in] size      Memory allocation size in bytes.
+ *
+ * @return A pointer to the allocated memory on the symmetric heap, or
+ *         \c NULL if \p alignment is invalid or the allocation cannot be
+ *         satisfied.
+ */
+__host__ void *rocshmem_align(size_t alignment, size_t size);
+
+/**
+ * @brief Allocate memory for an array of \p count elements of \p size bytes
+ * each from the symmetric heap and zero-initialize the allocation. This is a
+ * collective operation and must be called by all PEs with identical \p count
+ * and \p size arguments.
+ *
+ * Mirrors OpenSHMEM ``shmem_calloc`` semantics: the returned buffer holds
+ * ``count * size`` bytes, every byte set to ``0``. The pointer satisfies the
+ * same default symmetric-heap alignment as ::rocshmem_malloc.
+ *
+ * Returns ``NULL`` when:
+ *   - \p count is \c 0,
+ *   - \p size is \c 0,
+ *   - ``count * size`` would overflow ``size_t`` (a warning is emitted in
+ *     this case), or
+ *   - the underlying allocation cannot be satisfied.
+ *
+ * The collective barrier is still entered on the NULL-return paths so that
+ * other PEs do not deadlock.
+ *
+ * @param[in] count Number of elements to allocate.
+ * @param[in] size  Size of each element in bytes.
+ *
+ * @return A pointer to the zero-initialized allocation on the symmetric
+ *         heap, or \c NULL on the failure conditions described above.
+ */
+__host__ void *rocshmem_calloc(size_t count, size_t size);
+
+/**
  * @brief Free a memory allocation from the symmetric heap.
  * This is a collective operation and must be called by all PEs.
  *
@@ -245,6 +310,11 @@ __host__ int rocshmem_buffer_register(void *addr, size_t length);
  * @param[in] addr Pointer to previously registered memory
  */
 __host__ int rocshmem_buffer_unregister(void *addr);
+
+/**
+ * @brief Deregisters all previously registered user memory
+ */
+__host__ void rocshmem_buffer_unregister_all();
 
 /**
  * @brief Query for the number of PEs.

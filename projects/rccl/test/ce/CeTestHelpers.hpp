@@ -14,10 +14,21 @@
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 
-// Driver-version check
-// Returns true when the HIP driver supports CE: ROCm ≥ 7.12 or the 7.0.2.x
-// backport range [7.0.2.2, 7.0.3.0).
-inline bool isCeDriverSupported()
+#include <hip/hip_runtime.h>
+
+// Returns true when compiled with CE batch API support (CE_BATCH_ASYNC_SUPPORTED).
+// Gated at build time via check_symbol_exists(hipMemcpyBatchAsync); no runtime query needed.
+inline constexpr bool isCeDriverSupported()
+{
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    return true;
+#else
+    return false;
+#endif
+}
+
+// Runtime driver-version gate mirroring ncclCeImplemented(): ROCm 7.12+ (>= 71200000) or the 7.0.2.x backport range [70051831, 70060000).
+inline bool isCeRuntimeDriverSupported()
 {
     int driverVer = 0;
     if(hipDriverGetVersion(&driverVer) != hipSuccess)
@@ -28,11 +39,12 @@ inline bool isCeDriverSupported()
 
 // Full CE dispatch gate
 
-// Returns true when all four prerequisites for CE dispatch are satisfied:
-//   1. Driver version supports CE (ROCm ≥ 7.12 or 7.0.2.2).
-//   2. NCCL_CTA_POLICY=2     (CE dispatch mode).
-//   3. NCCL_LOCAL_REGISTER=0  (explicit buffer registration only).
-//   4. NCCL_CUMEM_ENABLE=1    (VMM-backed symmetric memory; default is 0).
+// Returns true when all prerequisites for CE dispatch are satisfied:
+//   1. Binary compiled with CE batch API support (CE_BATCH_ASYNC_SUPPORTED).
+//   2. Running driver in the CE-supported range (matches ncclCeImplemented()).
+//   3. NCCL_CTA_POLICY=2          (CE dispatch mode).
+//   4. NCCL_LOCAL_REGISTER=0      (explicit buffer registration only).
+//   5. NCCL_CUMEM_ENABLE=1        (VMM-backed symmetric memory; default is 0).
 //      Without this, comm->symmetricSupport is false and CE is never dispatched.
 //
 // Use this single check wherever a test needs to decide between asserting the
@@ -43,14 +55,15 @@ inline bool isCeDispatchConfigured()
     constexpr int kCtaPolicyCE     = 2; // NCCL_CTA_POLICY=2      → CE dispatch
     constexpr int kLocalRegisterCE = 0; // NCCL_LOCAL_REGISTER=0  → explicit registration
     constexpr int kCuMemEnable     = 1; // NCCL_CUMEM_ENABLE=1    → symmetric VMM memory
-    // NCCL compiled-in defaults (returned when the env var is unset)
-    constexpr int kCtaPolicyDefault     = 0; // SM path
-    constexpr int kLocalRegisterDefault = 1; // implicit registration enabled
-    constexpr int kCuMemEnableDefault   = 0; // VMM/symmetric memory disabled
+    // NCCL/RCCL compiled-in defaults (returned when the env var is unset)
+    constexpr int kCtaPolicyDefault         = 0;  // SM path
+    constexpr int kLocalRegisterDefault     = 1;  // implicit registration enabled
+    constexpr int kCuMemEnableDefault       = 0;  // VMM/symmetric memory disabled
     return isCeDriverSupported() &&
-           MPIHelpers::getEnvParam("NCCL_CTA_POLICY",    kCtaPolicyDefault)     == kCtaPolicyCE &&
-           MPIHelpers::getEnvParam("NCCL_LOCAL_REGISTER", kLocalRegisterDefault) == kLocalRegisterCE &&
-           MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",   kCuMemEnableDefault)   == kCuMemEnable;
+           isCeRuntimeDriverSupported() &&
+           MPIHelpers::getEnvParam("NCCL_CTA_POLICY",           kCtaPolicyDefault)         == kCtaPolicyCE &&
+           MPIHelpers::getEnvParam("NCCL_LOCAL_REGISTER",        kLocalRegisterDefault)     == kLocalRegisterCE &&
+           MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
 }
 
 // Batch path prediction helpers

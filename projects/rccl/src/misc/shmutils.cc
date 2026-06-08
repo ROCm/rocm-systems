@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "shmutils.h"
 #include "comm.h"
@@ -207,12 +208,12 @@ ncclResult_t ncclShmemAllgather(struct ncclComm *comm, struct ncclShmemCollBuff 
 
   memcpy((char*)shmem->ptr[curIndex] + comm->localRank * maxTypeSize, sendbuff, typeSize);
   /* reset the previous round and notify I arrive this round */
-  __atomic_store_n((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * comm->localRank), nextRound, __ATOMIC_RELEASE);
+  COMPILER_ATOMIC_STORE((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * comm->localRank), nextRound, std::memory_order_release);
 
   do {
     done = true;
     for (int i = index; i < comm->localRanks; ++i) {
-      if (i != comm->localRank && __atomic_load_n((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * i), __ATOMIC_ACQUIRE) < nextRound) {
+      if (i != comm->localRank && COMPILER_ATOMIC_LOAD((int*)((char*)shmem->cnt[curIndex] + CACHE_LINE_SIZE * i), std::memory_order_acquire) < nextRound) {
         done = false;
         index = i;
         break;

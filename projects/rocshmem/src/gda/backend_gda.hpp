@@ -243,6 +243,11 @@ class GDABackend : public Backend {
   int buffer_unregister(void *addr) override;
 
   /**
+   * @brief Unregister all previously registered user buffers.
+   */
+  void buffer_unregister_all() override;
+
+  /**
    * @brief Abort the application.
    *
    * @param[in] status Exit code.

@@ -266,13 +266,13 @@ class TestExecutor:
 
         if self.args.build_dir:
             # Use custom build directory from command line
-            self.build_dir = os.path.expanduser(os.path.expandvars(self.args.build_dir))
+            self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(self.args.build_dir)))
             self.using_custom_lib = True
             if self.args.verbose:
                 print(f"Using custom build directory from --build-dir: {self.build_dir}")
         elif custom_rccl_path:
             # Use custom library path from environment variable
-            self.build_dir = os.path.expanduser(os.path.expandvars(custom_rccl_path))
+            self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(custom_rccl_path)))
             self.using_custom_lib = True
             if self.args.verbose:
                 print(f"Using custom RCCL library path from environment: {self.build_dir}")

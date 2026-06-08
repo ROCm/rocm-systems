@@ -61,6 +61,10 @@ class OperandMap:
         dtype: str | None = None,
         src_width: int | None = None,
         dst_width: int | None = None,
+        src_widths: dict[int, int] | None = None,
+        dst_widths: dict[int, int] | None = None,
+        src_reg_classes: dict[int, RegClass] | None = None,
+        dst_reg_classes: dict[int, RegClass] | None = None,
     ) -> OperandMap:
         is_64 = dtype in ('b64', 'i64', 'u64', 'f64')
         is_scalar = exec_model == ExecModel.SCALAR
@@ -68,8 +72,18 @@ class OperandMap:
         default_width = 64 if is_64 else 32
         sw = src_width if src_width is not None else default_width
         dw = dst_width if dst_width is not None else default_width
-        src_b = {i: OperandBinding(name, reg, sw) for i, name in enumerate(src_ops)}
-        dst_b = {i: OperandBinding(name, reg, dw) for i, name in enumerate(dst_ops)}
+        src_widths = src_widths or {}
+        dst_widths = dst_widths or {}
+        src_reg_classes = src_reg_classes or {}
+        dst_reg_classes = dst_reg_classes or {}
+        src_b = {
+            i: OperandBinding(name, src_reg_classes.get(i, reg), src_widths.get(i, sw))
+            for i, name in enumerate(src_ops)
+        }
+        dst_b = {
+            i: OperandBinding(name, dst_reg_classes.get(i, reg), dst_widths.get(i, dw))
+            for i, name in enumerate(dst_ops)
+        }
         return OperandMap(src_bindings=src_b, dst_bindings=dst_b)
 
 
@@ -85,6 +99,12 @@ class LoweringContext:
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
     vcc_dst: str | None = None
+    true16_dst_select: str | None = None
+    true16_src_select: str | None = None
+    true16_src_selects: dict[int, str] = field(default_factory=dict)
+    true16_dst_reg: str | None = None
+    true16_src_raw: str | None = None
+    vector_sgpr_once: bool = False
 
 
 _INFIX_OPS: dict[SemaNodeKind, str] = {
@@ -159,6 +179,15 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         if writes_vcc:
             vcc_init = _vcc_init_expr(ctx)
             wrapped.append(f'  uint64_t vcc = {vcc_init};')
+        if ctx.vector_sgpr_once:
+            wrapped.append('  if (exec != 0) {')
+            for line in body_lines:
+                wrapped.append('  ' + line)
+            wrapped.append('  }')
+            if writes_vcc:
+                vcc_write = _vcc_write_stmt(ctx)
+                wrapped.append(f'  {vcc_write}')
+            return '\n'.join(wrapped)
         wrapped.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         wrapped.append('    if (!(exec & (1ULL << lane))) continue;')
         for line in body_lines:
@@ -261,6 +290,12 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
             operand_map=ctx.operand_map,
             indent=ctx.indent + 1,
             declared=ctx.declared,
+            true16_dst_select=ctx.true16_dst_select,
+            true16_src_select=ctx.true16_src_select,
+            true16_src_selects=ctx.true16_src_selects,
+            true16_dst_reg=ctx.true16_dst_reg,
+            true16_src_raw=ctx.true16_src_raw,
+            vector_sgpr_once=ctx.vector_sgpr_once,
         )
         lines.extend(_lower_stmt(node.children[1], inner_ctx))
         lines.append(f'{_indent(ctx)}}}')
@@ -380,6 +415,12 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
         operand_map=ctx.operand_map,
         indent=ctx.indent + 1,
         declared=ctx.declared,
+        true16_dst_select=ctx.true16_dst_select,
+        true16_src_select=ctx.true16_src_select,
+        true16_src_selects=ctx.true16_src_selects,
+        true16_dst_reg=ctx.true16_dst_reg,
+        true16_src_raw=ctx.true16_src_raw,
+        vector_sgpr_once=ctx.vector_sgpr_once,
     )
 
     if len(children) == 2:
@@ -424,6 +465,12 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
         operand_map=ctx.operand_map,
         indent=ctx.indent + 1,
         declared=ctx.declared,
+        true16_dst_select=ctx.true16_dst_select,
+        true16_src_select=ctx.true16_src_select,
+        true16_src_selects=ctx.true16_src_selects,
+        true16_dst_reg=ctx.true16_dst_reg,
+        true16_src_raw=ctx.true16_src_raw,
+        vector_sgpr_once=ctx.vector_sgpr_once,
     )
 
     init_str = (
@@ -790,14 +837,30 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
         if binding.reg_class == RegClass.SGPR or ctx.exec_model == ExecModel.SCALAR:
             if binding.bit_width == 64:
                 return f'{name}.read_scalar64(wf)'
-            return f'{name}.read_scalar(wf)'
+            value = f'{name}.read_scalar(wf)'
+            if tag != 'D' and idx in ctx.true16_src_selects:
+                select = ctx.true16_src_selects[idx]
+                return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+            return value
         if binding.bit_width == 64:
             return f'{name}.read_lane64(wf, lane)'
-        return f'{name}.read_lane(wf, lane)'
+        value = f'{name}.read_lane(wf, lane)'
+        if tag != 'D' and idx in ctx.true16_src_selects:
+            select = ctx.true16_src_selects[idx]
+            return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+        return value
 
     if ctx.exec_model == ExecModel.SCALAR:
-        return f'inst.src{idx}.read_scalar(wf)'
-    return f'inst.src{idx}.read_lane(wf, lane)'
+        value = f'inst.src{idx}.read_scalar(wf)'
+        if tag != 'D' and idx in ctx.true16_src_selects:
+            select = ctx.true16_src_selects[idx]
+            return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+        return value
+    value = f'inst.src{idx}.read_lane(wf, lane)'
+    if tag != 'D' and idx in ctx.true16_src_selects:
+        select = ctx.true16_src_selects[idx]
+        return f'(({select}) != 0 ? ({value} >> 16) : {value})'
+    return value
 
 
 def _get_operand_dtype(node: SemaNode) -> SemaType | None:
@@ -853,7 +916,8 @@ def _lower_dst_write(
 ) -> list[str]:
     """Lower a destination operand write."""
     idx = _get_operand_index(lhs_node)
-    rhs = _lower_expr(rhs_node, ctx)
+    raw_rhs = _lower_expr(rhs_node, ctx)
+    rhs = raw_rhs
 
     needs_bitcast = _rhs_is_float_expr(rhs_node)
     lhs_ty = _get_operand_dtype(lhs_node)
@@ -883,6 +947,39 @@ def _lower_dst_write(
             if binding.bit_width == 64:
                 return [f'{_indent(ctx)}{name}.write_scalar64(wf, {rhs});']
             return [f'{_indent(ctx)}{name}.write_scalar(wf, {rhs});']
+        if lhs_ty and lhs_ty.size == 16 and ctx.true16_dst_select is not None:
+            selected_rhs = rhs
+            if ctx.true16_src_raw is not None or ctx.true16_src_select is not None:
+                true16_rhs = ctx.true16_src_raw or raw_rhs
+                if (
+                    ctx.true16_src_raw is None
+                    and rhs_node.kind == SemaNodeKind.CAST
+                    and rhs_node.children
+                    and rhs_node.cast_target
+                    and rhs_node.cast_target.size == 16
+                ):
+                    true16_rhs = _lower_expr(rhs_node.children[0], ctx)
+                selected_rhs = true16_rhs
+                if ctx.true16_src_select is not None:
+                    selected_rhs = f'(({ctx.true16_src_select}) != 0 ? ({true16_rhs} >> 16) : {true16_rhs})'
+            ind = _indent(ctx)
+            if ctx.true16_dst_reg is not None:
+                dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
+                read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
+                write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
+            else:
+                read_dst = f'{name}.read_lane(wf, lane)'
+                write_dst = f'{name}.write_lane(wf, lane, merged);'
+            return [
+                f'{ind}{{',
+                f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
+                f'{ind}  uint32_t old_dst = {read_dst};',
+                f'{ind}  uint32_t merged = (({ctx.true16_dst_select}) != 0)',
+                f'{ind}      ? ((old_dst & 0x0000ffffu) | (src_half << 16))',
+                f'{ind}      : ((old_dst & 0xffff0000u) | src_half);',
+                f'{ind}  {write_dst}',
+                f'{ind}}}',
+            ]
         if binding.bit_width == 64:
             return [f'{_indent(ctx)}{name}.write_lane64(wf, lane, {rhs});']
         return [f'{_indent(ctx)}{name}.write_lane(wf, lane, {rhs});']
@@ -931,6 +1028,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'sqrt': 'amdgpu::transcendental::sqrt_f32({0})',
     'sin': 'amdgpu::transcendental::sin_f32({0})',
     'cos': 'amdgpu::transcendental::cos_f32({0})',
+    'tanh': 'amdgpu::transcendental::tanh_f32({0})',
     'log': 'amdgpu::transcendental::log_f32({0})',
     'exp': 'amdgpu::transcendental::exp_f32({0})',
     'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
@@ -1061,6 +1159,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
+    'cvt_f16_fp8': 'static_cast<uint32_t>(util::f32_to_f16(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0}))))',
+    'cvt_f16_bf8': 'static_cast<uint32_t>(util::f32_to_f16(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0}))))',
     'cvt_f64_i32': 'std::bit_cast<uint64_t>(static_cast<double>(static_cast<int32_t>({0})))',
     'cvt_f64_u32': 'std::bit_cast<uint64_t>(static_cast<double>({0}))',
     'cvt_i32_f64': '[&]() -> uint32_t {{ double s = std::bit_cast<double>(static_cast<uint64_t>({0}));'
@@ -1085,6 +1185,17 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
+    'cvt_norm_i16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
+    ' if (std::isnan(s)) return 0u;'
+    ' float scaled = std::clamp(s * 32767.0f, -32768.0f, 32767.0f);'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled))); }}()',
+    'cvt_norm_u16_f16': '[&]() -> uint32_t {{ float s = util::f16_to_f32(static_cast<uint16_t>({0}));'
+    ' if (std::isnan(s)) return 0u;'
+    ' float scaled = std::clamp(s * 65535.0f, 0.0f, 65535.0f);'
+    ' return static_cast<uint32_t>(static_cast<uint16_t>(scaled)); }}()',
+    'cvt_off_f32_i4': '[&]() -> float {{ int32_t nibble = static_cast<int32_t>({0} & 0xfu);'
+    ' if (nibble & 0x8) nibble -= 16;'
+    ' return static_cast<float>(nibble) * 0.0625f; }}()',
     'cvt_i32_i16': 'static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>({0} & 0xFFFF)))',
     'cvt_u32_u16': '({0} & 0xFFFFu)',
     'cvt_f32_ubyte0': 'std::bit_cast<uint32_t>(static_cast<float>({0} & 0xFFu))',
@@ -1145,6 +1256,18 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'std::max': 'std::max({0}, {1})',
     'std::fmin': 'std::fmin({0}, {1})',
     'std::fmax': 'std::fmax({0}, {1})',
+    'min_num': 'std::fmin({0}, {1})',
+    'max_num': 'std::fmax({0}, {1})',
+    'minimum': '[&]() {{ auto a = {0}; auto b = {1};'
+    ' if (std::isnan(a) || std::isnan(b))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' if (a == b) return std::signbit(a) ? a : b;'
+    ' return a < b ? a : b; }}()',
+    'maximum': '[&]() {{ auto a = {0}; auto b = {1};'
+    ' if (std::isnan(a) || std::isnan(b))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' if (a == b) return std::signbit(a) ? b : a;'
+    ' return a > b ? a : b; }}()',
     'is_ordered': '(!std::isnan({0}) && !std::isnan({1}))',
     'is_unordered': '(std::isnan({0}) || std::isnan({1}))',
     'fp_class_test': '[&]() -> bool {{'
@@ -1216,6 +1339,9 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     'pack_ll': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'pack_lh': '(({0} & 0xFFFFu) | ({1} & 0xFFFF0000u))',
     'pack_hh': '((({0} >> 16) & 0xFFFFu) | ({1} & 0xFFFF0000u))',
+    'pack_hl': '((({0} >> 16) & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
+    'cvt_pkrtz_f16_f32': '(static_cast<uint32_t>(util::f32_to_f16_rtz({0})) | '
+    '(static_cast<uint32_t>(util::f32_to_f16_rtz({1})) << 16))',
     'bfe': '[&]() {{ uint32_t base = {0}, field = {1};'
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
@@ -1279,6 +1405,24 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'lshl_add': '(({0} << {1}) + {2})',
     'lshl_or': '(({0} << {1}) | {2})',
     'add_lshl': '(({0} + {1}) << {2})',
+    'ashr_pk_i8_i32': '[&]() -> uint32_t {{'
+    ' uint32_t shift = static_cast<uint32_t>({2}) & 31u;'
+    ' auto pack = [&](uint32_t src) -> uint32_t {{'
+    ' int32_t shifted = static_cast<int32_t>(src) >> shift;'
+    ' int32_t clamped = std::clamp(shifted, static_cast<int32_t>(-128), static_cast<int32_t>(127));'
+    ' return static_cast<uint32_t>(clamped) & 0xffu;'
+    ' }};'
+    ' return pack({0}) | (pack({1}) << 8);'
+    ' }}()',
+    'ashr_pk_u8_i32': '[&]() -> uint32_t {{'
+    ' uint32_t shift = static_cast<uint32_t>({2}) & 31u;'
+    ' auto pack = [&](uint32_t src) -> uint32_t {{'
+    ' int32_t shifted = static_cast<int32_t>(src) >> shift;'
+    ' int32_t clamped = std::clamp(shifted, static_cast<int32_t>(0), static_cast<int32_t>(255));'
+    ' return static_cast<uint32_t>(clamped);'
+    ' }};'
+    ' return pack({0}) | (pack({1}) << 8);'
+    ' }}()',
     'and_or': '(({0} & {1}) | {2})',
     'bfi': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
     ' return (a & b) | (~a & c); }}()',
@@ -1324,14 +1468,38 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' : (sel == 0xC) ? 0u : (sel == 0xD) ? 0xFFu : 0u;'
     ' r |= static_cast<uint32_t>(byte) << (i*8);'
     ' }} return r; }}()',
-    'minimum3': 'std::fmin(std::fmin({0}, {1}), {2})',
-    'maximum3': 'std::fmax(std::fmax({0}, {1}), {2})',
+    'minimum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }}()',
+    'maximum3': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
     'maxmin': 'std::fmin(std::fmax({0}, {1}), {2})',
     'minmax': 'std::fmax(std::fmin({0}, {1}), {2})',
     'maxmin_num': 'std::fmin(std::fmax({0}, {1}), {2})',
     'minmax_num': 'std::fmax(std::fmin({0}, {1}), {2})',
-    'maximumminimum': 'std::fmin(std::fmax({0}, {1}), {2})',
-    'minimummaximum': 'std::fmax(std::fmin({0}, {1}), {2})',
+    'maximumminimum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }}()',
+    'minimummaximum': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
+    ' if (std::isnan(a) || std::isnan(b) || std::isnan(c))'
+    ' return std::numeric_limits<decltype(a)>::quiet_NaN();'
+    ' auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b);'
+    ' return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }}()',
+    'add_max_i32': '[&]() {{ uint32_t sum_bits = static_cast<uint32_t>({0}) + static_cast<uint32_t>({1});'
+    ' int32_t sum = static_cast<int32_t>(sum_bits); int32_t clamp = static_cast<int32_t>({2});'
+    ' return static_cast<uint32_t>(std::max(sum, clamp)); }}()',
+    'add_min_i32': '[&]() {{ uint32_t sum_bits = static_cast<uint32_t>({0}) + static_cast<uint32_t>({1});'
+    ' int32_t sum = static_cast<int32_t>(sum_bits); int32_t clamp = static_cast<int32_t>({2});'
+    ' return static_cast<uint32_t>(std::min(sum, clamp)); }}()',
+    'add_max_u32': 'std::max(static_cast<uint32_t>({0}) + static_cast<uint32_t>({1}), static_cast<uint32_t>({2}))',
+    'add_min_u32': 'std::min(static_cast<uint32_t>({0}) + static_cast<uint32_t>({1}), static_cast<uint32_t>({2}))',
     'addc_co': '[&]() {{ uint64_t w = static_cast<uint64_t>({0})'
     ' + static_cast<uint64_t>({1})'
     ' + static_cast<uint64_t>({2});'
