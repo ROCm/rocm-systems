@@ -15,7 +15,6 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -23,15 +22,12 @@ namespace amdgpu {
 
 class CompletionTracker {
 public:
-  using InterruptCallback = std::function<void(uint32_t event_id)>;
+  using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
 
   CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus)
       : memory_(mem), cus_(cus) {}
 
   void set_interrupt_callback(InterruptCallback cb) { interrupt_cb_ = std::move(cb); }
-
-  /// @brief Record a dispatch entry so notify_wg_complete can find it.
-  void register_dispatch(uint32_t dispatch_id, size_t queue_idx);
 
   /// @brief Notify that a workgroup has completed all its wavefronts.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id, std::vector<HwQueueState> &queues);
@@ -40,10 +36,13 @@ public:
   void drain_completions(std::vector<HwQueueState> &queues);
 
   /// @brief Flush L1/L2 caches before firing a completion signal.
-  void flush_caches();
+  void flush_caches(uint32_t vmid = 0);
 
   /// @brief Check if all queues have no pending entries.
   bool all_complete(const std::vector<HwQueueState> &queues) const;
+
+  /// @brief Write queue-idle status to the queue's inactive signal.
+  void fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t process_id);
 
 private:
   void fire_signal(const DispatchEntry &entry);
@@ -51,9 +50,6 @@ private:
   GpuMemory *memory_;
   std::vector<ComputeUnitCore *> &cus_;
   InterruptCallback interrupt_cb_;
-
-  /// @brief Map from dispatch_id -> queue_idx for fast lookup.
-  std::unordered_map<uint32_t, size_t> dispatch_queue_map_;
 };
 
 } // namespace amdgpu

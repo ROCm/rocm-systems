@@ -656,7 +656,7 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="Torch operator filter",
         help=(
-            "\t\tFilter operators using PurePosixPath glob patterns,\n"
+            "\t\tFilter operators using shell-style glob patterns (fnmatch),\n"
             "\t\t\tselect their kernels, and display metrics.\n"
             "\t\t\tWith no arguments, matches all operators (default: **).\n"
             "\t\t\tExamples (operator hierarchy is /-separated):\n"

@@ -13,7 +13,7 @@ from utils import schema
 from utils.logger import console_debug, console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
-from utils.pattern_matching import PatternMatcherEngine
+from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
     METRIC_ID_RE,
@@ -947,12 +947,9 @@ def load_non_mertrics_table(
     workload.dfs.update(tmp)
 
 
-torch_operator_matcher = PatternMatcherEngine(mode="glob-hierarchy")
-
-
 def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
     """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
-    return torch_operator_matcher.matches(pattern, operator_name)
+    return fnmatch_glob_matches(pattern, operator_name)
 
 
 @demarcate
