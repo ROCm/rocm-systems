@@ -53,6 +53,8 @@ add_executable(
     waitcnt_counter_test.cpp
     instruction_execution_harness_test.cpp
     decode_execute_benchmark.cpp
+    util_simd_test.cpp
+    v_add_simd_benchmark.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(
@@ -65,6 +67,12 @@ target_link_libraries(
         Threads::Threads
         GTest::gtest_main
 )
+if(HAS_DEVICE_KERNELS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE dbt/device_kernels_translate_tests.cpp
+    )
+endif()
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
