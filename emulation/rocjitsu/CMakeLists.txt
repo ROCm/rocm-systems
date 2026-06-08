@@ -212,6 +212,7 @@ target_link_libraries(
         rocjitsu_isa_gfx1250
         rocjitsu_isa_risc_v
         simdojo
+        rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
         rocjitsu_vm_risc_v
