@@ -937,12 +937,16 @@ void flush_hdp() {
   CHECK_HIP(hipGetDevice(&hip_dev_id));
   CHECK_HIP(hipDeviceGetAttribute(reinterpret_cast<int*>(&hdp_flush_ptr_),
                         hipDeviceAttributeHdpMemFlushCntl, hip_dev_id));
-  __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  if (hdp_flush_ptr_ != nullptr) {
+    __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  }
 }
 
 void Tester::barrier() {
   rocshmem_barrier_all();
+#if defined USE_HDP_FLUSH
   flush_hdp();
+#endif
 }
 
 double Tester::gpuCyclesToMicroseconds(long long int cycles) {

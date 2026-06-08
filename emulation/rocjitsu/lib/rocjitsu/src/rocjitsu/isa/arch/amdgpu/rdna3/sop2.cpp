@@ -804,8 +804,7 @@ SAndNot1B32Sop2::SAndNot1B32Sop2(const MachineInst *inst)
 }
 
 void SAndNot1B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_and_not1_b32_sop2(*this, wf);
 }
 
 SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
@@ -830,8 +829,7 @@ SAndNot1B64Sop2::SAndNot1B64Sop2(const MachineInst *inst)
 }
 
 void SAndNot1B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_and_not1_b64_sop2(*this, wf);
 }
 
 SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
@@ -856,8 +854,7 @@ SOrNot1B32Sop2::SOrNot1B32Sop2(const MachineInst *inst)
 }
 
 void SOrNot1B32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_or_not1_b32_sop2(*this, wf);
 }
 
 SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
@@ -882,8 +879,7 @@ SOrNot1B64Sop2::SOrNot1B64Sop2(const MachineInst *inst)
 }
 
 void SOrNot1B64Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_or_not1_b64_sop2(*this, wf);
 }
 
 SBfeU32Sop2::SBfeU32Sop2(const MachineInst *inst)
@@ -1237,8 +1233,7 @@ SPackHlB32B16Sop2::SPackHlB32B16Sop2(const MachineInst *inst)
 }
 
 void SPackHlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_pack_hl_b32_b16_sop2(*this, wf);
 }
 
 } // namespace rdna3

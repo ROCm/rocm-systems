@@ -9,6 +9,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/thread_context.h"
 
@@ -89,6 +90,50 @@ public:
   /// @param val New status register value.
   virtual void set_status_raw(uint32_t val) = 0;
 
+  /// @brief Read the raw MODE register value.
+  uint32_t mode_raw() const { return mode_raw_; }
+
+  /// @brief Write the raw MODE register value.
+  void set_mode_raw(uint32_t val) {
+    mode_raw_ = val;
+    vgpr_msb_mode_ = mode_layout_to_set_vgpr_msb(
+        static_cast<uint8_t>((val & VGPR_MSB_MODE_MASK) >> VGPR_MSB_MODE_SHIFT));
+  }
+
+  /// @brief Return current S_SET_VGPR_MSB-format VGPR high-bank bits.
+  uint8_t vgpr_msb_mode() const { return vgpr_msb_mode_; }
+
+  /// @brief Set current S_SET_VGPR_MSB-format VGPR high-bank bits.
+  void set_vgpr_msb_mode(uint8_t val) {
+    vgpr_msb_mode_ = val;
+    uint32_t mode_bits = static_cast<uint32_t>(set_vgpr_msb_to_mode_layout(val))
+                         << VGPR_MSB_MODE_SHIFT;
+    mode_raw_ = (mode_raw_ & ~VGPR_MSB_MODE_MASK) | mode_bits;
+  }
+
+  /// @brief Read the raw WAVE_SCHED_MODE register value.
+  uint32_t wave_sched_mode_raw() const { return wave_sched_mode_raw_; }
+
+  /// @brief Write the raw WAVE_SCHED_MODE register value.
+  void set_wave_sched_mode_raw(uint32_t val) { wave_sched_mode_raw_ = val; }
+
+  /// @brief Return the two-bit VGPR high-bank selector for an operand role.
+  uint32_t vgpr_msb_for_role(VgprMsbRole role) const {
+    switch (role) {
+    case VgprMsbRole::Src0:
+      return vgpr_msb_mode_ & 0x3u;
+    case VgprMsbRole::Src1:
+      return (vgpr_msb_mode_ >> 2) & 0x3u;
+    case VgprMsbRole::Src2:
+      return (vgpr_msb_mode_ >> 4) & 0x3u;
+    case VgprMsbRole::Dst:
+      return (vgpr_msb_mode_ >> 6) & 0x3u;
+    case VgprMsbRole::None:
+      return 0;
+    }
+    return 0;
+  }
+
   /// @brief Return the wavefront slot index within the CU.
   /// @returns Permanent slot index.
   uint32_t wf_id() const { return wf_id_; }
@@ -102,6 +147,12 @@ public:
 
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
+
+  /// @brief Return the owning process ID (PASID analog).
+  uint32_t process_id() const { return process_id_; }
+
+  /// @brief Set the owning process ID at dispatch time.
+  void set_process_id(uint32_t id) { process_id_ = id; }
 
   /// @brief Return the per-WG LDS base offset assigned at dispatch.
   uint32_t lds_base() const { return lds_base_; }
@@ -130,7 +181,7 @@ public:
 
   /// @brief Set the EXEC mask.
   /// @param val New EXEC mask value.
-  void set_exec(uint64_t val) { exec_ = val; }
+  void set_exec(uint64_t val) { exec_ = val & lane_mask(); }
 
   /// @brief Return the vector condition code.
   /// @returns VCC register value.
@@ -138,7 +189,7 @@ public:
 
   /// @brief Set the vector condition code.
   /// @param val New VCC value.
-  void set_vcc(uint64_t val) { vcc_ = val; }
+  void set_vcc(uint64_t val) { vcc_ = val & lane_mask(); }
 
   /// @brief Return the M0 special register.
   /// @returns M0 register value.
@@ -155,6 +206,23 @@ public:
   /// @brief Set the per-wavefront scratch base address.
   /// @param val Scratch base byte address (set at dispatch by CP).
   void set_scratch_base(uint64_t val) { scratch_base_ = val; }
+
+  /// @brief Return the per-lane private scratch allocation size in bytes.
+  uint32_t scratch_lane_size() const { return scratch_lane_size_; }
+
+  /// @brief Set the per-lane private scratch allocation size in bytes.
+  void set_scratch_lane_size(uint32_t val) { scratch_lane_size_ = val; }
+
+  uint64_t shared_aperture_base() const { return shared_aperture_base_; }
+  uint64_t shared_aperture_limit() const { return shared_aperture_limit_; }
+  uint64_t private_aperture_base() const { return private_aperture_base_; }
+  uint64_t private_aperture_limit() const { return private_aperture_limit_; }
+  void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl) {
+    shared_aperture_base_ = sb;
+    shared_aperture_limit_ = sl;
+    private_aperture_base_ = pb;
+    private_aperture_limit_ = pl;
+  }
 
   /// @brief Return the wait counters for outstanding memory operations.
   /// @returns Reference to the wait counters.
@@ -215,6 +283,20 @@ public:
       state_ = WfState::WAITCNT;
   }
 
+  /// @brief Set the TENSORCNT target (GFX12.5 S_WAIT_TENSORCNT).
+  void set_wait_target_tensorcnt(uint8_t threshold) {
+    wait_target_.tensorcnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
+  /// @brief Set the ASYNCCNT target (GFX12.5 S_WAIT_ASYNCCNT).
+  void set_wait_target_asynccnt(uint8_t threshold) {
+    wait_target_.asynccnt = threshold;
+    if (!wait_satisfied())
+      state_ = WfState::WAITCNT;
+  }
+
   /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
   void set_wait_target_storecnt_dscnt(uint8_t storecnt, uint8_t dscnt) {
     wait_target_.vscnt = storecnt;
@@ -247,6 +329,10 @@ public:
       set_wait_target_dscnt(t);
     else if (name == "wait_kmcnt")
       set_wait_target_kmcnt(t);
+    else if (name == "wait_tensorcnt")
+      set_wait_target_tensorcnt(t);
+    else if (name == "wait_asynccnt")
+      set_wait_target_asynccnt(t);
     else if (name == "wait_expcnt") {
       wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
       if (!wait_satisfied())
@@ -323,16 +409,25 @@ public:
     pc = 0;
     wg_id_ = 0;
     dispatch_id_ = 0;
+    process_id_ = 0;
     num_sgprs_ = 0;
     num_vgprs_ = 0;
     sgpr_alloc_ = {};
     vgpr_alloc_ = {};
-    exec_ = ~0ULL;
+    exec_ = lane_mask();
     vcc_ = 0;
     m0_ = 0;
+    set_mode_raw(0);
+    set_wave_sched_mode_raw(0);
     scratch_base_ = 0;
+    scratch_lane_size_ = 0;
+    shared_aperture_base_ = 0;
+    shared_aperture_limit_ = 0;
+    private_aperture_base_ = 0;
+    private_aperture_limit_ = 0;
     wait_counters_ = {};
     wait_target_ = {};
+    ready_cycle_ = 0;
     state_ = WfState::HALTED;
   }
 
@@ -351,6 +446,7 @@ protected:
   uint32_t wf_id_ = 0;       ///< Slot index within the CU (permanent).
   uint32_t wg_id_ = 0;       ///< Workgroup ID (set per dispatch).
   uint32_t dispatch_id_ = 0; ///< Dispatch ID (set per dispatch, unique per dispatch).
+  uint32_t process_id_ = 0;  ///< Owning process ID (PASID analog, set per dispatch).
   uint32_t lds_base_ = 0;    ///< Per-WG LDS base offset (set per dispatch).
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).
@@ -363,16 +459,32 @@ protected:
   RegAllocation vgpr_alloc_; ///< Slice in CU's VGPR file.
 
 private:
-  uint64_t exec_ = ~0ULL;           ///< EXEC mask -- one bit per lane (1 = active).
-  uint64_t vcc_ = 0;                ///< Vector condition code (per-lane comparison result).
-  uint32_t m0_ = 0;                 ///< M0 special register (misc addressing).
-  uint64_t scratch_base_ = 0;       ///< Per-wavefront scratch (private segment) base address.
+  uint64_t lane_mask() const { return wf_size_ >= 64 ? ~0ULL : ((1ULL << wf_size_) - 1ULL); }
+
+  uint64_t exec_ = ~0ULL;            ///< EXEC mask -- one bit per lane (1 = active).
+  uint64_t vcc_ = 0;                 ///< Vector condition code (per-lane comparison result).
+  uint32_t m0_ = 0;                  ///< M0 special register (misc addressing).
+  uint32_t mode_raw_ = 0;            ///< MODE register state.
+  uint8_t vgpr_msb_mode_ = 0;        ///< S_SET_VGPR_MSB layout for MODE VGPR_MSB bits.
+  uint32_t wave_sched_mode_raw_ = 0; ///< WAVE_SCHED_MODE register state.
+  uint64_t scratch_base_ = 0;        ///< Per-wavefront scratch (private segment) base address.
+  uint32_t scratch_lane_size_ = 0;   ///< Per-lane private scratch allocation size in bytes.
+  uint64_t shared_aperture_base_ = 0;
+  uint64_t shared_aperture_limit_ = 0;
+  uint64_t private_aperture_base_ = 0;
+  uint64_t private_aperture_limit_ = 0;
   WfState state_ = WfState::HALTED; ///< Current execution state.
   WaitCounters wait_counters_;      ///< Outstanding memory operation counters.
 
 public:
   uint32_t trace_inst_count_ = 0; ///< Debug: instruction count for trace.
+
+  /// @brief Cycle at which this WF became RUNNING (for scheduler priority).
+  uint64_t ready_cycle() const { return ready_cycle_; }
+  void set_ready_cycle(uint64_t c) { ready_cycle_ = c; }
+
 private:
+  uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ComputeUnitCore; // CU sets allocation fields during dispatch.
