@@ -21,7 +21,7 @@ find_program(
     HINTS
     ENV ROCM_PATH
     /opt/rocm
-    PATH_SUFFIXES bin
+    PATH_SUFFIXES lib/llvm/bin bin
     DOC "Path to the ROCm amdclang++ compiler"
 )
 
@@ -46,9 +46,18 @@ message(STATUS "Found amdclang++: ${AMDCLANG}")
 set(KERNEL_OUTPUT_DIR ${CMAKE_BINARY_DIR}/kernels)
 file(MAKE_DIRECTORY ${KERNEL_OUTPUT_DIR})
 
-# Locate the ROCm installation root for --rocm-path.
-get_filename_component(ROCM_PATH "${AMDCLANG}" DIRECTORY)
-get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
+# Locate the ROCm installation root for --rocm-path. Python rocm-sdk-devel
+# packages install the real compiler in lib/llvm/bin, while system installs
+# commonly expose it directly under bin.
+get_filename_component(AMDCLANG_DIR "${AMDCLANG}" DIRECTORY)
+if(AMDCLANG_DIR MATCHES "/lib/llvm/bin$")
+    get_filename_component(ROCM_PATH "${AMDCLANG_DIR}" DIRECTORY)
+    get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
+    get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
+else()
+    get_filename_component(ROCM_PATH "${AMDCLANG_DIR}" DIRECTORY)
+endif()
+message(STATUS "Using ROCm path for device kernels: ${ROCM_PATH}")
 
 include(rj_add_device_kernel)
 
