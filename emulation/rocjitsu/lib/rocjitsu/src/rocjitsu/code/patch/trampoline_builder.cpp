@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/trampoline_builder.h"
 
+#include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 
 #include <cstring>
@@ -10,11 +11,6 @@
 namespace rocjitsu {
 
 namespace {
-
-void report(std::string *out, const char *msg) {
-  if (out)
-    *out = msg;
-}
 
 [[nodiscard]] bool check_size_and_words(const TrampolinePlan &plan, std::string *err) {
   if (plan.original_size != 4 && plan.original_size != 8) {

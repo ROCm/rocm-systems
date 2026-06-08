@@ -50,6 +50,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
+    patch/error_report_test.cpp
     code/code_object_target_id_test.cpp
     dbt/translate_test.cpp
     mtype_flags_test.cpp

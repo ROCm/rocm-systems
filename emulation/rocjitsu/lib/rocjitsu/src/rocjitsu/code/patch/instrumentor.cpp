@@ -7,6 +7,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/error_report.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -21,11 +22,6 @@
 namespace rocjitsu {
 
 namespace {
-
-void report(std::string *out, const char *msg) {
-  if (out)
-    *out = msg;
-}
 
 // PC-relative instructions that may not surface in flags() or
 // branch_offset_bytes() on every ISA. Exact-match list plus a prefix match
@@ -208,23 +204,20 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   }
   decoder_ = std::move(decoder);
   blocks_ = BasicBlock::build(obj_, *decoder_);
+  for (const auto &block : blocks_) {
+    uint64_t cur = block->start_offset();
+    for (const Instruction &inst : block->instructions()) {
+      offset_to_inst_.emplace(cur, &inst);
+      cur += static_cast<uint64_t>(inst.size());
+    }
+  }
   blocks_built_ = true;
   return true;
 }
 
-const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) {
-  for (const auto &block : blocks_) {
-    if (anchor_offset < block->start_offset() || anchor_offset >= block->end_offset())
-      continue;
-    uint64_t cur = block->start_offset();
-    for (const Instruction &inst : block->instructions()) {
-      if (cur == anchor_offset)
-        return &inst;
-      cur += static_cast<uint64_t>(inst.size());
-    }
-    return nullptr;
-  }
-  return nullptr;
+const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) const {
+  auto it = offset_to_inst_.find(anchor_offset);
+  return it == offset_to_inst_.end() ? nullptr : it->second;
 }
 
 Instrumentor::ValidationResult Instrumentor::validate_points() {
@@ -335,16 +328,20 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     std::string err;
     if (!validate_inline_nop_plan(plan, &err)) {
       result.errors.push_back(std::move(err));
-      return result;
+      continue;
     }
     auto bytes = TrampolineBuilder::build(plan, &err);
     if (!bytes) {
       result.errors.push_back(std::move(err));
-      return result;
+      continue;
     }
     cave_cursor += bytes->trampoline_words.size() * sizeof(uint32_t);
     applied.push_back({&site, trampoline_offset, std::move(*bytes)});
   }
+
+  // All-or-nothing: bail before mutating the patcher if any site failed.
+  if (!result.errors.empty())
+    return result;
 
   // Every per-site validation, branch-range check, and trampoline-byte
   // construction has succeeded up to this point. Now time to patch.

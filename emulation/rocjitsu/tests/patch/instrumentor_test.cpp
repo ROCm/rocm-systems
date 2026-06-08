@@ -603,6 +603,41 @@ TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
       << "mnemonic was: " << result.sites[0].mnemonic;
 }
 
+TEST(Instrumentor, ResolvesAnchorAtOffsetZero) {
+  // Boundary: the first instruction starts at .text offset 0. Exercises the
+  // offset→Instruction map's zero key alongside the offset-4 case above.
+  auto image = make_gfx950_elf_with_two_nops();
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/0);
+
+  auto result = instrumentor.validate_points();
+  ASSERT_TRUE(result.errors.empty())
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  ASSERT_EQ(result.sites.size(), 1u);
+  EXPECT_EQ(result.sites[0].anchor_offset, 0u);
+}
+
+TEST(Instrumentor, RejectsAlignedOffsetPastLastInstruction) {
+  // Aligned and looks plausible, but no instruction starts at offset 8 in a
+  // 2-nop (8-byte) .text. The offset→Instruction map must miss rather than
+  // extrapolate past its populated keys.
+  auto image = make_gfx950_elf_with_two_nops();
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/8);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("no decoded instruction"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
 TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
   // Decoder::create returns nullptr for RV32I/RV64I/INVALID. The Instrumentor
   // must surface that as a structured ValidationResult error rather than
