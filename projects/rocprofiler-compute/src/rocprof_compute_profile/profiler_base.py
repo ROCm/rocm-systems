@@ -38,8 +38,7 @@ from vendored import yaml
 
 _FRAMEWORK_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_FRAMEWORKS"
 
-# Maps each CLI flag to the backends it enables. Set
-# ROCPROFCOMPUTE_ROCTX_FRAMEWORKS=api to enable every backend.
+# Maps each CLI flag to the backends it enables.
 _FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
     "torch_trace": ("torch",),
 }

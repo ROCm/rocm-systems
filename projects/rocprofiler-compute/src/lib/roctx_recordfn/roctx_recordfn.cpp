@@ -112,6 +112,9 @@ std::mutex               g_capture_mu;
 std::vector<std::string> g_captured;
 constexpr std::size_t    CAPTURE_CAP = 4096;
 
+// The RecordFunction tier instruments PyTorch ATen operators.
+constexpr const char* kRecordFnBackend = "torch";
+
 void maybe_capture(const std::string& s)
 {
     if (!g_capturing.load(std::memory_order_relaxed))
@@ -313,8 +316,10 @@ std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& fn)
             save_snapshot(seq, g_stack);
         }
 
-        // Emit the ROCTX range last.
-        const std::string full = build_marker_string(g_stack);
+        // Emit the ROCTX range last. RecordFunction ops are torch-backed.
+        std::string full = build_marker_string(g_stack);
+        full += '|';
+        full += kRecordFnBackend;
         roctxRangePushA(full.c_str());
         ctx->pushed_roctx_range = true;
         maybe_capture(full);
