@@ -464,6 +464,230 @@ void VulkanTest::CopyBuffer(VkBuffer src_buffer, VkBuffer dst_buffer, VkDeviceSi
   vkFreeCommandBuffers(_device, _command_pool, 1, &command_buffer);
 }
 
+// ── Vulkan image helpers ──────────────────────────────────────────────────────────────────────
+
+void VulkanTest::CreateImage(uint32_t width, uint32_t height, uint32_t num_levels,
+                              VkFormat format, VkImage& image, VkDeviceMemory& image_memory,
+                              VkDeviceSize& image_size, bool external) {
+  VkImageCreateInfo img_info = {};
+  img_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  img_info.imageType     = VK_IMAGE_TYPE_2D;
+  img_info.format        = format;
+  img_info.extent        = {width, height, 1};
+  img_info.mipLevels     = num_levels;
+  img_info.arrayLayers   = 1;
+  img_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+  img_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+  img_info.usage         = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+  img_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+  img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+  VkExternalMemoryImageCreateInfo ext_img_info = {};
+  if (external) {
+    ext_img_info.sType       = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+    ext_img_info.handleTypes = _mem_handle_type;
+    img_info.pNext           = &ext_img_info;
+  }
+
+  VK_CHECK_RESULT(vkCreateImage(_device, &img_info, nullptr, &image));
+
+  VkMemoryRequirements mem_req = {};
+  vkGetImageMemoryRequirements(_device, image, &mem_req);
+  image_size = mem_req.size;
+
+  VkMemoryAllocateInfo alloc_info = {};
+  alloc_info.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  alloc_info.allocationSize  = mem_req.size;
+  alloc_info.memoryTypeIndex = FindMemoryType(mem_req.memoryTypeBits,
+                                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  VkExportMemoryAllocateInfoKHR export_info = {};
+#ifdef _WIN64
+  WindowsSecurityAttributes win_sec_attrs;
+  VkExportMemoryWin32HandleInfoKHR win32_info = {};
+  win32_info.sType       = VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+  win32_info.pAttributes = &win_sec_attrs;
+  win32_info.dwAccess    = DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE;
+  win32_info.name        = nullptr;
+#endif
+
+  if (external) {
+    export_info.sType       = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR;
+    export_info.handleTypes = _mem_handle_type;
+#ifdef _WIN64
+    export_info.pNext = (_mem_handle_type & VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR)
+                        ? &win32_info : nullptr;
+#endif
+    alloc_info.pNext = &export_info;
+  }
+
+  VK_CHECK_RESULT(vkAllocateMemory(_device, &alloc_info, nullptr, &image_memory));
+  VK_CHECK_RESULT(vkBindImageMemory(_device, image, image_memory, 0));
+}
+
+VkImageView VulkanTest::CreateImageView(VkImage image, VkFormat format,
+                                         uint32_t base_mip_level, uint32_t level_count) {
+  VkImageViewCreateInfo view_info = {};
+  view_info.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  view_info.image                           = image;
+  view_info.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+  view_info.format                          = format;
+  view_info.components                      = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+                                               VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+  view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+  view_info.subresourceRange.baseMipLevel   = base_mip_level;
+  view_info.subresourceRange.levelCount     = level_count;
+  view_info.subresourceRange.baseArrayLayer = 0;
+  view_info.subresourceRange.layerCount     = 1;
+
+  VkImageView view = VK_NULL_HANDLE;
+  VK_CHECK_RESULT(vkCreateImageView(_device, &view_info, nullptr, &view));
+  return view;
+}
+
+static VkCommandBuffer BeginOneTimeCmd(VkDevice device, VkCommandPool pool) {
+  VkCommandBufferAllocateInfo alloc = {};
+  alloc.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  alloc.commandPool        = pool;
+  alloc.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  alloc.commandBufferCount = 1;
+
+  VkCommandBuffer cmd = VK_NULL_HANDLE;
+  vkAllocateCommandBuffers(device, &alloc, &cmd);
+
+  VkCommandBufferBeginInfo begin = {};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmd, &begin);
+  return cmd;
+}
+
+static void EndAndSubmitCmd(VkDevice device, VkQueue queue, VkCommandPool pool,
+                             VkCommandBuffer cmd) {
+  vkEndCommandBuffer(cmd);
+
+  VkSubmitInfo submit = {};
+  submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers    = &cmd;
+
+  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+  vkQueueWaitIdle(queue);
+  vkFreeCommandBuffers(device, pool, 1, &cmd);
+}
+
+static void RecordImageBarrier(VkCommandBuffer cmd, VkImage image, uint32_t mip_level,
+                                VkImageLayout old_layout, VkImageLayout new_layout,
+                                VkAccessFlags src_access, VkAccessFlags dst_access,
+                                VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage) {
+  VkImageMemoryBarrier barrier = {};
+  barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.oldLayout                       = old_layout;
+  barrier.newLayout                       = new_layout;
+  barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image                           = image;
+  barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.baseMipLevel   = mip_level;
+  barrier.subresourceRange.levelCount     = 1;
+  barrier.subresourceRange.baseArrayLayer = 0;
+  barrier.subresourceRange.layerCount     = 1;
+  barrier.srcAccessMask                   = src_access;
+  barrier.dstAccessMask                   = dst_access;
+  vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
+void VulkanTest::TransitionImageLayout(VkImage image, uint32_t num_levels,
+                                        VkImageLayout old_layout, VkImageLayout new_layout) {
+  VkCommandBuffer cmd = BeginOneTimeCmd(_device, _command_pool);
+
+  VkImageMemoryBarrier barrier = {};
+  barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.oldLayout                       = old_layout;
+  barrier.newLayout                       = new_layout;
+  barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image                           = image;
+  barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.baseMipLevel   = 0;
+  barrier.subresourceRange.levelCount     = num_levels;
+  barrier.subresourceRange.baseArrayLayer = 0;
+  barrier.subresourceRange.layerCount     = 1;
+  barrier.srcAccessMask                   = 0;
+  barrier.dstAccessMask                   = VK_ACCESS_TRANSFER_WRITE_BIT;
+  vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+  EndAndSubmitCmd(_device, _queue, _command_pool, cmd);
+}
+
+void VulkanTest::CopyBufferToImage(VkBuffer src_buf, VkImage dst_image, uint32_t mip_level,
+                                    uint32_t mip_width, uint32_t mip_height) {
+  VkCommandBuffer cmd = BeginOneTimeCmd(_device, _command_pool);
+
+  // UNDEFINED → TRANSFER_DST_OPTIMAL: oldLayout is UNDEFINED because we always overwrite the
+  // level's content; the driver is free to discard existing data, avoiding a redundant layout
+  // establishment pass before the first write.
+  RecordImageBarrier(cmd, dst_image, mip_level,
+                      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                      0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+  VkBufferImageCopy region = {};
+  region.bufferOffset                    = 0;
+  region.bufferRowLength                 = 0;
+  region.bufferImageHeight               = 0;
+  region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+  region.imageSubresource.mipLevel       = mip_level;
+  region.imageSubresource.baseArrayLayer = 0;
+  region.imageSubresource.layerCount     = 1;
+  region.imageOffset                     = {0, 0, 0};
+  region.imageExtent                     = {mip_width, mip_height, 1};
+  vkCmdCopyBufferToImage(cmd, src_buf, dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          1, &region);
+
+  // TRANSFER_DST_OPTIMAL → GENERAL
+  RecordImageBarrier(cmd, dst_image, mip_level,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                      VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+  EndAndSubmitCmd(_device, _queue, _command_pool, cmd);
+}
+
+void VulkanTest::CopyImageToBuffer(VkImage src_image, uint32_t mip_level, uint32_t mip_width,
+                                    uint32_t mip_height, VkBuffer dst_buf) {
+  VkCommandBuffer cmd = BeginOneTimeCmd(_device, _command_pool);
+
+  // GENERAL → TRANSFER_SRC_OPTIMAL
+  RecordImageBarrier(cmd, src_image, mip_level,
+                      VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                      VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+  VkBufferImageCopy region = {};
+  region.bufferOffset                    = 0;
+  region.bufferRowLength                 = 0;
+  region.bufferImageHeight               = 0;
+  region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+  region.imageSubresource.mipLevel       = mip_level;
+  region.imageSubresource.baseArrayLayer = 0;
+  region.imageSubresource.layerCount     = 1;
+  region.imageOffset                     = {0, 0, 0};
+  region.imageExtent                     = {mip_width, mip_height, 1};
+  vkCmdCopyImageToBuffer(cmd, src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst_buf,
+                          1, &region);
+
+  // TRANSFER_SRC_OPTIMAL → GENERAL
+  RecordImageBarrier(cmd, src_image, mip_level,
+                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                      VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_MEMORY_WRITE_BIT,
+                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+
+  EndAndSubmitCmd(_device, _queue, _command_pool, cmd);
+}
+
 // Sometimes in CUDA the stream is not immediately ready after a semaphore has been signaled
 void PollStream(hipStream_t stream, hipError_t expected, uint32_t num_iterations) {
   hipError_t query_result;

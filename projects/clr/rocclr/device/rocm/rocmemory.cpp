@@ -21,8 +21,13 @@
 #include "platform/sampler.hpp"
 #include "platform/interop_gl.hpp"
 #include "platform/external_memory.hpp"
+#include "platform/external_image.hpp"
 
 #ifdef _WIN32
+#if defined(ROCCLR_HAS_VULKAN)
+#include <vulkan/vulkan.h>
+#endif
+
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
 #include "platform/interop_d3d10.hpp"
@@ -226,6 +231,56 @@ hsa_status_t Memory::interopMapBuffer(hsa_handle_t fdn, hsa_interop_map_flag_t f
   assert(deviceMemory_ != nullptr && "Interop map failed to produce a pointer!");
   return status;
 }
+
+#if defined(_WIN32) && defined(ROCCLR_HAS_VULKAN)
+// Populate amdImageDesc_->data[] SRD words using vkWriteResourceDescriptorsEXT for a Vulkan image.
+// Returns true on success. Called only when hsa_amd_interop_map_buffer_with_size returns no
+// metadata on Windows (hardcoded nullptr,nullptr path).
+static bool QueryVulkanImageSrd(hsa_amd_image_descriptor_t* amdImageDesc,
+                                 VkDevice_T* vk_device, void* vk_image,
+                                 const std::vector<void*>& level_views, uint32_t num_levels) {
+  auto pfnWrite = reinterpret_cast<PFN_vkWriteResourceDescriptorsEXT>(
+      vkGetDeviceProcAddr(vk_device, "vkWriteResourceDescriptorsEXT"));
+  if (!pfnWrite) {
+    LogWarning("vkWriteResourceDescriptorsEXT not available — cannot populate image SRD");
+    return false;
+  }
+
+  static constexpr uint32_t kSrdDwords = 8;
+  uint32_t srd[kSrdDwords] = {};
+
+  // level_views[] stores VkImageViewCreateInfo* cast to void* (one per mip level)
+  VkImageDescriptorInfoEXT img_info = {};
+  img_info.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT;
+  img_info.pView = (level_views.size() > 0)
+                       ? reinterpret_cast<const VkImageViewCreateInfo*>(level_views[0])
+                       : nullptr;
+  img_info.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+  VkResourceDescriptorInfoEXT res_info = {};
+  res_info.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT;
+  res_info.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  res_info.data.pImage = &img_info;
+
+  VkHostAddressRangeEXT dst = {};
+  dst.address = srd;
+  dst.size = sizeof(srd);
+
+  pfnWrite(vk_device, 1, &res_info, &dst);
+  memcpy(&amdImageDesc->data[0], srd, kSrdDwords * sizeof(uint32_t));
+
+  // Write per-level SRDs into data[kSrdDwords * lvl ..] for mip offset extraction
+  for (uint32_t lvl = 1; lvl < num_levels && lvl < level_views.size(); ++lvl) {
+    uint32_t lvl_srd[kSrdDwords] = {};
+    img_info.pView = reinterpret_cast<const VkImageViewCreateInfo*>(level_views[lvl]);
+    dst.address = lvl_srd;
+    pfnWrite(vk_device, 1, &res_info, &dst);
+    memcpy(&amdImageDesc->data[kSrdDwords * lvl], lvl_srd, kSrdDwords * sizeof(uint32_t));
+  }
+
+  return true;
+}
+#endif  // _WIN32 && ROCCLR_HAS_VULKAN
 
 // Setup an interop buffer (dmabuf handle) as an OpenCL buffer
 // ================================================================================================
@@ -952,6 +1007,35 @@ bool Buffer::create(bool alloc_local) {
     amd::InteropObject* interop = owner()->getInteropObj();
     auto ext_memory = interop->asExternalMemory();
     if (ext_memory != nullptr) {
+#if defined(_WIN32) && defined(ROCCLR_HAS_VULKAN)
+      // ExternalImage: Vulkan NT handle — must query SRD via vkWriteResourceDescriptorsEXT
+      // because hsa_amd_interop_map_buffer_with_size returns nullptr metadata on Windows.
+      auto ext_image = dynamic_cast<amd::ExternalImage*>(ext_memory);
+      if (ext_image && ext_image->ExternalMemory::Type() == amd::ExternalMemory::HandleType::VkImage) {
+        static constexpr size_t MaxMetadataSizeDwords = 64;
+        static constexpr size_t HeaderSizeDwords =
+            sizeof(hsa_amd_image_descriptor_t) / sizeof(uint32_t) - 1;
+        amdImageDesc_ = reinterpret_cast<hsa_amd_image_descriptor_t*>(
+            new uint32_t[MaxMetadataSizeDwords + HeaderSizeDwords]());
+        if (!amdImageDesc_) return false;
+
+        hsa_agent_t agent = dev().getBackendDevice();
+        uint32_t id = 0;
+        Hsa::agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID), &id);
+        static constexpr uint32_t DeviceIdVendorShift = 16u;
+        amdImageDesc_->version = 1;
+        amdImageDesc_->deviceID = (AmdVendor << DeviceIdVendorShift) | id;
+
+        if (!QueryVulkanImageSrd(amdImageDesc_, ext_image->VkDeviceHandle(),
+                                 ext_image->VkImageHandle(), ext_image->LevelViews(),
+                                 ext_image->NumLevels())) {
+          return false;
+        }
+        // NT handle — not KMT
+        return interopMapBuffer(reinterpret_cast<hsa_handle_t>(ext_image->Handle()),
+                                HSA_INTEROP_MAP_FLAG_NONE) == HSA_STATUS_SUCCESS;
+      }
+#endif  // _WIN32 && ROCCLR_HAS_VULKAN
       // Win32-KMT handles need ROCR's KMT branch in libhsakmt; the default
       // (no flag) takes the NT path and fails with STATUS_INVALID_HANDLE.
       hsa_interop_map_flag_t map_flags = HSA_INTEROP_MAP_FLAG_NONE;
@@ -1286,6 +1370,18 @@ void Image::populateImageDescriptor() {
 }
 
 bool Image::createInteropImage() {
+  // Handle ExternalMemory (hipExternalMemory / Vulkan image interop)
+  auto ext_memory = owner()->getInteropObj()->asExternalMemory();
+  if (ext_memory != nullptr) {
+    // Memory::create() already called interopMapBuffer and filled amdImageDesc_ (on Windows,
+    // QueryVulkanImageSrd populated the SRD for ExternalImage via vkWriteResourceDescriptorsEXT).
+    originalDeviceMemory_ = deviceMemory_;
+    hsa_status_t err =
+        Hsa::image_create(dev().getBackendDevice(), &imageDescriptor_, amdImageDesc_,
+                          originalDeviceMemory_, permission_, &hsaImageObject_);
+    return err == HSA_STATUS_SUCCESS;
+  }
+
   // Handle GL interop images
   auto glObj = owner()->getInteropObj()->asGLObject();
   if (glObj) {

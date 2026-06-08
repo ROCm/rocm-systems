@@ -99,6 +99,15 @@ else()
     endif()
   endif()
 endif()
+if(WIN32)
+  find_package(Vulkan QUIET)
+  if(Vulkan_FOUND)
+    target_include_directories(rocclr PRIVATE ${Vulkan_INCLUDE_DIRS})
+    target_compile_definitions(rocclr PRIVATE ROCCLR_HAS_VULKAN=1)
+    target_link_libraries(rocclr PRIVATE ${Vulkan_LIBRARIES})
+  endif()
+endif()
+
 find_package(OpenGL REQUIRED)
 
 target_sources(rocclr PRIVATE
