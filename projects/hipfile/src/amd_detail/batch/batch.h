@@ -440,7 +440,8 @@ public:
     void cancelOperations() override;
 
     ///
-    /// @brief Cancel outstanding operations from this Context and wait for running ops
+    /// @brief Prevent future submissions, cancel outstanding operations, and wait for running ops.
+    /// @note This is the terminal cleanup operation used when destroying a Context.
     ///
     void cancelOperationsAndWait() override;
 
@@ -464,6 +465,10 @@ private:
 
     /// Task group used for all submitted operations owned by this context.
     std::unique_ptr<ITaskGroup> task_group;
+
+    /// Prevents operations from being submitted after destruction has begun.
+    /// Protected by context_mutex.
+    bool finished = false;
 
     BatchContext(unsigned capacity);
 

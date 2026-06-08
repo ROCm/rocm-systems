@@ -344,6 +344,10 @@ BatchContext::submitOperations(BatchOperations pending_ops)
     {
         std::unique_lock<std::shared_mutex> context_lock{context_mutex};
 
+        if (finished) {
+            throw InvalidBatchHandle();
+        }
+
         if (pending_ops.size() > capacity - (submitted_ops.size() + completed_ops.size())) {
             throw BatchFull();
         }
@@ -353,6 +357,9 @@ BatchContext::submitOperations(BatchOperations pending_ops)
         }
         submitted_ops.insert(pending_ops.begin(), pending_ops.end());
 
+        // Destruction takes context_mutex before canceling the task group. Keep
+        // all enqueue operations in this critical section so destroy cannot
+        // finish before an accepted operation is handed to the task group.
         auto self = shared_from_this();
         for (const auto &op : pending_ops) {
             task_group->run([self, op]() {
@@ -436,6 +443,7 @@ BatchContext::cancelOperationsAndWait()
     {
         std::unique_lock<std::shared_mutex> lock{context_mutex};
 
+        finished = true;
         task_group->cancel();
         completeCanceledOperations();
     }
@@ -488,17 +496,21 @@ BatchContextMap::createContext(unsigned capacity)
 void
 BatchContextMap::destroyContext(hipFileBatchHandle_t handle)
 {
-    std::unique_lock<std::shared_mutex> ulock{batch_mutex};
+    std::shared_ptr<IBatchContext> context;
 
-    auto context = active_contexts.find(handle);
-    if (context == active_contexts.end()) {
-        throw InvalidBatchHandle();
+    {
+        std::unique_lock<std::shared_mutex> ulock{batch_mutex};
+
+        auto iter = active_contexts.find(handle);
+        if (iter == active_contexts.end()) {
+            throw InvalidBatchHandle();
+        }
+
+        context = std::move(iter->second);
+        active_contexts.erase(iter);
     }
-    // TODO: Check for outstanding operations.
-    // TODO: Attempt to cancel any outstanding operations.
-    // TODO: Determine if we return unconditionally or require
-    //       outstanding ops to terminate first.
-    active_contexts.erase(handle);
+
+    context->cancelOperationsAndWait();
 }
 
 std::shared_ptr<IBatchContext>
