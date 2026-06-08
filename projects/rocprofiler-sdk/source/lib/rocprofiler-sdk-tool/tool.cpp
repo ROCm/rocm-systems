@@ -2722,6 +2722,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ROCP_ERROR << "Invalid GPU Device Index: " << entry;
     }
 
+    const auto defer_counter_start = tool::get_config().selected_regions;
+
     if(tool::get_config().counter_collection)
     {
         create_pause_resume_ctx(counter_collection_ctx, "agent counter collection");
@@ -2733,7 +2735,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                      nullptr),
             "Could not setup counting service");
 
-        start_context(counter_collection_ctx, "counter collection");
+        if(!defer_counter_start) start_context(counter_collection_ctx, "counter collection");
     }
 
     if(tool::get_config().spm_counter_collection)
@@ -2744,7 +2746,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 counter_collection_ctx, spm_dispatch_callback, nullptr, spm_data_callback, nullptr),
             "Could not setup SPM counting service");
 
-        start_context(counter_collection_ctx, "SPM counter collection");
+        if(!defer_counter_start) start_context(counter_collection_ctx, "SPM counter collection");
     }
 
     auto rename_ctx            = rocprofiler_context_id_t{0};
