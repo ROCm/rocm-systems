@@ -10,13 +10,27 @@ import common
 import pytest
 
 from rocprof_compute_base import RocProfCompute
-from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from rocprof_compute_profile.profiler_base import (
+    _FRAMEWORK_ENV_VAR,
+    RocProfCompute_Base,
+)
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
     NoScriptInCommandError,
     PythonScriptNotFoundError,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_framework_env(monkeypatch):
+    """Strip ROCPROFCOMPUTE_ROCTX_FRAMEWORKS from the parent env before each
+    test so an inherited value cannot influence sanitize(). sanitize() no
+    longer publishes the var via os.environ -- it is plumbed through the
+    subprocess env in run_prof -- but this guard keeps tests reproducible
+    when the launcher shell has the var pre-set.
+    """
+    monkeypatch.delenv(_FRAMEWORK_ENV_VAR, raising=False)
 
 
 def _make_sanitize_args(remaining, torch_trace=False, **overrides):

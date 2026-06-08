@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import os
 import re
 import shlex
 import shutil
@@ -35,6 +36,39 @@ from utils.utils_exceptions import (
 from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
 
+_FRAMEWORK_ENV_VAR = "ROCPROFCOMPUTE_ROCTX_FRAMEWORKS"
+
+# Maps each CLI flag to the backends it enables. Set
+# ROCPROFCOMPUTE_ROCTX_FRAMEWORKS=api to enable every backend.
+_FLAG_TO_FRAMEWORKS: dict[str, tuple[str, ...]] = {
+    "torch_trace": ("torch",),
+}
+
+
+def _compute_selected_frameworks(args: argparse.Namespace) -> set[str]:
+    """Return the set of frameworks requested via CLI flags."""
+    selected: set[str] = set()
+    for flag, frameworks in _FLAG_TO_FRAMEWORKS.items():
+        if getattr(args, flag, False):
+            selected.update(frameworks)
+    return selected
+
+
+def _build_inject_env(frameworks: set[str], pkg_parent: Path) -> dict[str, str]:
+    """Build the environment overrides for the workload subprocess.
+
+    Returns a dict suitable for run_prof's extra_env. PYTHONPATH is extended
+    rather than replaced.
+    """
+    env: dict[str, str] = {}
+    if frameworks:
+        env[_FRAMEWORK_ENV_VAR] = ",".join(sorted(frameworks))
+    parent_str = str(pkg_parent)
+    existing = os.environ.get("PYTHONPATH", "")
+    if parent_str not in existing.split(os.pathsep):
+        env["PYTHONPATH"] = parent_str + (os.pathsep + existing if existing else "")
+    return env
+
 
 def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[str]]:
     """Locate the script argument in a Python command, skipping interpreter flags.
@@ -59,24 +93,29 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
     return None, None
 
 
-def _prepare_torch_trace_injection(
+_INJECT_MODULE = "utils.inject_roctx"
+
+
+def _prepare_api_trace_injection(
     remaining: list[str],
     resolved_exec_path: Path,
     is_python: bool,
     script_index: Optional[int],
     skip_flag: Optional[str],
-) -> None:
-    """Rewrite the workload command to inject ROCTX markers for --torch-trace.
+) -> Path:
+    """Insert the inject_roctx entry point into the workload command.
 
-    Mutates *remaining* in-place.  Three cases:
-      1. Explicit Python interpreter  — insert inject_roctx.py before the script.
-      2. Direct .py script execution  — prepend sys.executable + inject_roctx.py.
-      3. Non-Python binary            — warn and leave the command untouched.
+    Modifies remaining in place. The rewrite depends on the workload type:
+      1. Python interpreter — insert ``-m utils.inject_roctx`` before the script.
+      2. Direct .py script  — prepend ``sys.executable -m utils.inject_roctx``.
+      3. Other executables  — leave the command unchanged and emit a warning.
+
+    Returns the package's parent directory for the subprocess PYTHONPATH.
     """
-    inject_script = Path(__file__).parent.parent / "utils" / "inject_roctx.py"
-    if not inject_script.exists():
+    inject_pkg_parent = Path(__file__).parent.parent
+    if not (inject_pkg_parent / "utils" / "inject_roctx" / "__main__.py").exists():
         console_error(
-            f"Cannot find inject_roctx.py at {inject_script}. "
+            f"Cannot find inject_roctx package under {inject_pkg_parent}. "
             "Please verify your installation."
         )
 
@@ -85,31 +124,32 @@ def _prepare_torch_trace_injection(
             console_warning(
                 f"Cannot inject ROCTX markers into 'python {skip_flag}' "
                 "invocations. Launching workload as-is; "
-                "--torch-trace may have no effect."
+                "API tracing may have no effect."
             )
         elif not Path(remaining[script_index]).is_file():
             raise PythonScriptNotFoundError(remaining[script_index])
         else:
-            remaining.insert(script_index, str(inject_script))
+            remaining[script_index:script_index] = ["-m", _INJECT_MODULE]
     elif resolved_exec_path.suffix in (".py", ".pyw", ".pyc", ".pyo"):
-        remaining.insert(0, str(inject_script))
-        remaining.insert(0, sys.executable)
+        remaining[0:0] = [sys.executable, "-m", _INJECT_MODULE]
     else:
         console_warning(
             "Command does not look like a Python entry point, "
             "skipping ROCTX auto-injection and launching workload as-is. "
-            "Ensure the binary already initializes PyTorch/ROCTX markers, "
-            "otherwise --torch-trace will have no effect."
+            "Ensure the binary already initializes ROCTX markers, "
+            "otherwise API tracing will have no effect."
         )
 
     if (resolved_exec_path.parent / "_internal").is_dir():
         console_warning(
             "Workload appears to be a self-contained binary. "
             "Such bundles typically ship private ROCm/HSA libraries, which "
-            "prevents --torch-trace from collecting data. "
+            "prevents API tracing from collecting data. "
             "Rebuild without packaging libhsa/libhip or "
             "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
         )
+
+    return inject_pkg_parent
 
 
 class RocProfCompute_Base:
@@ -135,6 +175,8 @@ class RocProfCompute_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
+        selected_frameworks = _compute_selected_frameworks(args)
+        self._selected_frameworks: set[str] = selected_frameworks
 
         if (
             sum((
@@ -161,26 +203,26 @@ class RocProfCompute_Base:
                 "Please remove one of these options."
             )
 
-        if getattr(args, "torch_trace", False):
+        if selected_frameworks:
             if args.attach_pid:
                 console_error(
-                    "--torch-trace cannot be used with --attach-pid. "
-                    "Torch trace requires injecting ROCTX markers into the "
-                    "workload at launch; already-running processes cannot be "
-                    "instrumented. Please remove one of these options."
+                    "API tracing cannot be used with --attach-pid. "
+                    "ROCTX injection requires launching the workload; "
+                    "already-running processes cannot be instrumented. "
+                    "Please remove one of these options."
                 )
 
             if args.attach_duration_msec:
                 console_error(
-                    "--torch-trace cannot be used with --attach-duration-msec. "
+                    "API tracing cannot be used with --attach-duration-msec. "
                     "--attach-duration-msec only applies to --attach-pid, which "
-                    "is incompatible with --torch-trace. Please remove one of "
+                    "is incompatible with API tracing. Please remove one of "
                     "these options."
                 )
 
             if args.spatial_multiplexing is not None:
                 console_error(
-                    "--torch-trace does not yet support multi-node profiling "
+                    "API tracing does not yet support multi-node profiling "
                     "via --spatial-multiplexing. Please remove one of these "
                     "options."
                 )
@@ -220,7 +262,7 @@ class RocProfCompute_Base:
             resolved_exec_path = Path(exec_candidate).resolve()
 
             # Detect bare Python interpreter (no script, no -c/-m) regardless
-            # of --torch-trace — this always hangs the profiler.
+            # of API tracing — this always hangs the profiler.
             is_python = re.match(r"^python[0-9.]*$", resolved_exec_path.name)
             script_index: Optional[int] = None
             skip_flag: Optional[str] = None
@@ -229,13 +271,16 @@ class RocProfCompute_Base:
                 if script_index is None and skip_flag is None:
                     raise NoScriptInCommandError(args.remaining)
 
-            if getattr(args, "torch_trace", False):
-                _prepare_torch_trace_injection(
+            if selected_frameworks:
+                inject_pkg_parent = _prepare_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
                     script_index,
                     skip_flag,
+                )
+                self._inject_env = _build_inject_env(
+                    selected_frameworks, inject_pkg_parent
                 )
             args.remaining = shlex.join(args.remaining)
         elif not args.attach_pid:
@@ -329,8 +374,9 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
-                torch_trace_enabled=getattr(args, "torch_trace", False),
+                api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
+                extra_env=getattr(self, "_inject_env", None),
             )
 
             end_time = time.time()

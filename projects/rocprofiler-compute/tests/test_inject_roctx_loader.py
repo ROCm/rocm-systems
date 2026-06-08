@@ -1,12 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for ``utils.inject_roctx_loader``.
-
-The tests stub the loader to verify tier ordering, cache fingerprint
-stability, and the ``ROCPROFCOMPUTE_REBUILD_ROCTX`` override across the
-prebuilt and JIT tiers. End-to-end builds are exercised in
-``test_torch_trace_coverage``.
+"""Unit tests for utils.inject_roctx._backends._torch_cpp_loader. No GPU.
+CMake build is end-to-end in test_torch_trace_coverage; this file stubs the
+loader to pin contracts: tier order, cache fingerprint, REBUILD env var,
+no-ninja policy.
 """
 
 import importlib
@@ -15,7 +13,7 @@ import sys
 import common  # noqa: F401
 import pytest
 
-from utils import inject_roctx_loader
+from utils.inject_roctx._backends import _torch_cpp_loader as inject_roctx_loader
 
 _FAKE_TAG = "py3.12_torch2.9_src000000000000"
 
@@ -120,7 +118,8 @@ def test_cmake_and_runtime_compute_identical_fingerprint():
     snippet = (
         "import sys, pathlib; "
         f"sys.path.insert(0, str(pathlib.Path('{cmake_dir}/../..').resolve())); "
-        "from utils.inject_roctx_loader import _source_fingerprint; "
+        "from utils.inject_roctx._backends._torch_cpp_loader "
+        "import _source_fingerprint; "
         "print(_source_fingerprint())"
     )
     result = subprocess.run(
@@ -1034,7 +1033,16 @@ def test_import_does_not_apply_global_patches(monkeypatch):
         post = {
             "compile": getattr(_torch, "compile", None),
         }
-        assert hasattr(inject_roctx, "install_global_wraps")
+        for sym in (
+            "install_global_wraps",
+            "install_function_apply_wrappers",
+            "using_c_tier",
+            "dump_recordfn_stats",
+            "_push_scope",
+            "_pop_scope",
+            "resolve_user_caller_location",
+        ):
+            assert hasattr(inject_roctx, sym), f"public symbol missing: {sym}"
         assert post["compile"] is pre["compile"], "torch.compile was replaced on import"
     finally:
         sys.modules.pop("utils.inject_roctx", None)
