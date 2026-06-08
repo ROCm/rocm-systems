@@ -71,6 +71,8 @@
 #include "library_info_tester.hpp"
 #include "fence_ordering_tester.hpp"
 #include "tile_rma_tester.hpp"
+#include "reduce_on_stream_tester.hpp"
+#include "host_ctx_create_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -704,6 +706,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case ReduceOnStreamTestType:
+      test_name = "Reduce On Stream";
+      testers.push_back(new ReduceOnStreamTester(args));
+      break;
+    case HostCtxCreateTestType:
+      test_name = "Host CTX Create";
+      testers.push_back(new HostCtxCreateTester(args));
+      break;
     default:
       test_name = "Empty";
       break;
@@ -790,7 +800,8 @@ void Tester::execute() {
         _type != TeamCtxInfraBlockTestType  &&
         _type != TeamCtxInfraOddEvenTestType &&
         _type != TeamCtxSharedInfraTestType &&
-        _type != TeamCtxSubsetParentInfraTestType ) {
+        _type != TeamCtxSubsetParentInfraTestType &&
+        _type != HostCtxCreateTestType) {
       print(size);
     }
   }
@@ -806,6 +817,7 @@ bool Tester::peLaunchesKernel() {
    * Some test types are active on both sides.
    */
   switch (_type) {
+    case ReduceOnStreamTestType:
     case TeamReductionTestType:
     case TeamBroadcastTestType:
     case TeamCtxInfraTestType:
@@ -922,12 +934,16 @@ void flush_hdp() {
   CHECK_HIP(hipGetDevice(&hip_dev_id));
   CHECK_HIP(hipDeviceGetAttribute(reinterpret_cast<int*>(&hdp_flush_ptr_),
                         hipDeviceAttributeHdpMemFlushCntl, hip_dev_id));
-  __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  if (hdp_flush_ptr_ != nullptr) {
+    __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  }
 }
 
 void Tester::barrier() {
   rocshmem_barrier_all();
+#if defined USE_HDP_FLUSH
   flush_hdp();
+#endif
 }
 
 double Tester::gpuCyclesToMicroseconds(long long int cycles) {

@@ -4,8 +4,12 @@
 
 # ROCm-backed hipFile
 
+include(AISUseTBB)
+
 set(HIPFILE_SOURCES
     "${HIPFILE_SRC_COMMON_PATH}/hipfile-common.cpp"
+    api_trace/api-dispatch-interface.cpp
+    api_trace/api-trace.cpp
     async.cpp
     backend.cpp
     backend/asyncop-fallback.cpp
@@ -28,13 +32,14 @@ set(HIPFILE_SOURCES
     stats.cpp
     stream.cpp
     sys.cpp
+    thread-pool.cpp
 )
 
 # Create hipfile target
 ais_add_libraries(
     NAME     hipfile
     DETAIL   amd
-    LIBS     mount
+    LIBS     mount TBB::tbb
     SRCS     ${HIPFILE_SOURCES}
     LIBINCL  ${HIPFILE_INCLUDE_PATH}
     SYSINCLS ${HIPFILE_AMD_SOURCE_PATH}

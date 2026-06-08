@@ -823,6 +823,17 @@ class StaticCommands:
                     e.get_error_info(),
                 )
             try:
+                mem_alloc_mode = amdsmi_interface.amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+                    args.gpu
+                )
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                mem_alloc_mode = "N/A"
+                logging.debug(
+                    "Failed to get compute partition mem alloc mode for gpu %s | %s",
+                    gpu_id,
+                    e.get_error_info(),
+                )
+            try:
                 kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
                 partition_id = kfd_info["current_partition_id"]
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -833,6 +844,7 @@ class StaticCommands:
             static_dict["partition"] = {
                 "accelerator_partition": compute_partition,
                 "memory_partition": memory_partition,
+                "compute_partition_mem_alloc_mode": mem_alloc_mode,
                 "partition_id": partition_id,
             }
         if "soc_pstate" in current_platform_args:
@@ -1225,6 +1237,13 @@ class StaticCommands:
                             continue
                         freq_dict = {}
                         current_level = frequencies["current"]
+                        # The C library reports current = (uint32_t)-1 when the
+                        # kernel exposes the pp_dpm_* table without a '*'
+                        # current-level marker (e.g. SMU power-gated domains
+                        # on gfx1151 APUs at idle). Surface that as N/A so
+                        # the CLI doesn't show 4294967295 to users.
+                        if current_level == 0xFFFFFFFF:
+                            current_level = "N/A"
                         # Add current_level first for proper output ordering
                         freq_dict.update({"current_level": current_level})
                         # Add frequency_levels second

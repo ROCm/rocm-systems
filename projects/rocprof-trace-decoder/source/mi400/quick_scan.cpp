@@ -27,12 +27,19 @@
 #include "gfx10/token_types.h"
 #include "mi400parser.h"
 
-#if defined(__x86_64__) || defined(_M_X64)
+// SIMD-only scanner — no scalar fallback. The AVX-512 path uses GCC
+// function multiversioning (__attribute__((target("…")))) which MSVC does
+// not implement, so MSVC and non-x86 targets compile to a stub that
+// returns SCAN_NOT_IMPLEMENTED. x86 CPUs without AVX-512 also resolve to
+// the stub at runtime.
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
 #    include <immintrin.h>
 #    define MI400_RARE_SCAN_HAS_X86 1
 #else
 #    define MI400_RARE_SCAN_HAS_X86 0
 #endif
+
+#if MI400_RARE_SCAN_HAS_X86
 
 namespace mi400::quick_scan
 {
@@ -85,117 +92,6 @@ const Tables& tables()
     }();
     return t;
 }
-
-size_t scan_mi400_scalar(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap)
-{
-    if (!buf || !out || out_cap == 0 || size == 0) return 0;
-
-    const Tables& T = tables();
-    const uint8_t* info = T.info; // hoist base pointer; one load per inner iter
-    size_t bp = 0;
-    size_t n_out = 0;
-    bool ext = false;
-
-    // Strict 2-iter unroll over a 16-byte window. Removing the inner-loop
-    // early-break (which mispredicted ~25% of the time on the previous
-    // 4-iter / 8-byte design) is the entire point of this layout: the loop
-    // shape is now a fixed schedule, no break, no continue in the hot
-    // path. The two cold paths (ext-skip, rare-capture) keep their
-    // branches but are predicted not-taken.
-    //
-    // TAIL_GUARD = 24 = 16-byte window load + up to 8 bytes of cold
-    // rare-capture re-read past the window (only on iter 1 when iter 0
-    // was a 9-byte INST_PC token and iter 1 happens to be a rare token —
-    // doubly cold, but covered).
-    constexpr size_t TAIL_GUARD = 24;
-
-    while (bp + TAIL_GUARD < size && n_out < out_cap)
-    {
-        // 16-byte logical window = (hi << 64) | lo.
-        uint64_t lo, hi;
-        std::memcpy(&lo, buf + bp, 8);
-        std::memcpy(&hi, buf + bp + 8, 8);
-
-        // ===== Iter 0 =====
-        const uint8_t b0 = static_cast<uint8_t>(lo);
-        unsigned bytes0;
-
-        if (__builtin_expect(ext && (b0 & 1u), 0)) { bytes0 = 1; }
-        else
-        {
-            const uint8_t v0 = info[b0];
-            bytes0 = v0 & INFO_LEN;
-
-            if (__builtin_expect(v0 & INFO_RARE, 0))
-            {
-                out[n_out++] = TokenGenerator::QuickToken{lo, T.rare_type[b0]};
-                if (n_out >= out_cap) goto done;
-            }
-
-            ext = (v0 & INFO_EXT) != 0;
-        }
-
-        // ===== Iter 1 =====
-        {
-            const unsigned s = bytes0 * 8;
-            const uint64_t lo1 = (s < 64) ? ((lo >> s) | (hi << ((64 - s) & 63))) : ((s == 64) ? hi : (hi >> (s - 64)));
-
-            const uint8_t b1 = static_cast<uint8_t>(lo1);
-            unsigned bytes1;
-
-            if (__builtin_expect(ext && (b1 & 1u), 0)) { bytes1 = 1; }
-            else
-            {
-                const uint8_t v1 = info[b1];
-                bytes1 = v1 & INFO_LEN;
-
-                if (__builtin_expect(v1 & INFO_RARE, 0))
-                {
-                    uint64_t contents;
-                    std::memcpy(&contents, buf + bp + bytes0, 8);
-                    out[n_out++] = TokenGenerator::QuickToken{contents, T.rare_type[b1]};
-                    if (n_out >= out_cap) goto done;
-                }
-
-                ext = (v1 & INFO_EXT) != 0;
-            }
-
-            bp += bytes0 + bytes1;
-        }
-    }
-
-done:
-    while (bp < size && n_out < out_cap)
-    {
-        uint8_t b = buf[bp];
-
-        if (ext && (b & 1u))
-        {
-            bp += 1;
-            continue;
-        }
-
-        const uint8_t v = info[b];
-        const unsigned bytes = v & INFO_LEN;
-
-        if (__builtin_expect(v & INFO_RARE, 0))
-        {
-            uint64_t contents = 0;
-            const size_t avail = size - bp;
-            const size_t to_copy = avail < 8 ? avail : 8;
-            std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = TokenGenerator::QuickToken{contents, T.rare_type[b]};
-            if (n_out >= out_cap) break;
-        }
-
-        ext = (v & INFO_EXT) != 0;
-        bp += bytes ? bytes : 1;
-    }
-
-    return n_out;
-}
-
-#if MI400_RARE_SCAN_HAS_X86
 
 // AVX-512_VBMI path. Per 64-byte chunk:
 //   1. Load 64 bytes.
@@ -376,18 +272,15 @@ done:
     return n_out;
 }
 
-#endif // MI400_RARE_SCAN_HAS_X86
-
 using ScanFn = size_t (*)(const uint8_t*, size_t, TokenGenerator::QuickToken*, size_t);
 
+// Returns nullptr if the x86 CPU lacks AVX-512.
 ScanFn select_scanner()
 {
-#if MI400_RARE_SCAN_HAS_X86
     __builtin_cpu_init();
     if (__builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512bw") && __builtin_cpu_supports("avx512f"))
         return &scan_mi400_avx512;
-#endif
-    return &scan_mi400_scalar;
+    return nullptr;
 }
 
 } // namespace
@@ -395,7 +288,11 @@ ScanFn select_scanner()
 size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap)
 {
     static const ScanFn fn = select_scanner();
+    if (!fn) throw std::exception();
+
     return fn(buf, size, out, out_cap);
 }
 
 } // namespace mi400::quick_scan
+
+#endif // MI400_RARE_SCAN_HAS_X86

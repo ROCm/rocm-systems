@@ -2,20 +2,21 @@
 // SPDX-License-Identifier: MIT
 
 /// @file shared_infra_test.cpp
-/// @brief Phase B unit tests: addr_calc, mfma_exec, wavefront context, CU factory.
+/// @brief Phase B unit tests: addr_calc, MMA execution, wavefront context, CU factory.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/mfma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -39,10 +40,13 @@ using namespace rocjitsu;
 // ---------------------------------------------------------------------------
 
 static_assert(GpuIsa<cdna3::Isa>);
+static_assert(GpuIsa<gfx1250::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
 static_assert(HasAccVgpr<cdna3::Isa>);
+static_assert(!HasAccVgpr<gfx1250::Isa>);
 static_assert(!HasAccVgpr<rdna4::Isa>);
 static_assert(HasMonolithicWaitcnt<cdna3::Isa>);
+static_assert(!HasMonolithicWaitcnt<gfx1250::Isa>);
 static_assert(!HasMonolithicWaitcnt<rdna4::Isa>);
 
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
@@ -50,6 +54,7 @@ static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 
 // RDNA2 supports Wave64 (WF_SIZE_MAX inherited as 64).
 static_assert(rdna2::Isa::WF_SIZE_MAX == 64);
+static_assert(gfx1250::Isa::WF_SIZE_MAX == 32);
 
 // CDNA1 has no AccVGPRs; CDNA2/3/4 have 256.
 static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == 0);
@@ -149,9 +154,9 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
 INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                                            ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                           ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4));
+                                           ROCJITSU_CODE_ARCH_GFX1250, ROCJITSU_CODE_ARCH_RDNA1,
+                                           ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                                           ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
 
 // ---------------------------------------------------------------------------
 // DPP permutation tests
@@ -321,7 +326,8 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   auto *wf = cu->dispatch_wf(0, 0, 104, 16);
   ASSERT_NE(wf, nullptr);
 
-  // Set scratch base to a known address.
+  // Set scratch base via the wavefront's dedicated FLAT_SCRATCH register.
+  // On CDNA4 this is an architected HW register, not SGPRs s[102:103].
   constexpr uint64_t SCRATCH_BASE = 0x1'0000'0000ULL;
   wf->set_scratch_base(SCRATCH_BASE);
 

@@ -61,6 +61,7 @@ inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1030 = 0x36;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1100 = 0x41;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1150 = 0x43;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x48;
+inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1250 = 0x49;
 inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
 
 inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
@@ -83,6 +84,8 @@ inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
     return EF_AMDGPU_MACH_AMDGCN_GFX1150;
   case ROCJITSU_CODE_ARCH_RDNA4:
     return EF_AMDGPU_MACH_AMDGCN_GFX1200;
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return EF_AMDGPU_MACH_AMDGCN_GFX1250;
   default:
     return EF_AMDGPU_MACH_NONE;
   }

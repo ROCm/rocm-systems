@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "argcheck.h" // Need some checks here since we access comm
 #include "collectives.h"
@@ -33,6 +34,9 @@ const char* ncclFuncToString(ncclFunc_t fn) {
   case ncclFuncScatter: return "Scatter";
   case ncclFuncSendRecv: return "SendRecv";
   case ncclFuncSend: return "Send";
+  case ncclFuncPutSignal: return "PutSignal";
+  case ncclFuncSignal: return "Signal";
+  case ncclFuncWaitSignal: return "WaitSignal";
   default: return "Invalid";
   }
 }
@@ -116,22 +120,30 @@ static ncclResult_t rcclDirectAllGather(const void* sendbuff, void* recvbuff, si
   return ncclEnqueueCheck(&info);
 }
 
-RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 0);
 RCCL_PARAM(DdaEnable, "DDA_ENABLE", 1);
 
-static bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
-  if (comm->nNodes < 8) return false;
-  if (rcclParamHierarchicalAllGather() != 1) return false;
-  if (!comm->hierarchicalCommsInitialized) return false;
+enum rcclAllGatherAlgo {
+  RCCL_AG_RING,
+  RCCL_AG_DIRECT,
+  RCCL_AG_HIERARCHICAL
+};
 
-  size_t threshold = 0;
-  if (comm->nNodes >= 16) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
-  } else if (comm->nNodes >= 8) {
-    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+static rcclAllGatherAlgo rcclSelectAllGatherAlgo(struct ncclComm* comm, size_t msgSize) {
+  if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
+    return RCCL_AG_HIERARCHICAL;
   }
+  if (rcclUseAllGatherDirect(comm, msgSize)) {
+    return RCCL_AG_DIRECT;
+  }
+  return RCCL_AG_RING;
+}
 
-  return threshold > 0 && msgSize <= threshold;
+static inline int hierarchicalShuffleNumBlocks(size_t totalBytes) {
+  if (totalBytes <= (size_t)64 * 1024)
+    return 8;
+  if (totalBytes <= (size_t)16 * 1024 * 1024)
+    return 16;
+  return 32;
 }
 
 static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* recvbuff, size_t sendcount,
@@ -153,8 +165,7 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
 
   // Step 1: Inter-node AllGather
   size_t interMsgSize = sendcount * nNodes * typeSize;
-  if (rcclUseAllGatherDirect(interComm, interMsgSize)) {
-    // Use direct allgather
+  if (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) {
     NCCLCHECK(rcclDirectAllGather(interSendBuff, recvbuff, sendcount, datatype, interComm, stream));
   } else {
     struct ncclInfo infoInterAG = { ncclFuncAllGather, "HierarchicalAllGather-Inter",
@@ -179,9 +190,8 @@ static ncclResult_t ncclHierarchicalAllGather_Impl(const void* sendbuff, void* r
   }
 
   // Step 3: Shuffle tempBuffer to recvbuff
-  // TODO: numBlocks is set to 16 based on testing up to 16 Nodes.
-  // may need to adjust for larger configurations
-  int numBlocks = 16;
+  size_t totalAGBytes = (size_t)nNodes * localRanks * rankOffset;
+  int numBlocks = hierarchicalShuffleNumBlocks(totalAGBytes);
   int threadsPerBlock = 1024;
   hierarchicalAGShuffle<<<numBlocks, threadsPerBlock, 0, stream>>>(
     (const char*)tempBuffer, (char*)recvbuff, rankOffset, nNodes, localRanks);
@@ -210,13 +220,13 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   NCCLCHECK(Recorder::instance().record(rrAllGather, info));
 
-  if (rcclUseHierarchicalAllGather(comm, msgSize)) {
+  rcclAllGatherAlgo algo = rcclSelectAllGatherAlgo(comm, msgSize);
+  switch (algo) {
+    case RCCL_AG_HIERARCHICAL:
     return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-  }
-
-  if (rcclUseAllGatherDirect(comm, msgSize) && ncclGroupDepth == 0) {
+    case RCCL_AG_DIRECT:
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
-        sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
+      sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
     // Use direct allgather (only when not in a group; in-group use Ring so
     // ncclGroupSimulateEnd gets estimatedTime).
     if (sendcount == 0) return ncclSuccess;
@@ -224,9 +234,9 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     // P2P tasks (no peer rotation, no in-place self skip).
     info.useDirect = true;
     return ncclEnqueueCheck(&info);
-  } else {
-     // use ring allgather
-     return ncclEnqueueCheck(&info);
+    case RCCL_AG_RING:
+    default:
+      return ncclEnqueueCheck(&info);
   }
 }
 
@@ -389,7 +399,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
      ddaThreshold = 0;	
   }
 
-  if (rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
+  if (!ncclParamLaunchOrderImplicit() && rcclParamDdaEnable() && (count * ncclTypeSize(datatype) <= ddaThreshold) && (ddaThreshold > 0) && ncclAllReduceDdaIpcEligible(comm, sendbuff, recvbuff, count, datatype, op) && ncclGroupDepth == 0) {
     NCCLCHECK(ncclAllReduceDdaIpc(
         sendbuff,
         recvbuff,
@@ -584,5 +594,91 @@ ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype
 
   NCCLCHECK(Recorder::instance().record(rrRecv, info));
 
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclPutSignal, const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclPutSignal(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(PutSignal, NcclNvtxParamsPut,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), peer, ctx));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncPutSignal;
+  info.opName = "PutSignal";
+  info.sendbuff = localbuff;
+  info.recvbuff = NULL;
+  info.count = count;
+  info.datatype = datatype;
+  info.op = ncclSum;
+  info.root = peer;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = peerWinOffset;
+  info.peerWin = peerWin;
+  info.sigIdx = sigIdx;
+  info.ctx = ctx;
+  info.flags = flags;
+  info.nDesc = 0;
+  info.signalDescs = NULL;
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclSignal, int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(Signal, NcclNvtxParamsSignal,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, peer, ctx));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncSignal;
+  info.opName = "Signal";
+  info.sendbuff = NULL;
+  info.recvbuff = NULL;
+  info.count = 0;
+  info.datatype = ncclInt8;
+  info.op = ncclSum;
+  info.root = peer;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = 0;
+  info.peerWin = NULL;
+  info.sigIdx = sigIdx;
+  info.ctx = ctx;
+  info.flags = flags;
+  info.nDesc = 0;
+  info.signalDescs = NULL;
+  return ncclEnqueueCheck(&info);
+}
+
+NCCL_API(ncclResult_t, ncclWaitSignal, int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream);
+ncclResult_t ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, cudaStream_t stream) {
+  NVTX3_FUNC_WITH_PARAMS(WaitSignal, NcclNvtxParamsWaitSignal,
+    NVTX3_PAYLOAD(comm ? comm->commHash : 0, nDesc, 0));
+
+  struct ncclInfo info = {};
+  info.coll = ncclFuncWaitSignal;
+  info.opName = "WaitSignal";
+  info.sendbuff = NULL;
+  info.recvbuff = NULL;
+  info.count = 0;
+  info.datatype = ncclInt32;
+  info.op = ncclSum;
+  info.root = 0;
+  info.comm = comm;
+  info.stream = stream;
+  info.chunkSteps = 1;
+  info.sliceSteps = 1;
+  info.peerWinOffset = 0;
+  info.peerWin = NULL;
+  info.sigIdx = 0;
+  info.ctx = 0;
+  info.flags = 0;
+  info.nDesc = nDesc;
+  info.signalDescs = signalDescs;
   return ncclEnqueueCheck(&info);
 }
