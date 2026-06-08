@@ -22,6 +22,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+- Corrected documentation and internal config handling that referenced the
+  non-existent `ROCPROFSYS_USE_TRACE` environment variable. The Perfetto tracing
+  backend is controlled by `ROCPROFSYS_TRACE`; setting `ROCPROFSYS_USE_TRACE` had
+  no effect.
+
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
 ### Added
