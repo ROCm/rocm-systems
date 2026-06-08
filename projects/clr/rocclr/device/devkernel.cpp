@@ -74,6 +74,22 @@ bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& r
 }
 
 // ================================================================================================
+// Queries a single unsigned integer property for an ISA from comgr's ISA metadata
+// (e.g. "EUsPerCU", "LocalMemorySize", "LDSBankCount"). Returns |defaultValue| if the
+// property is unavailable so that callers never depend on a hardcoded device table.
+uint32_t getUintFromIsaMeta(const std::string& isa, const char* key, uint32_t defaultValue) {
+  std::string value;
+  if (getValueFromIsaMeta(isa, key, value)) {
+    uint32_t parsed = 0;
+    std::istringstream iss(value);
+    if (iss >> parsed) {
+      return parsed;
+    }
+  }
+  return defaultValue;
+}
+
+// ================================================================================================
 static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
                                        const amd_comgr_metadata_node_t value, void* data) {
   amd_comgr_status_t status;

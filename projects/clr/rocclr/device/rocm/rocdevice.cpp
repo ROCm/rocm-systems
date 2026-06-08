@@ -1614,7 +1614,8 @@ bool Device::populateOCLDeviceConstants() {
     info_.timeStampFrequency_ = 1000000;
     info_.globalMemChannelBanks_ = 4;
     info_.globalMemChannelBankWidth_ = isa().memChannelBankWidth();
-    info_.localMemSizePerCU_ = isa().localMemSizePerCU();
+    // localMemSizePerCU_ comes from the driver-reported HSA group-segment pool (set earlier),
+    // not a hardcoded table.
     info_.localMemBanks_ = isa().localMemBanks();
     info_.numAsyncQueues_ = kMaxAsyncQueues;
     info_.numRTQueues_ = info_.numAsyncQueues_;
