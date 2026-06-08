@@ -215,6 +215,11 @@ void append_v_cmp_gt_u32_s2_s5_v12(std::vector<uint32_t> &program) {
   program.push_back(0x02021805u);
 }
 
+void append_v_dual_cndmask_b32_v2_v1_v2_dual_mov_b32_v1_0(std::vector<uint32_t> &program) {
+  program.push_back(0xCA500501u);
+  program.push_back(0x02000080u);
+}
+
 [[nodiscard]] rdna4::VglobalMachineInst global_load_b32(uint32_t vdst) {
   rdna4::VglobalMachineInst inst{};
   inst.encoding = 0xEE;
@@ -1030,6 +1035,22 @@ TEST(WaitcheckTest, ReportsMissingWaitAluVaVccBeforeValuReadsTrackedVcc) {
 
   ASSERT_TRUE(report.supported);
   ASSERT_EQ(report.diagnostics.size(), 1u);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Depctr);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VCC);
+  EXPECT_NE(report.diagnostics[0].message.find("depctr_va_vcc(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, ReportsMissingWaitAluVaVccBeforeVopdCndmaskReadsTrackedVcc) {
+  std::vector<uint32_t> program;
+  append_inst(program, v_cndmask_b32_e32(0, 128, 1)); // VALU reads VCC, tracking it.
+  append_inst(program, v_cmp_gt_u32_e32(5, 12));      // VALU writes VCC.
+  append_v_dual_cndmask_b32_v2_v1_v2_dual_mov_b32_v1_0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_GFX1250);
+
+  ASSERT_TRUE(report.supported);
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
   EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Depctr);
   EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
   EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VCC);
