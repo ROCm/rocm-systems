@@ -11,9 +11,9 @@
 ..     - include/hipfile.h
 ..     - examples/common/examples_common.h
 
-==============================================
+**********************************************
 Synchronous GPU-mediated file copy (``aiscp``)
-==============================================
+**********************************************
 
 This tutorial walks through the ``aiscp`` example program, a minimal file-copy
 utility that transfers data from a source file to a destination file by routing

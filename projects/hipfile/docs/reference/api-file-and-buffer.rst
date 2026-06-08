@@ -2,9 +2,9 @@
    :description: API reference for hipFile file handle registration, buffer registration, RDMA types, and related macros.
    :keywords: hipFile, ROCm, API, file handle, buffer, RDMA, hipFileHandleRegister, hipFileBufRegister, GPU IO
 
-===========================================
+*******************************************
 File handle, buffer, and RDMA API reference
-===========================================
+*******************************************
 
 This page documents the hipFile functions and types for registering and deregistering file handles and GPU memory buffers with the hipFile driver. It also covers the RDMA-related types and macros used with userspace RDMA filesystems.
 

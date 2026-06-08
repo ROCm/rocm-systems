@@ -13,9 +13,9 @@
 ..     - src/nvidia_detail/CMakeLists.txt
 ..     - CMakeLists.txt
 
-==============================================
+**********************************************
 Use hipFile with NVIDIA (cuFile compatibility)
-==============================================
+**********************************************
 
 hipFile supports NVIDIA platforms by delegating IO operations to the cuFile library. This page explains how to configure the build for an NVIDIA target and documents the known behavioral differences between the hipFile API and cuFile.
 

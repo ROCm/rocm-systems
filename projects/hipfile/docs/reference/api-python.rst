@@ -2,9 +2,9 @@
    :description: Python API reference for hipFile, covering Driver, FileHandle, Buffer, HipFileException, enumerations, and module-level functions.
    :keywords: hipFile, Python, API, ROCm, Driver, FileHandle, Buffer, HipFileException, OpError, FileHandleType, GPU, I/O
 
-====================
+********************
 Python API reference
-====================
+********************
 
 The hipFile Python package (``hipfile``) provides Cython-backed bindings for
 driver lifecycle management, file handle registration, GPU buffer

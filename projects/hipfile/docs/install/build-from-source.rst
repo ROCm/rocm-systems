@@ -2,9 +2,9 @@
   :description: Step-by-step instructions for building hipFile from source using CMake on AMD and NVIDIA platforms.
   :keywords: hipFile, build from source, CMake, ROCm, install, direct-to-GPU I/O, AMD, NVIDIA
 
-=========================
+*************************
 Build hipFile from source
-=========================
+*************************
 
 Prerequisites
 *************

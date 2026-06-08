@@ -2,9 +2,9 @@
    :description: Asynchronous I/O API reference for hipFile, covering stream-based non-blocking reads and writes and stream registration flags.
    :keywords: hipFile, async, asynchronous, I/O, stream, ROCm, GPU, API, reference
 
-==============================
+******************************
 Asynchronous I/O API reference
-==============================
+******************************
 
 The hipFile asynchronous API lets you enqueue non-blocking reads and writes on
 HIP streams. Stream registration communicates hints about fixed offsets and

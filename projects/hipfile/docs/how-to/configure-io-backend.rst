@@ -2,9 +2,9 @@
   :description: How to configure the hipFile I/O backend using environment variables to control fastpath and fallback behavior.
   :keywords: hipFile, I/O backend, environment variables, POSIX, fallback, fastpath, ROCm, configuration
 
-========================
+*************************
 Configure the I/O backend
-========================
+*************************
 
 hipFile uses environment variables to control which I/O backend handles data transfers. By default, hipFile attempts to use the fastpath backend (direct GPU I/O via HIP runtime extensions) and automatically falls back to POSIX I/O when the fastpath cannot service a request. You can override this behavior with three environment variables.
 

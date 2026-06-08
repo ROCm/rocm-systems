@@ -2,9 +2,9 @@
   :description: Tutorial walking through direct-to-GPU I/O using the hipFile Python bindings, covering Driver, FileHandle, Buffer, read, write, and error handling.
   :keywords: hipFile, Python, GPU I/O, tutorial, ROCm, direct I/O, hipMalloc, Buffer, Driver, FileHandle
 
-========================================
+****************************************
 Perform GPU I/O with the Python bindings
-========================================
+****************************************
 
 This tutorial walks you through a complete example that uses the hipFile Python
 bindings to read data from a file directly into GPU memory and write it back to

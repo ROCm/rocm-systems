@@ -1,5 +1,6 @@
+*********************
 Stats collection tool
-=====================
+*********************
 
 ``ais-stats`` collects runtime hipFile I/O statistics from an application.
 Use it for quick performance checks and backend-path validation.

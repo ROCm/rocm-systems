@@ -2,9 +2,9 @@
   :description: Step-by-step instructions for registering a file and GPU buffer for direct GPU I/O using hipFile.
   :keywords: hipFile, GPU I/O, hipFileHandleRegister, hipFileBufRegister, O_DIRECT, ROCm, register file, GPU buffer
 
-=========================================
+******************************************
 Register a file and GPU buffer for GPU I/O
-=========================================
+******************************************
 
 This guide walks you through registering a file and a GPU memory buffer for direct GPU I/O with hipFile. After registration, you can perform read and write operations directly between storage and GPU memory.
 

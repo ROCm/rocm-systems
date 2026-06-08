@@ -2,9 +2,9 @@
    :description: Error handling API reference for hipFile, covering the hipFileError_t struct, hipFileOpError_t enum, helper macros, and the ssize_t return convention.
    :keywords: hipFile, error handling, API, ROCm, hipFileError_t, hipFileOpError_t, hipFileGetOpErrorString, error codes
 
-============================
+****************************
 Error handling API reference
-============================
+****************************
 
 hipFile functions communicate errors through two mechanisms: a dual-field
 ``hipFileError_t`` struct returned by most API calls, and a signed ``ssize_t``

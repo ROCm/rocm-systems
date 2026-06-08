@@ -2,9 +2,9 @@
    :description: API reference for hipFile driver lifecycle and configuration functions, including initialization, shutdown, property queries, and configuration parameter management.
    :keywords: hipFile, ROCm, driver, API, configuration, GPU IO, AMD, reference
 
-================================================
+************************************************
 Driver lifecycle and configuration API reference
-================================================
+************************************************
 
 Functions and types for initializing and shutting down the GPU IO driver, querying and setting driver properties, managing the library reference count, and reading or writing configuration parameters.
 

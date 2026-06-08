@@ -2,9 +2,9 @@
   :description: Explains the hipFile driver lifecycle, reference counting model, implicit initialization, and cleanup behavior.
   :keywords: hipFile, driver, lifecycle, reference counting, hipFileDriverOpen, hipFileDriverClose, hipFileUseCount, ROCm, GPU I/O
 
-=======================================
+***************************************
 Driver lifecycle and reference counting
-=======================================
+***************************************
 
 hipFile uses a reference counting model to manage the lifecycle of its internal state. This page describes how the reference count controls driver initialization and teardown, the APIs that interact with it, and the cleanup behavior when the count reaches zero.
 

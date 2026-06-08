@@ -2,9 +2,9 @@
   :description: Tutorial showing how to query the hipFile library version at compile time and runtime using version macros and the hipFileGetVersion() function.
   :keywords: hipFile, version, HIPFILE_VERSION_MAJOR, HIPFILE_VERSION_MINOR, HIPFILE_VERSION_PATCH, hipFileGetVersion, ROCm, tutorial
 
-=========================
+*************************
 Query the hipFile version
-=========================
+*************************
 
 This tutorial demonstrates how to retrieve the hipFile library version using both compile-time macros and the runtime ``hipFileGetVersion()`` function. Knowing the library version is useful when you need to conditionally compile code against different hipFile releases or confirm that the installed runtime library matches expectations.
 

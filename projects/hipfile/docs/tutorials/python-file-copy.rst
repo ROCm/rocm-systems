@@ -17,9 +17,9 @@
 ..     - python/hipfile/enums.py
 ..     - python/hipfile/properties.py
 
-===================================
+***********************************
 Python file copy through GPU memory
-===================================
+***********************************
 
 This tutorial walks through ``python/main.py``, a complete script that reads a
 file from storage into GPU memory, writes that GPU buffer back to a second

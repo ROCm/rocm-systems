@@ -2,9 +2,9 @@
    :description: Batch I/O API reference for hipFile, covering batch handle lifecycle, I/O parameter and event types, opcodes, and status codes.
    :keywords: hipFile, batch, API, ROCm, GPU, I/O, hipFileBatchIOSetUp, hipFileBatchIOSubmit, hipFileBatchIOGetStatus, hipFileBatchIOCancel, hipFileBatchIODestroy
 
-=======================
+***********************
 Batch I/O API reference
-=======================
+***********************
 
 The hipFile batch I/O API lets you create batch contexts, submit multiple I/O
 requests in a single call, poll for completion, cancel pending operations, and

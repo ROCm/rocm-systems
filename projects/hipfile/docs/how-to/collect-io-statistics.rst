@@ -4,9 +4,9 @@
   :description: How to enable hipFile statistics collection and use the ais-stats tool to read bandwidth, latency, and error histograms from a running process.
   :keywords: hipFile, ais-stats, statistics, I/O statistics, bandwidth, latency, histogram, ROCm, HIPFILE_STATS_LEVEL
 
-====================================
+*************************************
 Collect I/O statistics with ais-stats
-====================================
+*************************************
 
 hipFile includes a built-in statistics collection framework and a companion tool, ``ais-stats``, that connects to a running hipFile process to report I/O bandwidth, latency, and error histograms. 
 

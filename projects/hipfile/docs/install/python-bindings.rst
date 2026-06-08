@@ -2,9 +2,9 @@
   :description: How to build and install the hipFile Cython-based Python bindings, including prerequisites, virtual environment setup, and CMake override variables.
   :keywords: hipFile, Python bindings, Cython, install, ROCm, scikit-build-core, wheel, editable install
 
-===================================
+***********************************
 Install the hipFile Python bindings
-===================================
+***********************************
 
 This page covers building and installing the Cython-based Python bindings for
 the hipFile C library. Before following these steps, you must have the hipFile C

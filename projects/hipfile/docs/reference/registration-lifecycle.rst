@@ -18,9 +18,9 @@
 ..     - docs/api/file.rst
 ..     - src/amd_detail/backend/fallback.cpp
 
-=================================
+*********************************
 Registration and driver lifecycle
-=================================
+*********************************
 
 hipFile organizes its state into three registration levels: the **driver**
 (library singleton), **file handles**, and **GPU memory buffers**. Understanding

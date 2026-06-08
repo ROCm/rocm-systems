@@ -2,9 +2,9 @@
   :description: Complete API reference for all public C functions and types in hipFile, organized by functional area.
   :keywords: hipFile, API, reference, ROCm, GPU I/O, direct storage, C API, functions, types
 
-=============
+*************
 API reference
-=============
+*************
 
 This page documents all public C API functions and types provided by hipFile, organized by functional area. For error code details, see :doc:`/reference/error-codes`. For driver lifecycle concepts, see :doc:`/conceptual/driver-lifecycle`.
 

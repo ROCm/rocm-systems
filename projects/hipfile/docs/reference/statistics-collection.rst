@@ -2,9 +2,9 @@
   :description: How hipFile collects per-GPU I/O statistics using histograms, shared memory, and Unix domain sockets, and how to inspect them with ais-stats.
   :keywords: hipFile, statistics, I/O stats, histogram, shared memory, memfd, Unix domain socket, ais-stats, HIPFILE_STATS_LEVEL, ROCm
 
-========================
+*************************
 I/O statistics collection
-========================
+*************************
 
 hipFile collects runtime I/O statistics to help you understand I/O behavior across GPUs and backends. This page explains the data model, the shared-memory transport that exposes statistics to external tools, the ``HIPFILE_STATS_LEVEL`` environment variable, and the ``ais-stats`` tool.
 

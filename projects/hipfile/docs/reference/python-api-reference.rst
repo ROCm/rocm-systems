@@ -2,9 +2,9 @@
   :description: Python bindings API reference for hipFile, documenting Driver, FileHandle, Buffer, enums, exceptions, and helper functions.
   :keywords: hipFile, Python, API, bindings, ROCm, GPU, direct I/O, Cython
 
-=============================
+*****************************
 Python bindings API reference
-=============================
+*****************************
 
 .. warning::
 

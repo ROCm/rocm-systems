@@ -16,9 +16,9 @@
 ..     - python/hipfile/properties.py
 ..     - python/main.py
 
-==================
+******************
 Use the Python API
-==================
+******************
 
 The hipFile Python bindings let you perform GPU-accelerated file I/O from Python without writing C code. This page walks through each step of a typical workflow: opening the driver, registering buffers, reading and writing files, handling errors, and querying version and driver properties.
 

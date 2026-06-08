@@ -12,9 +12,9 @@
 ..     - examples/common/examples_common.cpp
 ..     - include/hipfile.h
 
-=============================================
+*********************************************
 Async multi-stream IO with registered streams
-=============================================
+*********************************************
 
 This tutorial walks through a complete round-trip example that reads a file into
 GPU memory and writes it back out, splitting the work across multiple HIP

@@ -11,9 +11,9 @@
 ..     - docs/fio.rst
 ..     - util/fio/write-read-verify.fio
 
-==========================
+**************************
 Benchmark hipFile with fio
-==========================
+**************************
 
 `fio <https://github.com/axboe/fio>`_ is a flexible IO tester commonly used for storage benchmarking. AMD maintains a fork at `ROCm/fio <https://github.com/ROCm/fio>`_ that adds a ``libhipfile`` engine, letting you drive hipFile IO workloads from fio job files. This page explains how to build the fork, configure it against a local hipFile build, and run an example workload.
 

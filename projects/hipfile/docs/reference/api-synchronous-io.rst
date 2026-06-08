@@ -2,9 +2,9 @@
    :description: Synchronous read and write API reference for hipFile, covering hipFileRead, hipFileWrite, and the hoff_t offset type.
    :keywords: hipFile, ROCm, synchronous I/O, hipFileRead, hipFileWrite, hoff_t, GPU I/O, API reference
 
-========================================
+****************************************
 Synchronous read and write API reference
-========================================
+****************************************
 
 ``hipFileRead`` and ``hipFileWrite`` perform blocking transfers between a file and registered GPU memory. Both functions accept file and buffer offsets for fine-grained control over where data is read from or written to.
 

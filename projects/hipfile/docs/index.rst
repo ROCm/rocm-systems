@@ -4,9 +4,9 @@
    :description: hipFile is an AMD Infinity Storage library that enables direct GPU IO, allowing data to be transferred between storage devices and AMD GPU memory without CPU staging buffers. It provides a cuFile-equivalent API framework for high-performance IO operations that bypass traditional CPU memory paths, reducing latency and improving throughput for IO-bound workloads such as AI training and scientific simulations. hipFile supports AMD ROCm platforms via a fastpath that uses direct GPU DMA and an automatic fallback to POSIX IO when the fast path is unavailable, and also supports NVIDIA platforms via cuFile. Both a C API and Python bindings are provided.
    :keywords: hipFile, AMD, ROCm, GPU
 
-=====================
+*********************
 hipFile documentation
-=====================
+*********************
 
 hipFile is AMD's Infinity Storage library that provides direct-to-GPU I/O for the ROCm platform. It bypasses the CPU for data transfers between storage and GPU memory. The library exposes a C API and Python bindings for registering files and GPU buffers, then performing synchronous, asynchronous, and batch read/write operations directly into device memory. The AMD backend uses a fastpath through HIP runtime extensions, with automatic fallback to POSIX I/O. An NVIDIA backend wraps cuFile for compatibility.
 
@@ -36,14 +36,19 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
 
    .. grid-item-card:: Reference
 
-      * :doc:`I/O backend architecture <reference/io-backends>`
+      * :doc:`hipFile fastpath and fallback backends <reference/io-backends>`
       * :doc:`File system and file type requirements <reference/filesystem-requirements>`
       * :doc:`Driver lifecycle and reference counting <reference/driver-lifecycle>`
       * :doc:`I/O statistics collection <reference/statistics-collection>`
       * :doc:`hipFile environment variables <reference/environment-variables>`
-      * :doc:`API reference <reference/api-reference>`
-      * :doc:`Python bindings API reference <reference/python-api-reference>`
-      * :doc:`Errors and error handling <reference/errors>`
+      * API reference
+         * :doc:`Synchronous read and write API reference <reference/api-synchronous-io>`
+         * :doc:`Driver lifecycle and configuration API reference <reference/api-driver>`
+         * :doc:`File handle, buffer, and RDMA API reference <reference/api-file-and-buffer>`
+         * :doc:`Asynchronous I/O API reference <reference/api-async>`
+         * :doc:`Batch I/O API reference <reference/api-batch>`
+         * :doc:`Error handling API reference <reference/api-errors>`
+         * :doc:`Python API reference <reference/api-python>`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

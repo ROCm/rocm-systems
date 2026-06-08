@@ -1,5 +1,6 @@
+*************************
 Errors and Error Handling
-=========================
+*************************
 
 Functions that return a hipFileOpError_t struct
 -----------------------------------------------
