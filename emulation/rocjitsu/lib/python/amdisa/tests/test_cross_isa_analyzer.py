@@ -8,15 +8,23 @@ import os
 import pytest
 
 from amdisa.cross_isa import (
-    CrossIsaAnalyzer, SharedInstructionPlan,
-    CDNA_GFX9, RDNA_GFX10, RDNA_GFX11, RDNA_GFX12, CDNA_ISAS, RDNA_ISAS,
+    CrossIsaAnalyzer,
+    SharedInstructionPlan,
+    CDNA_GFX9,
+    RDNA_GFX10,
+    RDNA_GFX11,
+    RDNA_GFX12,
+    CDNA_ISAS,
+    RDNA_ISAS,
 )
 from amdisa.parser import Parser
 from amdisa.semantics import derive_all_semantics
 
 MRISA = os.environ.get('MRISA_PATH', '')
 if not MRISA:
-    pytest.skip('MRISA_PATH not set — skipping cross-ISA tests', allow_module_level=True)
+    pytest.skip(
+        'MRISA_PATH not set — skipping cross-ISA tests', allow_module_level=True
+    )
 
 # Use a smaller subset for fast tests.
 _PROFILES = None
@@ -27,9 +35,15 @@ def _get_profiles():
     global _PROFILES
     if _PROFILES is None:
         from amdisa.isa_profile import (
-            CdnaProfile, Cdna1Profile,
-            Rdna1Profile, Rdna2Profile, Rdna3Profile, Rdna3_5Profile, Rdna4Profile,
+            CdnaProfile,
+            Cdna1Profile,
+            Rdna1Profile,
+            Rdna2Profile,
+            Rdna3Profile,
+            Rdna3_5Profile,
+            Rdna4Profile,
         )
+
         _PROFILES = {
             'cdna1': Cdna1Profile(),
             'cdna4': CdnaProfile(),
@@ -182,23 +196,22 @@ class TestCrossIsaAnalyzer:
         for family, fam_insts in plan.family_shared.items():
             # Check if any v_mov_b32 variants exist
             v_mov_entries = [
-                (mnem, enc) for (mnem, enc) in fam_insts.keys()
-                if mnem == 'v_mov_b32'
+                (mnem, enc) for (mnem, enc) in fam_insts.keys() if mnem == 'v_mov_b32'
             ]
 
             # If v_mov_b32 exists, ensure encoding names are unique (no overwrites)
             if v_mov_entries:
                 encodings = [enc for _, enc in v_mov_entries]
-                assert len(encodings) == len(set(encodings)), (
-                    f"Duplicate encodings in family '{family}' for v_mov_b32: {encodings}"
-                )
+                assert len(encodings) == len(
+                    set(encodings)
+                ), f"Duplicate encodings in family '{family}' for v_mov_b32: {encodings}"
                 # Both VOP1 and VOP3 should be present
-                assert any('VOP1' in enc for enc in encodings), (
-                    f"Expected VOP1 encoding for v_mov_b32 in family '{family}'"
-                )
-                assert any('VOP3' in enc for enc in encodings), (
-                    f"Expected VOP3 encoding for v_mov_b32 in family '{family}'"
-                )
+                assert any(
+                    'VOP1' in enc for enc in encodings
+                ), f"Expected VOP1 encoding for v_mov_b32 in family '{family}'"
+                assert any(
+                    'VOP3' in enc for enc in encodings
+                ), f"Expected VOP3 encoding for v_mov_b32 in family '{family}'"
 
     def test_v_cmpx_instructions_cannot_share_execute(self):
         """Verify v_cmpx instructions cannot share execute() templates across families.
@@ -219,7 +232,7 @@ class TestCrossIsaAnalyzer:
             isa_spec=specs[0][1],  # cdna1 spec
             out_path='/tmp',  # unused for this test
             semantics=specs[0][2],  # cdna1 semantics
-            shared_plan=plan
+            shared_plan=plan,
         )
 
         # Find all v_cmpx instructions
@@ -229,7 +242,9 @@ class TestCrossIsaAnalyzer:
         for family_key, fam_insts in plan.family_shared.items():
             for (mnemonic, encoding_name), info in fam_insts.items():
                 if mnemonic.startswith('v_cmpx_'):
-                    v_cmpx_instructions.append((mnemonic, encoding_name, info.semantic_class))
+                    v_cmpx_instructions.append(
+                        (mnemonic, encoding_name, info.semantic_class)
+                    )
 
         # Verify we found v_cmpx instructions
         assert v_cmpx_instructions, "No v_cmpx instructions found in the plan"
@@ -294,9 +309,9 @@ class TestCrossIsaAnalyzer:
 
         # Sub-family keys should appear for RDNA generations.
         family_keys = set(plan.family_shared.keys())
-        assert 'rdna_gfx10' in family_keys, (
-            f"Expected 'rdna_gfx10' in family_shared keys, got {family_keys}"
-        )
+        assert (
+            'rdna_gfx10' in family_keys
+        ), f"Expected 'rdna_gfx10' in family_shared keys, got {family_keys}"
 
     def test_family_shared_uses_sub_family_keys(self):
         """Verify family_shared uses sub-family keys when multiple ISAs share one.

@@ -35,6 +35,7 @@ def ucx_base_env() -> dict[str, str]:
         "ROCPROFSYS_PERFETTO_FILL_POLICY": "ring_buffer",
         "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_MPI_INIT": "OFF",
+        "ROCPROFSYS_LOG_LEVEL": "debug",  # Required for rocprof-sys UCX regex validation output
         "OMPI_MCA_pml": "ucx",  # Use UCX point-to-point messaging layer
         "OMPI_MCA_osc": "ucx",  # Use UCX one-sided communications
         "OMPI_MCA_pml_ucx_tls": "tcp,self",  # Force TCP and self (not sysv/posix/cma which bypass UCX functions)

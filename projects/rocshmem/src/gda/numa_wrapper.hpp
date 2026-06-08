@@ -50,6 +50,8 @@ class NUMAWrapper {
                     const int nodes[count], int status[count], int flags);
     int distance(int node1, int node2);
 
+    bool is_available();
+
   private:
     struct numa_funcs_t {
       int (*bitmask_isbitset)(const struct bitmask *bmp, unsigned int n);
@@ -78,6 +80,11 @@ class NUMAWrapper {
      * @brief initialize function table
      */
     int init_function_table();
+
+    /**
+     * @brief Does the system have libnuma
+     */
+    bool numalib_available = false;
 };
 
 #pragma clang diagnostic pop

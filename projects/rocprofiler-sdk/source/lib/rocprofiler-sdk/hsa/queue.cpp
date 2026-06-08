@@ -376,7 +376,8 @@ WriteInterceptor(const void* packets,
     // these are for the services (dispatch counter collection, pc sampling, ATT) which use
     // the queue/queue_controller callback mechanism
     const auto queue_callback_context_filter = [](const context::context* ctx) {
-        return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace);
+        return (ctx->dispatch_counter_collection || ctx->pc_sampler || ctx->dispatch_thread_trace ||
+                ctx->dispatch_spm);
     };
 
     auto tracing_data_v = tracing::tracing_data{};
@@ -640,6 +641,16 @@ WriteInterceptor(const void* packets,
 
             for(const auto& pkt_injection : _packet_data.instrumentation_packets)
             {
+                if(!pkt_injection.first->before_krn_barrier_pkt.empty())
+                {
+                    for(const auto& pkt : pkt_injection.first->before_krn_barrier_pkt)
+                    {
+                        transformed_packets.emplace_back(pkt);
+                    }
+                }
+            }
+            for(const auto& pkt_injection : _packet_data.instrumentation_packets)
+            {
                 for(const auto& pkt : pkt_injection.first->before_krn_pkt)
                 {
                     inserted_before = true;
@@ -821,7 +832,7 @@ Queue::Queue(const AgentCache&  agent,
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);

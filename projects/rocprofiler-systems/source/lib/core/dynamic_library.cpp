@@ -4,7 +4,7 @@
 #include "dynamic_library.hpp"
 #include "common.hpp"
 
-#include <timemory/environment.hpp>
+#include "common/environment.hpp"
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/procfs/maps.hpp>
@@ -60,7 +60,7 @@ find_library_path(const std::string& _name, const std::vector<std::string>& _env
 }
 
 dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flags,
-                                 bool _open, bool _query_env, bool _store)
+                                 bool _open, bool _query_env)
 : envname{ std::move(_env) }
 , filename{ std::move(_fname) }
 , flags{ _flags }
@@ -70,7 +70,7 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
 
     if(_query_env)
     {
-        auto _env_val = get_env(envname, std::string{}, _store);
+        auto _env_val = common::get_env(envname, std::string{});
         // if the environment variable is set to an absolute path that exists,
         // override with value
         if(!_env_val.empty())

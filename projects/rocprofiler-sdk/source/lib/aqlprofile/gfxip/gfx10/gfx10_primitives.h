@@ -59,14 +59,16 @@ namespace gfx10
 class gfx10_cntx_prim
 {
 public:
-    static const uint32_t     GFXIP_LEVEL         = 10;
-    static const uint32_t     NUMBER_OF_BLOCKS    = LastCounterBlockId + 1;
-    static constexpr Register GRBM_GFX_INDEX_ADDR = REG_32B_ADDR(GC, 0, mmGRBM_GFX_INDEX);
+    static const uint32_t     GFXIP_LEVEL          = 10;
+    static const uint32_t     NUMBER_OF_BLOCKS     = LastCounterBlockId + 1;
+    static constexpr Register GRBM_GFX_INDEX_ADDR  = REG_32B_ADDR(GC, 0, mmGRBM_GFX_INDEX);
+    static constexpr Register GRBMA_GFX_INDEX_ADDR = REG_32B_NULL;
     static constexpr Register COMPUTE_PERFCOUNT_ENABLE_ADDR =
         REG_32B_ADDR(GC, 0, mmCOMPUTE_PERFCOUNT_ENABLE);
     static constexpr Register RLC_PERFMON_CLK_CNTL_ADDR =
         REG_32B_ADDR(GC, 0, mmRLC_PERFMON_CLK_CNTL);
-    static constexpr Register CP_PERFMON_CNTL_ADDR = REG_32B_ADDR(GC, 0, mmCP_PERFMON_CNTL);
+    static constexpr Register CP_PERFMON_CNTL_ADDR  = REG_32B_ADDR(GC, 0, mmCP_PERFMON_CNTL);
+    static constexpr Register AID_PERFMON_CNTL_ADDR = REG_32B_NULL;
     static constexpr Register COMPUTE_THREAD_TRACE_ENABLE_ADDR =
         REG_32B_ADDR(GC, 0, mmCOMPUTE_THREAD_TRACE_ENABLE);
 
@@ -618,7 +620,7 @@ public:
 
     // Indicate the different TT messages/tokens that should be enabled/logged
     // Indicate the different TT tokens that specify register operations to be logged
-    static uint32_t sqtt_token_mask_on_value()
+    static uint32_t sqtt_token_mask_on_value(bool)
     {
 #if SQTT_PRIM_ENABLED
         uint32_t token_mask{0};

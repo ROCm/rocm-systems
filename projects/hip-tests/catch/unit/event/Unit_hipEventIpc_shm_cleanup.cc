@@ -61,8 +61,7 @@ HIP_TEST_CASE(Unit_hipEventIpc_shm_cleanup) {
     auto shm_after = get_hip_ipc_shm_files();
     HIP_CHECK(hipEventDestroy(probe));
     if (shm_after.size() <= shm_before.size()) {
-      HipTest::HIP_SKIP_TEST("Device uses native IPC signals; /dev/shm cleanup not applicable");
-      return;
+      HIP_SKIP_TEST("Device uses native IPC signals; /dev/shm cleanup not applicable");
     }
   }
 

@@ -368,6 +368,25 @@
       ]
     },
 
+    "net_ib_cts_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_IB_P2P_DISABLE_CTS": "1",
+        "CTS_NUM_CONNS":  "16",
+        "CTS_QP_DEPTH":   "256",
+        "CTS_SNAP_EVERY": "4"
+      },
+      "tests": [
+        {
+          "name": "NetIB_CtsDepthStress",
+          "description": "Stress CTS match-table depth (16 P2P conns x 256 outstanding recvs) and sample hw_counters; with RCCL_IB_P2P_DISABLE_CTS=1 the workaround should keep retx/ack_timeout at 0",
+          "test_filter": "NetIbMPITest.CtsDepthStress"
+        }
+      ]
+    },
+
     "cast_base": {
       "extends": "net_ib_base",
       "env_variables": {
@@ -594,6 +613,166 @@
       "env_variables": {
         "NCCL_NET": "ib-cast"
       }
+    },
+
+    "fault_inject_cast": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS":          "1",
+        "NCCL_IB_QPS_PER_CONNECTION":         "4",
+        "RCCL_IB_QP_SCHED_WRR_ENABLE":       "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL":   "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL":    "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN":    "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS":         "1"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_Cast_QpErrorIsFatal",
+          "description": "CAST path: error injected on QP 0 increments fatalErrorCount",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_Cast_SlowQpRebalances",
+          "description": "CAST WRR: 10 ms delay on QP 0 causes RTT timer to reduce QP 0 active tokens below equal share after 500 sends",
+          "test_filter": "NetIbMPITest.FaultInjCastSlowQpRebalances"
+        },
+        {
+          "name": "FaultInj_Cast_DelayDataIntegrity",
+          "description": "CAST path: 2 ms per-QP delay preserves full data integrity across 50 sends",
+          "test_filter": "NetIbMPITest.FaultInjCastDelayDataIntegrity"
+        },
+        {
+          "name": "FaultInj_Cast_SingleQpErrorIsFatal",
+          "description": "CAST WRR: error on one QP (tokens steered to QP 0 via SetTokens) triggers fatalErrorCount > 0 or isend failure",
+          "test_filter": "NetIbMPITest.FaultInjCastSingleQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_Cast_QpErrorClearRecovers",
+          "description": "CAST path: after FaultClear on a faulted connection, a fresh connection completes 20 sends with no corruption and fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        }
+      ]
+    },
+
+    "net_ib_stress": {
+      "extends": "net_ib_base",
+      "timeout": 600,
+      "tests": [
+        { "name": "NetIB_Stress_TagZeroReuse",                "description": "50 messages with tag=0, verify FIFO ordering",                          "test_filter": "NetIbMPITest.TagZeroReuse" },
+        { "name": "NetIB_Stress_FifoPressureSenderFast",      "description": "Receiver slow, sender tight loop, verify FIFO backpressure (NULL req)", "test_filter": "NetIbMPITest.FifoPressureSenderFast" },
+        { "name": "NetIB_Stress_MixedSizeBarrage",            "description": "25 sizes from 1B to 64MB on single connection",                         "test_filter": "NetIbMPITest.MixedSizeBarrage" },
+        { "name": "NetIB_Stress_RequestSlotExhaustion",       "description": "Post 32 concurrent irecvs, drain, verify recycling",                    "test_filter": "NetIbMPITest.RequestSlotExhaustion" },
+        { "name": "NetIB_Stress_MemoryRegistrationStorm",     "description": "512 reg/dereg cycles in forward, reverse, shuffled order",              "test_filter": "NetIbMPITest.MemoryRegistrationStorm" },
+        { "name": "NetIB_Stress_ConcurrentMultiConnection",   "description": "4 parallel connections, concurrent I/O",                                "test_filter": "NetIbMPITest.ConcurrentMultiConnectionStress" },
+        { "name": "NetIB_Stress_ConnectionChurn",             "description": "1000 connect/transfer/close cycles, RDMA leak detection",               "test_filter": "NetIbMPITest.ConnectionChurnUnderLoad" },
+        { "name": "NetIB_Stress_ConnectionBatch",             "description": "100 batches x 10 connections, RDMA checkpoints",                        "test_filter": "NetIbMPITest.ConnectionBatchCreateDestroy" },
+        { "name": "NetIB_Stress_BidirectionalSaturation",     "description": "Two opposing connections, full-duplex, 50 iterations",                   "test_filter": "NetIbMPITest.BidirectionalSaturation" },
+        { "name": "NetIB_Stress_LongRunningEndurance",        "description": "10000 transfers, tag cycling, RDMA checkpoints",                        "test_filter": "NetIbMPITest.LongRunningEndurance" },
+        { "name": "NetIB_Stress_GpuMemoryTransfer",           "description": "5 GPU alloc/transfer/flush/verify/free cycles (skip if no GDR)",        "test_filter": "NetIbMPITest.GpuMemoryTransferStress" },
+        { "name": "NetIB_Stress_RapidRecvPostDrain",          "description": "100 cycles of post-32-recv/drain (6400 ops)",                           "test_filter": "NetIbMPITest.RapidRecvPostDrain" }
+      ]
+    },
+
+    "net_ib_branch_coverage": {
+      "extends": "net_ib_base",
+      "timeout": 60,
+      "tests": [
+        { "name": "NetIB_Branch_InvalidRecvCount",  "description": "irecv n>8 returns ncclInternalError (net_ib.cc early-return branch)",               "test_filter": "NetIbMPITest.InvalidRecvCount" },
+        { "name": "NetIB_Branch_MrCacheRefCount",   "description": "Double-register same buffer: refs reach 2, first dereg keeps MR, second frees it",  "test_filter": "NetIbMPITest.MrCacheRefCount" },
+        { "name": "NetIB_Branch_SendSizeClamping",  "description": "isend with size > maxRecvs*maxSize is clamped to maxSize, data integrity verified",  "test_filter": "NetIbMPITest.SendSizeClamping" },
+        { "name": "NetIB_Branch_NullCommClose",     "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",     "test_filter": "NetIbMPITest.NullCommClose" },
+        { "name": "NetIB_Branch_SetNetAttrNoOp",    "description": "ncclNetPlugin_v9.setAttr returns ncclSuccess for all known attribute types",         "test_filter": "NetIbMPITest.SetNetAttrNoOp" }
+      ]
+    },
+
+    "net_ib_stress_4rank": {
+      "extends": "net_ib_base",
+      "num_ranks": 4,
+      "timeout": 600,
+      "tests": [
+        { "name": "NetIB_Stress_FanIn",                 "description": "Fan-in 3->1, 100 iterations, data integrity per sender",          "test_filter": "NetIbMPITest.FanInStress" },
+        { "name": "NetIB_Stress_FanOut",                "description": "Fan-out 1->3, 100 iterations, receiver-specific patterns",        "test_filter": "NetIbMPITest.FanOutStress" },
+        { "name": "NetIB_Stress_AllToAll",              "description": "Full mesh (12 connections), 50 iterations, data integrity",       "test_filter": "NetIbMPITest.AllToAllStress" },
+        { "name": "NetIB_Stress_BidirectionalMultiRank","description": "All pairs bidirectional, 4 ranks, 50 iterations",                 "test_filter": "NetIbMPITest.BidirectionalMultiRank" },
+        { "name": "NetIB_Stress_LongRunningMultiRank",  "description": "Fan-in 3->1, 1000 iterations, RDMA checkpoints",                 "test_filter": "NetIbMPITest.LongRunningMultiRank" }
+      ]
+    },
+
+    "net_ib_stress_multi_qp_split": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "8",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_MultiQpSplitData", "description": "Multi-QP split data at alignment boundaries (QPS=8, SPLIT=1)", "test_filter": "NetIbMPITest.MultiQpSplitDataStress" }
+      ]
+    },
+
+    "net_ib_stress_multi_qp_nosplit": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_MultiQpNoSplit", "description": "Multi-QP no-split path (QPS=4, SPLIT=0)", "test_filter": "NetIbMPITest.MultiQpNoSplitStress" }
+      ]
+    },
+
+    "net_ib_stress_multi_qp_fanin": {
+      "extends": "net_ib_base",
+      "num_ranks": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_MultiQpFanIn", "description": "Multi-QP fan-in 3->1 (QPS=4, SPLIT=1)", "test_filter": "NetIbMPITest.MultiQpFanIn" }
+      ]
+    },
+
+    "net_ib_stress_ar": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "1",
+        "NCCL_IB_AR_THRESHOLD": "8192"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_ARThreshold", "description": "Adaptive routing threshold boundary (sizes around 8192)", "test_filter": "NetIbMPITest.AdaptiveRoutingThresholdBoundary" }
+      ]
+    },
+
+    "net_ib_stress_inline": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_MERGE_VFS": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_IB_USE_INLINE": "1"
+      },
+      "tests": [
+        { "name": "NetIB_Stress_InlineSend", "description": "CTS inline send boundary (USE_INLINE=1)", "test_filter": "NetIbMPITest.InlineSendBoundary" }
+      ]
     }
   },
   "test_suites": [
@@ -661,6 +840,12 @@
       "name": "NET IB - MultiRecv",
       "description": "irecv(n>1) multi-slot batching tests",
       "config": "net_ib_multirecv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CTS Depth Stress",
+      "description": "CTS match-table depth stress / overflow reproducer (AINIC); fully under RCCL_IB_P2P_DISABLE_CTS=1 workaround so passes cleanly on healthy stacks",
+      "config": "net_ib_cts_stress",
       "enabled": true
     },
     {
@@ -757,6 +942,60 @@
       "name": "NET IB - vNIC Stress (ib-cast)",
       "description": "Virtual NIC stress tests via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_vnic_stress_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection (CAST path)",
+      "description": "Per-QP fault injection: error detection, WRR rebalancing under artificial delay, data integrity on CAST multi-QP path",
+      "config": "fault_inject_cast",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (2-rank)",
+      "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
+      "config": "net_ib_stress",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Branch Coverage",
+      "description": "Targeted branch-coverage tests: irecv overflow, MR cache ref-count, send-size clamping, null-comm close, setAttr no-op",
+      "config": "net_ib_branch_coverage",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress (4-rank)",
+      "description": "Fan-in, fan-out, all-to-all, multi-rank endurance",
+      "config": "net_ib_stress_4rank",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Split",
+      "description": "Multi-QP striping with split alignment boundaries",
+      "config": "net_ib_stress_multi_qp_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP NoSplit",
+      "description": "Multi-QP no-split (nDataQps) path",
+      "config": "net_ib_stress_multi_qp_nosplit",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Multi-QP Fan-In",
+      "description": "Multi-QP fan-in 3->1 with 4 ranks",
+      "config": "net_ib_stress_multi_qp_fanin",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress AR Threshold",
+      "description": "Adaptive routing threshold boundary tests",
+      "config": "net_ib_stress_ar",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Stress Inline CTS",
+      "description": "CTS inline send boundary tests",
+      "config": "net_ib_stress_inline",
       "enabled": true
     }
   ]

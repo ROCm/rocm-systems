@@ -97,6 +97,10 @@ public:
   /// @brief Return true when no register class contains any live bits.
   [[nodiscard]] bool none() const;
 
+  /// @brief Return the total number of single-lane registers tracked across
+  ///        all classes (SGPR + VGPR + AccVGPR).
+  [[nodiscard]] size_t size() const;
+
   /// @brief Return true if any register lane is present in both sets.
   [[nodiscard]] bool intersects(const RegisterSet &rhs) const;
 
@@ -118,6 +122,26 @@ public:
   }
 
   friend bool operator==(const RegisterSet &, const RegisterSet &) = default;
+
+  /// @brief Invoke @p f with each tracked single-lane register in the set.
+  ///
+  /// @details Visits SGPRs, then VGPRs, then AccVGPRs in ascending index
+  /// order. Each yielded RegisterRef has @c width=1 — multi-lane refs that
+  /// were inserted via @c expand are visited as their constituent lanes.
+  template <typename F> void for_each(F &&f) const {
+    for (size_t i = 0; i < sgprs_.size(); ++i) {
+      if (sgprs_.test(i))
+        f(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(i), 1});
+    }
+    for (size_t i = 0; i < vgprs_.size(); ++i) {
+      if (vgprs_.test(i))
+        f(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(i), 1});
+    }
+    for (size_t i = 0; i < acc_vgprs_.size(); ++i) {
+      if (acc_vgprs_.test(i))
+        f(RegisterRef{RegClass::ACC_VGPR, static_cast<uint16_t>(i), 1});
+    }
+  }
 
 private:
   std::bitset<REGISTER_SET_MAX_SGPRS> sgprs_;

@@ -45,6 +45,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_AGENT_H_
 
+#include <atomic>
 #include <vector>
 #include <list>
 #include <map>
@@ -60,6 +61,7 @@
 #include "core/inc/signal.h"
 #include "core/util/lazy_ptr.h"
 #include "core/util/locks.h"
+#include "core/util/os.h"
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 #include "core/inc/counted_queue_manager.h"
@@ -315,6 +317,24 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
                                   uint32_t* recommended_ids_mask) override;
 
+  // @brief Pick an SDMA engine from a preferred-engine mask using round-robin.
+  // Returns a blit object index (1-indexed, suitable for GetBlitObject), or 0
+  // if mask is empty. When advance=true (default) the counter is incremented so
+  // successive body assignments spread across engines. Pass advance=false to
+  // peek at the current position without consuming a slot — used when selecting
+  // a coordinator engine so it rotates independently of body assignments.
+  inline uint32_t PickSdmaEngine(uint32_t engine_mask, bool advance = true) {
+    if (!engine_mask) return 0;
+    int count = rocr::os::Popcount(engine_mask);
+    if (count == 1) return rocr::os::Ffs(engine_mask);
+    uint32_t rr = advance ? sdma_rr_index_.fetch_add(1, std::memory_order_relaxed)
+                          : sdma_rr_index_.load(std::memory_order_relaxed);
+    uint32_t m = engine_mask;
+    for (uint32_t i = 0, pick = rr % count; i < pick; ++i)
+      m &= m - 1;
+    return rocr::os::Ffs(m);
+  }
+
   // @brief Override from core::Agent.
   hsa_status_t DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
                             uint32_t num_ops,
@@ -547,8 +567,15 @@ class GpuAgent : public GpuAgentInt {
     *size = scratch_pool_.size();
   }
 
-  /// @brief Get list of AQL queues for core dump filtering
-  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
+  /// @brief Get a snapshot of AQL queues for core dump filtering.
+  /// Returns a copy to avoid iterator invalidation from concurrent queue destruction.
+  std::vector<core::Queue*> GetAqlQueues() const {
+    std::lock_guard<std::mutex> lock(aql_queues_lock_);
+    return aql_queues_;
+  }
+
+  /// @brief Remove a destroyed AQL queue from agent-owned tracking.
+  void UnregisterAqlQueue(core::Queue* queue);
 
  protected:
   // Sizes are in packets.
@@ -643,6 +670,17 @@ class GpuAgent : public GpuAgentInt {
 
   // Protects xgmi_peer_list_
   std::mutex xgmi_peer_list_lock_;
+
+  // @brief Number of H2D/D2H engines
+  // On systems with more than 2 SDMA engines, this is capped at 2.
+  size_t num_h2d_d2h_engines_;
+
+  // @brief Number of P2P engines
+  // P2P engines are used for P2P copies between two GPUs.
+  // On platforms with xGMI, these are the xGMI engines.
+  // On platforms with more than 2 SDMA engines, these are the SDMA engines.
+  size_t num_p2p_engines_;
+
 
   // @brief AQL queues for cache management and blit compute usage.
   enum QueueEnum {
@@ -749,7 +787,7 @@ class GpuAgent : public GpuAgentInt {
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
   bool AddScratchNotifier(hsa_signal_t signal, hsa_signal_value_t value) {
-    if (signal.handle != 0) return false;
+    if (signal.handle == 0) return false;
     scratch_notifiers_[signal] = value;
     return true;
   }
@@ -782,12 +820,24 @@ class GpuAgent : public GpuAgentInt {
       const hsa_amd_memory_copy_op_t& op,
       std::vector<core::Signal*>& dep_signals);
 
+  // Indirect copy: src and/or dst is a pointer-to-pointer slot that the SDMA
+  // engine dereferences just before performing the transfer.  Whatever fills
+  // the slot (e.g. a kernel or a host-side write) is expected to synchronize
+  // with this op through `dep_signals`: `dep_signals[0]` maps to the packet's
+  // hardware WAIT field and the remaining entries are emitted as 64-bit poll
+  // commands ahead of the copy.  The runtime itself therefore does not need
+  // to know how, or by whom, the slot gets populated.
+  hsa_status_t DmaCopyIndirect(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
   // Common fan-out implementation shared by DmaCopyBroadcast, DmaCopyMulti,
-  // and swap operations.  Submits prologue, per-entry bodies (selected by
-  // @p op), and epilogue with one signal.
-  // @p op is the hsa_amd_memory_copy_op_type_t from the public API; only
-  // HSA_AMD_MEMORY_COPY_OP_LINEAR and HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP are
-  // currently supported.
+  // swap and indirect operations.  Submits prologue, per-entry bodies
+  // (selected by @p op), and epilogue with one signal.
+  // @p op is the hsa_amd_memory_copy_op_type_t from the public API;
+  // currently supported values are HSA_AMD_MEMORY_COPY_OP_LINEAR,
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP and
+  // HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_{SRC,DST,SRCDST}.
   hsa_status_t DmaCopyFanOutOp(
       hsa_amd_memory_copy_op_type_t op,
       core::Signal& out_signal,
@@ -832,11 +882,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
   std::vector<core::Queue*> aql_queues_;
 
+  // @brief Protects aql_queues_ from concurrent modification/iteration.
+  mutable std::mutex aql_queues_lock_;
+
   // Sets and Tracks pending SDMA status check or request counts
   void SetCopyRequestRefCount(bool set);
   void SetCopyStatusCheckRefCount(bool set);
-  int pending_copy_req_ref_;
-  int pending_copy_stat_check_ref_;
+  std::atomic<int> pending_copy_req_ref_;
+  std::atomic<int> pending_copy_stat_check_ref_;
 
   // Tracks what SDMA blits have been used since initialization.
   uint32_t sdma_blit_used_mask_;
@@ -931,8 +984,8 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
-  // Round-robin index for spreading SDMA work across engines.
-  uint32_t sdma_rr_index_ = 0;
+  // Round-robin index for spreading SDMA work across engines (gfx1250+).
+  std::atomic<uint32_t> sdma_rr_index_{0};
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;

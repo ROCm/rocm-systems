@@ -198,7 +198,7 @@ struct HIPLaunchParams : public LaunchParams {
 };
 
 //! A container for the local and global worksizes.
-class NDRangeContainer : public HeapObject {
+class NDRangeContainer {
  private:
   const size_t dimensions_;  //!< Number of dimensions.
   NDRange offset_;           //!< Global work-item offset.

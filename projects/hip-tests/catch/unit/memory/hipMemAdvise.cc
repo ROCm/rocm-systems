@@ -55,8 +55,7 @@ std::vector<int> GetDevicesWithAdviseSupport() {
 HIP_TEST_CASE(Unit_hipMemAdvise_Set_Unset_Basic) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = GENERATE_COPY(from_range(supported_devices));
@@ -85,8 +84,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Set_Unset_Basic) {
 HIP_TEST_CASE(Unit_hipMemAdvise_No_Flag_Interference) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = GENERATE_COPY(from_range(supported_devices));
@@ -113,8 +111,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_No_Flag_Interference) {
 HIP_TEST_CASE(Unit_hipMemAdvise_Rounding) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto device = supported_devices.front();
@@ -145,8 +142,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Rounding) {
 HIP_TEST_CASE(Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   supported_devices.push_back(hipCpuDeviceId);
 
@@ -172,8 +168,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch) {
 HIP_TEST_CASE(Unit_hipMemAdvise_Read_Write_After_Advise) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   constexpr size_t count = kPageSize / sizeof(*alloc.ptr());
@@ -217,8 +212,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Read_Write_After_Advise) {
 HIP_TEST_CASE(Unit_hipMemAdvise_Prefetch_After_Advise) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto advice = GENERATE(hipMemAdviseSetReadMostly, hipMemAdviseSetPreferredLocation
@@ -249,8 +243,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_Prefetch_After_Advise) {
 HIP_TEST_CASE(Unit_hipMemAdvise_AccessedBy_All_Devices) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   // Disabling this hipCpuDeviceId scenario as it fails due to ROCr issue
   // Enable it once SWDEV-36994, SWDEV-392002 are fixed
@@ -269,8 +262,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_AccessedBy_All_Devices) {
 HIP_TEST_CASE(Unit_hipMemAdvise_Negative_Parameters) {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
   }
   const auto device = supported_devices.front();
 

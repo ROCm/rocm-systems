@@ -109,6 +109,12 @@ process_t::process_t (amd_dbgapi_process_id_t process_id,
 
 process_t::~process_t ()
 {
+  /* Make sure to discard any cache before closing the driver.  The agent dtor
+     might otherwise try to write_back / discard the cache, but without a
+     process or a driver connection, this cannot work and would fail.  */
+  for (auto &&agent : range<agent_t> ())
+    agent.memory_cache ().discard (0, amd_dbgapi_size_t (-1), true);
+
   /* Destruct the os_driver before closing the notifier.  */
   m_os_driver.reset ();
   client_notifier ().close ();
@@ -743,7 +749,8 @@ process_t::insert_watchpoint (const watchpoint_t &watchpoint)
   try
     {
       for (auto &&agent : range<agent_t> ())
-        agent.insert_watchpoint (watchpoint);
+        if (agent.supports_debugging ())
+          agent.insert_watchpoint (watchpoint);
     }
   catch (...)
     {
@@ -752,7 +759,9 @@ process_t::insert_watchpoint (const watchpoint_t &watchpoint)
          the watchpoint and forward the exception.  Note: Removing a watchpoint
          that is not inserted is a no-op.  */
       for (auto &&agent : range<agent_t> ())
-        agent.remove_watchpoint (watchpoint);
+        if (agent.supports_debugging ())
+          agent.remove_watchpoint (watchpoint);
+
       throw;
     }
 }
@@ -761,7 +770,8 @@ void
 process_t::remove_watchpoint (const watchpoint_t &watchpoint)
 {
   for (auto &&agent : range<agent_t> ())
-    agent.remove_watchpoint (watchpoint);
+    if (agent.supports_debugging ())
+      agent.remove_watchpoint (watchpoint);
 
   const bool last_watchpoint = count<watchpoint_t> () == 1;
   if (last_watchpoint)

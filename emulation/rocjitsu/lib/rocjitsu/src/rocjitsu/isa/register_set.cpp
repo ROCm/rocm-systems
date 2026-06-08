@@ -100,6 +100,8 @@ bool RegisterSet::contains(RegisterRef ref) const {
 
 bool RegisterSet::none() const { return sgprs_.none() && vgprs_.none() && acc_vgprs_.none(); }
 
+size_t RegisterSet::size() const { return sgprs_.count() + vgprs_.count() + acc_vgprs_.count(); }
+
 bool RegisterSet::intersects(const RegisterSet &rhs) const {
   return (sgprs_ & rhs.sgprs_).any() || (vgprs_ & rhs.vgprs_).any() ||
          (acc_vgprs_ & rhs.acc_vgprs_).any();

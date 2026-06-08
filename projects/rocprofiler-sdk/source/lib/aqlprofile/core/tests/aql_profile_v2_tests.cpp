@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <gmock/gmock.h>
 
+#include <cstddef>
 #include <cstring>
 #include <vector>
 #include <memory>
@@ -384,6 +385,8 @@ TEST_F(AqlProfileV2Test, StructureSizes)
     EXPECT_GT(sizeof(aqlprofile_pmc_event_t), 0);
     EXPECT_GT(sizeof(aqlprofile_agent_info_t), 0);
     EXPECT_GT(sizeof(aqlprofile_agent_info_v1_t), 0);
+    EXPECT_GT(sizeof(aqlprofile_agent_info_v2_t), 0);
+    EXPECT_GT(sizeof(aqlprofile_cu_bitmap_t), 0);
     EXPECT_GT(sizeof(aqlprofile_pmc_profile_t), 0);
     EXPECT_GT(sizeof(aqlprofile_att_parameter_t), 0);
     EXPECT_GT(sizeof(aqlprofile_att_profile_t), 0);
@@ -393,6 +396,19 @@ TEST_F(AqlProfileV2Test, StructureSizes)
 
     // Verify v1 structure is larger than base version
     EXPECT_GT(sizeof(aqlprofile_agent_info_v1_t), sizeof(aqlprofile_agent_info_t));
+
+    // Verify v2 structure is larger than v1 (v2 appends cu_bitmap)
+    EXPECT_GT(sizeof(aqlprofile_agent_info_v2_t), sizeof(aqlprofile_agent_info_v1_t));
+
+    // Verify aqlprofile_cu_bitmap_t matches the kernel-uAPI-fixed layout.
+    // This is a runtime mirror of the static_assert in aql_profile_v2.h.
+    EXPECT_EQ(sizeof(aqlprofile_cu_bitmap_t),
+              AQLPROFILE_DRM_CU_BITMAP_NUM_SE * AQLPROFILE_DRM_CU_BITMAP_NUM_SA_PER_SE *
+                  sizeof(uint32_t));
+
+    // Verify cu_bitmap is uint32-aligned within aqlprofile_agent_info_v2_t so
+    // memcpy / struct-assignment of the bitmap is well-defined.
+    EXPECT_EQ(offsetof(aqlprofile_agent_info_v2_t, cu_bitmap) % alignof(uint32_t), 0u);
 
     // Verify handle structures are 8 bytes (uint64_t)
     EXPECT_EQ(sizeof(aqlprofile_handle_t), 8);
@@ -623,4 +639,33 @@ int         AqlProfileV2ApiTest::callback_call_count_ = 0;
 int         AqlProfileV2ApiTest::last_callback_id_    = -1;
 std::string AqlProfileV2ApiTest::last_callback_name_  = "";
 
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_NullCallback)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx900";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    EXPECT_EQ(aqlprofile_spm_query_agent_configurations(agent, nullptr, nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_InvalidAgent)
+{
+    aqlprofile_agent_handle_t agent{};
+    agent.handle = 99999;
+
+    aqlprofile_spm_available_configurations_cb_t cb =
+        [](const aqlprofile_spm_available_configuration_t*, size_t, void*) -> hsa_status_t {
+        return HSA_STATUS_SUCCESS;
+    };
+
+    EXPECT_EQ(aqlprofile_spm_query_agent_configurations(agent, cb, nullptr),
+              HSA_STATUS_ERROR_INVALID_AGENT);
+}
 }  // namespace aql_profile_v2_tests

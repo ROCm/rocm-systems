@@ -96,7 +96,10 @@ std::vector<const BasicBlock *> reverse_post_order(KernelBlockScope blocks) {
   return postorder;
 }
 
-LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks) { analyze(blocks); }
+LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, LivenessAnalysisOptions options) {
+  min_free_vgpr_ = options.min_free_vgpr;
+  analyze(blocks);
+}
 
 void LivenessAnalysis::analyze(KernelBlockScope blocks) {
   liveness_.resize(blocks.size());
@@ -220,9 +223,10 @@ std::optional<uint16_t> LivenessAnalysis::find_free_run(const Instruction *inst,
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  for (uint16_t base = search_start; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
-    if (!any_live_in_range(live, RegClass::VGPR, base, count))
-      return base;
+  const size_t first_candidate = std::max<size_t>(search_start, min_free_vgpr_);
+  for (size_t base = first_candidate; base + count <= REGISTER_SET_MAX_VGPRS; ++base) {
+    if (!any_live_in_range(live, RegClass::VGPR, static_cast<uint16_t>(base), count))
+      return static_cast<uint16_t>(base);
   }
   return std::nullopt;
 }
@@ -234,12 +238,12 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr_pair(const Instruction 
     return std::nullopt;
 
   const RegisterSet &live = live_it->second;
-  uint16_t base = search_start;
+  size_t base = search_start;
   if (base % 2 != 0)
     ++base; // even-align for s_mov_b64-style pair moves.
   for (; base + 1 < REGISTER_SET_ALLOCATABLE_SGPRS; base += 2) {
-    if (!any_live_in_range(live, RegClass::SGPR, base, 2))
-      return base;
+    if (!any_live_in_range(live, RegClass::SGPR, static_cast<uint16_t>(base), 2))
+      return static_cast<uint16_t>(base);
   }
   return std::nullopt;
 }
@@ -253,9 +257,9 @@ std::optional<uint16_t> LivenessAnalysis::find_free_sgpr(const Instruction *inst
   const RegisterSet &live = live_it->second;
   // Keep this in sync with find_free_sgpr_pair(): only normal SGPRs that are
   // valid across supported families are candidates for temporary allocation.
-  for (uint16_t base = search_start; base < REGISTER_SET_ALLOCATABLE_SGPRS; ++base) {
-    if (!live.contains({RegClass::SGPR, base, 1}))
-      return base;
+  for (size_t base = search_start; base < REGISTER_SET_ALLOCATABLE_SGPRS; ++base) {
+    if (!live.contains({RegClass::SGPR, static_cast<uint16_t>(base), 1}))
+      return static_cast<uint16_t>(base);
   }
   return std::nullopt;
 }

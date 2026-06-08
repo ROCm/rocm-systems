@@ -526,17 +526,22 @@ hipError_t ihipMemcpy_validate_memory(amd::Memory* memObj, size_t sizeBytes, siz
   return hipSuccess;
 }
 
-// ================================================================================================
-hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t sizeBytes,
-                               size_t dstOffset, size_t srcOffset) {
+hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t srcSizeBytes,
+                               size_t dstSizeBytes, size_t dstOffset, size_t srcOffset) {
   hipError_t status;
 
-  status = ihipMemcpy_validate_memory(srcMemory, sizeBytes, srcOffset, /*read_write*/ false);
+  status = ihipMemcpy_validate_memory(srcMemory, srcSizeBytes, srcOffset, /*read_write*/ false);
   if (status != hipSuccess) return status;
-  status = ihipMemcpy_validate_memory(dstMemory, sizeBytes, dstOffset, /*read_write*/ true);
+  status = ihipMemcpy_validate_memory(dstMemory, dstSizeBytes, dstOffset, /*read_write*/ true);
   if (status != hipSuccess) return status;
 
   return hipSuccess;
+}
+
+// ================================================================================================
+hipError_t ihipMemcpy_validate(amd::Memory* dstMemory, amd::Memory* srcMemory, size_t sizeBytes,
+                               size_t dstOffset, size_t srcOffset) {
+  return ihipMemcpy_validate(dstMemory, srcMemory, sizeBytes, sizeBytes, dstOffset, srcOffset);
 }
 
 // ================================================================================================
@@ -734,7 +739,7 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
   amd::Memory* srcDeviceMemory = nullptr;
   amd::Memory* dstDeviceMemory = nullptr;
   getMemoryObjectPairs(src, dst, srcDeviceMemory, dstDeviceMemory, sOffset, dOffset);
-  
+
   // Handle kind vs memobject miss matches
   if (kind == hipMemcpyDeviceToHost && srcDeviceMemory == nullptr) {
     return hipErrorInvalidValue;
@@ -2907,12 +2912,34 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   // Map flags
   unsigned int flags = attrs[attrIdx].flags;
   if (flags & hipMemcpyFlagExtPreferCE) {
-    metadata.preferCE_ = 1;
+    // CE means Copy Engine here, so keep these copies on SDMA instead of shader blits.
+    metadata.copyEnginePreference_ = amd::CopyMetadata::CopyEnginePreference::SDMA;
   }
   if (flags & hipMemcpyFlagExtOpSwap) {
     metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
   }
+  // Indirect source/destination flags map to a single op-type value depending
+  // on which side is indirect.  Swap and Indirect are mutually exclusive in
+  // the public API, so the cascading assignment is safe.
+  const bool indirect_src = flags & hipMemcpyFlagExtOpIndirectSrc;
+  const bool indirect_dst = flags & hipMemcpyFlagExtOpIndirectDst;
+  if (indirect_src && indirect_dst) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrcDst;
+  } else if (indirect_src) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrc;
+  } else if (indirect_dst) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectDst;
+  }
   return metadata;
+}
+
+// ================================================================================================
+// Returns the attribute flags that apply to copy `copyIdx`.
+static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                             size_t numAttrs, size_t copyIdx, size_t& attrIdx) {
+  if (attrs == nullptr || numAttrs == 0) return 0;
+  while (attrIdx + 1 < numAttrs && attrsIdxs[attrIdx + 1] <= copyIdx) ++attrIdx;
+  return attrs[attrIdx].flags;
 }
 
 // ================================================================================================
@@ -2935,7 +2962,17 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   // Batched memory object lookup for src/dst pairs with single lock acquisition
   getMemoryObjectBatchPairs(srcs, dsts, count, srcMemories, dstMemories, srcOffsets, dstOffsets);
 
+  size_t validateAttrIdx = 0;
   for (size_t i = 0; i < count; ++i) {
+    // Indirect copies pass a sizeof(void*) pointer-holder on the indirect side and
+    // dereference the real buffer on-device at execution time, so sizes[i] describes
+    // the eventual data buffer.
+    const unsigned int copyFlags =
+        getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, validateAttrIdx);
+    const size_t actualSrcSize =
+        (copyFlags & hipMemcpyFlagExtOpIndirectSrc) ? sizeof(void*) : sizes[i];
+    const size_t actualDstSize =
+        (copyFlags & hipMemcpyFlagExtOpIndirectDst) ? sizeof(void*) : sizes[i];
 
     // Host-to-host (both pointers have no associated memory object) is always
     // valid for hipMemcpyDefault.
@@ -2945,13 +2982,13 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
 
     hipError_t status;
     if (srcMemories[i] != nullptr && dstMemories[i] != nullptr) {
-      status = ihipMemcpy_validate(dstMemories[i], srcMemories[i], sizes[i], dstOffsets[i],
-                                   srcOffsets[i]);
+      status = ihipMemcpy_validate(dstMemories[i], srcMemories[i], actualSrcSize, actualDstSize,
+                                   dstOffsets[i], srcOffsets[i]);
     } else if (srcMemories[i] != nullptr) {
-      status = ihipMemcpy_validate_memory(srcMemories[i], sizes[i], srcOffsets[i],
+      status = ihipMemcpy_validate_memory(srcMemories[i], actualSrcSize, srcOffsets[i],
                                           /*read_write*/ false);
     } else {
-      status = ihipMemcpy_validate_memory(dstMemories[i], sizes[i], dstOffsets[i],
+      status = ihipMemcpy_validate_memory(dstMemories[i], actualDstSize, dstOffsets[i],
                                           /*read_write*/ true);
     }
     if (status != hipSuccess) {
@@ -2967,12 +3004,29 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
+  if (attrs != nullptr && !stream.device().settings().sdma_indirect_supported_) {
+    const unsigned int kIndirectMask =
+        hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+    for (size_t i = 0; i < numAttrs; ++i) {
+      if (attrs[i].flags & kIndirectMask) {
+        return hipErrorNotSupported;
+      }
+    }
+  }
+
   // Classify copies by type and group them
   std::vector<size_t> bufferCopyIndices;
   std::vector<size_t> hostToHostIndices;
   std::vector<size_t> writeBufferIndices;
   std::vector<size_t> readBufferIndices;
-  std::vector<size_t> p2pIndices;
+
+  // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
+  // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
+  // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
+  // device memory and pinned host memory. All other combinations are rejected up front.
+  const unsigned int kExtOpFlagMask =
+      hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+  size_t attrIdx = 0;
 
   for (size_t i = 0; i < count; ++i) {
     hip::MemcpyType type;
@@ -2985,9 +3039,33 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     } else {
       type = ihipGetMemcpyType(srcMemories[i], dstMemories[i], hipMemcpyDefault);
     }
+
+    const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
+    if (copyFlags & kExtOpFlagMask) {
+      switch (type) {
+        case hipCopyBuffer:
+        case hipCopyBufferSDMA:
+        case hipCopyBufferP2P: {
+          // Narrow to H<->D for both swap and indirect.
+          amd::Memory* sMem = srcMemories[i];
+          amd::Memory* dMem = dstMemories[i];
+          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
+            return hipErrorNotSupported;
+          }
+          break;
+        }
+        case hipHostToHost:
+        case hipWriteBuffer:
+        case hipReadBuffer:
+
+          return hipErrorNotSupported;
+      }
+    }
+
     switch (type) {
       case hipCopyBuffer:
       case hipCopyBufferSDMA:
+      case hipCopyBufferP2P:
         bufferCopyIndices.push_back(i);
         break;
       case hipHostToHost:
@@ -2998,9 +3076,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         break;
       case hipReadBuffer:
         readBufferIndices.push_back(i);
-        break;
-      case hipCopyBufferP2P:
-        p2pIndices.push_back(i);
         break;
     }
   }
@@ -3065,14 +3140,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     }
   }
 
-  // Handle P2P copies
-  for (size_t idx : p2pIndices) {
-    status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
-    if (status != hipSuccess) {
-      return status;
-    }
-  }
-
   return hipSuccess;
 }
 
@@ -3115,6 +3182,13 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
     for (size_t i = 0; i < numAttrs; ++i) {
       if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+
+      const unsigned int kIndirectFlagMask =
+          hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+      if ((attrs[i].flags & hipMemcpyFlagExtOpSwap) &&
+          (attrs[i].flags & kIndirectFlagMask)) {
         HIP_RETURN(hipErrorInvalidValue);
       }
     }
@@ -3779,14 +3853,26 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
     }
 
     attributes->devicePointer = reinterpret_cast<char*>(devMem->virtualAddress() + offset);
-    constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
-    attributes->isManaged =
-        ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) ? true : false;
+    constexpr uint32_t kHipMallocManagedFlags =
+        CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
+    constexpr uint32_t kManagedVarFlags =
+        CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
+    const auto memFlags = memObj->getMemFlags();
+    attributes->isManaged = ((memFlags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
+                            ((memFlags & kManagedVarFlags) == kManagedVarFlags);
     attributes->allocationFlags = memObj->getUserData().flags;
     attributes->device = memObj->getUserData().deviceId;
     if (attributes->isManaged) {
       attributes->type = hipMemoryTypeManaged;
     }
+  } else if (ptr != nullptr &&
+             PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
+    attributes->type = hipMemoryTypeManaged;
+    attributes->hostPointer = const_cast<void*>(ptr);
+    attributes->devicePointer = const_cast<void*>(ptr);
+    attributes->isManaged = true;
+    attributes->allocationFlags = 0;
+    attributes->device = hip::getCurrentDevice() ? hip::getCurrentDevice()->deviceId() : 0;
   } else {
     attributes->type = hipMemoryTypeUnregistered;
     attributes->devicePointer = nullptr;
@@ -3829,7 +3915,10 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(ptr, offset);
   amd::Memory* vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
-  constexpr uint32_t kManagedAlloc = (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR);
+  constexpr uint32_t kHipMallocManagedFlags =
+      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR;
+  constexpr uint32_t kManagedVarFlags =
+      CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR;
 
   hipError_t status = hipSuccess;
 
@@ -3850,25 +3939,37 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     case HIP_POINTER_ATTRIBUTE_MEMORY_TYPE: {
       if (memObj) {  // checks for host type or device type
         *reinterpret_cast<uint32_t*>(data) = getMemoryType(memObj);
-      } else {  // checks for array type
-        // ptr must be a host allocation using malloc since memObj is null and is
-        // not found in hipArraySet.
-        if (hip::hipArraySet.find(static_cast<hipArray*>(ptr)) == hip::hipArraySet.end()) {
+        break;
+      }
+      hipArray* arr = static_cast<hipArray*>(ptr);
+      cl_mem arrayData = nullptr;
+      bool isHipArray = false;
+      {
+        amd::ScopedLock lock(hipArraySetLock);
+        if (hip::hipArraySet.find(arr) != hip::hipArraySet.end()) {
+          isHipArray = true;
+          arrayData = reinterpret_cast<cl_mem>(arr->data);
+        }
+      }
+      if (isHipArray) {
+        // checks for array type
+        if (!is_valid(arrayData)) {
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
-        cl_mem dstMemObj = reinterpret_cast<cl_mem>((static_cast<hipArray*>(ptr))->data);
-        if (!is_valid(dstMemObj)) {
-          *reinterpret_cast<uint32_t*>(data) = 0;
-          return hipErrorInvalidValue;
-        }
-        amd::Image* dstImage = as_amd(dstMemObj)->asImage();
+        amd::Image* dstImage = as_amd(arrayData)->asImage();
         if (dstImage) {
           *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeArray;
         } else {
           *reinterpret_cast<uint32_t*>(data) = 0;
           return hipErrorInvalidValue;
         }
+      } else if (ptr != nullptr &&
+                 PlatformState::Instance().StatCO().FindDeferredManagedVar(ptr) != nullptr) {
+        *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeManaged;
+      } else {
+        // Unregistered host memory (allocated on stack, heap etc.)
+        *reinterpret_cast<uint32_t*>(data) = hipMemoryTypeUnregistered;
       }
       break;
     }
@@ -3946,8 +4047,10 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
     }
     case HIP_POINTER_ATTRIBUTE_IS_MANAGED: {
       if (memObj) {
+        const auto memFlags = memObj->getMemFlags();
         *reinterpret_cast<bool*>(data) =
-            ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) ? true : false;
+            ((memFlags & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
+            ((memFlags & kManagedVarFlags) == kManagedVarFlags);
       } else {
         *reinterpret_cast<bool*>(data) = false;
         return hipErrorInvalidValue;
@@ -3969,7 +4072,8 @@ hipError_t ihipPointerGetAttributes(void* data, hipPointer_attribute attribute,
         if (getMemoryType(memObj) == hipMemoryTypeHost) {
           // host pointer, pinned or registered memory
           *reinterpret_cast<int*>(data) = 0;
-        } else if ((memObj->getMemFlags() & kManagedAlloc) == kManagedAlloc) {
+        } else if (((memObj->getMemFlags() & kHipMallocManagedFlags) == kHipMallocManagedFlags) ||
+                   ((memObj->getMemFlags() & kManagedVarFlags) == kManagedVarFlags)) {
           // managed allocation
           *reinterpret_cast<int*>(data) = 0;
         } else if (vaddr_mem_obj) {

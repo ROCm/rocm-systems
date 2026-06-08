@@ -377,6 +377,30 @@ typedef union rocprofiler_rccl_api_args_t
         hipStream_t    stream;
     } ncclAlltoAllv;
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 4
+    struct
+    {
+        ncclComm_t comm;
+        int        revokeFlags;
+    } ncclCommRevoke;
+#endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 5
+    struct
+    {
+        ncclComm_t comm;
+        int        flags;
+    } ncclCommSuspend;
+    struct
+    {
+        ncclComm_t comm;
+    } ncclCommResume;
+    struct
+    {
+        ncclComm_t        comm;
+        ncclCommMemStat_t stat;
+        uint64_t*         value;
+    } ncclCommMemStats;
+#endif
 } rocprofiler_rccl_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
