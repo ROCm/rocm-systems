@@ -62,12 +62,11 @@ fi
 
 if [ 1 -eq 1 ]; then
 #####
-# RCCL AlltoAll: -D 0, (NCCL_GIN_TYPE=2, inter-node capable)
-echo "=== RCCL AlltoAll: -D 0, non-GIN (NCCL_GIN_TYPE=0, inter-node capable) np=${NP} max_bytes=${MAX_BYTES} ==="
+# RCCL AlltoAll: -D 0, (host-initiated, inter-node capable)
+echo "=== RCCL AlltoAll: -D 0, non-GIN (inter-node capable) np=${NP} max_bytes=${MAX_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
-  -x NCCL_DEBUG=VERSION \
   -x NCCL_GIN_ENABLE=0 \
   -x NCCL_GIN_TYPE=0 \
   -x NCCL_DEBUG_SUBSYS=INIT,NET \
