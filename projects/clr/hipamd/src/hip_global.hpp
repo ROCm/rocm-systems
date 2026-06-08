@@ -70,6 +70,15 @@ class Var {
   hipError_t GetStatDeviceVar(amd::Memory** mem, int deviceId);
   hipError_t GetDeviceVarPtr(amd::Memory** mem, int deviceId);
 
+  // Clears the cached per-device memory object after it has been released
+  // externally (e.g. via ihipFree in StatCO::RemoveFatBinary), so that ~Var()
+  // does not dereference a dangling pointer.
+  void ResetDeviceVarPtr(int deviceId) {
+    if (deviceId >= 0 && static_cast<size_t>(deviceId) < dMem_.size()) {
+      dMem_[deviceId] = nullptr;
+    }
+  }
+
   hipError_t AllocateManagedVarPtr();
 
   void ResizeDVar(size_t size) { dMem_.resize(size); }

@@ -65,6 +65,9 @@ DynCO::~DynCO() {
           // free also deletes the device ptr
           err = ihipFree(memDevPtr(mem));
           assert(err == hipSuccess);
+          // The amd::Memory object is now released; drop the cached pointer so
+          // ~Var() does not dereference the freed object (heap-use-after-free).
+          elem.second->ResetDeviceVarPtr(dev->deviceId());
         }
       }
     }
@@ -410,6 +413,9 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
           // free also deletes the device ptr
           err = ihipFree(memDevPtr(mem));
           assert(err == hipSuccess);
+          // The amd::Memory object is now released; drop the cached pointer so
+          // ~Var() does not dereference the freed object (heap-use-after-free).
+          managedVar->ResetDeviceVarPtr(dev->deviceId());
         }
       }
       if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
@@ -481,6 +487,9 @@ void StatCO::RemoveAllFatBinaries() {
           // Free device memory (also deletes the device ptr)
           [[maybe_unused]] hipError_t err = ihipFree(memDevPtr(mem));
           assert(err == hipSuccess);
+          // The amd::Memory object is now released; drop the cached pointer so
+          // ~Var() does not dereference the freed object (heap-use-after-free).
+          managed_var->ResetDeviceVarPtr(dev->deviceId());
         }
       }
 
