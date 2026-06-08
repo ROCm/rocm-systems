@@ -921,14 +921,14 @@ Output
 
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
-the ``torch_trace`` prefix. These correlate PyTorch operators
+the ``api_trace`` prefix. These correlate PyTorch operators
 with GPU kernels and performance counters. When you run analyze (e.g. with
 ``--list-torch-operators`` or ``--torch-operator``), a consolidated CSV is written
-to ``torch_trace/consolidated.csv``; the source marker and counter files are
+to ``api_trace/consolidated.csv``; the source marker and counter files are
 **retained** in the workload directory and are not deleted.
 
-``torch_trace/`` directory
-The ``torch_trace/`` directory contains ``consolidated.csv`` with all
+``api_trace/`` directory
+The ``api_trace/`` directory contains ``consolidated.csv`` with all
 operator/kernel data. The columns include:
 
    * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
@@ -941,7 +941,7 @@ The consolidated CSV is generated automatically on the first analysis run that
 requires it (``--list-torch-operators`` or ``--torch-operator``) and is reused on
 subsequent runs.
 
-Sample rows from ``torch_trace/consolidated.csv`` (from profiling an mnist model).
+Sample rows from ``api_trace/consolidated.csv`` (from profiling an mnist model).
 
 .. list-table::
    :header-rows: 1
@@ -1028,7 +1028,7 @@ operator occurs in your PyTorch application:
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    torch.nn.functional.relu
 
-The ``Operator_Name`` column in ``torch_trace/consolidated.csv`` contains
+The ``Operator_Name`` column in ``api_trace/consolidated.csv`` contains
 the full operator hierarchy.
 
 This hierarchical information enables:

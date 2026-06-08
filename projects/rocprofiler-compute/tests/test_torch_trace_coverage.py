@@ -259,13 +259,18 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     except SystemExit:
         pytest.skip("roctx bindings are unavailable in this environment")
 
+    from utils.inject_roctx._backends import _torch as _torch_backend
+
+    if not _torch_backend._resolve_torch():
+        pytest.skip("torch could not be resolved for inject_roctx backend")
+
     push_counter = {"count": 0}
 
     def _count_push(*_args, **_kwargs):
         push_counter["count"] += 1
 
-    monkeypatch.setattr(inject_roctx, "_push_scope", _count_push)
-    monkeypatch.setattr(inject_roctx, "_pop_scope", lambda: None)
+    monkeypatch.setattr(_torch_backend, "_push_scope", _count_push)
+    monkeypatch.setattr(_torch_backend, "_pop_scope", lambda: None)
 
     class Foo(torch.autograd.Function):
         @staticmethod

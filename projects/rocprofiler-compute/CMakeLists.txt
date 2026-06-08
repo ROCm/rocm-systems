@@ -684,6 +684,24 @@ add_test(
 )
 set_tests_properties(test_inject_roctx_loader PROPERTIES TIMEOUT 300)
 
+add_test(
+    NAME test_inject_roctx_module
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_inject_roctx_module.xml ${COV_OPTION}
+        tests/test_inject_roctx_module.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_inject_roctx_module PROPERTIES TIMEOUT 120)
+
+add_test(
+    NAME test_utils_profile_backend_split
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_utils_profile_backend_split.xml ${COV_OPTION}
+        tests/test_utils_profile_backend_split.py ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_utils_profile_backend_split PROPERTIES TIMEOUT 120)
+
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------
@@ -785,6 +803,8 @@ if(${ENABLE_COVERAGE})
         test_torch_trace_coverage
         test_profile_torch_trace
         test_inject_roctx_loader
+        test_inject_roctx_module
+        test_utils_profile_backend_split
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
@@ -861,8 +881,8 @@ install(
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE
 )
-# Install the roctx_recordfn sources so the runtime loader can rebuild
-# the extension against the user's PyTorch environment on first use.
+# Install the roctx_recordfn sources so the runtime loader can build the
+# extension against the user's PyTorch environment on first use.
 install(
     DIRECTORY src/lib/roctx_recordfn
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/lib

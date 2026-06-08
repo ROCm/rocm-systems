@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Optional
 
 _THIS_DIR = Path(__file__).resolve().parent
-_SO_SOURCE_DIR = _THIS_DIR.parent / "lib" / "roctx_recordfn"
+# parents[2] resolves to <repo>/src in dev and <install>/libexec/<project>
+# in installed layouts; both host the roctx_recordfn sources at lib/.
+_SO_SOURCE_DIR = _THIS_DIR.parents[2] / "lib" / "roctx_recordfn"
 _SO_SOURCE = _SO_SOURCE_DIR / "roctx_recordfn.cpp"
 _SO_BUILDFILE = _SO_SOURCE_DIR / "CMakeLists.txt"
 
@@ -51,9 +53,9 @@ def _safe_log(level: str, msg: str) -> None:
         emit = {"log": console_log, "warning": console_warning, "error": console_error}[
             level
         ]
-        emit("torch trace loader", msg)
+        emit("api trace loader", msg)
     except Exception:
-        sys.stderr.write(f"[torch trace loader] {level.upper()}: {msg}\n")
+        sys.stderr.write(f"[api trace loader] {level.upper()}: {msg}\n")
 
 
 def loaded_tier() -> Optional[str]:
@@ -122,8 +124,11 @@ def _import_module_from_path(name: str, path: Path) -> types.ModuleType:
 
 
 def _install_tree_prebuilt_candidates(tag: str) -> list[Path]:
-    """Return prebuilt ``.so`` candidates under the install prefix."""
-    install_root = _THIS_DIR.parent.parent.parent
+    """Packager-baked .so candidates under <install-prefix>/lib*/<project>/."""
+    # parents[4] reaches the install prefix from this file's location in
+    # both layouts: <repo>/src/utils/inject_roctx/_backends in dev, and
+    # <prefix>/libexec/<project>/utils/inject_roctx/_backends when installed.
+    install_root = _THIS_DIR.parents[4]
     so_name = f"roctx_recordfn-{tag}.so"
     pattern = f"lib*/{_INSTALL_TREE_PROJECT_NAME}/{so_name}"
     return sorted(install_root.glob(pattern))
