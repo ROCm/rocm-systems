@@ -56,11 +56,6 @@ struct HipFileBatch : public HipFileUnopened {
         io_params->mode                = hipFileBatch;
         io_params->opcode              = hipFileBatchRead;
     }
-
-    HipFileBatch()
-    {
-        batch_map.clear();
-    }
 };
 
 TEST_F(HipFileBatch, CreateOperationRead)
@@ -320,12 +315,6 @@ struct HipFileBatchContext : public HipFileUnopened {
         _context          = batch_map.get(batch_map.createContext(_context_capacity));
         // May be overridden with EXPECT_CALL in the test.
         EXPECT_CALL(*mock_driver_state, getFileAndBuffer).WillRepeatedly(Return(std::move(default_fb_pair)));
-    }
-
-    void TearDown() override
-    {
-        batch_map.destroyContext(_context.get());
-        mock_driver_state.reset();
     }
 };
 
