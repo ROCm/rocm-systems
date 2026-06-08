@@ -830,20 +830,37 @@ hsa_status_t MacAqlQueue::SubmitPm4AndWait(const std::vector<uint32_t>& input_pm
   hsa_status_t status = driver_.SubmitDirectCompute(direct_queue_, pm4.data(), pm4.size());
   if (status != HSA_STATUS_SUCCESS) return status;
 
-  const uint32_t expected_rptr = static_cast<uint32_t>(direct_queue_.wptr);
+  // ReadDirectComputeRptr returns the WRAPPED ring offset (CP_HQD_PQ_RPTR),
+  // while direct_queue_.wptr is the MONOTONIC dword index. Comparing them
+  // directly breaks at the first ring wrap: the wrapped rptr jumps backward
+  // (e.g. 966 -> 69) when wptr crosses ring_dw (1024) while wptr keeps
+  // counting, so the dispatch is never seen complete -> HSA_STATUS_ERROR. This
+  // capped sustained dispatch at ~14 on the 4 KiB ring (the #21 macOS
+  // multi-dispatch limit; the GPU/CP actually drains the ring fine). Fix:
+  // reconstruct the monotonic rptr congruent to the wrapped value mod ring_dw
+  // and <= mono_wptr before comparing.
+  uint64_t ring_dw = direct_queue_.ring_size_bytes / sizeof(uint32_t);
+  if (ring_dw == 0) ring_dw = 1;
+  const uint64_t mono_wptr = direct_queue_.wptr;
+  const uint32_t expected_rptr = static_cast<uint32_t>(mono_wptr);
   bool rptr_done = false;
   for (uint32_t i = 0; i < 50000; ++i) {
-    uint32_t rptr = 0;
-    if (driver_.ReadDirectComputeRptr(direct_queue_, &rptr) == HSA_STATUS_SUCCESS &&
-        static_cast<int32_t>(rptr - expected_rptr) >= 0) {
-      rptr_done = true;
-      if (rptr_only || *marker_cpu_ == marker_value_) {
-        if (TraceAql()) {
-          std::fprintf(stderr,
-                       "ROCR macOS PM4 complete rptr=%u marker=%u completion=%s\n",
-                       rptr, marker_value_, rptr_only ? "rptr-only" : "write-data-marker");
+    uint32_t hw_rptr = 0;
+    if (driver_.ReadDirectComputeRptr(direct_queue_, &hw_rptr) == HSA_STATUS_SUCCESS) {
+      uint64_t mono_rptr = (mono_wptr - (mono_wptr % ring_dw)) + hw_rptr;
+      if (mono_rptr > mono_wptr) mono_rptr -= ring_dw;
+      if (mono_rptr >= mono_wptr) {
+        rptr_done = true;
+        if (rptr_only || *marker_cpu_ == marker_value_) {
+          if (TraceAql()) {
+            std::fprintf(stderr,
+                         "ROCR macOS PM4 complete rptr=%u mono=%llu marker=%u "
+                         "completion=%s\n",
+                         hw_rptr, static_cast<unsigned long long>(mono_rptr),
+                         marker_value_, rptr_only ? "rptr-only" : "write-data-marker");
+          }
+          return HSA_STATUS_SUCCESS;
         }
-        return HSA_STATUS_SUCCESS;
       }
     }
     ::usleep(100);
