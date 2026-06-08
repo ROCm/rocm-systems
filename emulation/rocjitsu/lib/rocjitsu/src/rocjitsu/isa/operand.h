@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_OPERAND_H_
 
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <cstdint>
 #include <optional>
@@ -50,6 +51,9 @@ public:
   /// @brief Raw encoding value from the instruction binary.
   int encoding_value() const { return encoding_value_; }
 
+  /// @brief Full 64-bit literal value when this operand came from a literal64 encoding.
+  [[nodiscard]] virtual std::optional<uint64_t> literal64_value() const { return std::nullopt; }
+
   /// @brief Operand width in bits.
   int size_bits() const { return size_bits_; }
 
@@ -57,6 +61,12 @@ public:
   /// @details Classified at construction time by ISA-specific subclasses using
   /// the auto-generated is_vgpr_operand_type() from operand_types.h.
   [[nodiscard]] bool is_vgpr() const { return is_vgpr_; }
+
+  /// @brief Assign the GFX12 VGPR high-bank role for this operand.
+  void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
+
+  /// @brief Return the GFX12 VGPR high-bank role for this operand.
+  [[nodiscard]] amdgpu::VgprMsbRole vgpr_msb_role() const { return vgpr_msb_role_; }
 
   /// @brief Unified VGPR index for this operand (0-511).
   /// @details Maps AMDGPU encoding ranges to a unified index space:
@@ -173,6 +183,7 @@ public:
   int size_bits_ = 0;
   int encoding_value_ = 0;
   bool is_vgpr_ = false;
+  amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 private:
   /// @brief If this operand has contiguous per-lane uint32_t storage for the
@@ -201,6 +212,11 @@ private:
     return nullptr;
   }
 
+  /// @brief Notify the plugin system that this operand's VGPR was read
+  /// for lanes [lane_begin, lane_end). No-op for non-VGPR operands.
+  virtual void simd_notify_read(const amdgpu::Wavefront & /*wf*/, uint32_t /*lane_begin*/,
+                                uint32_t /*lane_end*/, uint8_t /*byte_mask*/) const {}
+
   Operand *delegate_ = nullptr;
 };
 
@@ -224,7 +240,7 @@ public:
 /// @brief AMDGPU-flavored `IsaOperand` that owns the SIMD fast-path
 /// overrides (`simd_capable`, `read_lane_chunk`, `write_lane_chunk`,
 /// `simd_lane_ptr`, `simd_dst_ptr`) so per-arch `Operand` subclasses do
-/// not duplicate the same body across 9 ISAs. The implementations live
+/// not duplicate the same body across AMDGPU ISAs. The implementations live
 /// in `isa_operand_simd_inl.h` and call into the per-arch `Isa::`
 /// traits struct (`resolved_vgpr_offset`, `is_immediate_type`,
 /// `can_resolve_src_scalar`, `resolve_src_scalar`). Non-AMDGPU arches
@@ -251,6 +267,8 @@ public:
 private:
   const uint32_t *simd_lane_ptr(const amdgpu::Wavefront &wf, uint32_t lane_base) const override;
   uint32_t *simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const override;
+  void simd_notify_read(const amdgpu::Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
+                        uint8_t byte_mask) const override;
 };
 
 /// @brief DPP-aware operand proxy that applies lane permutation on read.
@@ -323,6 +341,11 @@ struct SimdAccess {
   }
   template <typename Op> static uint32_t *dst_ptr(const Op &op, Wavefront &wf, uint32_t lane_base) {
     return op.simd_dst_ptr(wf, lane_base);
+  }
+  template <typename Op>
+  static void notify_read(const Op &op, const Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
+                          uint8_t byte_mask) {
+    op.simd_notify_read(wf, lane_begin, lane_end, byte_mask);
   }
 };
 } // namespace amdgpu

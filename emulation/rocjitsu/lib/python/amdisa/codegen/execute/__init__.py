@@ -82,6 +82,7 @@ def _register_handlers() -> None:
     )
     from amdisa.codegen.execute.vector_special import (
         gen_vector_mbcnt,
+        gen_vector_movrel,
         gen_vector_mad_64_32,
         gen_vector_mad_32_16,
         gen_vector_div_fixup,
@@ -94,6 +95,7 @@ def _register_handlers() -> None:
         gen_vector_permlane,
         gen_vector_permlane64,
         gen_vector_cvt_pk,
+        gen_vector_cvt_scale,
     )
     from amdisa.codegen.execute.packed import (
         gen_pk_binop,
@@ -103,6 +105,7 @@ def _register_handlers() -> None:
         gen_pk_mov_b32,
         gen_mad_mix_f32,
         gen_mad_mix_lo_hi,
+        gen_mad_mix_bf16,
         gen_dot2,
         gen_dot4,
         gen_dot8,
@@ -133,6 +136,9 @@ def _register_handlers() -> None:
 
     # Vector special
     DISPATCH['vector_mbcnt'] = lambda c: gen_vector_mbcnt(c.dst_ops, c.src_ops, c.op)
+    DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
+        c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
+    )
     DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
         c.dst_ops, c.src_ops, c.dtype
     )
@@ -158,10 +164,10 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.dtype
     )
     DISPATCH['vector_permlane16'] = lambda c: gen_vector_permlane(
-        c.dst_ops, c.src_ops, c.op, cross=False
+        c.dst_ops, c.src_ops, c.op, cross=False, op_sel_expr=c.opsel_exprs[0]
     )
     DISPATCH['vector_permlanex16'] = lambda c: gen_vector_permlane(
-        c.dst_ops, c.src_ops, c.op, cross=True
+        c.dst_ops, c.src_ops, c.op, cross=True, op_sel_expr=c.opsel_exprs[0]
     )
     DISPATCH['vector_permlane16_swap'] = lambda c: gen_vector_permlane_swap(
         c.dst_ops, c.src_ops, stride=16
@@ -173,6 +179,9 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops
     )
     DISPATCH['vector_cvt_pk'] = lambda c: gen_vector_cvt_pk(
+        c.dst_ops, c.src_ops, c.cls, c.op
+    )
+    DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
         c.dst_ops, c.src_ops, c.cls, c.op
     )
 
@@ -189,7 +198,11 @@ def _register_handlers() -> None:
         opsel_exprs=c.opsel_exprs,
     )
     DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
-        c.dst_ops, c.src_ops, c.op, opsel_exprs=c.opsel_exprs
+        c.dst_ops,
+        c.src_ops,
+        c.op,
+        opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['pk_ternary_f32'] = lambda c: gen_pk_ternary_f32(
         c.dst_ops,
@@ -197,15 +210,20 @@ def _register_handlers() -> None:
         c.op,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
-        c.dst_ops, c.src_ops, opsel_exprs=c.opsel_exprs
+        c.dst_ops,
+        c.src_ops,
+        opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['mad_mix_f32'] = lambda c: gen_mad_mix_f32(
         c.dst_ops,
         c.src_ops,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['mad_mixlo_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
@@ -213,6 +231,7 @@ def _register_handlers() -> None:
         is_lo=True,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['mad_mixhi_f16'] = lambda c: gen_mad_mix_lo_hi(
         c.dst_ops,
@@ -220,6 +239,31 @@ def _register_handlers() -> None:
         is_lo=False,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+    )
+    DISPATCH['mad_mix_f32_bf16'] = lambda c: gen_mad_mix_bf16(
+        c.dst_ops,
+        c.src_ops,
+        result='f32',
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+    )
+    DISPATCH['mad_mixlo_bf16'] = lambda c: gen_mad_mix_bf16(
+        c.dst_ops,
+        c.src_ops,
+        result='lo',
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
+    )
+    DISPATCH['mad_mixhi_bf16'] = lambda c: gen_mad_mix_bf16(
+        c.dst_ops,
+        c.src_ops,
+        result='hi',
+        op_sel_hi_2_expr=c.op_sel_hi_2_expr,
+        opsel_exprs=c.opsel_exprs,
+        use_gfx1250_helpers=c.arch_name == 'gfx1250',
     )
     DISPATCH['dot2'] = lambda c: gen_dot2(
         c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs

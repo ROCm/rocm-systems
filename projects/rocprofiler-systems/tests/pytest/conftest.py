@@ -10,7 +10,7 @@ This module provides shared fixtures and configuration for all test modules.
 from __future__ import annotations
 from pathlib import Path
 from functools import lru_cache
-from typing import Callable, Generator, Optional
+from typing import Any, Callable, Generator, Optional
 
 import re
 import os
@@ -1947,6 +1947,69 @@ def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bo
     return False
 
 
+# Contains a set of kwargs accepted for a given (function, mode) pair.
+_FUNCTION_ALLOWED_KWARGS: dict[str, dict[str, set[str]]] = {
+    "run_test": {
+        "baseline": {"command"},
+        "sampling": {"sampling_args"},
+        "binary_rewrite": {"binary_rewrite_args", "cleanup_on_success"},
+        "runtime_instrument": {"runtime_instrument_args"},
+        "sys_run": {"sys_run_args"},
+        "causal": {"causal_args", "causal_mode"},
+        "python": {"python_version", "profile_args", "annotated", "standalone"},
+    },
+    "assert_regex": {
+        "baseline": {"baseline_pass_regex", "baseline_fail_regex"},
+        "sampling": {"sampling_pass_regex", "sampling_fail_regex"},
+        "binary_rewrite": {"binary_rewrite_pass_regex", "binary_rewrite_fail_regex"},
+        "runtime_instrument": {
+            "runtime_instrument_pass_regex",
+            "runtime_instrument_fail_regex",
+        },
+        "sys_run": {"sys_run_pass_regex", "sys_run_fail_regex"},
+        "causal": {"causal_pass_regex", "causal_fail_regex"},
+        "python": {"python_pass_regex", "python_fail_regex"},
+    },
+}
+
+
+def _filter_kwargs(function: str, mode: str, **kwargs: Any) -> dict[str, Any]:
+    """Filter ``kwargs`` to those accepted by ``function`` for ``mode``.
+
+    This also verifies that the kwargs passed are valid for the given function.
+    If a kwarg is not valid, pytest.fail is called.
+
+    Returns:
+        A new dict containing only kwargs valid for ``(function, mode)``.
+    """
+    allowed_per_mode = _FUNCTION_ALLOWED_KWARGS.get(function)
+    if allowed_per_mode is None:
+        pytest.fail(
+            f"_filter_kwargs called with unknown function '{function}'. "
+            f"Expected one of: {sorted(_FUNCTION_ALLOWED_KWARGS.keys())}."
+        )
+
+    mode_key = mode.replace("-", "_")
+    allowed_for_mode = allowed_per_mode.get(mode_key)
+    if allowed_for_mode is None:
+        pytest.fail(
+            f"Unknown mode '{mode}' for '{function}'. "
+            f"Expected one of: {sorted(allowed_per_mode.keys())}."
+        )
+
+    # Union of every kwarg accepted by any mode of this function. Anything
+    # outside this set is considered a typo and an error is raised.
+    all_known_for_function: set[str] = set().union(*allowed_per_mode.values())
+    unknown = set(kwargs) - all_known_for_function
+    if unknown:
+        pytest.fail(
+            f"{function}: unknown kwargs {sorted(unknown)}. "
+            f"Valid kwargs across all modes: {sorted(all_known_for_function)}."
+        )
+
+    return {k: v for k, v in kwargs.items() if k in allowed_for_mode}
+
+
 # ============================================================================
 # Base Test Class
 # ============================================================================
@@ -2017,7 +2080,7 @@ def run_test(
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
         fail_message: Custom failure message (default: "{runner_type} test failed: {output}")
         no_base_env: If true, don't use the base environment (default: False)
-        **kwargs: Additional runner-specific arguments (sample_args, rewrite_args, etc.)
+        **kwargs: Additional runner-specific arguments (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
 
     Returns:
         TestResult for further assertions
@@ -2040,18 +2103,13 @@ def run_test(
         no_base_env: bool = False,
         **kwargs,
     ) -> TestResult:
-        # Filter kwargs to only pass runner-specific args that each runner accepts.
-        runner_specific_args = {
-            "baseline": {"command"},
-            "sampling": {"sample_args"},
-            "binary_rewrite": {"rewrite_args", "cleanup_on_success"},
-            "runtime_instrument": {"runtime_args"},
-            "sys_run": {"sysrun_args"},
-            "causal": {"causal_args", "causal_mode"},
-            "python": {"python_version", "profile_args", "annotated", "standalone"},
-        }
-        allowed_args = runner_specific_args.get(runner_type, set())
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k in allowed_args}
+        filtered_kwargs = _filter_kwargs("run_test", runner_type, **kwargs)
+
+        if num_procs > 0 and launcher is None:
+            pytest.fail(
+                f"num_procs={num_procs} was provided but no launcher was set. "
+                f"Pass launcher='<launcher_name>' alongside num_procs."
+            )
 
         if runner_type == "causal" and "causal_mode" not in filtered_kwargs:
             pytest.exit("causal_mode is required for causal tests", returncode=1)
@@ -2176,13 +2234,14 @@ def assert_regex(subtests, record_subtest_failure, request):
     Args:
         result: TestResult from run_test
         mode: Optional runner type (e.g., "binary_rewrite", "sys_run"). If provided, looks up
-              mode-specific regexes from kwargs (e.g., rewrite_pass_regex, sys_run_pass_regex)
+              mode-specific regexes from kwargs (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
         subtest_name: Name shown in subtest output (defaults to "Regex validation")
         pass_regex: Explicit list of pass regex patterns (used if mode is None or no mode-specific found)
         fail_regex: Explicit list of fail regex patterns (used if mode is None or no mode-specific found)
+        use_abort_fail_regex: Whether to validate against ROCPROFSYS_ABORT_FAIL_REGEX (default: True)
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
-        **kwargs: Mode-specific regexes like rewrite_pass_regex, sys_run_fail_regex, etc.
+        **kwargs: Mode-specific regexes (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
     """
     if _is_assert_disabled(request, "assert_regex"):
         return lambda *args, **kwargs: None
@@ -2198,12 +2257,23 @@ def assert_regex(subtests, record_subtest_failure, request):
         fail_message: Optional[str] = None,
         **kwargs,
     ) -> None:
-        # If mode is provided, look up mode-specific regexes from kwargs
+
+        if mode is None and kwargs:
+            pytest.fail(
+                f"assert_regex received mode-specific kwargs {sorted(kwargs)} but no "
+                f"'mode' was provided. Pass mode=... so they can be resolved, or use "
+                f"pass_regex/fail_regex directly."
+            )
+
         if mode is not None:
-            # Normalize mode name (hyphens to underscores)
+            filtered = _filter_kwargs("assert_regex", mode, **kwargs)
             mode_key = mode.replace("-", "_")
-            pass_regex = kwargs.get(f"{mode_key}_pass_regex") or pass_regex
-            fail_regex = kwargs.get(f"{mode_key}_fail_regex") or fail_regex
+            mode_pass_regex = filtered.get(f"{mode_key}_pass_regex")
+            if mode_pass_regex is not None:
+                pass_regex = mode_pass_regex
+            mode_fail_regex = filtered.get(f"{mode_key}_fail_regex")
+            if mode_fail_regex is not None:
+                fail_regex = mode_fail_regex
 
         with subtests.test(subtest_name):
             validation = validate_regex(
