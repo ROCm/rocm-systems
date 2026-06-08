@@ -146,7 +146,7 @@ void AlltoAllGetBw(size_t count, int typesize, double sec, double* algBw, double
   *busBw = baseBw * factor;
 }
 
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 // Single-node: LSA barriers only in devComm, but connect GIN_ANVIL transport (GPU-initiated
 // SDMA queues, needsProxyProgress=0). RCCL connects transport without GIN window registration
 // or devComm GIN barrier/signal allocation when barrier/signal counts are zero.
@@ -164,9 +164,7 @@ static inline void AlltoAllSetGinHybridDevCommReqs(ncclDevCommRequirements* reqs
   reqs->ginSignalCount = deviceCtaCount;
   reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 }
-#endif
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 // set devComm reqs for alltoall device kernels
 testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
   if (!reqs || !commProperties) return testInternalError;
@@ -224,8 +222,13 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       reqs->lsaBarrierCount = deviceCtaCount;
       return true;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-    case 3: // GinAlltoAllKernel — transport connect only on single-node fast paths
-      AlltoAllSetSingleNodeTransportDevCommReqs(reqs);
+    case 3: // GinAlltoAllKernel
+      reqs->ginContextCount = 1;
+      reqs->lsaBarrierCount = deviceCtaCount;
+      reqs->barrierCount = deviceCtaCount;
+      reqs->railGinBarrierCount = deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
       reqs->barrierCount = deviceCtaCount;
@@ -233,8 +236,13 @@ bool AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* req
       reqs->ginSignalCount = deviceCtaCount;
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
-    case 5: // GinAdaptiveAlltoAllKernel — transport-only when barriers/signals unused
-      AlltoAllSetSingleNodeTransportDevCommReqs(reqs);
+    case 5: // GinAdaptiveAlltoAllKernel (LSA-only intra-node + hybrid inter-node)
+      reqs->ginContextCount = 1;
+      reqs->lsaBarrierCount = deviceCtaCount;
+      reqs->barrierCount = deviceCtaCount;
+      reqs->railGinBarrierCount = deviceCtaCount;
+      reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return true;
 #endif
     default:
@@ -327,13 +335,11 @@ template <typename T>
 __device__ __forceinline__ void AlltoAllNvlCopyPeerParallel(ncclWindow_t sendwin, size_t sendoffset,
     ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int blockId,
     int nBlocks, int tid, int nthreads) {
-  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
+  T* sendPtr = (T*)ncclGetLsaPointer(sendwin, sendoffset, rank);
   for (int peer = blockId; peer < nRanks; peer += nBlocks) {
-    T* sendPeer = sendLocal + peer * count;
+    T* sendPeer = sendPtr + peer * count;
     T* recvPeer = (T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count;
-    int localTid = threadIdx.x;
-    int localNthreads = blockDim.x;
-    AlltoAllCopyOnePeerVectorized<T>(sendPeer, recvPeer, count, localTid, localNthreads);
+    AlltoAllCopyOnePeerVectorized<T>(sendPeer, recvPeer, count, tid, nthreads);
   }
 }
 
@@ -681,8 +687,8 @@ __global__ void GinAdaptiveAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffse
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
-                             world.nRanks, blockIdx.x, gridDim.x, tid, nthreads);
+    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
+                       startLsa, lsaSize, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
