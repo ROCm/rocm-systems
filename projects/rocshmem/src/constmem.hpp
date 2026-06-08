@@ -42,6 +42,11 @@ struct constmem_t {
   int ipc_first_pe;
   int ipc_stride;    // 0 = pattern invalid (use fallback linear scan)
   int ipc_shm_size;
+  void *default_ctx;         // ctx_opaque of ROCSHMEM_CTX_DEFAULT
+  int num_qps_per_pe_default_ctx;
+  int num_qps_per_pe_usr_ctx;
+  int num_qps_default_ctx;
+  int num_qps_usr_ctx;
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;
