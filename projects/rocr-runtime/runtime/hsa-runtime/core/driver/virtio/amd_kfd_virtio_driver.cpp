@@ -499,7 +499,8 @@ hsa_status_t KfdVirtioDriver::DestroyImportedShareableHandle(core::ShareableHand
 }
 
 hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_t offset,
-                                  size_t size, hsa_access_permission_t perms) {
+                                  size_t size, hsa_access_permission_t perms, uint32_t node_id) {
+  (void)node_id;
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -512,7 +513,8 @@ hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_
 }
 
 hsa_status_t KfdVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, size_t offset,
-                                    size_t size) {
+                                    size_t size, uint32_t node_id) {
+  (void)node_id;
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;

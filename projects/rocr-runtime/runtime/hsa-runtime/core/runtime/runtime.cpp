@@ -1523,6 +1523,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
           HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
         }
         it->second.thunk_bo = res.buf_handle;
+        it->second.thunk_node_id = agent->node_id();
       }
       runtime_singleton_->DmaBufClose(static_cast<int>(dmabuf_fd));
     }
@@ -1544,7 +1545,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
-  auto fixFragment = [&](HsaMemoryObjectHandle thunk_bo) {
+  auto fixFragment = [&](HsaMemoryObjectHandle thunk_bo, HSAuint32 node_id = -1) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);
@@ -1553,6 +1554,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     allocation_map_.try_emplace(
         importAddress, nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
     allocation_map_[importAddress].thunk_bo = thunk_bo;
+    allocation_map_[importAddress].thunk_node_id = node_id;
   };
 
   auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
@@ -1631,13 +1633,14 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
-    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
+    HSAuint32 gpu_node_id = allocation_map_[importAddress].thunk_node_id;
+    status = HSAKMT_CALL(hsaKmtMemoryVaMap(gpu_node_id, bo, 0, static_cast<HSAuint64>(importSize),
                                            reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_NONE));
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
     importAddress = cpuPtr;
-    fixFragment(bo);
+    fixFragment(bo, gpu_node_id);
 
     // Remove the stale intermediate entry created by IPCClientImport.
     // The canonical entry now lives at cpuPtr (set by fixFragment above).
@@ -1678,7 +1681,8 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     if (it != allocation_map_.end()) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       if (it->second.thunk_bo) {
-        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
+        HSAuint32 gpu_node_id = it->second.thunk_node_id;
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(gpu_node_id, it->second.thunk_bo, 0,
                                                                static_cast<HSAuint64>(it->second.size),
                                                                reinterpret_cast<HSAuint64>(ptr)));
         if (status != HSAKMT_STATUS_SUCCESS) {
@@ -3984,7 +3988,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
     }
   } else {
     hsa_status_t status = targetAgent->driver().Map(
-        shareable_handle, va, mappedHandle->offset, size, perms);
+        shareable_handle, va, mappedHandle->offset, size, perms, targetAgent->node_id());
     if (status != HSA_STATUS_SUCCESS)
       return status;
   }
@@ -4006,7 +4010,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
     }
   } else {
     return targetAgent->driver().Unmap(
-        shareable_handle, va, mappedHandle->offset, mappedHandle->size);
+        shareable_handle, va, mappedHandle->offset, mappedHandle->size, targetAgent->node_id());
   }
   return HSA_STATUS_SUCCESS;
 }

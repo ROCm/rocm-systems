@@ -1355,6 +1355,7 @@ hsaKmtHandleImport(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemoryVaMap(
+    HSAuint32 NodeId,
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,
@@ -1365,6 +1366,7 @@ hsaKmtMemoryVaMap(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtMemoryVaUnmap(
+    HSAuint32 NodeId,
     HsaMemoryObjectHandle Handle,
     HSAuint64 offset,
     HSAuint64 size,

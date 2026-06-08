@@ -858,7 +858,8 @@ hsa_status_t XdnaDriver::DestroyImportedShareableHandle(core::ShareableHandle* h
 
 hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
                              size_t offset, size_t size,
-                             hsa_access_permission_t perms) {
+                             hsa_access_permission_t perms, uint32_t node_id) {
+  (void)node_id;
   // Get fd associated with the handle.
   drm_prime_handle params = {};
   params.handle = handle.handle;
@@ -880,7 +881,8 @@ hsa_status_t XdnaDriver::Map(core::ShareableHandle handle, void *mem,
 }
 
 hsa_status_t XdnaDriver::Unmap(core::ShareableHandle handle, void *mem,
-                               size_t offset, size_t size) {
+                               size_t offset, size_t size, uint32_t node_id) {
+  (void)node_id;
   if (munmap(mem, size) != 0) {
     return HSA_STATUS_ERROR;
   }

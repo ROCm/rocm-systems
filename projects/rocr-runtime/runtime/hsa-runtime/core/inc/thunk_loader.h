@@ -358,12 +358,14 @@ class ThunkLoader {
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE* OutHandle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore))(HSA_EXTERNAL_SEMAPHORE_HANDLE Handle);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HsaMemoryObjectHandle Handle, \
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HSAuint32 NodeId, \
+                                      HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
                                       HSAuint64 addr, \
                                       HsaMemoryMapFlags flags);
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaUnmap))(HsaMemoryObjectHandle Handle, \
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaUnmap))(HSAuint32 NodeId, \
+                                      HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
                                       HSAuint64 addr);

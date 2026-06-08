@@ -33,7 +33,7 @@
 #include <fcntl.h>
 
 #include <amdgpu.h>
-#include <amdgpu_drm.h>
+#include "hsakmt/drm/amdgpu_drm.h"
 #include <xf86drm.h>
 
 #include "fmm.h"
@@ -1001,8 +1001,9 @@ HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags) {
   }
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
-    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
+						HsaMemoryObjectHandle Handle,
+						HSAuint64 offset, HSAuint64 size, HSAuint64 addr,
 						HsaMemoryMapFlags flags)
 {
 	CHECK_KFD_OPEN();
@@ -1011,17 +1012,67 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
     	return HSAKMT_STATUS_ERROR;
 	}
 
-    int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr,
-                      		  MapDrmPerm(flags), AMDGPU_VA_OP_MAP);
+	uint32_t gpu_id;
+	HSAKMT_STATUS result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	int drm_fd = -1;
+	uint32_t vm_timeline_syncobj = 0;
+	uint64_t vm_timeline_seqnum = 0;
+
+	result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
+				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	uint32_t gem_handle = 0;
+	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
+	if (ret)
+		return HSAKMT_STATUS_ERROR;
+	
+
+	struct drm_amdgpu_gem_va va;
+	memset(&va, 0, sizeof(va));
+	va.handle                      = gem_handle;
+	va.operation                   = AMDGPU_VA_OP_MAP;
+	va.flags                       = MapDrmPerm(flags);
+	va.va_address                  = addr;
+	va.offset_in_bo                = offset;
+	va.map_size                    = size;
+	va.vm_timeline_syncobj_out     = vm_timeline_syncobj;
+	va.vm_timeline_point           = vm_timeline_seqnum;
+
+	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_GEM_VA, &va, sizeof(va));
 	if (ret) {
+		pr_err("[%s] DRM_AMDGPU_GEM_VA MAP failed: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	// Wait for the VM page table update to complete
+	struct drm_amdgpu_userq_wait uw;
+	memset(&uw, 0, sizeof(uw));
+	uw.num_syncobj_timeline_handles = 1;
+	uw.syncobj_timeline_handles     = (uintptr_t)&vm_timeline_syncobj;
+	uw.syncobj_timeline_points      = (uintptr_t)&vm_timeline_seqnum;
+	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_USERQ_WAIT, &uw, sizeof(uw));
+
+	// TODO: Remove after testing with userq kernel patch
+	// ret = drmSyncobjTimelineWait(drm_fd, &vm_timeline_syncobj,
+	// 			     &vm_timeline_seq_num, 1,
+	// 			     INT64_MAX, 0, NULL);
+					 
+	if (ret) {
+		pr_err("[%s] DRM_AMDGPU_USERQ_WAIT failed after MAP: %d\n", __func__, ret);
 		return HSAKMT_STATUS_ERROR;
 	}
 
 	return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
-    					HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
+HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
+						HsaMemoryObjectHandle Handle,
+						HSAuint64 offset, HSAuint64 size, HSAuint64 addr)
 {
 	CHECK_KFD_OPEN();
 	amdgpu_bo_handle drmhandle = (amdgpu_bo_handle)(Handle);
@@ -1029,9 +1080,57 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
     	return HSAKMT_STATUS_ERROR;
 	}
 
-    int ret = amdgpu_bo_va_op(drmhandle, offset, size, addr, 0,
-							  AMDGPU_VA_OP_UNMAP);
+	uint32_t gpu_id;
+	HSAKMT_STATUS result = hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	int drm_fd = -1;
+	uint32_t vm_timeline_syncobj = 0;
+	uint64_t vm_timeline_seqnum = 0;
+
+	result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
+				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
+	if (result != HSAKMT_STATUS_SUCCESS)
+		return result;
+
+	uint32_t gem_handle = 0;
+	int ret = amdgpu_bo_export(drmhandle, amdgpu_bo_handle_type_kms, &gem_handle);
+	if (ret)
+		return HSAKMT_STATUS_ERROR;
+
+	struct drm_amdgpu_gem_va va;
+	memset(&va, 0, sizeof(va));
+	va.handle                  = gem_handle;
+	va.operation               = AMDGPU_VA_OP_UNMAP;
+	va.flags                   = 0;
+	va.va_address              = addr;
+	va.offset_in_bo            = offset;
+	va.map_size                = size;
+	va.vm_timeline_syncobj_out = vm_timeline_syncobj;
+	va.vm_timeline_point       = vm_timeline_seqnum;
+
+	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_GEM_VA, &va, sizeof(va));
 	if (ret) {
+		pr_err("[%s] DRM_AMDGPU_GEM_VA UNMAP failed: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	// Wait for the VM page table update to complete
+	struct drm_amdgpu_userq_wait uw;
+	memset(&uw, 0, sizeof(uw));
+	uw.num_syncobj_timeline_handles = 1;
+	uw.syncobj_timeline_handles     = (uintptr_t)&vm_timeline_syncobj;
+	uw.syncobj_timeline_points      = (uintptr_t)&vm_timeline_seqnum;
+	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_USERQ_WAIT, &uw, sizeof(uw));
+
+	// TODO: Remove after testing with userq kernel patch
+	// ret = drmSyncobjTimelineWait(drm_fd, &vm_timeline_syncobj,
+	// 			     &vm_timeline_seqnum, 1,
+	// 			     INT64_MAX, 0, NULL);
+					 
+	if (ret) {
+		pr_err("[%s] drmSyncobjTimelineWait failed after UNMAP: %d\n", __func__, ret);
 		return HSAKMT_STATUS_ERROR;
 	}
 
