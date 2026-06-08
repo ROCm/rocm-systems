@@ -33,6 +33,7 @@ struct GMockUCXGotcha
     MOCK_METHOD(bool, get_is_running, (), (const));
     MOCK_METHOD(void, start, ());
     MOCK_METHOD(std::function<void()>&, get_initializer, ());
+    MOCK_METHOD(void, set_ready, (bool ready));
 };
 
 struct GMockCommData
@@ -76,7 +77,10 @@ struct MockedUCXGotcha
     {
         return test_globals::g_ucx_gotcha_gmock->get_initializer();
     }
-    static void set_ready(bool) {}
+    static void set_ready(bool ready)
+    {
+        test_globals::g_ucx_gotcha_gmock->set_ready(ready);
+    }
 };
 
 template <typename GotchaData>
@@ -407,5 +411,117 @@ TEST_F(ucx_gotcha_test, test_different_gotcha_tool_ids)
     test_incoming("ucp_mem_map");
     test_incoming("ucp_am_send_nbx");
     test_incoming("uct_ep_am_short");
+}
+
+TEST_F(ucx_gotcha_test, test_pause)
+{
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, set_ready(false)).Times(1);
+
+    EXPECT_NO_THROW(ucx_gotcha_under_test_t::pause());
+}
+
+TEST_F(ucx_gotcha_test, test_resume)
+{
+    EXPECT_CALL(*test_globals::g_ucx_gotcha_gmock, set_ready(true)).Times(1);
+
+    EXPECT_NO_THROW(ucx_gotcha_under_test_t::resume());
+}
+
+TEST_F(ucx_gotcha_test, test_stop_is_noop)
+{
+    // stop() is intentionally a no-op
+    EXPECT_NO_THROW(ucx_gotcha_under_test_t::stop());
+}
+
+// The specialized incoming overloads must each open the region (start) and forward to
+// comm_data::audit. Exercising every overload guards their distinct signatures against
+// accidentally collapsing into the generic template (which would skip comm_data).
+TEST_F(ucx_gotcha_test, test_audit_incoming_tag_recv)
+{
+    MockedGotchaData data;
+    data.tool_id = "ucp_tag_recv_nbx";
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
+        .Times(1)
+        .WillOnce([](std::string_view name) { EXPECT_EQ(name, "ucp_tag_recv_nbx"); });
+    EXPECT_CALL(*test_globals::g_comm_data_gmock, audit()).Times(1);
+
+    void*       worker = reinterpret_cast<void*>(0x1);
+    void*       buffer = reinterpret_cast<void*>(0x2);
+    const void* param  = reinterpret_cast<const void*>(0x3);
+    ucx_gotcha_under_test_t::audit(data, tim::audit::incoming{}, worker, buffer,
+                                   size_t{ 64 }, std::uint64_t{ 1 }, std::uint64_t{ 2 },
+                                   param);
+}
+
+TEST_F(ucx_gotcha_test, test_audit_incoming_rma_get)
+{
+    MockedGotchaData data;
+    data.tool_id = "ucp_get_nbx";
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
+        .Times(1)
+        .WillOnce([](std::string_view name) { EXPECT_EQ(name, "ucp_get_nbx"); });
+    EXPECT_CALL(*test_globals::g_comm_data_gmock, audit()).Times(1);
+
+    void*       ep     = reinterpret_cast<void*>(0x1);
+    void*       buffer = reinterpret_cast<void*>(0x2);
+    void*       rkey   = reinterpret_cast<void*>(0x3);
+    const void* param  = reinterpret_cast<const void*>(0x4);
+    ucx_gotcha_under_test_t::audit(data, tim::audit::incoming{}, ep, buffer,
+                                   size_t{ 128 }, std::uint64_t{ 0xbeef }, rkey, param);
+}
+
+TEST_F(ucx_gotcha_test, test_audit_incoming_am_send)
+{
+    MockedGotchaData data;
+    data.tool_id = "ucp_am_send_nbx";
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
+        .Times(1)
+        .WillOnce([](std::string_view name) { EXPECT_EQ(name, "ucp_am_send_nbx"); });
+    EXPECT_CALL(*test_globals::g_comm_data_gmock, audit()).Times(1);
+
+    void*       ep     = reinterpret_cast<void*>(0x1);
+    const void* header = reinterpret_cast<const void*>(0x2);
+    const void* buffer = reinterpret_cast<const void*>(0x3);
+    const void* param  = reinterpret_cast<const void*>(0x4);
+    ucx_gotcha_under_test_t::audit(data, tim::audit::incoming{}, ep, unsigned{ 5 },
+                                   header, size_t{ 16 }, buffer, size_t{ 256 }, param);
+}
+
+TEST_F(ucx_gotcha_test, test_audit_incoming_stream_send)
+{
+    MockedGotchaData data;
+    data.tool_id = "ucp_stream_send_nbx";
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
+        .Times(1)
+        .WillOnce([](std::string_view name) { EXPECT_EQ(name, "ucp_stream_send_nbx"); });
+    EXPECT_CALL(*test_globals::g_comm_data_gmock, audit()).Times(1);
+
+    void*       ep     = reinterpret_cast<void*>(0x1);
+    const void* buffer = reinterpret_cast<const void*>(0x2);
+    const void* param  = reinterpret_cast<const void*>(0x3);
+    ucx_gotcha_under_test_t::audit(data, tim::audit::incoming{}, ep, buffer, size_t{ 32 },
+                                   param);
+}
+
+TEST_F(ucx_gotcha_test, test_audit_incoming_stream_recv)
+{
+    MockedGotchaData data;
+    data.tool_id = "ucp_stream_recv_nbx";
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
+        .Times(1)
+        .WillOnce([](std::string_view name) { EXPECT_EQ(name, "ucp_stream_recv_nbx"); });
+    EXPECT_CALL(*test_globals::g_comm_data_gmock, audit()).Times(1);
+
+    void*       ep     = reinterpret_cast<void*>(0x1);
+    void*       buffer = reinterpret_cast<void*>(0x2);
+    size_t      length = 0;
+    const void* param  = reinterpret_cast<const void*>(0x3);
+    ucx_gotcha_under_test_t::audit(data, tim::audit::incoming{}, ep, buffer, size_t{ 32 },
+                                   &length, param);
 }
 }  // namespace
