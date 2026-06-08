@@ -65,15 +65,15 @@ void TeamSplit2DTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                      size_t size) {}
 
 void TeamSplit2DTester::verifyResults([[maybe_unused]] size_t size) {
-  if (my_pe == 0){
-    if (!test_failed){
-      printf("PASS: rocshmem_team_split_2d succeeded with %d PEs\n", n_pes);
-    }
-    else {
-      printf("FAIL: rocshmem_team_split_2d failed %d times\n", test_failed);
-      exit(-1);
-    }
-  }
+  if (test_failed) {
+     fprintf(stderr,
+             "PE %d FAIL: rocshmem_team_split_2d failed %d checks\n",
+             my_pe, test_failed);
+     exit(-1);
+   }
+   if (my_pe == 0) {
+     printf("PASS: rocshmem_team_split_2d succeeded with %d PEs\n", n_pes);
+   }
 }
 
 void TeamSplit2DTester::preLaunchKernel() {
