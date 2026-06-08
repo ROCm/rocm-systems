@@ -2307,7 +2307,8 @@ void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
     vdst.write_lane(wf, lane, [&]() {
       auto a = static_cast<int32_t>(src0.read_lane(wf, lane) << 8) >> 8;
       auto b = static_cast<int32_t>(src1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(a * b + static_cast<int32_t>(src2.read_lane(wf, lane)));
+      return static_cast<uint32_t>(static_cast<int64_t>(a) * b +
+                                   static_cast<int32_t>(src2.read_lane(wf, lane)));
     }());
   }
 }
