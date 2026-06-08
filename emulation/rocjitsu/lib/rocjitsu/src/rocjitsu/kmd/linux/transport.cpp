@@ -17,7 +17,7 @@ UnixTransport::UnixTransport(int fd) : fd_(fd) {}
 UnixTransport::~UnixTransport() { close(); }
 
 std::unique_ptr<UnixTransport> UnixTransport::listen(const std::string &endpoint) {
-  int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (sock < 0)
     return nullptr;
 
@@ -30,7 +30,7 @@ std::unique_ptr<UnixTransport> UnixTransport::listen(const std::string &endpoint
 
   if (bind(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0 ||
       ::listen(sock, 16) != 0) {
-    ::close(sock);
+    syscall(SYS_close, sock);
     return nullptr;
   }
 
@@ -38,14 +38,14 @@ std::unique_ptr<UnixTransport> UnixTransport::listen(const std::string &endpoint
 }
 
 std::unique_ptr<UnixTransport> UnixTransport::accept() {
-  int client = ::accept(fd_, nullptr, nullptr);
+  int client = accept4(fd_, nullptr, nullptr, SOCK_CLOEXEC);
   if (client < 0)
     return nullptr;
   return std::make_unique<UnixTransport>(client);
 }
 
 std::unique_ptr<UnixTransport> UnixTransport::connect(const std::string &endpoint) {
-  int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+  int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
   if (sock < 0)
     return nullptr;
 
@@ -76,7 +76,7 @@ ssize_t UnixTransport::recv_with_handle(void *data, size_t len, int *handle_out,
 
 void UnixTransport::close() {
   if (fd_ >= 0) {
-    ::close(fd_);
+    syscall(SYS_close, fd_);
     fd_ = -1;
   }
 }

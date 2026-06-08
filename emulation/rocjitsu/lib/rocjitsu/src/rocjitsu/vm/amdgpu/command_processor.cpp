@@ -975,6 +975,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
       dp.dispatched_wgs = 0;
       dp.completion_signal = sig;
       dp.host_signal = false;
+      dp.barrier_bit = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
 
       qs.entries.push_back(std::move(dp));
     } else if (pkt_type == HSA_PACKET_TYPE_VENDOR_SPECIFIC) {
@@ -1027,6 +1028,7 @@ void CommandProcessor::fetch_from_queue(HwQueue &queue, HwQueueState &qs) {
         dp.dispatched_wgs = 0;
         dp.completion_signal = sig;
         dp.host_signal = false;
+        dp.barrier_bit = (pkt.header >> HSA_PACKET_HEADER_BARRIER) & 1;
 
         qs.entries.push_back(std::move(dp));
       }

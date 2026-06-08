@@ -97,6 +97,7 @@ add_executable(
     simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
+    transport_rpc_test.cpp
     execution_plugin_test.cpp
 )
 target_link_libraries(

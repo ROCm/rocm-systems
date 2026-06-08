@@ -158,7 +158,10 @@ inline ssize_t rpc_recv_msg(int sock, void *data, size_t data_len, int *fds = nu
     msg.msg_controllen = sizeof(cmsg_buf.buf);
   }
 
-  ssize_t bytes_received = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC | MSG_WAITALL);
+  ssize_t bytes_received;
+  do {
+    bytes_received = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC | MSG_WAITALL);
+  } while (bytes_received < 0 && errno == EINTR);
   if (bytes_received <= 0) {
     if (num_fds)
       *num_fds = 0;
