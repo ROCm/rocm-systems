@@ -50,6 +50,53 @@ static rocprofiler_context_id_t& get_client_ctx()
     return ctx;
 }
 
+// Separate context used for handling roctxProfilerPause/Resume. A dedicated
+// context is required because if the context that owns the pause/resume
+// callback were the same one being paused, a subsequent roctxProfilerResume
+// would never be delivered (its callback would be disabled along with the
+// rest of the context).
+static rocprofiler_context_id_t& get_control_ctx()
+{
+    static rocprofiler_context_id_t ctx{0};
+    return ctx;
+}
+
+void tool_tracing_ctrl_callback(rocprofiler_callback_tracing_record_t record,
+                                rocprofiler_user_data_t* /*user_data*/,
+                                void* client_data)
+{
+    auto* ctx = static_cast<rocprofiler_context_id_t*>(client_data);
+
+    if (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
+        record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API &&
+        record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause)
+    {
+        rocprofiler_stop_context(*ctx);
+    }
+    else if (record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
+             record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API &&
+             record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume)
+    {
+        rocprofiler_start_context(*ctx);
+    }
+}
+
+void tool_control_init(rocprofiler_context_id_t& primary_ctx)
+{
+    g_sdk_wrapper->create_context(&get_control_ctx());
+
+    g_sdk_wrapper->configure_callback_tracing_service(get_control_ctx(),
+                                                      ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+                                                      nullptr,
+                                                      0,
+                                                      tool_tracing_ctrl_callback,
+                                                      &primary_ctx);
+
+    // Start the control context immediately so pause/resume callbacks fire
+    // independently of the primary context's state.
+    g_sdk_wrapper->start_context(get_control_ctx());
+}
+
 iteration_multiplexing_mode_t iteration_multiplexing_mode(const std::string& mode)
 {
     if (mode == "kernel")
@@ -88,6 +135,10 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
     std::clog << "[rocprofiler-compute] In tool init\n";
     g_sdk_wrapper->create_context(&get_client_ctx());
+
+    // Enable support for roctxProfilerPause / roctxProfilerResume by routing
+    // their marker-control callbacks through a dedicated always-on context.
+    tool_control_init(get_client_ctx());
 
     g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
                                                                 dispatch_callback,
