@@ -2,6 +2,8 @@
 multiThread:
   Unit_hipMemsetAsync_QueueJobsMultithreaded:
     <<: *level_2
+    # AIRUNTIME-2291: hang on rocm-systems CI
+    disabled : [amd_linux]
     tags: [memory]
   Unit_hipMultiThreadDevice_Streams:
     <<: *level_2
