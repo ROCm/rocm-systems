@@ -1020,9 +1020,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaHandleImportDesc* import_des
 		import_res->dmabuf_fd = import_desc->dmabuf_fd;
 		break;
 	case HSA_EXTERNAL_HANDLE_FABRIC:
-	assert(!flags->ui32.UpdateMetadata);
 	/* Obtain a dma-buf from the fabric handle, then import it */
 	{
+		assert(!flags->ui32.UpdateMetadata);
 		int renderFd = amdgpu_device_get_fd(devhandle);
 		if (renderFd < 0)
 			return HSAKMT_STATUS_ERROR;
