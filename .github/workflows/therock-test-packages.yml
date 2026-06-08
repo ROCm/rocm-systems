@@ -5,6 +5,9 @@ on:
     inputs:
       projects_to_test:
         type: string
+      test_type:
+        type: string
+        default: "standard"
       amdgpu_families:
         type: string
       test_runs_on:
