@@ -122,6 +122,7 @@ struct ucx_gotcha : tim::component::base<ucx_gotcha<UCXPolicy>, void>
     static void audit(const gotcha_data&, tim::audit::outgoing);
     static void audit(const gotcha_data&, tim::audit::outgoing, void*);
     static void audit(const gotcha_data&, tim::audit::outgoing, int);
+    static void audit(const gotcha_data&, tim::audit::outgoing, unsigned);
     static void audit(const gotcha_data&, tim::audit::outgoing, long);
 
 private:
@@ -526,6 +527,13 @@ ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, voi
 template <typename UCXPolicy>
 void
 ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, int ret)
+{
+    UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
+}
+
+template <typename UCXPolicy>
+void
+ucx_gotcha<UCXPolicy>::audit(const gotcha_data& _data, tim::audit::outgoing, unsigned ret)
 {
     UCXPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }

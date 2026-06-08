@@ -48,6 +48,7 @@ struct GMockCategoryRegion
     MOCK_METHOD(void, stop_generic, (std::string_view name));
     MOCK_METHOD(void, stop_ptr, (std::string_view name, void* ret));
     MOCK_METHOD(void, stop_int, (std::string_view name, int ret));
+    MOCK_METHOD(void, stop_unsigned, (std::string_view name, unsigned ret));
     MOCK_METHOD(void, stop_long, (std::string_view name, long ret));
 };
 
@@ -122,6 +123,11 @@ struct MockedCategoryRegion
     static void stop(std::string_view name, const char*, int ret)
     {
         test_globals::g_category_region_gmock->stop_int(name, ret);
+    }
+
+    static void stop(std::string_view name, const char*, unsigned ret)
+    {
+        test_globals::g_category_region_gmock->stop_unsigned(name, ret);
     }
 
     static void stop(std::string_view name, const char*, long ret)
@@ -320,6 +326,24 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_int)
         .WillOnce([&](std::string_view name, int r) {
             EXPECT_EQ(name, "ucp_put");
             EXPECT_EQ(r, 7);
+        });
+
+    ucx_gotcha_under_test_t::audit(data, tim::audit::outgoing{}, ret);
+}
+
+TEST_F(ucx_gotcha_test, test_audit_outgoing_unsigned)
+{
+    MockedGotchaData data;
+    data.tool_id = "ucp_worker_progress";
+
+    // Progress APIs (e.g. ucp_worker_progress, uct_iface_progress) return unsigned
+    unsigned ret = 3;
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, stop_unsigned)
+        .Times(1)
+        .WillOnce([&](std::string_view name, unsigned r) {
+            EXPECT_EQ(name, "ucp_worker_progress");
+            EXPECT_EQ(r, 3u);
         });
 
     ucx_gotcha_under_test_t::audit(data, tim::audit::outgoing{}, ret);
