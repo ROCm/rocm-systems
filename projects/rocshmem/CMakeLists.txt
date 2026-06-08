@@ -78,7 +78,7 @@ option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GD
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
-option(ASAN "Enable AddressSanitizer" OFF)
+option(ASAN "Enable AddressSanitizer" ${ASAN})
 
 if (ASAN)
   execute_process(

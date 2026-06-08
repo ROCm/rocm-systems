@@ -31,9 +31,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_unit_tests VERSION 1.0.0 LANGUAGES CXX)
 
 # ASAN option (if not already defined by parent project)
-if (NOT DEFINED ASAN)
-  option(ASAN "Enable AddressSanitizer" OFF)
-endif()
+option(ASAN "Enable AddressSanitizer" ${ASAN})
 
 ###############################################################################
 # SOURCES
