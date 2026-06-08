@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import yaml
+from conftest import require_torch
 from scipy.stats import zscore
 
 from utils.utils_common import canonical_config_arch
@@ -2799,7 +2800,6 @@ def test_iteration_multiplexing_data_types(
 
 @pytest.mark.torch_trace
 def test_torch_trace_profile(
-    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
@@ -2809,12 +2809,13 @@ def test_torch_trace_profile(
 
     Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
     and counter CSVs), then runs analyze with --list-torch-operators and
-    --torch-operator (PurePosixPath glob patterns like *relu, all), and verifies
+    --torch-operator (shell-style fnmatch glob patterns like *relu, all), and verifies
     torch_trace directory, consolidated CSV contents (hierarchy, kernel, counters),
     and CLI output format (call tree grouped by source location, aggregated stats,
     kernel IDs, sort order).
     Requires PyTorch and GPU; not included in default suite.
     """
+    require_torch(gpu=True)
     workload_dir = common.get_output_dir(param_id="torch_trace")
 
     # --torch-trace needs --experimental for profiling
@@ -3031,17 +3032,19 @@ def test_torch_trace_profile(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*relu",
+        "*relu*",
     ])
-    # 16. Analyze with --torch-operator *relu succeeds
-    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu failed"
+    # 16. Analyze with --torch-operator *relu* succeeds and matches the relu subtree
+    assert returncode_analyze_relu == 0, "Analyze with --torch-operator *relu* failed"
+    out_relu = capsys.readouterr().out
+    assert "Matched PyTorch Operators" in out_relu, (
+        "Expected 'Matched PyTorch Operators' header from --torch-operator *relu*"
+    )
 
     # --- Verify torch-operator cli output ---
 
-    # 17. Multi-component pattern matches operator in the middle of hierarchy.
-    #     torch.nn.functional.relu is a wrapper that delegates to torch.relu;
-    #     only the leaf operator appears in consolidated trace, so we use
-    #     wildcards to match through the hierarchy.
+    # 17. Substring wildcard pattern matches torch.nn.functional.relu at any
+    #     position in the hierarchy.
     capsys.readouterr()
     rc_exact = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -3049,10 +3052,10 @@ def test_torch_trace_profile(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*/torch.nn.functional.relu/*",
+        "*torch.nn.functional.relu*",
     ])
     assert rc_exact == 0, (
-        "Analyze with --torch-operator */torch.nn.functional.relu/* failed"
+        "Analyze with --torch-operator *torch.nn.functional.relu* failed"
     )
     out_exact = capsys.readouterr().out
     assert "Matched PyTorch Operators" in out_exact, (
@@ -3062,7 +3065,7 @@ def test_torch_trace_profile(
         "Expected call tree with dispatches stats in --torch-operator output"
     )
 
-    # 18. Glob wildcard pattern (*relu) matches the relu operator
+    # 18. Glob wildcard pattern (*relu*) matches the relu operator subtree
     capsys.readouterr()
     rc_glob = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -3070,12 +3073,12 @@ def test_torch_trace_profile(
         "--path",
         workload_dir,
         "--torch-operator",
-        "*relu",
+        "*relu*",
     ])
-    assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
+    assert rc_glob == 0, "Analyze with --torch-operator *relu* failed"
     out_glob = capsys.readouterr().out
     assert "dispatches" in out_glob, (
-        "Glob pattern *relu should match relu operator and render call tree"
+        "Glob pattern *relu* should match relu operator and render call tree"
     )
 
     # 19. 'all' keyword matches every operator
@@ -3135,14 +3138,13 @@ def test_torch_trace_profile(
 
 
 @pytest.mark.torch_trace
-def test_torch_trace_overhead(
-    require_torch_gpu, binary_handler_profile_rocprof_compute
-):
+def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
     NOTE: Not included in the test suite since this requires PyTorch and GPU.
     """
+    require_torch(gpu=True)
     # Run WITHOUT --torch-trace (baseline)
     workload_dir_baseline = common.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
@@ -3447,13 +3449,13 @@ def test_multi_rank_no_warning_with_iteration_multiplexing(
     ],
 )
 def test_profile_invalid_workloads_torch_trace(
-    require_torch_gpu,
     binary_handler_profile_rocprof_compute,
     workload_cmd,
     expected_exit,
     request,
 ):
     """Integration test: workload validation exit codes with --torch-trace."""
+    require_torch(gpu=True)
     app_name = "test_invalid_workload"
     test_config = {**config, app_name: workload_cmd}
 
@@ -3547,3 +3549,82 @@ def test_profile_invalid_workloads_no_torch_trace(
     )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.torch_trace
+def test_torch_trace_deep_tensor_wraps_overhead(
+    binary_handler_profile_rocprof_compute,
+):
+    """Manual benchmark for the deep tensor wrap overhead.
+
+    Skipped unless ``ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1``.
+    """
+    require_torch(gpu=True)
+
+    run_bench = os.environ.get("ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH", "")
+    if run_bench.strip().lower() not in ("1", "true", "yes", "on"):
+        pytest.skip(
+            "set ROCPROFCOMPUTE_RUN_DEEP_TENSOR_WRAP_BENCH=1 to run this benchmark"
+        )
+
+    def _run_once(*, deep_wraps: bool, param_id: str) -> tuple[float, float]:
+        workload_dir = common.get_output_dir(param_id=param_id)
+        prev = os.environ.get("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS")
+        os.environ["ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"] = (
+            "1" if deep_wraps else "0"
+        )
+        try:
+            start = time.time()
+            returncode = binary_handler_profile_rocprof_compute(
+                config,
+                workload_dir,
+                ["--experimental", "--torch-trace", "--iteration-multiplexing"],
+                check_success=True,
+                roof=False,
+                app_name="torch_test_app",
+            )
+            elapsed = time.time() - start
+            assert returncode == 0, "torch-trace profiling run failed"
+
+            results_files = list(Path(workload_dir).glob("results_*.csv"))
+            df = pd.concat([pd.read_csv(f) for f in results_files], ignore_index=True)
+            kernel_duration_total = (
+                df["End_Timestamp"].max() - df["Start_Timestamp"].min()
+            )
+            return elapsed, kernel_duration_total
+        finally:
+            common.clean_output_dir(config["cleanup"], workload_dir)
+            if prev is None:
+                os.environ.pop("ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS", None)
+            else:
+                os.environ["ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS"] = prev
+
+    baseline_wall, baseline_kernel = _run_once(
+        deep_wraps=False,
+        param_id="torch_trace_deep_wraps_off",
+    )
+    deep_wall, deep_kernel = _run_once(
+        deep_wraps=True,
+        param_id="torch_trace_deep_wraps_on",
+    )
+
+    wall_overhead = (
+        ((deep_wall - baseline_wall) / baseline_wall) * 100
+        if baseline_wall > 0
+        else 0.0
+    )
+    kernel_overhead = (
+        ((deep_kernel - baseline_kernel) / baseline_kernel) * 100
+        if baseline_kernel > 0
+        else 0.0
+    )
+
+    print("\n" + "=" * 70)
+    print("Deep Tensor Wrap Overhead Benchmark (--torch-trace):")
+    print(f"  Baseline wall-clock:         {baseline_wall:.2f}s")
+    print(f"  Deep-wraps wall-clock:       {deep_wall:.2f}s")
+    print(f"  Wall-clock overhead:         {wall_overhead:.1f}%")
+    print(f"  Baseline kernel duration:    {baseline_kernel:.0f} ns")
+    print(f"  Deep-wraps kernel duration:  {deep_kernel:.0f} ns")
+    print(f"  Kernel overhead:             {kernel_overhead:.1f}%")
+    print("=" * 70 + "\n")
