@@ -130,11 +130,6 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
 
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
   uint64_t line_addr = CacheStore::line_address(addr);
-  // Functional-mode stores write through to the shared backing memory, but
-  // another L2 may still hold an older clean copy. Refetch line fills from the
-  // backing store so dispatches scheduled on different XCDs observe each
-  // other's completed global stores.
-  flush_line(line_addr, vmid);
   ensure_line(line_addr, vmid);
   cache_.read_line(line_addr, line_buf, 0, LINE_SIZE);
 }

@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+include_guard(GLOBAL)
+
 option(AIS_USE_SANITIZERS "Build with sanitizers (clang only - see docs for a list)" OFF)
 option(AIS_USE_THREAD_SANITIZER "Build with -fsanitize=thread (clang only - not compatible with AIS_USE_SANITIZERS)" OFF)
 

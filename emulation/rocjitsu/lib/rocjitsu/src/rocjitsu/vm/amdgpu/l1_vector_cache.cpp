@@ -32,6 +32,9 @@ void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
   cache_.fill_line(addr, line_buf);
 }
 
+// Per-line CC invalidation is sufficient: the CP serializes dispatch N's cache
+// management before dispatch N+1 begins execution, so no blanket invalidation
+// at dispatch boundaries is needed.
 void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                                bool non_temporal, uint32_t vmid) {
   Mtype inst_mtype = mtype;
@@ -74,12 +77,6 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
       copied += chunk;
       continue;
     }
-
-    // Functional execution can schedule dependent dispatches on different CUs or
-    // XCDs without modeling global cache probes. Stores are write-through below,
-    // so backing memory is authoritative; force each vector load to refill through
-    // L2 instead of reusing a clean line that may predate another CU's store.
-    cache_.invalidate(ea);
 
     ensure_line(ea, vmid);
     cache_.read_line(ea, dst + copied, line_offset, chunk);

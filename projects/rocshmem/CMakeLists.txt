@@ -331,7 +331,7 @@ if (NOT BUILD_TESTS_ONLY)
     PRIVATE
       -Wall
       -Wextra
-      -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
+      -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
   )
 
   target_include_directories(

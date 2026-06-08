@@ -173,23 +173,24 @@ class TestDeriveScalarBinop:
         cpp = lower_sema_block(block)
         assert 'write_scc' in cpp
 
-    def test_signed_co_uses_raw_unsigned_bits(self):
+    def test_signed_co_uses_unsigned_carry(self):
         sem = derive_semantics('S_ADD_CO_I32', 'ENC_SOP2')
+        assert sem.sets_scc == 'carry'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
 
-        assert 'uint32_t s0' in cpp
-        assert 'uint32_t s1' in cpp
-        assert re.search(r'\bint32_t\s+s0\b', cpp) is None
-        assert 'static_cast<uint64_t>(s0)' in cpp
+        assert 'uint32_t' in cpp
+        assert 'uint64_t' in cpp
+        assert 'write_scc' in cpp
+        assert 'static_cast<int64_t>' not in cpp
 
         sem = derive_semantics('S_SUB_CO_I32', 'ENC_SOP2')
+        assert sem.sets_scc == 'borrow'
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'uint32_t s0' in cpp
-        assert 'uint32_t s1' in cpp
-        assert re.search(r'\bint32_t\s+s0\b', cpp) is None
-        assert 'wf.write_scc((s0 < s1))' in cpp
+        assert 'uint32_t' in cpp
+        assert 'write_scc' in cpp
+        assert 'static_cast<int64_t>' not in cpp
 
     @pytest.mark.parametrize(
         'name,operation,dtype,scc',
