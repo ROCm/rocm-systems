@@ -130,8 +130,12 @@ iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 {
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
 
-    std::lock_guard lg(registration->mutex);
-    for(const auto& code_object : registration->code_objects)
+    auto snapshot = code_object_collection_t{};
+    {
+        std::lock_guard lg(registration->mutex);
+        snapshot = code_object_collection_t{registration->code_objects};
+    }
+    for(const auto& code_object : snapshot)
     {
         func(code_object, data);
     }
