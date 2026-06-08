@@ -399,11 +399,11 @@ rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
 }
 
 rocpd_status_t
-rocpd_get_supported_schema_versions(rocpd_sql_engine_t                       engine,
-                                    const char**                             schema_path_hints,
-                                    uint64_t                                 num_schema_path_hints,
-                                    rocpd_get_supported_schema_versions_cb_t callback,
-                                    void*                                    user_data)
+rocpd_query_supported_schema_versions(rocpd_sql_engine_t engine,
+                                      const char**       schema_path_hints,
+                                      uint64_t           num_schema_path_hints,
+                                      rocpd_query_supported_schema_versions_cb_t callback,
+                                      void*                                      user_data)
 {
     switch(engine)
     {

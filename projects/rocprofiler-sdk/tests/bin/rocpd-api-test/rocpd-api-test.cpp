@@ -284,10 +284,10 @@ load_schema(rocpd_version_triplet_t requested_version)
 }
 
 rocpd_status_t
-get_supported_schema_versions_callback(rocpd_sql_engine_t /*engine*/,
-                                       const rocpd_version_triplet_t* versions,
-                                       uint64_t                       num_versions,
-                                       void*                          user_data)
+query_supported_schema_versions_callback(rocpd_sql_engine_t /*engine*/,
+                                         const rocpd_version_triplet_t* versions,
+                                         uint64_t                       num_versions,
+                                         void*                          user_data)
 {
     auto* out = static_cast<std::vector<rocpd_version_triplet_t>*>(user_data);
     if(out == nullptr) return ROCPD_STATUS_ERROR_INVALID_ARGUMENT;
@@ -496,18 +496,18 @@ main(int argc, char** argv)
 
     if(list_versions || load_all_schemas)
     {
-        status = rocpd_get_supported_schema_versions(ROCPD_SQL_ENGINE_SQLITE3,
-                                                     nullptr,
-                                                     0,
-                                                     get_supported_schema_versions_callback,
-                                                     &local_list_of_schema_versions);
+        status = rocpd_query_supported_schema_versions(ROCPD_SQL_ENGINE_SQLITE3,
+                                                       nullptr,
+                                                       0,
+                                                       query_supported_schema_versions_callback,
+                                                       &local_list_of_schema_versions);
         if(status != ROCPD_STATUS_SUCCESS)
         {
-            std::cerr << "rocpd-api-test: rocpd_get_supported_schema_versions failed: "
+            std::cerr << "rocpd-api-test: rocpd_query_supported_schema_versions failed: "
                       << rocpd_get_status_name(status) << "\n";
             return EXIT_FAILURE;
         }
-        std::cout << "rocpd-api-test: rocpd_get_supported_schema_versions OK ("
+        std::cout << "rocpd-api-test: rocpd_query_supported_schema_versions OK ("
                   << local_list_of_schema_versions.size() << " versions)\n";
         for(auto i = size_t{0}; i < local_list_of_schema_versions.size(); ++i)
         {

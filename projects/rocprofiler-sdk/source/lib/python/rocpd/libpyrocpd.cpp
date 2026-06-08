@@ -416,7 +416,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 });
 
     pyrocpd.def(
-        "get_supported_schema_versions",
+        "query_supported_schema_versions",
         [](rocpd_sql_engine_t engine, const py::sequence& hints_opt) -> py::list {
             std::vector<std::string> storage;
             std::vector<const char*> hints;
@@ -442,7 +442,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 }
                 return ROCPD_STATUS_SUCCESS;
             };
-            ROCPD_CHECK(rocpd_get_supported_schema_versions(
+            ROCPD_CHECK(rocpd_query_supported_schema_versions(
                 engine, hints.empty() ? nullptr : hints.data(), hints.size(), _callback, &out));
             return out;
         },
