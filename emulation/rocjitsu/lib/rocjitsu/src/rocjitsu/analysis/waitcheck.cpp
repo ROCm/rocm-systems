@@ -1436,8 +1436,14 @@ private:
 
   [[nodiscard]] static bool instruction_uses_vcc_implicit(const Instruction &inst) {
     const std::string_view mnemonic = inst.mnemonic();
+    constexpr uint16_t kVopdXyEncodingId = 0x32;
+    constexpr uint16_t kVopdCndmaskOp = 9;
+    const bool vopd_xy_uses_vcc =
+        inst.encoding_id() == kVopdXyEncodingId &&
+        ((inst.opcode() >> 8u) == kVopdCndmaskOp || (inst.opcode() & 0xffu) == kVopdCndmaskOp);
     return mnemonic == "v_cndmask_b32_e32" || mnemonic == "v_add_co_ci_u32_e32" ||
-           mnemonic == "v_sub_co_ci_u32_e32" || mnemonic == "v_subrev_co_ci_u32_e32";
+           mnemonic == "v_sub_co_ci_u32_e32" || mnemonic == "v_subrev_co_ci_u32_e32" ||
+           vopd_xy_uses_vcc;
   }
 
   [[nodiscard]] static bool instruction_defines_vcc_implicit(const Instruction &inst,
