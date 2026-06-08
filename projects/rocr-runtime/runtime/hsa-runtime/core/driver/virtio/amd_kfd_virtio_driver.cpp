@@ -565,7 +565,7 @@ hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t 
 }
 
 hsa_status_t KfdVirtioDriver::DestroyMemoryHandle(core::DriverMemoryHandle* handle) {
-  const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
+  const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle->handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
 

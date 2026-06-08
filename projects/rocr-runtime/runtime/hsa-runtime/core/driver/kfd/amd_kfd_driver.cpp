@@ -647,8 +647,10 @@ hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
   // Re-export from DRM; the KFD fd was transient and is already closed.
   ret = ExportMemoryHandle(agent, targetHandle, core::ShareType::DMABUF_FD, 0,
                            &shareable_fd);
-  if (ret != HSA_STATUS_SUCCESS)
+  if (ret != HSA_STATUS_SUCCESS) {
+    DestroyMemoryHandle(&targetHandle);
     return ret;
+  }
   /*
    * We converted mem into a driver handle. The driver handle will keep the reference count
    * inside the KMD so we can free the original KFD allocation.
