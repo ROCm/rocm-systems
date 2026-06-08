@@ -1906,7 +1906,13 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
   // and serves as the dispatch anchor for all segments across all streams.
-  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+  // Pass `this` as the kernel-names owner: the command borrows kernel-name
+  // strings owned by this graph's nodes (via setKernelNamesRef during dispatch)
+  // and reads them in ReportActivity() at completion, after OnLaunchComplete()
+  // drops the launch's reference. Tying the GraphExec's lifetime to the command
+  // keeps those strings valid through the report (no copies). We already hold a
+  // launch reference here, so the retain in the constructor needs no trim lock.
+  auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr, this);
 
   // Register HW events with graph_accumulate so profiling can read them.
   for (auto& hw_event : segment_hw_events) {
