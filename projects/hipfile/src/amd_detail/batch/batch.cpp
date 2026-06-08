@@ -507,17 +507,21 @@ BatchContextMap::createContext(unsigned capacity)
 void
 BatchContextMap::destroyContext(hipFileBatchHandle_t handle)
 {
-    std::unique_lock<std::shared_mutex> ulock{batch_mutex};
+    std::shared_ptr<IBatchContext> context;
 
-    auto context = active_contexts.find(handle);
-    if (context == active_contexts.end()) {
-        throw InvalidBatchHandle();
+    {
+        std::unique_lock<std::shared_mutex> ulock{batch_mutex};
+
+        auto iter = active_contexts.find(handle);
+        if (iter == active_contexts.end()) {
+            throw InvalidBatchHandle();
+        }
+
+        context = std::move(iter->second);
+        active_contexts.erase(iter);
     }
-    // TODO: Check for outstanding operations.
-    // TODO: Attempt to cancel any outstanding operations.
-    // TODO: Determine if we return unconditionally or require
-    //       outstanding ops to terminate first.
-    active_contexts.erase(handle);
+
+    context->cancelOperations();
 }
 
 std::shared_ptr<IBatchContext>
