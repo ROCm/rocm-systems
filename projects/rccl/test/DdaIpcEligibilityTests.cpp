@@ -6,11 +6,11 @@
 
 #include "common/DdaIpcTestHelpers.hpp"
 
-#include "dda_all_gather_ipc.h"
-#include "dda_alltoall_ipc.h"
-#include "dda_reduce_scatter_ipc.h"
+#include "dda_all_gather.h"
+#include "dda_alltoall.h"
+#include "dda_reduce_scatter.h"
 #include "gtest/gtest.h"
-#include "ipc_init_detail.h"
+#include "dda_init_detail.h"
 
 namespace RcclUnitTesting
 {
@@ -71,7 +71,7 @@ TEST_F(DdaIpcEligibilityTest, AllGather_UnsupportedDatatype)
 
 TEST_F(DdaIpcEligibilityTest, AllGather_ScratchTooSmall)
 {
-    mockComm_.comm.ddaIpcScratchBytes = 8;
+    mockComm_.comm.ddaScratchBytes = 8;
     EXPECT_FALSE(ncclAllGatherDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
@@ -109,7 +109,7 @@ TEST_F(DdaIpcEligibilityTest, AllToAll_EligibleFloat32)
 
 TEST_F(DdaIpcEligibilityTest, AllToAll_ScratchTooSmallForTotal)
 {
-    mockComm_.comm.ddaIpcScratchBytes = 64;
+    mockComm_.comm.ddaScratchBytes = 64;
     EXPECT_FALSE(ncclAllToAllDdaIpcEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }

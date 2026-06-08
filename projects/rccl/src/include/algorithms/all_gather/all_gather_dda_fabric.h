@@ -2,30 +2,38 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
- * Derived from Meta torchcomms comms/common/algorithms/all_reduce/all_reduce_dda.cuh.
- * Adapted for allgather collective operation.
- * Includes use *.h names so RCCL hipify output (src/include/...) resolves correctly.
+ * DDA all-gather kernel for the fabric/VMM path, using FabricGpuBarrier.
+ *
+ * Templated on a compile-time rank count NRANKS_CT (matching the all-reduce
+ * fabric design):
+ *   - NRANKS_CT > 0  : specialized for that clique size; the unified CollCommon
+ *                      allGather fully unrolls the peer loop.
+ *   - NRANKS_CT == 0 : runtime fallback; the rank count is passed via nRanks and
+ *                      the unified helper partially unrolls 8-wide, so a single
+ *                      instantiation covers any other clique size up to
+ *                      kDdaMaxNranks.
  * See LICENSE.txt for license information.
  ************************************************************************/
 
 #pragma once
 
-#include "ipc_gpu_barrier.h"
 #include "algorithms/CollCommon.h"
+#include "fabric_gpu_barrier.h"
 
 namespace meta::comms {
 
-template <typename T, int NRANKS, bool hasAcc>
+template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-__global__ void ddaAllGatherIpc(
+__global__ void ddaAllGatherFabric(
     T* const* __restrict__ ipcbuffs,
     T* __restrict__ recvbuff,
     size_t count,
     const T* __restrict__ sendbuff,
     int selfRank,
-    IpcGpuBarrier barrier) {
+    int nRanks,
+    FabricGpuBarrier barrier) {
 
   const size_t countPerRank = count;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
@@ -35,8 +43,8 @@ __global__ void ddaAllGatherIpc(
   const auto idxEnd = countPerRank;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  // It is expensive to launch hipMemcpyAsync on ROCm
-  // Move data copy here. Each block copies part of sendbuff data
+  // It is expensive to launch hipMemcpyAsync on ROCm: each block copies part
+  // of sendbuff into this rank's scratch buffer.
   copyFromSrcToDest<T>(
       sendbuff, ipcbuffs[selfRank], idxStart, idxEnd, idxStride);
 
@@ -44,8 +52,8 @@ __global__ void ddaAllGatherIpc(
       true /* hasPreviousMemAccess */,
       true /* hasSubsequentMemAccess */>();
 
-  allGather<T, NRANKS>(
-      ipcbuffs, recvbuff, selfRank, NRANKS, idxStart, idxEnd, idxStride, false);
+  allGather<T, NRANKS_CT>(
+      ipcbuffs, recvbuff, selfRank, nRanks, idxStart, idxEnd, idxStride, false);
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
   barrier.syncOnSameBlockIdx<
