@@ -260,9 +260,7 @@ class CodeGenerator:
         os.makedirs(out_dir, exist_ok=True)
         guard = f'ROCJITSU_ISA_ARCH_AMDGPU_{arch.upper()}_VOPD_H_'
 
-        header = (
-            textwrap.dedent(
-                '''
+        header = textwrap.dedent('''
             // Copyright (c) 2026 Advanced Micro Devices, Inc.
             // SPDX-License-Identifier: MIT
             //
@@ -339,16 +337,9 @@ class CodeGenerator:
             } // namespace rocjitsu
 
             #endif // @GUARD@
-            '''
-            )
-            .lstrip()
-            .replace('@ARCH@', arch)
-            .replace('@GUARD@', guard)
-        )
+            ''').lstrip().replace('@ARCH@', arch).replace('@GUARD@', guard)
 
-        impl = (
-            textwrap.dedent(
-                '''
+        impl = textwrap.dedent('''
             // Copyright (c) 2026 Advanced Micro Devices, Inc.
             // SPDX-License-Identifier: MIT
             //
@@ -754,11 +745,7 @@ class CodeGenerator:
 
             } // namespace @ARCH@
             } // namespace rocjitsu
-            '''
-            )
-            .lstrip()
-            .replace('@ARCH@', arch)
-        )
+            ''').lstrip().replace('@ARCH@', arch)
 
         with open(os.path.join(out_dir, 'vopd.h'), 'w') as f:
             f.write(header)
@@ -1332,8 +1319,7 @@ class CodeGenerator:
     def _emit_gfx1250_matrix_fmt_helpers() -> str:
         """Emit C++ helpers for gfx1250 VOP3P packed and matrix quirks."""
         return (
-            textwrap.dedent(
-                '''\
+            textwrap.dedent('''\
             namespace {
             struct PkF32Words {
               uint32_t lo;
@@ -1352,8 +1338,7 @@ class CodeGenerator:
               const uint64_t raw = operand.read_lane64(wf, lane);
               return {static_cast<uint32_t>(raw), static_cast<uint32_t>(raw >> 32)};
             }
-            '''
-            )
+            ''')
             + (
                 'const char *gfx1250_matrix_fmt_name(uint32_t fmt) {\n'
                 '  switch (fmt) {\n'
@@ -1568,8 +1553,7 @@ class CodeGenerator:
 
     @staticmethod
     def _emit_gfx1250_scaled_wmma_vop3px2_class() -> str:
-        return textwrap.dedent(
-            '''\
+        return textwrap.dedent('''\
             class VWmmaScaleF3216x16x128F8f6f4Vop3px2 : public Vop3p {
             public:
               VWmmaScaleF3216x16x128F8f6f4Vop3px2(const MachineInst *inst);
@@ -1585,13 +1569,11 @@ class CodeGenerator:
               OpEncoding scale_inst_;
               std::array<uint32_t, 4> raw_words_{};
             };
-            '''
-        )
+            ''')
 
     @staticmethod
     def _emit_gfx1250_scaled_wmma_vop3px2_impls() -> str:
-        return textwrap.dedent(
-            '''\
+        return textwrap.dedent('''\
             VWmmaScaleF3216x16x128F8f6f4Vop3px2::VWmmaScaleF3216x16x128F8f6f4Vop3px2(const MachineInst *inst)
                 : Vop3p("v_wmma_scale_f32_16x16x128_f8f6f4", reinterpret_cast<const OpEncoding *>(inst + 2),
                         make_exec_fn<VWmmaScaleF3216x16x128F8f6f4Vop3px2>()),
@@ -1701,13 +1683,11 @@ class CodeGenerator:
               if (!dispatched)
                 throw util::UnimplementedInst(mnemonic());
             }
-            '''
-        )
+            ''')
 
     @staticmethod
     def _emit_gfx1250_scaled_wmma_vop3px2_decoder_helpers() -> str:
-        return textwrap.dedent(
-            '''\
+        return textwrap.dedent('''\
             namespace {
 
             bool isWmmaScaleF32F8f6f4Vop3px2(const MachineInst *opcode) {
@@ -1720,8 +1700,7 @@ class CodeGenerator:
             }
 
             } // namespace
-            '''
-        )
+            ''')
 
     def _gen_execute_body(
         self, inst: Instruction, sem: InstructionSemantics, enc_name: str = ''
@@ -6078,8 +6057,7 @@ class CodeGenerator:
 
         simd_methods = ''
         if uses_packed_16bit_sources:
-            simd_methods = textwrap.dedent(
-                '''\
+            simd_methods = textwrap.dedent('''\
                 bool Operand::simd_capable() const {
                   if (delegate())
                     return delegate()->simd_capable();
@@ -6102,8 +6080,7 @@ class CodeGenerator:
                   AmdgpuIsaOperand<Isa>::read_lane_chunk(wf, lane_base, count, out);
                 }
 
-                '''
-            )
+                ''')
 
         resolve_code = cgen.Line(
             'namespace {\n'
