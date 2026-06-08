@@ -54,6 +54,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Minimum required C++ standard raised from C++17 to C++20. timemory now builds
   against the `rocprofiler-systems-cppstd20` branch and spdlog was bumped to
   v1.17.0 (bundled fmt v12).
+- Supported environment variables for rank detection: removed MPI_RANK and
+  MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
 
 ### Resolved issues
 

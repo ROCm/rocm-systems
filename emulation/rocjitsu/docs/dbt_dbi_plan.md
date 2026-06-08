@@ -94,7 +94,7 @@ Each ISA variant lives under `isa/arch/amdgpu/{isa}/`. As of Phase A (branch `ph
 | `{isa}/machine_insts.h` | Bitfield structs (`Sop1MachineInst`, `SoppMachineInst`, `SmemMachineInst`, `FlatMachineInst`, `Vop3pMachineInst`, ...) for both **decoding** guest instructions and **emitting** host instructions by filling fields and casting to `uint32_t` |
 | `{isa}/encodings.h` | Instruction format base classes (`Sop1`, `Vop2`, `Vop3p`, ...) — serve as emitter templates when constructing translated instructions |
 | `{isa}/addr_calc.h` | `flat_calculate_addresses()`, `mubuf_calculate_addresses()` — per-lane scratch address formulas reused by `SpillManager` to compute spill slot addresses |
-| `{isa}/mfma_exec.h` | `input_loc()`, `output_loc_32()`, `output_loc_64()`, `exec_f32()`, `exec_i32_i8()`, `exec_f64()` — reference MFMA implementation including register layout; CDNA ISAs only (RDNA has no MFMA); used by DBI for AccVGPR clobber detection (CDNA2+ only — CDNA1 MFMA outputs to regular VGPRs, not AccVGPRs) and by DBT as the software fallback body |
+| `{isa}/mma_exec.h` | `input_loc()`, `output_loc_32()`, `output_loc_64()`, `exec_f32()`, `exec_i32_i8()`, `exec_f64()` — reference MFMA implementation including register layout; CDNA ISAs only (RDNA has no MFMA); used by DBI for AccVGPR clobber detection (CDNA2+ only — CDNA1 MFMA outputs to regular VGPRs, not AccVGPRs) and by DBT as the software fallback body |
 | `{isa}::Decoder` (`isa/decoder.h`, `isa/arch/amdgpu/{isa}/decoder.h`) | Factory that decodes raw `uint32_t` words into typed `Instruction` subclasses; serves as the **guest decoder** in DBT |
 | `BasicBlock` (`code/basic_block.h`) | Splits decoded instructions at branch terminators using `InstFlags::BRANCH`; provides `instructions()` iterator, `start_offset()` / `end_offset()`, and CFG predecessor/successor links for byte-level position in `.text` |
 | `AmdGpuCodeObject` (`code/amdgpu_code_object.h`) | ELF parser; `kernel_descriptor_offset()` looks up `.kd` symbols; `image_data()` / `image_size()` give the raw ELF bytes to the patcher; `code_sections()` returns all executable sections, including DBT-generated `.rj_translations` |
@@ -126,9 +126,9 @@ The `ControlFlowGraph` phase (Phase 2 in the roadmap) is therefore implemented a
 
 **Pillar 1 (ELF foundation)** provides `CodeObjectPatcher` and `SpillManager` as the write layer; all pillars that produce modified binaries drive these two components. The `{isa}/machine_insts.h` and `{isa}/encodings.h` structs are the instruction encoding primitives shared across Pillars 2 and 3.
 
-**Pillar 2 (DBI)** uses `{isa}/machine_insts.h` bitfield structs to emit new instructions (spill stores, restores, `s_swappc_b64`), uses `{isa}/addr_calc.h` formulas inside `SpillManager`, and consults `{isa}/mfma_exec.h`'s `output_loc_32/64()` to identify AccVGPR ranges clobbered by MFMA instructions at the patch point (CDNA ISAs only).
+**Pillar 2 (DBI)** uses `{isa}/machine_insts.h` bitfield structs to emit new instructions (spill stores, restores, `s_swappc_b64`), uses `{isa}/addr_calc.h` formulas inside `SpillManager`, and consults `{isa}/mma_exec.h`'s `output_loc_32/64()` to identify AccVGPR ranges clobbered by MFMA instructions at the patch point (CDNA ISAs only).
 
-**Pillar 3 (DBT)** calls `{isa}::Decoder::decode()` to decode guest instructions, uses cross-ISA `OperandType` comparison to detect capability gaps (e.g., `OPR_ACCVGPR` present in CDNA `operand_types.h` but absent in RDNA), and reuses the guest ISA's `mfma_exec.h` `exec_f32()` / `exec_i32_i8()` / `exec_f64()` as the software fallback body when translating to a target that lacks MFMA.
+**Pillar 3 (DBT)** calls `{isa}::Decoder::decode()` to decode guest instructions, uses cross-ISA `OperandType` comparison to detect capability gaps (e.g., `OPR_ACCVGPR` present in CDNA `operand_types.h` but absent in RDNA), and reuses the guest ISA's `mma_exec.h` `exec_f32()` / `exec_i32_i8()` / `exec_f64()` as the software fallback body when translating to a target that lacks MFMA.
 
 **Pillar 4 (Liveness)** builds `InstDefUse` from explicit operand vectors plus `Instruction::implicit_uses()` / `implicit_defs()`, classifies ordinary SGPR/VGPR/AccVGPR operands through `Operand::to_register_ref()` (not by string-parsing `name()`), and runs `LivenessAnalysis` over one `KernelBlockScope` at a time. Special architectural state such as EXEC, VCC, SCC, M0, TTMP, and FLAT_SCRATCH is represented in `RegClass` but not tracked by `RegisterSet` yet; special-register liveness remains future work.
 
@@ -465,7 +465,7 @@ On CDNA3/4 (and analogously on RDNA), the private segment (scratch) is the per-t
 
 The per-lane address formulas are implemented in `shared/addr_calc_scalar.h` (SMEM, MUBUF, MTBUF, DS) and `shared/addr_calc_flat.h` (FLAT/GLOBAL/SCRATCH), with per-ISA thin wrappers in `{isa}/addr_calc.cpp`. `SpillManager` reuses the shared logic directly — it does not reimplement scratch address derivation.
 
-Additionally, when calculating the spill set at a patch site containing an MFMA instruction on **CDNA2+ targets** (GFX90A, GFX940/941/942, GFX950), `SpillManager` must account for AccVGPR ranges clobbered by the MFMA. The clobbered output registers are identified by calling `mfma_exec.h`'s `output_loc_32()` / `output_loc_64()` with the MFMA dimensions extracted from the `Vop3pMachineInst` encoding — these functions return the exact `{reg, lane}` pairs written, from which the AccVGPR range can be derived and added to the spill set. On CDNA1 (GFX908/MI100), MFMA instructions write to regular VGPRs (not AccVGPRs); there is no AccVGPR range to account for.
+Additionally, when calculating the spill set at a patch site containing an MFMA instruction on **CDNA2+ targets** (GFX90A, GFX940/941/942, GFX950), `SpillManager` must account for AccVGPR ranges clobbered by the MFMA. The clobbered output registers are identified by calling `mma_exec.h`'s `output_loc_32()` / `output_loc_64()` with the MFMA dimensions extracted from the `Vop3pMachineInst` encoding — these functions return the exact `{reg, lane}` pairs written, from which the AccVGPR range can be derived and added to the spill set. On CDNA1 (GFX908/MI100), MFMA instructions write to regular VGPRs (not AccVGPRs); there is no AccVGPR range to account for.
 
 NOTE (05/06/2026): SpillManager was implemented in Phase 5. Accounting for
 AccVGPR ranges clobbered by the MFMA has been deferred.
@@ -2740,12 +2740,12 @@ s_mov_b32    exec_hi, 0         ; clear upper 32 lanes
 
 On non-CDNA hardware (RDNA), MFMA instructions have no target equivalent and are classified `Action::Expand` in the auto-generated legalization table. `BinaryTranslator::expand_mfma_body()` handles the expansion, dispatching on the mnemonic prefix `v_mfma_` or `v_smfmac_`.
 
-**The reference implementation of the matrix math lives in `shared/mfma_exec.h`** (factored from `cdna3/mfma_exec.h` in Phase B, with `AccMode` enum for Unified/Separate/VgprOnly). That file contains:
+**The reference implementation of the matrix math lives in `shared/mma_exec.h`** (factored from `cdna3/mma_exec.h` in Phase B, with `AccMode` enum for Unified/Separate/VgprOnly). That file contains:
 - `input_loc(dim, K, B, i, k, b, data_bits)` — maps `(i, k, b)` indices to `{vgpr_offset, lane, sub_element}` for A and B matrices.
 - `output_loc_32(M, N, i, j, b)` / `output_loc_64(M, N, i, j, b)` — maps `(i, j, b)` to `{reg, lane}` for the D/C matrix.
 - `exec_f32<ExtractA, ExtractB>()`, `exec_i32_i8()`, `exec_f64()` — the full accumulate loops over `(blocks, rows, cols, K)` calling the above.
 
-The DBT MFMA fallback stub is a **pre-compiled device-side library** (built as a separate AMDGPU device ELF for the target ISA) that wraps exactly these `mfma_exec.h` templates, compiled once at rocjitsu library build time via device-side C++. The translator inserts a call to the appropriate stub via the same `s_swappc_b64` trampoline mechanism as DBI — no new matrix math code is written.
+The DBT MFMA fallback stub is a **pre-compiled device-side library** (built as a separate AMDGPU device ELF for the target ISA) that wraps exactly these `mma_exec.h` templates, compiled once at rocjitsu library build time via device-side C++. The translator inserts a call to the appropriate stub via the same `s_swappc_b64` trampoline mechanism as DBI — no new matrix math code is written.
 
 ```cpp
 std::vector<uint32_t> BinaryTranslator::expand_mfma_body(
@@ -3128,7 +3128,7 @@ v_mov_b32 v[M], v[N + accvgpr_base]
 
 `accvgpr_base` is the first VGPR index beyond the guest's regular VGPR range: `accvgpr_base = guest_vgpr_count`. The KD's total VGPR count is increased to `guest_vgpr_count + guest_accvgpr_count`. If this exceeds the target's M_max, the VGPR tiered fallback (§3.9.4.1) handles the overflow — AccVGPR-mapped VGPRs are typically cold between MFMA invocations and are good spill candidates.
 
-MFMA instructions themselves are handled by the EXPAND rule (§3.6), which emits software fallback stubs using the reference implementations in `shared/mfma_exec.h`.
+MFMA instructions themselves are handled by the EXPAND rule (§3.6), which emits software fallback stubs using the reference implementations in `shared/mma_exec.h`.
 
 ##### 3.9.4.4 LDS Size Mismatch
 
@@ -3506,7 +3506,7 @@ Compatible MFMA→WMMA mappings:
 | `v_mfma_f32_16x16x32_fp8_*` | `v_wmma_f32_16x16x16_fp8_*` | K-split: 2 passes | RDNA4 only |
 
 **Tier 1 — Software fallback stubs:**
-For MFMA shapes with no WMMA equivalent (e.g., `v_mfma_f64_*`, `v_mfma_f32_4x4x1_*`, sparse SMFMAC), expand to software fallback stubs compiled from `shared/mfma_exec.h` reference implementations. The expansion uses the same `s_swappc_b64` trampoline mechanism as DBI (§2.4). Performance is ~100x slower than hardware.
+For MFMA shapes with no WMMA equivalent (e.g., `v_mfma_f64_*`, `v_mfma_f32_4x4x1_*`, sparse SMFMAC), expand to software fallback stubs compiled from `shared/mma_exec.h` reference implementations. The expansion uses the same `s_swappc_b64` trampoline mechanism as DBI (§2.4). Performance is ~100x slower than hardware.
 
 **AccVGPR instructions** (`V_ACCVGPR_WRITE`, `V_ACCVGPR_READ`, `V_ACCVGPR_MOV_B32`) are expanded to `V_MOV_B32` with remapped register indices as described in §3.9.4.3.
 
@@ -5087,10 +5087,10 @@ Note: `BranchFixup` is not needed for DBT — the code cave invariant (§3.3.2) 
 
 | Task | New Files |
 |---|---|
-| `dbt/mfma_stub/`: device-side GPU code object library; one stub function per MFMA variant; implementations derived from `shared/mfma_exec.h` reference code | `dbt/mfma_stub/` (separate GPU CMake target) |
-| Fallback expansion: for MFMA shapes not covered by semantic rules (Tier 0), insert trampoline to the corresponding software stub; handle AccVGPR layout remapping via `mfma_exec.h` `input_loc()`/`output_loc_32/64()` | Inside `binary_translator.cpp` |
+| `dbt/mfma_stub/`: device-side GPU code object library; one stub function per MFMA variant; implementations derived from `shared/mma_exec.h` reference code | `dbt/mfma_stub/` (separate GPU CMake target) |
+| Fallback expansion: for MFMA shapes not covered by semantic rules (Tier 0), insert trampoline to the corresponding software stub; handle AccVGPR layout remapping via `mma_exec.h` `input_loc()`/`output_loc_32/64()` | Inside `binary_translator.cpp` |
 
-**Tests:** Translate a CDNA3 kernel using `v_mfma_f32_16x16x16f16` to RDNA3 target (no Tier 0 WMMA rule for RDNA3 since RDNA3 WMMA has different lane mapping). Run through the simulator. Assert matrix output matches the reference computed directly from `mfma_exec.h::exec_f32()`.
+**Tests:** Translate a CDNA3 kernel using `v_mfma_f32_16x16x16f16` to RDNA3 target (no Tier 0 WMMA rule for RDNA3 since RDNA3 WMMA has different lane mapping). Run through the simulator. Assert matrix output matches the reference computed directly from `mma_exec.h::exec_f32()`.
 
 ---
 

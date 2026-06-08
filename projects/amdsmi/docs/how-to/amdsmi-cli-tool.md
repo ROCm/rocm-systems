@@ -1047,7 +1047,7 @@ GPU: 0
     ASIC:
         MARKET_NAME: AMD Instinct MI300A
         VENDOR_ID: 0x1002
-        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
+        VENDOR_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
         SUBSYSTEM_ID: 0x74a0

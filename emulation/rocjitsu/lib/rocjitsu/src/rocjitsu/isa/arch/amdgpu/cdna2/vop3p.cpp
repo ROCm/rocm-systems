@@ -5,7 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/cdna2/vop3p.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna2/mfma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/mma_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -730,26 +730,26 @@ void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t s0_lo_w = src0.read_lane(wf, lane);
-    uint32_t s0_hi_w =
-        (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511)
-            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
-                                    static_cast<uint32_t>(src0.encoding_value_ - 256) + 1,
-                                lane)
-            : s0_lo_w;
+    uint32_t s0_hi_w = s0_lo_w;
+    if (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511) {
+      uint64_t s0_pair_w = src0.read_lane64(wf, lane);
+      s0_lo_w = static_cast<uint32_t>(s0_pair_w);
+      s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
+    }
     uint32_t s1_lo_w = src1.read_lane(wf, lane);
-    uint32_t s1_hi_w =
-        (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511)
-            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
-                                    static_cast<uint32_t>(src1.encoding_value_ - 256) + 1,
-                                lane)
-            : s1_lo_w;
+    uint32_t s1_hi_w = s1_lo_w;
+    if (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511) {
+      uint64_t s1_pair_w = src1.read_lane64(wf, lane);
+      s1_lo_w = static_cast<uint32_t>(s1_pair_w);
+      s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
+    }
     uint32_t s2_lo_w = src2.read_lane(wf, lane);
-    uint32_t s2_hi_w =
-        (src2.encoding_value_ >= 256 && src2.encoding_value_ <= 511)
-            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
-                                    static_cast<uint32_t>(src2.encoding_value_ - 256) + 1,
-                                lane)
-            : s2_lo_w;
+    uint32_t s2_hi_w = s2_lo_w;
+    if (src2.encoding_value_ >= 256 && src2.encoding_value_ <= 511) {
+      uint64_t s2_pair_w = src2.read_lane64(wf, lane);
+      s2_lo_w = static_cast<uint32_t>(s2_pair_w);
+      s2_hi_w = static_cast<uint32_t>(s2_pair_w >> 32);
+    }
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel2_lo = (inst_.op_sel >> 2) & 1;
@@ -799,19 +799,19 @@ void VPkMulF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t s0_lo_w = src0.read_lane(wf, lane);
-    uint32_t s0_hi_w =
-        (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511)
-            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
-                                    static_cast<uint32_t>(src0.encoding_value_ - 256) + 1,
-                                lane)
-            : s0_lo_w;
+    uint32_t s0_hi_w = s0_lo_w;
+    if (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511) {
+      uint64_t s0_pair_w = src0.read_lane64(wf, lane);
+      s0_lo_w = static_cast<uint32_t>(s0_pair_w);
+      s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
+    }
     uint32_t s1_lo_w = src1.read_lane(wf, lane);
-    uint32_t s1_hi_w =
-        (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511)
-            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
-                                    static_cast<uint32_t>(src1.encoding_value_ - 256) + 1,
-                                lane)
-            : s1_lo_w;
+    uint32_t s1_hi_w = s1_lo_w;
+    if (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511) {
+      uint64_t s1_pair_w = src1.read_lane64(wf, lane);
+      s1_lo_w = static_cast<uint32_t>(s1_pair_w);
+      s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
+    }
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;
@@ -853,19 +853,19 @@ void VPkAddF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t s0_lo_w = src0.read_lane(wf, lane);
-    uint32_t s0_hi_w =
-        (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511)
-            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
-                                    static_cast<uint32_t>(src0.encoding_value_ - 256) + 1,
-                                lane)
-            : s0_lo_w;
+    uint32_t s0_hi_w = s0_lo_w;
+    if (src0.encoding_value_ >= 256 && src0.encoding_value_ <= 511) {
+      uint64_t s0_pair_w = src0.read_lane64(wf, lane);
+      s0_lo_w = static_cast<uint32_t>(s0_pair_w);
+      s0_hi_w = static_cast<uint32_t>(s0_pair_w >> 32);
+    }
     uint32_t s1_lo_w = src1.read_lane(wf, lane);
-    uint32_t s1_hi_w =
-        (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511)
-            ? wf.cu().read_vgpr(wf.vgpr_alloc().base +
-                                    static_cast<uint32_t>(src1.encoding_value_ - 256) + 1,
-                                lane)
-            : s1_lo_w;
+    uint32_t s1_hi_w = s1_lo_w;
+    if (src1.encoding_value_ >= 256 && src1.encoding_value_ <= 511) {
+      uint64_t s1_pair_w = src1.read_lane64(wf, lane);
+      s1_lo_w = static_cast<uint32_t>(s1_pair_w);
+      s1_hi_w = static_cast<uint32_t>(s1_pair_w >> 32);
+    }
     bool sel0_lo = (inst_.op_sel >> 0) & 1;
     bool sel1_lo = (inst_.op_sel >> 1) & 1;
     bool sel0_hi = (inst_.op_sel_hi >> 0) & 1;

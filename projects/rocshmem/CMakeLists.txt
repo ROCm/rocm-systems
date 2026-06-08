@@ -24,6 +24,9 @@
 
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
+# Set root directory for ROCm Systems shared files
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 ###############################################################################
 # AVOID IN SOURCE BUILD
 ###############################################################################
@@ -64,6 +67,7 @@ option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
+option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
@@ -331,7 +335,7 @@ if (NOT BUILD_TESTS_ONLY)
     PRIVATE
       -Wall
       -Wextra
-      -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
+      -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
   )
 
   target_include_directories(
@@ -427,6 +431,9 @@ endif (NOT BUILD_TESTS_ONLY)
 ###############################################################################
 # TEST SUBDIRECTORIES
 ###############################################################################
+if(BUILD_CTESTS)
+    enable_testing()
+endif()
 add_subdirectory(tests)
 
 if (BUILD_EXAMPLES)
