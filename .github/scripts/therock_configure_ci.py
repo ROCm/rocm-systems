@@ -20,7 +20,7 @@ from therock_matrix import (
     windows_only_subtrees,
 )
 import time
-from typing import Mapping, Optional, Iterable, List
+from typing import Mapping, Optional, Iterable
 import os
 
 # Add TheRock's github_actions to path for shared utilities
@@ -30,7 +30,6 @@ from amdgpu_family_matrix import get_build_runner_labels, select_weighted_label
 
 # Valid test types in order of comprehensiveness (least to most)
 VALID_TEST_TYPES = ["quick", "standard", "comprehensive", "full"]
-TEST_TYPE_PRIORITY = {t: i for i, t in enumerate(VALID_TEST_TYPES)}
 
 logging.basicConfig(level=logging.INFO)
 
@@ -103,44 +102,6 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     if paths is None:
         return False
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
-
-
-def get_pr_labels(args) -> List[str]:
-    """Gets a list of labels applied to a pull request."""
-    data = json.loads(args.get("pr_labels", "{}"))
-    labels = []
-    for label in data.get("labels", []):
-        labels.append(label["name"])
-    return labels
-
-
-def parse_test_type_from_labels(pr_labels: List[str]) -> Optional[str]:
-    """
-    Parse PR labels to extract test type.
-
-    Looks for labels like 'test_type:quick', 'test_type:comprehensive'.
-    If multiple test_type labels exist, the most comprehensive one takes precedence.
-
-    Returns:
-        The test type string if found, None otherwise.
-    """
-    test_type = None
-
-    for label in pr_labels:
-        if label.startswith("test_type:"):
-            label_test_type = label.split("test_type:")[-1]
-            if label_test_type in VALID_TEST_TYPES:
-                # If multiple test_type labels, use the most comprehensive one
-                if (
-                    test_type is None
-                    or TEST_TYPE_PRIORITY[label_test_type]
-                    > TEST_TYPE_PRIORITY[test_type]
-                ):
-                    test_type = label_test_type
-            else:
-                logging.warning(f"Unknown test type in label: {label}")
-
-    return test_type
 
 
 def check_trigger_windows_ci_for_subtree_path(path):
@@ -278,9 +239,6 @@ def retrieve_projects(args):
     # Default test type is "standard" for normal CI runs
     test_type = "standard"
 
-    # Variables to track if labels override defaults
-    label_test_type = None
-
     # Nightly (schedule): use same test coverage as TheRock submodule bump PRs —
     # single nightly job with THEROCK_ENABLE_ALL=ON and full projects_to_test list.
     # Run all builds and tests including RCCL.
@@ -307,14 +265,6 @@ def retrieve_projects(args):
     modified_paths = get_modified_paths(base_ref)
     print("modified_paths (max 200):", modified_paths[:200])
 
-    # Parse PR labels for test_type override
-    if args.get("is_pull_request"):
-        pr_labels = get_pr_labels(args)
-        label_test_type = parse_test_type_from_labels(pr_labels)
-        if label_test_type:
-            test_type = label_test_type
-            logging.info(f"Test type overridden by label: {test_type}")
-
     # If only skippable paths were modified, skip CI
     if args.get("is_push") or args.get("is_pull_request"):
         if not check_for_non_skippable_path(modified_paths):
@@ -329,9 +279,7 @@ def retrieve_projects(args):
         if check_for_workflow_file_related_to_ci(modified_paths):
             logging.info("CI workflow files changed, evaluating all subtrees with quick tests")
             subtrees = list(subtree_to_project_map.keys())
-            # Use quick tests for CI workflow changes unless overridden by label
-            if not label_test_type:
-                test_type = "quick"
+            test_type = "quick"
         elif matched_subtrees:
             # Known subtrees changed - run CI for those subtrees
             subtrees = list(matched_subtrees)
@@ -367,9 +315,7 @@ def retrieve_projects(args):
         if check_for_workflow_file_related_to_ci(modified_paths):
             logging.info("CI workflow files changed, evaluating all subtrees with quick tests")
             subtrees = list(subtree_to_project_map.keys())
-            # Use quick tests for CI workflow changes unless overridden by label
-            if not label_test_type:
-                test_type = "quick"
+            test_type = "quick"
 
         # Pull request
         elif args.get("is_pull_request"):
@@ -554,9 +500,6 @@ if __name__ == "__main__":
     args["platform"] = input_platform
 
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
-
-    # PR labels for test_type override
-    args["pr_labels"] = os.environ.get("PR_LABELS", '{"labels": []}')
 
     logging.info(f"Retrieved arguments {args}")
 

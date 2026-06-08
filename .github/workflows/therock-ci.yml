@@ -10,8 +10,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
-      - unlabeled
   workflow_dispatch:
     inputs:
       projects:
@@ -99,14 +97,6 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --config ".github/repos-config.json"
-
-      - name: Set PR_LABELS variable with labels assigned to pull request
-        if: ${{ github.event.pull_request }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.number }}
-        run: |
-          echo "PR_LABELS=$(gh pr view ${PR_NUMBER} --json labels)" >> $GITHUB_ENV
 
       - name: Determine Linux projects to run
         id: linux_projects
