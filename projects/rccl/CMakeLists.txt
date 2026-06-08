@@ -88,7 +88,6 @@ option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernel
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
-option(PROFILE                                 "Enable profiling"                              OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)

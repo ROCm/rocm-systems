@@ -84,9 +84,6 @@ struct ncclShmemData {
   alignas(16) union {
     unpackShmem unpack;
   } devicePlugin;
-#ifdef ENABLE_PROFILING
-  struct ncclProf prof;
-#endif
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
 #endif
@@ -170,18 +167,6 @@ __device__ inline bool barrier_red_or(bool vote, int name, int nThreads) {
       : "=r"(ans) : "r"((int)vote), "r"(name), "r"(nThreads) : "memory");
   return bool(ans);
 }
-
-#ifdef ENABLE_PROFILING
-#define __insert_timestamp(line_num) do { \
-      if (ncclShmem.prof.count < PROFILE_NUM_ITEMS) { \
-        ncclShmem.prof.elem[ncclShmem.prof.count].line = line_num; \
-        ncclShmem.prof.elem[ncclShmem.prof.count].timeStamp = wall_clock64(); \
-        ncclShmem.prof.count++; \
-      } \
-    } while(0);
-#else
-#define __insert_timestamp(line_num)
-#endif
 
 // Copy 16-byte aligned data. You must call with at least `(bytes+15)/16` threads.
 inline __device__ void copyToShmem16(int tid, void* dst, void const* src, int bytes) {
@@ -574,16 +559,8 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   }
   __syncthreads();
 #endif
-#ifdef ENABLE_PROFILING
-  if (tid == 0) {
-    ncclShmem.prof.count = 0;
-    ncclShmem.prof.seq = ncclShmem.comm.devProf[blockIdx.x].seq;
-  }
-#endif
-  if (tid == 0) __insert_timestamp(__LINE__);
 
   while (ncclShmem.aborted == 0) {
-    if (tid == 0) __insert_timestamp(__LINE__);
     profiler(START);
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
@@ -625,14 +602,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     __syncthreads();
   }
   profiler(FINI);
-
-#ifdef ENABLE_PROFILING
-  if (ncclShmem.comm.devProf->seq < PROFILE_NUM_LAUNCHES) {
-    __syncthreads();
-    copyToShmem16(tid, ncclShmem.comm.devProf+MAXCHANNELS*ncclShmem.prof.seq+blockIdx.x, &ncclShmem.prof, sizeof(struct ncclProf));
-    if (tid == 0) ncclShmem.comm.devProf[blockIdx.x].seq++;
-  }
-#endif
 }
 
 __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);

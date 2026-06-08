@@ -491,29 +491,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
   }
 
 
-#ifdef ENABLE_PROFILING
-  struct ncclProf *prof, *prof_seq;
-  prof = (struct ncclProf*)malloc(sizeof(struct ncclProf)*MAXCHANNELS*PROFILE_NUM_LAUNCHES);
-  if (prof == nullptr) {
-    WARN("Failed to allocate profiling buffer");
-    // Skip profiling but continue with destruction
-    goto skip_profiling;
-  }
-  CUDACHECK(hipMemcpy(prof, comm->devComm->devProf, sizeof(struct ncclProf)*MAXCHANNELS*PROFILE_NUM_LAUNCHES, hipMemcpyDeviceToHost));
-  #define VEGA_GPU_RTC_FREQUENCY 2.5E7
-  for (int i=0; i<comm->nChannels; i++) {
-    for (int s=0; s<prof[MAXCHANNELS*i].seq; s++) {
-      if (prof[MAXCHANNELS*s+i].count == 0) continue;
-      for (int j=0; j<prof[MAXCHANNELS*s+i].count; j++) {
-        INFO(NCCL_INIT, "# [%02d:%02d] %02d-%02d L:%04u %6.2fus", comm->rank, i, s, j, prof[MAXCHANNELS*s+i].elem[j].line, (prof[MAXCHANNELS*s+i].elem[j].timeStamp-prof[MAXCHANNELS*s+i].elem[0].timeStamp)/VEGA_GPU_RTC_FREQUENCY*1.0E6);
-      }
-    }
-  }
-  free(prof);
-  CUDACHECK(hipFree(comm->devComm->devProf));
-skip_profiling:
-#endif
-
   free(comm->peerInfo);
   if (comm->topo)
     ncclTopoFree(comm->topo);
@@ -939,10 +916,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   NCCLCHECK(NpKit::Init(comm->rank));
   tmpCommAndChans.comm.npKitEventCollectContexts = NpKit::GetGpuEventCollectContexts();
   tmpCommAndChans.comm.cpuTimestamp = NpKit::GetCpuTimestamp();
-#endif
-
-#ifdef ENABLE_PROFILING
-  NCCLCHECK(ncclCudaCalloc(&tmpCommAndChans.comm.devProf, MAXCHANNELS*PROFILE_NUM_LAUNCHES, comm->memManager, ncclMemPersist));
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION

@@ -566,21 +566,6 @@ struct ncclDevChannelPeer {
 };
 #pragma pack(pop)   /* restore original alignment from stack */
 
-#ifdef ENABLE_PROFILING
-#define PROFILE_NUM_ITEMS 31
-#define PROFILE_NUM_LAUNCHES 1024
-
-struct ncclProf {
-  uint32_t count;
-  uint32_t seq; // only entry from first launch is used
-  struct {
-    uint64_t line:16;
-    uint64_t timeStamp:48;
-  } elem[PROFILE_NUM_ITEMS];
-};
-static_assert(sizeof(struct ncclProf) == 256, "ncclProf must have size of 256");
-#endif
-
 struct alignas(16) ncclDevChannel {
   struct ncclDevChannelPeer** peers;
   struct ncclRing ring;
@@ -629,10 +614,6 @@ struct ncclKernelComm {
 #if defined(ENABLE_NPKIT)
   NpKitEventCollectContext* npKitEventCollectContexts;
   uint64_t* cpuTimestamp;
-#endif
-
-#ifdef ENABLE_PROFILING
-  struct ncclProf* devProf;
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION

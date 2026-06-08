@@ -94,7 +94,6 @@ function display_help()
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
-    echo "    -DPROFILE=ON                          Enable profiling (default: OFF)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
     echo ""
