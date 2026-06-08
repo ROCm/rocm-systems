@@ -79,7 +79,9 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
   ncclResult_t ret = ncclSuccess;
   ALIGN_SIZE(alignedSize, hostPageSize);
   HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)addr, alignedSize, fd, &offset), ret, fail);
+  return ret;
 fail:
+  return ret;
 #endif
   return ncclInvalidUsage;
 }
