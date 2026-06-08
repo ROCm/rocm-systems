@@ -117,3 +117,5 @@ add_custom_target(
 # Export variables to the parent scope so the test executable can use them.
 set(HAS_DEVICE_KERNELS TRUE PARENT_SCOPE)
 set(KERNEL_OUTPUT_DIR ${KERNEL_OUTPUT_DIR} PARENT_SCOPE)
+set(AMDCLANG ${AMDCLANG} PARENT_SCOPE)
+set(ROCM_PATH ${ROCM_PATH} PARENT_SCOPE)

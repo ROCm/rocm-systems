@@ -457,20 +457,13 @@ else()
     message(STATUS "HSA init test disabled (libhsa-runtime64 not found)")
 endif()
 
-# --- HIP tests (requires hipcc + CLI launcher) ---
+# --- HIP tests (requires amdclang++ + CLI launcher) ---
 
-find_program(
-    HIPCC_EXECUTABLE
-    hipcc
-    PATHS /opt/rocm/bin
-    ENV ROCM_PATH
-    PATH_SUFFIXES bin
-)
-if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+if(AMDCLANG AND HSA_RUNTIME64)
     set(GTEST_INC ${googletest_SOURCE_DIR}/googletest/include)
     set(GTEST_LIB_DIR ${CMAKE_BINARY_DIR}/lib)
 
-    # Helper: build a HIP test binary with hipcc + gtest.
+    # Helper: build a HIP test binary with amdclang++ + gtest.
     function(rj_add_hip_test TEST_NAME)
         cmake_parse_arguments(ARG "" "ARCH;SOURCE" "EXTRA_LIBS" ${ARGN})
         if(NOT ARG_ARCH)
@@ -485,12 +478,13 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         add_custom_command(
             OUTPUT ${HIP_TEST_BIN}
             COMMAND
-                ${HIPCC_EXECUTABLE} --offload-arch=${ARG_ARCH} -std=c++20
-                -isystem ${GTEST_INC} -I${CMAKE_CURRENT_SOURCE_DIR}
+                ${AMDCLANG} --offload-arch=${ARG_ARCH} --rocm-path=${ROCM_PATH}
+                -std=c++20 -O2 -isystem ${GTEST_INC}
+                -I${CMAKE_CURRENT_SOURCE_DIR} -x hip ${HIP_TEST_SRC} -x none
                 -L${GTEST_LIB_DIR} -lgtest -lpthread ${ARG_EXTRA_LIBS}
-                -Wl,-rpath,${GTEST_LIB_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                -Wl,-rpath,${GTEST_LIB_DIR} -o ${HIP_TEST_BIN}
             DEPENDS ${HIP_TEST_SRC} GTest::gtest GTest::gtest_main
-            COMMENT "Building ${TEST_NAME} with hipcc (${ARG_ARCH})"
+            COMMENT "Building ${TEST_NAME} with amdclang++ (${ARG_ARCH})"
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
@@ -651,7 +645,10 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_bfe_2d_test)
     rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
 
-    message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
+    message(STATUS "HIP tests enabled (found ${AMDCLANG})")
 else()
-    message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
+    message(
+        STATUS
+        "HIP tests disabled (amdclang++ or libhsa-runtime64 not found)"
+    )
 endif()
