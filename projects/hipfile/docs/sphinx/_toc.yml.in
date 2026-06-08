@@ -11,26 +11,10 @@ subtrees:
       - file: how-to/ais-stats-tool
   - caption: Tutorials
     entries:
-<<<<<<< HEAD
-      - file: tutorials/synchronous-file-copy
-      - file: tutorials/async-multistream-io
-      - file: tutorials/python-file-copy
-  - caption: Reference
-    entries:
-      - file: reference/api-synchronous-io
-      - file: reference/api-driver
-      - file: reference/api-file-and-buffer
-      - file: reference/api-async
-      - file: reference/api-batch
-      - file: reference/api-errors
-      - file: reference/api-python
-  - caption: About
-=======
       - file: tutorials/copy-a-file
       - file: tutorials/get-version
       - file: tutorials/python-gpu-io
   - caption: Reference
->>>>>>> 4693ab6efae (fixed merge conflicts)
     entries:
       - file: reference/io-backends
       - file: reference/filesystem-requirements

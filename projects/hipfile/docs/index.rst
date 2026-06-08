@@ -42,18 +42,8 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
       * :doc:`I/O statistics collection <reference/statistics-collection>`
       * :doc:`hipFile environment variables <reference/environment-variables>`
       * :doc:`API reference <reference/api-reference>`
-      * :doc:`Errors and error handling <reference/errors>`
       * :doc:`Python bindings API reference <reference/python-api-reference>`
-
-   .. grid-item-card:: Reference
-
-      * :doc:`Synchronous read and write API reference <reference/api-synchronous-io>`
-      * :doc:`Driver lifecycle and configuration API reference <reference/api-driver>`
-      * :doc:`File handle, buffer, and RDMA API reference <reference/api-file-and-buffer>`
-      * :doc:`Asynchronous I/O API reference <reference/api-async>`
-      * :doc:`Batch I/O API reference <reference/api-batch>`
-      * :doc:`Error handling API reference <reference/api-errors>`
-      * :doc:`Python API reference <reference/api-python>`
+      * :doc:`Errors and error handling <reference/errors>`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
