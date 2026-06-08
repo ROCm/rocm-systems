@@ -573,9 +573,10 @@ def gen_vector_permlane(
     """Generate V_PERMLANE16_B32 / V_PERMLANEX16_B32 (imm and var forms).
 
     For each lane i, read from lane (i & ~0xF) | selector[i & 0xF].
-    Immediate form: selector from src1 (low 16 lanes) / src2 (high 16 lanes),
-      each is a 4-bit field per sub-lane packed into a 32-bit scalar.
-    Var form: selector from low 4 bits of src2 VGPR per lane.
+    Immediate form: lanesel = {S2, S1} forms a 64-bit value; each sub-lane i
+      selects from lanesel[i*4+3 : i*4]. Sub-lanes 0-7 read from S1 (low 32),
+      sub-lanes 8-15 read from S2 (high 32).
+    Var form: selector from low 4 bits of src1 VGPR per lane.
     For permlanex16 (cross=True), fetch from the other 16-lane half of the
     same 32-lane row.
     """
@@ -592,11 +593,11 @@ def gen_vector_permlane(
     if is_var:
         L.append(f'    uint32_t sel = {src[1]}.read_lane(wf, lane) & 0xF;')
     else:
-        L.append(f'    uint32_t sel_word = (lane < 32)')
+        L.append('    uint32_t sub = lane & 0xF;')
+        L.append(f'    uint32_t sel_word = (sub < 8u)')
         L.append(f'        ? {src[1]}.read_scalar(wf)')
         L.append(f'        : {src[2]}.read_scalar(wf);')
-        L.append('    uint32_t sub = lane & 0xF;')
-        L.append('    uint32_t sel = (sel_word >> (sub * 4)) & 0xF;')
+        L.append('    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;')
     if cross:
         L.append('    uint32_t row_base = lane & ~0x1Fu;')
         L.append('    uint32_t half = (lane ^ 0x10u) & 0x10u;')
