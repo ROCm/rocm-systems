@@ -40,11 +40,11 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
 
   dev_program_ = fb_info_->GetProgram(ihipGetDevice())
                                      ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
-  std::string mod_loading_mode;
-  if (!flagIsDefault(HIP_MODULE_LOADING)) {
-      mod_loading_mode = HIP_MODULE_LOADING;
-  }
-  if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
+
+  // Check loading mode dynamically
+  hipModuleLoadingMode_t mode;
+  PlatformState::Instance().GetLoadingMode(&mode);
+  if (mode == HIP_MODULE_EAGER_LOADING) {
     // Define Global variables
     IHIP_RETURN_ONFAIL(populateDynGlobalVars());
 
