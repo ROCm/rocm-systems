@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// A new comment to delete
+
 #include "tools/dbt_translate.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
