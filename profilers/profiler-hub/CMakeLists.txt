@@ -207,6 +207,18 @@ add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
 set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
 
+# Belt-and-suspenders for the shared library: even though the bundled SQLite is
+# compiled with hidden visibility, also instruct the linker not to re-export any
+# symbol that came from the SQLite static archive. This keeps the 262 sqlite3_*
+# symbols out of libprofiler-hub.so's dynamic symbol table so they cannot
+# collide with other sqlite3 versions present on TheRock.
+if(NOT PROFILER_HUB_SQLITE3_USE_SYSTEM)
+    target_link_options(
+        profiler-hub
+        PRIVATE -Wl,--exclude-libs,libprofiler-hub-sqlite3-static.a
+    )
+endif()
+
 # Embed semantic version + ABI version on the shared library so that
 # libprofiler-hub.so.<MAJOR> is the SONAME and libprofiler-hub.so.<MAJOR>.<MINOR>.<PATCH>
 # is the actual file, with both symlinks installed alongside libprofiler-hub.so.

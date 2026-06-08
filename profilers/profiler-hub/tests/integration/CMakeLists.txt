@@ -12,6 +12,13 @@ include(gtest)
 
 set(INTEGRATION_TEST_SOURCES writer_test.cpp reader_test.cpp backend_test.cpp)
 
+# Build-artifact regression guard: verify libprofiler-hub.so does not export the
+# bundled sqlite3_* symbols (the symbol seal). Only meaningful with the bundled
+# SQLite; the system SQLite has no private copy to seal.
+if(NOT PROFILER_HUB_SQLITE3_USE_SYSTEM)
+    list(APPEND INTEGRATION_TEST_SOURCES symbol_seal_test.cpp)
+endif()
+
 add_executable(profiler-hub_integration_tests ${INTEGRATION_TEST_SOURCES})
 
 # Link the STATIC profiler-hub so the backend's explicitly-instantiated members
@@ -42,6 +49,16 @@ target_compile_definitions(
     profiler-hub_integration_tests
     PUBLIC ROCPD_DB_PATH="${ROCPD_DB_PATH}"
 )
+
+# Inject the absolute path of the built shared library so symbol_seal_test can
+# inspect it with nm, and ensure the library is built before this test runs.
+if(NOT PROFILER_HUB_SQLITE3_USE_SYSTEM)
+    target_compile_definitions(
+        profiler-hub_integration_tests
+        PRIVATE PROFILER_HUB_SHARED_LIB="$<TARGET_FILE:profiler-hub>"
+    )
+    add_dependencies(profiler-hub_integration_tests profiler-hub)
+endif()
 
 target_include_directories(
     profiler-hub_integration_tests
