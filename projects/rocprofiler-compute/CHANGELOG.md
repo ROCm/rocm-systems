@@ -7,6 +7,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Added
 
 * Added GPU benchmarking support for gfx1150 and gfx1152 hardware.
+* Added GPU support of GPU metrics for gfx1150 and gfx1152 hardware.
 
 ### Changed
 

@@ -14,7 +14,7 @@ including CDNA™ architecture based GPUs like the AMD Instinct MI100, CDNA2 arc
 
 .. note::
 
-  * For AMD Ryzen™ / RDNA™ APUs (e.g. gfx11.5/RDNA3.5), see :doc:`RDNA3 <../rdna/rdna-performance-model>`.
+  * For AMD Ryzen™ / RDNA™ APUs (e.g. gfx115x/RDNA3.5), see :doc:`RDNA3 <../rdna/rdna-performance-model>`.
 
   * For top-level metrics details on CDNA and RDNA architecture, see :doc:`../performance-model`.
 
