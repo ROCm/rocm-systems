@@ -228,6 +228,12 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
   return RDC_ST_OK;
 }
 
+static bool rdc_diag_temperature_is_relevant(amdsmi_temperature_type_t type) {
+  return type == AMDSMI_TEMPERATURE_TYPE_EDGE
+      || type == AMDSMI_TEMPERATURE_TYPE_JUNCTION
+      || type == AMDSMI_TEMPERATURE_TYPE_VRAM;
+}
+
 rdc_status_t RdcSmiDiagnosticImpl::check_smi_param_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
                                                         uint32_t gpu_count,
                                                         rdc_diag_test_result_t* result) {
@@ -244,6 +250,12 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_param_info(uint32_t gpu_index[RDC_M
     // temperature
     for (amdsmi_temperature_type_t sensor_type = AMDSMI_TEMPERATURE_TYPE_FIRST;
          sensor_type < AMDSMI_TEMPERATURE_TYPE__MAX;) {
+
+      if (!rdc_diag_temperature_is_relevant(sensor_type)) {
+        sensor_type = static_cast<amdsmi_temperature_type_t>(sensor_type + 1);
+        continue;
+      }
+
       auto status = check_temperature_level(gpu_index[i], sensor_type, result->info,
                                             result->gpu_results[i].gpu_result.msg);
       // Set to higher error level
