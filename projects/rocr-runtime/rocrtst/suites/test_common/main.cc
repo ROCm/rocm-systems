@@ -53,6 +53,7 @@
 #include "suites/functional/memory_basic.h"
 #include "suites/functional/memory_access.h"
 #include "suites/functional/ipc.h"
+#include "suites/functional/ipc_extended.h"
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
@@ -281,6 +282,21 @@ TEST(rocrtstFunc, DISABLED_CU_Masking) {
 TEST(rocrtstFunc, IPC) {
     IPCTest ipc;
     RunGenericTest(&ipc);
+}
+
+TEST(rocrtstFunc, IPC_ServerRestart) {
+  IPCServerRestartTest test;
+  RunGenericTest(&test);
+}
+
+TEST(rocrtstFunc, IPC_FreeBeforeDetach) {
+  IPCFreeBeforeDetachTest test;
+  RunGenericTest(&test);
+}
+
+TEST(rocrtstFunc, IPC_RepeatedHandle) {
+  IPCRepeatedHandleTest test;
+  RunGenericTest(&test);
 }
 
 TEST(rocrtstFunc, DISABLED_Signal_Kernel_Set) {

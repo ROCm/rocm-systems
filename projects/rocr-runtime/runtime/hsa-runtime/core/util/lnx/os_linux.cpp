@@ -1009,7 +1009,7 @@ IPCSocket CreateIPCServer(const char* name, int backlog) {
 }
 
 IPCSocket AcceptIPCConnection(IPCSocket server) {
-  int fd = accept(IPCSockToFd(server), NULL, NULL);
+  int fd = accept4(IPCSockToFd(server), NULL, NULL, SOCK_CLOEXEC);
   if (fd == -1) return INVALID_SOCKET_VALUE;
   return FdToIPCSock(fd);
 }

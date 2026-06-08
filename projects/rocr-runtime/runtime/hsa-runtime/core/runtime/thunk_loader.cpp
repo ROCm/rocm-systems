@@ -425,7 +425,11 @@ namespace core {
       if (HSAKMT_PFN(hsaKmtMemHandleFree) == nullptr) goto LOAD_ERROR;
 
       HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemHandleFreePreserveMetadata");
-      if (HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) == nullptr) goto LOAD_ERROR;
+      // Backward-compatibility: older thunk libraries may not provide this symbol.
+      // Fall back to hsaKmtMemHandleFree (metadata will be cleared, but IPC will still work).
+      if (HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) == nullptr) {
+        HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = HSAKMT_PFN(hsaKmtMemHandleFree);
+      }
 
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryGetCpuAddr");
       if (HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) == nullptr) goto LOAD_ERROR;
