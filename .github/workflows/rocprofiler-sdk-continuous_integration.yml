@@ -468,7 +468,7 @@ jobs:
         --privileged
         --cap-add SYS_PTRACE
         --security-opt seccomp=unconfined
-        # --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     # define this for containers
     env:
