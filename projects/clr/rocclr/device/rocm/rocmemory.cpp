@@ -679,6 +679,10 @@ void Buffer::destroy() {
     if (memFlags & ROCCLR_MEM_PHYMEM) {
       // If this is physical memory, dont call hsa free function, since device mem was never created
       dev().deviceVmemRelease(owner()->getUserData().hsa_handle);
+      // Free what we counted on alloc. Imported memory was never counted.
+      if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+        const_cast<Device&>(dev()).updateFreeMemory(size(), true);
+      }
       return;
     }
 
@@ -827,6 +831,11 @@ bool Buffer::create(bool alloc_local) {
     }
 
     owner()->setSvmPtr(reinterpret_cast<void*>(owner()->getUserData().hsa_handle));
+
+    // Real device memory, so count it. Imported memory isn't ours, so skip it.
+    if (!(memFlags & ROCCLR_MEM_INTERPROCESS)) {
+      const_cast<Device&>(dev()).updateFreeMemory(size(), false);
+    }
 
     return (success = true);
   }
