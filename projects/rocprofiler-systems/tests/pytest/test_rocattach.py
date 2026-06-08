@@ -4,8 +4,10 @@
 """Tests for the rocprof-sys-attach binary (rocattach codepath).
 
 Exercises a long-running HIP target (transpose in infinite mode) and runs
-N attach/detach sessions against its PID. Asserts each session produces
-its own output directory containing a perfetto trace, and that the target
+N attach/detach sessions against its PID. The target keeps a single output
+directory across re-attaches, so each session adds a run-counter-suffixed
+perfetto trace rather than a fresh per-session directory. Asserts that N
+attach sessions yield at least N perfetto traces and that the target
 survives all sessions.
 """
 
@@ -96,13 +98,14 @@ class TestRocattach:
                 )
                 time.sleep(self.INTER_SESSION_PAUSE_S)
 
-            for session_idx in range(n_sessions):
-                session_out = test_output_dir / f"session_{session_idx}"
-                assert (
-                    session_out.is_dir()
-                ), f"output directory missing for session {session_idx}: {session_out}"
-                traces = list(session_out.rglob("perfetto-trace*.proto"))
-                assert traces, f"no perfetto-trace*.proto found under {session_out}"
+            # Re-attaching to the same process reuses the output directory set
+            # on the first attach; each session is distinguished by a run-counter
+            # suffix (perfetto-trace-<pid>-<n>.proto), not a fresh session_N dir.
+            traces = sorted(test_output_dir.rglob("perfetto-trace*.proto"))
+            assert len(traces) >= n_sessions, (
+                f"expected at least {n_sessions} perfetto-trace*.proto file(s) under "
+                f"{test_output_dir}, found {len(traces)}: {traces}"
+            )
         finally:
             if target_proc.poll() is None:
                 target_proc.terminate()
