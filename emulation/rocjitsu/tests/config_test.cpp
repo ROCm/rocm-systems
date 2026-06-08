@@ -113,6 +113,33 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
   EXPECT_EQ(xcd->shader_engine(1)->num_compute_units(), 3u);
 }
 
+TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
+  const char *json = R"({"max_ticks":1000,"num_threads":1,
+    "vm":{"arch":"gfx1250"},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu[0:1]","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"1"},
+            {"key":"lds_size_kb","value":"64"}
+          ]}
+        ]}
+      ]}
+    ]},"links":[
+      {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+      {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+    ]}})";
+
+  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_EQ(cu->config().sgprs_per_wf, 128u);
+  EXPECT_EQ(cu->config().vgprs_per_wf, 1024u);
+}
+
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   const char *json = R"({"max_ticks":10000,"num_threads":1,
     "vm":{"arch":"cdna3"},

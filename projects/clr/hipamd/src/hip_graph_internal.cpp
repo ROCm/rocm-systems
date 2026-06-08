@@ -544,6 +544,19 @@ void GraphExec::BuildSyncPlan() {
       sync_plan_.leaf_segment_ids.push_back(segment.id);
     }
   }
+
+  // Create the per-graph HW event signal pool once at instantiate time
+  // (single-threaded here) and pre-create the signals, so the launch hot path
+  // only pops a ready set and patches it — never creating signals.
+  if (signalManager_ == nullptr) {
+    signalManager_ = new GraphSignalManager();
+  }
+  if (sync_plan_.num_segments > 0) {
+    // Pre-create a few sets to cover a small amount of launch overlap; the pool
+    // grows on demand if more launches are concurrently in flight.
+    constexpr int kPrecreatedSets = 16;
+    signalManager_->Prepopulate(device, sync_plan_.num_segments, kPrecreatedSets);
+  }
 }
 
 // ================================================================================================
@@ -1779,15 +1792,32 @@ hipError_t GraphExec::UpdatePacketBatchesForNodeEnableDisable(hip::GraphNode* no
   return hipSuccess;
 }
 
-void GraphExec::DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data) {
-  GraphExec* graphExec = reinterpret_cast<GraphExec*>(user_data);
+// Carries the per-launch state needed by the completion callback: the graph
+// whose refcount to drop, plus the signal set (and its device) to re-arm and
+// return to the pool now that the launch's GPU work is done.
+struct GraphLaunchCleanup {
+  GraphExec* exec;
+  amd::Device* device;
+  std::vector<void*> signal_set;
+};
+
+void GraphExec::OnLaunchComplete(cl_event event, cl_int command_exec_status, void* user_data) {
+  auto* cleanup = reinterpret_cast<GraphLaunchCleanup*>(user_data);
+  GraphExec* graphExec = cleanup->exec;
+  // Re-arm and recycle the launch's signals while the GraphExec (and thus its
+  // signal pool) is still alive, then drop the launch's reference.
+  if (graphExec->signalManager_ != nullptr && !cleanup->signal_set.empty()) {
+    graphExec->signalManager_->ReleaseSet(cleanup->device, cleanup->signal_set);
+  }
+  delete cleanup;
   graphExec->release();
 }
 
 // ================================================================================================
 amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
                                                const std::vector<hip::Stream*>& streams,
-                                               hipError_t* out_status) {
+                                               hipError_t* out_status,
+                                               std::vector<void*>* out_signal_set) {
   hipError_t status = hipSuccess;
   if (out_status != nullptr) {
     *out_status = hipSuccess;
@@ -1795,10 +1825,17 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 
   auto* device = g_devices[launch_stream->DeviceId()]->devices()[0];
 
-  // Allocate HW events for all segments
+  // Top-level launches recycle signals through the per-graph pool; the legacy
+  // recursive child-graph path (out_signal_set == nullptr) creates them locally
+  // and lets the AccumulateCommand destructor destroy them.
+  const bool recycle = (out_signal_set != nullptr);
+
   std::vector<void*> segment_hw_events;
   if (sync_plan_.num_segments > 0) {
-    if (!device->CreateHwEvents(sync_plan_.num_segments, segment_hw_events)) {
+    const bool ok = recycle
+        ? signalManager_->AcquireSet(device, sync_plan_.num_segments, segment_hw_events)
+        : device->CreateHwEvents(sync_plan_.num_segments, segment_hw_events);
+    if (!ok) {
       if (out_status != nullptr) {
         *out_status = hipErrorOutOfMemory;
       }
@@ -1825,13 +1862,21 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // and serves as the dispatch anchor for all segments across all streams.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
 
-  // Register HW events with graph_accumulate for lifetime tracking.
-  // addHwEvent does not retain — ownership transfers from CreateHwEvents
-  // to graph_accumulate. ~AccumulateCommand releases them after graph completion.
+  // Register HW events with graph_accumulate so profiling can read them.
   for (auto& hw_event : segment_hw_events) {
     if (hw_event != nullptr) {
       graph_accumulate->addHwEvent(hw_event, device);
     }
+  }
+
+  // For the recycling (top-level) path, the pool owns the signals: hand the set
+  // back to the caller, which forwards it to the completion callback
+  // (OnLaunchComplete) that re-arms and returns it to the pool. Tell the
+  // AccumulateCommand destructor not to destroy them. The legacy path keeps the
+  // default (destructor destroys the locally created signals).
+  if (recycle && !segment_hw_events.empty()) {
+    graph_accumulate->setOwnsHwEvents(false);
+    *out_signal_set = segment_hw_events;
   }
 
   // Process segments level by level
@@ -1983,7 +2028,14 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
         }
       }
 
-      // Recursively enqueue the child graph with its own dependency tracking
+      // Recursively enqueue the child graph with its own dependency tracking.
+      // TODO: child graphs currently take the legacy create/destroy signal path
+      // (out_signal_set == nullptr -> recycle == false), so their pre-created
+      // signal pool (from the child's BuildSyncPlan/Prepopulate) sits unused and
+      // they pay signal_create/destroy every launch. To pool child signals too,
+      // pass an out_signal_set here and recycle it from the parent's
+      // OnLaunchComplete (the parent's accumulate completion encloses the
+      // child's work); the cleanup would carry per-pool (manager, set) pairs.
       hipError_t child_status = hipSuccess;
       amd::Command* child_last_cmd =
           childGraphExec->EnqueueSegmentedGraph(stream, {}, &child_status);
@@ -2389,6 +2441,14 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
   launch_stream->vdev()->AcquireQueueWithPreference();
   UpdateStreams(launch_stream);
 
+  // Signals borrowed from the per-graph pool for this launch (segmented path
+  // only); handed to the completion callback to re-arm and return to the pool.
+  std::vector<void*> launch_signal_set;
+
+  // Command whose completion drives OnLaunchComplete. On the segmented path we
+  // reuse the graph's own accumulate command instead of enqueuing a dedicated marker
+  amd::Command* completion_cmd = nullptr;
+
   if (use_segment_scheduling_ && instantiateDeviceId_ == launch_stream->DeviceId()) {
     // If the graph has kernels that does device side allocation,  during packet capture, heap is
     // allocated because heap pointer has to be added to the AQL packet, and initialized during
@@ -2401,16 +2461,16 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     amd::Command* last_cmd = nullptr;
     if (max_streams_dev_.size() == 1) {
       // Single-device: pass collision-handled streams_ to EnqueueSegmentedGraph
-      last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status);
+      last_cmd = EnqueueSegmentedGraph(launch_stream, streams_, &status, &launch_signal_set);
     } else {
       // Multi-device: pass empty vector, will use parallel_streams_ internally
-      last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status);
+      last_cmd = EnqueueSegmentedGraph(launch_stream, {}, &status, &launch_signal_set);
     }
 
-    // Release the last command as we don't need to track it for top-level graph execution
-    if (last_cmd != nullptr) {
-      last_cmd->release();
-    }
+    // Drive OnLaunchComplete off this command's completion (its leaf-sync deps
+    // already imply all parallel work is done). Our reference is released after
+    // the callback is registered below; the queue keeps it alive until done.
+    completion_cmd = last_cmd;
   } else if (max_streams_ == 1 && instantiateDeviceId_ != launch_stream->DeviceId()) {
     for (int i = 0; i < topoOrder_.size(); i++) {
       topoOrder_[i]->SetStream(launch_stream);
@@ -2434,19 +2494,131 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] graph dump:%s", filename.c_str());
     }
   }
-  amd::Command* CallbackCommand = new amd::Marker(*launch_stream, kMarkerDisableFlush, {});
-  // we may not need to flush any caches.
-  CallbackCommand->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+  // Register the refcount/recycle callback. Prefer the graph's own accumulate
+  // command (segmented path); otherwise enqueue a lightweight marker just to
+  // carry the callback.
+  amd::Command* CallbackCommand = completion_cmd;
+  const bool own_callback_cmd = (CallbackCommand == nullptr);
+  if (own_callback_cmd) {
+    CallbackCommand = new amd::Marker(*launch_stream, kMarkerDisableFlush, {});
+    // we may not need to flush any caches.
+    CallbackCommand->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+  }
   amd::Event& event = CallbackCommand->event();
   constexpr bool kBlocking = false;
-  if (!event.setCallback(CL_COMPLETE, GraphExec::DecrementRefCount, this, kBlocking)) {
-    this->release();
+  auto* cleanup = new GraphLaunchCleanup();
+  cleanup->exec = this;
+  cleanup->device = g_devices[launch_stream->DeviceId()]->devices()[0];
+  cleanup->signal_set = std::move(launch_signal_set);
+  if (!event.setCallback(CL_COMPLETE, GraphExec::OnLaunchComplete, cleanup, kBlocking)) {
+    // setCallback essentially never fails, but if it does the launch's GPU work
+    // is already queued (the accumulate is enqueued and was told not to destroy
+    // its signals). Drain that work, then run the same completion handling the
+    // callback would have (recycle the borrowed pooled signals + drop our
+    // reference) so they are not leaked and the pool does not shrink.
+    launch_stream->finish();
+    OnLaunchComplete(nullptr, CL_COMPLETE, cleanup);
     CallbackCommand->release();
     return hipErrorInvalidHandle;
   }
-  CallbackCommand->enqueue();
+  // The marker must be enqueued to run; the accumulate command is already
+  // enqueued by EnqueueSegmentedGraph. Either way, release our reference: the
+  // queue keeps the command alive until completion, when the callback fires.
+  if (own_callback_cmd) {
+    CallbackCommand->enqueue();
+  }
   CallbackCommand->release();
   return status;
+}
+
+// ================================================================================================
+GraphSignalManager::~GraphSignalManager() {
+  // No launches can be in flight at this point (GraphExec refcount guarantees
+  // it outlives all launches), so every set is back in the free pool.
+  for (auto& dev_pool : free_sets_) {
+    amd::Device* device = dev_pool.first;
+    for (auto& set : dev_pool.second) {
+      // Pooled signals rest armed (value 1); mark them idle before destroy so
+      // ~ProfilingSignal does not block waiting on an armed-but-idle signal.
+      device->QuiesceHwEvents(set);
+      for (void* sig : set) {
+        if (sig != nullptr) {
+          // Pair with CreateHwEvents() so non-ROCm devices can hook teardown.
+          device->DestroyHwEvent(sig);
+        }
+      }
+    }
+  }
+  free_sets_.clear();
+}
+
+bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_sets) {
+  if (count <= 0 || num_sets <= 0) {
+    return true;
+  }
+  std::lock_guard<std::mutex> lock(lock_);
+  auto& pool = free_sets_[device];
+
+  // BuildSyncPlan is re-runnable, so Prepopulate may be called more than once.
+  // If a prior run sized the sets for a different segment count, those sets are
+  // unusable -- destroy and rebuild. No launches are in flight at (re)instantiate
+  // time, so every set for this device is present in the free pool here.
+  if (!pool.empty() && static_cast<int>(pool.back().size()) != count) {
+    for (auto& set : pool) {
+      device->QuiesceHwEvents(set);
+      for (void* sig : set) {
+        if (sig != nullptr) {
+          device->DestroyHwEvent(sig);
+        }
+      }
+    }
+    pool.clear();
+  }
+
+  // Top up to num_sets only; do not unconditionally append on every call, which
+  // would grow the pool without bound across re-instantiations.
+  for (int i = static_cast<int>(pool.size()); i < num_sets; ++i) {
+    std::vector<void*> set;
+    if (!device->CreateHwEvents(count, set)) {
+      return false;
+    }
+    pool.push_back(std::move(set));
+  }
+  return true;
+}
+
+bool GraphSignalManager::AcquireSet(amd::Device* device, int count,
+                                    std::vector<void*>& out_set) {
+  if (count <= 0) {
+    out_set.clear();
+    return true;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(lock_);
+    auto& pool = free_sets_[device];
+    if (!pool.empty()) {
+      // Hot path: just hand out a ready (already-armed) set, then patch it.
+      out_set = std::move(pool.back());
+      pool.pop_back();
+      return true;
+    }
+  }
+
+  // Fallback only: more launches in flight than pre-created sets. Create one
+  // (armed to 1 by CreateHwEvents); it joins the pool when released.
+  return device->CreateHwEvents(count, out_set);
+}
+
+void GraphSignalManager::ReleaseSet(amd::Device* device, std::vector<void*>& set) {
+  if (set.empty()) {
+    return;
+  }
+  // Re-arm the signals for the next launch. Safe here because this runs from
+  // the launch completion callback, so the GPU work that used them is done.
+  device->ResetHwEvents(set);
+  std::lock_guard<std::mutex> lock(lock_);
+  free_sets_[device].push_back(std::move(set));
 }
 
 // ================================================================================================

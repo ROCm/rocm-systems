@@ -66,6 +66,11 @@ struct HwQueue {
   uint64_t queue_desc_va = 0;
 };
 
+enum class SdmaPacketDialect {
+  Legacy,
+  Gfx1250,
+};
+
 /// @brief AMDGPU command processor that dispatches wavefronts to compute units.
 ///
 /// @details Distributes AQL dispatch packets across the registered compute units in
@@ -85,7 +90,10 @@ public:
   void set_memory(GpuMemory *mem) { memory_ = mem; }
   void add_l2_cache(L2Cache *l2) { l2_caches_.push_back(l2); }
   void set_vgpr_granularity(uint32_t g) { vgpr_granularity_ = g; }
+  uint32_t vgpr_granularity() const { return vgpr_granularity_; }
   void set_packed_tid(bool v) { packed_tid_ = v; }
+  void set_sdma_packet_dialect(SdmaPacketDialect dialect) { sdma_packet_dialect_ = dialect; }
+  SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
   /// @brief Update doorbell_base for all queues belonging to a process.
   /// @details Called when the doorbell page is mmap'd after queue creation.
   void set_doorbell_base(uint32_t process_id, void *base);
@@ -199,6 +207,10 @@ private:
     return false;
   }
 
+  bool uses_gfx1250_sdma_packets() const {
+    return sdma_packet_dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
   GpuMemory *memory_ = nullptr;
   std::vector<ShaderProcessorInput *> spis_;
   std::vector<L2Cache *> l2_caches_;
@@ -213,6 +225,9 @@ private:
   uint32_t workgroup_id_offset_ = 0;
   uint32_t vgpr_granularity_ = 8;
   bool packed_tid_ = false;
+  // Gfx1250 SDMA GCR keeps the same opcode but changes packet size/layout, so
+  // the decoder cannot infer this dialect from the packet header alone.
+  SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
 

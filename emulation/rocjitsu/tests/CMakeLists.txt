@@ -20,6 +20,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_isa_rdna3
     rocjitsu_isa_rdna3_5
     rocjitsu_isa_rdna4
+    rocjitsu_isa_gfx1250
     rocjitsu_isa_risc_v
     simdojo
     rocjitsu_kmd
@@ -38,6 +39,7 @@ add_executable(
     config_test.cpp
     matmul_test.cpp
     vector_add_test.cpp
+    gfx1250_sim_test.cpp
     simdojo_sim_test.cpp
     simulated_driver_test.cpp
     decode_smoke_test.cpp
@@ -473,6 +475,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test_case(hip_memcpy_test "HipMemcpyTest.DeviceToDevice")
     rj_add_hip_test(hip_vector_add_test)
     rj_add_hip_test_case(hip_vector_add_test "HipVectorAddTest.CorrectResult")
+    rj_add_hip_test(hip_ds_transpose_acc_test)
 
     # --- RCCL collective test ---
     find_library(
@@ -576,6 +579,10 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         )
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmTest.${TC}")
         endforeach()
+        set_tests_properties(
+            RocblasGemmTest.Large_2048x2048
+            PROPERTIES TIMEOUT 300
+        )
         foreach(I RANGE 0 4)
             rj_add_hip_test_case(hip_gemm_test "RocblasGemmFuzz.Iter${I}")
         endforeach()

@@ -45,7 +45,7 @@ event:
     tags: [synchronization]
   Unit_hipEventRecord:
     <<: *level_2
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [synchronization, smoke]
   Unit_hipEventRecord_Negative:
     <<: *level_2

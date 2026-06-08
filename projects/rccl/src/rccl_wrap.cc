@@ -404,6 +404,38 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   return ncclSuccess;
 }
 
+static int symkHostRedOpToDev(ncclRedOp_t op) {
+  switch ((int)op) {
+  case ncclSum:  return (int)ncclDevSum;
+  case ncclProd: return (int)ncclDevProd;
+  case ncclMin:
+  case ncclMax:  return (int)ncclDevMinMax;
+  default:       return -1;
+  }
+}
+
+ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, ncclRedOp_t op,
+    int* algo, int* protocol, int* maxChannels) {
+  RCCL_STATIC_EXPOSE_CHECK();
+  if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
+  if (coll != ncclFuncAllReduce && coll != ncclFuncAllGather && coll != ncclFuncReduceScatter)
+    return ncclInvalidArgument;
+  int devOp = (coll == ncclFuncAllGather) ? (int)ncclDevSum : symkHostRedOpToDev(op);
+  if (devOp < 0) return ncclInvalidArgument;
+  NCCLCHECK(ncclSymkInitOnce(comm));
+  if (!ncclSymkAvailable(comm, coll, devOp, dataType, (size_t)count)) return ncclInvalidArgument;
+  float estTimeUs;
+  ncclSymkKernelId kernelId;
+  int nWarps;
+  bool forced = false;
+  NCCLCHECK(ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, (ncclSymRegType_t)0, &estTimeUs, &kernelId, maxChannels, &nWarps, &forced));
+  if (kernelId == ncclSymkKernelId_Count) return ncclInvalidArgument;
+  *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
+  *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+
+  return ncclSuccess;
+}
+
 ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
   if (algo < 0 || algo >= RCCL_ALGO_COUNT) {
     WARN("Invalid algorithm value: %d", algo);
@@ -422,6 +454,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
         *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
         break;
 #endif
+      case rcclAddonAlgos_t::RCCL_SYMMETRIC:
+        *algoName = "SYM";
+        break;
       default:
         WARN("Invalid algorithm value: %d", algo);
         return ncclInvalidArgument;

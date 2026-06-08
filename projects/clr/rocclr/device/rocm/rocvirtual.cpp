@@ -1933,33 +1933,7 @@ VirtualGPU::~VirtualGPU() {
 
   delete blitMgr_;
 
-  bool skip_fence_barrier = false;
-  if (nullptr != schedulerQueue_) {
-#if defined(_WIN32)
-    if (isSchedulerQueueThreadRunning()) {
-      schedulerQueueThreadRunning_.store(false, std::memory_order_release);
-      {
-        std::lock_guard<std::mutex> lock(scheduler_mutex_);
-        pendingSchedulerEvents_.clear();
-        scheduler_cv_.notify_one();
-      }
-      if (schedulerQueueThread_.joinable()) {
-        schedulerQueueThread_.join();
-      }
-    }
-    if (!dev().IsPm4Emulation()) {
-      roc_device_.hasSchedulerQueue_.fetch_add(1, std::memory_order_release);
-      skip_fence_barrier = true;
-    } else {
-      Hsa::queue_destroy(schedulerQueue_);
-    }
-#else
-    Hsa::queue_destroy(schedulerQueue_);
-#endif  // _WIN32
-    schedulerQueue_ = nullptr;
-  }
-
-  if (tracking_created_ && !skip_fence_barrier) {
+  if (tracking_created_) {
     std::scoped_lock l(execution());
     // Dedicated queues keep their HW queue, never acquire from pool
     if (!dedicated_queue_ && gpu_queue_ == nullptr) {
@@ -1982,6 +1956,19 @@ VirtualGPU::~VirtualGPU() {
   }
 
   delete printfdbg_;
+
+  if (nullptr != schedulerQueue_) {
+#if defined(_WIN32)
+    // Stop the monitor thread before destroying the queue
+    if (schedulerQueueThread_.joinable()) {
+      schedulerQueueThreadRunning_.store(false, std::memory_order_release);
+      scheduler_cv_.notify_one();
+      schedulerQueueThread_.join();
+    }
+#endif  // _WIN32
+    Hsa::queue_destroy(schedulerQueue_);
+    schedulerQueue_ = nullptr;
+  }
 
   if (nullptr != virtualQueue_) {
     virtualQueue_->release();
@@ -3792,6 +3779,7 @@ void VirtualGPU::startSchedulerQueueThread() {
   schedulerQueueThreadRunning_.store(true, std::memory_order_release);
 
   schedulerQueueThread_ = std::thread([this]() {
+    uint64_t updated_write_index = 0;
     while (isSchedulerQueueThreadRunning()) {
 
       // Wait until scheduler events are added or thread termination
@@ -3806,12 +3794,12 @@ void VirtualGPU::startSchedulerQueueThread() {
       // Actively monitor the scheduler queue while any sync event is pending.
       bool has_active_events = true;
       while (has_active_events && isSchedulerQueueThreadRunning()) {
-        uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
         uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
 
-        if (write_index > read_index) {
+        if (write_index > updated_write_index) {
           // New packets in the scheduler queue, ringing the doorbell
           Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index - 1);
+          updated_write_index = write_index;
         } else {
           // Yield briefly before re-checking.
           amd::Os::yield();

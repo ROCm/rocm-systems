@@ -2563,6 +2563,15 @@ static const std::map<rsmi_compute_partition_type_t, std::string>
         {RSMI_COMPUTE_PARTITION_SPX, "SPX"},         {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
         {RSMI_COMPUTE_PARTITION_TPX, "TPX"},         {RSMI_COMPUTE_PARTITION_QPX, "QPX"}};
 
+static const std::map<std::string, rsmi_compute_partition_mem_alloc_mode_t>
+    mapStringToRSMIMemAllocModeTypes{{"CAPPING", RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING},
+                                     {"ALL", RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL}};
+
+static const std::map<rsmi_compute_partition_mem_alloc_mode_t, std::string>
+    mapRSMIToStringMemAllocModeTypes{{RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID, "UNKNOWN"},
+                                     {RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING, "CAPPING"},
+                                     {RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL, "ALL"}};
+
 static const std::map<rsmi_memory_partition_type_t, std::string>
     mapRSMIToStringMemoryPartitionTypes{{RSMI_MEMORY_PARTITION_UNKNOWN, "UNKNOWN"},
                                         {RSMI_MEMORY_PARTITION_NPS1, "NPS1"},
@@ -6003,6 +6012,86 @@ rsmi_status_t rsmi_dev_compute_partition_set(uint32_t dv_ind,
      << " | Returning = " << getRSMIStatusString(returnResponse) << " |";
   LOG_TRACE(ss);
 
+  return returnResponse;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_get(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t* mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind = " << dv_ind;
+  LOG_TRACE(ss);
+  if (mode == nullptr) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail | Cause: mode pointer was null"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string mode_str;
+  DEVICE_MUTEX
+  rsmi_status_t ret =
+      get_dev_value_str(amd::smi::kDevComputePartitionMemAllocMode, dv_ind, &mode_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail | Device #: " << dv_ind
+       << " | Cause: could not read compute_partition_mem_alloc_mode"
+       << " | Returning = " << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  auto it = mapStringToRSMIMemAllocModeTypes.find(mode_str);
+  if (it == mapStringToRSMIMemAllocModeTypes.end()) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Fail | Device #: " << dv_ind << " | Data: " << mode_str
+       << " | Cause: unexpected value read from sysfs"
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  *mode = it->second;
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | Success | Device #: " << dv_ind << " | Data: " << mode_str
+     << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_compute_partition_mem_alloc_mode_set(
+    uint32_t dv_ind, rsmi_compute_partition_mem_alloc_mode_t mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+
+  std::string newModeStr;
+  switch (mode) {
+    case RSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING:
+    case RSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL:
+      newModeStr = mapRSMIToStringMemAllocModeTypes.at(mode);
+      break;
+    case RSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID:
+    default:
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+         << " | Fail | Device #: " << dv_ind << " | Cause: requested mode was invalid"
+         << " | Returning = " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  GET_DEV_FROM_INDX
+  DEVICE_MUTEX
+  int ret = dev->writeDevInfo(amd::smi::kDevComputePartitionMemAllocMode, newModeStr);
+  rsmi_status_t returnResponse = amd::smi::ErrnoToRsmiStatus(ret);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | " << (returnResponse == RSMI_STATUS_SUCCESS ? "Success" : "Fail")
+     << " | Device #: " << dv_ind << " | Data: " << newModeStr
+     << " | Returning = " << getRSMIStatusString(returnResponse) << " |";
+  LOG_TRACE(ss);
   return returnResponse;
   CATCH
 }

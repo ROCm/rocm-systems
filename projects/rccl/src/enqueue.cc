@@ -28,6 +28,7 @@
 #include "common.h"
 #include "api_trace.h"
 #include "rccl_common.h"
+#include "net.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -1079,15 +1080,16 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
 // Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
 // previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
-// we want to enable by default only for gfx950, so we use rcclEffectiveP2pBatchEnable helper to branch based on arch
-RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", 0);
+// we want to auto-enable only for gfx950 paired with a non-AINIC NIC, so we use
+// rcclEffectiveP2pBatchEnable helper to branch based on arch and NIC type.
+RCCL_PARAM(P2pBatchEnable,    "P2P_BATCH_ENABLE",    -1);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
-
 
 static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
   if (userInput >= 0) return userInput;
-  return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ? 1 : 0;
+  bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  return (isGfx950 && !rcclUseAinic()) ? 1 : 0;
 }
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget

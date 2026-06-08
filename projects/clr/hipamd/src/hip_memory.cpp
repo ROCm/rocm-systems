@@ -1299,7 +1299,7 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
 hipError_t hipArrayCreate(hipArray_t* array, const HIP_ARRAY_DESCRIPTOR* pAllocateArray) {
   HIP_INIT_API(hipArrayCreate, array, pAllocateArray);
   if (pAllocateArray == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR desc = {
@@ -1314,7 +1314,7 @@ hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, s
                           size_t height, unsigned int flags) {
   HIP_INIT_API(hipMallocArray, array, desc, width, height, flags);
   if (array == nullptr || desc == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {width,
@@ -1324,7 +1324,7 @@ hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, s
                                           hip::getNumChannels(*desc),
                                           flags};
   if (!hip::CheckArrayFormat(*desc)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   HIP_RETURN(ihipArrayCreate(array, &allocateArray, 0 /* numMipLevels */));
 }
@@ -1342,7 +1342,7 @@ hipError_t hipMalloc3DArray(hipArray_t* array, const hipChannelFormatDesc* desc,
                             unsigned int flags) {
   HIP_INIT_API(hipMalloc3DArray, array, desc, extent, flags);
   if (array == nullptr || desc == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {extent.width,
@@ -1352,7 +1352,7 @@ hipError_t hipMalloc3DArray(hipArray_t* array, const hipChannelFormatDesc* desc,
                                           hip::getNumChannels(*desc),
                                           flags};
   if (!hip::CheckArrayFormat(*desc)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   HIP_RETURN(ihipArrayCreate(array, &allocateArray, 0));
@@ -1730,10 +1730,10 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, siz
   hipMemcpyKind kind = hipMemcpyHostToDevice;
   STREAM_CAPTURE(hipMemcpyHtoDAsync, stream, dstDevice, srcHost, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
-    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+    return hipErrorInvalidMemcpyDirection;
   }
   if (!hip::isValid(stream)) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -1748,10 +1748,10 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice
   hipMemcpyKind kind = hipMemcpyDeviceToDevice;
   STREAM_CAPTURE(hipMemcpyDtoDAsync, stream, dstDevice, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
-    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+    return hipErrorInvalidMemcpyDirection;
   }
   if (!hip::isValid(stream)) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -1766,10 +1766,10 @@ hipError_t hipMemcpyDtoHAsync(void* dstHost, hipDeviceptr_t srcDevice, size_t By
   hipMemcpyKind kind = hipMemcpyDeviceToHost;
   STREAM_CAPTURE(hipMemcpyDtoHAsync, stream, dstHost, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
-    HIP_RETURN(hipErrorInvalidMemcpyDirection);
+    return hipErrorInvalidMemcpyDirection;
   }
   if (!hip::isValid(stream)) {
-    HIP_RETURN(hipErrorContextIsDestroyed);
+    return hipErrorContextIsDestroyed;
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
@@ -4756,7 +4756,7 @@ hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
                                    unsigned int numLevels, unsigned int flags) {
   HIP_INIT_API(hipMallocMipmappedArray, mipmappedArray, desc, extent, numLevels, flags);
   if (mipmappedArray == nullptr || desc == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {extent.width,
@@ -4766,7 +4766,7 @@ hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
                                           hip::getNumChannels(*desc),
                                           flags};
   if (!hip::CheckArrayFormat(*desc)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   HIP_RETURN(ihipMipmapArrayCreate(mipmappedArray, &allocateArray, numLevels));
 }
@@ -4818,12 +4818,12 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
 
   // We do not support any flags at this time.
   if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd || flags != 0) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidValue;)
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   if (!device->GetHandleForAddressRange(dptr, size, handle)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    HIP_RETURN(hipErrorInvalidValue;)
   }
 
   HIP_RETURN(hipSuccess);
