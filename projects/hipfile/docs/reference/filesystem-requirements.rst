@@ -94,23 +94,3 @@ The ``aiscp`` example demonstrates proper alignment handling when performing I/O
    nbytes = hipFileWrite(dst_handle, devbuf,
                          align_up(static_cast<size_t>(nread - nwrite), block_size),
                          file_offset + nwrite, nwrite);
-
-Fastpath eligibility summary
-****************************
-
-The following diagram summarizes the decision process for fastpath eligibility based on file system and file type checks:
-
-.. mermaid::
-
-   flowchart TD
-       A[File registered] --> B{Block device?}
-       B -- Yes --> G[Fastpath eligible]
-       B -- No --> C{Regular file?}
-       C -- No --> H[Fastpath ineligible]
-       C -- Yes --> D{ext4 ordered or xfs?}
-       D -- Yes --> G
-       D -- No --> E{HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true?}
-       E -- Yes --> G
-       E -- No --> H
-
-When the fastpath backend is ineligible, the request is routed to the fallback (POSIX) backend if it is enabled. For details on how backend selection works, see :doc:`/conceptual/io-backends`.

@@ -25,10 +25,7 @@ in the hipFile source tree.
 
 .. warning::
 
-   Asynchronous IO is not yet supported on AMD backends in the current
-   release. The APIs are available and compile, but calls return
-   ``hipFileAsyncNotSupported`` on AMD ROCm platforms. The workflow described
-   here functions on NVIDIA platforms via the cuFile backend.
+   Asynchronous I/O on the AMD backend is serviced through the fallback path rather than the fastpath.
 
 When to use this pattern
 ************************
@@ -45,7 +42,7 @@ Prerequisites
 *************
 
 - A working hipFile installation (see :doc:`/install/install`).
-- An AMD or NVIDIA GPU with hipFile support.
+- An AMD GPU with ROCm and hipFile support.
 - A filesystem that supports ``O_DIRECT`` (for example, ext4 or XFS).
 - The ``examples_common`` helper library shipped with hipFile
   (``examples/common/``).

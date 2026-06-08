@@ -1,6 +1,6 @@
 .. meta::
-  :description: Step-by-step instructions for building hipFile from source using CMake on AMD and NVIDIA platforms.
-  :keywords: hipFile, build from source, CMake, ROCm, install, direct-to-GPU I/O, AMD, NVIDIA
+  :description: Step-by-step instructions for building hipFile from source using CMake on AMD ROCm platforms.
+  :keywords: hipFile, build from source, CMake, ROCm, install, direct-to-GPU I/O, AMD
 
 *************************
 Build hipFile from source
@@ -15,11 +15,6 @@ Before building hipFile, make sure you have the following software installed:
 - ``CMake`` >= 3.21
 - C++17 compiler (Clang or GCC)
 - ``libmount`` (from ``util-linux``)
-
-For the NVIDIA platform, you also need:
-
-- CUDAToolkit
-- cuFile library
 
 Install the ROCm Core SDK
 *************************
@@ -90,22 +85,33 @@ hipFile requires the following libraries during configuration and linking:
 - ``hip``: HIP runtime (found via CMake config)
 - ``libmount``: mount information parsing (from ``util-linux``; located via ``find_library``)
 
-On the NVIDIA platform, these additional dependencies are required:
-
-- CUDAToolkit: CUDA runtime and headers
-- cuFile: NVIDIA GPUDirect Storage library
-
 Build commands
 --------------
 
 Create a build directory, configure with CMake, build, and install:
 
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+For an NVIDIA platform build, set ``CMAKE_HIP_PLATFORM`` to ``nvidia`` and make sure
+``CUDAToolkit`` and ``cuFile`` are discoverable:
+
 .. code:: shell
 
-   cd rocm-systems/projects/hipfile
    cmake -B build \
-       -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-       -DCMAKE_HIP_PLATFORM=amd
+       -DCMAKE_HIP_PLATFORM=nvidia \
+       -DCMAKE_INSTALL_PREFIX=/usr/local
    cmake --build build
    sudo cmake --install build
 
@@ -117,6 +123,82 @@ For an NVIDIA platform build, set ``CMAKE_HIP_PLATFORM`` to ``nvidia`` and make 
    cmake -B build \
        -DCMAKE_HIP_PLATFORM=nvidia \
        -DCMAKE_INSTALL_PREFIX=/usr/local
+   cmake --build build
+   sudo cmake --install build
+
+For an NVIDIA platform build, set ``CMAKE_HIP_PLATFORM`` to ``nvidia`` and make sure
+``CUDAToolkit`` and ``cuFile`` are discoverable:
+
+.. code:: shell
+
+   cmake -B build \
+       -DCMAKE_HIP_PLATFORM=nvidia \
+       -DCMAKE_INSTALL_PREFIX=/usr/local
+   cmake --build build
+   sudo cmake --install build
+
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+On the NVIDIA platform, these additional dependencies are required:
+
+- CUDAToolkit: CUDA runtime and headers
+- cuFile: NVIDIA GPUDirect Storage library
+
+.. code:: shell
+
+   cd rocm-systems/projects/hipfile
+   cmake -B build \
+       -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+       -DCMAKE_HIP_PLATFORM=amd
    cmake --build build
    sudo cmake --install build
 
@@ -134,7 +216,7 @@ The following table lists the CMake options available when configuring hipFile. 
      - Description
    * - ``CMAKE_HIP_PLATFORM``
      - ``amd``
-     - Target HIP platform. Set to ``amd`` or ``nvidia``.
+     - Target HIP platform. Set to ``amd``.
    * - ``ROCM_PATH``
      - ``/opt/rocm``
      - Path to the ROCm installation. Can also be set via the ``ROCM_PATH`` environment variable.

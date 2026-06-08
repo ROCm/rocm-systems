@@ -16,7 +16,7 @@ subtrees:
       - file: tutorials/python-gpu-io
   - caption: Reference
     entries:
-      - file: reference/io-backends
+      - file: reference/hipFile-io-backends
       - file: reference/filesystem-requirements
       - file: reference/driver-lifecycle
       - file: reference/statistics-collection

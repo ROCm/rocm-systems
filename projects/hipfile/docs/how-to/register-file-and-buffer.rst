@@ -17,7 +17,7 @@ Prerequisites
 
 .. note::
 
-   Using ``O_DIRECT`` when opening files is recommended for optimal performance. On the NVIDIA backend, hipFile may return ``hipFileDIONotSet`` (error code 5020) when ``O_DIRECT`` is not set. On AMD, if the client fd lacks ``O_DIRECT``, hipFile attempts to reopen the file via ``/proc/self/fd`` with ``O_DIRECT`` before rejecting fastpath selection.
+   Using ``O_DIRECT`` when opening files is recommended for optimal performance. If the client fd lacks ``O_DIRECT``, hipFile attempts to reopen the file via ``/proc/self/fd`` with ``O_DIRECT`` before rejecting fastpath selection.
 
 Open a file with ``O_DIRECT``
 *****************************
