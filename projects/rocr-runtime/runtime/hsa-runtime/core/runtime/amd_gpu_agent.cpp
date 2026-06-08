@@ -1041,6 +1041,18 @@ void GpuAgent::ReleaseResources() {
 
     for (int i = 0; i < QueueCount; i++)
       queues_[i].reset();
+    // Destroy the GWS-access queue here. It is a GpuAgent member that would
+    // otherwise only be released by ~GpuAgent's automatic member destruction,
+    // which runs after Runtime::Unload() has cleared SharedSignalPool. At that
+    // point its ~AqlQueue stores to an already-freed queue_inactive_signal,
+    // causing a use-after-free at process exit. Releasing it here, while the
+    // signal pool and async handler are still alive, lets ~AqlQueue tear down
+    // safely.
+    {
+      std::lock_guard<std::mutex> gws_lock(gws_queue_.lock_);
+      gws_queue_.queue_.reset();
+      gws_queue_.ref_ct_ = 0;
+    }
 
     system_deallocator()(doorbell_queue_map_);
 
