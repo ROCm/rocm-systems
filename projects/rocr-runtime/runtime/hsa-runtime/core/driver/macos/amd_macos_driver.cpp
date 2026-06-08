@@ -628,6 +628,14 @@ hsa_status_t MacOsDriver::ReadDirectComputeRptr(const DirectComputeQueue& queue,
   return lite::ReadDirectQueueRptr(*this, queue, rptr);
 }
 
+hsa_status_t MacOsDriver::SetQueueScratch(DirectComputeQueue& queue,
+                                          uint64_t scratch_base_256,
+                                          uint32_t tmpring_size) const {
+  std::lock_guard<std::mutex> g(gpu_lock_);
+  return lite::SetDirectQueueScratch(*this, queue, scratch_base_256,
+                                     tmpring_size, MacDirectQueueOptions());
+}
+
 hsa_status_t MacOsDriver::CreateQueue(uint32_t, HSA_QUEUE_TYPE, uint32_t,
                                       HSA::hsa_amd_queue_priority_internal_t,
                                       uint32_t, void*, uint64_t, uint64_t, HsaEvent*,

@@ -1849,6 +1849,11 @@ hsa_status_t CreateDirectQueue(const DirectQueuePlatform& platform,
     return status;
   }
 
+  // Retain the layout + framebuffer base so SetDirectQueueScratch can patch the
+  // MQD scratch fields and re-map this queue later.
+  queue->layout = layout;
+  queue->framebuffer_base = framebuffer_base;
+
   auto* ring_cpu = static_cast<volatile uint32_t*>(
       LayoutCpuPointer(platform, layout, layout.ring_offset,
                        kDirectComputeRingSize));
@@ -2142,6 +2147,53 @@ hsa_status_t DestroyDirectQueue(const DirectQueuePlatform& platform,
   const hsa_status_t free_status = platform.FreeQueueMemory(&queue.memory);
   queue = {};
   return free_status;
+}
+
+hsa_status_t SetDirectQueueScratch(const DirectQueuePlatform& platform,
+                                   DirectQueueState& queue,
+                                   uint64_t scratch_base_256,
+                                   uint32_t tmpring_size,
+                                   const DirectQueueOptions& options) {
+  // The per-dispatch SET_SH_REG of COMPUTE_DISPATCH_SCRATCH_BASE/TMPRING is
+  // clobbered when the MEC restores the queue's saved persistent state from the
+  // MQD (which is zero) -> FLAT_SCRATCH stays 0 -> GCVM permission fault at VA0
+  // for any spilling kernel. Patch the MQD's saved scratch fields so the restore
+  // carries the real values. v12 compute MQD dwords: compute_dispatch_scratch_
+  // base_lo/hi = 0x11/0x12 (backing VA >> 8), compute_tmpring_size = 0x19.
+  hsa_status_t status = WriteLayoutMemory32(
+      platform, queue.layout, queue.layout.mqd_offset + 0x11 * 4,
+      static_cast<uint32_t>(scratch_base_256));
+  if (status != HSA_STATUS_SUCCESS) return status;
+  status = WriteLayoutMemory32(
+      platform, queue.layout, queue.layout.mqd_offset + 0x12 * 4,
+      static_cast<uint32_t>(scratch_base_256 >> 32));
+  if (status != HSA_STATUS_SUCCESS) return status;
+  status = WriteLayoutMemory32(
+      platform, queue.layout, queue.layout.mqd_offset + 0x19 * 4, tmpring_size);
+  if (status != HSA_STATUS_SUCCESS) return status;
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  status = platform.FlushHdp();
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  if (options.trace) {
+    std::fprintf(stderr,
+                 "%s set-scratch qid=%u base256=0x%llx tmpring=0x%x mes=%d\n",
+                 TracePrefix(options), queue.queue_id,
+                 static_cast<unsigned long long>(scratch_base_256), tmpring_size,
+                 queue.mes_backed ? 1 : 0);
+  }
+
+  // Re-activate so the MEC reloads the patched MQD persistent state. For an
+  // MES-backed queue that is REMOVE_QUEUE + ADD_QUEUE(map_legacy). (A direct
+  // HQD would need a dequeue + re-activate; not used on the MES path.)
+  if (queue.mes_backed) {
+    status = UnmapLegacyQueueWithMes(platform, queue, options);
+    if (status != HSA_STATUS_SUCCESS) return status;
+    status = MapLegacyQueueWithMes(platform, queue, queue.layout,
+                                   queue.framebuffer_base, options);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t SubmitDirectQueue(const DirectQueuePlatform& platform,

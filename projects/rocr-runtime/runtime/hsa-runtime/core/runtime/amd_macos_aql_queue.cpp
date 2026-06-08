@@ -639,6 +639,18 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
                    wavesize_units, kScratchMaxWaves, compute_tmpring_size,
                    gpu_scratch_size_);
     }
+    // Patch the queue MQD scratch state + re-map so the MEC/MES initializes
+    // FLAT_SCRATCH from per-queue state (the per-dispatch SET_SH_REG alone is
+    // clobbered by the MQD restore). Only when it changes -- re-mapping is not
+    // free.
+    if (gpu_scratch_base_256 != last_scratch_base_256_ ||
+        compute_tmpring_size != last_scratch_tmpring_) {
+      status = driver_.SetQueueScratch(direct_queue_, gpu_scratch_base_256,
+                                       compute_tmpring_size);
+      if (status != HSA_STATUS_SUCCESS) return status;
+      last_scratch_base_256_ = gpu_scratch_base_256;
+      last_scratch_tmpring_ = compute_tmpring_size;
+    }
   }
 
   std::vector<uint32_t> user_data;

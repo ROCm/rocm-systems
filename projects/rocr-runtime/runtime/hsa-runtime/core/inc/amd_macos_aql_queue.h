@@ -112,6 +112,10 @@ class MacAqlQueue : public core::Queue,
   void* gpu_scratch_cpu_ = nullptr;
   uint64_t gpu_scratch_gpu_ = 0;
   size_t gpu_scratch_size_ = 0;
+  // Last scratch base/tmpring pushed into the queue MQD (avoid re-mapping the
+  // queue when unchanged).
+  uint64_t last_scratch_base_256_ = 0;
+  uint32_t last_scratch_tmpring_ = 0;
 
   static __forceinline int& rtti_id() {
     static int rtti_id_ = 0;

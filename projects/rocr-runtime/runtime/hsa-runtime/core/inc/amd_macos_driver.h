@@ -198,6 +198,9 @@ class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform
                                    const uint32_t* pm4, size_t dword_count) const;
   hsa_status_t ReadDirectComputeRptr(const DirectComputeQueue& queue,
                                      uint32_t* rptr) const;
+  hsa_status_t SetQueueScratch(DirectComputeQueue& queue,
+                               uint64_t scratch_base_256,
+                               uint32_t tmpring_size) const;
 
  private:
   struct VramAllocation {

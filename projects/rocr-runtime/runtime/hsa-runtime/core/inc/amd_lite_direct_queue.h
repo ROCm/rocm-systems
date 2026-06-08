@@ -65,6 +65,8 @@ struct DirectQueueState {
   uint64_t ring_gpu = 0;
   uint64_t wptr = 0;
   bool mes_backed = false;
+  uint64_t framebuffer_base = 0;
+  DirectQueueLayout layout{};
   DirectQueueMemory memory;
   volatile uint32_t* ring_cpu = nullptr;
   volatile uint64_t* wptr_cpu = nullptr;
@@ -137,6 +139,14 @@ hsa_status_t SubmitDirectQueue(const DirectQueuePlatform& platform,
 hsa_status_t ReadDirectQueueRptr(const DirectQueuePlatform& platform,
                                  const DirectQueueState& queue,
                                  uint32_t* rptr);
+// Patch the MQD scratch persistent-state (compute_dispatch_scratch_base +
+// tmpring) and re-activate the queue so the MEC/MES re-initializes FLAT_SCRATCH
+// from per-queue state. scratch_base_256 = backing VA >> 8.
+hsa_status_t SetDirectQueueScratch(const DirectQueuePlatform& platform,
+                                   DirectQueueState& queue,
+                                   uint64_t scratch_base_256,
+                                   uint32_t tmpring_size,
+                                   const DirectQueueOptions& options);
 
 }  // namespace lite
 }  // namespace AMD
