@@ -197,7 +197,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=[
+            sys_run_args=[
                 "--rank-filter-output",
                 "garbage,10-0,-1,2,50",
                 "--rank-filter-logs",
@@ -225,7 +225,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=["--rank-filter-output", "5,6"],
+            sys_run_args=["--rank-filter-output", "5,6"],
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
@@ -280,7 +280,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=[
+            sys_run_args=[
                 "--rank-filter-id",
                 "MY_CUSTOM_RANK",
                 "--rank-filter-output",
