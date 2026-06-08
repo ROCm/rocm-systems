@@ -42,9 +42,9 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   struct ibv_qp *ib_qp;
   int err;
 
-  NicDevice &nic = nic_for_qp(conn_num);
   int pe = conn_num % num_pes;
   int nic_idx = nic_idx_for_qp(conn_num);
+  const NicDevice& nic = nic_for_qp(conn_num);
 
   ib_qp = qps[conn_num];
 
@@ -93,7 +93,7 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
              "There may be runtime errors.");
   }
 
-  /* QueuePair is either QueuePairBNXT or QueuePairGeneric
+  /* QueuePair is either QueuePairBNXT or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
    * so just use that instead of trying to figure out which one we're using */
   new (gpu_qp) QueuePair{QueuePairBNXT{qpn, base_heap, heap_size, lkey, rkey, pd, dbr,

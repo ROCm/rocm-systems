@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_GDA_QUEUE_PAIR_GENERIC_HPP_
-#define LIBRARY_SRC_GDA_QUEUE_PAIR_GENERIC_HPP_
+#ifndef LIBRARY_SRC_GDA_QUEUE_PAIR_MUX_HPP_
+#define LIBRARY_SRC_GDA_QUEUE_PAIR_MUX_HPP_
 
 #include <hip/hip_runtime.h>
 
@@ -44,11 +44,11 @@
 
 namespace rocshmem {
 
-class QueuePairGeneric;
+class QueuePairMux;
 
-template <> struct QueuePairTraits<QueuePairGeneric> {
+template <> struct QueuePairTraits<QueuePairMux> {
   /**
-   * @brief Generic OpCode enumeration
+   * @brief Mux OpCode enumeration
    */
   enum class OpCode {
     RDMA_WRITE,
@@ -58,23 +58,23 @@ template <> struct QueuePairTraits<QueuePairGeneric> {
   };
 };
 
-class QueuePairGeneric : public QueuePairSHMEM<QueuePairGeneric> {
+class QueuePairMux : public QueuePairSHMEM<QueuePairMux> {
 public:
 #if defined(GDA_IONIC)
-  __host__ QueuePairGeneric(QueuePairIONIC&& ionic);
+  __host__ QueuePairMux(QueuePairIONIC&& ionic);
 #endif
 #if defined(GDA_BNXT)
-  __host__ QueuePairGeneric(QueuePairBNXT&& bnxt);
+  __host__ QueuePairMux(QueuePairBNXT&& bnxt);
 #endif
 #if defined(GDA_MLX5)
-  __host__ QueuePairGeneric(QueuePairMLX5&& mlx5);
+  __host__ QueuePairMux(QueuePairMLX5&& mlx5);
 #endif
 
-  __host__ QueuePairGeneric(const QueuePairGeneric& other) = delete;
-  __host__ QueuePairGeneric& operator=(const QueuePairGeneric& other) = delete;
-  __host__ QueuePairGeneric& operator=(QueuePairGeneric&& other);
-  __host__ QueuePairGeneric(QueuePairGeneric&& other);
-  __host__ ~QueuePairGeneric();
+  __host__ QueuePairMux(const QueuePairMux& other) = delete;
+  __host__ QueuePairMux& operator=(const QueuePairMux& other) = delete;
+  __host__ QueuePairMux& operator=(QueuePairMux&& other);
+  __host__ QueuePairMux(QueuePairMux&& other);
+  __host__ ~QueuePairMux();
 
 public:
   template <OpCode Op,
@@ -119,56 +119,56 @@ public:
   __host__ int buffer_unregister(void *addr);
 
 private:
-  union QueuePairProvider {
+  union QueuePairUnion {
 #if defined(GDA_IONIC)
     QueuePairIONIC ionic;
-    __host__ QueuePairProvider(QueuePairIONIC&& ionic);
-    __host__ QueuePairProvider& operator=(QueuePairIONIC&& ionic);
+    __host__ QueuePairUnion(QueuePairIONIC&& ionic);
+    __host__ QueuePairUnion& operator=(QueuePairIONIC&& ionic);
 #endif
 #if defined(GDA_BNXT)
     QueuePairBNXT  bnxt;
-    __host__ QueuePairProvider(QueuePairBNXT&& bnxt);
-    __host__ QueuePairProvider& operator=(QueuePairBNXT&& bnxt);
+    __host__ QueuePairUnion(QueuePairBNXT&& bnxt);
+    __host__ QueuePairUnion& operator=(QueuePairBNXT&& bnxt);
 #endif
 #if defined(GDA_MLX5)
     QueuePairMLX5  mlx5;
-    __host__ QueuePairProvider(QueuePairMLX5&& mlx5);
-    __host__ QueuePairProvider& operator=(QueuePairMLX5&& mlx5);
+    __host__ QueuePairUnion(QueuePairMLX5&& mlx5);
+    __host__ QueuePairUnion& operator=(QueuePairMLX5&& mlx5);
 #endif
 
     /* Copy and move constructors and assignment operators are deleted,
      * since they can't know which subobject to construct or assign */
-    __host__ QueuePairProvider(const QueuePairProvider& other)            = delete;
-    __host__ QueuePairProvider(QueuePairProvider&& other)                 = delete;
-    __host__ QueuePairProvider& operator=(const QueuePairProvider& other) = delete;
-    __host__ QueuePairProvider& operator=(QueuePairProvider&& other)      = delete;
+    __host__ QueuePairUnion(const QueuePairUnion& other)            = delete;
+    __host__ QueuePairUnion(QueuePairUnion&& other)                 = delete;
+    __host__ QueuePairUnion& operator=(const QueuePairUnion& other) = delete;
+    __host__ QueuePairUnion& operator=(QueuePairUnion&& other)      = delete;
 
     /*
-     * @brief Empty destructor. Call QueuePairProvider::destruct to destroy active subobject.
+     * @brief Empty destructor. Call QueuePairUnion::destruct to destroy active subobject.
      *
      * Since union members have non-trivial destructors,
      * the implicitely-declared or explicitly-defaulted destructor is defined as deleted.
-     * To allow any definition of QueuePairGeneric::~QueuePairGeneric(),
-     * we must provide some definition of ~QueuePairProvider(), as otherwise it cannot be called
-     * as part of the destructor sequence of ~QueuePairGeneric().
+     * To allow any definition of QueuePairMux::~QueuePairMux(),
+     * we must provide some definition of ~QueuePairUnion(), as otherwise it cannot be called
+     * as part of the destructor sequence of ~QueuePairMux().
      *
-     * ~QueuePairProvider() is defined as empty;
-     * destruction of the active subobject is delegated to QueuePairProvider::destruct.
+     * ~QueuePairUnion() is defined as empty;
+     * destruction of the active subobject is delegated to QueuePairUnion::destruct.
      * Once provider is in __constant__ memory,
-     * destruction can be done directly by ~QueuePairProvider().
+     * destruction can be done directly by ~QueuePairUnion().
      */
-    __host__ ~QueuePairProvider() { }
+    __host__ ~QueuePairUnion() { }
 
 
     /*
-     * @brief Construct new QueuePairProvider, moving the active subobject from other.
+     * @brief Construct new QueuePairUnion, moving the active subobject from other.
      *
-     * @param[in,out] other QueuePairProvider object to move from.
+     * @param[in,out] other QueuePairUnion object to move from.
      * @param[in] provider Type of active subobject of other.
      *
-     * @return QueuePairProvider with an active subobject moved from other.
+     * @return QueuePairUnion with an active subobject moved from other.
      */
-    static __host__ QueuePairProvider construct(QueuePairProvider&& other, GDAProvider provider);
+    static __host__ QueuePairUnion construct(QueuePairUnion&& other, GDAProvider provider);
 
     /*
      * @brief Call destructor of active subobject.
@@ -180,14 +180,14 @@ private:
   GDAProvider provider;
 
   /*
-   * @brief Convert from QueuePairGeneric::OpCode to the equivalent Provider::OpCode
+   * @brief Convert from QueuePairMux::OpCode to the equivalent Provider::OpCode
    */
   template <OpCode Op, typename Provider>
   static __host__ __device__ constexpr typename Provider::OpCode provider_op();
 };
 
-template <QueuePairGeneric::OpCode Op, typename Provider>
-__host__ __device__ constexpr typename Provider::OpCode QueuePairGeneric::provider_op() {
+template <QueuePairMux::OpCode Op, typename Provider>
+__host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_op() {
   if constexpr (Op == OpCode::RDMA_WRITE) {
     return Provider::OpCode::RDMA_WRITE;
   } else if constexpr (Op == OpCode::RDMA_READ) {
@@ -199,8 +199,8 @@ __host__ __device__ constexpr typename Provider::OpCode QueuePairGeneric::provid
   }
 }
 
-template <QueuePairGeneric::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
-__device__ void QueuePairGeneric::post_wqe_rma(
+template <QueuePairMux::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
+__device__ void QueuePairMux::post_wqe_rma(
     uintptr_t laddr, uintptr_t raddr, size_t size, const ActiveWFInfo& wf_info) {
   switch (provider) {
 #if defined(GDA_IONIC)
@@ -224,8 +224,8 @@ __device__ void QueuePairGeneric::post_wqe_rma(
   }
 }
 
-template <QueuePairGeneric::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
-__device__ void QueuePairGeneric::post_wqe_rma_single(
+template <QueuePairMux::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
+__device__ void QueuePairMux::post_wqe_rma_single(
     uintptr_t laddr, uintptr_t raddr, size_t size) {
   switch (provider) {
 #if defined(GDA_IONIC)
@@ -249,9 +249,9 @@ __device__ void QueuePairGeneric::post_wqe_rma_single(
   }
 }
 
-template <QueuePairGeneric::OpCode Op, AMOFetchType Fetch,
+template <QueuePairMux::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
-__device__ QueuePairGeneric::amo_ret_t<Fetch> QueuePairGeneric::post_wqe_amo(
+__device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
     uintptr_t raddr, uint64_t value, uint64_t cond, const ActiveWFInfo& wf_info) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   switch (provider) {
@@ -276,9 +276,9 @@ __device__ QueuePairGeneric::amo_ret_t<Fetch> QueuePairGeneric::post_wqe_amo(
   }
 }
 
-template <QueuePairGeneric::OpCode Op, AMOFetchType Fetch,
+template <QueuePairMux::OpCode Op, AMOFetchType Fetch,
           bool RingDB, bool ThreadSafe, bool CheckCQ>
-__device__ QueuePairGeneric::amo_ret_t<Fetch> QueuePairGeneric::post_wqe_amo_single(
+__device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
     uintptr_t raddr, uint64_t value, uint64_t cond) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
   switch (provider) {
@@ -305,4 +305,4 @@ __device__ QueuePairGeneric::amo_ret_t<Fetch> QueuePairGeneric::post_wqe_amo_sin
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_GDA_QUEUE_PAIR_GENERIC_HPP_
+#endif  // LIBRARY_SRC_GDA_QUEUE_PAIR_MUX_HPP_

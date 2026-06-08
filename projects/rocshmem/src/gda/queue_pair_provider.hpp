@@ -29,8 +29,8 @@
 
 #include "queue_pair.hpp"
 
-#if   defined(GDA_GENERIC)
-#include "queue_pair_generic.hpp"
+#if   defined(GDA_MUX)
+#include "queue_pair_mux.hpp"
 #elif defined(GDA_IONIC)
 #include "gda/ionic/queue_pair_ionic.hpp"
 #elif defined(GDA_BNXT)
@@ -41,10 +41,10 @@
 
 namespace rocshmem {
 
-#if   defined(GDA_GENERIC)
-using QueuePair = QueuePairGeneric;
+#if   defined(GDA_MUX)
+using QueuePair = QueuePairMux;
 #elif defined(GDA_IONIC)
-using QueuePair = QueuePairMLX5;
+using QueuePair = QueuePairIONIC;
 #elif defined(GDA_BNXT)
 using QueuePair = QueuePairBNXT;
 #elif defined(GDA_MLX5)
