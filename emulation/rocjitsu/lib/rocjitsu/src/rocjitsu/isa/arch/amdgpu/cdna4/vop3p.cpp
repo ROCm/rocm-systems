@@ -843,7 +843,8 @@ VMfmaF3216x16x128F8f6f4Vop3pMfma::VMfmaF3216x16x128F8f6f4Vop3pMfma(const Machine
       src1(256, OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
            reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(128, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+           reinterpret_cast<const OpEncoding *>(inst)->src2),
+      x2_dw1_(inst[-1]) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -861,23 +862,22 @@ void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                     [&] { return src2.read_scalar(wf); });
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
   if (!(inst_.abid & 1u)) {
-    amdgpu::exec_f32(cu, 16, 16, 128, 1, 8, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                     amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_fp8,
-                     amdgpu::extract_fp8, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+    amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,
+                                     [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+                                       amdgpu::exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits,
+                                                              dst, s0b, s1b, s2, ea, eb, const_acc);
+                                     });
   } else {
-    if (inst_.abid & 1u) {
-      auto *raw = reinterpret_cast<const uint32_t *>(&inst_);
-      uint32_t x2_dw1 = raw[-1];
-      uint32_t scale_src0_enc = x2_dw1 & 0x1FFu;
-      uint32_t scale_src1_enc = (x2_dw1 >> 9) & 0x1FFu;
-      uint32_t sa_base = amdgpu::src_base(vb, scale_src0_enc);
-      uint32_t sb_base = amdgpu::src_base(vb, scale_src1_enc);
-      amdgpu::exec_f32_scaled(
-          cu, 16, 16, 128, 1, 8, dst, amdgpu::src_base(vb, src0.encoding_value_),
-          amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_fp8, amdgpu::extract_fp8,
-          const_acc, inst_.cbsz, inst_.abid, inst_.blgp, sa_base, sb_base);
-    }
+    uint32_t sa_base = amdgpu::src_base(vb, x2_dw1_ & 0x1FFu);
+    uint32_t sb_base = amdgpu::src_base(vb, (x2_dw1_ >> 9) & 0x1FFu);
+    amdgpu::dispatch_matrix_fmt_pair(
+        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+          amdgpu::exec_f32_scaled_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
+                                        eb, const_acc, sa_base, sb_base);
+        });
   }
 }
 
@@ -890,7 +890,8 @@ VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineIn
       src1(256, OperandType::OPR_SRC_VGPR_OR_ACCVGPR,
            reinterpret_cast<const OpEncoding *>(inst)->src1),
       src2(512, OperandType::OPR_SRC_VGPR_OR_ACCVGPR_OR_CONST,
-           reinterpret_cast<const OpEncoding *>(inst)->src2) {
+           reinterpret_cast<const OpEncoding *>(inst)->src2),
+      x2_dw1_(inst[-1]) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   src_operands_[1] = &src1;
@@ -908,23 +909,22 @@ void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t const_acc;
   uint32_t s2 = amdgpu::resolve_acc(vb, dst, src2.encoding_value_, const_acc,
                                     [&] { return src2.read_scalar(wf); });
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
   if (!(inst_.abid & 1u)) {
-    amdgpu::exec_f32(cu, 32, 32, 64, 1, 8, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                     amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_fp8,
-                     amdgpu::extract_fp8, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);
+    amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,
+                                     [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+                                       amdgpu::exec_f32_mixed(cu, 32, 32, 64, 1, a_bits, b_bits,
+                                                              dst, s0b, s1b, s2, ea, eb, const_acc);
+                                     });
   } else {
-    if (inst_.abid & 1u) {
-      auto *raw = reinterpret_cast<const uint32_t *>(&inst_);
-      uint32_t x2_dw1 = raw[-1];
-      uint32_t scale_src0_enc = x2_dw1 & 0x1FFu;
-      uint32_t scale_src1_enc = (x2_dw1 >> 9) & 0x1FFu;
-      uint32_t sa_base = amdgpu::src_base(vb, scale_src0_enc);
-      uint32_t sb_base = amdgpu::src_base(vb, scale_src1_enc);
-      amdgpu::exec_f32_scaled(cu, 32, 32, 64, 1, 8, dst, amdgpu::src_base(vb, src0.encoding_value_),
-                              amdgpu::src_base(vb, src1.encoding_value_), s2, amdgpu::extract_fp8,
-                              amdgpu::extract_fp8, const_acc, inst_.cbsz, inst_.abid, inst_.blgp,
-                              sa_base, sb_base);
-    }
+    uint32_t sa_base = amdgpu::src_base(vb, x2_dw1_ & 0x1FFu);
+    uint32_t sb_base = amdgpu::src_base(vb, (x2_dw1_ >> 9) & 0x1FFu);
+    amdgpu::dispatch_matrix_fmt_pair(
+        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+          amdgpu::exec_f32_scaled_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
+                                        eb, const_acc, sa_base, sb_base);
+        });
   }
 }
 
@@ -1069,22 +1069,13 @@ VSmfmacF3216x16x64Bf16Vop3pMfma::VSmfmacF3216x16x64Bf16Vop3pMfma(const MachineIn
 }
 
 void VSmfmacF3216x16x64Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X64_BF16 — 16x16x64 BF16→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x64_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
 }
 
 VSmfmacI3216x16x128I8Vop3pMfma::VSmfmacI3216x16x128I8Vop3pMfma(const MachineInst *inst)
@@ -1145,23 +1136,14 @@ VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const Mac
 }
 
 void VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X128_BF8_BF8 — 16x16x128 BF8_BF8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                        amdgpu::smfmac_read_bf8);
 }
 
 VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::VSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const MachineInst *inst)
@@ -1183,23 +1165,14 @@ VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::VSmfmacF3216x16x128Bf8Fp8Vop3pMfma(const Mac
 }
 
 void VSmfmacF3216x16x128Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X128_BF8_FP8 — 16x16x128 BF8_FP8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                        amdgpu::smfmac_read_fp8);
 }
 
 VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const MachineInst *inst)
@@ -1221,23 +1194,14 @@ VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::VSmfmacF3216x16x128Fp8Bf8Vop3pMfma(const Mac
 }
 
 void VSmfmacF3216x16x128Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X128_FP8_BF8 — 16x16x128 FP8_BF8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                        amdgpu::smfmac_read_bf8);
 }
 
 VMfmaF3232x32x12bF32Vop3pMfma::VMfmaF3232x32x12bF32Vop3pMfma(const MachineInst *inst)
@@ -1353,23 +1317,14 @@ VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::VSmfmacF3216x16x128Fp8Fp8Vop3pMfma(const Mac
 }
 
 void VSmfmacF3216x16x128Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X128_FP8_FP8 — 16x16x128 FP8_FP8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x128_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                        amdgpu::smfmac_read_fp8);
 }
 
 VMfmaF3232x32x2F32Vop3pMfma::VMfmaF3232x32x2F32Vop3pMfma(const MachineInst *inst)
@@ -1453,22 +1408,13 @@ VSmfmacF3232x32x32Bf16Vop3pMfma::VSmfmacF3232x32x32Bf16Vop3pMfma(const MachineIn
 }
 
 void VSmfmacF3232x32x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X32_BF16 — 32x32x32 BF16→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
 }
 
 VSmfmacI3232x32x64I8Vop3pMfma::VSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *inst)
@@ -1623,23 +1569,14 @@ VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::VSmfmacF3232x32x64Bf8Bf8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x64Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X64_BF8_BF8 — 32x32x64 BF8_BF8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                       amdgpu::smfmac_read_bf8);
 }
 
 VMfmaF3232x32x8F16Vop3pMfma::VMfmaF3232x32x8F16Vop3pMfma(const MachineInst *inst)
@@ -1723,23 +1660,14 @@ VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::VSmfmacF3232x32x64Bf8Fp8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X64_BF8_FP8 — 32x32x64 BF8_FP8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                       amdgpu::smfmac_read_fp8);
 }
 
 VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const MachineInst *inst)
@@ -1761,23 +1689,14 @@ VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::VSmfmacF3232x32x64Fp8Bf8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X64_FP8_BF8 — 32x32x64 FP8_BF8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                       amdgpu::smfmac_read_bf8);
 }
 
 VMfmaI3232x32x42bI8Vop3pMfma::VMfmaI3232x32x42bI8Vop3pMfma(const MachineInst *inst)
@@ -1890,23 +1809,14 @@ VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::VSmfmacF3232x32x64Fp8Fp8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x64Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X64_FP8_FP8 — 32x32x64 FP8_FP8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                       amdgpu::smfmac_read_fp8);
 }
 
 VMfmaF3216x16x32F16Vop3pMfma::VMfmaF3216x16x32F16Vop3pMfma(const MachineInst *inst)
@@ -2050,22 +1960,13 @@ VSmfmacF3216x16x64F16Vop3pMfma::VSmfmacF3216x16x64F16Vop3pMfma(const MachineInst
 }
 
 void VSmfmacF3216x16x64F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X64_F16 — 16x16x64 F16→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x64_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
 }
 
 VSmfmacF3232x32x32F16Vop3pMfma::VSmfmacF3232x32x32F16Vop3pMfma(const MachineInst *inst)
@@ -2087,22 +1988,13 @@ VSmfmacF3232x32x32F16Vop3pMfma::VSmfmacF3232x32x32F16Vop3pMfma(const MachineInst
 }
 
 void VSmfmacF3232x32x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X32_F16 — 32x32x32 F16→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
 }
 
 VMfmaF3232x32x42bBf16Vop3pMfma::VMfmaF3232x32x42bBf16Vop3pMfma(const MachineInst *inst)
@@ -2280,22 +2172,13 @@ VSmfmacF3216x16x32F16Vop3pMfma::VSmfmacF3216x16x32F16Vop3pMfma(const MachineInst
 }
 
 void VSmfmacF3216x16x32F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X32_F16 — 16x16x32 F16→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
 }
 
 VSmfmacF3232x32x16F16Vop3pMfma::VSmfmacF3232x32x16F16Vop3pMfma(const MachineInst *inst)
@@ -2317,22 +2200,13 @@ VSmfmacF3232x32x16F16Vop3pMfma::VSmfmacF3232x32x16F16Vop3pMfma(const MachineInst
 }
 
 void VSmfmacF3232x32x16F16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X16_F16 — 32x32x16 F16→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::f16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::f16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::f16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::f16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x16_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_f16);
 }
 
 VSmfmacF3216x16x32Bf16Vop3pMfma::VSmfmacF3216x16x32Bf16Vop3pMfma(const MachineInst *inst)
@@ -2354,22 +2228,13 @@ VSmfmacF3216x16x32Bf16Vop3pMfma::VSmfmacF3216x16x32Bf16Vop3pMfma(const MachineIn
 }
 
 void VSmfmacF3216x16x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X32_BF16 — 16x16x32 BF16→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x32_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
 }
 
 VSmfmacF3232x32x16Bf16Vop3pMfma::VSmfmacF3232x32x16Bf16Vop3pMfma(const MachineInst *inst)
@@ -2391,22 +2256,13 @@ VSmfmacF3232x32x16Bf16Vop3pMfma::VSmfmacF3232x32x16Bf16Vop3pMfma(const MachineIn
 }
 
 void VSmfmacF3232x32x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X16_BF16 — 32x32x16 BF16→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float a0 = util::bf16_to_f32(static_cast<uint16_t>(a_raw));
-    float a1 = util::bf16_to_f32(static_cast<uint16_t>(a_raw >> 16));
-    float b0 = util::bf16_to_f32(static_cast<uint16_t>(b_raw));
-    float b1 = util::bf16_to_f32(static_cast<uint16_t>(b_raw >> 16));
-    float dot = a0 * b0 + a1 * b1;
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x16_f16(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf16);
 }
 
 VSmfmacI3216x16x64I8Vop3pMfma::VSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *inst)
@@ -2814,23 +2670,14 @@ VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::VSmfmacF3216x16x64Bf8Bf8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3216x16x64Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X64_BF8_BF8 — 16x16x64 BF8_BF8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                       amdgpu::smfmac_read_bf8);
 }
 
 VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::VSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const MachineInst *inst)
@@ -2852,23 +2699,14 @@ VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::VSmfmacF3216x16x64Bf8Fp8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3216x16x64Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X64_BF8_FP8 — 16x16x64 BF8_FP8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                       amdgpu::smfmac_read_fp8);
 }
 
 VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const MachineInst *inst)
@@ -2890,23 +2728,14 @@ VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::VSmfmacF3216x16x64Fp8Bf8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3216x16x64Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X64_FP8_BF8 — 16x16x64 FP8_BF8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                       amdgpu::smfmac_read_bf8);
 }
 
 VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::VSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const MachineInst *inst)
@@ -2928,23 +2757,14 @@ VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::VSmfmacF3216x16x64Fp8Fp8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3216x16x64Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_16X16X64_FP8_FP8 — 16x16x64 FP8_FP8→F32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_16x16x64_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                       amdgpu::smfmac_read_fp8);
 }
 
 VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const MachineInst *inst)
@@ -2966,23 +2786,14 @@ VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::VSmfmacF3232x32x32Bf8Bf8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x32Bf8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X32_BF8_BF8 — 32x32x32 BF8_BF8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                       amdgpu::smfmac_read_bf8);
 }
 
 VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::VSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const MachineInst *inst)
@@ -3004,23 +2815,14 @@ VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::VSmfmacF3232x32x32Bf8Fp8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x32Bf8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X32_BF8_FP8 — 32x32x32 BF8_FP8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::bf8_e5m2_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_bf8,
+                                       amdgpu::smfmac_read_fp8);
 }
 
 VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const MachineInst *inst)
@@ -3042,23 +2844,14 @@ VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::VSmfmacF3232x32x32Fp8Bf8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x32Fp8Bf8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X32_FP8_BF8 — 32x32x32 FP8_BF8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::bf8_e5m2_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                       amdgpu::smfmac_read_bf8);
 }
 
 VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const MachineInst *inst)
@@ -3080,23 +2873,14 @@ VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::VSmfmacF3232x32x32Fp8Fp8Vop3pMfma(const Machi
 }
 
 void VSmfmacF3232x32x32Fp8Fp8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_F32_32X32X32_FP8_FP8 — 32x32x32 FP8_FP8→F32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    float dot = 0.0f;
-    for (int k = 0; k < 4; ++k) {
-      float ae = util::fp8_e4m3_to_f32(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));
-      float be = util::fp8_e4m3_to_f32(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));
-      dot += ae * be;
-    }
-    float acc = std::bit_cast<float>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));
-  }
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd);
+  uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
+  uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  uint32_t idx = amdgpu::src_base(vb, src2.encoding_value_);
+  amdgpu::exec_smfmac_f32_32x32x32_fp8(cu, dst, s0b, s1b, idx, amdgpu::smfmac_read_fp8,
+                                       amdgpu::smfmac_read_fp8);
 }
 
 } // namespace cdna4

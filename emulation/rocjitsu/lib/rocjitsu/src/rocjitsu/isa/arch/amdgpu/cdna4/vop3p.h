@@ -379,6 +379,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  uint32_t x2_dw1_ = 0;
 };
 
 class VMfmaF3232x32x64F8f6f4Vop3pMfma : public Vop3pMfma {
@@ -389,6 +390,7 @@ public:
   Operand src0;
   Operand src1;
   Operand src2;
+  uint32_t x2_dw1_ = 0;
 };
 
 class VMfmaF3216x16x32Bf16Vop3pMfma : public Vop3pMfma {
