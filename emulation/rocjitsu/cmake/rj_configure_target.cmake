@@ -92,6 +92,9 @@ function(rj_configure_target target)
     endif()
 
     # Definitions.
+    if(RJ_PLUGINS)
+        target_compile_definitions(${target} PRIVATE RJ_PLUGINS)
+    endif()
     if(ARG_CONFIG_DIRS)
         target_compile_definitions(
             ${target}

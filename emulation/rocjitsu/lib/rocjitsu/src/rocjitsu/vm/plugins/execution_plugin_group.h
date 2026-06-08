@@ -4,7 +4,12 @@
 /// @file execution_plugin_group.h
 /// @brief Collection of plugins that delegates to each member.
 ///
-/// ## Sink configuration
+/// When RJ_PLUGINS is not defined, this header provides a stub
+/// ExecutionPluginGroup whose hooks are empty non-virtual inlines.
+/// The compiler eliminates them at all call sites — no #ifdef needed
+/// in consuming code.
+///
+/// ## Sink configuration (RJ_PLUGINS only)
 ///
 /// The group controls where plugin output goes. Call add_sink() to add
 /// external sinks (applied to all plugins). Call set_sink_dir() before
@@ -16,12 +21,19 @@
 
 #pragma once
 
-#include "rocjitsu/vm/plugins/execution_plugin.h"
-#include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
 
 #include <cstdint>
 #include <memory>
 #include <span>
+
+#ifdef RJ_PLUGINS
+
+#include "rocjitsu/vm/plugins/execution_plugin.h"
+#include "rocjitsu/vm/plugins/plugin_sink.h"
+
 #include <string>
 #include <vector>
 
@@ -183,3 +195,37 @@ private:
 };
 
 } // namespace rocjitsu
+
+#else // !RJ_PLUGINS
+
+namespace rocjitsu {
+
+class ExecutionPluginGroup {
+public:
+  void onInit() {}
+  void onShutdown() {}
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &) {}
+  void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &, amdgpu::Wavefront &) {}
+  void onAmdgpuRouteMemoryInstruction(const Instruction &, amdgpu::Wavefront &) {}
+  void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &) {}
+  void onAmdgpuDispatchExecutionBegin(uint32_t) {}
+  void onAmdgpuDispatchExecutionEnd(uint32_t) {}
+  void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                   std::span<amdgpu::Wavefront *>) {}
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) {}
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &) {}
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) {}
+  void onAmdgpuReadVgprs(const amdgpu::Wavefront *, uint32_t, uint32_t, uint32_t, uint8_t = 0xF) {}
+  void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) {}
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *>) {}
+  bool empty() const { return true; }
+
+  static std::shared_ptr<ExecutionPluginGroup> empty_group() {
+    static auto instance = std::make_shared<ExecutionPluginGroup>();
+    return instance;
+  }
+};
+
+} // namespace rocjitsu
+
+#endif // RJ_PLUGINS

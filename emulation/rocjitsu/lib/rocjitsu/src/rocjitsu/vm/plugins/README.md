@@ -14,12 +14,35 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
 
-## Enabling plugins
+## Build-time gating
 
-Plugins are loaded at runtime based on environment variables:
+Plugin support is controlled by the `RJ_PLUGINS` CMake option (default `ON`):
+
+```bash
+cmake -DRJ_PLUGINS=OFF ...   # disable all plugin support
+cmake -DRJ_PLUGINS=ON  ...   # enable (default)
+```
+
+When `OFF`:
+- Plugin source directories are not compiled.
+- `ExecutionPluginGroup` is replaced by a stub with empty inline hooks,
+  so consuming code (compute unit, command processor) compiles without
+  `#ifdef` guards — the compiler eliminates all hook calls.
+- Plugin-specific tests (race detection, logging, profiled group) are
+  excluded from the build.
+- The interposer does not link plugin libraries or create plugin groups.
+
+When `ON` (default): plugins are compiled, linked, and available at
+runtime via environment variables.
+
+## Enabling plugins at runtime
+
+Plugins are loaded based on environment variables:
 
 - `RJ_RACE=1` enables the race detection plugin.
 - `RJ_LOG=1` enables the kernel logging plugin.
+- `RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1` wraps all plugin hooks with
+  adaptive-sampling timing instrumentation (not thread-safe).
 
 ## Plugin output
 
@@ -82,5 +105,6 @@ Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
 1. Implement `ExecutionPlugin` in a new `.cpp`/`.h` pair in this directory.
 2. Add the source to `CMakeLists.txt`.
-3. Register the plugin in `simulated_driver.cpp` (gated by an environment variable).
+3. Add an `extern "C"` factory function and wire it into `interposer.cpp`,
+   gated by an environment variable.
 4. Use `sink().write()` for all output — never write to stderr directly.

@@ -12,9 +12,10 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
-#include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#ifdef RJ_PLUGINS
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
+#endif
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
@@ -46,8 +47,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#ifdef RJ_PLUGINS
 extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
 extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
+#endif
 
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedDriver;
@@ -337,6 +340,7 @@ public:
         return nullptr;
       }
 
+#ifdef RJ_PLUGINS
       // Set up execution plugins based on environment variables.
       if (rj_vm_->soc) {
         std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
@@ -375,6 +379,7 @@ public:
         }
         rj_vm_->soc->set_plugin_group(pg);
       }
+#endif
 
       std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
       in_construction = false;

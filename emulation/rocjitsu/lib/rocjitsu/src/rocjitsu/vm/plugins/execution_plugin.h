@@ -12,6 +12,10 @@
 
 #pragma once
 
+#ifndef RJ_PLUGINS
+#error "execution_plugin.h requires RJ_PLUGINS to be defined"
+#endif
+
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"

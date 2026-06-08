@@ -26,13 +26,28 @@ set(RJ_OBJECT_LIBS
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
-    rocjitsu_plugin_logging
-    rocjitsu_plugin_race_detector
     rocjitsu_vm_risc_v
     rocjitsu_config
 )
+if(RJ_PLUGINS)
+    list(
+        APPEND RJ_OBJECT_LIBS
+        rocjitsu_plugin_logging
+        rocjitsu_plugin_race_detector
+    )
+endif()
 
 # --- Unit / integration test suite ---
+
+set(RJ_PLUGIN_TEST_SOURCES)
+if(RJ_PLUGINS)
+    list(
+        APPEND RJ_PLUGIN_TEST_SOURCES
+        execution_plugin_test.cpp
+        race-detector/race_detector_tests.cpp
+        race-detector/interval_set_tests.cpp
+    )
+endif()
 
 add_executable(
     rocjitsu_tests
@@ -99,9 +114,7 @@ add_executable(
     simd_correctness/vop3p_fma_mix_simd_correctness_test.cpp
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
-    execution_plugin_test.cpp
-    race-detector/race_detector_tests.cpp
-    race-detector/interval_set_tests.cpp
+    ${RJ_PLUGIN_TEST_SOURCES}
 )
 target_link_libraries(
     rocjitsu_tests
@@ -685,42 +698,44 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test(hip_bfe_2d_test)
     rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
 
-    # --- Logging plugin end-to-end test ---
-    rj_add_hip_test(hip_logging_test SOURCE logging/hip_logging_test.hip)
-    set(LOGGING_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/logging_test_output)
-    set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
-    file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
-    file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
-    rj_add_hip_test_case(
-        hip_logging_test "LoggingTest.dispatch_logged"
-        TIMEOUT 30
-        ENVIRONMENT
-            "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
-            "RJ_LOG=1"
-            "RJ_SINKS=file"
-            "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
-    )
+    if(RJ_PLUGINS)
+        # --- Logging plugin end-to-end test ---
+        rj_add_hip_test(hip_logging_test SOURCE logging/hip_logging_test.hip)
+        set(LOGGING_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/logging_test_output)
+        set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
+        file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
+        file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
+        rj_add_hip_test_case(
+            hip_logging_test "LoggingTest.dispatch_logged"
+            TIMEOUT 30
+            ENVIRONMENT
+                "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
+                "RJ_LOG=1"
+                "RJ_SINKS=file"
+                "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
+        )
 
-    # --- Profiled plugin group end-to-end test ---
-    rj_add_hip_test(
-        hip_profiled_plugin_test
-        SOURCE logging/hip_profiled_plugin_test.hip
-    )
-    set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
-    set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
-    file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
-    file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
-    rj_add_hip_test_case(
-        hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
-        TIMEOUT 30
-        ENVIRONMENT
-            "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-            "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
-            "RJ_SINKS=file"
-            "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
-    )
+        # --- Profiled plugin group end-to-end test ---
+        rj_add_hip_test(
+            hip_profiled_plugin_test
+            SOURCE logging/hip_profiled_plugin_test.hip
+        )
+        set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
+        set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
+        file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
+        file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
+        rj_add_hip_test_case(
+            hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
+            TIMEOUT 30
+            ENVIRONMENT
+                "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
+                "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
+                "RJ_SINKS=file"
+                "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
+        )
 
-    add_subdirectory(race-detector)
+        add_subdirectory(race-detector)
+    endif()
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()

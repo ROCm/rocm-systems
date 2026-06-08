@@ -49,6 +49,7 @@ include(rj_log)
 # Sanitizer and static analysis options.
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
+option(RJ_PLUGINS "Enable execution plugin support" ON)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -194,7 +195,9 @@ set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
-add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
+if(RJ_PLUGINS)
+    add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
+endif()
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
@@ -220,8 +223,8 @@ target_link_libraries(
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
-        rocjitsu_plugin_logging
-        rocjitsu_plugin_race_detector
+        $<$<BOOL:${RJ_PLUGINS}>:rocjitsu_plugin_logging>
+        $<$<BOOL:${RJ_PLUGINS}>:rocjitsu_plugin_race_detector>
         rocjitsu_vm_risc_v
         rocjitsu_config
         util

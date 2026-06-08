@@ -12,6 +12,10 @@
 
 #pragma once
 
+#ifndef RJ_PLUGINS
+#error "profiled_execution_plugin_group.h requires RJ_PLUGINS to be defined"
+#endif
+
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include <chrono>

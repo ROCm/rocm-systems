@@ -40,8 +40,8 @@ target_link_libraries(
         simdojo
         rocjitsu_vm
         rocjitsu_vm_amdgpu
-        rocjitsu_plugin_logging
-        rocjitsu_plugin_race_detector
+        $<$<BOOL:${RJ_PLUGINS}>:rocjitsu_plugin_logging>
+        $<$<BOOL:${RJ_PLUGINS}>:rocjitsu_plugin_race_detector>
         rocjitsu_vm_risc_v
         rocjitsu_config
         util
@@ -49,7 +49,10 @@ target_link_libraries(
         Threads::Threads
         dl
 )
-target_compile_definitions(rocjitsu_kmd_shim PRIVATE _GNU_SOURCE)
+target_compile_definitions(
+    rocjitsu_kmd_shim
+    PRIVATE _GNU_SOURCE $<$<BOOL:${RJ_PLUGINS}>:RJ_PLUGINS>
+)
 target_compile_options(
     rocjitsu_kmd_shim
     PRIVATE -Wall -Wextra -Wpedantic -Werror
