@@ -7,9 +7,11 @@
 
 #include "hipfile.h"
 
-#include <cstddef>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -361,6 +363,28 @@ private:
 
 using BatchOperations = std::vector<std::shared_ptr<IBatchOperation>>;
 
+///
+/// @internal
+/// @brief Point in time after which a batch status wait gives up.
+///
+/// An empty optional means the caller is willing to wait indefinitely.
+///
+using BatchDeadline = std::optional<std::chrono::steady_clock::time_point>;
+
+///
+/// @internal
+/// @brief Convert a caller supplied timeout into a `BatchDeadline`.
+///
+/// @param [in] timeout Relative timeout, or `nullptr` to wait indefinitely.
+/// @param [in] now Current time used to calculate the deadline.
+///
+/// @return The absolute deadline, or an empty optional when @p timeout is `nullptr`.
+/// @throws std::invalid_argument if @p timeout is not a normalized, non-negative duration.
+///
+BatchDeadline
+makeBatchDeadline(const struct timespec                             *timeout,
+                  std::chrono::time_point<std::chrono::steady_clock> now = std::chrono::steady_clock::now());
+
 class IBatchContext {
 public:
     static constexpr unsigned MAX_SIZE = 128;
@@ -368,9 +392,11 @@ public:
     virtual ~IBatchContext()                               = default;
     virtual unsigned getCapacity() const noexcept          = 0;
     virtual void     submitOperations(BatchOperations ops) = 0;
+    virtual void     getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp,
+                               BatchDeadline deadline)     = 0;
 };
 
-class BatchContext : public IBatchContext {
+class BatchContext : public IBatchContext, public std::enable_shared_from_this<BatchContext> {
 public:
     // Don't allow copying
     BatchContext(const BatchContext &)            = delete;
@@ -397,6 +423,15 @@ public:
     ///
     void submitOperations(BatchOperations ops) override;
 
+    ///
+    /// @brief Poll for completed operations from this Context.
+    /// @param [in]     min_nr   Minimum number of events requested before returning.
+    /// @param [in,out] nr       Input event capacity and output number of events returned.
+    /// @param [out]    iocbp    Event output buffer.
+    /// @param [in]     deadline Point in time to stop waiting, or empty to wait indefinitely.
+    ///
+    void getStatus(unsigned min_nr, unsigned *nr, hipFileIOEvents_t *iocbp, BatchDeadline deadline) override;
+
 private:
     const unsigned capacity;
 
@@ -404,9 +439,16 @@ private:
     /// Shared as internally we can be more strategic about concurrent access.
     mutable std::shared_mutex context_mutex;
 
+    /// Wakes callers waiting for operations to become terminal.
+    std::condition_variable_any status_cv;
+
     /// IO Operations that have been submitted, but not completed
     /// shared_ptr as it may need to be passed to a backend.
     std::unordered_set<std::shared_ptr<IBatchOperation>> submitted_ops;
+
+    /// IO operations that have been completed, but whose result has
+    /// not been retrieved
+    std::vector<std::shared_ptr<IBatchOperation>> completed_ops;
 
     /// Task group used for all submitted operations owned by this context.
     std::unique_ptr<ITaskGroup> task_group;
