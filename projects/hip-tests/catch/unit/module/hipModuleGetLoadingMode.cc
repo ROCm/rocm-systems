@@ -133,9 +133,11 @@ void kernelExecutionFunction(hipModule_t module) {
   struct {
     void *_Ad;
     void *_Bd;
+    size_t _size;
   } args;
   args._Ad = reinterpret_cast<void *>(Ad);
   args._Bd = reinterpret_cast<void *>(Bd);
+  args._size = LEN;
   size_t size = sizeof(args);
 
   void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
@@ -253,10 +255,7 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
  */
 TEST_CASE("Unit_hipModuleGetLoadingMode_NullptrCheck") {
   hipError_t err = hipModuleGetLoadingMode(nullptr);
-  // Note: The current implementation doesn't check for nullptr
-  // If this test fails, we may need to add validation to the API
-  // For now, we just check it doesn't crash
-  (void)err;
+  REQUIRE(err == hipErrorInvalidValue);
 }
 
 /**

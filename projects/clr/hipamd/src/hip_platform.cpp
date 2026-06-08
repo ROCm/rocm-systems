@@ -1241,13 +1241,29 @@ void PlatformState::SetDynamicLibraryHandle(void* handle) {
 // ================================================================================================
 void PlatformState::GetLoadingMode(hipModuleLoadingMode_t* mode) {
   *mode = HIP_MODULE_LAZY_LOADING;
-  std::string mod_loading_mode;
-  if (!flagIsDefault(HIP_MODULE_LOADING)) {
-      mod_loading_mode = HIP_MODULE_LOADING;
+  // Read environment variable directly to support dynamic changes
+#ifdef _WIN32
+  char env_buffer[256];
+  DWORD len = GetEnvironmentVariableA("HIP_MODULE_LOADING", env_buffer, sizeof(env_buffer));
+  if (len > 0 && len < sizeof(env_buffer)) {
+    std::string mod_loading_mode(env_buffer);
+    if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
+      *mode = HIP_MODULE_EAGER_LOADING;
+    } else if (mod_loading_mode == "LAZY" || mod_loading_mode == "lazy") {
+      *mode = HIP_MODULE_LAZY_LOADING;
+    }
   }
-  if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
-    *mode = HIP_MODULE_EAGER_LOADING;
+#else
+  const char* env_value = getenv("HIP_MODULE_LOADING");
+  if (env_value != nullptr) {
+    std::string mod_loading_mode(env_value);
+    if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
+      *mode = HIP_MODULE_EAGER_LOADING;
+    } else if (mod_loading_mode == "LAZY" || mod_loading_mode == "lazy") {
+      *mode = HIP_MODULE_LAZY_LOADING;
+    }
   }
+#endif
 }
 
 }  // namespace hip
