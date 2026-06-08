@@ -11,8 +11,8 @@ Using PC sampling in ROCm Compute Profiler
    PC sampling is an experimental feature. Enable it in ``profile``
    mode by passing ``--experimental --pc-sampling``. The ``analyze``
    command detects PC sampling automatically from the profiling
-   configuration and needs no extra flag. Behavior and command-line
-   surface may change in future releases.
+   configuration and needs no extra pc-sampling flag. Behavior and
+   command-line surface may change in future releases.
 
 Program Counter (PC) sampling service for GPU profiling is a profiling technique that periodically samples the program counter during the GPU kernel execution to understand code execution patterns and hotspots.
 
@@ -46,7 +46,7 @@ For using analysis options for PC sampling the configuration needed are:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ --experimental -k 0 --pc-sampling-sorting-type offset
+   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -k 0 --pc-sampling-sorting-type offset
 
 **Sample output:**
 

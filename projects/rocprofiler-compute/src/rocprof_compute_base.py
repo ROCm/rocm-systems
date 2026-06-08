@@ -177,7 +177,7 @@ class RocProfCompute:
                     )
             # Block 21 (PC sampling) is profile-only; analyze auto-detects it
             # from the profiling config yaml.
-            if self.__mode == "profile" and block_input == "21":
+            if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
                 if not self.__args.pc_sampling or not self.__args.experimental:
                     console_error(
                         "Block 21 (PC Sampling) is an experimental feature.\n"

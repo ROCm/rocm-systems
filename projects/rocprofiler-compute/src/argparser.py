@@ -173,7 +173,7 @@ def add_general_group(
             "   Spatial multiplexing (--spatial-multiplexing)\n"
             "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
-            "--pc-sampling-interval, --pc-sampling-sorting-type)\n"
+            "--pc-sampling-interval)\n"
         ),
     )
 
@@ -770,10 +770,6 @@ Examples:
         dest="pc_sampling_sorting_type",
         default="offset",
         type=str,
-        base_action="store",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="PC Sampling",
         help="\t\tSet the sorting type of pc sampling: "
         "offset or count (DEFAULT: offset).",
     )

@@ -349,6 +349,12 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
             id="pc_sampling_without_experimental_errors",
         ),
         pytest.param(
+            _make_rpc_args(filter_blocks=["pc_sampling"]),
+            True,
+            None,
+            id="block_alias_without_pc_sampling_errors",
+        ),
+        pytest.param(
             _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[]),
             False,
             ["21"],
