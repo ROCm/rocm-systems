@@ -41,28 +41,29 @@ For this example, we will be using the `jacobi-fortran-targetdata-markers exampl
 Building the example
 ---------------------------------------------
 
-This example uses ``amdflang`` as the Fortran compiler. To begin, clone the ``rocm-systems`` repository and sparse checkout the necessary examples.
+This example uses ``amdflang`` as the Fortran compiler.
 
-.. code-block:: shell
+#. Clone the ``rocm-systems`` repository and sparse checkout the necessary examples:
 
-    git clone --no-checkout --filter=blob:none --depth=1 --branch develop https://github.com/ROCm/rocm-systems.git
-    cd rocm-systems
-    git sparse-checkout init --cone
-    git sparse-checkout set projects/rocprofiler-systems/examples
-    git checkout develop
+   .. code-block:: shell
 
+       git clone --no-checkout --filter=blob:none --depth=1 --branch develop https://github.com/ROCm/rocm-systems.git
+       cd rocm-systems
+       git sparse-checkout init --cone
+       git sparse-checkout set projects/rocprofiler-systems/examples
+       git checkout develop
 
-Build only the ``jacobi-fortran-targetdata-markers`` example
+#. Build only the ``jacobi-fortran-targetdata-markers`` example:
 
-.. code-block:: shell
+   .. code-block:: shell
 
-    rm -rf build-hpc
-    cmake -S projects/rocprofiler-systems/examples/hpc \
-        -B build-hpc \
-        -DCMAKE_PREFIX_PATH=/opt/rocm
-    cmake --build build-hpc --target jacobi-fortran-targetdata-markers
-    export JACOBI_FORTRAN_BIN=$PWD/build-hpc/jacobi-fortran-targetdata-markers/jacobi-fortran-targetdata-markers
-    cd ..
+       rm -rf build-hpc
+       cmake -S projects/rocprofiler-systems/examples/hpc \
+           -B build-hpc \
+           -DCMAKE_PREFIX_PATH=/opt/rocm
+       cmake --build build-hpc --target jacobi-fortran-targetdata-markers
+       export JACOBI_FORTRAN_BIN=$PWD/build-hpc/jacobi-fortran-targetdata-markers/jacobi-fortran-targetdata-markers
+       cd ..
 
 The resulting binary is at ``rocm-systems/build-hpc/jacobi-fortran-targetdata-markers/jacobi-fortran-targetdata-markers``.
 
@@ -76,25 +77,26 @@ Collecting a trace with rocprof-sys-run
 ------------------------------------------------
 
 Callback APIs, such as OMPT, can be traced using ``rocprof-sys-run`` with the ``--preset=trace-openmp`` option.
-To collect a trace for the Jacobi example, run the following command:
 
-.. code-block:: shell
+#. To collect a trace for the Jacobi example, run the following command:
 
-    rocprof-sys-run --preset=trace-openmp -- "$JACOBI_FORTRAN_BIN"
+   .. code-block:: shell
 
-.. note::
+       rocprof-sys-run --preset=trace-openmp -- "$JACOBI_FORTRAN_BIN"
 
-    ``--preset=trace-openmp`` requires ROCm 7.13.0 or later. On earlier
-    versions, use the equivalent environment variables (see
-    :ref:`openmp-env-var-config`).
+   .. note::
 
-Once the command completes, an output directory will be generated:
+       ``--preset=trace-openmp`` requires ROCm 7.13.0 or later. On earlier
+       versions, use the equivalent environment variables (see
+       :ref:`openmp-env-var-config`).
 
-.. code-block:: shell
+#. Once the command completes, an output directory will be generated:
 
-    rocprofsys-jacobi-fortran-targetdata-markers-output/<timestamp>/
+   .. code-block:: shell
 
-By default, a ``.proto`` trace file containing all captured traces from the profiling session is written under this directory.
+       rocprofsys-jacobi-fortran-targetdata-markers-output/<timestamp>/
+
+   By default, a ``.proto`` trace file containing all captured traces from the profiling session is written under this directory.
 
 .. tip::
 
@@ -119,17 +121,17 @@ To view the collected traces, click on the drop-down arrow in the ``jacobi-fortr
 .. tip::
     You can pin important tracks in Perfetto by hovering over the track name and clicking the pin icon.
 
-Multiple tracks are displayed, each representing different information, such as:
+Multiple tracks are displayed, each representing different information, such as (in the numbering order from the screenshot):
 
-1. Shows the events captured on the main thread. The main program is executed here (represented by the trace labelled ``jacobi-fortran-targetdata-markers``).
-2. Shows GPU kernel executions.
-3. Shows memory copy operations between agents (CPU/GPU).
-4. Shows the power being used by the GPU.
-5. Measures graphics engine utilization as a percentage.
-6. Measures multimedia engine activity as a percentage.
-7. Measures VRAM consumption.
-8. Shows GPU temperature in Celsius.
-9. Measures memory controller utilization as a percentage.
+1. Events captured on the main thread. The main program is executed here (represented by the trace labelled ``jacobi-fortran-targetdata-markers``).
+2. GPU kernel executions.
+3. Memory copy operations between agents (CPU/GPU).
+4. Power being used by the GPU.
+5. Graphics engine utilization (in percentage).
+6. Multimedia engine activity (in percentage).
+7. VRAM consumption.
+8. GPU temperature (in Celsius).
+9. Memory controller utilization (in percentage).
 
 For this example, the important tracks are ``jacobi-fortran-targetdata-markers`` (1), ``GPU Kernel Dispatch`` (2), and ``GPU Memory Copy to Agent`` (3).
 
@@ -184,7 +186,7 @@ The image below shows a group of events that correspond to the execution of the 
     :alt: Events corresponding to the Laplacian OpenMP pragma
     :width: 1400
 
-The general sequence of events for this code block is as follows:
+The general sequence of events for this code block is as follows (in the numbering order from the screenshot):
 
 1. An ``omp_target_emi`` callback is generated and spans the entire duration of the OpenMP ``target teams`` construct.
 2. Memory is allocated on the GPU for variables. This is represented by an ``omp_target_data_op_emi`` event with ``optype = target_data_alloc``.
@@ -211,24 +213,27 @@ Optional: Instrumenting the application with rocprof-sys-instrument
 The application can be instrumented with ``rocprof-sys-instrument`` to also capture user-defined functions alongside the OMPT events.
 More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the :doc:`data collection modes <../conceptual/data-collection-modes>` document.
 
-.. code-block:: shell
+#. Instrument the application to generate an instrumented binary, ``jacobi.inst``:
 
-    rocprof-sys-instrument -o jacobi.inst -- "$JACOBI_FORTRAN_BIN"
+   .. code-block:: shell
 
-This command generates an instrumented binary, ``jacobi.inst``. To profile this binary with OMPT tracing enabled, run the following command:
+       rocprof-sys-instrument -o jacobi.inst -- "$JACOBI_FORTRAN_BIN"
 
-.. code-block:: shell
+#. Profile the instrumented binary with OMPT tracing enabled:
 
-    rocprof-sys-run --preset=trace-openmp -- ./jacobi.inst
+   .. code-block:: shell
 
-Once profiling completes, an output directory will be generated:
+       rocprof-sys-run --preset=trace-openmp -- ./jacobi.inst
 
-.. code-block:: shell
+#. Once profiling completes, an output directory will be generated:
 
-    rocprofsys-jacobi-inst-output/<timestamp>/
+   .. code-block:: shell
 
-A ``.proto`` trace file is written under this directory, and can be viewed using the same method described in the previous section.
-Compared to the trace from the preset-only run, the instrumented trace additionally surfaces user-defined functions in the ``jacobi-fortran-targetdata-markers`` track, allowing application-level call paths to be correlated with OMPT and GPU activity.
+       rocprofsys-jacobi-inst-output/<timestamp>/
+
+   A ``.proto`` trace file is written under this directory, and can be viewed using the same method described in the previous section.
+   Compared to the trace from the preset-only run, the instrumented trace additionally surfaces user-defined functions in the ``jacobi-fortran-targetdata-markers`` track,
+   allowing application-level call paths to be correlated with OMPT and GPU activity.
 
 .. important::
 
