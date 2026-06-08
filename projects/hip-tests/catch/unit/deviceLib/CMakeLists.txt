@@ -72,13 +72,18 @@ set(AMD_TEST_SRC
     # fp8_e8m0.cc # TODO, reenable it, disabling this test due to failure seen on TheRock,
     fp6_ocp.cc
     fp4_ocp.cc
-    ext_ocp.cc
-    ext_extract.cc
-    ext_cxx.cc
     memcpy_async.cc
     bfloat16_atomic_test.cc
     fp16_atomic_test.cc
 )
+
+if(UNIX)
+  set(TEST_SRC
+    ${TEST_SRC}
+    ext_ocp.cc
+    ext_extract.cc
+    ext_cxx.cc)
+endif()
 
 set(AMD_ARCH_SPEC_TEST_SRC
     AtomicAdd_Coherent.cc
