@@ -22,14 +22,17 @@ namespace amdgpu {
 struct DispatchEntry {
   uint32_t dispatch_id = 0;
   uint32_t queue_id = 0;
+  uint32_t process_id = 0;
 
   uint64_t kernel_entry_pc = 0;
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
   uint64_t kernarg_addr = 0;
+  uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
+  uint16_t kernarg_preload = 0;
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
   uint32_t workgroup_id_offset = 0;
@@ -71,6 +74,7 @@ struct HwQueueState {
   std::deque<DispatchEntry> entries;
   bool implicit_barrier_next = false;
   size_t next_dispatch_idx = 0;
+  uint64_t queue_desc_va = 0;
 };
 
 } // namespace amdgpu

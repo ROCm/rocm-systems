@@ -80,9 +80,6 @@ if(HIP_HIPCC_EXECUTABLE)
   add_definitions(-DHIP_HIPCC_EXECUTABLE="${HIP_HIPCC_EXECUTABLE}")
 endif()
 
-# Make Rocm lib path available for runtime dlopen (e.g., librocm_smi64.so)
-add_definitions(-DROCM_SMI_LIB_DIR="${ROCM_PATH}/lib")
-
 if(TEST_CLOCK_CYCLE)
   add_definitions(-DTEST_CLOCK_CYCLE)
 endif()

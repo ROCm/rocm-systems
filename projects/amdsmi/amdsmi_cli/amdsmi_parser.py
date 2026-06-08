@@ -2273,6 +2273,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             help=name_help,
         )
 
+        process_parser.add_argument(
+            "--sort-by-pid",
+            action="store_true",
+            default=False,
+            help="Group process output by PID instead of GPU.",
+        )
+
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(process_parser)
         self._add_device_arguments(process_parser, required=False)
@@ -2549,6 +2556,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_exclusive_group.add_argument(
                     "-C",
                     "--compute-partition",
+                    "--accelerator-partition",
                     action="store",
                     choices=accelerator_set_choices,
                     type=lambda value: self._is_command_supported(
@@ -2567,6 +2575,16 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     help=set_memory_partition_help,
                     metavar="PARTITION",
+                )
+                set_value_exclusive_group.add_argument(
+                    "-a",
+                    "--compute-partition-mem-alloc-mode",
+                    action="store",
+                    choices=["CAPPING", "ALL"],
+                    type=str.upper,
+                    required=False,
+                    help="Set compute partition memory allocation mode (CAPPING or ALL). Requires sudo.",
+                    metavar="MODE",
                 )
             # Power cap is enabled on guest, maintain order
             set_value_exclusive_group.add_argument(
@@ -3076,6 +3094,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             monitor_parser.add_argument(
                 "-V", "--violation", action="store_true", required=False, help=violation_help
             )
+
+        monitor_parser.add_argument(
+            "--sort-by-pid",
+            action="store_true",
+            default=False,
+            help="Group process output by PID instead of GPU. Only applies when --process is used.",
+        )
 
         # Add Universal Arguments & Watch Args
         self._add_watch_arguments(monitor_parser)

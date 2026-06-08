@@ -2,34 +2,37 @@
 // SPDX-License-Identifier: MIT
 
 /// @file gpu_memory.h
-/// @brief AMDGPU VRAM memory as a passive simulation component.
+/// @brief AMDGPU VRAM memory with per-process VMID-based page table resolution.
 
 #ifndef ROCJITSU_VM_AMDGPU_GPU_MEMORY_H_
 #define ROCJITSU_VM_AMDGPU_GPU_MEMORY_H_
 
+#include "rocjitsu/kmd/linux/kfd_process.h"
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
+#include "util/log.h"
 
+#include <cstring>
+#include <format>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace rocjitsu {
 namespace amdgpu {
 
-/// @brief AMDGPU VRAM memory as a passive simulation component.
+/// @brief AMDGPU VRAM memory with VMID-based per-process page table resolution.
 ///
-/// @details Inherits all read/write/load functionality from simdojo::SparseMemory.
-/// Memory requests are serviced synchronously via direct read/write calls
-/// from compute units - no step() or event-driven scheduling.
-///
-/// Has an IN port for structural topology visibility. In functional mode,
-/// data flows via direct method calls; the port is unused. In clocked mode
-/// (future), L2 miss traffic would arrive through this port.
+/// @details Mirrors the GFXHUB's VMID register file. Each process registers its
+/// page table via register_process(). Every memory access carries an explicit
+/// vmid parameter that selects the page table for VA-to-host translation,
+/// matching real hardware where the VMID travels with each request from the
+/// issuing wave through the memory hierarchy.
 class GpuMemory : public simdojo::SparseMemory {
 public:
-  /// @brief Construct a GPU memory component.
-  /// @param name Human-readable name (e.g., "vram").
   explicit GpuMemory(std::string name) : simdojo::SparseMemory(std::move(name)) {
     cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                     simdojo::PortProtocol::MEMORY));
@@ -47,12 +50,173 @@ public:
     });
   }
 
-  /// @brief Return the completer port (receives memory requests).
-  /// @returns Pointer to the completer port.
   simdojo::Port *cpl_port() { return cpl_; }
 
+  /// @brief Register a process's page table in the VMID table.
+  void register_process(uint32_t pid, KfdProcess::PageTable *pt, std::shared_mutex *mu) {
+    util::Logger::cp("VMID_REG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
+                     std::dec, " pt_size=", pt->size());
+    std::unique_lock lk(vmid_mutex_);
+    vmid_table_[pid] = {pt, mu};
+  }
+
+  /// @brief Unregister a process from the VMID table.
+  void unregister_process(uint32_t pid) {
+    util::Logger::cp("VMID_UNREG pid=", pid, " mem=0x", std::hex, reinterpret_cast<uintptr_t>(this),
+                     std::dec);
+    std::unique_lock lk(vmid_mutex_);
+    vmid_table_.erase(pid);
+  }
+
+  /// @brief Enable passthrough for unmapped addresses (local/user-mode only).
+  /// @details When true, addresses not found in the page table are treated as
+  /// host pointers (GPU VA == host VA). This mirrors QEMU user-mode's identity
+  /// mapping and is only valid when simulator and target share an address space.
+  void set_passthrough(bool v) { passthrough_ = v; }
+
+  /// @brief Resolve a GPU VA to a host pointer via the given VMID's page table.
+  uint8_t *resolve_host_ptr(uint64_t addr, uint32_t vmid = 0) const {
+    return translate(addr, vmid);
+  }
+
+  /// @brief Look up PTE MTYPE for a GPU VA in the given VMID's page table.
+  Mtype pte_mtype(uint64_t addr, uint32_t vmid = 0) const {
+    if (vmid == 0)
+      return Mtype::RW;
+    {
+      std::shared_lock lk(vmid_mutex_);
+      auto it = vmid_table_.find(vmid);
+      if (it != vmid_table_.end()) {
+        auto &entry = it->second;
+        std::shared_lock pt_lk(*entry.mutex);
+        auto pt_it = entry.page_table->find(addr >> PAGE_SHIFT);
+        if (pt_it != entry.page_table->end())
+          return pt_it->second.mtype;
+      }
+    }
+    return Mtype::RW;
+  }
+
+  uint32_t fetch32(uint64_t addr, uint32_t vmid = 0) const { return read32(addr, vmid); }
+
+  uint8_t *translate_debug(uint64_t addr, uint32_t vmid) const { return translate(addr, vmid); }
+
+  std::string debug_page_table_info(uint32_t vmid, uint64_t page_key) const {
+    std::shared_lock lk(vmid_mutex_);
+    auto it = vmid_table_.find(vmid);
+    if (it == vmid_table_.end())
+      return "vmid_not_found";
+    auto &entry = it->second;
+    std::shared_lock pt_lk(*entry.mutex);
+    auto pt_it = entry.page_table->find(page_key);
+    if (pt_it != entry.page_table->end())
+      return "page_found";
+    std::string result = "page_missing pt_size=" + std::to_string(entry.page_table->size());
+    uint64_t lo = UINT64_MAX, hi = 0;
+    for (auto &[k, v] : *entry.page_table) {
+      if (k < lo)
+        lo = k;
+      if (k > hi)
+        hi = k;
+    }
+    result += " range=[0x" + std::format("{:x}", lo) + ",0x" + std::format("{:x}", hi) + "]";
+    return result;
+  }
+
+  uint8_t read8(uint64_t addr, uint32_t vmid = 0) const {
+    if (auto *p = translate(addr, vmid))
+      return p[addr & PAGE_MASK];
+    return SparseMemory::read8(addr);
+  }
+
+  uint16_t read16(uint64_t addr, uint32_t vmid = 0) const {
+    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
+      uint16_t val;
+      std::memcpy(&val, p + (addr & PAGE_MASK), 2);
+      return val;
+    }
+    return SparseMemory::read16(addr);
+  }
+
+  uint32_t read32(uint64_t addr, uint32_t vmid = 0) const {
+    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
+      uint32_t val;
+      std::memcpy(&val, p + (addr & PAGE_MASK), 4);
+      return val;
+    }
+    return SparseMemory::read32(addr);
+  }
+
+  uint64_t read64(uint64_t addr, uint32_t vmid = 0) const {
+    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
+      uint64_t val;
+      std::memcpy(&val, p + (addr & PAGE_MASK), 8);
+      return val;
+    }
+    return SparseMemory::read64(addr);
+  }
+
+  void write8(uint64_t addr, uint8_t val, uint32_t vmid = 0) {
+    if (auto *p = translate(addr, vmid)) {
+      p[addr & PAGE_MASK] = val;
+      return;
+    }
+    SparseMemory::write8(addr, val);
+  }
+
+  void write16(uint64_t addr, uint16_t val, uint32_t vmid = 0) {
+    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
+      std::memcpy(p + (addr & PAGE_MASK), &val, 2);
+      return;
+    }
+    SparseMemory::write16(addr, val);
+  }
+
+  void write32(uint64_t addr, uint32_t val, uint32_t vmid = 0) {
+    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 4 <= PAGE_SIZE) {
+      std::memcpy(p + (addr & PAGE_MASK), &val, 4);
+      return;
+    }
+    SparseMemory::write32(addr, val);
+  }
+
+  void write64(uint64_t addr, uint64_t val, uint32_t vmid = 0) {
+    if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 8 <= PAGE_SIZE) {
+      std::memcpy(p + (addr & PAGE_MASK), &val, 8);
+      return;
+    }
+    SparseMemory::write64(addr, val);
+  }
+
 private:
+  struct VmidEntry {
+    KfdProcess::PageTable *page_table = nullptr;
+    std::shared_mutex *mutex = nullptr;
+  };
+
+  uint8_t *translate(uint64_t addr, uint32_t vmid) const {
+    if (vmid == 0)
+      return passthrough_ ? reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK) : nullptr;
+    {
+      std::shared_lock lk(vmid_mutex_);
+      auto it = vmid_table_.find(vmid);
+      if (it != vmid_table_.end()) {
+        auto &entry = it->second;
+        std::shared_lock pt_lk(*entry.mutex);
+        auto pt_it = entry.page_table->find(addr >> PAGE_SHIFT);
+        if (pt_it != entry.page_table->end())
+          return pt_it->second.host_ptr;
+      }
+    }
+    if (passthrough_)
+      return reinterpret_cast<uint8_t *>(addr & ~PAGE_MASK);
+    return nullptr;
+  }
+
   simdojo::Port *cpl_ = nullptr;
+  mutable std::shared_mutex vmid_mutex_;
+  std::unordered_map<uint32_t, VmidEntry> vmid_table_;
+  bool passthrough_ = false;
 };
 
 } // namespace amdgpu
