@@ -80,12 +80,14 @@ stream:
   Unit_hipStreamCreateWithPriority_MulthreadDefaultflag:
     <<: *level_2
     # SWDEV-398981 fails in stress test
-    disabled: [amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_wsl, asan]
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
     <<: *level_2
     # Disabling test tracked SWDEV-394199
-    disabled: [amd_windows, amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_windows, amd_wsl, asan]
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_NegTst:
     <<: *level_2
