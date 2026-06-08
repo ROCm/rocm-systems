@@ -57,9 +57,6 @@
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 
-// Internal RCCL symbol exported from librccl.so.
-ncclResult_t ncclCommSetAsyncError(ncclComm_t comm, ncclResult_t nextState);
-
 // ============================================================
 // Shared helpers
 // ============================================================
