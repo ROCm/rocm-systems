@@ -29,7 +29,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
@@ -104,7 +103,7 @@ constexpr uint64_t C_ADDR = 0x300000;
 constexpr uint64_t KERNARG_ADDR = 0x400000;
 
 /// Fixture that loads a device kernel, places it and matrix data in simulator
-/// GPU memory, and dispatches wavefronts via the engine-driven path.
+/// GPU memory, and dispatches wavefronts through the CP worker path.
 struct KernelExecFixture {
   std::unique_ptr<simdojo::SimulationEngine> engine;
   SoC *soc = nullptr;
@@ -115,14 +114,12 @@ struct KernelExecFixture {
     auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
     soc = loaded.soc();
     gpu_mem = loaded.memory();
-    loaded.engine_config.num_threads = num_threads;
+    loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
     loaded.wire_links(engine->topology());
-    if (num_threads > 1)
-      partition_by_xcd(num_threads);
-    else
-      engine->build();
+    soc->for_each_cp([num_threads](auto *cp) { cp->set_dispatch_threads(num_threads); });
+    engine->build();
 
     Executable exec(kernel_path(kernel_name));
     ASSERT_TRUE(exec.is_valid());
@@ -134,28 +131,6 @@ struct KernelExecFixture {
     co->load_to_memory(mem(), KD_ADDR);
     kernel_object = KD_ADDR + co->kernel_descriptor_offset(kernel_name);
     ASSERT_NE(kernel_object, KD_ADDR) << "Kernel descriptor symbol not found";
-  }
-
-  /// Partition so that each XCD's components stay in the same partition.
-  /// Components not under any XCD (SoC, VM, IODs) go to partition 0.
-  void partition_by_xcd(uint32_t num_partitions) {
-    // Build a map from Xcd pointer to partition ID.
-    std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-    for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-      xcd_map[soc->xcd(i)] = i % num_partitions;
-
-    engine->topology().partition_manual(
-        num_partitions, [&](simdojo::Component *c) -> simdojo::PartitionID {
-          // Walk up the parent chain looking for an XCD ancestor.
-          for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-               p = static_cast<simdojo::Component *>(p->parent())) {
-            auto it = xcd_map.find(p);
-            if (it != xcd_map.end())
-              return it->second;
-          }
-          return 0; // Top-level components → partition 0.
-        });
-    engine->build();
   }
 
   amdgpu::GpuMemory *mem() { return gpu_mem; }
@@ -367,9 +342,7 @@ TEST(MatmulStressTest, TiledAllCUs) { run_matmul_stress("matmul_tiled", STRESS_N
 constexpr unsigned MFMA_N = 64;
 TEST(MatmulStressTest, MfmaAllCUs) { run_matmul_stress("matmul_mfma", MFMA_N); }
 
-// Multi-threaded versions: one worker thread per XCD (8 threads).
-// Exercises the barrier-based LBTS protocol with real GPU kernel execution.
-// Multi-threaded: exercises barrier-based LBTS with real GPU kernel execution.
+// Multi-threaded: exercises CP CPU worker execution with real GPU kernel execution.
 TEST(MatmulStressTest, TiledAllCUs_MultiThreaded) {
   run_matmul_stress("matmul_tiled", STRESS_N, TOTAL_XCDS);
 }
@@ -379,7 +352,7 @@ TEST(MatmulStressTest, MfmaAllCUs_MultiThreaded) {
 }
 
 // Topology-only stress test: verify that the CDNA4 topology builds correctly
-// and all 256 CUs can dispatch and halt wavefronts (engine-driven, no kernel execution).
+// and all 256 CUs can dispatch and halt wavefronts (CP worker path, no kernel execution).
 
 TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
@@ -439,25 +412,11 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
-  loaded.engine_config.num_threads = TOTAL_XCDS;
+  loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-
-  // Partition by XCD so each XCD's components stay on one thread.
-  std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-  for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-    xcd_map[soc->xcd(i)] = i;
-  engine->topology().partition_manual(
-      TOTAL_XCDS, [&](simdojo::Component *c) -> simdojo::PartitionID {
-        for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-             p = static_cast<simdojo::Component *>(p->parent())) {
-          auto it = xcd_map.find(p);
-          if (it != xcd_map.end())
-            return it->second;
-        }
-        return 0;
-      });
+  soc->for_each_cp([](auto *cp) { cp->set_dispatch_threads(TOTAL_XCDS); });
   engine->build();
 
   using namespace rocr::llvm::amdhsa;

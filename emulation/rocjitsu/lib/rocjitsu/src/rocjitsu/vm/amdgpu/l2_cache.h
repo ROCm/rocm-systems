@@ -128,6 +128,7 @@ public:
   /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
   ///           old value, compute the new value, and write it in place.
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
+    std::lock_guard<std::recursive_mutex> cache_lock(mutex_);
     uint32_t stripe = (addr >> LINE_SIZE_BITS) & (ATOMIC_STRIPE_COUNT - 1);
     std::lock_guard<std::mutex> lock(atomic_stripes_[stripe]);
     ensure_line(addr, vmid);
@@ -157,7 +158,10 @@ public:
   void flush_line(uint64_t addr, uint32_t vmid = 0);
 
   /// @brief Invalidate all L2 lines.
-  void invalidate_all() { cache_.invalidate_all(); }
+  void invalidate_all() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    cache_.invalidate_all();
+  }
 
   /// @brief Invalidate L2 lines covering an address range.
   /// @details Used after host/SDMA writes to ensure GPU reads reload from
@@ -195,6 +199,7 @@ private:
   static constexpr uint32_t ATOMIC_STRIPE_COUNT = 64;
 
   CacheStore cache_;
+  mutable std::recursive_mutex mutex_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   /// @brief Striped locks for atomic RMW serialization. Each stripe covers

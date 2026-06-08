@@ -15,6 +15,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "linux/uapi/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -24,6 +25,12 @@ using namespace rocjitsu;
 
 namespace {
 
+void set_cpu_dispatch_threads(SoC *soc, uint32_t threads) {
+  if (!soc)
+    return;
+  soc->for_each_cp([threads](auto *cp) { cp->set_dispatch_threads(threads); });
+}
+
 rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, rj_vm_t **handle) {
   if (!loaded.soc())
     return ROCJITSU_STATUS_ERROR;
@@ -31,6 +38,8 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   auto s = std::make_unique<rj_vm_t>();
   s->soc = loaded.soc();
   auto num_xcds = s->soc->num_xcds();
+  uint32_t cpu_dispatch_threads = std::max(loaded.engine_config.num_threads, 1u);
+  loaded.engine_config.num_threads = 1;
 
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);
   bool daemon = (mode == RJ_VM_MODE_DAEMON);
@@ -44,11 +53,13 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
 
   if (loaded.num_gpus > 1 && !loaded.extra_gpu_builds.empty()) {
     std::vector<std::unique_ptr<SoC>> socs;
+    std::vector<SoC *> dispatch_socs;
     std::vector<uint32_t> gpu_ids;
 
     auto root0 = loaded.take_root();
     root0.release();
     socs.push_back(std::unique_ptr<SoC>(s->soc));
+    dispatch_socs.push_back(s->soc);
     gpu_ids.push_back(loaded.devices.empty() ? 0 : loaded.devices[0].gpu_id);
 
     for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
@@ -58,6 +69,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
         continue;
       eb.root.release();
       socs.push_back(std::unique_ptr<SoC>(extra_soc));
+      dispatch_socs.push_back(extra_soc);
       gpu_ids.push_back(i + 1 < loaded.devices.size() ? loaded.devices[i + 1].gpu_id : 0);
     }
 
@@ -72,6 +84,8 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
       if (extra_soc)
         extra_soc->wire_backing(s->engine->topology());
     }
+    for (auto *soc : dispatch_socs)
+      set_cpu_dispatch_threads(soc, cpu_dispatch_threads);
   } else {
     auto root = loaded.take_root();
     root.release();
@@ -80,6 +94,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     s->engine->topology().set_root(std::move(vm_ptr));
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
+    set_cpu_dispatch_threads(s->soc, cpu_dispatch_threads);
   }
   s->engine->build();
 

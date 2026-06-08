@@ -14,4 +14,5 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     l1_vector_cache.cpp
     l2_cache.cpp
     memory_side_cache.cpp
+    partitioning.cpp
 )

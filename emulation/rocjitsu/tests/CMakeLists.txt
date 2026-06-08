@@ -43,6 +43,7 @@ add_executable(
     vector_add_test.cpp
     gfx1250_sim_test.cpp
     simdojo_sim_test.cpp
+    partitioning_test.cpp
     simulated_driver_test.cpp
     decode_smoke_test.cpp
     shared_infra_test.cpp

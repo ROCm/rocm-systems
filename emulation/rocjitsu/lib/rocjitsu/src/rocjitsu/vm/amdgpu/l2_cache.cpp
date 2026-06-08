@@ -70,6 +70,7 @@ void L2Cache::ensure_line(uint64_t addr, uint32_t vmid) {
 }
 
 void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint32_t vmid) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (mtype == Mtype::UC) {
     send_backing(addr, dst, size, simdojo::MessageOp::READ, vmid);
     return;
@@ -95,6 +96,7 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
 }
 
 void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype, uint32_t vmid) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (mtype == Mtype::UC) {
     send_backing(addr, const_cast<uint8_t *>(src), size, simdojo::MessageOp::WRITE, vmid);
     return;
@@ -129,12 +131,14 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
 }
 
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   uint64_t line_addr = CacheStore::line_address(addr);
   ensure_line(line_addr, vmid);
   cache_.read_line(line_addr, line_buf, 0, LINE_SIZE);
 }
 
 void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype, uint32_t vmid) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   simdojo::CacheTag *tag = nullptr;
   if (cache_.lookup(line_addr, &tag)) {
     cache_.write_line(line_addr, data, 0, LINE_SIZE);
@@ -166,6 +170,7 @@ void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtyp
 }
 
 void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   simdojo::CacheTag *tag = nullptr;
   if (!cache_.lookup(addr, &tag))
     return;
@@ -180,6 +185,7 @@ void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
 }
 
 void L2Cache::flush_all(uint32_t vmid) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   uint32_t dirty_count = 0;
   uint64_t min_addr = UINT64_MAX, max_addr = 0;
   cache_.for_each_dirty([this, vmid, &dirty_count, &min_addr,
@@ -198,6 +204,7 @@ void L2Cache::flush_all(uint32_t vmid) {
 }
 
 void L2Cache::invalidate_range(uint64_t addr, uint32_t size) {
+  std::lock_guard<std::recursive_mutex> lock(mutex_);
   if (size == 0)
     return;
   uint64_t line_start = CacheStore::line_address(addr);

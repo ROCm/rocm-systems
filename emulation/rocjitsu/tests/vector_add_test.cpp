@@ -35,7 +35,6 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
@@ -138,9 +137,7 @@ TEST(VectorAddStressTest, AllCUsGoldenReference) {
   EXPECT_EQ(mismatches, 0u) << mismatches << " elements differ (showing first 10)";
 }
 
-// Multi-threaded version: one worker thread per XCD (8 threads).
-// Exercises the barrier-based LBTS protocol with real GPU kernel execution.
-// Multi-threaded: exercises barrier-based LBTS with real GPU kernel execution.
+// Multi-threaded: exercises CP CPU worker execution with real GPU kernel execution.
 TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   Executable exec(kernel_path("vector_add"));
   ASSERT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
@@ -151,25 +148,11 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
-  loaded.engine_config.num_threads = TOTAL_XCDS;
+  loaded.engine_config.num_threads = 1;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
-
-  // Partition by XCD so each XCD's components stay on one thread.
-  std::unordered_map<simdojo::Component *, simdojo::PartitionID> xcd_map;
-  for (uint32_t i = 0; i < soc->num_xcds(); ++i)
-    xcd_map[soc->xcd(i)] = i;
-  engine->topology().partition_manual(
-      TOTAL_XCDS, [&](simdojo::Component *c) -> simdojo::PartitionID {
-        for (auto *p = static_cast<simdojo::Component *>(c); p != nullptr;
-             p = static_cast<simdojo::Component *>(p->parent())) {
-          auto it = xcd_map.find(p);
-          if (it != xcd_map.end())
-            return it->second;
-        }
-        return 0;
-      });
+  soc->for_each_cp([](auto *cp) { cp->set_dispatch_threads(TOTAL_XCDS); });
   engine->build();
 
   co->load_to_memory(memory, KD_ADDR);

@@ -18,11 +18,13 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <elf.h>
 #include <format>
 #include <limits>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <sys/mman.h>
@@ -86,7 +88,136 @@ bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
   }
 }
 
+bool run_cu_quantum(ComputeUnitCore *cu) {
+  bool ran = false;
+  for (uint32_t i = 0; i < ComputeUnitCore::kFunctionalQuantum; ++i) {
+    if (!cu->has_active_wfs())
+      break;
+    ran = true;
+    if (!cu->step())
+      break;
+  }
+  return ran;
+}
+
 } // namespace
+
+class CpuDispatchPool {
+public:
+  explicit CpuDispatchPool(uint32_t threads) {
+    uint32_t worker_count = threads > 1 ? threads - 1 : 0;
+    workers_.reserve(worker_count);
+    for (uint32_t i = 0; i < worker_count; ++i)
+      workers_.emplace_back([this](std::stop_token stop) { worker_loop(stop); });
+  }
+
+  ~CpuDispatchPool() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stopping_ = true;
+      ++generation_;
+    }
+    work_cv_.notify_all();
+  }
+
+  void run(std::span<ComputeUnitCore *> tasks) {
+    if (tasks.empty())
+      return;
+
+    if (workers_.empty()) {
+      for (auto *cu : tasks)
+        run_cu_quantum(cu);
+      return;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      tasks_.assign(tasks.begin(), tasks.end());
+      next_task_ = 0;
+      active_workers_ = 0;
+      ++generation_;
+    }
+    work_cv_.notify_all();
+
+    while (auto *cu = take_task()) {
+      run_cu_quantum(cu);
+      finish_task();
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    done_cv_.wait(lock,
+                  [this]() { return next_task_ >= tasks_.size() && active_workers_ == 0; });
+    tasks_.clear();
+  }
+
+private:
+  ComputeUnitCore *take_task() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (next_task_ >= tasks_.size())
+      return nullptr;
+    ++active_workers_;
+    return tasks_[next_task_++];
+  }
+
+  void finish_task() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    --active_workers_;
+    if (next_task_ >= tasks_.size() && active_workers_ == 0)
+      done_cv_.notify_one();
+  }
+
+  void worker_loop(std::stop_token stop) {
+    uint64_t seen_generation = 0;
+    while (true) {
+      std::unique_lock<std::mutex> lock(mutex_);
+      work_cv_.wait(lock, [this, &stop, seen_generation]() {
+        return stopping_ || stop.stop_requested() || generation_ != seen_generation;
+      });
+      if (stopping_ || stop.stop_requested())
+        return;
+      seen_generation = generation_;
+
+      while (next_task_ < tasks_.size()) {
+        auto *cu = tasks_[next_task_++];
+        ++active_workers_;
+        lock.unlock();
+        run_cu_quantum(cu);
+        lock.lock();
+        --active_workers_;
+      }
+
+      if (next_task_ >= tasks_.size() && active_workers_ == 0)
+        done_cv_.notify_one();
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable work_cv_;
+  std::condition_variable done_cv_;
+  std::vector<std::jthread> workers_;
+  std::vector<ComputeUnitCore *> tasks_;
+  size_t next_task_ = 0;
+  size_t active_workers_ = 0;
+  uint64_t generation_ = 0;
+  bool stopping_ = false;
+};
+
+CommandProcessor::CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {}
+
+CommandProcessor::~CommandProcessor() {
+  stop_doorbell_monitor();
+  dispatch_pool_.reset();
+}
+
+void CommandProcessor::set_dispatch_threads(uint32_t threads) {
+  threads = std::max(threads, 1u);
+  if (dispatch_threads_ == threads)
+    return;
+  dispatch_threads_ = threads;
+  dispatch_pool_.reset();
+  if (dispatch_threads_ > 1)
+    dispatch_pool_ = std::make_unique<CpuDispatchPool>(dispatch_threads_);
+}
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
                                            const DispatchEntry &pkt, uint32_t global_wg_id,
@@ -660,6 +791,33 @@ void CommandProcessor::process_queues() {
   }
 }
 
+bool CommandProcessor::has_active_cus() const {
+  for (auto *cu : cus_) {
+    if (cu->has_active_wfs())
+      return true;
+  }
+  return false;
+}
+
+bool CommandProcessor::run_active_cus_once() {
+  std::vector<ComputeUnitCore *> active;
+  active.reserve(cus_.size());
+  for (auto *cu : cus_) {
+    if (cu->has_active_wfs())
+      active.push_back(cu);
+  }
+  if (active.empty())
+    return false;
+
+  if (dispatch_pool_) {
+    dispatch_pool_->run(active);
+  } else {
+    for (auto *cu : active)
+      run_cu_quantum(cu);
+  }
+  return true;
+}
+
 rocr::llvm::amdhsa::kernel_descriptor_t
 CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid,
                                          [[maybe_unused]] bool host_accessible) {
@@ -1048,7 +1206,11 @@ void CommandProcessor::fetch_packets() {
     fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
 }
 
-void CommandProcessor::handle_doorbell(simdojo::Tick) {
+void CommandProcessor::handle_doorbell(simdojo::Tick timestamp) {
+  handle_doorbell_sync(timestamp);
+}
+
+void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
   util::Logger::cp(
       [&](auto &os) { os << std::format("{}: DOORBELL queues={}", name(), hw_queues_.size()); });
 
@@ -1073,6 +1235,17 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
     os << std::format("{}: FETCHED {} new entries (total={})", name(),
                       entries_after - entries_before, entries_after);
   });
+
+  auto run_dispatch_workers = [&]() {
+    if (dispatch_threads_ <= 1 || !has_active_cus())
+      return false;
+    lock.unlock();
+    bool ran = run_active_cus_once();
+    lock.lock();
+    if (completion_)
+      completion_->drain_completions(new_queue_states_);
+    return ran;
+  };
 
   // Phase 1: Dispatch-Execute-Complete loop (functional mode).
   bool progress = true;
@@ -1119,6 +1292,10 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
           if (sent > 0)
             progress = true;
 
+          bool ran_workers = run_dispatch_workers();
+          if (ran_workers)
+            progress = true;
+
           if (completion_)
             completion_->drain_completions(new_queue_states_);
 
@@ -1132,7 +1309,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
             ++qs.next_dispatch_idx;
             break;
           }
-          if (sent == 0) {
+          if (sent == 0 && !ran_workers) {
             backpressure = true;
             break;
           }
@@ -1141,6 +1318,9 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
           break;
       }
     }
+
+    if (run_dispatch_workers())
+      progress = true;
   }
 
   // Final drain: catch any entries that became fully_completed during the

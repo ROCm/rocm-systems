@@ -49,6 +49,8 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
+class CpuDispatchPool;
+
 /// @brief Description of an AQL hardware queue registered with the CP.
 struct HwQueue {
   uint32_t process_id = 0;
@@ -84,8 +86,8 @@ enum class SdmaPacketDialect {
 /// not on global CU idle. Signals fire in per-queue submission order.
 class CommandProcessor : public simdojo::Component {
 public:
-  explicit CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {}
-  ~CommandProcessor() override { stop_doorbell_monitor(); }
+  explicit CommandProcessor(std::string name);
+  ~CommandProcessor() override;
 
   void set_memory(GpuMemory *mem) { memory_ = mem; }
   void add_l2_cache(L2Cache *l2) { l2_caches_.push_back(l2); }
@@ -94,6 +96,8 @@ public:
   void set_packed_tid(bool v) { packed_tid_ = v; }
   void set_sdma_packet_dialect(SdmaPacketDialect dialect) { sdma_packet_dialect_ = dialect; }
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
+  void set_dispatch_threads(uint32_t threads);
+  uint32_t dispatch_threads() const { return dispatch_threads_; }
   /// @brief Update doorbell_base for all queues belonging to a process.
   /// @details Called when the doorbell page is mmap'd after queue creation.
   void set_doorbell_base(uint32_t process_id, void *base);
@@ -185,12 +189,19 @@ private:
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
 
+  /// @brief Execute one functional quantum on each active CU using the CP CPU pool.
+  bool run_active_cus_once();
+
+  bool has_active_cus() const;
+
   /// @brief Called from CU on_idle callback. In functional mode with quantum>0,
   /// checks for stalled dispatches that can resume.
   void on_cu_idle();
 
   /// @brief Queue scheduling: select next queue with undispatched entries.
   HwQueueState *schedule_next_queue();
+
+  void handle_doorbell_sync(simdojo::Tick timestamp);
 
   /// @brief Check if barrier is satisfied for an entry.
   bool barrier_satisfied(const HwQueueState &qs, size_t idx) const;
@@ -233,6 +244,8 @@ private:
   SdmaPacketDialect sdma_packet_dialect_ = SdmaPacketDialect::Legacy;
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
+  uint32_t dispatch_threads_ = 1;
+  std::unique_ptr<CpuDispatchPool> dispatch_pool_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;
