@@ -170,6 +170,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
   uint64_t* countersLocal = nullptr;
   ncclGinAnvilGPUContext* gpuCtxHostArr = nullptr;
   struct ncclDevrState* devr = nullptr;
+  size_t queueSlots = 0;
   if (nContexts < 1) nContexts = 1;
   NCCLCHECK(ncclCalloc(&ctx, 1));
   ctx->comm = comm;
@@ -219,7 +220,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
 
   NCCLCHECKGOTO(setupSignalBases(ctx, comm, signalsLocal), ret, fail_signals);
   ctx->numSdmaChannels = ginAnvilParseNumSdmaChannels();
-  size_t queueSlots = (size_t)comm->nRanks * (size_t)ctx->numSdmaChannels;
+  queueSlots = (size_t)comm->nRanks * (size_t)ctx->numSdmaChannels;
   NCCLCHECKGOTO(ncclCalloc(&ctx->queuesHost, queueSlots), ret, fail_signals);
 
   if (!rocshmem::anvil::initEndpoint()) {
