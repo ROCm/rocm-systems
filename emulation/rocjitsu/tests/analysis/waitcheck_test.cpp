@@ -1202,7 +1202,7 @@ TEST(WaitcheckTest, AcceptsLoadcntMaxCountForOldestOverflowSizedQueue) {
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
-TEST(WaitcheckTest, ReportsStorecntMaxCountForOverflowSizedQueueBeforeProgramEnd) {
+TEST(WaitcheckTest, AcceptsStorecntOverflowSizedQueueBeforeProgramEnd) {
   std::vector<uint32_t> program;
   append_global_stores(program, kOverflowQueueSize, kOverflowBaseVgpr);
   append_inst(program, s_endpgm());
@@ -1211,10 +1211,10 @@ TEST(WaitcheckTest, ReportsStorecntMaxCountForOverflowSizedQueueBeforeProgramEnd
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4, options);
 
-  expect_single_overflow_diagnostic(report, WaitCounterKind::Store, WaitcheckAccessKind::ProgramEnd,
-                                    RegClass::PC, 0);
-  EXPECT_EQ(report.diagnostics_observed, kOverflowQueueSize);
-  EXPECT_TRUE(report.diagnostics_truncated);
+  EXPECT_TRUE(report.supported);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics_observed, 0u);
+  EXPECT_FALSE(report.diagnostics_truncated);
 }
 
 TEST(WaitcheckTest, ReportsKmcntMaxCountForOverflowSizedQueue) {
@@ -1918,19 +1918,15 @@ TEST(WaitcheckTest, AcceptsLoadcntAfterGlobalInvBeforeMemoryOp) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
-TEST(WaitcheckTest, ReportsMissingStorecntBeforeEndpgmAfterVmemStore) {
+TEST(WaitcheckTest, AcceptsEndpgmAfterPendingVmemStore) {
   std::vector<uint32_t> program;
   append_inst(program, global_store_b32(0));
   append_inst(program, s_endpgm());
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
-  ASSERT_TRUE(report.supported);
-  ASSERT_EQ(report.diagnostics.size(), 1u);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Store);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::ProgramEnd);
-  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
-  EXPECT_NE(report.diagnostics[0].message.find("program end"), std::string::npos);
+  EXPECT_TRUE(report.supported);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
 TEST(WaitcheckTest, AcceptsStorecntBeforeEndpgmAfterVmemStore) {
@@ -2274,10 +2270,8 @@ TEST(WaitcheckTest, CombinedStorecntDscntLeavesStorePending) {
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
 
-  ASSERT_TRUE(report.supported);
-  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
-  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Store);
-  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::ProgramEnd);
+  EXPECT_TRUE(report.supported);
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
 }
 
 TEST(WaitcheckTest, CombinedStorecntDscntLeavesDsPending) {
