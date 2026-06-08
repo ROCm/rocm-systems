@@ -271,7 +271,7 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
     HIP_RETURN(status);
   }
   d_kernel->workGroupInfo()->groupMemCarveout_ =
-      d_kernel->device().GetGroupMemCarveout(static_cast<amd::FuncCache>(cacheConfig));
+      amd::funcCacheToCarveoutPercent(static_cast<uint32_t>(cacheConfig));
 
   HIP_RETURN(hipSuccess);
 }

@@ -35,7 +35,7 @@ All commands are run from the rocjitsu project root:
 export MRISA=/path/to/mrisa  # directory containing amdgpu_isa_*.xml files
 ```
 
-### Regenerate ISA decoders/encoders (all 9 ISAs)
+### Regenerate ISA decoders/encoders (all AMDGPU ISAs)
 
 Use the convenience script from the rocjitsu project root:
 
@@ -44,7 +44,7 @@ bash tmp/gen-amdgpu.sh
 ```
 
 This regenerates all ISA files (decoders, encoders, instruction classes, shared execute
-templates) for all 9 ISAs into `isa/arch/amdgpu/`. See `tmp/gen-amdgpu.sh` for the
+templates) for all AMDGPU ISAs into `isa/arch/amdgpu/`. See `tmp/gen-amdgpu.sh` for the
 underlying `python3 -m amdisa --multi --gen-all --gen-shared-execute` invocation.
 
 ### Regenerate DBT files (legalization tables + encoding translators)

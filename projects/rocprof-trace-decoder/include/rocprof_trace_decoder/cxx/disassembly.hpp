@@ -168,12 +168,16 @@ public:
 
         if (auto offset_it = params.find("offset"); offset_it != params.end())
         {
-            offset = std::stoul(offset_it->second, nullptr, 0);
+            auto parsed_offset = std::stoull(offset_it->second, nullptr, 0);
+            if (parsed_offset > std::numeric_limits<size_t>::max()) throw std::out_of_range("URI offset too large");
+            offset = static_cast<size_t>(parsed_offset);
         }
 
         if (auto size_it = params.find("size"); size_it != params.end())
         {
-            if ((size = std::stoul(size_it->second, nullptr, 0)) == 0) return;
+            auto parsed_size = std::stoull(size_it->second, nullptr, 0);
+            if (parsed_size > std::numeric_limits<size_t>::max()) throw std::out_of_range("URI size too large");
+            if ((size = static_cast<size_t>(parsed_size)) == 0) return;
         }
 
         if (protocol == "memory") throw std::runtime_error(protocol + " protocol not supported!");
