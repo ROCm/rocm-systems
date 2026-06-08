@@ -16,6 +16,8 @@ rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+set(PC_SAMPLING_BETA_ENV "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on")
+
 # To ensure we sample all agents, use 16 threads each assigned to one agent in a round
 # robin manner. To keep the job per device reasonable, each thread offloads 100 instances
 # of a transpose kernel.
@@ -33,6 +35,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PC_SAMPLING_BETA_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd
@@ -69,6 +72,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PC_SAMPLING_BETA_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-json
@@ -104,6 +108,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PC_SAMPLING_BETA_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP
         rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-yaml

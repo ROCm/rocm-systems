@@ -50,7 +50,8 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 # Check if PC sampling is disabled and whether we should disable the test
 rocprofiler_sdk_pc_sampling_disabled(IS_PC_SAMPLING_DISABLED)
 
-set(pc-sampling-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
+set(pc-sampling-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV}
+                    "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on")
 
 add_test(NAME pc-sampling COMMAND $<TARGET_FILE:pc-sampling>)
 

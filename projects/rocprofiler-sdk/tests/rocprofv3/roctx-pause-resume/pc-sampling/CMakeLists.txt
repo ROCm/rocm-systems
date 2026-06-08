@@ -38,7 +38,7 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(roctx-pause-resume-env "${PRELOAD_ENV}")
+set(roctx-pause-resume-env "${PRELOAD_ENV}" "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-roctx-pause-resume-pc-sampling

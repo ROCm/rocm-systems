@@ -16,6 +16,8 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+set(PC_SAMPLING_BETA_ENV "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     COMMAND
@@ -27,6 +29,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PC_SAMPLING_BETA_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
@@ -61,6 +64,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PC_SAMPLING_BETA_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
@@ -94,6 +98,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PC_SAMPLING_BETA_ENV}"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
