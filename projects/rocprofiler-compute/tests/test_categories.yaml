@@ -16,6 +16,7 @@ test_categories:
       - test_analysis_db
       - test_torch_trace_analysis
       - test_torch_trace_coverage
+      - test_L1_cache_counters
       - test_data_imputation
       - test_roofline_calc_ai_analyze
       - test_num_xcds_spec_class
@@ -31,7 +32,6 @@ test_categories:
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_L1_cache_counters
     labels:
       - "quick"
       - "pre-commit"
@@ -64,6 +64,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
+      - test_L1_cache_counters
       - test_roofline_calc_ai_analyze
       - test_torch_trace_analysis
       - test_torch_trace_coverage
@@ -80,7 +81,6 @@ test_categories:
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_L1_cache_counters
     labels:
       - "standard"
       - "pr"
@@ -112,6 +112,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
+      - test_L1_cache_counters
       - test_roofline_calc_ai_analyze
       - test_torch_trace_analysis
       - test_torch_trace_coverage
@@ -128,7 +129,6 @@ test_categories:
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_L1_cache_counters
     labels:
       - "comprehensive"
       - "nightly"
@@ -160,6 +160,7 @@ test_categories:
       - test_num_xcds_spec_class
       - test_mi_gpu_spec
       - test_utils
+      - test_L1_cache_counters
       - test_roofline_calc_ai_analyze
       - test_torch_trace_analysis
       - test_torch_trace_coverage
@@ -176,7 +177,6 @@ test_categories:
     exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
-      - test_L1_cache_counters
     labels:
       - "full"
       - "weekly"
