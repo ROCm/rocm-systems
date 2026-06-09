@@ -947,6 +947,10 @@ def _load_test_categories() -> Optional[dict]:
             "include": _compile_list(cfg.get("test_patterns")),
             "exclude": _compile_list(cfg.get("exclude")),
             "excluded_labels": set(cfg.get("excluded_labels") or []),
+            # Supplementary CTest labels declared by the tier (e.g. quick's
+            # `pre-commit` / `smoke`, comprehensive's `nightly`). Emitted in
+            # addition to the tier name by _resolve_tier_labels().
+            "labels": list(cfg.get("labels") or []),
         }
 
     arch_exclude: dict[str, list] = {}  # {label: [compiled_patterns]}
@@ -976,11 +980,17 @@ def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
     ``exclude`` punches a hole through the cascade for individual tests:
     listing ``testA`` under ``standard.exclude`` drops ``standard`` from
     its label set even if ``quick`` / ``comprehensive`` / ``full`` match.
+
+    In addition to the tier name, each matched tier contributes its
+    supplementary ``labels:`` (e.g. ``pre-commit`` / ``smoke`` for quick,
+    ``nightly`` for comprehensive), so ``ctest -L <alias>`` works for the
+    aliases declared in test_categories.yaml.
     """
     categories = _load_test_categories()
     if not categories:
         return set()
     matched_indices: list[int] = []
+    extra_labels: set[str] = set()
     for i, tier in enumerate(TIER_ORDER):
         cfg = categories["tiers"].get(tier) or {}
         if not any(p.search(test_name) for p in cfg.get("include", [])):
@@ -990,7 +1000,8 @@ def _resolve_tier_labels(test_name: str, existing_labels: set[str]) -> set[str]:
         if existing_labels & cfg.get("excluded_labels", set()):
             continue
         matched_indices.append(i)
-    return {TIER_ORDER[i] for i in matched_indices}
+        extra_labels.update(cfg.get("labels", []))
+    return {TIER_ORDER[i] for i in matched_indices} | extra_labels
 
 
 def _resolve_arch_exclude_labels(test_name: str) -> set[str]:
