@@ -339,24 +339,12 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         }
         auto missing_counters_str = fmt::format("{}", fmt::join(missing_counters, ", "));
 
-        // In production, warn and continue with available counters
         LOG_WARNING("Unable to find all counters for agent {} (gpu-{}, {}). "
                     "Requested: {}. Found: {}. Missing: {}. Continuing with "
                     "available counters.",
                     tool_agent_v->agent->node_id, tool_agent_v->device_id,
                     tool_agent_v->agent->name, requested_counters, found_counters,
                     missing_counters_str);
-
-        if(get_is_continuous_integration())
-        {
-            LOG_CRITICAL("Unable to find all counters for agent {} (gpu-{}, {}) in "
-                         "{}. Found: {}",
-                         tool_agent_v->agent->node_id, tool_agent_v->device_id,
-                         tool_agent_v->agent->name, requested_counters, found_counters);
-
-            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-            ::std::abort();
-        }
     }
 
     if(!counters_v.empty())
@@ -1454,7 +1442,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
-                if(get_is_continuous_integration())
                 {
                     LOG_CRITICAL("Unhandled callback record: {}",
                                  static_cast<int>(record.kind));
@@ -1465,7 +1452,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
             default:
             {
-                if(get_is_continuous_integration())
                 {
                     LOG_CRITICAL("Unhandled callback record: {}", info.str());
                     ::rocprofsys::set_state(::rocprofsys::State::Finalized);
@@ -1547,7 +1533,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_HIP_STREAM:
 #endif
             {
-                if(get_is_continuous_integration())
                 {
                     LOG_CRITICAL("Unhandled callback record: {}",
                                  static_cast<int>(record.kind));
@@ -1558,7 +1543,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
             default:
             {
-                if(get_is_continuous_integration())
                 {
                     LOG_CRITICAL("Unhandled callback record: {}", info.str());
                     ::rocprofsys::set_state(::rocprofsys::State::Finalized);
@@ -1669,14 +1653,10 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else
     {
-        if(get_is_continuous_integration())
-        {
-            LOG_CRITICAL("unhandled callback record phase: {}",
-                         static_cast<int>(record.phase));
-            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-            ::std::abort();
-        }
-        LOG_WARNING("tool_tracing_callback: unhandled callback record: {}", info.str());
+        LOG_CRITICAL("unhandled callback record phase: {}",
+                     static_cast<int>(record.phase));
+        ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+        ::std::abort();
     }
 }
 
@@ -1694,7 +1674,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         return fmt::format("HIP Activity Stream {}", _stream_id);
     };
 
-    const bool _default_group_by_queue = get_group_by_queue();
+    const bool _default_group_by_queue = config::get_group_by_queue();
 
     static auto _mtx = std::mutex{};
     auto        _lk  = std::unique_lock<std::mutex>{ _mtx };
@@ -2582,12 +2562,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             &_data->memory_alloc_buffer));
         if(_data->memory_alloc_buffer.handle == 0UL)
         {
-            if(get_is_continuous_integration())
-            {
-                LOG_CRITICAL("Failed to create memory allocation buffer");
-                ::rocprofsys::set_state(::rocprofsys::State::Finalized);
-                ::std::abort();
-            }
+            LOG_CRITICAL("Failed to create memory allocation buffer");
+            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            ::std::abort();
         }
         auto _ops =
             rocprofiler_sdk::get_operations(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
@@ -2692,6 +2669,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(!_counter_events.empty())
     {
+        // Resolve counter names to counter IDs per agent
         for(const auto& itr : _data->gpu_agents)
         {
             const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
@@ -2699,6 +2677,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
         }
 
+        // --- Dispatch-mode kernel counters ---
         ROCPROFILER_CALL(rocprofiler_create_context(&_data->counter_ctx));
 
         auto _operations = std::array<rocprofiler_tracing_operation_t, 1>{
@@ -2713,6 +2692,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->counter_ctx, dispatch_counting_service_callback, _data,
             counter_record_callback, _data));
     }
+
+#if ROCPROFILER_VERSION >= 600
+    const auto gpu_perf_counters_setting = get_gpu_perf_counters();
+    if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
+    {
+        pmc::register_gpu_perf_counter_source(
+            get_agent_manager_instance().get_agents_by_type(agent_type::GPU));
+    }
+#endif
 
     for(const auto& itr : _data->get_buffers())
     {
@@ -2733,7 +2721,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     gpu::add_device_metadata();
 
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
     {
         LOG_DEBUG("Setting PMC sampler state to active...");
         pmc::set_state(State::Active);
@@ -2781,8 +2769,6 @@ finalize_sdk_common()
     flush();
     stop();
 
-    if(config::get_use_process_sampling() && config::get_use_amd_smi()) pmc::shutdown();
-
     if(get_counter_storage())
     {
         flush_counter_storage_outputs();
@@ -2824,7 +2810,6 @@ tool_fini(void* callback_data)
 void
 flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 {
-    // Get current timestamp if not provided
     if(timestamp == 0)
     {
         ROCPROFILER_CALL(rocprofiler_get_timestamp(&timestamp));
@@ -3087,7 +3072,7 @@ extern "C"
             _first = false;
         }
 
-        if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
+        if(!rocprofsys::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
         if(!tim::settings::enabled()) return nullptr;
 
         if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;

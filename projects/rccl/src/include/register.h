@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2024-2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_REGISTER_H_
 #define NCCL_REGISTER_H_
@@ -51,6 +52,9 @@ struct ncclReg {
   uintptr_t caddrs[NCCL_MAX_LOCAL_RANKS]; /* use to check if NVLS buffers match among intra-node ranks */
   // collnet reg
   void* collnetHandle;
+  // gin reg
+  void** ginMhandles;
+  void** ginHandles;
   struct ncclProxyConnector* collnetProxyconn;
   // general ipc reg
   struct ncclPeerRegIpcAddr regIpcAddrs;

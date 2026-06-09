@@ -5,6 +5,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <algorithm>
 #include <initializer_list>
 #include <memory>
 #include "hip/driver_types.h"
@@ -105,7 +106,10 @@ hipExtent generateExtent(AllocationApi api) {
   hipExtent extent;
   if (api == AllocationApi::hipMalloc3D) {
     auto& extents3D = ExtentGenerator::getInstance().extents3D;
-    extent = GENERATE_REF(from_range(extents3D.begin(), extents3D.end()));
+    // At level_0: 4 edge cases + 4 random = 8 extents (vs 24 normally)
+    auto end3D = isQuickLevel() ? extents3D.begin() + std::min(extents3D.size(), size_t(8))
+                                : extents3D.end();
+    extent = GENERATE_REF(from_range(extents3D.begin(), end3D));
   } else {
     auto& extents2D = ExtentGenerator::getInstance().extents2D;
     extent = GENERATE_REF(from_range(extents2D.begin(), extents2D.end()));

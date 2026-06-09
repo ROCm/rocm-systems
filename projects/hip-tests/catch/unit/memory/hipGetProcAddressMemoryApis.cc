@@ -7,7 +7,6 @@
 #include <hip_test_common.hh>
 #include <hip_test_helper.hh>
 #include <utils.hh>
-#include "hipMallocManagedCommon.hh"
 #include "../device/hipGetProcAddressHelpers.hh"
 
 /**
@@ -1439,7 +1438,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       reinterpret_cast<hipError_t (*)(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>(
           hipMemcpyWithStream_ptr);
   int N = 4096;
-  const int Ns = 4;
+  const int Ns = isQuickLevel() ? 2 : 4;
   int Nbytes = N * sizeof(int);
   int value = 2;
   // Validating hipMemcpyHtoDAsync API
@@ -5381,10 +5380,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisAddressRelated) {
  *  - HIP_VERSION >= 6.2
  */
 HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisManagedMemory) {
-  if (HmmAttrPrint() != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
-    return;
-  }
+  CHECK_MANAGED_MEMORY_SUPPORT
 
   void* hipMallocManaged_ptr = nullptr;
   void* hipMemPrefetchAsync_ptr = nullptr;
@@ -5676,8 +5672,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory) {
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
 
   if (mem_pool_support != 1) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kMemoryPoolUnsupported);
   }
 
   void* hipMallocAsync_ptr = nullptr;
@@ -6020,8 +6015,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
   if (deviceCount < 2) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 
   void* hipMemGetAddressRange_ptr = nullptr;
@@ -6052,8 +6046,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisPeerToPeer) {
   int canAccessPeer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId));
   if (!canAccessPeer) {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
   }
 
   const int N = 16;

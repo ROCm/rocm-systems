@@ -12,7 +12,7 @@ subtrees:
 - caption: Install
   entries:
   - file: install/install.md
-    title: Library and CLI tool installation
+    title: Install AMD SMI
   - file: install/build.md
     title: Build from source
 
@@ -26,6 +26,8 @@ subtrees:
     title: Go library usage
   - file: how-to/amdsmi-cli-tool.md
     title: CLI tool usage
+  - file: how-to/amdsmi-nic-integration.md
+    title: AI NIC integration
   - file: how-to/setup-docker-container.md
     title: Use AMD SMI in a Docker container
 
@@ -53,6 +55,8 @@ subtrees:
 
 - caption: Conceptual
   entries:
+  - file: conceptual/partition.md
+    title: GPU partitioning
   - file: conceptual/gpu-violations.md
   - file: conceptual/perf-determinism.md
     title: Performance determinism

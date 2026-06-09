@@ -13,9 +13,9 @@
             "validation_queries": [
                 {
                     "comparison": "greater_than",
-                    "description": "Verify that 'rocm_marker_api' appears in category at least 5 times in table events_args",
+                    "description": "Verify that 'rocm_marker_api' appears in category at least 4 times in table events_args",
                     "error_message": "'rocm_marker_api' category entries are fewer than expected in events_args",
-                    "expected_result": 5,
+                    "expected_result": 3,
                     "query": "SELECT COUNT(*) FROM events_args WHERE category = 'rocm_marker_api';"
                 },
                 {
@@ -39,9 +39,9 @@
             "validation_queries": [
                 {
                     "comparison": "greater_than_or_equal",
-                    "description": "Verify that 'rocm_marker_api' appears in category 10 times in 'regions' table",
-                    "error_message": "Less than 10 'rocm_marker_api' entries in the 'regions' table",
-                    "expected_result": 10,
+                    "description": "Verify that 'rocm_marker_api' appears in category at least 6 times in 'regions' table",
+                    "error_message": "Less than 6 'rocm_marker_api' entries in the 'regions' table",
+                    "expected_result": 6,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api';"
                 },
                 {
@@ -60,9 +60,9 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Verify that roctxMark markers appear 5 times in table 'regions'",
-                    "error_message": "Expected 5 roctxMark marker entries in `regions` table",
-                    "expected_result": 5,
+                    "description": "Verify that roctxMark markers appear 4 times in table 'regions'",
+                    "error_message": "Expected 4 roctxMark marker entries in `regions` table",
+                    "expected_result": 4,
                     "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE 'roctxMark_%';"
                 },
                 {

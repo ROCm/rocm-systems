@@ -1,7 +1,8 @@
 #
-# Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
-# See LICENSE.txt for license information
+# See LICENSE.txt for more license information
 #
 
 CUDA_HOME ?= /usr/local/cuda
@@ -19,8 +20,9 @@ RDMA_CORE ?= 0
 NET_PROFILER ?= 0
 MLX5DV ?= 0
 MAX_EXT_NET_PLUGINS ?= 0
+EMIT_LLVM_IR ?= 0
 
-NVCC = $(CUDA_HOME)/bin/nvcc
+NVCC ?= $(CUDA_HOME)/bin/nvcc
 
 CUDA_LIB ?= $(CUDA_HOME)/lib64
 CUDA_INC ?= $(CUDA_HOME)/include
@@ -84,6 +86,8 @@ CXXFLAGS   := -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR) -fPIC -fvisi
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD) --expt-extended-lambda -Xptxas -maxrregcount=96 -Xfatbin -compress-all
 # Use addprefix so that we can specify more than one path
 NVLDFLAGS  := -L${CUDA_LIB} -lcudart -lrt
+
+NVCUFLAGS_SYM :=
 
 ########## GCOV ##########
 GCOV ?= 0 # disable by default.
@@ -157,4 +161,33 @@ endif
 
 ifneq ($(MAX_EXT_NET_PLUGINS), 0)
 CXXFLAGS += -DNCCL_NET_MAX_PLUGINS=$(MAX_EXT_NET_PLUGINS)
+endif
+
+CXXFLAGS += -DDOCA_VERBS_USE_CUDA_WRAPPER -DDOCA_VERBS_USE_NET_WRAPPER
+NVCUFLAGS += -DDOCA_VERBS_USE_CUDA_WRAPPER -DDOCA_VERBS_USE_NET_WRAPPER
+
+CXXFLAGS += -DNCCL_GIN_PROXY_ENABLE=1
+
+# Detect OS Linux or Windows
+ifeq ($(shell uname -s), Linux)
+  NCCL_OS_LINUX := 1
+  CXXFLAGS += -DNCCL_OS_LINUX
+  NVCUFLAGS += -DNCCL_OS_LINUX
+else ifeq ($(shell uname -s), Windows)
+  NCCL_OS_WINDOWS := 1
+  CXXFLAGS += -DNCCL_OS_WINDOWS
+  NVCUFLAGS += -DNCCL_OS_WINDOWS
+endif
+
+# Check and enable LLVM IR generation
+ifneq ($(EMIT_LLVM_IR), 0)
+  CXXFLAGS += -DEMIT_LLVM_IR=1
+endif
+
+# Git version overrides (set via command line: make NCCL_GIT_BRANCH=xxx NCCL_GIT_COMMIT_HASH=yyy)
+ifneq ($(NCCL_GIT_BRANCH),)
+  CXXFLAGS += -DNCCL_GIT_BRANCH='"$(NCCL_GIT_BRANCH)"'
+endif
+ifneq ($(NCCL_GIT_COMMIT_HASH),)
+  CXXFLAGS += -DNCCL_GIT_COMMIT_HASH='"$(NCCL_GIT_COMMIT_HASH)"'
 endif

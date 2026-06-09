@@ -43,6 +43,7 @@ public:
         convert_xcp(raw, out);
         convert_xgmi(raw, out);
         convert_pcie(raw, out);
+        convert_clocks(raw, out);
         return out;
     }
 
@@ -170,6 +171,16 @@ private:
         populate_if_supported(out.pcie.link.speed, raw.pcie_link_speed);
         populate_if_supported(out.pcie.bandwidth.acc, raw.pcie_bandwidth_acc);
         populate_if_supported(out.pcie.bandwidth.inst, raw.pcie_bandwidth_inst);
+    }
+
+    static void convert_clocks(const amdsmi_gpu_metrics_t& raw, metrics& out)
+    {
+        populate_if_supported(out.gfx_clock_mhz,
+                              static_cast<std::uint32_t>(raw.current_gfxclk),
+                              static_cast<std::uint32_t>(0xFFFFU));
+        populate_if_supported(out.mem_clock_mhz,
+                              static_cast<std::uint32_t>(raw.current_uclk),
+                              static_cast<std::uint32_t>(0xFFFFU));
     }
 
     amdsmi_processor_handle m_handle;

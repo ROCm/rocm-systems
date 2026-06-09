@@ -6,6 +6,7 @@
 #include "library/pmc/collectors/nic/types.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -67,13 +68,15 @@ public:
      */
     [[nodiscard]] rdma_info get_nic_rdma_info() const
     {
-        amdsmi_nic_rdma_devices_info_t raw{};
-        check(amdsmi_get_nic_rdma_dev_info(m_handle, &raw), "get_nic_rdma_dev_info");
-        if(raw.num_rdma_dev == 0)
+        // Heap-allocate: amdsmi_nic_rdma_devices_info_t is ~558 KiB (above the
+        // -Wstack-usage=524288 ceiling).
+        auto raw = std::make_unique<amdsmi_nic_rdma_devices_info_t>();
+        check(amdsmi_get_nic_rdma_dev_info(m_handle, raw.get()), "get_nic_rdma_dev_info");
+        if(raw->num_rdma_dev == 0)
         {
             return { 0 };
         }
-        return { raw.rdma_dev_info[0].num_rdma_ports };
+        return { raw->rdma_dev_info[0].num_rdma_ports };
     }
 
     /**

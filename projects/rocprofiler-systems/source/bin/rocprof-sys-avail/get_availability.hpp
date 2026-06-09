@@ -13,7 +13,6 @@
 #include <timemory/defines.h>
 #include <timemory/enum.h>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/macros.hpp>
 
@@ -133,7 +132,7 @@ get_availability<Type>::get_info()
                               : std::string("");
     auto description =
         (has_metadata) ? metadata_t::description() : Type::get_description();
-    auto     data_type = demangle<value_type>();
+    auto     data_type = rocprofsys::utility::demangle<value_type>();
     string_t enum_type = property_t::enum_string();
     string_t id_type   = property_t::id();
     auto     ids_set   = property_t::ids();

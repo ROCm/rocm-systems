@@ -4,13 +4,14 @@
 
 include(AISAddExecutable)
 include(AISUseGTest)
-find_package(Boost COMPONENTS program_options REQUIRED)
+find_package(Threads REQUIRED)
 
 set(SHARED_SOURCE_FILES
     "${HIPFILE_TEST_COMMON_PATH}/magic-word.cpp"
 )
 
 set(TEST_SOURCE_FILES
+    api_trace.cpp
     async.cpp
     backend.cpp
     batch/batch.cpp
@@ -30,6 +31,7 @@ set(TEST_SOURCE_FILES
     mountinfo.cpp
     stats.cpp
     stream.cpp
+    thread-pool.cpp
 )
 
 set(TEST_SYSINCLS
@@ -37,6 +39,7 @@ set(TEST_SYSINCLS
     ${HIPFILE_INCLUDE_PATH}
     ${HIPFILE_TEST_COMMON_PATH}
     ${HIPFILE_AMD_TEST_PATH}
+    ${HIPFILE_THIRD_PARTY_PATH}
 )
 
 ais_add_test_executable(
@@ -49,7 +52,6 @@ ais_add_test_executable(
 # Add gtest
 target_link_libraries(internal_tests PRIVATE GTest::gmock)
 target_link_libraries(internal_tests PRIVATE GTest::gtest)
-target_link_libraries(internal_tests PRIVATE Boost::program_options)
 
 ais_gtest_discover_tests(
     internal_tests
@@ -69,6 +71,9 @@ ais_add_test_executable(
     SRCS "state_mt.cpp"
     SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH}
 )
+
+target_link_libraries(state_mt PRIVATE Threads::Threads)
+
 add_test(
     NAME state_mt_test
     COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result --args $<TARGET_FILE:state_mt>
@@ -81,6 +86,9 @@ ais_add_test_executable(
     SRCS "batch/batch_mt.cpp"
     SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH}
 )
+
+target_link_libraries(batch_mt PRIVATE Threads::Threads)
+
 add_test(
     NAME batch_mt_test
     COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result --args $<TARGET_FILE:batch_mt>
