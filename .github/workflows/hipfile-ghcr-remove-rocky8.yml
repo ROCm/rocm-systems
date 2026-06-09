@@ -1,0 +1,43 @@
+name: hipFile GHCR remove ais_ci_rocky8 (throwaway)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/hipfile-ghcr-remove-rocky8.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  ORG: ${{ github.repository_owner }}
+  PACKAGE: hipfile%2Fais_ci_rocky8
+  # Flip to "false" and push again to actually delete the entire package.
+  DRY_RUN: "false"
+
+jobs:
+  nuke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show then (optionally) delete package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Target: /orgs/${ORG}/packages/container/${PACKAGE}"
+          echo "== Package =="
+          gh api -H "Accept: application/vnd.github+json" \
+            "/orgs/${ORG}/packages/container/${PACKAGE}" \
+            --jq '{name, visibility, version_count}' || true
+          echo "== Versions =="
+          gh api -H "Accept: application/vnd.github+json" \
+            "/orgs/${ORG}/packages/container/${PACKAGE}/versions" --paginate \
+            --jq '.[] | "\(.id)\t\(.metadata.container.tags // [])"' || true
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "DRY_RUN=true -> would DELETE entire package ${PACKAGE}. No action taken."
+            exit 0
+          fi
+          echo "DELETING entire package ${PACKAGE} ..."
+          gh api -X DELETE -H "Accept: application/vnd.github+json" \
+            "/orgs/${ORG}/packages/container/${PACKAGE}"
+          echo "Deleted package ${PACKAGE}."

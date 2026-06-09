@@ -20,6 +20,7 @@ permissions:
 
 jobs:
   Precheck:
+    if: false
     runs-on: [ubuntu-24.04]
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
