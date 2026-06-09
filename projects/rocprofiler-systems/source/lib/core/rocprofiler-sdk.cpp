@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
+#include "common/rocm_spm.hpp"
 #include "core/config.hpp"
 #include "timemory.hpp"
 #include <regex>
@@ -367,8 +368,10 @@ config_settings(const std::shared_ptr<settings>& _config)
         std::string, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT",
         "Sampling interval unit for SPM counter collection. Currently supported: "
         "sclk_cycles.",
-        "sclk_cycles", "rocm", "hardware_counters", "spm")
-        ->set_choices({ "sclk_cycles" });
+        std::string{ common::rocm_spm_sample_interval_unit_sclk_cycles }, "rocm",
+        "hardware_counters", "spm")
+        ->set_choices(
+            { std::string{ common::rocm_spm_sample_interval_unit_sclk_cycles } });
 
     _skip_domains.emplace("kernel_dispatch");
     _skip_domains.emplace("page_migration");
@@ -707,7 +710,7 @@ std::string
 get_rocm_spm_sample_interval_unit()
 {
     return get_setting_value<std::string>("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT")
-        .value_or(std::string{ "sclk_cycles" });
+        .value_or(std::string{ common::rocm_spm_sample_interval_unit_sclk_cycles });
 }
 
 std::vector<std::int32_t>

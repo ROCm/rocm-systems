@@ -4,6 +4,7 @@
 #include "argparse.hpp"
 #include "common/environment.hpp"
 #include "common/path.hpp"
+#include "common/rocm_spm.hpp"
 #include "config.hpp"
 #include "exception.hpp"
 #include "gpu.hpp"
@@ -1214,7 +1215,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Set beta SPM counter sampling interval unit")
             .count(1)
             .dtype("string")
-            .choices({ "sclk_cycles" })
+            .choices({ std::string{ common::rocm_spm_sample_interval_unit_sclk_cycles } })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL_UNIT",
                            p.get<std::string>("spm-sample-interval-unit"));

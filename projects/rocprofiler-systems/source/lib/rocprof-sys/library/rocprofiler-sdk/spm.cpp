@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/spm.hpp"
+#include "common/rocm_spm.hpp"
 #include "core/rocprofiler-sdk.hpp"
 
 #include "logger/debug.hpp"
@@ -29,7 +30,7 @@ constexpr bool runtime_collection_available = false;
 }  // namespace
 
 bool
-beta_request::requested() const
+beta_request::requested() const noexcept
 {
     return (enabled || !events.empty());
 }
@@ -55,6 +56,8 @@ bool
 validate_beta_request(const beta_request&             request,
                       const std::vector<std::string>& dispatch_counter_events)
 {
+    // Backstop for direct library load paths. rocprof-sys-run/sample reject SPM
+    // earlier in the launcher, but tool_init must also fail closed for PR1.
     if(!request.requested()) return true;
 
     if(!request.sdk_header_available)
@@ -71,6 +74,8 @@ validate_beta_request(const beta_request&             request,
         return false;
     }
 
+    // The detailed runtime request checks below become reachable when PR2 enables
+    // runtime collection. PR1 intentionally rejects any requested SPM collection above.
     if(request.events.empty())
     {
         LOG_WARNING("SPM counter collection was enabled, but no counters were requested. "
@@ -92,11 +97,12 @@ validate_beta_request(const beta_request&             request,
         return false;
     }
 
-    if(request.sample_interval_unit != "sclk_cycles")
+    if(request.sample_interval_unit != common::rocm_spm_sample_interval_unit_sclk_cycles)
     {
         LOG_WARNING("Unsupported SPM sample interval unit '{}'. Supported unit: "
-                    "sclk_cycles",
-                    request.sample_interval_unit);
+                    "{}",
+                    request.sample_interval_unit,
+                    common::rocm_spm_sample_interval_unit_sclk_cycles);
         return false;
     }
 

@@ -103,7 +103,7 @@ getenv_string(std::string_view key, std::string_view default_value)
     return (val != nullptr) ? std::string{ val } : std::string{ default_value };
 }
 
-std::optional<std::string_view>
+[[nodiscard]] std::optional<std::string_view>
 lookup_env_value(const std::vector<std::string>& envs, std::string_view key)
 {
     const auto prefix = std::string{ key } + "=";
@@ -114,14 +114,7 @@ lookup_env_value(const std::vector<std::string>& envs, std::string_view key)
     return std::nullopt;
 }
 
-bool
-is_enabled_value(std::string_view value)
-{
-    return (value == "1" || value == "true" || value == "TRUE" || value == "ON" ||
-            value == "on" || value == "yes" || value == "YES");
-}
-
-bool
+[[nodiscard]] bool
 spm_runtime_requested(const std::vector<std::string>& envs)
 {
     if(auto events = lookup_env_value(envs, env::ROCM_SPM_EVENTS);
@@ -129,7 +122,7 @@ spm_runtime_requested(const std::vector<std::string>& envs)
         return true;
 
     if(auto enabled = lookup_env_value(envs, env::ROCM_SPM_ENABLED);
-       enabled && is_enabled_value(*enabled))
+       enabled && env::is_truthy(*enabled))
         return true;
 
     return false;
@@ -140,6 +133,8 @@ validate_spm_runtime_request(const std::vector<std::string>& envs)
 {
     if(!spm_runtime_requested(envs)) return;
 
+    // Launcher-side guard: reject SPM requests before exec. The injected library
+    // keeps a matching validation backstop for direct-load paths.
     throw std::runtime_error("SPM counter collection is configured, but Systems Profiler "
                              "SPM runtime collection is not implemented in this build");
 }

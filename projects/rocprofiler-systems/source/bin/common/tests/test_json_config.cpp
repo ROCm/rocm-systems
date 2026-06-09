@@ -425,6 +425,32 @@ TEST_F(json_config_test, handling_round_trip_for_new_values_in_json_schema)
               "sclk_cycles");
 }
 
+TEST_F(json_config_test, exports_large_spm_sample_interval_as_integer)
+{
+    std::map<std::string, std::string> env_vars = {
+        { "ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL", "4294967296" },
+    };
+
+    auto j = env_vars_to_json_schema(env_vars);
+
+    EXPECT_EQ(j["hardware_counters"]["spm"]["sample_interval"]["value"], 4294967296ULL);
+}
+
+TEST_F(json_config_test, resolves_large_spm_sample_interval_from_json)
+{
+    auto j = nlohmann::json::parse(R"({
+        "hardware_counters": {
+            "spm": {
+                "sample_interval": {"value": 4294967296}
+            }
+        }
+    })");
+
+    auto result = resolve_config(j);
+
+    EXPECT_EQ(result.at("ROCPROFSYS_ROCM_SPM_SAMPLE_INTERVAL"), "4294967296");
+}
+
 // Test env_vars constants match expected string values
 TEST_F(json_config_test, validate_env_var_constants)
 {
