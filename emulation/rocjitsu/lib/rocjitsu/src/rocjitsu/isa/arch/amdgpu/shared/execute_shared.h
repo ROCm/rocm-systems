@@ -8485,6 +8485,8 @@ inline void execute_v_ctz_i32_b32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_cubeid_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+      [](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8540,6 +8542,10 @@ inline void execute_v_cubeid_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cubema_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32([](auto x, auto y, auto z) {
+    return 2.0f * util::stdx::fmax(util::stdx::abs(x),
+                                   util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z)));
+  });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8591,6 +8597,8 @@ inline void execute_v_cubema_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cubesc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+      [](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -8646,6 +8654,8 @@ inline void execute_v_cubesc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_cubetc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32(
+      [](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))

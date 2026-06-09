@@ -1999,6 +1999,13 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_minimum3_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c); }',
     'v_maximumminimum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c); }',
     'v_minimummaximum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c); }',
+    # Cubemap face ops: ternary f32, per-source abs/neg + result omod/clamp via
+    # the glue; the face-selection is a bit-exact where-cascade (helpers in
+    # simd_glue.h). cubema is inline (exact ×2 of fmax of abs).
+    'v_cubeid_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); }',
+    'v_cubema_f32_vop3': '[](auto x, auto y, auto z) { return 2.0f * util::stdx::fmax(util::stdx::abs(x), util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z))); }',
+    'v_cubesc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }',
+    'v_cubetc_f32_vop3': '[](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }',
     # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
     # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
     # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate

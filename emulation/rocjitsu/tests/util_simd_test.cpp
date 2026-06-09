@@ -697,6 +697,90 @@ TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
       }
 }
 
+// --- Cubemap face ops (v_cube{id,ma,sc,tc}_f32) ------------------------------
+//
+// util::cube_{id,sc,tc}_f32_simd back the v_cube* gap ops; they must be
+// bit-identical to the generated scalar bodies (transcribed verbatim below).
+// Sweep every sign/magnitude/tie/zero/Inf/NaN triple.
+
+float scalar_cubeid(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  if (ax >= ay && ax >= az)
+    return x >= 0 ? 0.0f : 1.0f;
+  if (ay >= ax && ay >= az)
+    return y >= 0 ? 2.0f : 3.0f;
+  return z >= 0 ? 4.0f : 5.0f;
+}
+float scalar_cubesc(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  if (ax >= ay && ax >= az)
+    return x >= 0 ? z : -z;
+  if (ay >= ax && ay >= az)
+    return x;
+  return z >= 0 ? -x : x;
+}
+float scalar_cubetc(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  if (ax >= ay && ax >= az)
+    return -y;
+  if (ay >= ax && ay >= az)
+    return y >= 0 ? -z : z;
+  return -y;
+}
+float scalar_cubema(float x, float y, float z) {
+  float ax = std::fabs(x), ay = std::fabs(y), az = std::fabs(z);
+  return 2.0f * std::fmax(ax, std::fmax(ay, az));
+}
+
+template <typename SimdFn, typename ScalarFn> void check_cube(SimdFn simd_fn, ScalarFn scalar_fn) {
+  using V = util::native<float>;
+  constexpr std::size_t W = V::size();
+  const std::array<float, 9> grid = {{-2.0f, -1.0f, -0.0f, 0.0f, 0.5f, 1.0f, 2.0f,
+                                      std::numeric_limits<float>::infinity(),
+                                      std::numeric_limits<float>::quiet_NaN()}};
+  for (float zv : grid)
+    for (float yv : grid)
+      for (float xv : grid) {
+        alignas(V) float xb[W], yb[W], zb[W];
+        for (std::size_t i = 0; i < W; ++i) {
+          xb[i] = xv;
+          yb[i] = yv;
+          zb[i] = zv;
+        }
+        V x(xb, util::stdx::vector_aligned), y(yb, util::stdx::vector_aligned),
+            z(zb, util::stdx::vector_aligned);
+        V r = simd_fn(x, y, z);
+        const float expect = scalar_fn(xv, yv, zv);
+        for (std::size_t i = 0; i < W; ++i) {
+          const float rv = r[i];
+          EXPECT_EQ(bits_of(rv), bits_of(expect))
+              << "x=" << xv << " y=" << yv << " z=" << zv << " lane=" << i;
+        }
+      }
+}
+
+TEST(UtilSimd, CubeId_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube([](auto x, auto y, auto z) { return util::cube_id_f32_simd(x, y, z); }, scalar_cubeid);
+}
+TEST(UtilSimd, CubeSc_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube([](auto x, auto y, auto z) { return util::cube_sc_f32_simd(x, y, z); }, scalar_cubesc);
+}
+TEST(UtilSimd, CubeTc_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube([](auto x, auto y, auto z) { return util::cube_tc_f32_simd(x, y, z); }, scalar_cubetc);
+}
+TEST(UtilSimd, CubeMa_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_cube(
+      [](auto x, auto y, auto z) {
+        return 2.0f * util::stdx::fmax(util::stdx::abs(x),
+                                       util::stdx::fmax(util::stdx::abs(y), util::stdx::abs(z)));
+      },
+      scalar_cubema);
+}
+
 #undef SKIP_IF_NO_SIMD
 
 } // namespace
