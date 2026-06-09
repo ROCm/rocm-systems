@@ -4948,16 +4948,7 @@ void VMacF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     src0.set_delegate(dpp_src0_.get());
   if (dpp_src1_)
     vsrc1.set_delegate(dpp_src1_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane,
-                    util::f32_to_f16(std::fma(
-                        util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane))),
-                        util::f16_to_f32(static_cast<uint16_t>(vsrc1.read_lane(wf, lane))),
-                        util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))))));
-  }
+  amdgpu::execute_v_mac_f16_vop2(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {

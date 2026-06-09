@@ -32,3 +32,7 @@ if(NOT TBB_FOUND)
 else()
     message(STATUS "Using system TBB")
 endif()
+
+if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
+    ais_add_sanitizers(TBB::tbb)
+endif()

@@ -186,10 +186,15 @@ FetchContent_MakeAvailable(googletest flatbuffers)
 
 include(rj_flatbuffers)
 
+# Set include paths before adding subdirectories so all targets can find them.
+set(ROCJITSU_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include)
+set(ROCJITSU_SRC_DIR ${PROJECT_SOURCE_DIR}/lib/rocjitsu/src)
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
+add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
 # Main shared library - assembles all object libraries.
 add_library(rocjitsu_shared SHARED)
@@ -215,8 +220,11 @@ target_link_libraries(
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
+        rocjitsu_plugin_logging
+        rocjitsu_plugin_race_detector
         rocjitsu_vm_risc_v
         rocjitsu_config
+        util
         flatbuffers
         Threads::Threads
 )
