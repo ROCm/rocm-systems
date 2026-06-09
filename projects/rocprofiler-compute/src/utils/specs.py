@@ -26,7 +26,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.mi_gpu_spec import MIGPUSpecs, mi_gpu_specs
 from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
@@ -288,14 +288,9 @@ def extract_machine_info() -> dict[str, Any]:
 
 @demarcate
 def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
-    # Partition is only supported on >= MI 300 series
-    # (gpu_arch should be gfx940 or higher for MI300+)
-    is_partition_supported = False
-    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
-        try:
-            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
-        except ValueError:
-            pass  # Invalid hex string, keep is_partition_supported as False
+    is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
+        gpu_arch=gpu_arch, gpu_model=None
+    )
 
     result: dict[str, Optional[str]] = {
         "vbios": None,
