@@ -2486,8 +2486,6 @@ bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   if (hsa_status != HSA_STATUS_SUCCESS) {
     LogPrintfError("virtualMap: hsa_amd_vmem_map failed with status: %d", hsa_status);
     // Roll back the bookkeeping so the sub_obj/MemObjMap doesn't leak.
-    constexpr bool kDestroyVirtualBuffer = true;
-    constexpr bool kReleaseSubObj = true;
     // FinalizeMapMemObjBookkeeping was never called, so MemObjMap doesn't
     // contain va and the cross-links are not wired. Just tear down the
     // sub-buffer view directly.
