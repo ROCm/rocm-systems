@@ -1,0 +1,114 @@
+name: RCCL device-API CI
+
+# Standalone (non-TheRock) pipeline that builds RCCL + rccl-tests with
+# ENABLE_DEVICE_API=1 and runs the device-API benchmark suite (symmetric
+# memory / LSA device kernels / GIN proxy) on a single 8-GPU node of the
+# Ruby MI350 slurm-backed scale runner.
+#
+# Topology (same sbatch-dispatch pattern as therock-rccl-test-packages-multi-node.yml):
+#   GH runner (ruby-linux-slurm-scale-runner)  ── login / scheduling node
+#       └─ `sbatch --wait` ──► compute node (8x MI350)
+#                                  └─ projects/rccl/tools/ci/lib/device-api.sbatch  (orchestrator)
+#                                        ├─ lib/fetch-rocm.sh  ROCm (TheRock nightly)  → /apps/rccl-ci/rocm/rocm-<ver>
+#                                        ├─ lib/build-ompi.sh  OpenMPI (--with-rocm)   → /apps/rccl-ci/ompi/install/<ver>
+#                                        ├─ projects/rccl/install.sh  RCCL (release)   → projects/rccl/build/release (in-tree)
+#                                        ├─ rccl-tests install.sh  (ENABLE_DEVICE_API) → $WORKDIR/rccl-tests (fresh each run)
+#                                        └─ run-device-api-ci.sh  device-API benchmarks
+#
+# ROCm/OpenMPI are version-keyed and cached on the shared /apps/rccl-ci NFS
+# mount (persist across runs, visible to the compute node). RCCL and rccl-tests
+# are rebuilt every run so breakage is caught. ROCm is fetched with TheRock's
+# build_tools/install_rocm_from_artifacts.py (nightly tarball for the family),
+# NOT from /opt/rocm on the node.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rocm_release:
+        description: 'ROCm nightly/dev version to fetch (e.g. 7.13.0a20260515). Empty = latest nightly for the family.'
+        type: string
+        required: false
+        default: '7.13.0a20260515'
+      rocm_amdgpu_family:
+        description: 'TheRock artifact group / GPU family for the ROCm nightly tarball.'
+        type: string
+        required: false
+        default: 'gfx950-dcgpu'
+      amdgpu_targets:
+        description: 'RCCL --amdgpu_targets value (must match the ROCm family ARCH).'
+        type: string
+        required: false
+        default: 'gfx950'
+  pull_request:
+    paths:
+      - 'projects/rccl/**'
+      - '.github/workflows/rccl-device-api.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR number for presubmit, commit SHA for postsubmit. Cancels superseded
+  # in-flight runs to keep the ruby cluster from queueing up stale jobs.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  device-api:
+    name: Build + run RCCL device-API benchmarks (1 node x 8 GPU)
+    runs-on: ruby-linux-slurm-scale-runner
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    env:
+      RCCL_AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || 'gfx950' }}
+      ROCM_AMDGPU_FAMILY: ${{ inputs.rocm_amdgpu_family || 'gfx950-dcgpu' }}
+      # Pinned ROCm nightly. Bump this (or pass the rocm_release input) to move
+      # ROCm; empty would resolve the latest nightly for the family instead.
+      ROCM_RELEASE: ${{ inputs.rocm_release || '7.13.0a20260515' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Submit device-API build+test to SLURM
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          logs_dir="${{ github.workspace }}/.ci-out/device-api-logs"
+          mkdir -p "${logs_dir}"
+          cd "${logs_dir}"
+
+          # Persistent cache for ROCm/OpenMPI/rccl-tests on the cluster's
+          # shared /apps NFS mount. Survives ephemeral runner recreation and
+          # actions/checkout's `git clean`, and is the same path on the compute
+          # node. Mirrors the Ruby multi-node convention (/apps/cvs_tests).
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
+          # Create the cache tree up front (no-op if it exists). Fail loudly here
+          # rather than mid-build if /apps isn't writable by the runner user.
+          if ! mkdir -p "${RCCL_DEVICE_API_CACHE}"/{rocm,ompi,downloads,therock}; then
+            echo "ERROR: cannot create ${RCCL_DEVICE_API_CACHE} (is /apps writable by $(id -un)?)" >&2
+            exit 1
+          fi
+
+          # `--wait` blocks until the job reaches a terminal state and
+          # propagates the job's exit code as sbatch's exit code.
+          sbatch --wait \
+            --export=ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS \
+            "${{ github.workspace }}/projects/rccl/tools/ci/lib/device-api.sbatch"
+          rc=$?
+          echo "sbatch --wait exited with rc=${rc}"
+          exit "${rc}"
+
+      - name: Dump compute-node logs
+        if: always()
+        run: |
+          logs_dir="${{ github.workspace }}/.ci-out/device-api-logs"
+          shopt -s nullglob
+          for f in "${logs_dir}"/rccl-device-api-*.out "${logs_dir}"/rccl-device-api-*.err; do
+            echo "==> ${f} <=="
+            cat "${f}" || true
+            echo
+          done
