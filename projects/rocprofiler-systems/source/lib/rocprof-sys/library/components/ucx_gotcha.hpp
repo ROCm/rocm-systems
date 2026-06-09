@@ -6,12 +6,12 @@
 #include <timemory/components/base/declaration.hpp>
 #include <timemory/utility/types.hpp>
 
-#include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <utility>
 
 namespace rocprofsys::component::ucx_concepts
