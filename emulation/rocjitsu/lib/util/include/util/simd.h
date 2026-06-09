@@ -596,6 +596,55 @@ template <typename V> inline V ieee_minimum_simd(V a, V b) {
   return res;
 }
 
+/// Cubemap face ops (back v_cube{id,sc,tc}_f32). The scalar bodies select among
+/// the three axes by an `else if` cascade on |x|,|y|,|z| with `>=` ties: the X
+/// face wins ties, then Y, then Z. The vector forms apply the blends in reverse
+/// priority (Z default, Y overwrite, X overwrite last) so X wins ties exactly as
+/// scalar. Every branch is a bit-identical value copy / sign flip of the
+/// (already abs/neg-applied) inputs — no FP arithmetic — so byte-identical. NaN
+/// inputs make every `>=` mask false -> the Z-axis default, matching scalar.
+/// (cubema = 2 * fmax(|x|,fmax(|y|,|z|)) is emitted inline at the call site.)
+inline native<float> cube_id_f32_simd(native<float> x, native<float> y, native<float> z) {
+  using F = native<float>;
+  const F ax = stdx::abs(x), ay = stdx::abs(y), az = stdx::abs(z);
+  const auto x_face = (ax >= ay) && (ax >= az);
+  const auto y_face = (ay >= ax) && (ay >= az);
+  F r = F(5.0f);
+  stdx::where(z >= F(0.0f), r) = F(4.0f); // Z face: z>=0 ? 4 : 5
+  F yv = F(3.0f);
+  stdx::where(y >= F(0.0f), yv) = F(2.0f);
+  stdx::where(y_face, r) = yv;
+  F xv = F(1.0f);
+  stdx::where(x >= F(0.0f), xv) = F(0.0f);
+  stdx::where(x_face, r) = xv;
+  return r;
+}
+inline native<float> cube_sc_f32_simd(native<float> x, native<float> y, native<float> z) {
+  using F = native<float>;
+  const F ax = stdx::abs(x), ay = stdx::abs(y), az = stdx::abs(z);
+  const auto x_face = (ax >= ay) && (ax >= az);
+  const auto y_face = (ay >= ax) && (ay >= az);
+  F r = x;
+  stdx::where(z >= F(0.0f), r) = -x; // Z face: z>=0 ? -x : x
+  stdx::where(y_face, r) = x;
+  F xv = -z;
+  stdx::where(x >= F(0.0f), xv) = z; // X face: x>=0 ? z : -z
+  stdx::where(x_face, r) = xv;
+  return r;
+}
+inline native<float> cube_tc_f32_simd(native<float> x, native<float> y, native<float> z) {
+  using F = native<float>;
+  const F ax = stdx::abs(x), ay = stdx::abs(y), az = stdx::abs(z);
+  const auto x_face = (ax >= ay) && (ax >= az);
+  const auto y_face = (ay >= ax) && (ay >= az);
+  F r = -y; // Z face and X face both return -y
+  F yv = z;
+  stdx::where(y >= F(0.0f), yv) = -z; // Y face: y>=0 ? -z : z
+  stdx::where(y_face, r) = yv;
+  stdx::where(x_face, r) = -y; // restore -y on ties where the Y mask also fired
+  return r;
+}
+
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
 /// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
 /// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
