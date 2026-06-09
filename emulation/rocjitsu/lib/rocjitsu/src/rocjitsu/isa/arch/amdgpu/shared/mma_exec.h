@@ -30,6 +30,7 @@
 #include "util/meta_programming.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
@@ -338,36 +339,51 @@ inline uint32_t permute_b_lane(uint32_t lane, uint32_t blgp) {
 
 inline uint32_t packed_mask(uint32_t bits) { return bits >= 32 ? UINT32_MAX : ((1u << bits) - 1u); }
 
+inline uint32_t read_vgpr_for_mma(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane) {
+  if (!cu.plugin_hooks_enabled())
+    return cu.vgpr_lanes32(reg)[lane];
+  return cu.read_vgpr(reg, lane);
+}
+
+inline void write_vgpr_for_mma(amdgpu::ComputeUnitCore &cu, uint32_t reg, uint32_t lane,
+                               uint32_t value) {
+  if (!cu.plugin_hooks_enabled()) {
+    cu.vgpr_lanes32(reg)[lane] = value;
+    return;
+  }
+  cu.write_vgpr(reg, lane, value);
+}
+
 inline uint32_t read_packed(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane) >> loc.bit_offset;
+  uint32_t raw = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane) >> loc.bit_offset;
   if (loc.bit_offset + loc.data_bits > 32) {
-    uint32_t next = cu.read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
+    uint32_t next = read_vgpr_for_mma(cu, base + loc.vgpr_offset + 1, loc.lane);
     raw |= next << (32 - loc.bit_offset);
   }
   return raw & packed_mask(loc.data_bits);
 }
 
 inline float extract_f32(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  return std::bit_cast<float>(cu.read_vgpr(base + loc.vgpr_offset, loc.lane));
+  return std::bit_cast<float>(read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane));
 }
 
 inline float extract_f16(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  uint32_t raw = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane);
   return util::f16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
 }
 
 inline float extract_bf16(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  uint32_t raw = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane);
   return util::bf16_to_f32(static_cast<uint16_t>((raw >> (loc.sub_element * 16)) & 0xFFFF));
 }
 
 inline int32_t extract_i8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  uint32_t raw = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane);
   return static_cast<int32_t>(static_cast<int8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
 inline int32_t extract_u8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  uint32_t raw = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane);
   return static_cast<int32_t>((raw >> (loc.sub_element * 8)) & 0xFF);
 }
 
@@ -385,12 +401,12 @@ inline int32_t extract_u4(amdgpu::ComputeUnitCore &cu, uint32_t base, const Inpu
 }
 
 inline float extract_fp8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  uint32_t raw = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane);
   return util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
 inline float extract_bf8(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t raw = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
+  uint32_t raw = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane);
   return util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> (loc.sub_element * 8)) & 0xFF));
 }
 
@@ -407,8 +423,8 @@ inline float extract_bf6(amdgpu::ComputeUnitCore &cu, uint32_t base, const Input
 }
 
 inline double extract_f64(amdgpu::ComputeUnitCore &cu, uint32_t base, const InputLoc &loc) {
-  uint32_t lo = cu.read_vgpr(base + loc.vgpr_offset, loc.lane);
-  uint32_t hi = cu.read_vgpr(base + loc.vgpr_offset + 1, loc.lane);
+  uint32_t lo = read_vgpr_for_mma(cu, base + loc.vgpr_offset, loc.lane);
+  uint32_t hi = read_vgpr_for_mma(cu, base + loc.vgpr_offset + 1, loc.lane);
   return std::bit_cast<double>(static_cast<uint64_t>(hi) << 32 | lo);
 }
 
@@ -565,8 +581,17 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     uint32_t lane;
     uint32_t val;
   };
-  std::vector<Result> results;
-  results.reserve(M * N * B);
+  constexpr size_t MAX_RESULTS = 1024;
+  const size_t result_capacity = static_cast<size_t>(M) * N * B;
+  std::array<Result, MAX_RESULTS> stack_results;
+  std::vector<Result> heap_results;
+  Result *results = stack_results.data();
+  if (result_capacity > stack_results.size()) {
+    heap_results.resize(result_capacity);
+    results = heap_results.data();
+  }
+  size_t result_count = 0;
+  auto append_result = [&](Result result) { results[result_count++] = result; };
   for (uint32_t b = 0; b < B; ++b) {
     for (uint32_t row = 0; row < M; ++row) {
       for (uint32_t col = 0; col < N; ++col) {
@@ -574,7 +599,7 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
         auto out = output_loc_32(M, N, row, col, b);
         float acc = (const_acc != ACC_FROM_VGPR)
                         ? std::bit_cast<float>(const_acc)
-                        : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+                        : std::bit_cast<float>(read_vgpr_for_mma(cu, s2 + out.reg, out.lane));
         for (uint32_t k = 0; k < K; ++k) {
           auto al = input_loc(M, K, B, row, k, b, a_bits);
           auto bl = input_loc(N, K, B, col, k, b, b_bits);
@@ -588,13 +613,14 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
           float b_val = eb(cu, s1, bl);
           acc += a_val * b_val;
         }
-        results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+        append_result({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
       }
     }
   }
   bool has_nan = false;
-  for (const auto &r : results) {
-    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+  for (size_t i = 0; i < result_count; ++i) {
+    const auto &r = results[i];
+    write_vgpr_for_mma(cu, dst + r.reg, r.lane, r.val);
     float fval = std::bit_cast<float>(r.val);
     if (std::isnan(fval) || std::isinf(fval))
       has_nan = true;
@@ -603,7 +629,8 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     util::Logger::vm([&](auto &os) {
       os << std::format("MFMA_NAN_DETECTED dst=v{} s0=v{} s1=v{} s2=v{} M={} N={} K={}", dst, s0,
                         s1, s2, M, N, K);
-      for (const auto &r : results) {
+      for (size_t i = 0; i < result_count; ++i) {
+        const auto &r = results[i];
         float fval = std::bit_cast<float>(r.val);
         if (std::isnan(fval) || std::isinf(fval))
           os << std::format("\n[rj log VM]   reg={} lane={} val={:#x}({}) "

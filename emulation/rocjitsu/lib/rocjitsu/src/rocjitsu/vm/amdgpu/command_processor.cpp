@@ -90,7 +90,8 @@ bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
 
 bool run_cu_quantum(ComputeUnitCore *cu) {
   bool ran = false;
-  for (uint32_t i = 0; i < ComputeUnitCore::kFunctionalQuantum; ++i) {
+  const uint32_t quantum = cu->functional_quantum();
+  for (uint32_t i = 0; i < quantum; ++i) {
     if (!cu->has_active_wfs())
       break;
     ran = true;
@@ -432,7 +433,7 @@ void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
 void CommandProcessor::startup() {
   doorbell_event_.set_handler(
       [this](simdojo::Tick ts, simdojo::Message *) { handle_doorbell(ts); });
-  completion_ = std::make_unique<CompletionTracker>(memory_, cus_);
+  completion_ = std::make_unique<CompletionTracker>(memory_, cus_, l2_caches_);
   completion_->set_plugin_group(plugin_group_);
   if (interrupt_cb_)
     completion_->set_interrupt_callback(interrupt_cb_);
@@ -943,7 +944,9 @@ void CommandProcessor::process_aql_packet(const hsa_kernel_dispatch_packet_t &pk
   uint32_t acquire_scope = (pkt.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 0x3;
   if (acquire_scope >= HSA_FENCE_SCOPE_AGENT && !cus_.empty()) {
     for (auto *cu : cus_)
-      cu->flush_all(queue.process_id);
+      cu->flush_l1(queue.process_id);
+    for (auto *l2 : l2_caches_)
+      l2->flush_all(queue.process_id);
   }
 
   std::string kernel_sym;

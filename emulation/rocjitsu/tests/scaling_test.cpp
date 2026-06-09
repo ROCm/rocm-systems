@@ -24,10 +24,13 @@ RJ_DIAGNOSTIC_POP
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef HAS_DEVICE_KERNELS
@@ -51,6 +54,17 @@ static constexpr uint64_t C_ADDR = 0x300000;
 static constexpr uint64_t KERNARG_ADDR = 0x400000;
 
 using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+
+std::optional<uint32_t> env_u32(const char *name) {
+  const char *value = std::getenv(name);
+  if (!value || !value[0])
+    return std::nullopt;
+  char *end = nullptr;
+  unsigned long parsed = std::strtoul(value, &end, 10);
+  if (end == value)
+    return std::nullopt;
+  return static_cast<uint32_t>(parsed);
+}
 
 KD read_kd(const CodeObject &co) {
   for (const auto *sec : co.rodata_sections())
@@ -147,9 +161,21 @@ int main() {
 
   constexpr int RUNS = 1;
 
-  for (uint32_t t = 1; t <= TOTAL_XCDS; ++t) {
+  uint32_t min_threads = env_u32("RJ_SCALING_MIN_THREADS").value_or(1);
+  uint32_t max_threads = env_u32("RJ_SCALING_MAX_THREADS").value_or(TOTAL_XCDS);
+  min_threads = std::clamp(min_threads, 1u, TOTAL_XCDS);
+  max_threads = std::clamp(max_threads, min_threads, TOTAL_XCDS);
+  std::string_view kernel_filter;
+  if (const char *env = std::getenv("RJ_SCALING_KERNEL"))
+    kernel_filter = env;
+
+  for (uint32_t t = min_threads; t <= max_threads; ++t) {
     std::cout << t;
     for (auto &k : kernels) {
+      if (!kernel_filter.empty() && kernel_filter != k.name) {
+        std::cout << ",nan";
+        continue;
+      }
       // Take the median of RUNS.
       std::vector<double> times;
       for (int r = 0; r < RUNS; ++r) {

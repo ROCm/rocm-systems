@@ -22,12 +22,15 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+class L2Cache;
+
 class CompletionTracker {
 public:
   using InterruptCallback = std::function<void(uint32_t process_id, uint32_t event_id)>;
 
-  CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus)
-      : memory_(mem), cus_(cus) {}
+  CompletionTracker(GpuMemory *mem, std::vector<ComputeUnitCore *> &cus,
+                    std::vector<L2Cache *> &l2_caches)
+      : memory_(mem), cus_(cus), l2_caches_(l2_caches) {}
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
@@ -55,6 +58,7 @@ private:
 
   GpuMemory *memory_;
   std::vector<ComputeUnitCore *> &cus_;
+  std::vector<L2Cache *> &l2_caches_;
   InterruptCallback interrupt_cb_;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
 };

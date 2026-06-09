@@ -43,8 +43,9 @@ public:
 
   /// @brief Try to allocate a contiguous block of registers.
   /// @param count Number of registers needed (must be <= regs_per_block).
+  /// @param clear Whether to reset the whole allocation block before returning it.
   /// @returns Base register index, or -1 if no free block.
-  int32_t allocate(uint32_t count) {
+  int32_t allocate(uint32_t count, bool clear = true) {
     if (count == 0 || regs_per_block_ == 0)
       return -1;
     assert(count <= regs_per_block_ && "requested register count exceeds block size");
@@ -52,8 +53,10 @@ public:
       if (free_blocks_[i]) {
         free_blocks_[i] = false;
         uint32_t base = static_cast<uint32_t>(i * regs_per_block_);
-        for (uint32_t r = base; r < base + regs_per_block_; ++r)
-          data_[r] = RegType{};
+        if (clear) {
+          for (uint32_t r = base; r < base + regs_per_block_; ++r)
+            data_[r] = RegType{};
+        }
         return static_cast<int32_t>(base);
       }
     }

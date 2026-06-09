@@ -21,13 +21,206 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
+namespace {
+
+constexpr uint64_t kDecodeProfileRawPc = UINT64_MAX;
+
+struct DecodeProfileKey {
+  uint64_t pc = 0;
+  uint32_t arch = 0;
+  uint32_t size = 0;
+  std::array<uint32_t, 4> words{};
+
+  bool operator==(const DecodeProfileKey &other) const {
+    return pc == other.pc && arch == other.arch && size == other.size && words == other.words;
+  }
+};
+
+struct DecodeProfileKeyHash {
+  size_t operator()(const DecodeProfileKey &key) const {
+    uint64_t h = key.pc ^ (static_cast<uint64_t>(key.arch) << 32) ^ key.size;
+    for (uint32_t word : key.words) {
+      h ^= static_cast<uint64_t>(word) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+    }
+    return static_cast<size_t>(h);
+  }
+};
+
+struct DecodeProfileEntry {
+  uint64_t count = 0;
+  std::string mnemonic;
+};
+
+class DecodeProfile {
+public:
+  DecodeProfile(std::string path, uint64_t stride) : path_(std::move(path)), stride_(stride) {}
+
+  void record(rj_code_arch_t arch, uint64_t pc, const rj_code_binary_inst_t words[4],
+              std::string_view mnemonic, uint32_t inst_size) {
+    uint64_t seen = total_seen_.fetch_add(1, std::memory_order_relaxed);
+    if ((seen % stride_) != 0)
+      return;
+    sampled_.fetch_add(1, std::memory_order_relaxed);
+
+    DecodeProfileKey key;
+    key.pc = pc;
+    key.arch = static_cast<uint32_t>(arch);
+    key.size = inst_size;
+    uint32_t used_words = std::min<uint32_t>((inst_size + 3) / 4, key.words.size());
+    for (uint32_t i = 0; i < used_words; ++i)
+      key.words[i] = words[i];
+
+    record_key(pc_shards_, key, mnemonic);
+    key.pc = kDecodeProfileRawPc;
+    record_key(raw_shards_, key, mnemonic);
+  }
+
+  void dump() {
+    std::ofstream out(path_);
+    if (!out) {
+      std::fprintf(stderr, "rocjitsu: could not write RJ_DECODE_PROFILE=%s\n", path_.c_str());
+      return;
+    }
+
+    std::vector<Row> raw_rows;
+    std::vector<Row> pc_rows;
+    collect_rows(raw_shards_, raw_rows);
+    collect_rows(pc_shards_, pc_rows);
+    std::sort(raw_rows.begin(), raw_rows.end(), row_count_desc);
+    std::sort(pc_rows.begin(), pc_rows.end(), row_count_desc);
+
+    uint64_t total_seen = total_seen_.load(std::memory_order_relaxed);
+    uint64_t sampled = sampled_.load(std::memory_order_relaxed);
+    out << "metric,value\n";
+    out << "total_decode_attempts," << total_seen << "\n";
+    out << "sample_stride," << stride_ << "\n";
+    out << "sampled_decode_attempts," << sampled << "\n";
+    out << "unique_raw_instructions," << raw_rows.size() << "\n";
+    out << "unique_pc_instructions," << pc_rows.size() << "\n";
+    out << "sampled_per_unique_raw,"
+        << (raw_rows.empty() ? 0.0 : static_cast<double>(sampled) / raw_rows.size()) << "\n";
+    out << "sampled_per_unique_pc,"
+        << (pc_rows.empty() ? 0.0 : static_cast<double>(sampled) / pc_rows.size()) << "\n";
+    out << "\nsection,rank,count,arch,pc,size,words,mnemonic\n";
+    dump_rows(out, "raw", raw_rows);
+    dump_rows(out, "pc", pc_rows);
+  }
+
+private:
+  struct Shard {
+    std::mutex mutex;
+    std::unordered_map<DecodeProfileKey, DecodeProfileEntry, DecodeProfileKeyHash> counts;
+  };
+
+  struct Row {
+    DecodeProfileKey key;
+    DecodeProfileEntry entry;
+  };
+
+  using Shards = std::array<Shard, 64>;
+
+  static bool row_count_desc(const Row &a, const Row &b) { return a.entry.count > b.entry.count; }
+
+  static void record_key(Shards &shards, const DecodeProfileKey &key, std::string_view mnemonic) {
+    auto hash = DecodeProfileKeyHash{}(key);
+    Shard &shard = shards[hash & (shards.size() - 1)];
+    std::lock_guard lock(shard.mutex);
+    auto [it, inserted] = shard.counts.try_emplace(key);
+    if (inserted)
+      it->second.mnemonic = std::string(mnemonic);
+    ++it->second.count;
+  }
+
+  static void collect_rows(Shards &shards, std::vector<Row> &rows) {
+    for (auto &shard : shards) {
+      std::lock_guard lock(shard.mutex);
+      rows.reserve(rows.size() + shard.counts.size());
+      for (const auto &[key, entry] : shard.counts)
+        rows.push_back({key, entry});
+    }
+  }
+
+  static void dump_rows(std::ofstream &out, std::string_view section,
+                        const std::vector<Row> &rows) {
+    constexpr size_t kMaxRows = 64;
+    size_t limit = std::min(kMaxRows, rows.size());
+    for (size_t i = 0; i < limit; ++i) {
+      const auto &row = rows[i];
+      out << section << "," << (i + 1) << "," << row.entry.count << "," << row.key.arch << ",";
+      if (row.key.pc == kDecodeProfileRawPc)
+        out << ",";
+      else
+        out << "0x" << std::hex << row.key.pc << std::dec << ",";
+      out << row.key.size << ",\"";
+      uint32_t used_words = std::min<uint32_t>((row.key.size + 3) / 4, row.key.words.size());
+      for (uint32_t w = 0; w < used_words; ++w) {
+        if (w)
+          out << " ";
+        out << "0x" << std::hex << row.key.words[w] << std::dec;
+      }
+      out << "\",\"" << row.entry.mnemonic << "\"\n";
+    }
+  }
+
+  std::string path_;
+  uint64_t stride_ = 1;
+  std::atomic<uint64_t> total_seen_{0};
+  std::atomic<uint64_t> sampled_{0};
+  Shards raw_shards_;
+  Shards pc_shards_;
+};
+
+DecodeProfile *&decode_profile_storage() {
+  static DecodeProfile *profile = nullptr;
+  return profile;
+}
+
+DecodeProfile *create_decode_profile() {
+  const char *env = std::getenv("RJ_DECODE_PROFILE");
+  if (!env || !env[0] || std::string_view(env) == "0")
+    return nullptr;
+
+  uint64_t stride = 1;
+  if (const char *stride_env = std::getenv("RJ_DECODE_PROFILE_STRIDE")) {
+    char *end = nullptr;
+    unsigned long long parsed = std::strtoull(stride_env, &end, 10);
+    if (end != stride_env && parsed > 0)
+      stride = static_cast<uint64_t>(parsed);
+  }
+
+  std::string path = std::string_view(env) == "1" ? "/tmp/rocjitsu_decode_profile.csv" : env;
+  auto *profile = new DecodeProfile(std::move(path), stride);
+  decode_profile_storage() = profile;
+  std::atexit([] {
+    if (auto *p = decode_profile_storage())
+      p->dump();
+  });
+  return profile;
+}
+
+DecodeProfile *decode_profile() {
+  static DecodeProfile *profile = create_decode_profile();
+  return profile;
+}
+
+} // namespace
 
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size)
@@ -111,7 +304,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   if (slot >= config_.num_wf_slots)
     return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(sgprs);
+  int32_t sgpr_base = sgpr_file_.allocate(sgprs, /*clear=*/false);
   if (sgpr_base < 0)
     return nullptr;
 
@@ -131,6 +324,7 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   // arguments from L2/memory rather than stale lines from a prior kernel.
   // On real hardware, the driver issues s_dcache_inv at kernel launch.
   l1_scalar_.invalidate_all();
+  invalidate_inst_fetch_cache();
 
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;
@@ -165,6 +359,7 @@ size_t ComputeUnitCore::num_wfs() const {
 }
 
 void ComputeUnitCore::reset_all_wf() {
+  invalidate_inst_fetch_cache();
   for (auto &w : wfs_) {
     if (w->sgpr_alloc().count > 0) {
       sgpr_file_.free(w->sgpr_alloc().base);
@@ -342,8 +537,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   uint32_t vmid = active->process_id();
 
   rj_code_binary_inst_t words[4];
-  for (int i = 0; i < 4; ++i)
-    words[i] = memory_->fetch32(active->pc + i * 4, vmid);
+  fetch_instruction_words(active->pc, vmid, words);
 
   active->trace_inst_count_++;
 
@@ -367,6 +561,9 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   int inst_size_signed = inst->size();
   assert(inst_size_signed > 0 && "instruction size must be positive");
+  if (auto *profile = decode_profile())
+    profile->record(config_.arch, active->pc, words, inst->mnemonic(),
+                    static_cast<uint32_t>(inst_size_signed));
   auto inst_size = static_cast<uint64_t>(inst_size_signed);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
@@ -440,6 +637,27 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     delete inst;
 
   active->pc += inst_size;
+}
+
+void ComputeUnitCore::fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4]) {
+  static_assert((kInstFetchCacheLines & (kInstFetchCacheLines - 1)) == 0);
+  const uint64_t mixed = (pc >> 2) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL);
+  auto &line = inst_fetch_cache_[mixed & (kInstFetchCacheLines - 1)];
+  if (line.valid && line.pc == pc && line.vmid == vmid) {
+    std::memcpy(words, line.words.data(), sizeof(line.words));
+    return;
+  }
+
+  memory_->read_block(pc, reinterpret_cast<uint8_t *>(words), sizeof(line.words), vmid);
+  line.pc = pc;
+  line.vmid = vmid;
+  std::memcpy(line.words.data(), words, sizeof(line.words));
+  line.valid = true;
+}
+
+void ComputeUnitCore::invalidate_inst_fetch_cache() {
+  for (auto &line : inst_fetch_cache_)
+    line.valid = false;
 }
 
 bool ComputeUnitCore::step() {

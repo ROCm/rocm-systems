@@ -95,6 +95,8 @@ public:
   void write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype = Mtype::RW,
              uint32_t vmid = 0);
 
+  uint64_t write_count() const { return write_count_; }
+
   /// @brief Fetch an entire cache line into the given buffer.
   ///
   /// Convenience method for L1 fills. Returns a full LINE_SIZE-byte line

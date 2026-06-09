@@ -26,6 +26,7 @@ rocjitsu::SoC *rocjitsu::config::LoadedConfig::soc() {
 
 #include <cassert>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -82,6 +83,17 @@ uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, con
   if (it == cfg.end())
     return def;
   return static_cast<uint32_t>(std::stoul(it->second));
+}
+
+uint32_t env_u32(const char *name, uint32_t def) {
+  const char *value = std::getenv(name);
+  if (!value || !value[0])
+    return def;
+  char *end = nullptr;
+  unsigned long parsed = std::strtoul(value, &end, 10);
+  if (end == value)
+    return def;
+  return static_cast<uint32_t>(parsed);
 }
 
 uint32_t default_sgprs_per_wf(rj_code_arch_t arch) {
@@ -477,6 +489,9 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
       cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
+      cc.functional_quantum =
+          config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
+      cc.functional_quantum = env_u32("RJ_FUNCTIONAL_QUANTUM", cc.functional_quantum);
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }

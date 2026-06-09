@@ -34,6 +34,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -75,6 +76,7 @@ public:
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
     uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
+    uint32_t functional_quantum = kFunctionalQuantum; ///< Max instructions per functional slice.
   };
 
   ~ComputeUnitCore() override = default;
@@ -125,6 +127,10 @@ public:
 
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
   virtual bool advance() = 0;
+
+  uint32_t functional_quantum() const {
+    return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
+  }
 
   /// @brief Signal that work has been dispatched; begin processing.
   ///
@@ -256,6 +262,7 @@ public:
     memory_ = memory;
     l1_vector_.set_memory(memory);
     l1_scalar_.set_memory(memory);
+    invalidate_inst_fetch_cache();
   }
 
   /// @brief Set (or replace) the L2 cache pointer.
@@ -329,9 +336,13 @@ public:
   /// @returns Register value.
   // TODO(newling) consider cmake flag to build without plugins, this call
   // overhead might be non-negligible.
+  bool plugin_hooks_enabled() const { return plugin_hooks_enabled_; }
+
   uint32_t read_sgpr(uint32_t reg_idx) const {
-    if (auto *wf = sgpr_to_wave_[reg_idx]; plugin_hooks_enabled_ && wf) {
-      plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
+    if (plugin_hooks_enabled_) {
+      if (auto *wf = sgpr_to_wave_[reg_idx]) {
+        plugin_group_->onAmdgpuReadSgpr(wf, reg_idx);
+      }
     }
     return sgpr_file_[reg_idx];
   }
@@ -358,6 +369,14 @@ public:
   /// @param lane Lane index within the wavefront.
   /// @param val Value to write.
   virtual void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) = 0;
+
+  /// @brief Write 32-bit lane values into one VGPR.
+  /// @param reg_idx Physical register index.
+  /// @param lane_mask Enabled lanes to write.
+  /// @param src Source bytes, indexed as src[lane * src_stride].
+  /// @param src_stride Byte stride between source lane values.
+  virtual void write_vgpr_lanes32(uint32_t reg_idx, uint64_t lane_mask, const uint8_t *src,
+                                  uint32_t src_stride) = 0;
 
   /// @brief Return a pointer to a wavefront's SGPR data in the physical file.
   /// @param base Base register index in the SGPR file.
@@ -393,6 +412,14 @@ public:
     static_assert(sizeof(simdojo::VectorReg<N, uint32_t>) == N * sizeof(uint32_t),
                   "VectorReg must be layout-compatible with raw lane storage");
     return *reinterpret_cast<const simdojo::VectorReg<N, uint32_t> *>(vgpr_data(base));
+  }
+
+  const uint32_t *vgpr_lanes32(uint32_t reg_idx) const {
+    return reinterpret_cast<const uint32_t *>(vgpr_data(reg_idx));
+  }
+
+  uint32_t *vgpr_lanes32(uint32_t reg_idx) {
+    return reinterpret_cast<uint32_t *>(vgpr_data(reg_idx));
   }
 
   /// @brief Return the SGPR register file (for serialization).
@@ -448,6 +475,12 @@ protected:
   /// @brief Fetch, decode, execute one instruction from the given wavefront.
   void issue_instruction(Wavefront *wf);
 
+  /// @brief Fetch the 16-byte decode window for the given PC.
+  void fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4]);
+
+  /// @brief Drop cached instruction bytes after image or dispatch changes.
+  void invalidate_inst_fetch_cache();
+
   /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
   void tick_pipelines();
 
@@ -496,6 +529,15 @@ protected:
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool plugin_hooks_enabled_ = false;
 
+  struct InstFetchCacheLine {
+    uint64_t pc = 0;
+    uint32_t vmid = 0;
+    std::array<uint32_t, 4> words{};
+    bool valid = false;
+  };
+  static constexpr size_t kInstFetchCacheLines = 1024;
+  std::array<InstFetchCacheLine, kInstFetchCacheLines> inst_fetch_cache_{};
+
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".
   std::vector<Wavefront *> sgpr_to_wave_;
@@ -523,7 +565,7 @@ public:
   /// @brief Execute work up to the quantum limit, then yield.
   bool advance() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      for (uint32_t i = 0; i < kFunctionalQuantum && step(); ++i) {
+      for (uint32_t i = 0, quantum = this->functional_quantum(); i < quantum && step(); ++i) {
       }
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
@@ -587,8 +629,10 @@ public:
 
   /// @returns Lane value from the VGPR file.
   uint32_t read_vgpr(uint32_t reg_idx, uint32_t lane) const override {
-    if (auto *wf = vgpr_to_wave_[reg_idx]; this->plugin_hooks_enabled_ && wf) {
-      this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
+    if (this->plugin_hooks_enabled_) {
+      if (auto *wf = vgpr_to_wave_[reg_idx]) {
+        this->plugin_group_->onAmdgpuReadVgprs(wf, reg_idx, lane, lane + 1);
+      }
     }
     return vgpr_file_[reg_idx][lane];
   }
@@ -600,6 +644,16 @@ public:
   /// @brief Write a value to the VGPR file.
   void write_vgpr(uint32_t reg_idx, uint32_t lane, uint32_t val) override {
     vgpr_file_[reg_idx][lane] = val;
+  }
+
+  void write_vgpr_lanes32(uint32_t reg_idx, uint64_t lane_mask, const uint8_t *src,
+                          uint32_t src_stride) override {
+    auto &reg = vgpr_file_[reg_idx];
+    for (uint32_t lane = 0; lane < Isa::WF_SIZE; ++lane) {
+      if (!(lane_mask & (uint64_t{1} << lane)))
+        continue;
+      std::memcpy(&reg[lane], src + lane * src_stride, sizeof(uint32_t));
+    }
   }
 
   /// @returns Const pointer to the raw VGPR data.
@@ -622,7 +676,7 @@ public:
 
 protected:
   /// @returns Base index of the allocated VGPR block, or -1 on failure.
-  int32_t allocate_vgprs(uint32_t count) override { return vgpr_file_.allocate(count); }
+  int32_t allocate_vgprs(uint32_t count) override { return vgpr_file_.allocate(count, false); }
 
   /// @brief Return allocated VGPRs to the free pool.
   void free_vgprs(uint32_t base) override { vgpr_file_.free(base); }

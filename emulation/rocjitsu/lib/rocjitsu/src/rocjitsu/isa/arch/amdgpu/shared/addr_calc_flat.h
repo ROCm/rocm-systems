@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <bit>
 #include <cstdint>
 
 namespace rocjitsu {
@@ -36,9 +37,27 @@ template <typename FlatInst>
 void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
+  const uint32_t wf_size = wf.wf_size();
   d.lane_mask = exec;
   d.exec_mask = exec;
-  d.wf_size = wf.wf_size();
+  d.wf_size = wf_size;
+
+  const uint64_t full_exec_mask = wf_size == 64 ? ~0ULL : ((1ULL << wf_size) - 1);
+  const bool full_exec = exec == full_exec_mask;
+  auto for_each_active_lane = [&](auto &&body) {
+    if (full_exec) {
+      for (uint32_t lane = 0; lane < wf_size; ++lane)
+        body(lane);
+      return;
+    }
+
+    uint64_t remaining = exec;
+    while (remaining) {
+      const uint32_t lane = std::countr_zero(remaining);
+      remaining &= remaining - 1;
+      body(lane);
+    }
+  };
 
   // Compute signed 13-bit offset for GLOBAL/SCRATCH, unsigned 12-bit for FLAT.
   int64_t offset;
@@ -71,17 +90,17 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       has_vaddr = (inst.sve == 1);
     else if (inst.seg == 1)
       has_vaddr = (inst.lds == 1);
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
+    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+    const uint32_t *vaddr_lanes =
+        has_vaddr && !cu.plugin_hooks_enabled() ? cu.vgpr_lanes32(vbase) : nullptr;
+    for_each_active_lane([&](uint32_t lane) {
       uint32_t vaddr = 0;
       if (has_vaddr) {
-        uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-        vaddr = cu.read_vgpr(vbase, lane);
+        vaddr = vaddr_lanes ? vaddr_lanes[lane] : cu.read_vgpr(vbase, lane);
       }
       d.per_lane_addr[lane] =
           scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
-    }
+    });
   } else if (inst.seg == 2) {
     // GLOBAL: saddr (64-bit SGPR pair) + VGPR (32-bit) + offset,
     //         or VGPR pair (64-bit) + offset when saddr==0x7F.
@@ -90,19 +109,25 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
       uint32_t sb = wf.sgpr_alloc().base + inst.saddr;
       saddr_val = (static_cast<uint64_t>(cu.read_sgpr(sb + 1)) << 32) | cu.read_sgpr(sb);
     }
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
-      uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-      uint64_t vaddr;
-      if (inst.saddr != 0x7F) {
-        vaddr = static_cast<uint64_t>(static_cast<int64_t>(
-            static_cast<int32_t>(cu.read_vgpr(vbase, lane)))); // sign-extended 32-bit offset
-      } else {
-        vaddr = (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) |
-                cu.read_vgpr(vbase, lane); // 64-bit VGPR pair
-      }
-      d.per_lane_addr[lane] = saddr_val + vaddr + offset;
+    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+    const bool notify_vgpr_reads = cu.plugin_hooks_enabled();
+    const uint32_t *lo_lanes = notify_vgpr_reads ? nullptr : cu.vgpr_lanes32(vbase);
+    const uint32_t *hi_lanes =
+        (!notify_vgpr_reads && inst.saddr == 0x7F) ? cu.vgpr_lanes32(vbase + 1) : nullptr;
+    if (inst.saddr != 0x7F) {
+      for_each_active_lane([&](uint32_t lane) {
+        uint32_t raw = lo_lanes ? lo_lanes[lane] : cu.read_vgpr(vbase, lane);
+        uint64_t vaddr = static_cast<uint64_t>(
+            static_cast<int64_t>(static_cast<int32_t>(raw))); // sign-extended 32-bit offset
+        d.per_lane_addr[lane] = saddr_val + vaddr + offset;
+      });
+    } else {
+      for_each_active_lane([&](uint32_t lane) {
+        uint32_t lo = lo_lanes ? lo_lanes[lane] : cu.read_vgpr(vbase, lane);
+        uint32_t hi = hi_lanes ? hi_lanes[lane] : cu.read_vgpr(vbase + 1, lane);
+        uint64_t vaddr = (static_cast<uint64_t>(hi) << 32) | lo; // 64-bit VGPR pair
+        d.per_lane_addr[lane] = saddr_val + vaddr + offset;
+      });
     }
   } else {
     // FLAT: 64-bit VGPR pair + unsigned 12-bit offset.
@@ -113,17 +138,19 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
     uint64_t scratch_base = wf.scratch_base();
     uint32_t lane_stride = wf.scratch_lane_size();
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
-        continue;
-      uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-      uint64_t vaddr =
-          (static_cast<uint64_t>(cu.read_vgpr(vbase + 1, lane)) << 32) | cu.read_vgpr(vbase, lane);
+    uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
+    const bool notify_vgpr_reads = cu.plugin_hooks_enabled();
+    const uint32_t *lo_lanes = notify_vgpr_reads ? nullptr : cu.vgpr_lanes32(vbase);
+    const uint32_t *hi_lanes = notify_vgpr_reads ? nullptr : cu.vgpr_lanes32(vbase + 1);
+    for_each_active_lane([&](uint32_t lane) {
+      uint32_t lo = lo_lanes ? lo_lanes[lane] : cu.read_vgpr(vbase, lane);
+      uint32_t hi = hi_lanes ? hi_lanes[lane] : cu.read_vgpr(vbase + 1, lane);
+      uint64_t vaddr = (static_cast<uint64_t>(hi) << 32) | lo;
       uint64_t addr = vaddr + offset;
       if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
         addr = scratch_base + static_cast<uint64_t>(lane) * lane_stride + (addr & 0xFFFFFFFFULL);
       d.per_lane_addr[lane] = addr;
-    }
+    });
   }
 }
 

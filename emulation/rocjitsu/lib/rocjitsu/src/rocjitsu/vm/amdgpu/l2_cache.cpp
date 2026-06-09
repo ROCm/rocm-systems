@@ -131,8 +131,24 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
   std::lock_guard set_lock(set_mutex(addr));
   uint64_t line_addr = CacheStore::line_address(addr);
-  ensure_line(line_addr, vmid);
-  cache_.read_line(line_addr, line_buf, 0, LINE_SIZE);
+  const uint8_t *line = cache_.line_data_for_read(line_addr);
+  if (!line) {
+    simdojo::CacheTag evicted;
+    uint8_t evicted_data[LINE_SIZE];
+    auto allocated = cache_.allocate_with_data(line_addr, &evicted, evicted_data);
+
+    if (evicted.valid && evicted.dirty) {
+      static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
+      uint64_t evicted_addr =
+          (evicted.tag << (LINE_SIZE_BITS + SET_INDEX_BITS)) |
+          (static_cast<uint64_t>(CacheStore::set_index(line_addr)) << LINE_SIZE_BITS);
+      send_backing(evicted_addr, evicted_data, LINE_SIZE, simdojo::MessageOp::WRITE, vmid);
+    }
+
+    send_backing(line_addr, allocated.data, LINE_SIZE, simdojo::MessageOp::READ, vmid);
+    line = allocated.data;
+  }
+  std::memcpy(line_buf, line, LINE_SIZE);
 }
 
 void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype, uint32_t vmid) {

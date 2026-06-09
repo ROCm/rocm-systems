@@ -34,6 +34,16 @@ uint32_t extend_scalar_load(const uint8_t *bytes, uint32_t elem_size, bool sign_
   return value;
 }
 
+void populate_trace_metadata(VectorMemState &d, Wavefront &wf) {
+  if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
+    if (d.cu_path.empty()) {
+      d.cu_path = wf.cu().full_path();
+      d.wg_id = wf.wg_id();
+      d.wf_id = wf.wf_id();
+    }
+  }
+}
+
 /// Shared complete_access logic for vector/LDS loads (write VGPRs from
 /// response data). Used by both GlobalMemPipeline and LocalMemPipeline.
 ///
@@ -115,6 +125,14 @@ void vector_complete(VectorMemState &d, ComputeUnitCore &cu) {
       }
     }
   }
+
+  if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
+    for (uint32_t i = 0; i < vgpr_count; ++i)
+      cu.write_vgpr_lanes32(d.dst_reg_base + i, d.lane_mask, d.response_data.data() + i * 4,
+                            stride);
+    return;
+  }
+
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
@@ -433,11 +451,7 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds) {
 
 void GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
-  if (d.cu_path.empty()) {
-    d.cu_path = wf.cu().full_path();
-    d.wg_id = wf.wg_id();
-    d.wf_id = wf.wf_id();
-  }
+  populate_trace_metadata(d, wf);
 
   if (d.atomic_op != AtomicOp::NONE) {
     execute_atomic_rmw(d, l2_, l1_, wf.process_id());
@@ -463,11 +477,7 @@ void GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf) {
 
 void LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<VectorMemState>();
-  if (d.cu_path.empty()) {
-    d.cu_path = wf.cu().full_path();
-    d.wg_id = wf.wg_id();
-    d.wf_id = wf.wf_id();
-  }
+  populate_trace_metadata(d, wf);
 
   if (d.atomic_op != AtomicOp::NONE) {
     execute_lds_atomic_rmw(d, lds_);

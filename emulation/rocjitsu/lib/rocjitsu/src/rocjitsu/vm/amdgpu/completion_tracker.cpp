@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -134,7 +135,9 @@ void CompletionTracker::fire_queue_idle_signal(uint64_t queue_desc_va, uint32_t 
 
 void CompletionTracker::flush_caches(uint32_t vmid) {
   for (auto *cu : cus_)
-    cu->flush_all(vmid);
+    cu->flush_l1(vmid);
+  for (auto *l2 : l2_caches_)
+    l2->flush_all(vmid);
 }
 
 bool CompletionTracker::all_complete(const std::vector<HwQueueState> &queues) const {
