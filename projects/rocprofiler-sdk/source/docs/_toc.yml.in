@@ -38,6 +38,8 @@ subtrees:
     entries:
     - file: api-reference/tool_library
       title: Tool library
+    - file: api-reference/tool_library_environment
+      title: Tool library environment variables
     - file: api-reference/intercept_table
       title: Runtime intercept tables
     - file: api-reference/process_attachment
