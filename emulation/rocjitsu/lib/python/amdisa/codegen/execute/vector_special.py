@@ -202,8 +202,8 @@ def gen_vector_div_fixup(
             L.extend(vop3_src_mod('b', 1, has_abs))
             L.extend(vop3_src_mod('c', 2, has_abs))
         L.append('    double result;')
-        L.append('    if (std::isnan(b)) result = b;')
-        L.append('    else if (std::isnan(c)) result = c;')
+        L.append('    if (std::isnan(c)) result = c;')
+        L.append('    else if (std::isnan(b)) result = b;')
         L.append(
             '    else if (c == 0.0 && b == 0.0) result = std::numeric_limits<double>::quiet_NaN();'
         )
@@ -247,8 +247,8 @@ def gen_vector_div_fixup(
             L.extend(vop3_src_mod('b', 1, has_abs))
             L.extend(vop3_src_mod('c', 2, has_abs))
         L.append('    float result;')
-        L.append('    if (std::isnan(b)) result = b;')
-        L.append('    else if (std::isnan(c)) result = c;')
+        L.append('    if (std::isnan(c)) result = c;')
+        L.append('    else if (std::isnan(b)) result = b;')
         L.append(
             '    else if (c == 0.0f && b == 0.0f) result = std::numeric_limits<float>::quiet_NaN();'
         )
