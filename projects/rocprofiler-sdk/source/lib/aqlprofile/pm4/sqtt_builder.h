@@ -99,6 +99,7 @@ struct TraceControl
     uint64_t gpu_clock_cnt_end{0};
     uint32_t status_double_buffer{0};
     uint32_t wptr_doublebuffer{0};
+    uint32_t spi_config_temp{0};
 };
 
 // Encapsulates the various Api and structures that are used to enable
@@ -278,13 +279,17 @@ public:
             config->target_cu_per_se[se_index] = bMaskedIn ? config->targetCu : -1;
         }
 
+        SetGRBMToBroadcast(cmd_buffer);
+
+        auto spi_event_data = Primitives::spi_sqg_event_ctl(true);
+        auto spi_event_addr = (Primitives::GFXIP_LEVEL >= 12) ? Primitives::SPI_SQG_EVENT_CTL_ADDR
+                                                              : Primitives::SPI_CONFIG_CNTL_ADDR;
+
+        if(Primitives::GFXIP_LEVEL >= 12 || !config->buffer_data.empty())
+            WriteConfigPacket(cmd_buffer, spi_event_addr, spi_event_data);
+
         if(Primitives::GFXIP_LEVEL == 9)
         {
-            // Program Grbm to broadcast messages to all shader engines
-            SetGRBMToBroadcast(cmd_buffer);
-
-            // Issue a CSPartialFlush cmd including cache flush
-            if(config->concurrent == 0) builder.BuildWriteWaitIdlePacket(cmd_buffer);
             // Program the thread trace mask - specifies SH, CU, SIMD and
             // VM Id masks to apply. Enabling SQ/SPI/REG_STALL_EN bits
             const uint32_t mask_value =
@@ -393,16 +398,8 @@ public:
         }
         else
         {
-            SetGRBMToBroadcast(cmd_buffer);
             builder.BuildWritePConfigRegPacket(
                 cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
-
-            if(Primitives::GFXIP_LEVEL == 12)
-            {
-                WriteConfigPacket(cmd_buffer,
-                                  Primitives::SPI_SQG_EVENT_CTL_ADDR,
-                                  Primitives::spi_sqg_event_ctl(true));
-            }
 
             for(int xcc = 0; xcc < xcc_number_; xcc++)
             {

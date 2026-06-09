@@ -72,6 +72,7 @@ public:
     static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__CLEAR_ALL_MASK_PRM  = 0x02000000L;
 
     static constexpr Register SPI_SQG_EVENT_CTL_ADDR = REG_32B_ADDR(GC, 0, regSPI_SQG_EVENT_CTL);
+    static constexpr Register SPI_CONFIG_CNTL_ADDR{};
     static constexpr Register SQ_PERFCOUNTER_CTRL_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL);
     static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR =
