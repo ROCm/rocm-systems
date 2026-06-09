@@ -13,11 +13,11 @@
 #include "simdojo/sim/message.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
 #include <string>
 #include <utility>
 
@@ -48,8 +48,9 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// @par Thread safety
 /// Public cache operations are thread-safe. Normal line operations take a
 /// per-set mutex so CPU dispatch workers sharing an XCD-local L2 can make
-/// progress on independent cache sets. Whole-cache maintenance uses a global
-/// gate to exclude concurrent set operations.
+/// progress on independent cache sets. Whole-cache maintenance takes all set
+/// mutexes in address-set order to exclude concurrent set operations without
+/// adding a global lock to every cache hit.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -123,7 +124,6 @@ public:
   /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
   ///           old value, compute the new value, and write it in place.
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
-    std::shared_lock cache_lock(cache_mutex_);
     std::lock_guard set_lock(set_mutex(addr));
     ensure_line(addr, vmid);
 
@@ -153,7 +153,7 @@ public:
 
   /// @brief Invalidate all L2 lines.
   void invalidate_all() {
-    std::unique_lock cache_lock(cache_mutex_);
+    auto locks = lock_all_sets();
     cache_.invalidate_all();
   }
 
@@ -190,13 +190,45 @@ private:
     return set_mutexes_[CacheStore::set_index(addr)];
   }
 
+  class AllSetLocks {
+  public:
+    explicit AllSetLocks(std::array<std::recursive_mutex, NUM_SETS> &mutexes) : mutexes_(mutexes) {
+      try {
+        for (auto &mutex : mutexes_) {
+          mutex.lock();
+          ++locked_;
+        }
+      } catch (...) {
+        unlock_all();
+        throw;
+      }
+    }
+
+    AllSetLocks(const AllSetLocks &) = delete;
+    AllSetLocks &operator=(const AllSetLocks &) = delete;
+
+    ~AllSetLocks() { unlock_all(); }
+
+  private:
+    void unlock_all() {
+      while (locked_ > 0) {
+        --locked_;
+        mutexes_[locked_].unlock();
+      }
+    }
+
+    std::array<std::recursive_mutex, NUM_SETS> &mutexes_;
+    size_t locked_ = 0;
+  };
+
+  AllSetLocks lock_all_sets() const { return AllSetLocks(set_mutexes_); }
+
   void ensure_line(uint64_t addr, uint32_t vmid = 0);
   void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
   void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
                     uint32_t vmid = 0);
 
   CacheStore cache_;
-  mutable std::shared_mutex cache_mutex_;
   mutable std::array<std::recursive_mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).

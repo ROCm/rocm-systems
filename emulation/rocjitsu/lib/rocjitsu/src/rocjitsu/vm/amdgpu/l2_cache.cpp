@@ -73,7 +73,6 @@ void L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype, uint
     return;
   }
 
-  std::shared_lock cache_lock(cache_mutex_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -100,7 +99,6 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
     return;
   }
 
-  std::shared_lock cache_lock(cache_mutex_);
   uint32_t copied = 0;
   while (copied < size) {
     const uint64_t ea = addr + copied;
@@ -131,7 +129,6 @@ void L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtyp
 }
 
 void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
-  std::shared_lock cache_lock(cache_mutex_);
   std::lock_guard set_lock(set_mutex(addr));
   uint64_t line_addr = CacheStore::line_address(addr);
   ensure_line(line_addr, vmid);
@@ -139,7 +136,6 @@ void L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid) {
 }
 
 void L2Cache::writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype, uint32_t vmid) {
-  std::shared_lock cache_lock(cache_mutex_);
   std::lock_guard set_lock(set_mutex(line_addr));
   simdojo::CacheTag *tag = nullptr;
   if (cache_.lookup(line_addr, &tag)) {
@@ -186,13 +182,12 @@ void L2Cache::flush_line_locked(uint64_t addr, uint32_t vmid) {
 }
 
 void L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
-  std::shared_lock cache_lock(cache_mutex_);
   std::lock_guard set_lock(set_mutex(addr));
   flush_line_locked(addr, vmid);
 }
 
 void L2Cache::flush_all(uint32_t vmid) {
-  std::unique_lock cache_lock(cache_mutex_);
+  auto locks = lock_all_sets();
   uint32_t dirty_count = 0;
   uint64_t min_addr = UINT64_MAX, max_addr = 0;
   cache_.for_each_dirty([this, vmid, &dirty_count, &min_addr,
@@ -211,9 +206,9 @@ void L2Cache::flush_all(uint32_t vmid) {
 }
 
 void L2Cache::invalidate_range(uint64_t addr, uint32_t size) {
-  std::unique_lock cache_lock(cache_mutex_);
   if (size == 0)
     return;
+  auto locks = lock_all_sets();
   uint64_t line_start = CacheStore::line_address(addr);
   uint64_t end = addr + size;
   for (uint64_t la = line_start; la < end; la += LINE_SIZE)
