@@ -138,6 +138,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
+  gpu_clock_offset_ = 0;
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
@@ -3010,6 +3011,14 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
   const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
 
   std::lock_guard<std::mutex> lock(t1_lock_);
+
+#ifdef _WIN32
+  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
+  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
+  // base).  Subtract the offset before interpolation (0 until first detection).
+  // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
+  tick -= gpu_clock_offset_;
+#endif
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
   // clock read certainty is <4us.
@@ -3048,6 +3057,22 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
     system_tick = uint64_t(historical_clock_ratio_ * double(int64_t(tick - t0_.GPUClockCounter))) +
         t0_.SystemClockCounter;
   }
+
+#ifdef _WIN32
+  // Detect epoch mismatch: only trigger when translated time is in the future,
+  // which proves AQL timestamps have an epoch offset from D3DKMT's GPU clock.
+  // If TranslateTime is called long after dispatch, system_tick <= now, so no
+  // false offset is computed.  Retries on subsequent calls until detected.
+  if (gpu_clock_offset_ == 0) {
+    int64_t now = int64_t(os::TimeNanos());
+    if (int64_t(system_tick) > now) {
+      gpu_clock_offset_ = int64_t(double(int64_t(system_tick) - now) / ratio);
+      // Re-translate this first event with the corrected offset.
+      elapsed = int64_t(ratio * double((int64_t(tick) - gpu_clock_offset_) - int64_t(t1_.GPUClockCounter)));
+      system_tick = uint64_t(elapsed) + t1_.SystemClockCounter;
+    }
+  }
+#endif
 
   return system_tick;
 }
