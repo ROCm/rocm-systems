@@ -142,8 +142,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
-  num_p2p_engines_ =  properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
-                      : std::max(0U, properties_.NumSdmaEngines - 2);
+  num_p2p_engines_ = properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
+                     : properties_.NumSdmaEngines - num_h2d_d2h_engines_;
 
   const core::Isa *isa_base;
 
