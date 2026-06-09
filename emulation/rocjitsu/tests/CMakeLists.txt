@@ -693,10 +693,10 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
     rj_add_hip_test_case(
         hip_logging_test "LoggingTest.dispatch_logged"
+        CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json
         TIMEOUT 30
         ENVIRONMENT
             "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
-            "RJ_LOG=1"
             "RJ_SINKS=file"
             "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
     )

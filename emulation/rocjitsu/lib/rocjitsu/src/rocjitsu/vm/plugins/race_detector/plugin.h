@@ -106,7 +106,9 @@ struct RaceWavefrontState : WavefrontState {
 
 class RaceDetectorPlugin : public ExecutionPlugin {
 public:
-  RaceDetectorPlugin();
+  /// @param config_json Plugin configuration object as a JSON string (unused;
+  ///        this plugin takes no configuration). May be null.
+  explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;

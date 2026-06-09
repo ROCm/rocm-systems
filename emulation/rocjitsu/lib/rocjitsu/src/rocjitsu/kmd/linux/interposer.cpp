@@ -13,6 +13,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 #include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
@@ -46,11 +47,26 @@
 #include <unordered_map>
 #include <unordered_set>
 
-extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
-extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
-
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedDriver;
+
+// Read an entire text file via raw syscalls. Used during driver construction
+// to avoid re-entering the interposed libc I/O path. Returns empty on failure.
+static std::string read_text_file_raw(const char *path) {
+  int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, O_RDONLY, 0));
+  if (fd < 0)
+    return {};
+  std::string out;
+  char buf[4096];
+  for (;;) {
+    auto n = syscall(SYS_read, fd, buf, sizeof(buf));
+    if (n <= 0)
+      break;
+    out.append(buf, static_cast<size_t>(n));
+  }
+  syscall(SYS_close, fd);
+  return out;
+}
 
 static int connect_to_daemon() {
   auto path = rocjitsu::rpc_default_socket_path();
@@ -337,7 +353,8 @@ public:
         return nullptr;
       }
 
-      // Set up execution plugins based on environment variables.
+      // Set up the execution plugin group, its output sinks, and load any
+      // plugins declared in the config file's "plugins" section.
       if (rj_vm_->soc) {
         std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
         if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
@@ -364,15 +381,12 @@ public:
           }
         }
 
-        if (const char *rj_log = std::getenv("RJ_LOG"); rj_log && std::string(rj_log) == "1") {
-          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createKernelLoggingPlugin()));
-          fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
-        }
+        // Discover and load execution plugins declared in the config file's
+        // "plugins" section. cfg_buf holds the path to the JSON config.
+        std::string config_json = read_text_file_raw(cfg_buf);
+        if (!config_json.empty())
+          rocjitsu::PluginLoader::load_from_config(config_json, *pg);
 
-        if (const char *race = std::getenv("RJ_RACE"); race && std::string(race) == "1") {
-          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
-          fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
-        }
         rj_vm_->soc->set_plugin_group(pg);
       }
 

@@ -11,8 +11,14 @@ Logs kernel dispatch metadata and detects MFMA instruction usage.
 
 ## Enabling
 
+Add the plugin to the `plugins` section of your rocjitsu config file:
+
+```json
+{ "plugins": { "logging": {} } }
+```
+
 ```bash
-RJ_LOG=1 LD_PRELOAD=librocjitsu_kmd.so ./my_app
+rocjitsu --config my_config.json -- ./my_app
 ```
 
 Output goes through the plugin sink system — see the

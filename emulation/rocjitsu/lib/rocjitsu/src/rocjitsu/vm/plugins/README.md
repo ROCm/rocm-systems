@@ -16,10 +16,59 @@ The race detector plugin contains both the core detection algorithm
 
 ## Enabling plugins
 
-Plugins are loaded at runtime based on environment variables:
+Plugins are compiled into standalone shared objects named
+`librocjitsu_plugin_<name>.so` and discovered at runtime through the
+standard dynamic-linker search path (`librocjitsu_plugin_*.so` are
+installed next to the interposer, and the launcher adds that directory to
+`LD_LIBRARY_PATH`).
 
-- `RJ_RACE=1` enables the race detection plugin.
-- `RJ_LOG=1` enables the kernel logging plugin.
+A plugin is enabled by listing it in the `plugins` section of the
+rocjitsu config file. The key is the plugin name (the `<name>` in
+`librocjitsu_plugin_<name>.so`) and the value is a JSON object with the
+plugin's configuration:
+
+```json
+{
+  "plugins": {
+    "race": {},
+    "logging": {}
+  }
+}
+```
+
+The bundled plugins are `race` (`RaceDetectorPlugin`) and `logging`
+(`KernelLoggingPlugin`).
+
+### Plugin ABI
+
+Each plugin `.so` exports two `extern "C"` functions:
+
+- `const PluginMetadata *rocjitsu_plugin_metadata()` — returns a pointer
+  to static metadata: `abi` version, `name`, `contact`, `version`, and a
+  `config_schema` JSON string.
+- `std::unique_ptr<ExecutionPlugin> rocjitsu_plugin_create(const char *config_json)`
+  — constructs the plugin from its resolved JSON configuration string.
+
+Use the `ROCJITSU_DEFINE_PLUGIN` macro from `plugin_abi.h` to emit both
+functions. The host validates the reported `abi` against the loader's
+expected version before use.
+
+### Config schema
+
+The `config_schema` string describes the accepted config keys. Each key
+maps to an object with a `type` (`string`, `number`, or `boolean`), an
+optional `description`, and an optional `default`. Keys without a
+`default` are required. Example:
+
+```json
+{
+  "argname": { "type": "string", "description": "does something important", "default": "defaultvalue" },
+  "requiredarg": { "type": "number" }
+}
+```
+
+The loader merges defaults, validates types, checks for required keys,
+and passes the resolved JSON object to `rocjitsu_plugin_create`.
 
 ## Plugin output
 
@@ -40,16 +89,22 @@ When `file` is in `RJ_SINKS`, each plugin writes to
 
 ### Examples
 
+With a config file `my_config.json` that contains a `plugins` section:
+
+```json
+{ "plugins": { "race": {} } }
+```
+
 ```bash
 # Interactive use (default) — output goes to stderr
-RJ_RACE=1 LD_PRELOAD=librocjitsu_kmd.so ./my_app
+rocjitsu --config my_config.json -- ./my_app
 
 # Save race reports to files (for test harnesses)
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output LD_PRELOAD=... ./my_app
+RJ_SINKS=file RJ_SINK_DIR=/tmp/output rocjitsu --config my_config.json -- ./my_app
 # Race reports are in /tmp/output/race.log
 
 # Both stderr and file simultaneously
-RJ_RACE=1 RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output LD_PRELOAD=... ./my_app
+RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output rocjitsu --config my_config.json -- ./my_app
 ```
 
 ### Writing a plugin that uses sinks
@@ -80,7 +135,13 @@ Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
 ## Adding a new plugin
 
-1. Implement `ExecutionPlugin` in a new `.cpp`/`.h` pair in this directory.
-2. Add the source to `CMakeLists.txt`.
-3. Register the plugin in `simulated_driver.cpp` (gated by an environment variable).
+1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
+   must be constructible from `const char *config_json`.
+2. Add a `plugin_export.cpp` that calls
+   `ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", contact, version, schema)`.
+3. In `CMakeLists.txt`, add the object library and a
+   `rj_add_plugin_so(myname <object_lib> <export_src>)` call so it builds
+   `librocjitsu_plugin_myname.so`.
 4. Use `sink().write()` for all output — never write to stderr directly.
+5. Enable it by adding `"myname": { ... }` to the `plugins` section of
+   the config file.

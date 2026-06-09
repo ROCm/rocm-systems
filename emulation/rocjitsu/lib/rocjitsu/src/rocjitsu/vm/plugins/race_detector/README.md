@@ -77,10 +77,17 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 # or: amdclang++ -O2 -o /tmp/race_example race_example.hip --offload-arch=gfx950
 ```
 
-Run it under the emulator with `RJ_RACE=1` to enable the race detector:
+Enable the race detector by adding it to the `plugins` section of your
+rocjitsu config file (`my_config.json`):
+
+```json
+{ "plugins": { "race": {} } }
+```
+
+Run it under the emulator:
 
 ```bash
-RJ_RACE=1 $BUILD_DIR/tools/rocjitsu/rocjitsu -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
 ```
 
 You should see output like:
@@ -105,16 +112,16 @@ ROCm workload — compiled HIP/HSA binaries, Python scripts using PyTorch
 or JAX, multi-process launchers like `torchrun`, etc.
 
 ```bash
-RJ_RACE=1 $BUILD_DIR/tools/rocjitsu/rocjitsu -- ./my_app
-RJ_RACE=1 $BUILD_DIR/tools/rocjitsu/rocjitsu -- python my_script.py
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.py
 ```
 
 To capture reports to a file instead of stderr (useful for CI or
 scripted workflows), set `RJ_SINKS=file` and `RJ_SINK_DIR`:
 
 ```bash
-RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  $BUILD_DIR/tools/rocjitsu/rocjitsu -- ./my_app
+RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
+  $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 
@@ -194,13 +201,13 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   DTL, exec mask, multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `hip_race_tests.hip` — end-to-end HIP kernel tests run under the
-  emulator with `RJ_RACE=1`.
+  emulator with the `race` plugin enabled in the config file.
 
 ```bash
 # Core detection tests
 ctest --test-dir $BUILD_DIR -R "RaceDetector|IntervalSet"
 
-# End-to-end HIP tests (RJ_RACE=1 is set automatically by ctest)
+# End-to-end HIP tests (the test config enables the race plugin)
 ctest --test-dir $BUILD_DIR -R "RaceTest"
 ```
 

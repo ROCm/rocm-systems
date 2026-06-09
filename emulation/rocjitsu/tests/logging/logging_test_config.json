@@ -85,6 +85,6 @@
     ]
   },
   "plugins": {
-    "race": {}
+    "logging": {}
   }
 }

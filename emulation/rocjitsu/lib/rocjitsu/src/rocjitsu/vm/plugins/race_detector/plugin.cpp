@@ -139,7 +139,8 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin() : ExecutionPlugin("race") {}
+RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/)
+    : ExecutionPlugin("race") {}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
 
@@ -357,7 +358,3 @@ void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> 
 }
 
 } // namespace rocjitsu::plugins::race_detector
-
-extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin() {
-  return new rocjitsu::plugins::race_detector::RaceDetectorPlugin();
-}

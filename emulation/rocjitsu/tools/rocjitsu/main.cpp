@@ -418,6 +418,18 @@ int main(int argc, char *argv[]) {
   }
 
   setenv("LD_PRELOAD", lib_path.c_str(), 1);
+
+  // Make plugin shared objects (librocjitsu_plugin_<name>.so), which are
+  // installed next to the interposer, discoverable through the standard
+  // dynamic-linker search path.
+  {
+    auto lib_dir = std::filesystem::path(lib_path).parent_path().string();
+    std::string ld_path = lib_dir;
+    if (const char *existing = std::getenv("LD_LIBRARY_PATH"); existing && *existing)
+      ld_path += ":" + std::string(existing);
+    setenv("LD_LIBRARY_PATH", ld_path.c_str(), 1);
+  }
+
   execvp(app_argv[0], app_argv);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));

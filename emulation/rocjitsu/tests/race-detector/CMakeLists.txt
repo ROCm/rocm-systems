@@ -22,7 +22,6 @@ function(rj_add_race_test_case TEST_CASE)
         TIMEOUT 30
         ENVIRONMENT
             "ROCJITSU_RUNTIME_DIR=${RUNTIME_DIR}"
-            "RJ_RACE=1"
             "RJ_SINKS=file"
             "RJ_SINK_DIR=${SINK_DIR}"
     )

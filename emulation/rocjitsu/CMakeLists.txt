@@ -220,13 +220,13 @@ target_link_libraries(
         rocjitsu_kmd
         rocjitsu_vm
         rocjitsu_vm_amdgpu
-        rocjitsu_plugin_logging
-        rocjitsu_plugin_race_detector
+        rocjitsu_plugin_loader
         rocjitsu_vm_risc_v
         rocjitsu_config
         util
         flatbuffers
         Threads::Threads
+        dl
 )
 target_include_directories(rocjitsu_shared PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_shared flatbuffers_schemas)
