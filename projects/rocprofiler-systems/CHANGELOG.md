@@ -75,6 +75,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   building for TheRock. The system version of `elfutils` was used, rather than
   the vendored version causing package install failures.
 
+### Known issues
+
+- Some workloads may report an imbalance in the push/pop trace counts.
+
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
 ### Added
