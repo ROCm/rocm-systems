@@ -38,6 +38,7 @@
 #include "lib/aqlprofile/core/aql_profile.hpp"
 #include "lib/aqlprofile/core/aql_profile_exception.h"
 #include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/common/environment.hpp"
 #include "lib/aqlprofile/pm4/cmd_builder.h"
 #include "lib/aqlprofile/pm4/pmc_builder.h"
 #include "lib/aqlprofile/pm4/spm_builder.h"
@@ -60,6 +61,9 @@ GetAgentInfo(aqlprofile_agent_handle_t agent_id);
 
 aqlprofile_agent_handle_t
 RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info);
+
+aqlprofile_agent_handle_t
+RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info);
 
 // GPU enumeration
 enum gpu_id_t
@@ -241,6 +245,14 @@ public:
     virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
     virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
 
+    // Return GPU id for a given gfxip string. Pure mapping function; the
+    // instance-side GetGpuId() above returns the cached value resolved by
+    // this lookup at factory-construction time. Exposed for callers that
+    // need chip-family dispatch before a Pm4Factory exists -- e.g.
+    // populate_cu_bitmap_from_drm() gating the GFX11+ DRM bitmap fetch in
+    // pm4_factory.cpp without re-implementing the gfxip -> gpu_id_t table.
+    static gpu_id_t GetGpuId(std::string_view);
+
 protected:
     explicit Pm4Factory(const BlockInfoMap& map)
     : concurrent_mode_(concurrent_create_mode_)
@@ -309,8 +321,6 @@ private:
     static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
     // Create MI450 factory
     static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
-    // Return GPU id for a given agent
-    static gpu_id_t GetGpuId(std::string_view);
 
     static bool CheckConcurrent(const profile_t* profile);
 
@@ -331,8 +341,9 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
     instances_t::iterator it  = ret.first;
 
     concurrent_create_mode_ = concurrent;
-    static bool spm_kfd     = getenv("ROCP_SPM_KFD_MODE") != nullptr;
-    spm_kfd_mode_           = spm_kfd;
+    // Check presence, not value (even empty string means "enabled")
+    static bool spm_kfd = rocprofiler::common::get_env_optional("ROCP_SPM_KFD_MODE").has_value();
+    spm_kfd_mode_       = spm_kfd;
 
     // Create a factory implementation for the GPU id
     if(ret.second)

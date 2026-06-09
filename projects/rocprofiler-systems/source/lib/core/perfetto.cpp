@@ -277,7 +277,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error,
     {
         auto _output_folder = filepath::dirname(_filename);
         auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{});
 
         if(!_script_dir.empty())
         {

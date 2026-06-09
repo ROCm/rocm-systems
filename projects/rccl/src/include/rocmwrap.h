@@ -102,6 +102,11 @@ ncclResult_t rocmLibraryInit(void);
 extern int ncclCudaDriverVersionCache;
 extern bool ncclCudaLaunchBlocking; // initialized by ncclCudaLibraryInit()
 
+// [RCCL] cudawrap.h (now hipified) also defines ncclCudaDriverVersion. When a
+// translation unit pulls both rocmwrap.h and cudawrap.h in (e.g. via alloc.h)
+// we'd otherwise get a redefinition error. Pick a single canonical location.
+#ifndef NCCL_CUDA_DRIVER_VERSION_DEFINED
+#define NCCL_CUDA_DRIVER_VERSION_DEFINED
 inline ncclResult_t ncclCudaDriverVersion(int* driver) {
   int version = __atomic_load_n(&ncclCudaDriverVersionCache, __ATOMIC_RELAXED);
   if (version == -1) {
@@ -109,6 +114,20 @@ inline ncclResult_t ncclCudaDriverVersion(int* driver) {
     __atomic_store_n(&ncclCudaDriverVersionCache, version, __ATOMIC_RELAXED);
   }
   *driver = version;
+  return ncclSuccess;
+}
+#endif
+
+// [RCCL] Upstream NCCL added this helper in cudawrap.h; on HIP we provide the
+// equivalent that resolves the "legacy NULL" stream alias.
+static inline ncclResult_t ncclCudaStreamIsLegacyNull(cudaStream_t stream, bool* isLegacy) {
+#if CUDART_VERSION >= 11030
+  unsigned long long streamId = ~0ULL;
+  CUDACHECK(cudaStreamGetId(stream, &streamId));
+  *isLegacy = (streamId == 0);
+#else
+  *isLegacy = (stream == NULL) || (stream == cudaStreamLegacy);
+#endif
   return ncclSuccess;
 }
 
