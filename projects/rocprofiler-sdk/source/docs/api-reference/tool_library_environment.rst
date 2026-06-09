@@ -72,8 +72,8 @@ that is not being loaded, not being initialized, or not receiving callbacks.
     * - ``ROCPROFILER_LOG_LEVEL``
       - ``warning``
       - Severity threshold for SDK log output. Accepted values:
-        ``trace``, ``info``, ``warning``, ``error``, ``fatal``. A negative integer
-        (for example, ``-1``) enables verbose ``vmodule`` output at that level.
+        ``trace``, ``info``, ``warning``, ``error``, ``fatal``. Integer values
+        ``4``..``0`` are also accepted (``4``=trace, ``3``=info, ``2``=warning, ``1``=error, ``0``=fatal).
     * - ``ROCPROFILER_LOG_DIR``
       - (stderr)
       - Directory to write log files into. When unset, log messages are written
