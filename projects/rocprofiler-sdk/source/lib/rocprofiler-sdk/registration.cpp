@@ -42,6 +42,7 @@
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
@@ -1253,6 +1254,49 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->tools_, lib_instance);
+
+        // install queue interposition AFTER update_table so our wrappers
+        // sit outermost in core_ and chain through the tracing functors
+        {
+            auto non_queue_interposition_contexts = rocprofiler::context::get_registered_contexts(
+                [](const rocprofiler::context::context* ctx) {
+                    return (ctx->dispatch_counter_collection != nullptr ||
+                            ctx->dispatch_thread_trace != nullptr || ctx->pc_sampler != nullptr);
+                });
+
+            ROCP_INFO << fmt::format(
+                "[queue-interposition] counter/ATT/PC-sampling contexts found: {}. The presence of "
+                "any of these contexts will prevent inline intercept (for the time being).",
+                non_queue_interposition_contexts.size());
+
+            // if non_queue_interposition_contexts is empty, default to inline intercept.
+            // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
+            auto enable_queue_interposition = rocprofiler::common::get_env(
+                "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
+
+            // if ROCPROFILER_QUEUE_INTERPOSITION is explicitly set to true, but there are contexts
+            // that require non-inline intercept, print a warning and fall back to non-inline
+            // intercept
+            if(enable_queue_interposition && !non_queue_interposition_contexts.empty())
+            {
+                ROCP_WARNING << fmt::format(
+                    "ROCPROFILER_QUEUE_INTERPOSITION was explicitly set to true, but {} contexts "
+                    "were found that require non-inline intercept. Falling back to non-inline "
+                    "intercept...",
+                    non_queue_interposition_contexts.size());
+                enable_queue_interposition = false;
+            }
+
+            // report the final decision on inline vs non-inline intercept
+            ROCP_INFO << "[queue-interposition] ROCPROFILER_QUEUE_INTERPOSITION="
+                      << (enable_queue_interposition ? "true" : "false");
+
+            // (eventually) we will want to always install the intercepts so that dynamic enablement
+            // of inline intercept can occur when conditions allow.
+            if(enable_queue_interposition)
+                rocprofiler::hsa::queue_interposition::interposition_init(
+                    hsa_api_table->core_, enable_queue_interposition);
+        }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // Initialize PC sampling service if configured

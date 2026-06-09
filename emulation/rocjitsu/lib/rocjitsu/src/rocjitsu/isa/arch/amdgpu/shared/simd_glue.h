@@ -109,7 +109,10 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
 /// off the resolved (loop-invariant) object with no further dispatch and no raw
 /// pointer in the kernel body — the storage pointer never escapes `VgprStorage`.
 template <typename Op> inline const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
-  return SimdAccess::vgpr_storage(op, wf);
+  const VgprStorage *r = SimdAccess::vgpr_storage(op, wf);
+  if (r)
+    SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
+  return r;
 }
 
 /// Mutable counterpart of `simd_src_reg` for the dst write path (single
@@ -125,7 +128,10 @@ template <typename Op> inline VgprStorage *simd_dst_reg(const Op &op, Wavefront 
 /// `lo->simd_load64<T>(*hi, base)` — no raw pointer in the kernel body.
 template <typename Op>
 inline ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
-  return SimdAccess::vgpr_storage64(op, wf);
+  ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
+  if (p.lo)
+    SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
+  return p;
 }
 
 /// Mutable counterpart of `simd_src_reg64` for the 64-bit dst write path
@@ -651,8 +657,11 @@ template <typename T, typename Op>
   requires(util::has_stdx_simd)
 inline util::narrow32<T> read_narrow(const Op &op, const Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_narrow: T must be a 32-bit lane type");
-  if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf))
+  if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf)) {
+    constexpr auto W = static_cast<uint32_t>(util::native_width64);
+    SimdAccess::notify_read(op, wf, lane_base, lane_base + W, 0xF);
     return r->template simd_load_narrow<T>(lane_base);
+  }
   return util::broadcast_narrow<T>(op.read_scalar(wf));
 }
 
