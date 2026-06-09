@@ -29,9 +29,9 @@ namespace rocdecode {
 //! \fn rocParserStatus ROCDECAPI rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *parser_params)
 //! Create video parser object and initialize
 /************************************************************************************************/
-rocDecStatus ROCDECAPI 
+rocDecStatus ROCDECAPI
 rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *parser_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(parser_handle) + ", " + RocDecFmtPtr(parser_params));
     if (parser_handle == nullptr || parser_params == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -72,7 +72,7 @@ rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *pa
 /************************************************************************************************/
 rocDecStatus ROCDECAPI
 rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *packet) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(parser_handle) + ", " + RocDecFmtPtr(packet));
     if (parser_handle == nullptr || packet == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -99,7 +99,7 @@ rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *pa
 /************************************************************************************************/
 extern rocDecStatus ROCDECAPI
 rocDecDestroyVideoParser(RocdecVideoParser parser_handle) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(parser_handle));
     if (parser_handle == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
