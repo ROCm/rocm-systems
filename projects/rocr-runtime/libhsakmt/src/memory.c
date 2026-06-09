@@ -1047,16 +1047,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	// Wait for the VM page table update to complete
-	struct drm_amdgpu_userq_wait uw;
-	memset(&uw, 0, sizeof(uw));
-	uw.num_syncobj_timeline_handles = 1;
-	uw.syncobj_timeline_handles     = (uintptr_t)&vm_timeline_syncobj;
-	uw.syncobj_timeline_points      = (uintptr_t)&vm_timeline_seqnum;
-	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_USERQ_WAIT, &uw, sizeof(uw));
-					 
+	// Wait on timeline syncobj to indicate page table update completion
+	struct drm_syncobj_timeline_wait tw;
+	memset(&tw, 0, sizeof(tw));
+	tw.handles = (uintptr_t)&vm_timeline_syncobj;
+	tw.points = (uintptr_t)&vm_timeline_seqnum;
+	tw.count_handles = 1;
+	tw.timeout_nsec = INT64_MAX;
+	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
+
 	if (ret) {
-		pr_err("[%s] DRM_AMDGPU_USERQ_WAIT failed after MAP: %d\n", __func__, ret);
+		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after MAP: %d\n", __func__, ret);
 		return HSAKMT_STATUS_ERROR;
 	}
 
@@ -1107,16 +1109,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	// Wait for the VM page table update to complete
-	struct drm_amdgpu_userq_wait uw;
-	memset(&uw, 0, sizeof(uw));
-	uw.num_syncobj_timeline_handles = 1;
-	uw.syncobj_timeline_handles     = (uintptr_t)&vm_timeline_syncobj;
-	uw.syncobj_timeline_points      = (uintptr_t)&vm_timeline_seqnum;
-	ret = drmCommandWriteRead(drm_fd, DRM_AMDGPU_USERQ_WAIT, &uw, sizeof(uw));
-					 
+	// Wait on timeline syncobj to indicate page table update completion
+	struct drm_syncobj_timeline_wait tw;
+	memset(&tw, 0, sizeof(tw));
+	tw.handles = (uintptr_t)&vm_timeline_syncobj;
+	tw.points = (uintptr_t)&vm_timeline_seqnum;
+	tw.count_handles = 1;
+	tw.timeout_nsec = INT64_MAX;
+	tw.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
+	ret = drmIoctl(drm_fd, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &tw);
+
 	if (ret) {
-		pr_err("[%s] drmSyncobjTimelineWait failed after UNMAP: %d\n", __func__, ret);
+		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after UNMAP: %d\n", __func__, ret);
 		return HSAKMT_STATUS_ERROR;
 	}
 
