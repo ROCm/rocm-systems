@@ -1929,6 +1929,36 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
 }
 
 
+# VOP3 frexp twins routed through the EXISTING unary FP glue. Their generated
+# scalar bodies apply src0 abs/neg, compute the frexp exp/mantissa, then apply
+# result omod/clamp on the (float-domain) value and bit_cast / f32_to_f16 it to
+# the dst — exactly what the f32 / f16 unary FP glue produces. So only the
+# functor differs from the proven VOP1 forms.
+#   route 'fp16' -> ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16   (f16<->f32 widen glue)
+#   route 'fp32' -> ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, ...)
+# frexp_exp returns the uint32 two's-complement exponent (±0/Inf/NaN -> 0); the
+# static_simd_cast<float> reproduces the scalar `(float)(uint32_t)exp` exactly
+# (negative exp -> large float -> f16 +Inf, like scalar). frexp_mant_f32_simd is
+# the already-proven VOP1 helper. (v_frexp_exp_i32_f64 needs a new f64->f32
+# mixed-width glue and stays in _VOP3_UNARY_SKIP / scalar for now.)
+SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
+    'v_frexp_mant_f16_vop3': (
+        'fp16',
+        '[](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); }',
+    ),
+    'v_frexp_exp_i16_f16_vop3': (
+        'fp16',
+        '[](auto a) { return util::stdx::static_simd_cast<util::native<float>>('
+        'util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a))); }',
+    ),
+    'v_frexp_exp_i32_f32_vop3': (
+        'fp32',
+        '[](auto a) { return util::stdx::static_simd_cast<util::native<float>>('
+        'util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a))); }',
+    ),
+}
+
+
 # --- VOP3 floating-point ternary (FMA / MAD family) ------------------------
 #
 # v_fma_*: util::stdx::fma (fused multiply-add, single-rounded). v_fmac/v_mac:
@@ -2638,6 +2668,12 @@ def simd_probe_line(template_name: str) -> str | None:
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64({spec3unaf64});'
     # VOP3 f16 unary (widen-then-modify-then-narrow). FTZ-free ops only:
     # ceil/floor/trunc/rndne/sqrt. Transcendentals deferred.
+    specfrexp = SIMD_VOP3_FREXP_FP.get(template_name)
+    if specfrexp is not None:
+        route, fn = specfrexp
+        if route == 'fp16':
+            return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16({fn});'
+        return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {fn});'
     spec3unaf16 = SIMD_VOP3_UNARY_FP16.get(template_name)
     if spec3unaf16 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16({spec3unaf16});'
