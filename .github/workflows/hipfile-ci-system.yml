@@ -172,7 +172,7 @@ jobs:
             -w /ais/build/hipfile \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              ctest -V -L "system" --parallel
+              ctest -V -L "system"
             '
       - name: Stress tests for hipFile targeting the AMD platform (amdclang++)
         run: |
