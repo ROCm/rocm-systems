@@ -152,7 +152,7 @@ shutdown_amd_smi_collectors()
         return;
     }
 
-    LOG_DEBUG("Shutting down PMC sampler.");
+    LOG_DEBUG("Shutting down AMD-SMI PMC sampler.");
 
     try
     {
@@ -162,7 +162,8 @@ shutdown_amd_smi_collectors()
         }
     } catch(const std::runtime_error& _e)
     {
-        LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
+        LOG_ERROR("Exception thrown when shutting down AMD-SMI PMC sampler: {}",
+                  _e.what());
     }
 
     is_initialized() = false;
@@ -178,6 +179,8 @@ shutdown_gpu_hw_collector()
 {
 #if ROCPROFILER_VERSION >= 600
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    LOG_DEBUG("Shutting down rocprofiler-sdk GPU hardware counter collector.");
 
     if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
     g_gpu_perf_counter_collector.reset();
