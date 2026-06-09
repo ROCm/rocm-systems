@@ -170,18 +170,18 @@ namespace
 {
 auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
 
-// Returns true if `path` is a .json file that lacks the top-level TIMEMORY_PROJECT_NAME
-// ("rocprofiler-systems") root object that timemory's cereal reader requires.
 bool
-is_json_without_project_name_root(const std::string& path)
+json_has_project_name_root(const std::string& json_path)
 {
-    if(!path.ends_with(".json")) return false;
-    std::ifstream ifs{ path };
-    if(!ifs.is_open()) return false;
+    std::ifstream ifs{ json_path };
+    if(!ifs.is_open())
+    {
+        return false;
+    }
     try
     {
         auto json = nlohmann::json::parse(ifs);
-        return json.is_object() && !json.contains(TIMEMORY_PROJECT_NAME);
+        return json.is_object() && json.contains(TIMEMORY_PROJECT_NAME);
     } catch(const nlohmann::json::exception&)
     {
         return false;
@@ -1106,29 +1106,32 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& itr :
+    for(auto&& filename :
         tim::delimit(_config->get<std::string>("ROCPROFSYS_CONFIG_FILE"), ";:"))
     {
         if(_config->get_suppress_config()) continue;
 
-        auto fitr = settings::format(itr, _config->get_tag());
+        const auto expanded_filename = settings::format(filename, _config->get_tag());
 
-        // Timemory's read() will silently drop JSON config files without proper root
-        if(is_json_without_project_name_root(fitr))
+        // Prevent Timemory's read() silently dropping JSON config files without proper
+        // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
+        // includes '~/.rocprofiler-systems.json' that can be missing
+        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+           !json_has_project_name_root(expanded_filename))
         {
-            LOG_CRITICAL("Config file '{}' is missing the expected '{}' root object and "
-                         "cannot be loaded. If this is a hierarchical preset "
-                         "configuration, pass it via --preset instead.",
-                         fitr, TIMEMORY_PROJECT_NAME);
-            std::exit(EXIT_FAILURE);
+            throw std::runtime_error(
+                fmt::format("Config file '{}' is missing the expected '{}' root object "
+                            "and cannot be loaded. If this is a hierarchical preset "
+                            "configuration, pass it via --preset instead.",
+                            expanded_filename, TIMEMORY_PROJECT_NAME));
         }
 
-        LOG_DEBUG("Reading config file {}", itr);
-        if(_config->read(itr) && _main_proc &&
+        LOG_DEBUG("Reading config file {}", filename);
+        if(_config->read(filename) && _main_proc &&
            ((_config->get<bool>("ROCPROFSYS_CI") && settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
         {
-            std::ifstream     _in{ fitr };
+            std::ifstream     _in{ expanded_filename };
             std::stringstream _iss{};
             while(_in)
             {
@@ -1138,7 +1141,7 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                LOG_DEBUG("config file '{}': {}", fitr, _iss.str());
+                LOG_DEBUG("config file '{}': {}", expanded_filename, _iss.str());
             }
         }
     }
