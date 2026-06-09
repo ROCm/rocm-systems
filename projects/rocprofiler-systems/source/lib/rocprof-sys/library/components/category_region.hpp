@@ -61,6 +61,13 @@ struct pending_cache_entry
 inline thread_local std::map<entry_key, std::vector<pending_cache_entry>>
     map_name_to_args;
 
+// Args destined for the next cache_start on this thread. Set by the args-aware
+// start path immediately before it calls start(), consumed (moved-from) by
+// cache_start. This threads the args through the single name-hash + map-insert
+// that start() already performs, avoiding a second hash + lookup and the
+// ordering hazard of patching the pending entry after the fact.
+inline thread_local std::string pending_cache_args;
+
 namespace
 {
 
@@ -84,21 +91,7 @@ cache_start(const char* name)
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
     map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }].push_back(
-        pending_cache_entry{ start_ts, /*args=*/{} });
-}
-
-// Attach a pre-serialized args string to the currently open region for
-// this thread
-template <typename CategoryT>
-void
-set_cache_args(const char* name, std::string args_str)
-{
-    auto key = entry_key{ name, rocprofsys::trait::name<CategoryT>::value };
-    auto itr = map_name_to_args.find(key);
-    if(itr != map_name_to_args.end() && !itr->second.empty())
-    {
-        itr->second.back().args = std::move(args_str);
-    }
+        pending_cache_entry{ start_ts, std::move(pending_cache_args) });
 }
 
 template <typename CategoryT>
@@ -251,7 +244,7 @@ struct category_region : comp::base<category_region<CategoryT>, void>
     template <typename... OptsT, typename... Args>
     static void audit(quirk::config<OptsT...>, Args&&...);
 
-    static void set_cache_args(std::string_view name, std::string serialized_args);
+    static void start_with_args(std::string_view name, std::string serialized_args);
 };
 
 template <typename CategoryT>
@@ -328,18 +321,26 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     cache_start<CategoryT>(name.data());
 }
 
+// Starts a region and attaches the pre-serialized args to it in a single push.
+// The args are stashed in the thread-local pending_cache_args, which the
+// cache_start invoked inside start() moves into the new pending entry — so the
+// name is hashed and the map touched exactly once.
 template <typename CategoryT>
 void
-category_region<CategoryT>::set_cache_args(std::string_view name,
-                                           std::string      serialized_args)
+category_region<CategoryT>::start_with_args(std::string_view name,
+                                            std::string      serialized_args)
 {
-    if(name.empty() || serialized_args.empty()) return;
+    if(serialized_args.empty())
+    {
+        start(name);
+        return;
+    }
 
-    ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-    auto _hash = tim::add_hash_id(name);
-    name       = tim::get_hash_identifier_fast(_hash);
-    ::set_cache_args<CategoryT>(name.data(), std::move(serialized_args));
+    pending_cache_args = std::move(serialized_args);
+    start(name);
+    // If start() short-circuited before cache_start (disabled/finalized), the
+    // stash was never consumed; clear it so it can't leak into a later region.
+    pending_cache_args.clear();
 }
 
 template <typename CategoryT>
