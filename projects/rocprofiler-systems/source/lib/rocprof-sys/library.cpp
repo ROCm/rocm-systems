@@ -1278,14 +1278,13 @@ rocprofsys_finalize_hidden(void)
                                              get_perfetto_output_filename()));
     }
 
-    if(_push_count > _pop_count &&
-       !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false))
+    if(_push_count > _pop_count)
     {
-        throw std::runtime_error(fmt::format(
-            "rocprofsys_push_trace was called more times than "
-            "rocprofsys_pop_trace. The inverse is fine but the current state "
-            "means not every measurement was ended :: pushed: {} vs. popped: {}",
-            _push_count, _pop_count));
+        LOG_WARNING("rocprofsys_push_trace was called more times than "
+                    "rocprofsys_pop_trace. This is not fatal, but trace output will "
+                    "not include regions that were still open during finalization :: "
+                    "pushed: {} vs. popped: {}.",
+                    _push_count, _pop_count);
     }
 
     // debug::close_file();
