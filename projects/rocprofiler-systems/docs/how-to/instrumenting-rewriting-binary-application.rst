@@ -116,7 +116,7 @@ view the help menu.
                                                             --traps (max: 1, dtype: boolean)
                                                             --loop-traps (max: 1, dtype: boolean)
                                                             --allow-overlapping (max: 1, dtype: bool)
-                                                            --parse-all-modules (max: 1, dtype: bool)
+                                                            --exclude-internal-lib-paths (max: 1, dtype: boolean)
                                                             --batch-size (count: 1, dtype: int)
                                                             --dyninst-rt (min: 1, dtype: filepath)
                                                             --dyninst-options (count: unlimited)
@@ -137,13 +137,13 @@ view the help menu.
       --simulate                     Exit after outputting diagnostic {available,instrumented,excluded,overlapping} module
                                     function lists, e.g. available.txt (max: 1, dtype: boolean)
       --dump-info                    Write diagnostic module function reports (available, instrumented, excluded, coverage,
-                                    overlapping) to files in the output directory. Includes per-function heuristic constraint
-                                    results in JSON/XML formats (max: 0)
+                                    overlapping) to {print-dir}/instrumentation/. Includes per-function heuristic constraint
+                                    results in {print-format} formats (max: 0)
       --print-format [ json | txt | xml ]
-                                    Output file format(s) for --dump-info diagnostic reports, e.g. {print-dir}/available.txt
-                                    (min: 1, dtype: string)
-      --print-dir                    Output directory for diagnostic {available,instrumented,excluded,overlapping} module
-                                    function lists, e.g. {print-dir}/available.txt (count: 1, dtype: string)
+                                    Output file format(s) for --dump-info diagnostic reports, e.g.
+                                    {print-dir}/instrumentation/available.txt (min: 1, dtype: string)
+      --print-dir                    Output directory for --dump-info diagnostic reports. Files are written to
+                                    {print-dir}/instrumentation/ (count: 1, dtype: string)
       --print-available [ functions | functions+ | modules | pair | pair+ ]
                                     Print the available entities for instrumentation (functions, modules, or module-function
                                     pair) to stdout after applying regular expressions (count: 1)
@@ -337,11 +337,10 @@ view the help menu.
       --allow-overlapping            Allow dyninst to instrument either multiple functions which overlap (share part of same
                                     function body) or single functions with multiple entry points. For more info, see Section
                                     2 of the DyninstAPI documentation. (max: 1, dtype: bool)
-      --parse-all-modules            By default, rocprof-sys simply requests Dyninst to provide all the procedures in the
-                                    application image. If this option is enabled, rocprof-sys will iterate over all the
-                                    modules and extract the functions. Theoretically, it should be the same but the data is
-                                    slightly different, possibly due to weak binding scopes. In general, enabling option will
-                                    probably have no visible effect (max: 1, dtype: bool)
+      --exclude-internal-lib-paths
+                                    By default, each internal library is excluded only at the path linked at startup. When
+                                    enabled, every on-disk path matching an internal library's filename is excluded. Useful
+                                    when the application dlopen()s a different copy at runtime. (max: 1, dtype: boolean)
 
       [DYNINST OPTIONS]
 
