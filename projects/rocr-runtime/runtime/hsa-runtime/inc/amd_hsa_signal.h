@@ -74,6 +74,21 @@ typedef struct AMD_SIGNAL_ALIGN amd_signal_s {
     uint64_t reserved2;
   };
   uint32_t reserved3[2];
+  // Debug-only per-XCC dispatch start timestamps (MI450, 8 XCCs/chiplets).
+  // The master CP on XCC0 records start_ts/end_ts above; because XCC0 observes
+  // work later than the chiplet that actually launched it, start_ts can be
+  // reported too late. To investigate this each XCC's CP additionally records
+  // the low 16 bits of its own dispatch-start RTC sample (100 MHz, 10 ns/tick)
+  // here. These fields are appended after reserved3 so the frozen offsets of
+  // start_ts/end_ts (and all preceding fields) are unchanged. They are purely
+  // for debug inspection. The SDMA path does not write them. A slot of 0 means
+  // the corresponding XCC did not record a sample. Reconstruct each XCC's
+  // absolute start against start_ts via modular signed subtraction (exact to
+  // 10 ns while |skew| < 327.68 us):
+  //   int16_t d = (int16_t)(xcc_start_ts_lo[i] - (uint16_t)start_ts);
+  //   uint64_t xcc_abs = start_ts + d;
+  uint16_t xcc_start_ts_lo[8];
+  uint32_t reserved4[12];
 } amd_signal_t;
 
 #endif // AMD_HSA_SIGNAL_H

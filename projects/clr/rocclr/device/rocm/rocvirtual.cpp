@@ -203,6 +203,34 @@ static inline void logAqlBarrierValuePacket(const hsa_queue_t* queue, uint16_t h
 }
 
 // ================================================================================================
+// MI450 debug: reconstruct the earliest per-XCC dispatch start (in GPU ticks).
+//
+// On MI450 there are 8 XCCs (chiplets) each with its own CP. The master CP on XCC0
+// writes amd_signal_t::start_ts, but a wave can launch earlier on another XCC that
+// XCC0 only observes later — inflating start_ts and under-reporting the kernel
+// duration. Each XCC additionally records the low 16 bits of its own dispatch-start
+// RTC sample (100 MHz, 10 ns/tick) in amd_signal_t::xcc_start_ts_lo[]. Reconstruct
+// each against start_ts via modular signed subtraction (exact to 10 ns while the
+// inter-XCC skew is < 327.68 us) and return the minimum. A slot of 0 means that XCC
+// recorded no sample and is ignored.
+static inline uint64_t GetXccMinStartTs(const amd_signal_t* s) {
+  const uint64_t base = s->start_ts;
+  uint64_t min_start = base;
+  for (int i = 0; i < 8; ++i) {
+    const uint16_t lo = s->xcc_start_ts_lo[i];
+    if (lo == 0) {
+      continue;
+    }
+    const int16_t d = static_cast<int16_t>(lo - static_cast<uint16_t>(base));
+    const uint64_t abs = base + d;
+    if (abs < min_start) {
+      min_start = abs;
+    }
+  }
+  return min_start;
+}
+
+// ================================================================================================
 void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device) {
   // Lock needed as async handler thread can also touch this structure
   std::scoped_lock lock(lock_);
@@ -224,6 +252,19 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device) {
     cached_timing_.start_ = time.start;
     cached_timing_.end_ = time.end;
   } else {
+    // MI450 debug (opt-in via DEBUG_CLR_MULTI_TS): override XCC0's start_ts with the
+    // earliest per-XCC start so the reported dispatch start (and the duration seen by
+    // HIP events and the profiler) reflects the chiplet that actually launched first.
+    // Compute/dispatch path only; end_ts (the latest finish) is left as-is. Translation
+    // below then runs on the corrected start_ts, keeping the tick->time conversion
+    // consistent. Disabled by default.
+    if (DEBUG_CLR_MULTI_TS) {
+      amd_signal_t* amdSignal = reinterpret_cast<amd_signal_t*>(signal_.handle);
+      const uint64_t min_start = GetXccMinStartTs(amdSignal);
+      if (min_start < amdSignal->start_ts) {
+        amdSignal->start_ts = min_start;
+      }
+    }
     hsa_amd_profiling_dispatch_time_t time = {};
     Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
     cached_timing_.start_ = time.start;

@@ -221,7 +221,7 @@ static_assert((offsetof(SharedSignal, sdma_start_ts) % 32) == 0,
               "Bad SDMA time stamp alignment.");
 static_assert((offsetof(SharedSignal, sdma_end_ts) % 32) == 0,
               "Bad SDMA time stamp alignment.");
-static_assert(sizeof(SharedSignal) == 128,
+static_assert(sizeof(SharedSignal) == 192,
               "Bad SharedSignal size.");
 
 

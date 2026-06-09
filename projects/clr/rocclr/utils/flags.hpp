@@ -275,7 +275,10 @@ release(cstring, HIP_HRR_CAPTURE_OUTPUT, "",                                  \
 release(uint, DEBUG_CLR_DOORBELL_SKIP, 16,                                    \
         "Number of consecutive dispatches that may skip the doorbell flush.") \
 release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
-        "Disables certain fallback paths")
+        "Disables certain fallback paths")                                    \
+release(bool, DEBUG_CLR_MULTI_TS, false,                                      \
+        "MI450 debug: report the earliest per-XCC dispatch start "            \
+        "(amd_signal_t::xcc_start_ts_lo[]) instead of XCC0's start_ts")
 
 
 namespace amd {
