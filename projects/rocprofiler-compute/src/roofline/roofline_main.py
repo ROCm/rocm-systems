@@ -359,6 +359,11 @@ class Roofline:
         subplot_row = None
         total_figure_height = 600  # default height
 
+        sanitized_cache_hierarchy = sanitize_mem_level(
+            self.__run_parameters["mem_level"],
+            self.__run_parameters["gpu_arch"],
+        )
+
         if is_new_figure:
             if has_kernel_names:
                 raw_kernel_names = kernel_names_data.get("kernel_names", [])
@@ -372,11 +377,6 @@ class Roofline:
                     roofline_parameters=self.__run_parameters,
                     dtype=dtype,
                     ai_data=self.__ai_data,
-                )
-
-                sanitized_cache_hierarchy = sanitize_mem_level(
-                    self.__run_parameters["mem_level"],
-                    self.__run_parameters["gpu_arch"],
                 )
 
                 plot_points_data = []
