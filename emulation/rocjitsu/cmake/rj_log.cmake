@@ -36,7 +36,11 @@ set(_RJ_GROUP_DBT_HOOKS 4) # bit 2
 # set(_RJ_GROUP_KFD   8)  # bit 3
 
 # All known group bits OR'd together.
-math(EXPR _RJ_GROUP_ALL "${_RJ_GROUP_VM} | ${_RJ_GROUP_CP} | ${_RJ_GROUP_DBT_HOOKS}")
+math(
+    EXPR
+    _RJ_GROUP_ALL
+    "${_RJ_GROUP_VM} | ${_RJ_GROUP_CP} | ${_RJ_GROUP_DBT_HOOKS}"
+)
 
 # --- Resolve the user value to a numeric bitmask ---
 set(_rj_groups_resolved 0)
