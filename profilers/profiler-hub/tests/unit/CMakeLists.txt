@@ -16,12 +16,18 @@ set(UNIT_TEST_SOURCES
     backend_over_mock_test.cpp
 )
 
+# Build-artifact regression guard: verify libprofiler-hub.so does not export the
+# bundled sqlite3_* symbols
+if(NOT PROFILER_HUB_SQLITE3_USE_SYSTEM)
+    list(APPEND UNIT_TEST_SOURCES symbol_seal_test.cpp)
+endif()
+
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
 
 target_link_libraries(
     profiler-hub_unit_tests
     PRIVATE
-        profiler-hub
+        profiler-hub-static
         profiler-hub_queries
         GTest::gtest
         GTest::gtest_main
@@ -43,6 +49,16 @@ target_compile_definitions(
     profiler-hub_unit_tests
     PUBLIC ROCPD_DB_PATH="${ROCPD_DB_PATH}"
 )
+
+# Inject the absolute path of the built shared library so symbol_seal_test can
+# inspect it with nm, and ensure the library is built before this test runs.
+if(NOT PROFILER_HUB_SQLITE3_USE_SYSTEM)
+    target_compile_definitions(
+        profiler-hub_unit_tests
+        PRIVATE PROFILER_HUB_SHARED_LIB="$<TARGET_FILE:profiler-hub>"
+    )
+    add_dependencies(profiler-hub_unit_tests profiler-hub)
+endif()
 
 target_include_directories(
     profiler-hub_unit_tests
