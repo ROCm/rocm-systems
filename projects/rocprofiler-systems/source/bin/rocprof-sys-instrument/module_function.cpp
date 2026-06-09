@@ -867,10 +867,13 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     auto _name            = signature.get();
     auto _source_obj_name = get_source_object_name(function);
 
-    // Arguments passed to rocprofsys_push_trace_with_args must be serialized
-    auto _serialized_args = rocprofsys_get_serialized_args(
-        "source_object", _source_obj_name, !_source_obj_name.empty());
-    bool use_args_entr = (!_serialized_args.empty() && _entr_trace_args);
+    // Arguments passed to rocprofsys_push_trace_with_args must be serialized into
+    // the shared wire format (see rocprofsys::get_args_string)
+    rocprofsys::function_args_t _args{};
+    if(!_source_obj_name.empty())
+        _args.push_back({ 0U, "string", "source_object", _source_obj_name });
+    auto _serialized_args = rocprofsys::get_args_string(_args);
+    bool use_args_entr    = (!_serialized_args.empty() && _entr_trace_args);
 
     auto _trace_entr = (use_args_entr)
                            ? rocprofsys_call_expr(_name.c_str(), _serialized_args)

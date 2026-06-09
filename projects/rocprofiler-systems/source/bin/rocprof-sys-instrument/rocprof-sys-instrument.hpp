@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "arg_serializer.hpp"
 #include "core/common_types.hpp"
 #include "core/demangler.hpp"
 #include "function_signature.hpp"
@@ -65,13 +64,6 @@ get_snippets(Args&&... args)
     TIMEMORY_FOLD_EXPRESSION(_tmp.push_back(get_snippet(std::forward<Args>(args))));
     return _tmp;
 }
-//
-//======================================================================================//
-//
-// get_serialized_arg_name / get_serialized_arg_type / get_serialized_arg_value /
-// append_serialized_args / rocprofsys_get_serialized_args are declared in
-// arg_serializer.hpp (included above) so the templates can be unit tested
-// without dragging in Dyninst.
 //
 //======================================================================================//
 //
