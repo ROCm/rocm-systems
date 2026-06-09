@@ -25,6 +25,7 @@ set(SYSTEM_TEST_SOURCE_FILES
     system/config.cpp
     system/driver.cpp
     system/main.cpp
+    system/util.cpp
     system/version.cpp
 )
 
