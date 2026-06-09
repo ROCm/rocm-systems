@@ -440,8 +440,22 @@ void GraphExec::BuildSyncPlan() {
   sync_plan_.patch_list.clear();
   sync_plan_.barrier_packets.clear();
   sync_plan_.leaf_segment_ids.clear();
+  sync_plan_.seg_to_hw_event.assign(segments_.size(), -1);
+  sync_plan_.num_hw_events = 0;
 
   auto* device = g_devices[instantiateDeviceId_]->devices()[0];
+
+  // PASS 1: Assign a compact HW-event slot only to segments whose completion
+  // signal is consumed — cross-device/stream successor, or leaf when
+  // leaf-sync is required. Same-stream successors are ordered by the
+  // in-order queue and need no signal.
+  // needs_completion_signal is pre-computed by PrecomputeStreamAssignment()
+  // using the same criteria, so we reuse it directly.
+  for (size_t i = 0; i < segments_.size(); ++i) {
+    if (segments_[i].needs_completion_signal) {
+      sync_plan_.seg_to_hw_event[i] = sync_plan_.num_hw_events++;
+    }
+  }
 
   // Barrier packets are sentinel-marked with nullptr in dispatchKernelNames so that
   // activity.cpp can distinguish them from kernel/blit dispatch packets (which use "" or a
@@ -449,6 +463,8 @@ void GraphExec::BuildSyncPlan() {
   // be dropped when a copy/blit node also contributed an empty-string entry.
   static const std::string* const kBarrierKernelNamePtr = nullptr;
 
+  // PASS 2: Materialize barrier packets and patch entries using the compact
+  // hw_event slot indices computed in PASS 1.
   for (const auto& segment : segments_) {
     // Collect cross-stream/device dependency IDs for this segment.
     // barrier_dep_indices is local per iteration — no cross-iteration access needed.
@@ -496,8 +512,10 @@ void GraphExec::BuildSyncPlan() {
 
       if (use_ext_dep) {
         uint8_t* first_dispatch = firstBatch.dispatchPackets[0];
+        // hw_event_index uses the compact slot; dep producer always has one (PASS 1).
         sync_plan_.patch_list.push_back(
-            {first_dispatch, nullptr, barrier_dep_indices[0],
+            {first_dispatch, nullptr,
+             sync_plan_.seg_to_hw_event[barrier_dep_indices[0]],
              amd::Device::HwEventPatch::kExtDispatchDepSignal});
       } else {
         int barrier_count = (num_deps + 4) / 5;
@@ -510,7 +528,9 @@ void GraphExec::BuildSyncPlan() {
           int end_dep = std::min(start_dep + 5, num_deps);
           for (int d = start_dep; d < end_dep; ++d) {
             sync_plan_.patch_list.push_back(
-                {barrier_pkt, nullptr, barrier_dep_indices[d], d - start_dep});
+                {barrier_pkt, nullptr,
+                 sync_plan_.seg_to_hw_event[barrier_dep_indices[d]],
+                 d - start_dep});
           }
 
           firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
@@ -529,8 +549,13 @@ void GraphExec::BuildSyncPlan() {
     bool last_node_uncaptured = segBatch.has_uncaptured_nodes &&
         !segment.nodes.empty() && !segBatch.node_capture_status.back();
 
+    // hw_slot >= 0 => some consumer observes this signal (set by PASS 1).
+    // Otherwise skip both the completion barrier packet and its patch entry.
+    const int hw_slot = sync_plan_.seg_to_hw_event[segment.id];
+    const bool completion_signal_needed = (hw_slot >= 0);
+
     auto& lastBatch = segBatch.packet_batches.back();
-    if (last_node_uncaptured) {
+    if (last_node_uncaptured && completion_signal_needed) {
       uint8_t* completion_barrier = device->CreateBarrierPacket();
       sync_plan_.barrier_packets.push_back(completion_barrier);
 
@@ -538,13 +563,13 @@ void GraphExec::BuildSyncPlan() {
       lastBatch.dispatchKernelNames.push_back(kBarrierKernelNamePtr);
 
       sync_plan_.patch_list.push_back(
-          {completion_barrier, nullptr, segment.id,
+          {completion_barrier, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
-    } else if (!lastBatch.dispatchPackets.empty()) {
+    } else if (!lastBatch.dispatchPackets.empty() && completion_signal_needed) {
       // Safe to patch the last kernel dispatch directly
       uint8_t* last_pkt = lastBatch.dispatchPackets.back();
       sync_plan_.patch_list.push_back(
-          {last_pkt, nullptr, segment.id,
+          {last_pkt, nullptr, hw_slot,
            amd::Device::HwEventPatch::kCompletionSignal});
     }
 
@@ -559,11 +584,11 @@ void GraphExec::BuildSyncPlan() {
   if (signalManager_ == nullptr) {
     signalManager_ = new GraphSignalManager();
   }
-  if (sync_plan_.num_segments > 0) {
+  if (sync_plan_.num_hw_events > 0) {
     // Pre-create a few sets to cover a small amount of launch overlap; the pool
     // grows on demand if more launches are concurrently in flight.
     constexpr int kPrecreatedSets = 16;
-    signalManager_->Prepopulate(device, sync_plan_.num_segments, kPrecreatedSets);
+    signalManager_->Prepopulate(device, sync_plan_.num_hw_events, kPrecreatedSets);
   }
 }
 
@@ -1152,12 +1177,15 @@ void GraphExec::PrecomputeStreamAssignment() {
     }
   }
 
+  const bool leaf_sync_required = IsLeafNodeSyncRequired();
   for (auto& seg : segments_) {
     seg.needs_completion_signal = false;
-    // Leaf segments always need a signal so EnqueueSegmentedGraph can sync
-    // the graph back to the launch stream.
     if (seg.segment_ids_edges.empty()) {
-      seg.needs_completion_signal = true;
+      // Leaf segments need a completion signal so EnqueueSegmentedGraph can
+      // sync them back to the launch stream via graph_accumulate dep_signals.
+      if (leaf_sync_required) {
+        seg.needs_completion_signal = true;
+      }
       continue;
     }
     for (int edge_id : seg.segment_ids_edges) {
@@ -1398,8 +1426,8 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
     bool first_node_is_uncaptured = !segment.nodes.empty() &&
                                     !segment.nodes[0]->GraphCaptureEnabled();
 
-    // If the first node is non-capturable, create a leading empty batch so
-    // BuildSyncPlan can prepend dependency barriers that execute before it
+    // Leading empty batch: gives BuildSyncPlan a slot to prepend the cross-dep
+    // BARRIER_AND so it physically precedes the uncaptured node's GPU commands.
     if (first_node_is_uncaptured) {
       currentSegBatch.packet_batches.emplace_back();
     }
@@ -1470,10 +1498,8 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
       }
     }
 
-    // If the last node is non-captured, always create a dedicated trailing
-    // PacketBatch for the completion barrier. This must be separate from the
-    // leading batch (which holds dep barriers) to avoid the completion signal
-    // firing before uncaptured nodes execute.
+    // Trailing empty batch: separate slot for the completion barrier so it
+    // cannot fire before the uncaptured last node's commands finish.
     bool last_node_uncaptured = currentSegBatch.has_uncaptured_nodes &&
         !segment.nodes.empty() && !currentSegBatch.node_capture_status.back();
     if (last_node_uncaptured) {
@@ -1839,10 +1865,10 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   const bool recycle = (out_signal_set != nullptr);
 
   std::vector<void*> segment_hw_events;
-  if (sync_plan_.num_segments > 0) {
+  if (sync_plan_.num_hw_events > 0) {
     const bool ok = recycle
-        ? signalManager_->AcquireSet(device, sync_plan_.num_segments, segment_hw_events)
-        : device->CreateHwEvents(sync_plan_.num_segments, segment_hw_events);
+        ? signalManager_->AcquireSet(device, sync_plan_.num_hw_events, segment_hw_events)
+        : device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events);
     if (!ok) {
       if (out_status != nullptr) {
         *out_status = hipErrorOutOfMemory;
@@ -1935,18 +1961,16 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
   }
 
-  // Synchronize parallel streams back to the launch stream.
-  // Each leaf segment already has a completion HW event signal patched onto its
-  // last packet. Add those HW events as dependencies on graph_accumulate so
-  // the runtime emits barrier packets when it is enqueued on the launch stream.
+  // Sync parallel-stream leaves back to launch_stream via graph_accumulate's
+  // dep_signal[]. Same-stream leaves rely on in-order queue semantics instead.
   if (IsLeafNodeSyncRequired()) {
     for (int seg_id : sync_plan_.leaf_segment_ids) {
-      if (seg_id >= 0 && seg_id < static_cast<int>(segments_.size())) {
-        hip::Stream* seg_stream = resolveSegmentStream(segments_[seg_id]);
-        if (seg_stream != launch_stream) {
-          graph_accumulate->addDepHwEvent(segment_hw_events[seg_id]);
-        }
-      }
+      if (seg_id < 0 || seg_id >= static_cast<int>(segments_.size())) continue;
+      hip::Stream* seg_stream = resolveSegmentStream(segments_[seg_id]);
+      if (seg_stream == launch_stream) continue;
+      int hw_slot = sync_plan_.seg_to_hw_event[seg_id];  // PASS 1 guarantees >= 0; guard defensively.
+      if (hw_slot < 0 || hw_slot >= static_cast<int>(segment_hw_events.size())) continue;
+      graph_accumulate->addDepHwEvent(segment_hw_events[hw_slot]);
     }
   }
 
@@ -2067,6 +2091,15 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     }
 
     return hipSuccess;
+  }
+
+  // Dispatch the leading batch (cross-dep barrier from BuildSyncPlan) before
+  // the uncaptured first node so the AQL barrier precedes its GPU commands.
+  if (segBatch && !segBatch->node_capture_status.empty() &&
+      !segBatch->node_capture_status[0] &&
+      batchIndex < segBatch->packet_batches.size()) {
+    status = dispatchCurrentBatch();
+    if (status != hipSuccess) return status;
   }
 
   // Process all nodes in this segment

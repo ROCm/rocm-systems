@@ -125,10 +125,16 @@ def _register_handlers() -> None:
     # Vector ALU — vector_unary, vector_binop, vector_ternary now handled
     # by SemaAST pipeline (_SEMA_CLASSES).
 
-    # Vector compare — vector_cmp, vector_cmp_class, vector_add_co now
-    # handled by SemaAST pipeline (_SEMA_CLASSES).
+    # Vector compare — vector_cmp, vector_add_co handled by SemaAST pipeline
+    # (_SEMA_CLASSES). vector_cmp_class is NOT: the SemaAST lowering mangles the
+    # operand (a bit_cast<float>(static_cast<uint32_t>(...)) value round-trip)
+    # and always classifies in f32, so the dedicated per-type generator here
+    # (correct f16/f32/f64 qnan masks, full 64-bit f64 read) owns it instead.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
         c.src_ops, c.op, c.dtype, c.cmpx_writes_vcc, c.is_vop3, c.dst_ops, c.has_abs
+    )
+    DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(
+        c.dst_ops, c.src_ops, c.dtype, False, False, c.is_vop3, c.has_abs
     )
     DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
         c.dst_ops, c.src_ops, c.dtype, True, c.cmpx_writes_vcc, c.is_vop3, c.has_abs
