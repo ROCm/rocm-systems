@@ -15,7 +15,7 @@ ENV HIP_COMPILER=amdclang++
 ENV LLVM_PATH=/opt/rocm/llvm
 ENV CMAKE_PREFIX_PATH=/opt/rocm
 ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:/usr/lib64/openmpi/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
-ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/llvm/lib:${LD_LIBRARY_PATH:-}
 
 # Debian/Ubuntu
 RUN set-euo pipefail; \
@@ -97,5 +97,8 @@ RUN set -euo pipefail; \
         python3 -m pipx ensurepath; \
         source ~/.bashrc; \
     fi; \
-    aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" rocm-${GPU_TYPE}.tar.gz --no-sign-request && \
-    mv rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz;
+    aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" /tmp/rocm-${GPU_TYPE}.tar.gz --no-sign-request && \
+    rm -rf /opt/rocm* && \
+    mkdir -p /opt/rocm && \
+    mv /tmp/rocm-${GPU_TYPE}.tar.gz /opt/rocm-${GPU_TYPE}.tar.gz && \
+    tar -xf /opt/rocm-${GPU_TYPE}.tar.gz -C /opt/rocm;
