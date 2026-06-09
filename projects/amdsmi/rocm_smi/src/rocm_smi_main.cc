@@ -320,9 +320,14 @@ void RocmSMI::Initialize(uint64_t flags) {
   LOG_DEBUG(ss);
 
   // Sort index based on BDF (BDF values are unique per device).
-  std::sort(
+#pragma clang diagnostic push
+  // stable sort uses a deprecated function, get_termporary_buffer() which is slated
+  // to be removed in C++ 2026
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  std::stable_sort(
       dv_to_id.begin(), dv_to_id.end(),
       [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
+#pragma clang diagnostic pop
   devices_.clear();
   for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
     devices_.push_back(dv_to_id[dv_ind].second);
@@ -444,9 +449,14 @@ void RocmSMI::Initialize(uint64_t flags) {
     LOG_DEBUG(ss);
 
     // Sort index based on BDF (BDF values are unique per device).
-    std::sort(
+#pragma clang diagnostic push
+    // stable sort uses a deprecated function, get_termporary_buffer() which is slated
+    // to be removed in C++ 2026
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    std::stable_sort(
         dv_to_id.begin(), dv_to_id.end(),
         [](const BDFDevicePair_t& p1, const BDFDevicePair_t& p2) { return p1.first < p2.first; });
+#pragma clang diagnostic pop
     nic_devices_.clear();
     for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
       nic_devices_.push_back(dv_to_id[dv_ind].second);
@@ -1331,15 +1341,15 @@ uint32_t RocmSMI::DiscoverBRCMswitchDevices(void) {
     // each identified switch node is a primary node for
     // potential matching unique ids
     std::vector<char> buf(512);
-    size_t len;
+    ssize_t len;
 
     do {
       buf.resize(buf.size() + 100);
-      len = static_cast<size_t>(::readlink(path.c_str(), &(buf[0]), buf.size()));
-    } while (buf.size() == len);
+      len = ::readlink(path.c_str(), &(buf[0]), buf.size());
+    } while (static_cast<ssize_t>(buf.size()) == len);
 
     if (len > 0) {
-      buf[len] = '\0';
+      buf[static_cast<size_t>(len)] = '\0';
       path = std::string(&(buf[0]));
       std::string suffixDel =
           "host" + std::to_string(cardId) + "/scsi_host/" + "host" + std::to_string(cardId) + "/";
