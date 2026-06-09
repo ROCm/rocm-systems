@@ -44,7 +44,7 @@ struct perfetto_counter_track
                         const char* _category = nullptr, std::int64_t _mult = 1,
                         bool _incr = false);
 
-    static auto& at(size_t _idx, size_t _n)
+    static ::perfetto::CounterTrack at(size_t _idx, size_t _n)
     {
         std::lock_guard<std::mutex> _lk{ get_mutex() };
         return get_data().second.at(_idx).at(_n);
