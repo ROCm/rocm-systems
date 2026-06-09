@@ -5170,7 +5170,10 @@ class CodeGenerator:
                             return False
                         return self._can_share_execute(
                             i.mnemonic, i, enc.enc_name
-                        ) or _simd_probe_arch_portable(f'{i.mnemonic}_{enc_key}')
+                        ) or _simd_probe_arch_portable(
+                            f'{i.mnemonic}_{enc_key}',
+                            self.isa_spec.profile.vop3p_opsel_fields,
+                        )
 
                     has_shared = any(_delegates_to_shared(i) for i in all_insts)
                     if has_shared:

@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3p.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/mma_exec.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
