@@ -85,6 +85,8 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id &id) const {
     CuidUtilities::remove_UUIDv8_bits(&id.UUIDv8_representation, id.raw_bits);
     return AMDCUID_STATUS_SUCCESS;
   }
+  std::cout << "Platform Primary CUID not found in file, generating new one"
+            << std::endl;
 
   uint64_t fingerprint = 0;
 
@@ -92,6 +94,9 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id &id) const {
   uint8_t uuid[16] = {0};
   status = SmbiosUtil::get_system_uuid(uuid);
   if (status == AMDCUID_STATUS_SUCCESS) {
+    std::cout << "Platform UUID obtained from SMBIOS, using as basis for CUID "
+                 "generation"
+              << std::endl;
     // use UUID as basis for CUID
     fingerprint = (static_cast<uint64_t>(uuid[0]) << 56) |
                   (static_cast<uint64_t>(uuid[1]) << 48) |
@@ -104,20 +109,26 @@ amdcuid_status_t CuidPlatform::get_primary_cuid(amdcuid_primary_id &id) const {
   } else {
     // Fallback: get fingerprint from other sources
     status = get_hardware_fingerprint(fingerprint);
+    std::cout
+        << "Platform hardware fingerprint obtained from SMBIOS serial number"
+        << std::endl;
 
     if (status != AMDCUID_STATUS_SUCCESS) {
       std::string name = "";
       // family here not used
       std::string family = "";
       status = SmbiosUtil::get_product_info(name, family);
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        return status;
-      }
 
       CuidUtilities::make_fallback_fingerprint(name, fingerprint);
+      std::cout << "Platform fingerprint generated from fallback method using "
+                   "product name"
+                << std::endl;
       temp = true;
     }
   }
+
+  std::cout << "Platform fingerprint: " << std::hex << fingerprint << std::dec
+            << std::endl;
 
   status = CuidUtilities::generate_primary_cuid(
       fingerprint, 0, 0, 0, m_info.header.fields.platform.vendor_id,

@@ -49,11 +49,13 @@ private:
 
 public:
   cuid_hmac();
+  cuid_hmac(uint8_t key_data[key_length]);
   ~cuid_hmac();
   bool is_valid() const { return valid; }
 
   amdcuid_status_t generate_hmac_sha256(const uint8_t *data, size_t data_len,
                                         uint8_t *out_hash, size_t *out_len);
+  amdcuid_status_t set_hmac_algorithm(const char *digest_name);
   amdcuid_status_t set_hmac_key(const uint8_t key_data[key_length]);
   amdcuid_status_t generate_key(uint8_t key[key_length]);
 

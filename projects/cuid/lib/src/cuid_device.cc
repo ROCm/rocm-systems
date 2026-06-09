@@ -196,15 +196,17 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id &id,
     // users
     uint8_t padded_key[key_length] = {};
     memcpy(padded_key, primary.raw_bits, sizeof(primary.raw_bits));
+    // not using set_key here because we don't want to write to overwrite user
+    // key
     cuid_hmac temp_hmac = cuid_hmac(padded_key);
-    temp_hmac.set_hmac_algorithm(EVP_sha256());
+    temp_hmac.set_hmac_algorithm("SHA256");
     status =
         CuidUtilities::generate_derived_cuid(&fixed_app_id, &id, &temp_hmac);
   } else {
     status = CuidUtilities::generate_derived_cuid(&primary, &id, hmac);
   }
 
-  return AMDCUID_STATUS_SUCCESS;
+  return status;
 }
 
 amdcuid_status_t CuidDevice::is_temporary_cuid(bool *is_temp) const {
