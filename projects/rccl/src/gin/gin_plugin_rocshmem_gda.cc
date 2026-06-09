@@ -59,6 +59,7 @@ static ncclResult_t ginRocshmemGdaListen(void* ctx, int dev, void* handle, void*
 }
 
 static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks, int rank,
+                                          int nConnections, int queueDepth,
                                           void* listenComm, void** collComm) {
   auto* cctx = new ginRocshmemGdaCollCtx;
   cctx->nranks = nranks;
@@ -82,6 +83,7 @@ static ncclResult_t ginRocshmemGdaFinalize(void* ctx) {
 }
 
 static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, int nSignals, int nCounters,
+                                                int nContexts,
                                                 void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
   return ncclGinRocshmemGdaCreateContextFromPlugin(nSignals, nCounters, ginCtx, devHandle);
 }
@@ -115,10 +117,10 @@ static ncclResult_t ginRocshmemGdaQueryLastError(void* ginCtx, bool* hasError) {
   return ncclSuccess;
 }
 
-static ncclResult_t ginRocshmemGdaIput(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, void**) {
+static ncclResult_t ginRocshmemGdaIput(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, int, void**) {
   return ncclInternalError;
 }
-static ncclResult_t ginRocshmemGdaIputSignal(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, uint64_t, void*, uint64_t, uint32_t, void**) {
+static ncclResult_t ginRocshmemGdaIputSignal(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, uint64_t, void*, uint64_t, uint32_t, int, void**) {
   return ncclInternalError;
 }
 static ncclResult_t ginRocshmemGdaTest(void*, void*, int*) {
@@ -126,7 +128,7 @@ static ncclResult_t ginRocshmemGdaTest(void*, void*, int*) {
 }
 
 __attribute__((visibility("default")))
-ncclGin_v11_t ncclGinRocshmemGdaPlugin = {
+ncclGin_t ncclGinRocshmemGdaPlugin = {
   .name            = "rocshmem_gda",
   .init            = ginRocshmemGdaInit,
   .devices         = ginRocshmemGdaDevices,

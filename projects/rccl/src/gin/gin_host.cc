@@ -249,12 +249,12 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm, ncclGinConnectionType_t r
                     ret, fail);
 #ifdef ENABLE_ROCSHMEM_GIN
     } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM_API) {
-      NCCLCHECKGOTO(ncclGinRocshmemCreateContext(comm, ginState->ginComms[n], localNets[n%nLocalNets],
+      NCCLCHECKGOTO(ncclGinRocshmemCreateContext(comm, ginState->ginComms[n], localGinDevs[n%nLocalGinDevs],
                                                   ginState->signalSpaceSize, ginState->counterSpaceSize,
                                                   &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);
     } else if (ginState->ginType == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) {
-      NCCLCHECKGOTO(ncclGinRocshmemGdaCreateContext(comm, ginState->ginComms[n], localNets[n%nLocalNets],
+      NCCLCHECKGOTO(ncclGinRocshmemGdaCreateContext(comm, ginState->ginComms[n], localGinDevs[n%nLocalGinDevs],
                                                     ginState->signalSpaceSize, ginState->counterSpaceSize,
                                                     &ginState->ginCtx[n], &ginState->ginDevHandles[n]),
                     ret, fail);

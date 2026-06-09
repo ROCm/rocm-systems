@@ -35,6 +35,6 @@ ncclResult_t ncclGinRocshmemGdaDeregisterFromPlugin(void *mhandle);
 ncclResult_t ncclGinRocshmemGdaDestroyContextFromPlugin(void *ginCtx);
 
 // The built-in plugin instance
-extern ncclGin_v11_t ncclGinRocshmemGdaPlugin;
+extern ncclGin_t ncclGinRocshmemGdaPlugin;
 
 #endif

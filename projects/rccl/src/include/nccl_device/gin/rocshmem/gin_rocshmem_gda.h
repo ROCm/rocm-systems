@@ -16,13 +16,15 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   template <typename Coop>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, bool hasWins,
                                       ncclGinWindow_t dstWin, size_t dstOff, ncclGinWindow_t srcWin,
-                                      size_t srcOff, size_t bytes, bool hasSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
+                                      size_t srcOff, size_t bytes,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                                       uint64_t signalOpArg, bool hasCounter,
                                       ncclGinCounter_t counterId, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given) {
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
+    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
     if (coop.thread_rank() == 0) {
@@ -48,7 +50,7 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-        uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
+        uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
         qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
       } else if (hasCounter) {
@@ -67,12 +69,14 @@ template <>
 struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   template <typename Coop, typename T>
   NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, int peer, ncclGinWindow_t dstWin,
-                                      size_t dstOff, T srcVal, bool hasSignal,
-                                      ncclGinSignal_t signalId, ncclGinSignalOp_t signalOp,
+                                      size_t dstOff, T srcVal,
+                                      ncclGinSignalDescriptor signal, ncclGinSignalOp_t signalOp,
                                       uint64_t signalOpArg, bool hasDescriptor,
                                       ncclGinDescriptorSmem* descriptor,
-                                      cuda::thread_scope required, cuda::thread_scope given) {
+                                      cuda::thread_scope required, cuda::thread_scope given,
+                                      uint32_t optFlags = ncclGinOptFlagsDefault) {
     using nccl::utility::loadConst;
+    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
 
     coop.sync();
     if (coop.thread_rank() == 0) {
@@ -94,7 +98,7 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
-        uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signalId;
+        uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
         qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/true);
       }
@@ -129,9 +133,10 @@ struct ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
 template <>
 struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignal_t signalId) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, ncclGinSignalDescriptor signal) {
     ncclGinRocshmemGdaGPUContext* rsCtx = (ncclGinRocshmemGdaGPUContext*)ctx.handle;
-    nccl::utility::loadConst(&rsCtx->signals)[signalId] = 0;
+    if (signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED)
+      nccl::utility::loadConst(&rsCtx->signals)[signal.indexedSignal.signalId] = 0;
   }
 };
 

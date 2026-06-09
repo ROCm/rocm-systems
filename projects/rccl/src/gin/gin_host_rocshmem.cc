@@ -262,6 +262,7 @@ static ncclResult_t ncclGinRocshmemListen(void* ctx, int dev, void* handle, void
 }
 
 static ncclResult_t ncclGinRocshmemConnect(void* ctx, void* handles[], int nranks, int rank,
+                                           int nConnections, int queueDepth,
                                            void* listenComm, void** collComm) {
   *collComm = (void*)0x1;
   return ncclSuccess;
@@ -278,28 +279,6 @@ static ncclResult_t ncclGinRocshmemCloseColl(void* collComm) {
 static ncclResult_t ncclGinRocshmemFinalize(void* ctx) {
   return ncclSuccess;
 }
-
-ncclGin_t ncclGinRocshmem = {
-  "GIN_ROCSHMEM",
-  ncclGinRocshmemInit,
-  ncclGinRocshmemDevices,
-  ncclGinRocshmemGetProperties,
-  ncclGinRocshmemListen,
-  ncclGinRocshmemConnect,
-  NULL, // createContext - handled by ncclGinRocshmemCreateContext in gin_host.cc
-  NULL, // regMrSym - handled by ncclGinRocshmemRegister in gin_host.cc
-  NULL, // regMrSymDmaBuf
-  NULL, // deregMrSym - handled by ncclGinRocshmemDeregister in gin_host.cc
-  NULL, // destroyContext - handled by ncclGinRocshmemDestroyContext in gin_host.cc
-  ncclGinRocshmemCloseColl,
-  ncclGinRocshmemCloseListen,
-  NULL, // iput
-  NULL, // iputSignal
-  NULL, // test
-  NULL, // ginProgress
-  NULL, // queryLastError
-  ncclGinRocshmemFinalize
-};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Plugin-facing variants (no ncclComm available)

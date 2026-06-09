@@ -229,10 +229,9 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
   // Add internal rocshmem GDA plugin
-  // TODO: ncclGinRocshmemGdaPlugin is v11, needs v12 adapter or upgrade
   {
-    extern ncclGin_v11_t ncclGinRocshmemGdaPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = (ncclGin_t*)&ncclGinRocshmemGdaPlugin;
+    extern ncclGin_t ncclGinRocshmemGdaPlugin;
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     pluginCounter++;
   }
