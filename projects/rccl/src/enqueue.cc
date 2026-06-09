@@ -726,6 +726,9 @@ static ncclResult_t scheduleCollTasksToPlan(
       workBytes += workNode->size;
       int kind = 2*task->isCollnet + task->isNvls;
       trafficBytes[kind] += std::max(MinTrafficPerChannel, task->trafficBytes);
+      // DEBUG AICOMRCCL-1137: log nMaxChannels before aggregation to verify bitfield truncation
+      INFO(NCCL_TUNING, "addPlanTask rank=%d func=%d nMaxChannels=%d",
+           comm->rank, (int)task->func, (int)task->nMaxChannels);
       nChannels[kind] += task->nMaxChannels;
       nChannels[kind] = std::min(nChannels[kind], nMaxChannels[kind]);
       task = task->next;
