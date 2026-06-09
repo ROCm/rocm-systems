@@ -1608,7 +1608,6 @@ HIP_TEST_CASE(Unit_hipMemSetAccessHost_devicealloc) {
   HIP_CHECK(hipMemAddressFree(addr, mapSize));
   HIP_CHECK(hipMemRelease(handle));
 }
-
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
