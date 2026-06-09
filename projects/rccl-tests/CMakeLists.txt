@@ -147,7 +147,7 @@ execute_process(
 message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
 
 ## Check for HIP version
-# Use hip_VERSION from find_package(hip) above instead of hipconfig (deprecated).
+# Use hip_VERSION from find_package(hip) above
 string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)" hip_version_string "${hip_VERSION}")
 message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
 
