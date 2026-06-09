@@ -2514,6 +2514,20 @@ def simd_probe_line(template_name: str) -> str | None:
             cpp_t, cpp_op = spec2v3
             if cpp_t == 'float32_t':
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});'
+            # f16 float binaries (v_add/sub/subrev/mul/max/min/ldexp_f16) are
+            # uint32-typed (the functor widens f16->f32 by hand), but their VOP3
+            # twin applies abs/neg/omod/clamp around the f16<->f32 round trip (see
+            # the generated scalar body). The plain integer VOP3 glue
+            # (ROCJITSU_TRY_SIMD_VOP3_BINARY_INT) does NOT apply those, so it would
+            # silently drop the modifiers and return the VOP2-style result. No fp16
+            # VOP3 binary modifier glue exists yet, so route them through the f16
+            # variant that bails to the (modifier-applying) scalar body whenever a
+            # modifier field is set, and takes the fast path only for the common
+            # unmodified case. (Keeping a probe present — rather than returning None
+            # — also avoids perturbing the cross-ISA shared plan via the
+            # simd_probe_arch_portable gate.)
+            if base.endswith('_f16'):
+                return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_F16({cpp_t}, {cpp_op});'
             return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
         # VOP3-encoded twins of the SIMD VOP1 unary ops. The plain int/cvt forms
         # apply no modifiers and read the same src0/vdst operands as VOP1, so they
