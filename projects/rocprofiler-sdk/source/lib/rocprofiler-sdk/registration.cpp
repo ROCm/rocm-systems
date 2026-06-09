@@ -1138,8 +1138,8 @@ rocprofiler_set_api_table(const char* name,
     std::call_once(_once, rocprofiler::registration::initialize);
 
     // Verify that the rocattach table is always the first table registered when the attach
-    // feature is in use. Any table registered before rocattach means stream ID lookups for
-    // pre-existing streams may fire before supports_attachment() returns true.
+    // feature is in use. Any table registered before rocattach means modules may be initialized
+    // without awareness of attachment.
     static auto _non_rocattach_registered = std::atomic<bool>{false};
     if(std::string_view{name} == "rocattach")
     {
