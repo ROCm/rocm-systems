@@ -112,9 +112,7 @@ def _parse_enc_id_masks(
         Tuple of (flat_enc_mask, op_mask, dont_care_bits) where each mask is
         a (start, end) slice pair into the identifier string.
     """
-    bit_masks = [
-        (x.start(), x.end()) for x in re.finditer(r'1+', enc_id_mask)
-    ]
+    bit_masks = [(x.start(), x.end()) for x in re.finditer(r'1+', enc_id_mask)]
     flat_enc_mask = bit_masks[0]
     if len(bit_masks) == 1:
         op_mask = (
@@ -172,8 +170,10 @@ def _collapse_register_ranges(
             prefix = reg_match.group(1)
             reg_idx = int(reg_match.group(2))
             label_map = {
-                'v': 'VGPR', 's': 'SGPR',
-                'ttmp': 'TTMP', 'acc': 'ACC',
+                'v': 'VGPR',
+                's': 'SGPR',
+                'ttmp': 'TTMP',
+                'acc': 'ACC',
             }
             label = label_map[prefix]
             if prefix != current_range_prefix:
@@ -189,23 +189,21 @@ def _collapse_register_ranges(
                     current_range_max_idx = reg_idx
                 next_pair = None
                 if pair_idx + 1 < len(pairs):
-                    next_name = xs.get_node_text(
-                        pairs[pair_idx + 1].find(xs.NAME)
-                    )
-                    next_match = re.match(
-                        r'^\s*(v|s|ttmp|acc)([0-9]+)$', next_name
-                    )
+                    next_name = xs.get_node_text(pairs[pair_idx + 1].find(xs.NAME))
+                    next_match = re.match(r'^\s*(v|s|ttmp|acc)([0-9]+)$', next_name)
                     if next_match:
                         next_pair = next_match.group(1)
                 if next_pair != prefix:
                     last = True
                     predef_name = f'{opnd_type_name}_{label}_MAX'
-                    name_patterns.append(OperandNamePattern(
-                        OperandNamePattern.REG_RANGE,
-                        prefix=current_range_prefix,
-                        min_enum=current_range_min_enum,
-                        max_enum=predef_name,
-                    ))
+                    name_patterns.append(
+                        OperandNamePattern(
+                            OperandNamePattern.REG_RANGE,
+                            prefix=current_range_prefix,
+                            min_enum=current_range_min_enum,
+                            max_enum=predef_name,
+                        )
+                    )
                 else:
                     continue
         else:
@@ -217,11 +215,13 @@ def _collapse_register_ranges(
                         current_int_min_enum = predef_name
                     elif int_val == -16:
                         predef_name = opnd_type_name + '_NEG_INT_MAX'
-                        name_patterns.append(OperandNamePattern(
-                            OperandNamePattern.NEG_INT,
-                            min_enum=current_int_min_enum,
-                            max_enum=predef_name,
-                        ))
+                        name_patterns.append(
+                            OperandNamePattern(
+                                OperandNamePattern.NEG_INT,
+                                min_enum=current_int_min_enum,
+                                max_enum=predef_name,
+                            )
+                        )
                     else:
                         continue
                 else:
@@ -230,38 +230,43 @@ def _collapse_register_ranges(
                         current_int_min_enum = predef_name
                     elif int_val == 64:
                         predef_name = opnd_type_name + '_POS_INT_MAX'
-                        name_patterns.append(OperandNamePattern(
-                            OperandNamePattern.POS_INT,
-                            min_enum=current_int_min_enum,
-                            max_enum=predef_name,
-                        ))
+                        name_patterns.append(
+                            OperandNamePattern(
+                                OperandNamePattern.POS_INT,
+                                min_enum=current_int_min_enum,
+                                max_enum=predef_name,
+                            )
+                        )
                     else:
                         continue
             except ValueError:
                 try:
                     flt_val = float(predef_name)
-                    predef_name = (
-                        f'{opnd_type_name}_FLOAT_'
-                        f'{flt_name_map[flt_val]}'
+                    predef_name = f'{opnd_type_name}_FLOAT_' f'{flt_name_map[flt_val]}'
+                    name_patterns.append(
+                        OperandNamePattern(
+                            OperandNamePattern.FLOAT_CONST,
+                            operand_name=original_name,
+                            enum_name=predef_name,
+                        )
                     )
-                    name_patterns.append(OperandNamePattern(
-                        OperandNamePattern.FLOAT_CONST,
-                        operand_name=original_name,
-                        enum_name=predef_name,
-                    ))
                 except ValueError:
                     predef_name = f'{opnd_type_name}_{predef_name.upper()}'
                     if original_name.lower() == 'src_literal':
-                        name_patterns.append(OperandNamePattern(
-                            OperandNamePattern.LITERAL,
-                            enum_name=predef_name,
-                        ))
+                        name_patterns.append(
+                            OperandNamePattern(
+                                OperandNamePattern.LITERAL,
+                                enum_name=predef_name,
+                            )
+                        )
                     else:
-                        name_patterns.append(OperandNamePattern(
-                            OperandNamePattern.NAMED,
-                            operand_name=original_name,
-                            enum_name=predef_name,
-                        ))
+                        name_patterns.append(
+                            OperandNamePattern(
+                                OperandNamePattern.NAMED,
+                                operand_name=original_name,
+                                enum_name=predef_name,
+                            )
+                        )
         if last:
             first = True
             last = False
@@ -301,7 +306,7 @@ class Parser:
         arch_parts = arch_name_raw.split()
         arch_family = arch_parts[1].lower()
         arch_version = arch_parts[2].replace('.', '_')
-        arch_name = f'{arch_family}{arch_version}'
+        arch_name = profile.generated_arch_name or f'{arch_family}{arch_version}'
         self.isa_spec = IsaSpec(arch_name, version, profile)
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
@@ -319,15 +324,69 @@ class Parser:
         self.parse_operand_types()
         return self.isa_spec
 
+    def _parse_compact_expr(self, expr_node: elem_tree.Element) -> str:
+        """Parse the compact expression AST used by newer MR ISA XML."""
+        if expr_node.tag == 'id':
+            return expr_node.attrib['val'].lower()
+        if expr_node.tag == 'lit':
+            literal = expr_node.attrib.get('val', '0')
+            ty_node = expr_node.find('ty/t')
+            if ty_node is not None and ty_node.attrib.get('size') == '1':
+                return 'true' if literal == '1' else 'false'
+            return literal
+        if expr_node.tag != 'op':
+            raise ValueError(f"Unrecognized compact expression node '{expr_node.tag}'")
+
+        operator = expr_node.attrib['type']
+        operands = [
+            self._parse_compact_expr(child)
+            for child in list(expr_node)
+            if child.tag != 'ty'
+        ]
+
+        if operator == '.fieldderef':
+            if len(operands) != 2:
+                raise ValueError(
+                    f'Expected 2 operands for {operator}, got {len(operands)}'
+                )
+            if '.' in operands[0]:
+                return f"{operands[0].split('.')[0]}_.{operands[1]}"
+            return f'{operands[0]}.{operands[1]}'
+
+        if operator in ('.within', '.notwithin'):
+            if len(operands) != 2:
+                raise ValueError(
+                    f'Expected 2 operands for {operator}, got {len(operands)}'
+                )
+            values = [v.strip() for v in operands[1].split(',') if v.strip()]
+            if not values:
+                return 'false' if operator == '.within' else 'true'
+            joiner = ' || ' if operator == '.within' else ' && '
+            cmp_op = '==' if operator == '.within' else '!='
+            return (
+                '(' + joiner.join(f'{operands[0]} {cmp_op} {v}' for v in values) + ')'
+            )
+
+        if operator == '.cons_array':
+            return ', '.join(operands)
+
+        if len(operands) < 2:
+            raise ValueError(
+                f"Expected at least 2 operands for operator '{operator}', got {len(operands)}"
+            )
+        return f'({operands[0]} {operator} {operands[1]})'
+
     def parse_expr(self, expr_node: elem_tree.Element) -> str:
         """Recursively parse an expression AST into a C++ expression string."""
+        if xs.EXPR_ATTR_TYPE not in expr_node.attrib:
+            return self._parse_compact_expr(expr_node)
+
         expr_type = expr_node.attrib[xs.EXPR_ATTR_TYPE]
 
         if expr_type == xs.EXPR_TYPE_VAL_OPERATOR:
             operator = xs.get_node_text(expr_node.find(xs.OPERATOR))
             sub_expr = [
-                self.parse_expr(s)
-                for s in expr_node.find(xs.SUB_EXPR).findall(xs.EXPR)
+                self.parse_expr(s) for s in expr_node.find(xs.SUB_EXPR).findall(xs.EXPR)
             ]
             if len(sub_expr) < 2:
                 raise ValueError(
@@ -345,9 +404,7 @@ class Parser:
         elif expr_type == xs.EXPR_TYPE_VAL_LITERAL:
             val_node = expr_node.find(xs.VALUE)
             literal = val_node.text if val_node is not None and val_node.text else '0'
-            lit_size = xs.get_node_text(expr_node.find(
-                f'{xs.VALUE_TYPE}/{xs.SIZE}'
-            ))
+            lit_size = xs.get_node_text(expr_node.find(f'{xs.VALUE_TYPE}/{xs.SIZE}'))
             if lit_size == '1':
                 return 'true' if literal == '1' else 'false'
             return literal
@@ -355,11 +412,12 @@ class Parser:
             # ReturnType annotations don't contribute to the C++ expression.
             return ''
         raise ValueError(
-            f"Unrecognized expression type '{expr_type}' in encoding "
-            f"condition AST"
+            f"Unrecognized expression type '{expr_type}' in encoding " f"condition AST"
         )
 
-    def parse_condition(self, cond_node: elem_tree.Element) -> tuple[str, str]:
+    def parse_condition(
+        self, cond_node: elem_tree.Element, enc_name: str
+    ) -> tuple[str, str]:
         """Parse an encoding condition into a (name, expression) pair."""
         cond_name = xs.get_node_text(cond_node.find(f'.//{xs.COND_NAME}'))
         cond_expr_node = cond_node.find(xs.COND_EXPR)
@@ -372,18 +430,43 @@ class Parser:
             )
         expr_node = cond_expr_node.find(xs.EXPR)
         if expr_node is None:
+            expr_node = next(iter(cond_expr_node), None)
+        if expr_node is None:
             raise xs.SchemaValueError(
                 f'{xs.EXPR} not found in condition expression for {cond_name!r}'
             )
         expr = self.parse_expr(expr_node)
 
+        cond_name = self.profile.normalize_encoding_condition(enc_name, cond_name)
         if cond_name == 'default':
             cond_name += '_encoding'
+        else:
+            cond_name = self._sanitize_condition_name(cond_name)
 
         return (cond_name, expr)
 
+    @staticmethod
+    def _sanitize_condition_name(cond_name: str) -> str:
+        """Return a C++ identifier for an XML encoding condition name.
+
+        The mapping is intentionally best-effort rather than injective. XML
+        profiles may repeat equivalent condition names; parse_encoding_conditions
+        keeps the first generated identifier in those cases.
+        """
+        name = cond_name.strip()
+        name = name.replace('!', 'not_')
+        name = name.replace('&', '_and_')
+        name = name.replace('|', '_or_')
+        name = re.sub(r'[^0-9A-Za-z_]', '_', name)
+        name = re.sub(r'_+', '_', name).strip('_')
+        if not name:
+            name = 'condition'
+        if name[0].isdigit():
+            name = f'cond_{name}'
+        return name
+
     def parse_encoding_conditions(
-        self, conds_node: elem_tree.Element
+        self, conds_node: elem_tree.Element, enc_name: str
     ) -> list[tuple[str, str]]:
         """Parse all encoding conditions under the given node.
 
@@ -395,7 +478,7 @@ class Parser:
         seen: set[str] = set()
         result: list[tuple[str, str]] = []
         for cond_node in conds_node.findall(xs.ENCODING_COND):
-            name, expr = self.parse_condition(cond_node)
+            name, expr = self.parse_condition(cond_node, enc_name)
             if name not in seen:
                 seen.add(name)
                 result.append((name, expr))
@@ -420,17 +503,15 @@ class Parser:
         opm_field_bit_cnt = 0
         enc_name_raw = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
         renames = self.profile.field_renames(enc_name_raw.upper())
-        for field in enc_node.findall(
-            f'./{xs.UCODE_FMT}/{xs.BITMAP}/{xs.FIELD}'
-        ):
+        for field in enc_node.findall(f'./{xs.UCODE_FMT}/{xs.BITMAP}/{xs.FIELD}'):
             field_name = xs.get_node_text(field.find(xs.FIELD_NAME)).lower()
             field_name = renames.get(field_name, field_name)
-            field_bit_cnt = int(xs.get_node_text(
-                field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_CNT}')
-            ))
-            field_bit_offset = int(xs.get_node_text(
-                field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_OFF}')
-            ))
+            field_bit_cnt = int(
+                xs.get_node_text(field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_CNT}'))
+            )
+            field_bit_offset = int(
+                xs.get_node_text(field.find(f'{xs.BIT_LAYOUT}/{xs.RANGE}/{xs.BIT_OFF}'))
+            )
             ucode_fields.append(
                 MicrocodeField(field_name, field_bit_cnt, field_bit_offset)
             )
@@ -458,15 +539,16 @@ class Parser:
         enc_name = xs.get_node_text(xs.get_node(enc_node, xs.ENCODING_NAME))
         if enc_field_bit_cnt is None:
             raise ValueError(
-                f"Encoding '{enc_name}' bitmap missing required 'encoding' "
-                f"field"
+                f"Encoding '{enc_name}' bitmap missing required 'encoding' " f"field"
             )
         if op_field_bit_cnt is None:
             op_field_bit_cnt = 0
         return ucode_fields, enc_field_bit_cnt, op_field_bit_cnt, opm_field_bit_cnt
 
     def parse_encoding_identifers(
-        self, enc_node: elem_tree.Element, inst_enc: InstEncoding,
+        self,
+        enc_node: elem_tree.Element,
+        inst_enc: InstEncoding,
         parent_enc: InstEncoding | None = None,
     ) -> None:
         """Parse encoding identifier masks to populate the primary decode table.
@@ -493,12 +575,12 @@ class Parser:
 
         enc_id_mask = xs.get_node_text(enc_node.find(xs.ENCODING_IDENTIFIER_MASK))
         flat_enc_mask, op_mask, dont_care_bits = _parse_enc_id_masks(
-            enc_id_mask, max_enc_bits,
-            inst_enc.enc_field_bit_cnt, inst_enc.op_field_bit_cnt,
+            enc_id_mask,
+            max_enc_bits,
+            inst_enc.enc_field_bit_cnt,
+            inst_enc.op_field_bit_cnt,
         )
-        effective_op_bits = (
-            inst_enc.op_field_bit_cnt + inst_enc.opm_field_bit_cnt
-        )
+        effective_op_bits = inst_enc.op_field_bit_cnt + inst_enc.opm_field_bit_cnt
         max_num_opcodes = pow(2, effective_op_bits)
         sub_decode_funcs = ['decodeInvalid'] * max_num_opcodes
         dt = self.isa_spec.primary_decode_table
@@ -531,10 +613,8 @@ class Parser:
                         if self.profile.is_alt_encoding(inst_enc.enc_name)
                         else None
                     )
-                    if (
-                        dt[enc_val].enc.enc_name != inst_enc.enc_name
-                        and (parent_name is None
-                             or dt[enc_val].enc.enc_name != parent_name)
+                    if dt[enc_val].enc.enc_name != inst_enc.enc_name and (
+                        parent_name is None or dt[enc_val].enc.enc_name != parent_name
                     ):
                         raise ValueError(
                             f'Double-mapped encoding in primary decode table: '
@@ -547,15 +627,11 @@ class Parser:
                 # (only unique-ops alternates need new primary entries).
                 deferred_entries.append(enc_val)
             else:
-                dt[enc_val] = DecodeTableEntry(
-                    inst_enc, pow(2, dont_care_bits)
-                )
+                dt[enc_val] = DecodeTableEntry(inst_enc, pow(2, dont_care_bits))
             if inst_enc.op_field_bit_cnt == 0:
                 opcode = 0
             else:
-                opcode = int(
-                    enc_id_text[op_mask[0] : op_mask[1]], enc_id_radix
-                )
+                opcode = int(enc_id_text[op_mask[0] : op_mask[1]], enc_id_radix)
             if primary_dt_ptrs[opcode] != -1:
                 if parent_enc is not None:
                     continue
@@ -583,7 +659,8 @@ class Parser:
             # Alternate encoding with unique opcodes: fill deferred primary
             # table entries by copying state from an existing parent entry.
             has_unique_opcode = any(
-                v != -1 and (
+                v != -1
+                and (
                     parent_enc.primary_dt_ptrs is None
                     or parent_enc.primary_dt_ptrs[i] == -1
                 )
@@ -591,36 +668,29 @@ class Parser:
             )
             if has_unique_opcode:
                 parent_entry = next(
-                    (dt[v] for v in parent_enc.primary_dt_ptrs
-                     if v != -1 and dt[v] is not None),
+                    (
+                        dt[v]
+                        for v in parent_enc.primary_dt_ptrs
+                        if v != -1 and dt[v] is not None
+                    ),
                     None,
                 )
                 for enc_val in deferred_entries:
                     if dt[enc_val] is None:
-                        new_entry = DecodeTableEntry(
-                            parent_enc, pow(2, dont_care_bits)
-                        )
+                        new_entry = DecodeTableEntry(parent_enc, pow(2, dont_care_bits))
                         if parent_entry is not None:
                             new_entry.is_primary = parent_entry.is_primary
                             new_entry.decode_func = parent_entry.decode_func
-                            new_entry.sub_decode_table = (
-                                parent_entry.sub_decode_table
-                            )
-                            new_entry.sub_decode_funcs = (
-                                parent_entry.sub_decode_funcs
-                            )
+                            new_entry.sub_decode_table = parent_entry.sub_decode_table
+                            new_entry.sub_decode_funcs = parent_entry.sub_decode_funcs
                         dt[enc_val] = new_entry
 
         if not inst_enc.is_primary_decode and parent_enc is None:
             for i in primary_dt_ptrs:
                 if i != -1:
                     dte = dt[i]
-                    dte.decode_func = (
-                        f'subDecode{inst_enc.fmt_enc_name}'
-                    )
-                    dte.sub_decode_table = (
-                        f'sub_decode_{inst_enc.fmt_enc_name}'.lower()
-                    )
+                    dte.decode_func = f'subDecode{inst_enc.fmt_enc_name}'
+                    dte.sub_decode_table = f'sub_decode_{inst_enc.fmt_enc_name}'.lower()
                     if dte.sub_decode_funcs is None:
                         dte.is_primary = False
                         dte.sub_decode_funcs = list(sub_decode_funcs)
@@ -651,11 +721,14 @@ class Parser:
             order = int(enc_node.attrib[xs.ENC_ATTR_ORDER])
             bit_cnt = int(xs.get_node_text(bit_cnt_node))
 
-            ucode_fields, enc_field_bit_cnt, op_field_bit_cnt, opm_field_bit_cnt = (
-                self.parse_ucode_bitmap(enc_node, bit_cnt)
-            )
+            (
+                ucode_fields,
+                enc_field_bit_cnt,
+                op_field_bit_cnt,
+                opm_field_bit_cnt,
+            ) = self.parse_ucode_bitmap(enc_node, bit_cnt)
             enc_conds_node = enc_node.find(xs.ENCODING_CONDS)
-            enc_conds = self.parse_encoding_conditions(enc_conds_node)
+            enc_conds = self.parse_encoding_conditions(enc_conds_node, enc_name)
 
             ucode_fields.sort(key=lambda x: x.bit_offset)
             inst_enc = InstEncoding(
@@ -697,12 +770,8 @@ class Parser:
                     inst_enc.is_implied_literal_enc = True
                     self.isa_spec.alt_encs_with_implied_literal.add(enc_name)
 
-            if not is_alt or not self.profile.skip_inst_encoding(
-                enc_name, 'default'
-            ):
-                self.parse_encoding_identifers(
-                    enc_node, inst_enc, parent_enc
-                )
+            if not is_alt or not self.profile.skip_inst_encoding(enc_name, 'default'):
+                self.parse_encoding_identifers(enc_node, inst_enc, parent_enc)
 
             self.isa_spec.inst_encodings.append(inst_enc)
             if enc_name in self.isa_spec.encoding_map:
@@ -740,15 +809,10 @@ class Parser:
                 opcode = int(xs.get_node_text(opcode_node))
                 opnds = []
                 for opnd in operands_node:
-                    is_in = (
-                        opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
-                    )
-                    is_out = (
-                        opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
-                    )
+                    is_in = opnd.attrib[xs.OPERAND_ATTR_INPUT].lower() == 'true'
+                    is_out = opnd.attrib[xs.OPERAND_ATTR_OUTPUT].lower() == 'true'
                     is_implicit = (
-                        opnd.attrib[xs.OPERAND_ATTR_IS_IMPLICIT].lower()
-                        == 'true'
+                        opnd.attrib[xs.OPERAND_ATTR_IS_IMPLICIT].lower() == 'true'
                     )
                     is_bin_ucode_required = (
                         opnd.attrib[
@@ -791,9 +855,7 @@ class Parser:
                     parent_name = self.profile.derive_parent_enc_name(enc_name)
                     parent_enc = self.isa_spec.encoding_map[parent_name]
                     parent_enc.insts.append(inst)
-                    parent_enc.implied_literal_ops.append(
-                        str(inst.opcode)
-                    )
+                    parent_enc.implied_literal_ops.append(str(inst.opcode))
                 else:
                     enc.insts.append(inst)
 
@@ -828,17 +890,13 @@ class Parser:
             opnd_type_name = xs.get_node_text(
                 opnd_type.find(f'.//{xs.OPERAND_TYPE_NAME}')
             )
-            opnd_predefined_val = opnd_type.find(
-                f'.//{xs.OPERAND_PREDEFINED_VALS}'
-            )
+            opnd_predefined_val = opnd_type.find(f'.//{xs.OPERAND_PREDEFINED_VALS}')
             if opnd_predefined_val is not None:
                 pairs = list(opnd_predefined_val)
                 predef_vals_list, name_patterns = _collapse_register_ranges(
                     pairs, opnd_type_name, self.profile.flt_name_map
                 )
                 self.isa_spec.opnd_selectors.append(
-                    OperandSelector(
-                        opnd_type_name, predef_vals_list, name_patterns
-                    )
+                    OperandSelector(opnd_type_name, predef_vals_list, name_patterns)
                 )
             self.isa_spec.operand_types.append(opnd_type_name)

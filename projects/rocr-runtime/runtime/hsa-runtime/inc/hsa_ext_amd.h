@@ -75,9 +75,10 @@
  * - 1.21 - hsa_amd_signal_get_event_id
  * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
+ * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 23
+#define HSA_AMD_INTERFACE_VERSION_MINOR 24
 
 #ifdef __cplusplus
 extern "C" {
@@ -2240,25 +2241,30 @@ typedef enum {
  *   dst_size        -- size of the destination region in bytes
  *   num_entries     -- 0
  *
- * LINEAR_INDIRECT_SRC (source address resolved via indirection):
- *   src             -- void** pointing to the actual source address
- *   dst             -- regular destination pointer
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ * LINEAR_INDIRECT_SRC / _DST / _SRCDST: one or more indirect transfers whose
+ * source and/or destination address is resolved at execution time by the
+ * SDMA engine dereferencing a pointer-to-pointer slot.  The op.type chooses
+ * which side is indirect: SRC -> src is void**; DST -> dst is void**;
+ * SRCDST -> both are void**.  All entries in a single op share the same
+ * indirect mode.
  *
- * LINEAR_INDIRECT_DST (destination address resolved via indirection):
- *   src             -- regular source pointer
- *   dst             -- void** pointing to the actual destination address
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
- *
- * LINEAR_INDIRECT_SRCDST (both addresses resolved via indirection):
- *   src             -- void** pointing to the actual source address
- *   dst             -- void** pointing to the actual destination address
- *   wait.scope      -- hsa_fence_scope_t for indirect address reads
- *
- * For all INDIRECT_* types:
- *   src_agent, dst_agent -- source and destination agents
+ * LINEAR_INDIRECT_* (single, when num_entries == 0):
+ *   src, src_agent  -- source pointer (void** for SRC/SRCDST) and agent
+ *   dst, dst_agent  -- destination pointer (void** for DST/SRCDST) and agent
  *   size            -- copy size in bytes
- *   num_entries        -- must be 0
+ *   num_entries     -- 0
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_* (multi-entry, when num_entries > 0):
+ *   src_list        -- array of num_entries void** (SRC/SRCDST) or void*
+ *                      (DST) pointers
+ *   dst_list        -- array of num_entries void** (DST/SRCDST) or void*
+ *                      (SRC) pointers
+ *   dst_agent_list  -- array of num_entries destination agents
+ *   size_list       -- array of num_entries copy sizes in bytes
+ *   src_agent       -- source agent (common to all entries)
+ *   num_entries     -- >= 1 and <= 1024
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
  *
  * Future-proofing unions (reserved, must not be used):
  *   src_agent_list           -- reserved for future gather operations
@@ -2267,7 +2273,7 @@ typedef enum {
 typedef struct hsa_amd_memory_copy_op_s {
   uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
   uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
-  uint16_t num_entries;                    /**< LINEAR multi / BROADCAST / SWAP: number of entries; others: must be 0 */
+  uint16_t num_entries;                    /**< Number of entries for multi-entry forms (LINEAR / SWAP / INDIRECT_*: 0 = scalar form; BROADCAST: always >= 1) */
   uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
   hsa_signal_t completion_signal;         /**< Completion signal for this operation */
   union {
@@ -3187,6 +3193,78 @@ hsa_status_t HSA_API hsa_amd_ipc_memory_attach(
  * with hsa_amd_ipc_memory_attach.
  */
 hsa_status_t HSA_API hsa_amd_ipc_memory_detach(void* mapped_ptr);
+
+/**
+ * @brief External semaphore handle types (subset of Vulkan
+ * VkExternalSemaphoreHandleTypeFlagBits, mapped 1:1 to
+ * HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE in libhsakmt).
+ */
+typedef enum {
+  HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32     = 0,
+  HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT = 1,
+  HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD        = 2,
+} hsa_amd_external_semaphore_handle_type_t;
+
+/**
+ * @brief Imported external semaphore. Opaque; created by
+ * hsa_amd_external_semaphore_handle_open and released by
+ * hsa_amd_external_semaphore_handle_close. Internally encodes the
+ * libhsakmt HSA_EXTERNAL_SEMAPHORE_HANDLE.
+ *
+ * @note This release adds the import / close half only. The HSA queue
+ * signal/wait APIs that consume hsa_amd_external_semaphore_t will land
+ * in a separate change; until then the imported handle is only useful
+ * as a lifecycle owner.
+ */
+typedef struct hsa_amd_external_semaphore_s {
+  uint64_t handle;
+} hsa_amd_external_semaphore_t;
+
+/**
+ * @brief Descriptor passed to hsa_amd_external_semaphore_handle_open.
+ */
+typedef struct {
+  hsa_amd_external_semaphore_handle_type_t type;
+  union {
+    void *win32_handle;   // valid when type == OPAQUE_WIN32 / KMT
+    int   fd;             // valid when type == OPAQUE_FD
+  } handle;
+} hsa_amd_external_semaphore_handle_descriptor_t;
+
+/**
+ * @brief Imports a Vulkan-exported external semaphore on the given
+ * agent's KMD node. The returned semaphore must be released with
+ * hsa_amd_external_semaphore_handle_close.
+ *
+ * @note This release adds the import / close path only. There is no
+ * HSA queue signal/wait API in this header that consumes
+ * hsa_amd_external_semaphore_t yet; the submission half will land in
+ * a separate change.
+ *
+ * @param[in] agent A GPU agent whose node owns the imported syncobj.
+ * @param[in] desc Descriptor naming the OS handle and its type.
+ * @param[out] out_sem On success, the imported semaphore.
+ *
+ * @retval HSA_STATUS_SUCCESS Imported.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT Agent is not a GPU, or its
+ *   KMD node has no associated WDDM device.
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT desc/out_sem null,
+ *   the OS handle is null, or the handle type is unsupported.
+ * @retval HSA_STATUS_ERROR Underlying KMD import failed.
+ */
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_open(
+    hsa_agent_t agent,
+    const hsa_amd_external_semaphore_handle_descriptor_t *desc,
+    hsa_amd_external_semaphore_t *out_sem);
+
+/**
+ * @brief Releases an imported external semaphore. Until the HSA queue
+ * signal/wait API for hsa_amd_external_semaphore_t is added, callers
+ * are expected to keep the handle alive only for as long as the
+ * higher-level (HIP / rocclr) wrapper that owns the same syncobj.
+ */
+hsa_status_t HSA_API hsa_amd_external_semaphore_handle_close(
+    hsa_amd_external_semaphore_t sem);
 
 /** @} */
 

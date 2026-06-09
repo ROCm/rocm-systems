@@ -261,33 +261,39 @@ amdcuid_status_t CuidNpu::discover_single(amdcuid_npu_info *npu_info,
 
 amdcuid_status_t
 CuidNpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
+  if (geteuid() != 0) {
+    return AMDCUID_STATUS_PERMISSION_DENIED;
+  }
+
   // Attempt to get fingerprint through PCI Config Space DSN capability
   uint16_t offset = 0;
-  amdcuid_status_t status =
-      PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
+  amdcuid_status_t status = PciUtil::get_pci_dsn_cap_offset(m_info.bdf, offset);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    // attempt to get fingerprint through VSEC fallback if DSN capability is not
+    // found
+    status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      fingerprint = 0;
+      return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+    }
+  }
   if (status == AMDCUID_STATUS_SUCCESS) {
     const uint8_t fingerprint_size = 8;
     uint8_t fingerprint_bytes[fingerprint_size] = {0};
     status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_bytes,
                                             fingerprint_size, offset);
     if (status == AMDCUID_STATUS_SUCCESS) {
-      fingerprint = PciUtil::le64_to_be64(
-          *reinterpret_cast<uint64_t *>(fingerprint_bytes));
+      uint64_t fingerprint_value = 0;
+      std::memcpy(&fingerprint_value, fingerprint_bytes, fingerprint_size);
+      fingerprint = PciUtil::le64_to_be64(fingerprint_value);
       return AMDCUID_STATUS_SUCCESS;
+    } else {
+      fingerprint = 0;
+      return status;
     }
   }
 
-  // If DSN capability is not available, construct a fingerprint from
-  // PCI vendor/device/revision IDs as a fallback. This fingerprint is
-  // not unique per device instance — all NPUs of the same model will
-  // produce the same value. This is acceptable for integrated NPUs
-  // (one per SoC). If discrete NPU parts appear in the future, a
-  // unique identifier source (e.g., fuse ID) will be needed.
-  fingerprint =
-      (static_cast<uint64_t>(m_info.header.fields.npu.vendor_id) << 32) |
-      (static_cast<uint64_t>(m_info.header.fields.npu.device_id) << 16) |
-      static_cast<uint64_t>(m_info.header.fields.npu.revision_id);
-  return AMDCUID_STATUS_SUCCESS;
+  return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
 }
 
 amdcuid_status_t CuidNpu::get_primary_cuid(amdcuid_primary_id &id) const {

@@ -48,6 +48,7 @@ env:
   OMPI_ALLOW_RUN_AS_ROOT: 1
   OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
   ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
 
 jobs:
   rhel:
@@ -60,9 +61,16 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '8.10', '9' ]
+        os-release: [ '8.10', '9', '10' ]
         rocm-version: [ '6.3', '6.4', '7.0', '7.1', '7.2' ]
         build-type: ['Release']
+        exclude:
+          - os-release: '10'
+            rocm-version: '6.3'
+          - os-release: '10'
+            rocm-version: '6.4'
+          - os-release: '10'
+            rocm-version: '7.0'
 
     steps:
     - uses: actions/checkout@v6
@@ -93,11 +101,36 @@ jobs:
             # Set env var so validate_perfetto_trace() uses the downloaded binary
             echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
           fi
+          if [ $OS_VERSION_MAJOR -eq 10 ]; then
+            # TODO: Move package install to the docker.
+            dnf install -y --enablerepo=crb mpich mpich-devel
+            echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
+          fi
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+        restore-keys: |
+          ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+          ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
+
+    - name: Configure ccache
+      run: |
+        mkdir -p "${CCACHE_DIR}"
+        ccache --max-size=1G
+        ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+        ccache -z
+        ccache -p | head -20
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run:
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
@@ -130,6 +163,14 @@ jobs:
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
           -LE "network|gpu"
+
+    - name: ccache stats
+      if: always()
+      run: |
+        echo "=== ccache stats ==="
+        ccache -s -v || true
+        echo "=== ccache dir size ==="
+        du -sh "${CCACHE_DIR}" || true
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5

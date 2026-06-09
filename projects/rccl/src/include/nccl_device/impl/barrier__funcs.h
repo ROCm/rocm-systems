@@ -1,17 +1,19 @@
 /*************************************************************************
- * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef _NCCL_DEVICE_BARRIER__FUNCS_H_
 #define _NCCL_DEVICE_BARRIER__FUNCS_H_
+#include "../hip_compat.h"
 #include "barrier__types.h"
 #include "lsa_barrier__funcs.h"
 #include "gin_barrier__funcs.h"
 #include "../utility.h"
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
     Coop coop, ncclTeam innerTeam, ncclTeam outerTeam, ncclGin gin,
@@ -26,7 +28,7 @@ NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
     Coop coop, ncclTeamTagWorld, ncclGin gin, uint32_t index, bool multimem
@@ -52,7 +54,7 @@ NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclBarrierSession<Coop>::ncclBarrierSession(
     Coop coop, ncclTeamTagRail, ncclGin gin, uint32_t index
@@ -72,21 +74,22 @@ NCCL_DEVICE_INLINE ncclLsaBarrierSession<Coop>& ncclBarrierSession<Coop>::lsaBar
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclGinBarrierSession<Coop>& ncclBarrierSession<Coop>::ginBarrier() {
   return this->outerGinBar.thing;
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
 template<typename Coop>
 NCCL_DEVICE_INLINE void ncclBarrierSession<Coop>::sync(Coop, cuda::memory_order ord, ncclGinFenceLevel fence) {
   if (this->innerLsaBar.present) {
     this->innerLsaBar.thing.sync(this->coop, this->outerGinBar.present ? nccl::utility::releaseOrderOf(ord) : ord);
   }
   if (this->outerGinBar.present) {
-    this->outerGinBar.thing.sync(this->coop, this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord, fence);
+    auto ginOrd = this->innerLsaBar.present ? nccl::utility::acquireOrderOf(ord) : ord;
+    this->outerGinBar.thing.sync(this->coop, ginOrd, fence);
   }
 }
 #endif

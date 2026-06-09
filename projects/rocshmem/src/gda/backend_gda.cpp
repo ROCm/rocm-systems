@@ -614,6 +614,16 @@ int GDABackend::buffer_unregister(void *addr) {
   return err;
 }
 
+void GDABackend::buffer_unregister_all() {
+  /* Deregister all buffers with QPs */
+  for (size_t i = 0; i < num_qps; i++) {
+    host_qps[i].buffer_unregister_all();
+  }
+
+  /* Clear the ptr cache */
+  Backend::buffer_unregister_all();
+}
+
 void GDABackend::reset_backend_stats() {
   assert(false);
 }

@@ -54,6 +54,7 @@ extern "C" {
 #define DRM_AMDGPU_VM			0x13
 #define DRM_AMDGPU_FENCE_TO_HANDLE	0x14
 #define DRM_AMDGPU_SCHED		0x15
+#define DRM_AMDGPU_PROC_OPTIONS	0x1A
 
 /* hybrid specific ioctls */
 #define DRM_AMDGPU_SEM			0x5b
@@ -75,6 +76,7 @@ extern "C" {
 #define DRM_IOCTL_AMDGPU_VM		DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_VM, union drm_amdgpu_vm)
 #define DRM_IOCTL_AMDGPU_FENCE_TO_HANDLE DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_FENCE_TO_HANDLE, union drm_amdgpu_fence_to_handle)
 #define DRM_IOCTL_AMDGPU_SCHED		DRM_IOW(DRM_COMMAND_BASE + DRM_AMDGPU_SCHED, union drm_amdgpu_sched)
+#define DRM_IOCTL_AMDGPU_PROC_OPTIONS	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_PROC_OPTIONS, struct drm_amdgpu_proc_options)
 /* hybrid specific ioctls */
 #define DRM_IOCTL_AMDGPU_SEM		DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_SEM, union drm_amdgpu_sem)
 #define DRM_IOCTL_AMDGPU_GEM_DGMA	DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_GEM_DGMA, struct drm_amdgpu_gem_dgma)
@@ -397,6 +399,18 @@ struct drm_amdgpu_sched_in {
 union drm_amdgpu_sched {
 	struct drm_amdgpu_sched_in in;
 };
+
+struct drm_amdgpu_proc_options {
+  __u32 op;
+  union {
+    struct {
+      __u32 value;
+    } kfd_sigbus_delay;
+  };
+};
+
+#define AMDGPU_PROC_OPTIONS_OP_KFD_SIGBUS_DELAY 0
+#define AMDGPU_PROC_OPTIONS_KFD_SIGBUS_DELAY_DISABLED UINT32_MAX
 
 /*
  * This is not a reliable API and you should expect it to fail for any

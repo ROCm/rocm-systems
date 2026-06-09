@@ -27,6 +27,50 @@ THE SOFTWARE.
 #include "net.h"
 #include <climits>
 
+// Minimal libc-backed implementations of the ncclOs* affinity / page-size
+// helpers introduced by the NCCL 2.29.x sync. The real implementations live
+// in src/os/linux.cc, but linking that whole file into topo_expl pulls in
+// header dependencies that clash with topo_expl's own include/utils.h.
+// topo_expl only needs CPU-affinity bookkeeping for graph construction and
+// the page size for allocator templates, so we provide thin wrappers.
+#include <sched.h>
+#include <unistd.h>
+#include <cstring>
+
+void ncclOsCpuZero(cpu_set_t& affinity) {
+  CPU_ZERO(&affinity);
+}
+
+void ncclOsCpuSet(cpu_set_t& affinity, int cpu) {
+  CPU_SET(cpu, &affinity);
+}
+
+bool ncclOsCpuIsSet(const cpu_set_t affinity, int cpu) {
+  return CPU_ISSET(cpu, &affinity) != 0;
+}
+
+int ncclOsCpuCount(const cpu_set_t affinity) {
+  return CPU_COUNT(&affinity);
+}
+
+cpu_set_t ncclOsCpuAnd(const cpu_set_t& a, const cpu_set_t& b) {
+  cpu_set_t r;
+  CPU_AND(&r, &a, &b);
+  return r;
+}
+
+ncclResult_t ncclOsGetAffinity(cpu_set_t* affinity) {
+  if (sched_getaffinity(0, sizeof(cpu_set_t), affinity) != 0) {
+    return ncclSystemError;
+  }
+  return ncclSuccess;
+}
+
+size_t ncclOsGetPageSize() {
+  long ps = sysconf(_SC_PAGESIZE);
+  return ps > 0 ? (size_t)ps : (size_t)4096;
+}
+
 // Stub for ncclCommCount - just return the nRanks from the comm
 extern "C" ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
   *count = comm->nRanks;

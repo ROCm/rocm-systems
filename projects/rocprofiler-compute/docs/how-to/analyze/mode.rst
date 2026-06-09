@@ -26,8 +26,8 @@ See the following sections to explore ROCm Compute Profiler's analysis and visua
 options.
 
 * :doc:`cli`
-* :doc:`standalone-gui`
-* :doc:`tui`
+* :doc:`standalone-gui` (experimental feature)
+* :doc:`tui` (experimental feature)
 
 .. note::
 

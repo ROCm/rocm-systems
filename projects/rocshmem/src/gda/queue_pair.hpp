@@ -488,6 +488,7 @@ class QueuePair {
 
   int buffer_register(uintptr_t addr, size_t length);
   int buffer_unregister(uintptr_t addr);
+  void buffer_unregister_all();
 
   __device__ uint32_t get_lkey(uintptr_t addr);
 };

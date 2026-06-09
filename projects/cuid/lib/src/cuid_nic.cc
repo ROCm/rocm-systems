@@ -57,10 +57,10 @@ amdcuid_status_t CuidNic::discover(std::vector<DevicePtr> &nics) {
       nics.emplace_back(std::make_shared<CuidNic>(info));
     }
   }
+  closedir(dir);
   if (nics.size() == 0)
     return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
-  closedir(dir);
   return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -154,18 +154,27 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info *nic_info,
 
 amdcuid_status_t
 CuidNic::get_hardware_fingerprint(uint64_t &fingerprint) const {
-  uint32_t cap_id = 0x3;
+  if (geteuid() != 0) {
+    return AMDCUID_STATUS_PERMISSION_DENIED;
+  }
+
   uint16_t offset = 0;
-  amdcuid_status_t status =
-      PciUtil::get_pci_cap_offset(m_info.bdf, cap_id, offset);
+  amdcuid_status_t status = PciUtil::get_pci_dsn_cap_offset(m_info.bdf, offset);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    // attempt to get fingerprint through VSEC fallback if DSN capability is not
+    // found
+    status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
+  }
   if (status == AMDCUID_STATUS_SUCCESS) {
     const uint8_t fingerprint_size = 8;
     uint8_t fingerprint_bytes[fingerprint_size] = {0};
     status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_bytes,
                                             fingerprint_size, offset);
     if (status == AMDCUID_STATUS_SUCCESS) {
-      fingerprint = PciUtil::le64_to_be64(
-          *reinterpret_cast<uint64_t *>(fingerprint_bytes));
+      uint64_t fingerprint_value = 0;
+      std::memcpy(&fingerprint_value, fingerprint_bytes,
+                  sizeof(fingerprint_bytes));
+      fingerprint = PciUtil::le64_to_be64(fingerprint_value);
       return AMDCUID_STATUS_SUCCESS;
     }
   }
@@ -183,7 +192,9 @@ CuidNic::get_hardware_fingerprint(uint64_t &fingerprint) const {
     sscanf(mac_address.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac_bytes[0],
            &mac_bytes[1], &mac_bytes[2], &mac_bytes[3], &mac_bytes[4],
            &mac_bytes[5]);
-    fingerprint = *reinterpret_cast<uint64_t *>(mac_bytes);
+    uint64_t mac_fingerprint = 0;
+    std::memcpy(&mac_fingerprint, mac_bytes, sizeof(mac_bytes));
+    fingerprint = mac_fingerprint;
     return AMDCUID_STATUS_SUCCESS;
   }
 
