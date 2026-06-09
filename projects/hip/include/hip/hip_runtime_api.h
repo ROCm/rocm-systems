@@ -6021,8 +6021,9 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 /**
  * @brief Perform Batch of 1D copies with extended operation support.
  *
- * Extended version of hipMemcpyBatchAsync with per-entry operation flags,
- * asymmetric swap sizes, and optional GPU-side wait/signal conditions.
+ * Extended version of hipMemcpyBatchAsync with per-entry operation flags
+ * and asymmetric swap sizes. GPU-side wait/signal parameters are reserved
+ * for future use and must be NULL.
  *
  * @param [in] dsts        - Array of destination pointers.
  * @param [in] srcs        - Array of source pointers.

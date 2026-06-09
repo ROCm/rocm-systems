@@ -472,6 +472,8 @@ typedef enum hipExtMemcpyWaitCmpOp {
 
 /**
  * Signal operations for hipExtMemcpySignal.
+ * Values match SDMA packet signal_type field encoding.
+ * These will be mapped to ROCr equivalents when wait/signal support is implemented.
  */
 typedef enum hipExtMemcpySignalOp {
   hipExtMemcpySignalOpSub64b   = 0x70,  ///< 64-bit atomic subtract

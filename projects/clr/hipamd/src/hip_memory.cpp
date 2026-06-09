@@ -3148,13 +3148,21 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
       // Override ext operation type from per-entry flags when available.
       if (ops != nullptr) {
         uint32_t ef = ops[idx];
-        if (ef & hipExtMemcpyOpSwap) metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
-        if ((ef & hipExtMemcpyOpIndirectSrc) && (ef & hipExtMemcpyOpIndirectDst))
+        const bool isSwapOp = ef & hipExtMemcpyOpSwap;
+        const bool isIndirectOp = ef & (hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst);
+        // Swap and indirect are mutually exclusive per-entry operations.
+        if (isSwapOp && isIndirectOp) {
+          return hipErrorInvalidValue;
+        }
+        if (isSwapOp) {
+          metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
+        } else if ((ef & hipExtMemcpyOpIndirectSrc) && (ef & hipExtMemcpyOpIndirectDst)) {
           metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrcDst;
-        else if (ef & hipExtMemcpyOpIndirectSrc)
+        } else if (ef & hipExtMemcpyOpIndirectSrc) {
           metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrc;
-        else if (ef & hipExtMemcpyOpIndirectDst)
+        } else if (ef & hipExtMemcpyOpIndirectDst) {
           metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectDst;
+        }
       }
 
       // For asymmetric swap, sizesB provides the B-side size.
@@ -3187,20 +3195,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
                              metadata, sizeB);
       }
 
-      // Populate per-entry wait/signal on the last emplace_back'd op.
-      if (waits != nullptr && waits[idx].addr != nullptr) {
-        auto& w = copyOps.back().wait;
-        w.addr = waits[idx].addr;
-        w.value = waits[idx].value;
-        w.mask = waits[idx].mask;
-        w.compareOp = waits[idx].compareOp;
-      }
-      if (signals != nullptr && signals[idx].addr != nullptr) {
-        auto& s = copyOps.back().signal;
-        s.addr = signals[idx].addr;
-        s.data = signals[idx].data;
-        s.signalOp = signals[idx].signalOp;
-      }
+      // TODO: Per-entry wait/signal population will be wired here once the
+      // hipErrorNotSupported guard at the top of ihipMemcpyBatch is removed.
     }
 
     // Create and enqueue batch copy command
