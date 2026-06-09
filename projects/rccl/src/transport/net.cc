@@ -250,6 +250,14 @@ static void rcclDetectIBNics() {
   int _NicsRate[rcclIBNicTypeMax]{};
   int totalNnics = 0;
 
+  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware */
+  const char* envNet = ncclGetEnv("NCCL_NET");
+  if (envNet && strcasecmp(envNet, "ROCM-IB") == 0) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC mode forced by NCCL_NET=ROCM-IB");
+    rcclPrimaryNicInfo.type = rcclIBNicTypeAINIC;
+    return;
+  }
+
   /* respect user preference for AINIC */
   if (rcclParamAinicRoce() == 1) {
     INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC detection: enforced by user settings");
@@ -1052,9 +1060,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (proxyState->ncclNet == &rocmNetIb) {
-    NCCLCHECK(rcclRocmNetP2pPolicy(req->handle, resources->isP2p));
-  } else if (proxyState->ncclNet == &netIbCast) {
+  if (proxyState->ncclNet == &netIbCast) {
     NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
   }
 #endif

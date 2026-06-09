@@ -59,7 +59,7 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
   // Reject work submission on a stream whose owning ctx has been destroyed.
   CHECK_STREAM_DETACHED(stream);
 
-  amd::Memory* memory = getMemoryObject(ptr, offset);
+  amd::Memory* memory = getMemoryObject(hip::getCurrentDevice(), ptr, offset);
   if (!memory) {
     return hipErrorInvalidValue;
   }

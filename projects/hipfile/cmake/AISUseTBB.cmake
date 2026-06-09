@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: MIT
-#
+
 include(AISSanitizers)
 include(FetchContent)
 
@@ -31,4 +31,8 @@ if(NOT TBB_FOUND)
     message(STATUS "Using fetched TBB")
 else()
     message(STATUS "Using system TBB")
+endif()
+
+if(AIS_USE_SANITIZERS OR AIS_USE_THREAD_SANITIZER)
+    ais_add_sanitizers(TBB::tbb)
 endif()
