@@ -24,7 +24,6 @@ def lulesh_base_env() -> dict[str, str]:
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_SAMPLING_FREQ": "50",
         "ROCPROFSYS_KOKKOSP_PREFIX": "[kokkos]",
-        "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK": "ON",
     }
     return env
 
@@ -49,8 +48,17 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "5", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2", "--label", "file", "line", "return", "args"],
-            runtime_args=[
+            binary_rewrite_args=[
+                "-e",
+                "-v",
+                "2",
+                "--label",
+                "file",
+                "line",
+                "return",
+                "args",
+            ],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -66,8 +74,8 @@ class TestLulesh(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
-            runtime_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
+            binary_rewrite_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
+            runtime_instrument_pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"],
         )
 
     @pytest.mark.baseline
@@ -87,14 +95,14 @@ class TestLulesh(RocprofsysTest):
         "mode", ["sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
     )
     def test_kokkosp(self, mode):
-        env = {"ROCPROFSYS_USE_KOKKOSP": "ON", "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK": "ON"}
+        env = {"ROCPROFSYS_USE_KOKKOSP": "ON"}
         result = self.run_test(
             mode,
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2"],
-            runtime_args=[
+            binary_rewrite_args=["-e", "-v", "2"],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -115,14 +123,13 @@ class TestLulesh(RocprofsysTest):
     def test_perfetto(self, mode, perfetto_env):
         env = perfetto_env.copy()
         env["ROCPROFSYS_USE_KOKKOSP"] = "OFF"
-        env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
         result = self.run_test(
             mode,
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            rewrite_args=["-e", "-v", "2"],
-            runtime_args=[
+            binary_rewrite_args=["-e", "-v", "2"],
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -143,13 +150,12 @@ class TestLulesh(RocprofsysTest):
     def test_timemory(self, mode, timemory_env):
         env = timemory_env.copy()
         env["ROCPROFSYS_USE_KOKKOSP"] = "OFF"
-        env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
         result = self.run_test(
             mode,
             "lulesh",
             env=env,
             run_args=["-i", "2", "-s", "20", "-p"],
-            rewrite_args=[
+            binary_rewrite_args=[
                 "-e",
                 "-v",
                 "2",
@@ -158,7 +164,7 @@ class TestLulesh(RocprofsysTest):
                 "--traps",
                 "--allow-overlapping",
             ],
-            runtime_args=[
+            runtime_instrument_args=[
                 "-e",
                 "-v",
                 "1",
@@ -173,5 +179,5 @@ class TestLulesh(RocprofsysTest):
         self.assert_regex(
             result,
             mode,
-            rewrite_fail_regex=["0 instrumented loops in procedure"],
+            binary_rewrite_fail_regex=["0 instrumented loops in procedure"],
         )

@@ -94,6 +94,13 @@ void ReportActivity(const amd::Command& command) {
     case CL_COMMAND_FILL_BUFFER:
       record.bytes = linearSize(static_cast<const amd::FillMemoryCommand&>(command).size());
       break;
+    case ROCCLR_COMMAND_BATCH_COPY_BUFFER: {
+      const auto& ops = static_cast<const amd::BatchCopyMemoryCommand&>(command).copyOps();
+      size_t total = 0;
+      for (const auto& op : ops) total += op.size;
+      record.bytes = total;
+      break;
+    }
     default:
       break;
   }
@@ -162,6 +169,8 @@ const char* getOclCommandKindString(cl_command_type commandType) {
     CASE_STRING(CL_COMMAND_SVM_UNMAP, SvmUnmap);
     CASE_STRING(ROCCLR_COMMAND_STREAM_WAIT_VALUE, StreamWait);
     CASE_STRING(ROCCLR_COMMAND_STREAM_WRITE_VALUE, StreamWrite);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_STREAM, BatchStreamOp);
+    CASE_STRING(ROCCLR_COMMAND_BATCH_COPY_BUFFER, BatchCopyBuffer);
     default:
       break;
   };

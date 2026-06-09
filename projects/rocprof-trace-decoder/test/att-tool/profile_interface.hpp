@@ -38,6 +38,7 @@
 #include "code.hpp"
 #include "wave.hpp"
 #include "util.hpp"
+#include "rocprof_trace_decoder/rocprof_trace_decoder.h"
 
 #define C_API_BEGIN                                                                                \
     try                                                                                            \
@@ -54,12 +55,12 @@ namespace rocprofiler
 {
 namespace att_wrapper
 {
-using Instruction = rocprofiler::sdk::codeobj::disassembly::Instruction;
-using SymbolInfo  = rocprofiler::sdk::codeobj::disassembly::SymbolInfo;
+using Instruction = rocprof_trace_decoder::codeobj::Instruction;
+using SymbolInfo  = rocprof_trace_decoder::codeobj::SymbolInfo;
 
 struct ToolData
 {
-    ToolData(const std::vector<char>& data, WaveConfig& config);
+    ToolData(const std::vector<char>& data, WaveConfig& config, rocprof_trace_decoder_handle_t decoder);
     ~ToolData();
 
     CodeLine& get(pcinfo_t pc);

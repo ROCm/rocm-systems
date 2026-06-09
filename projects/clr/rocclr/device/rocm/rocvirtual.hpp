@@ -372,6 +372,26 @@ class VirtualGPU : public device::VirtualDevice {
         }
       }
 
+      //! Set the launch descriptor version (called once from VirtualGPU::create)
+      void SetLaunchDescriptorVersion(uint8_t version) {
+        launch_descriptor_version_ = version;
+      }
+
+      //! Copy the dynamic data prefetch config into the preloader state
+      void SetDynDataPrefetchRegions(const amd::DynDataPrefetchConfig& cfg) {
+        dyn_data_prefetch_enabled_ = true;
+        dyn_data_prefetch_num_regions_ = cfg.numRegions;
+        dyn_data_prefetch_hints_ = cfg.hints;
+        for (uint32_t i = 0; i < cfg.numRegions && i < amd::kDynDataPrefetchMaxRegions; ++i) {
+          dyn_data_prefetch_regions_[i] = cfg.regions[i];
+        }
+      }
+
+      //! Reset the dynamic data prefetch state after dispatch
+      void ClearDynDataPrefetchConfig() {
+        dyn_data_prefetch_enabled_ = false;
+      }
+
     private:
       //! Return whether the loader is attached to a gpu queue
       bool IsAttached() const { return queue_base_ != nullptr; }
@@ -383,7 +403,7 @@ class VirtualGPU : public device::VirtualDevice {
 
       //! Set the metadata prefetch aql packet for kernel dispatch
       void SetPacket(hsa_kernel_dispatch_packet_t* aql, uint16_t header,
-                     hsa_amd_metadata_kernel_dispatch_packet_t* metadata) const;
+                     hsa_amd_metadata_kernel_dispatch_packet_t* metadata);
 
       //! Set the metadata prefetch aql packet for barrier.
       //! The CP invalidates headers after completion, so only header0
@@ -410,6 +430,12 @@ class VirtualGPU : public device::VirtualDevice {
       const hsa_amd_metadata_kernel_descriptor_t* pending_descriptor_ = nullptr;
       uint16_t pending_preload_length_ = 0;
       uint16_t pending_preload_offset_ = 0;
+
+      uint8_t launch_descriptor_version_ = AMD_LAUNCH_DESCRIPTOR_VERSION_NONE;
+      bool dyn_data_prefetch_enabled_ = false;
+      uint8_t dyn_data_prefetch_hints_ = 0;
+      uint32_t dyn_data_prefetch_num_regions_ = 0;
+      amd::DynDataPrefetchRegion dyn_data_prefetch_regions_[amd::kDynDataPrefetchMaxRegions] = {};
   };
 
   VirtualGPU(Device& device, bool profiling = false, bool cooperative = false,
@@ -535,7 +561,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   void hasPendingDispatch() { hasPendingDispatch_ = true; }
   bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
-  void addSystemScope() {
+  void addSystemScope() override {
     addSystemScope_ = true;
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }

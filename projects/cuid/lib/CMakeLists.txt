@@ -40,6 +40,11 @@ message("")
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# When built as part of the top-level project, OpenSSL is already resolved
+# (either from the system or via FetchContent). QUIET prevents a redundant
+# hard failure when targets are already available through FetchContent.
+find_package(OpenSSL QUIET)
+
 set(CUID_SOURCES
     ${SRC_DIR}/cuid.cc
     ${SRC_DIR}/cuid_util.cc
@@ -77,11 +82,13 @@ set(CUID_HEADERS
 add_library(amdcuid_static STATIC ${CUID_SOURCES} ${CUID_HEADERS})
 add_library(amdcuid_shared SHARED ${CUID_SOURCES} ${CUID_HEADERS})
 
-target_include_directories(amdcuid_static 
+target_include_directories(
+    amdcuid_static
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_include_directories(amdcuid_shared 
+target_include_directories(
+    amdcuid_shared
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -89,10 +96,22 @@ target_include_directories(amdcuid_shared
 # Pass the version-independent shared config directory to the library at compile
 # time. All installed versions of the library must agree on this path so that
 # the HMAC key is shared and CUIDs remain stable across version upgrades.
-target_compile_definitions(amdcuid_static PRIVATE
-    AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
-target_compile_definitions(amdcuid_shared PRIVATE
-    AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}")
+target_compile_definitions(
+    amdcuid_static
+    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
+)
+target_compile_definitions(
+    amdcuid_shared
+    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
+)
+
+if(WIN32)
+    target_link_libraries(amdcuid_shared PRIVATE bcrypt)
+    target_link_libraries(amdcuid_static PUBLIC bcrypt)
+else()
+    target_link_libraries(amdcuid_shared PRIVATE OpenSSL::Crypto)
+    target_link_libraries(amdcuid_static PUBLIC OpenSSL::Crypto)
+endif()
 
 # Shared library
 install(

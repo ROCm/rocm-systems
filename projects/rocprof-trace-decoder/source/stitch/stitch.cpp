@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <algorithm>
+#include <climits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -27,6 +29,8 @@
 #include "stitch/stitch.hpp"
 #include "trace_parser.hpp"
 #include "trie.h"
+
+inline int32_t clamp_to_int32(int64_t v) { return static_cast<int32_t>(std::clamp<int64_t>(v, INT32_MIN, INT32_MAX)); }
 
 #define MAX_FAILED_STTICHES 1000
 
@@ -219,7 +223,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
         }
         else if (gfxip == 12 && line->cat == InstCategory::V_MOV_B64 && inst.category == WaveInstCategory::VALU)
         {
-            inst.duration = std::max(inst.duration, inst.stall + 2);
+            inst.duration = std::max<int32_t>(inst.duration, inst.stall + 2);
         }
         else if (gfxip == 9 && line->cat == InstCategory::MFMA_SCALE && inst.category == WaveInstCategory::VALU)
         {
@@ -341,11 +345,12 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
 
         if (wave.timeline.size() && wstates.back().duration >= current_time - inst.time && current_time >= current.time)
         {
-            wstates.back().duration -= current_time - inst.time;
+            wstates.back().duration -= clamp_to_int32(current_time - inst.time);
             int type = wstates.back().type;
-            wstates.push_back(att_wave_state_t{.type = WaveslotState::WS_WAIT, .duration = int(inst.duration)});
-            wstates.push_back(att_wave_state_t{.type = type, .duration = int(current_time - inst.time - inst.duration)}
-            );
+            wstates.push_back(att_wave_state_t{
+                .type = WaveslotState::WS_WAIT, .duration = clamp_to_int32(inst.duration)});
+            wstates.push_back(att_wave_state_t{
+                .type = type, .duration = clamp_to_int32(current_time - inst.time - inst.duration)});
         }
 
         insts.push_back(std::move(inst));

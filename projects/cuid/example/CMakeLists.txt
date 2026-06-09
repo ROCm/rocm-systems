@@ -36,19 +36,19 @@ message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("")
 
-set(INC_DIR ${CMAKE_SOURCE_DIR}/lib)
 set(AMDCUID_EXAMPLE_EXECUTABLE amdcuid_example)
 set(SRC_LIST main.cc)
 
-# Add the example executable
 add_executable(${AMDCUID_EXAMPLE_EXECUTABLE} ${SRC_LIST})
 
-# Include directories - only need access to public headers
-target_include_directories(${AMDCUID_EXAMPLE_EXECUTABLE} PRIVATE ${INC_DIR})
+target_include_directories(
+    ${AMDCUID_EXAMPLE_EXECUTABLE}
+    PRIVATE ${CMAKE_SOURCE_DIR}/lib
+)
 
 # Link against the CUID library (public API only)
 # The example now uses only the public API defined in amd_cuid.h
-target_link_libraries(${AMDCUID_EXAMPLE_EXECUTABLE} amdcuid_static OpenSSL::Crypto)
+target_link_libraries(${AMDCUID_EXAMPLE_EXECUTABLE} amdcuid_static pthread)
 
 # Install example source into documentation
 install(

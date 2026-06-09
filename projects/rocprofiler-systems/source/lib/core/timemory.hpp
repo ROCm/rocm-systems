@@ -34,6 +34,4 @@ namespace units     = ::tim::units;      // NOLINT
 
 using settings = ::tim::settings;  // NOLINT
 
-using ::tim::get_env;  // NOLINT
-using ::tim::set_env;  // NOLINT
 }  // namespace rocprofsys

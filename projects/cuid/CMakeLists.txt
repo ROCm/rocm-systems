@@ -99,18 +99,31 @@ endif()
 
 if(WIN32)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)  # DLLs
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)  # Import libs
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin) # DLLs
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib) # Import libs
 endif()
 
-# Platform-specific dependencies
+# Platform-specific dependencies; use native Windows bcrypt for HMAC, and OpenSSL on Linux/Unix
 if(WIN32)
-    # Windows may need different OpenSSL path
-    set(OPENSSL_ROOT_DIR "C:/OpenSSL-Win64" CACHE PATH "OpenSSL location")
+    # Use the native Windows bcrypt library and link it directly on Windows targets.
+else()
+    # Prefer a system-installed OpenSSL; fall back to building from source via
+    # FetchContent if the dev package is not present (e.g. in bare containers).
+    find_package(OpenSSL QUIET)
+    if(NOT OPENSSL_FOUND)
+        message(
+            STATUS
+            "OpenSSL not found on system; fetching and building from source"
+        )
+        include(FetchContent)
+        FetchContent_Declare(
+            openssl-cmake
+            GIT_REPOSITORY https://github.com/janbar/openssl-cmake.git
+            GIT_TAG 1.1.1w-20231130
+        )
+        FetchContent_MakeAvailable(openssl-cmake)
+    endif()
 endif()
-
-# Find project-wide dependencies
-find_package(OpenSSL REQUIRED)
 
 message("Build Configuration:")
 message("-----------ROCM_DIR : " ${ROCM_DIR})

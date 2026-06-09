@@ -45,32 +45,33 @@ message("")
 set(INC_DIR ${CMAKE_SOURCE_DIR}/lib)
 set(AMDCUID_DAEMON_EXECUTABLE amdcuid_daemon)
 set(SRC_LIST amdcuid_daemon.cc)
-
-# Add the daemon executable
-add_executable(${AMDCUID_DAEMON_EXECUTABLE} ${SRC_LIST})
-
-find_package(Threads REQUIRED)
-# Link against the CUID library
-target_link_libraries(
-    ${AMDCUID_DAEMON_EXECUTABLE}
-    amdcuid_static
-    OpenSSL::Crypto
-    Threads::Threads
-)
-
-# Include directories
-target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
 if(WIN32)
     set(CONFIG_INSTALL_DIR "CONFIG") # Relative to prefix
 else()
     set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/${AMDCUID}/config")
 endif()
 
-# Pass the version-independent shared config directory to the daemon at compile
-# time so that multi-version installs all reference the same HMAC key and conf.
+find_package(Threads REQUIRED)
+
+# Add the daemon executable
+add_executable(${AMDCUID_DAEMON_EXECUTABLE} ${SRC_LIST})
+
+# Include directories
+target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
+
+# Pass the resolved config install directory to the daemon at compile time so
+# the HMAC key and daemon configuration paths are always built from a concrete
+# location.
 target_compile_definitions(
     ${AMDCUID_DAEMON_EXECUTABLE}
-    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
+)
+
+# Link against the CUID library
+target_link_libraries(
+    ${AMDCUID_DAEMON_EXECUTABLE}
+    amdcuid_static
+    Threads::Threads
 )
 
 # Install the daemon
@@ -81,6 +82,11 @@ install(
 )
 
 set(DAEMON_CONFIG_FILE amdcuid_daemon.conf)
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/${DAEMON_CONFIG_FILE}
+    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
+    COMPONENT ${DAEMON_COMPONENT}
+)
 
 install(
     FILES ${DAEMON_CONFIG_FILE}

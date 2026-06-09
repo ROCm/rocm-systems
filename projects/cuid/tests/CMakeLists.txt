@@ -61,30 +61,21 @@ set(UNIT_TEST_SOURCES
     unit/cuid_misc_test.cc
     functional/cuid_reverse_lookup_test.cc
 )
-
-
+# integration tests executable to be added later
 
 # Enable testing
 enable_testing()
 
 # Unit tests executable
-add_executable(${AMDCUID_TST_EXECUTABLE}
-    ${UNIT_TEST_SOURCES}
-)
-# integration tests executable to be added later
+add_executable(amdcuid_test ${UNIT_TEST_SOURCES})
 
-target_include_directories(
-    ${AMDCUID_TST_EXECUTABLE}
-    PRIVATE ${CMAKE_SOURCE_DIR}/lib
-)
+target_include_directories(amdcuid_test PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 
 target_link_libraries(
     ${AMDCUID_TST_EXECUTABLE}
-    PRIVATE amdcuid_static
-    PRIVATE GTest::gtest
-    PRIVATE GTest::gtest_main
-    PRIVATE OpenSSL::SSL
-    PRIVATE OpenSSL::Crypto
+    amdcuid_static
+    GTest::GTest
+    GTest::Main
 )
 
 # Register tests with CTest
