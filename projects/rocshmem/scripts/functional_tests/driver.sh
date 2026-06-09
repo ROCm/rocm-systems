@@ -600,11 +600,14 @@ TestOnStream() {
 TestHostRma() { #AIROCSHMEM-419
   ##############################################################################
   #       | Name                    | Ranks | WGs | Threads | Max Msg Size    #
-  # Run with ROCSHMEM_TEST_UUID=1 to exercise the non-MPI TcpBootstrap path. #
+  # These tests exercise the non-MPI TcpBootstrap IPC host path.              #
+  # ROCSHMEM_TEST_UUID=1 is set automatically so tests always use that path.  #
   # IPC_HOST_NPES controls the PE count for the multi-PE concurrency tests.   #
   # Default: 4. Override: IPC_HOST_NPES=8 ./driver.sh ...                     #
   ##############################################################################
   local npes=${IPC_HOST_NPES:-4}
+  local saved_uuid=$ROCSHMEM_TEST_UUID
+  ROCSHMEM_TEST_UUID=1
 
   # Default-context: rocshmem_fence / rocshmem_quiet
   ExecTest  "host_putmem"         2        1      1        65536
@@ -613,15 +616,16 @@ TestHostRma() { #AIROCSHMEM-419
   ExecTest  "host_amo_fadd"       2        1      1
   ExecTest  "host_amo_fcswap"     2        1      1
   # Explicit-context: rocshmem_ctx_fence / rocshmem_ctx_quiet
-  # ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 — default context occupies slot 0, explicit ctx needs slot 1
-  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "host_ctx_putmem"  2 1 1 65536
-  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 ExecTest "host_ctx_getmem"  2 1 1 65536
+  # ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2: default context takes slot 0, explicit ctx needs slot 1
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 && ExecTest "host_ctx_putmem"  2 1 1 65536
+  ROCSHMEM_MAX_NUM_HOST_CONTEXTS=2 && ExecTest "host_ctx_getmem"  2 1 1 65536
   # Int (32-bit) AMOs: rocshmem_int_atomic_fetch_add/cas (exercises 32-bit kernel path)
   ExecTest  "host_int_amo_fadd"   2        1      1
   ExecTest  "host_int_amo_fcswap" 2        1      1
   # Concurrency tests — configurable PE count (IPC_HOST_NPES, default 4)
   ExecTest  "host_amo_all_pes"    $npes    1      1
   ExecTest  "host_amo_self"       $npes    1      1
+  ROCSHMEM_TEST_UUID=$saved_uuid
 }
 
 TestOther() {
@@ -920,6 +924,9 @@ case $TEST in
     if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
       TestTiles
     fi
+    TestHostRma
+    ;;
+  *"host")
     TestHostRma
     ;;
   *"rma")
