@@ -48,7 +48,7 @@ endif()
 message(STATUS "HIP_PATH: ${HIP_PATH}")
 message(STATUS "ROCM_PATH: ${ROCM_PATH}")
 
-# Use find_package(hip) to get HIP version instead of hipconfig (deprecated).
+# Use find_package(hip) to get HIP version
 find_package(hip REQUIRED CONFIG PATHS "${ROCM_PATH}")
 string(REPLACE "." ";" VERSION_LIST ${hip_VERSION})
 list(GET VERSION_LIST 0 HIP_VERSION_MAJOR)
