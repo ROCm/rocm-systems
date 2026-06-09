@@ -3,17 +3,12 @@
 
 #pragma once
 
-#include "common/defines.h"
-#include "core/common.hpp"
-#include "core/timemory.hpp"
-
-#include <timemory/components/base.hpp>
-#include <timemory/components/gotcha/backends.hpp>
+#include <timemory/components/base/declaration.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <string_view>
