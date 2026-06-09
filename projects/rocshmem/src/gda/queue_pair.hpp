@@ -163,8 +163,8 @@ class ActiveWFInfo {
  *   enum class OpCode : uint8_t {
  *     RDMA_WRITE = ...,
  *     RDMA_READ  = ...,
- *     ATOMIC_FA  = ...,
  *     ATOMIC_CS  = ...,
+ *     ATOMIC_FA  = ...,
  *   };
  *
  *   static constexpr endian::Order Endianness = endian::Order::...;
@@ -184,11 +184,11 @@ class ActiveWFInfo {
  * @var QueuePairTraits<Provider>::OpCode::RDMA_READ
  * Provider-specific RDMA Read opcode.
  *
- * @var QueuePairTraits<Provider>::OpCode::ATOMIC_FA
- * Provider-specific Fetch-Add opcode.
- *
  * @var QueuePairTraits<Provider>::OpCode::ATOMIC_CS
  * Provider-specific Compare-and-Swap opcode.
+ *
+ * @var QueuePairTraits<Provider>::OpCode::ATOMIC_FA
+ * Provider-specific Fetch-Add opcode.
  */
 
 /*
