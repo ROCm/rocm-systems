@@ -488,12 +488,16 @@ void StatCO::RemoveAllFatBinaries() {
       for (auto dev : g_devices) {
         amd::Memory* mem = nullptr;
         if (managed_var->GetDeviceVarPtr(&mem, dev->deviceId()) == hipSuccess && mem) {
-          // Free device memory (also deletes the device ptr)
-          [[maybe_unused]] hipError_t err = ihipFree(memDevPtr(mem));
-          assert(err == hipSuccess);
-          // The amd::Memory object is now released; drop the cached pointer so
-          // ~Var() does not dereference the freed object (heap-use-after-free).
-          managed_var->ResetDeviceVarPtr(dev->deviceId());
+          if (managed_var->GetDeviceVarPtr(&mem, dev->deviceId()) == hipSuccess && mem) {
+            // Free device memory (also deletes the device ptr)
+            [[maybe_unused]] hipError_t err = ihipFree(memDevPtr(mem));
+            assert(err == hipSuccess);
+            // The amd::Memory object is now released; drop the cached pointer so
+            // ~Var() does not dereference the freed object (heap-use-after-free).
+            if (err == hipSuccess) {
+              managed_var->ResetDeviceVarPtr(dev->deviceId());
+            }
+          }
         }
       }
 
