@@ -567,6 +567,35 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(out);
 }
 
+/// Vector ports of the IEEE-2019 maximum / minimum operations (the non-"num"
+/// forms used by v_maximum_*/v_minimum_* on gfx1250/rdna4). Unlike fmax/fmin
+/// these PROPAGATE NaN (any NaN input -> canonical qNaN) and order signed zeros
+/// (-0 < +0): maximum of a ±0 tie is +0, minimum is -0. Bit-identical to the
+/// scalar bodies:
+///   if (isnan(a)||isnan(b)) return qNaN;
+///   if (a==b)              return signbit(a) ? <tie> : <other>;
+///   return a <cmp> b ? a : b;
+template <typename V> inline V ieee_maximum_simd(V a, V b) {
+  const auto nan = stdx::isnan(a) || stdx::isnan(b);
+  const auto eq = (a == b);
+  const auto sa = stdx::signbit(a); // true when a is negative (incl. -0)
+  V res = b;                        // a < b (and the a==b,!sa case start)
+  stdx::where(a > b, res) = a;
+  stdx::where(eq && !sa, res) = a; // ±0 / equal tie: pick the +signed operand
+  stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
+  return res;
+}
+template <typename V> inline V ieee_minimum_simd(V a, V b) {
+  const auto nan = stdx::isnan(a) || stdx::isnan(b);
+  const auto eq = (a == b);
+  const auto sa = stdx::signbit(a);
+  V res = b; // a > b (and the a==b,!sa case)
+  stdx::where(a < b, res) = a;
+  stdx::where(eq && sa, res) = a; // ±0 / equal tie: pick the -signed operand
+  stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
+  return res;
+}
+
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
 /// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
 /// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep

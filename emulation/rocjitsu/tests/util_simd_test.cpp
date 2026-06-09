@@ -578,6 +578,125 @@ TEST(UtilSimd, FlushDenormF32) {
   }
 }
 
+// --- IEEE-2019 maximum / minimum (NaN-propagating, signed-zero-ordered) ------
+//
+// util::ieee_{maximum,minimum}_simd back the v_maximum_*/v_minimum_* gap ops.
+// They must be bit-identical to the scalar bodies the generator emits, which is
+// the exact expression below. The grid pairs every IEEE class against every
+// other so ±0 ties, NaN-in-either, Inf, and ordinary compares are all covered.
+
+// Bit pattern of a float/double as an unsigned integer, for exact lane-value
+// comparison (EXPECT_EQ on the raw bits distinguishes NaN payloads and ±0,
+// which == on the float values would not).
+//
+// Both overloads share a single uint64_t return type so the helper is
+// type-generic at the call sites. The float overload therefore zero-extends
+// its 32-bit pattern into the 64-bit result; this is intentional and safe
+// because only same-type lanes are ever compared (float-vs-float or
+// double-vs-double), so the high 32 zero bits are present on both sides of any
+// float comparison and never change the result.
+inline uint64_t bits_of(float v) { return std::bit_cast<uint32_t>(v); }
+inline uint64_t bits_of(double v) { return std::bit_cast<uint64_t>(v); }
+
+// Scalar references — literally the generated VOP3 body's inner expression.
+template <typename T> T scalar_ieee_maximum(T a, T b) {
+  if (std::isnan(a) || std::isnan(b))
+    return std::numeric_limits<T>::quiet_NaN();
+  if (a == b)
+    return std::signbit(a) ? b : a;
+  return a > b ? a : b;
+}
+template <typename T> T scalar_ieee_minimum(T a, T b) {
+  if (std::isnan(a) || std::isnan(b))
+    return std::numeric_limits<T>::quiet_NaN();
+  if (a == b)
+    return std::signbit(a) ? a : b;
+  return a < b ? a : b;
+}
+
+template <typename T> std::array<T, 13> ieee_minmax_grid() {
+  const T inf = std::numeric_limits<T>::infinity();
+  const T qnan = std::numeric_limits<T>::quiet_NaN();
+  const T den = std::numeric_limits<T>::denorm_min();
+  return {T(0), -T(0), T(1), -T(1), T(2), -T(2), T(0.5), inf, -inf, qnan, -qnan, den, -den};
+}
+
+template <typename V, typename T, typename SimdFn, typename ScalarFn>
+void check_ieee_minmax(SimdFn simd_fn, ScalarFn scalar_fn) {
+  constexpr std::size_t W = V::size();
+  const auto grid = ieee_minmax_grid<T>();
+  for (T bv : grid) {
+    // Fill a vector with `bv` in every lane and sweep `av` across the grid so
+    // both same-class (ties) and cross-class pairs are exercised per lane.
+    for (T av : grid) {
+      alignas(V) T abuf[W];
+      alignas(V) T bbuf[W];
+      for (std::size_t i = 0; i < W; ++i) {
+        abuf[i] = av;
+        bbuf[i] = bv;
+      }
+      V a(abuf, util::stdx::vector_aligned);
+      V b(bbuf, util::stdx::vector_aligned);
+      V r = simd_fn(a, b);
+      const T expect = scalar_fn(av, bv);
+      for (std::size_t i = 0; i < W; ++i) {
+        const T rv = r[i];
+        EXPECT_EQ(bits_of(rv), bits_of(expect)) << "av=" << av << " bv=" << bv << " lane=" << i;
+      }
+    }
+  }
+}
+
+TEST(UtilSimd, IeeeMaximum_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<float>, float>(
+      [](auto a, auto b) { return util::ieee_maximum_simd(a, b); }, scalar_ieee_maximum<float>);
+}
+TEST(UtilSimd, IeeeMinimum_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<float>, float>(
+      [](auto a, auto b) { return util::ieee_minimum_simd(a, b); }, scalar_ieee_minimum<float>);
+}
+TEST(UtilSimd, IeeeMaximum_F64_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<double>, double>(
+      [](auto a, auto b) { return util::ieee_maximum_simd(a, b); }, scalar_ieee_maximum<double>);
+}
+TEST(UtilSimd, IeeeMinimum_F64_BitExact) {
+  SKIP_IF_NO_SIMD();
+  check_ieee_minmax<util::native<double>, double>(
+      [](auto a, auto b) { return util::ieee_minimum_simd(a, b); }, scalar_ieee_minimum<double>);
+}
+
+// The 3-input / combined gap ops are exact nested compositions of the binary
+// helper; verify the composition matches the nested scalar reference too.
+TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = V::size();
+  const auto grid = ieee_minmax_grid<float>();
+  for (float cv : grid)
+    for (float bv : grid)
+      for (float av : grid) {
+        alignas(V) float a_[W], b_[W], c_[W];
+        for (std::size_t i = 0; i < W; ++i) {
+          a_[i] = av;
+          b_[i] = bv;
+          c_[i] = cv;
+        }
+        V a(a_, util::stdx::vector_aligned), b(b_, util::stdx::vector_aligned),
+            c(c_, util::stdx::vector_aligned);
+        // maximumminimum = minimum(maximum(a,b), c) — exercises both helpers.
+        V r = util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c);
+        float expect = scalar_ieee_minimum(scalar_ieee_maximum(av, bv), cv);
+        for (std::size_t i = 0; i < W; ++i) {
+          const float rv = r[i];
+          EXPECT_EQ(bits_of(rv), bits_of(expect))
+              << "av=" << av << " bv=" << bv << " cv=" << cv << " lane=" << i;
+        }
+      }
+}
+
 #undef SKIP_IF_NO_SIMD
 
 } // namespace

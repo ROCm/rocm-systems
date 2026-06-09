@@ -1769,6 +1769,15 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 # tie (matching the f32 finding) — accepted divergences, with the A/B test
 # skipping NaN-input and zero-tie lanes (same convention as v_max_f32 / v_min_f32
 # in SIMD_VOP2_BINARY).
+# VOP3-only f32 binary ops (no VOP2 twin, so not reachable via the _vop3
+# auto-route). Per-source abs/neg + result omod/clamp applied by the f32 binary
+# glue; the functor sees already-modified native<float> args. Currently the
+# IEEE-2019 maximum/minimum (NaN-propagating, signed-zero-ordered) forms.
+SIMD_VOP3_BINARY_FP32: dict[str, str] = {
+    'v_maximum_f32_vop3': '[](auto a, auto b) { return util::ieee_maximum_simd(a, b); }',
+    'v_minimum_f32_vop3': '[](auto a, auto b) { return util::ieee_minimum_simd(a, b); }',
+}
+
 SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
@@ -1777,6 +1786,9 @@ SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     # IEEE-2019 num twins: scalar bodies are the same std::fmax / std::fmin.
     'v_max_num_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
     'v_min_num_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+    # IEEE-2019 maximum/minimum (NaN-propagating, signed-zero-ordered).
+    'v_maximum_f64_vop3': '[](auto a, auto b) { return util::ieee_maximum_simd(a, b); }',
+    'v_minimum_f64_vop3': '[](auto a, auto b) { return util::ieee_minimum_simd(a, b); }',
 }
 
 # Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
@@ -1884,6 +1896,13 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_min3_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
     'v_minmax_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    # IEEE-2019 maximum/minimum 3-input + combined forms. The scalar bodies are
+    # the exact nested composition of the binary maximum/minimum (NaN-propagating,
+    # signed-zero-ordered) — see util::ieee_{maximum,minimum}_simd.
+    'v_maximum3_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_maximum_simd(a, b), c); }',
+    'v_minimum3_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c); }',
+    'v_maximumminimum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c); }',
+    'v_minimummaximum_f32_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c); }',
     # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
     # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
     # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate
@@ -1923,6 +1942,11 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_min3_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
     'v_minmax_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    # IEEE-2019 maximum/minimum 3-input + combined (f16; widened to f32 by glue).
+    'v_maximum3_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_maximum_simd(a, b), c); }',
+    'v_minimum3_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c); }',
+    'v_maximumminimum_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_maximum_simd(a, b), c); }',
+    'v_minimummaximum_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_minimum_simd(a, b), c); }',
 }
 
 # f64 ternary FMA.
@@ -2529,6 +2553,11 @@ def simd_probe_line(template_name: str) -> str | None:
     if spec3binx is not None:
         cpp_t, cpp_op = spec3binx
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
+    # VOP3-only f32 binary (no VOP2 twin): IEEE maximum/minimum. Per-source
+    # abs/neg + result omod/clamp applied by the f32 binary glue.
+    spec3binf32 = SIMD_VOP3_BINARY_FP32.get(template_name)
+    if spec3binf32 is not None:
+        return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP(float32_t, {spec3binf32});'
     # VOP3 f64 binary (add/mul/max/min). Per-source abs/neg + result omod/clamp
     # in the f64 domain.
     spec3binf64 = SIMD_VOP3_BINARY_FP64.get(template_name)
