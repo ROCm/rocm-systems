@@ -181,7 +181,7 @@ struct cache_policy
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_umc_busy>::value, "UMC Busy",
+              trait::name<category::amd_smi_umc_busy>::value, "UMC Avg. Busy",
               trait::name<category::amd_smi_umc_busy>::description, LONG_DESCRIPTION,
               COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });

@@ -1363,8 +1363,8 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     // Scalar metrics
     emit_gpu_scalar<amd_smi_gfx_track>(_device_id, _ts, _em.bits.gfx_activity, "GFX Busy",
                                        "%", _m.gfx_activity);
-    emit_gpu_scalar<amd_smi_umc_track>(_device_id, _ts, _em.bits.umc_activity, "UMC Busy",
-                                       "%", _m.umc_activity);
+    emit_gpu_scalar<amd_smi_umc_track>(_device_id, _ts, _em.bits.umc_activity,
+                                       "UMC Avg. Busy", "%", _m.umc_activity);
     emit_gpu_scalar<amd_smi_mm_track>(_device_id, _ts, _em.bits.mm_activity, "MM Busy",
                                       "%", _m.mm_activity);
 
@@ -1375,9 +1375,8 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 
     emit_gpu_scalar<amd_smi_power_track>(
         _device_id, _ts, _em.bits.current_socket_power || _em.bits.average_socket_power,
-        "Current Power", "watts",
-        _em.bits.average_socket_power ? _m.average_socket_power
-                                      : _m.current_socket_power);
+        pmc::collectors::gpu::socket_power_track_label(_em), "watts",
+        pmc::collectors::gpu::select_socket_power(_em, _m));
 
     emit_gpu_scalar<amd_smi_mem_track>(
         _device_id, _ts, _em.bits.memory_usage, "Memory Usage", "megabytes",
