@@ -60,7 +60,7 @@ struct ionic_device_sq : public ionic_device_queue<ionic_v1_wqe> {
 
   __host__ inline ionic_device_sq(ionic_v1_wqe* sq_buf, uint64_t* sq_dbreg, uint64_t sq_dbval,
                                   uint16_t sq_mask)
-    : ionic_device_queue{sq_buf, sq_dbreg, sq_dbreg, sq_mask}, msn{0} { }
+    : ionic_device_queue{sq_buf, sq_dbreg, sq_dbval, sq_mask}, msn{0} { }
 };
 // check if ionic_device_sq::msn is packed into tail padding of ionic_device_queue<ionic_v1_wqe>
 static_assert(sizeof(ionic_device_sq) == 48);

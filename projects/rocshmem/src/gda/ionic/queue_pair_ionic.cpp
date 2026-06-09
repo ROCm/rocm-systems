@@ -71,7 +71,7 @@ __device__ uint32_t QueuePairIONIC::reserve_sq_single(uint32_t num_wqes) {
 }
 
 __device__ uint32_t QueuePairIONIC::commit_sq(const ActiveWFInfo& wf_info, uint32_t my_sq_prod,
-                                              uint32_t my_sq_pos, uint32_t num_wqes) {
+                                              uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
   spin_lock_acquire_shared(&sq.lock, wf_info.pe_group_mask);
@@ -87,8 +87,7 @@ __device__ uint32_t QueuePairIONIC::commit_sq(const ActiveWFInfo& wf_info, uint3
   return dbprod;
 }
 
-__device__ uint32_t QueuePairIONIC::commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos,
-                                                     uint32_t num_wqes) {
+__device__ uint32_t QueuePairIONIC::commit_sq_single(uint32_t my_sq_prod, uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
   spin_lock_acquire_unique(&sq.lock);
@@ -127,7 +126,7 @@ __device__ void QueuePairIONIC::ring_doorbell_single(uint32_t pos) {
   __atomic_store_n(&sq.dbreg[8 * __lane_id()], sq.dbval | (sq.mask & pos), __ATOMIC_SEQ_CST);
 }
 
-__device__ void QueuePairIONIC::poll_wave_cqes(uint64_t active_lane_mask) {
+__device__ void QueuePairIONIC::poll_wave_cqes(uint64_t activemask) {
   int my_logical_lane_id = get_active_lane_num(activemask);
   uint32_t my_cq_pos = cq.pos + my_logical_lane_id;
 
@@ -135,7 +134,7 @@ __device__ void QueuePairIONIC::poll_wave_cqes(uint64_t active_lane_mask) {
   struct ionic_v1_cqe *cqe = &cq.buf[my_cq_pos & cq.mask];
 
   /* Determine expected color based on cq wrap count */
-  uint32_t qtf_color_bit = byteswap<uint32_t>(IONIC_V1_CQE_COLOR);
+  uint32_t qtf_color_bit = IONIC_V1_CQE_COLOR_BE;
   uint32_t qtf_color_exp = qtf_color_bit;
   if (my_cq_pos & (cq.mask + 1)) {
     qtf_color_exp = 0;
@@ -147,16 +146,16 @@ __device__ void QueuePairIONIC::poll_wave_cqes(uint64_t active_lane_mask) {
     return;
   }
 
-  uint32_t msn = byteswap<uint32_t>(cqe->send.msg_msn);
+  uint32_t msn = endian::from_be(cqe->send.msg_msn);
 
   /* Report if the completion indicates an error. */
-  if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
+  if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
 #if defined(BUILD_DEBUG_DEVICE)
-    uint32_t qtf = byteswap<uint32_t>(qtf_be);
+    uint32_t qtf = endian::from_be(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
     uint32_t flag = qtf & 0xf;
-    uint32_t status = byteswap<uint32_t>(cqe->status_length);
+    uint32_t status = endian::from_be(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
     LOGD_ERROR("QUIET ERROR: qid %u type %u flag %#x status %u msn %u npg %lu",
@@ -196,23 +195,23 @@ __device__ void QueuePairIONIC::quiet_internal_ccqe(const ActiveWFInfo& wf_info,
 
   volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
   uint32_t qtf_be = cqe->qid_type_flags;
-  uint32_t msn = byteswap<uint32_t>(cqe->send.msg_msn);
+  uint32_t msn = endian::from_be(cqe->send.msg_msn);
   while ((msn - cons) & 0x800000) {
-    if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
+    if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
       break;
     }
 
     qtf_be = cqe->qid_type_flags;
-    msn = byteswap<uint32_t>(cqe->send.msg_msn);
+    msn = endian::from_be(cqe->send.msg_msn);
   }
 
-  if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
+  if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
 #if defined(BUILD_DEBUG_DEVICE)
-    uint32_t qtf = byteswap<uint32_t>(qtf_be);
+    uint32_t qtf = endian::from_be(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
     uint32_t flag = qtf & 0xf;
-    uint32_t status = byteswap<uint32_t>(cqe->status_length);
+    uint32_t status = endian::from_be(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
     LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
@@ -226,23 +225,23 @@ __device__ void QueuePairIONIC::quiet_internal_ccqe(const ActiveWFInfo& wf_info,
 __device__ void QueuePairIONIC::quiet_internal_ccqe_single(uint32_t cons) {
   volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
   uint32_t qtf_be = cqe->qid_type_flags;
-  uint32_t msn = byteswap<uint32_t>(cqe->send.msg_msn);
+  uint32_t msn = endian::from_be(cqe->send.msg_msn);
   while ((msn - cons) & 0x800000) {
-    if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
+    if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
       break;
     }
 
     qtf_be = cqe->qid_type_flags;
-    msn = byteswap<uint32_t>(cqe->send.msg_msn);
+    msn = endian::from_be(cqe->send.msg_msn);
   }
 
-  if (!!(qtf_be & byteswap<uint32_t>(IONIC_V1_CQE_ERROR))) {
+  if (!!(qtf_be & IONIC_V1_CQE_ERROR_BE)) {
 #if defined(BUILD_DEBUG_DEVICE)
-    uint32_t qtf = byteswap<uint32_t>(qtf_be);
+    uint32_t qtf = endian::from_be(qtf_be);
     uint32_t qid = qtf >> IONIC_V1_CQE_QID_SHIFT;
     uint32_t type = (qtf >> IONIC_V1_CQE_TYPE_SHIFT) & IONIC_V1_CQE_TYPE_MASK;
     uint32_t flag = qtf & 0xf;
-    uint32_t status = byteswap<uint32_t>(cqe->status_length);
+    uint32_t status = endian::from_be(cqe->status_length);
     uint64_t npg = cqe->send.npg_wqe_idx_timestamp & IONIC_V1_CQE_WQE_IDX_MASK;
 
     LOGD_ERROR("QUIET ERROR (CCQE): qid %u type %u flag %#x status %u msn %u npg %lu",
