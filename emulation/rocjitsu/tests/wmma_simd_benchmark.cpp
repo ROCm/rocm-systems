@@ -356,3 +356,17 @@ TEST(WmmaSimdBenchmark, F32_16x16x4_f32_Specialized) {
   };
   bench("v_wmma_f32_16x16x4_f32 [specialized]", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
+
+// Dense WMMA, f16 output, f16 input, K=32 — specialized (constexpr + F16C).
+TEST(WmmaSimdBenchmark, F16_16x16x32_f16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
+  fx.seed(S0_OFF, 16, bits, SmallGen(51));
+  fx.seed(S1_OFF, 16, bits, SmallGen(52));
+  auto run = [&] {
+    amdgpu::exec_wmma_f16_spec<16, 16, 32>(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                           fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
+  };
+  bench("v_wmma_f16_16x16x32_f16 [specialized]", fx, run, double(M) * N * K, Cmp::F16Tol);
+}
