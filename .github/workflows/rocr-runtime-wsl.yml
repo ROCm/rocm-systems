@@ -35,6 +35,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocr-runtime
+            shared/amdgpu-windows-interop/wkmi
           sparse-checkout-cone-mode: true
 
       - name: Configure MSVC and Windows SDK
