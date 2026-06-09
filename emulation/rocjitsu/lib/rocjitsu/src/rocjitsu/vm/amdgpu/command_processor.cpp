@@ -120,11 +120,17 @@ public:
     work_cv_.notify_all();
   }
 
-  void run(std::span<ComputeUnitCore *> tasks) {
+  uint32_t thread_count() const { return static_cast<uint32_t>(workers_.size() + 1); }
+
+  void run(std::span<ComputeUnitCore *> tasks, uint32_t threads) {
     if (tasks.empty())
       return;
 
-    if (workers_.empty()) {
+    threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(tasks.size()));
+    uint32_t worker_goal =
+        std::min<uint32_t>(threads > 1 ? threads - 1 : 0, static_cast<uint32_t>(workers_.size()));
+
+    if (worker_goal == 0) {
       for (auto *cu : tasks)
         run_cu_quantum(cu);
       return;
@@ -135,9 +141,12 @@ public:
       tasks_.assign(tasks.begin(), tasks.end());
       next_task_ = 0;
       active_workers_ = 0;
+      started_workers_ = 0;
+      target_workers_ = worker_goal;
       ++generation_;
     }
-    work_cv_.notify_all();
+    for (uint32_t i = 0; i < worker_goal; ++i)
+      work_cv_.notify_one();
 
     while (auto *cu = take_task()) {
       run_cu_quantum(cu);
@@ -147,6 +156,7 @@ public:
     std::unique_lock<std::mutex> lock(mutex_);
     done_cv_.wait(lock, [this]() { return next_task_ >= tasks_.size() && active_workers_ == 0; });
     tasks_.clear();
+    target_workers_ = 0;
   }
 
 private:
@@ -175,6 +185,9 @@ private:
       if (stopping_ || stop.stop_requested())
         return;
       seen_generation = generation_;
+      if (started_workers_ >= target_workers_)
+        continue;
+      ++started_workers_;
 
       while (next_task_ < tasks_.size()) {
         auto *cu = tasks_[next_task_++];
@@ -197,6 +210,8 @@ private:
   std::vector<ComputeUnitCore *> tasks_;
   size_t next_task_ = 0;
   size_t active_workers_ = 0;
+  uint32_t started_workers_ = 0;
+  uint32_t target_workers_ = 0;
   uint64_t generation_ = 0;
   bool stopping_ = false;
 };
@@ -214,8 +229,6 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
     return;
   dispatch_threads_ = threads;
   dispatch_pool_.reset();
-  if (dispatch_threads_ > 1)
-    dispatch_pool_ = std::make_unique<CpuDispatchPool>(dispatch_threads_);
 }
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -808,8 +821,12 @@ bool CommandProcessor::run_active_cus_once() {
   if (active.empty())
     return false;
 
-  if (dispatch_pool_) {
-    dispatch_pool_->run(active);
+  uint32_t effective_threads =
+      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active.size()));
+  if (effective_threads > 1) {
+    if (!dispatch_pool_ || dispatch_pool_->thread_count() < effective_threads)
+      dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
+    dispatch_pool_->run(active, effective_threads);
   } else {
     for (auto *cu : active)
       run_cu_quantum(cu);

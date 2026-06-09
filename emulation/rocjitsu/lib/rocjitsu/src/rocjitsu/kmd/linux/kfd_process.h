@@ -15,6 +15,7 @@
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 #include <shared_mutex>
@@ -125,6 +126,7 @@ public:
     auto *base = static_cast<uint8_t *>(host_ptr);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_[(gpu_va + off) >> kPageShift] = {base + off, mtype};
+    page_table_generation_.fetch_add(1, std::memory_order_release);
   }
 
   /// @brief Unmap pages from this process's GPU page table.
@@ -132,10 +134,12 @@ public:
     std::unique_lock lock(page_table_mutex_);
     for (size_t off = 0; off < size; off += kPageSize)
       page_table_.erase((gpu_va + off) >> kPageShift);
+    page_table_generation_.fetch_add(1, std::memory_order_release);
   }
 
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
+  std::atomic<uint64_t> page_table_generation_{1};
 
   // -- Per-process state --
 

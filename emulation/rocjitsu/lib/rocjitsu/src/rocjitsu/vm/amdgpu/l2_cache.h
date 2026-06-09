@@ -12,10 +12,12 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <utility>
 
@@ -44,10 +46,10 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// requests, OUT for HBM/fabric traffic).
 ///
 /// @par Thread safety
-/// Public cache operations are thread-safe. A single L2 mutex protects the
-/// underlying CacheStore, matching the functional simulator's coarse L2
-/// arbitration point while avoiding races when CPU dispatch workers share an
-/// XCD-local L2.
+/// Public cache operations are thread-safe. Normal line operations take a
+/// per-set mutex so CPU dispatch workers sharing an XCD-local L2 can make
+/// progress on independent cache sets. Whole-cache maintenance uses a global
+/// gate to exclude concurrent set operations.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -121,7 +123,8 @@ public:
   /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
   ///           old value, compute the new value, and write it in place.
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
-    std::lock_guard<std::recursive_mutex> cache_lock(mutex_);
+    std::shared_lock cache_lock(cache_mutex_);
+    std::lock_guard set_lock(set_mutex(addr));
     ensure_line(addr, vmid);
 
     uint32_t offset = CacheStore::line_offset(addr);
@@ -150,7 +153,7 @@ public:
 
   /// @brief Invalidate all L2 lines.
   void invalidate_all() {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::unique_lock cache_lock(cache_mutex_);
     cache_.invalidate_all();
   }
 
@@ -183,12 +186,18 @@ public:
   const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
 
 private:
+  std::recursive_mutex &set_mutex(uint64_t addr) const {
+    return set_mutexes_[CacheStore::set_index(addr)];
+  }
+
   void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  void flush_line_locked(uint64_t addr, uint32_t vmid = 0);
   void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
                     uint32_t vmid = 0);
 
   CacheStore cache_;
-  mutable std::recursive_mutex mutex_;
+  mutable std::shared_mutex cache_mutex_;
+  mutable std::array<std::recursive_mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   std::vector<simdojo::Port *> cpl_ports_;
