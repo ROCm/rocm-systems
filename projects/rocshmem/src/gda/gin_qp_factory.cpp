@@ -1139,7 +1139,10 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
     dump_ibv_pd(set->nic.pd_orig);
     dump_ibv_port_attr(&set->nic.portinfo);
     for (int i = 0; i < nRanks; i++) {
-      dump_ibv_qp(set->ibv_qps[i], i);
+      if (set->ibv_qps[i]) dump_ibv_qp(set->ibv_qps[i], i);
+#if defined(GDA_MLX5)
+      if (set->provider == GDAProvider::MLX5) set->mlx5_qps[i].dump(i);
+#endif
     }
   }
 
