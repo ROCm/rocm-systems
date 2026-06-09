@@ -74,10 +74,14 @@ bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& r
 }
 
 // ================================================================================================
-// Queries a single unsigned integer property for an ISA from comgr's ISA metadata
-// (e.g. "EUsPerCU", "LocalMemorySize", "LDSBankCount"). Returns |defaultValue| if the
-// property is unavailable so that callers never depend on a hardcoded device table.
+// Queries an unsigned ISA-metadata property from comgr (e.g. "LocalMemorySize"); returns
+// |defaultValue| if unavailable, so callers never depend on a hardcoded device table.
 uint32_t getUintFromIsaMeta(const std::string& isa, const char* key, uint32_t defaultValue) {
+  // Ensure comgr is loaded first: PAL can populate device info before comgr init, leaving its
+  // entry points null. Fall back to |defaultValue| if unavailable.
+  if (!amd::Comgr::IsReady() && !amd::Comgr::LoadLib()) {
+    return defaultValue;
+  }
   std::string value;
   if (getValueFromIsaMeta(isa, key, value)) {
     uint32_t parsed = 0;
