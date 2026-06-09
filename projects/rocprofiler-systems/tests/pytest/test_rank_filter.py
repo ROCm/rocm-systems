@@ -104,11 +104,11 @@ class TestRankFilter(RocprofsysTest):
         Every rank should produce both file and console output (filtering disabled).
         """
         env = rocpd_env.copy()
-        sysrun_args = []
+        sys_run_args = []
         if filter_source == "unset":
             pass
         elif filter_source == "via_cli":
-            sysrun_args = ["--rank-filter-output", "", "--rank-filter-logs", ""]
+            sys_run_args = ["--rank-filter-output", "", "--rank-filter-logs", ""]
         elif filter_source == "via_env":
             env["ROCPROFSYS_RANK_FILTER_OUTPUT"] = ""
             env["ROCPROFSYS_RANK_FILTER_LOGS"] = ""
@@ -117,7 +117,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=env,
-            sysrun_args=sysrun_args,
+            sys_run_args=sys_run_args,
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
@@ -142,7 +142,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=["--rank-filter-logs", "2"],
+            sys_run_args=["--rank-filter-logs", "2"],
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
@@ -167,7 +167,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=["--rank-filter-output", "0-1"],
+            sys_run_args=["--rank-filter-output", "0-1"],
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
@@ -197,7 +197,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=[
+            sys_run_args=[
                 "--rank-filter-output",
                 "garbage,10-0,-1,2,50",
                 "--rank-filter-logs",
@@ -225,7 +225,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=["--rank-filter-output", "5,6"],
+            sys_run_args=["--rank-filter-output", "5,6"],
             launcher="mpi",
             num_procs=NUM_PROCS,
         )
@@ -248,7 +248,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=[
+            sys_run_args=[
                 "--rank-filter-id",
                 "MY_CUSTOM_RANK",
                 "--rank-filter-output",
@@ -280,7 +280,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=[
+            sys_run_args=[
                 "--rank-filter-id",
                 "MY_CUSTOM_RANK",
                 "--rank-filter-output",
@@ -309,7 +309,7 @@ class TestRankFilter(RocprofsysTest):
             "sys_run",
             TARGET,
             env=rocpd_env,
-            sysrun_args=["--rank-filter-id", "MY_CUSTOM_RANK"],
+            sys_run_args=["--rank-filter-id", "MY_CUSTOM_RANK"],
             launcher="mpi",
             num_procs=NUM_PROCS,
             fail_on_pass=True,
