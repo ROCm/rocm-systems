@@ -10,5 +10,12 @@ set(GRAPH_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/trees.cc
 )
 
+# >>> RCCL-DELTA: RCCL-only graph sources (Rome model topology detection / consensus).
+list(APPEND GRAPH_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/rome_models.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/rome_topo_consensus.cc
+)
+# <<< RCCL-DELTA
+
 # Add graph sources to parent scope
 set(GRAPH_SOURCES ${GRAPH_SOURCES} PARENT_SCOPE)
