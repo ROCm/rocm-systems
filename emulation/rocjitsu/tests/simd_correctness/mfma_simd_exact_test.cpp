@@ -185,6 +185,22 @@ TEST(MfmaSimdExact, I32_i8_AllShapes) {
     run_i8("i32_i8", s.m, s.n, s.k, s.b);
 }
 
+// --- specialized i8 kernels (constexpr dims + i8 sign-extend bulk convert) ---
+// The accumulator window is seeded with random words spanning the full int32
+// range, so wrap-around near INT32_MAX/INT32_MIN is exercised on both paths.
+TEST(MfmaSimdExact, I8Spec_AllShapes) {
+  SKIP_IF_NO_SIMD();
+  auto spec = [](auto fn, const char *label) {
+    run_case(label, Fmt::I8, Fmt::I8, [fn](MfmaFixture &fx, uint32_t const_acc) {
+      fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc);
+    });
+  };
+  spec(amdgpu::exec_i32_mfma_i8_spec<16, 16, 64>, "spec_i8_16x16x64");
+  spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 32>, "spec_i8_32x32x32");
+  spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 16>, "spec_i8_32x32x16");
+  spec(amdgpu::exec_i32_mfma_i8_spec<16, 16, 32>, "spec_i8_16x16x32");
+}
+
 // --- f64 MFMA ---
 TEST(MfmaSimdExact, F64_AllShapes) {
   SKIP_IF_NO_SIMD();
