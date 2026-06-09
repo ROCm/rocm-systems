@@ -898,12 +898,17 @@ def _ctest_item_ctest_identity(item: pytest.Item) -> tuple[str, str, str]:
 # from the installed share/rocprofiler-systems/tests directory.
 
 TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
-_TEST_CATEGORIES_YAML = Path(__file__).parent.parent / "test_categories.yaml"
 
 
 @lru_cache(maxsize=1)
 def _load_test_categories() -> Optional[dict]:
-    """Load and compile tests/test_categories.yaml.
+    """Load and compile test_categories.yaml from rocprofsys_tests_dir.
+
+    Reads the YAML that CMake installs/configures into
+    ``<build|install>/share/rocprofiler-systems/tests`` (resolved via
+    ``get_rocprof_config().rocprofsys_tests_dir``) rather than the
+    source-tree copy, so build-tree edits and the installed layout both
+    pick up the right file.
 
     Returns ``None`` (with a single STDERR warning) when the YAML is missing or
     PyYAML isn't importable - the conftest stays usable in sparse / standalone
@@ -919,13 +924,21 @@ def _load_test_categories() -> Optional[dict]:
             file=sys.stderr,
         )
         return None
-    if not _TEST_CATEGORIES_YAML.exists():
+    try:
+        yaml_path = get_rocprof_config().rocprofsys_tests_dir / "test_categories.yaml"
+    except Exception as exc:
+        print(
+            f"[test_categories] Could not resolve tests dir - skipping tier label injection: {exc}",
+            file=sys.stderr,
+        )
+        return None
+    if not yaml_path.exists():
         return None
     try:
-        data = yaml.safe_load(_TEST_CATEGORIES_YAML.read_text()) or {}
+        data = yaml.safe_load(yaml_path.read_text()) or {}
     except yaml.YAMLError as exc:
         print(
-            f"[test_categories] Failed to load {_TEST_CATEGORIES_YAML}: {exc}",
+            f"[test_categories] Failed to load {yaml_path}: {exc}",
             file=sys.stderr,
         )
         return None
