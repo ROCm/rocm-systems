@@ -855,8 +855,56 @@ using ::timemory::join::join;
 
 //======================================================================================//
 //
+//  Filters app_objects (internal constraints are applied in module level filtering)
+//
+
+std::vector<object_t*>
+filter_objects(std::vector<object_t*>* app_objects)
+{
+    if(!app_objects || app_objects->empty()) return {};
+
+    auto _wc = tim::component::wall_clock{};
+    auto _pr = tim::component::peak_rss{};
+    _wc.start();
+    _pr.start();
+
+    auto   _result         = std::vector<object_t*>{};
+    size_t _excluded_count = 0;
+
+    for(auto* obj : *app_objects)
+    {
+        if(!obj) continue;
+
+        // TODO: exe-only check
+        // TODO: --max-library-functions filtering
+
+        _result.emplace_back(obj);
+    }
+
+    _wc.stop();
+    _pr.stop();
+    verbprintf(0,
+               "Filtered objects: %zu of %zu included (%zu excluded) "
+               "(%.3f %s, %.3f %s)\n",
+               _result.size(), app_objects->size(), _excluded_count, _wc.get(),
+               _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    if(verbose_level >= 2)
+    {
+        verbprintf(2, "[filter] The following objects will be processed:\n");
+        for(auto* obj : _result)
+        {
+            if(!obj) continue;
+            verbprintf(2, "[filter] '%s'\n", obj->name().c_str());
+        }
+    }
+
+    return _result;
+}
+
+//======================================================================================//
+//
 //  Filters app_modules by removing internal and user-excluded modules.
-//  Returns a new vector containing only the modules eligible for instrumentation.
 //
 
 std::vector<module_t*>
@@ -911,7 +959,14 @@ filter_modules(std::vector<module_t*>* app_modules)
 
         if(_is_excluded)
         {
-            verbprintf(3, "Skipping internal module: '%s'\n", _module_name.c_str());
+            // Do not filter it out if internal function regex is active
+            if(!func_internal_include.empty())
+            {
+                _result.emplace_back(mod);
+                continue;
+            }
+            verbprintf(3, "[filter] Skipping internal module: '%s'\n",
+                       _module_name.c_str());
             ++_excluded_count;
             continue;
         }
@@ -922,7 +977,7 @@ filter_modules(std::vector<module_t*>* app_modules)
             if(std::regex_search(_module_name, re))
             {
                 _is_excluded = true;
-                verbprintf(2, "[filter_modules] skipping module-exclude-regex: '%s'\n",
+                verbprintf(2, "[filter] skipping module-exclude-regex: '%s'\n",
                            _module_name.c_str());
                 break;
             }
@@ -943,7 +998,7 @@ filter_modules(std::vector<module_t*>* app_modules)
             if(!_matched)
             {
                 _is_excluded = true;
-                verbprintf(2, "[filter_modules] skipping module-restrict-regex: '%s'\n",
+                verbprintf(2, "[filter] skipping module-restrict-regex: '%s'\n",
                            _module_name.c_str());
             }
         }
@@ -956,7 +1011,7 @@ filter_modules(std::vector<module_t*>* app_modules)
                 if(std::regex_search(_module_name, re))
                 {
                     _is_excluded = false;
-                    verbprintf(2, "[filter_modules] forcing module-include-regex: '%s'\n",
+                    verbprintf(2, "[filter] forcing module-include-regex: '%s'\n",
                                _module_name.c_str());
                     break;
                 }
@@ -980,47 +1035,80 @@ filter_modules(std::vector<module_t*>* app_modules)
                _result.size(), app_modules->size(), _excluded_count, _wc.get(),
                _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
 
+    if(verbose_level >= 2)
+    {
+        verbprintf(2, "[filter] The following modules will be processed:\n");
+        for(auto* mod : _result)
+        {
+            if(!mod) continue;
+            verbprintf(2, "[filter] '%s'\n", std::string{ get_name(mod) }.c_str());
+        }
+    }
+
     return _result;
 }
 
 //======================================================================================//
 //
-//  Fetches procedures from the given modules. Assumes modules have already been
-//  filtered by filter_modules(). Falls back to app_image->getProcedures() if
-//  no modules are provided.
+//  Fetches procedures/modules from the given modules/objects. Assumes modules have
+//  already been filtered by the respective filter functions
 //
 
-std::vector<procedure_t*>
-get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
-               bool include_uninstrumentable)
+std::vector<module_t*>*
+get_modules(std::vector<object_t*>* app_objects)
 {
+    if(!app_objects || app_objects->empty()) return nullptr;
+
     auto _wc = tim::component::wall_clock{};
     auto _pr = tim::component::peak_rss{};
     _wc.start();
     _pr.start();
 
-    // This is the original dyninst implementation. No filtering is applied
-    if(!app_modules || app_modules->empty())
+    auto* modlist = new std::vector<module_t*>{};
+
+    // BPatch_object exposes modules() as an out-param API, not a getter
+    auto _scratch = std::vector<module_t*>{};
+    for(auto* obj : *app_objects)
     {
-        verbprintf(2, "No modules found, falling back to "
-                      "app_image->getProcedures()...\n");
-        std::unique_ptr<std::vector<procedure_t*>> _procs{ app_image->getProcedures(
-            include_uninstrumentable) };
-
-        _pr.stop();
-        _wc.stop();
-
-        verbprintf(0,
-                   "Fetching procedures from image (no modules): "
-                   "%zu procedures found (%.3f %s, %.3f %s)\n",
-                   _procs ? _procs->size() : 0, _wc.get(), _wc.display_unit().c_str(),
-                   _pr.get(), _pr.display_unit().c_str());
-
-        return _procs ? std::vector<procedure_t*>{ _procs->begin(), _procs->end() }
-                      : std::vector<procedure_t*>{};
+        if(!obj) continue;
+        _scratch.clear();
+        obj->modules(_scratch);
+        if(!_scratch.empty())
+            modlist->insert(modlist->end(), _scratch.begin(), _scratch.end());
     }
 
-    std::vector<procedure_t*> proclist{};
+    _pr.stop();
+    _wc.stop();
+    verbprintf(1,
+               "Fetched modules from %zu objects: "
+               "%zu modules found (%.3f %s, %.3f %s)\n",
+               app_objects->size(), modlist->size(), _wc.get(),
+               _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
+
+    if(modlist->empty())
+    {
+        delete modlist;
+        return nullptr;
+    }
+
+    return modlist;
+}
+
+std::vector<procedure_t*>*
+get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable)
+{
+    if(!app_modules || app_modules->empty())
+    {
+        verbprintf(0, "No modules found\n");
+        return nullptr;
+    }
+
+    auto _wc = tim::component::wall_clock{};
+    auto _pr = tim::component::peak_rss{};
+    _wc.start();
+    _pr.start();
+
+    auto* proclist = new std::vector<procedure_t*>{};
 
     for(auto* mod : *app_modules)
     {
@@ -1028,15 +1116,15 @@ get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
         std::unique_ptr<std::vector<procedure_t*>> procs{ mod->getProcedures(
             include_uninstrumentable) };
         if(procs && !procs->empty())
-            proclist.insert(proclist.end(), procs->begin(), procs->end());
+            proclist->insert(proclist->end(), procs->begin(), procs->end());
     }
 
     _pr.stop();
     _wc.stop();
-    verbprintf(0,
+    verbprintf(1,
                "Fetched procedures from %zu modules: "
                "%zu procedures found (%.3f %s, %.3f %s)\n",
-               app_modules->size(), proclist.size(), _wc.get(),
+               app_modules->size(), proclist->size(), _wc.get(),
                _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
 
     return proclist;

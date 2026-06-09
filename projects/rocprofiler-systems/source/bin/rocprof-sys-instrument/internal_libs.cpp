@@ -347,7 +347,7 @@ get_internal_libs_impl()
     {
         if(!itr.empty())
         {
-            if(parse_all_modules)
+            if(exclude_internal_lib_paths)
             {
                 auto _lib_v = find_libraries(itr);
                 if(!_lib_v.empty())

@@ -171,7 +171,7 @@ extern bool   loop_level_instr;
 extern bool   instr_dynamic_callsites;
 extern bool   instr_traps;
 extern bool   instr_loop_traps;
-extern bool   parse_all_modules;
+extern bool   exclude_internal_lib_paths;
 extern size_t min_address_range;
 extern size_t min_loop_address_range;
 extern size_t min_instructions;
@@ -364,12 +364,17 @@ get_name(module_t*);
 symtab_func_t*
 get_symtab_function(procedure_t*);
 
+std::vector<object_t*>
+filter_objects(std::vector<object_t*>* app_objects);
+
 std::vector<module_t*>
 filter_modules(std::vector<module_t*>* app_modules);
 
-std::vector<procedure_t*>
-get_procedures(image_t* app_image, std::vector<module_t*>* app_modules,
-               bool include_uninstrumentable);
+std::vector<module_t*>*
+get_modules(std::vector<object_t*>* app_objects);
+
+std::vector<procedure_t*>*
+get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable);
 
 namespace std
 {

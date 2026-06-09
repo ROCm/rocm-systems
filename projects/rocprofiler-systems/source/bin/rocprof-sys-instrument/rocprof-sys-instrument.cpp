@@ -81,7 +81,7 @@ bool   loop_level_instr             = false;
 bool   instr_dynamic_callsites      = false;
 bool   instr_traps                  = false;
 bool   instr_loop_traps             = false;
-bool   parse_all_modules            = false;
+bool   exclude_internal_lib_paths   = false;
 size_t min_address_range            = get_default_min_address_range();  // 4096
 size_t min_loop_address_range       = get_default_min_address_range();  // 4096
 size_t min_instructions             = get_default_min_instructions();   // 1024
@@ -1017,17 +1017,16 @@ main(int argc, char** argv)
             [](parser_t& p) { allow_overlapping = p.get<bool>("allow-overlapping"); });
     parser
         .add_argument(
-            { "--parse-all-modules" },
-            "By default, rocprof-sys simply requests Dyninst to provide all the "
-            "procedures "
-            "in the application image. If this option is enabled, rocprof-sys will "
-            "iterate "
-            "over all the modules and extract the functions. Theoretically, it should be "
-            "the same but the data is slightly different, possibly due to weak binding "
-            "scopes. In general, enabling option will probably have no visible effect")
+            { "--exclude-internal-lib-paths" },
+            "By default, each internal library is excluded only at the path linked at "
+            "startup. When enabled, every on-disk path matching an internal library's "
+            "filename is excluded. Useful when the application dlopen()s a different "
+            "copy at runtime.")
         .max_count(1)
-        .action(
-            [](parser_t& p) { parse_all_modules = p.get<bool>("parse-all-modules"); });
+        .dtype("boolean")
+        .action([](parser_t& p) {
+            exclude_internal_lib_paths = p.get<bool>("exclude-internal-lib-paths");
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DYNINST OPTIONS]" }, "");
@@ -1451,30 +1450,45 @@ main(int argc, char** argv)
                   (binary_rewrite) ? "ON" : "OFF", (_rewrite) ? "ON" : "OFF");
     }
 
-    process_t*     app_thread = nullptr;
-    binary_edit_t* app_binary = nullptr;
+    //----------------------------------------------------------------------------------//
+    //
+    //  Fetch image, objects, modules, and procedures
+    //
+    //----------------------------------------------------------------------------------//
 
-    // These take little time to execute
-    verbprintf(1, "Getting the address space image, objects, and modules...\n");
-    image_t* app_image   = addr_space->getImage();
-    auto     app_objects = std::vector<object_t*>{};
+    verbprintf(1, "Getting the address space image...\n");
+    image_t* app_image = addr_space->getImage();
+
+    verbprintf(1, "Getting and filtering the address space objects...\n");
+    // Dyninst indicates that shared libs should have one module, and executables have
+    // one or more. However, if the shared lib has debug info, Dyninst will generate a
+    // module per DWARF compilation unit
+    auto app_objects = std::vector<object_t*>{};
     app_image->getObjects(app_objects);  // API does not return objects
-    std::vector<module_t*>* app_modules = app_image->getModules();
+    auto filtered_objects = filter_objects(&app_objects);
 
-    auto objects =
-        std::unordered_set<object_t*>{ app_objects.begin(), app_objects.end() };
-    std::unordered_set<module_t*>    modules   = {};
-    std::unordered_set<procedure_t*> functions = {};
-
-    // This may take a long time for modules that have many procedures
-    verbprintf(
-        2, "Filtering modules based on internal libraries and user-defined filters...\n");
+    verbprintf(1, "Getting and filtering the object modules...\n");
+    auto app_modules      = get_modules(&filtered_objects);
     auto filtered_modules = filter_modules(app_modules);
     process_modules(filtered_modules);
 
-    verbprintf(1, "Getting available procedures based on filtered modules...\n");
-    std::vector<procedure_t*> app_functions =
-        get_procedures(app_image, &filtered_modules, include_uninstr);
+    verbprintf(1, "Getting available procedures from the modules...\n");
+    auto app_functions = get_procedures(&filtered_modules, include_uninstr);
+    // Procedure filtering is applied later when checking whether to instrument the
+    // procedure as we also output information about how the heuristics affected
+    // the set of instrumented procedures
+
+    if(!app_functions || app_functions->empty())
+    {
+        verbprintf(
+            0, "Warning! No functions detected! Fetching from the image directly...\n");
+        // If no functions are found, go through the image
+        app_functions = app_image->getProcedures(include_uninstr);
+    }
+
+    std::unordered_set<object_t*>    objects   = {};
+    std::unordered_set<module_t*>    modules   = {};
+    std::unordered_set<procedure_t*> functions = {};
 
     //----------------------------------------------------------------------------------//
     //
@@ -1507,9 +1521,9 @@ main(int argc, char** argv)
         }
     };
 
-    if(!app_functions.empty())
+    if(app_functions && !app_functions->empty())
     {
-        for(auto* itr : app_functions)
+        for(auto* itr : *app_functions)
         {
             if(itr->getModule())
             {
@@ -1535,52 +1549,8 @@ main(int argc, char** argv)
     }
     else
     {
-        verbprintf(
-            0, "Warning! No functions in application. Enabling parsing all modules...\n");
-        parse_all_modules = true;
+        verbprintf(0, "Warning! No functions in application...\n");
     }
-
-    if(parse_all_modules && app_modules && !app_modules->empty())
-    {
-        for(auto* itr : *app_modules)
-        {
-            modules.emplace(itr);
-            if(itr->getObject()) objects.emplace(itr->getObject());
-        }
-
-        verbprintf(2,
-                   "Adding the procedures from %zu modules found in the app image...\n",
-                   modules.size());
-        for(auto* itr : modules)
-        {
-            auto* procedures = itr->getProcedures(include_uninstr);
-            if(procedures)
-            {
-                verbprintf(2, "Processing %zu procedures found in the %s module...\n",
-                           procedures->size(), get_name(itr).data());
-                for(auto* pitr : *procedures)
-                {
-                    if(!pitr->isInstrumentable() && !simulate && !include_uninstr)
-                        continue;
-                    functions.emplace(pitr);
-                    auto _modfn = module_function{ itr, pitr };
-                    module_names.insert(_modfn.module_name);
-                    _insert_module_function(available_module_functions, _modfn);
-                    _add_overlapping(itr, pitr);
-                }
-            }
-        }
-    }
-    else if(parse_all_modules)
-    {
-        verbprintf(0, "Warning! No modules in application...\n");
-    }
-
-    verbprintf(1, "\n");
-    verbprintf(1, "Found %zu functions in %zu modules across %zu objects\n",
-               functions.size(), modules.size(), objects.size());
-    for(auto* obj : objects)
-        verbprintf(1, "  [object] %s\n", obj->name().c_str());
 
     if(debug_print || verbose_level > 2)
     {
@@ -1623,6 +1593,9 @@ main(int argc, char** argv)
     //  Get the derived type of the address space
     //
     //----------------------------------------------------------------------------------//
+
+    process_t*     app_thread = nullptr;
+    binary_edit_t* app_binary = nullptr;
 
     is_static_exe = addr_space->isStaticExecutable();
 
