@@ -24,6 +24,36 @@ downstream consumer of the library.
 
 - `libprofiler-hub.so` now ships with a SOVERSION (`libprofiler-hub.so.0` symlink and
   `libprofiler-hub.so.0.1.0` actual file) so consumers can pin to a specific ABI.
+- New cache var `FMT_VERSION` (default `11.2.0`). When the system fmt is missing,
+  the build fetches `fmtlib/fmt` at this version.
+
+### Changed
+
+- spdlog is now built with `SPDLOG_FMT_EXTERNAL=ON`. fmt is resolved as an
+  independent dependency (via `find_package(fmt)` or FetchContent) rather than
+  through spdlog's vendored copy. Internal includes switched from
+  `<spdlog/fmt/bundled/core.h>` to `<fmt/core.h>`. Required to integrate
+  profiler-hub into the TheRock super-project, which builds spdlog with
+  `SPDLOG_FMT_EXTERNAL=ON` and rejects any duplicate fmt provider.
+- Because fmt is now an external dependency, consumers of the installed
+  `profiler-hub` CMake package (especially the static library) must have fmt
+  discoverable; the package config calls `find_dependency(fmt)`.
+- FetchContent fallback versions bumped to a compatible pair: spdlog `1.15.3`
+  and fmt `11.2.0`. spdlog 1.14.x does not compile against fmt 11, so the
+  external-fmt switch requires spdlog >= 1.15 when the system fmt is 11.x.
+- `find_package(spdlog ...)`, `find_package(fmt ...)`, and the other system
+  lookups keep their version variable as a minimum, so a system copy that is
+  too old to satisfy the requirement falls back to FetchContent. A system
+  spdlog is additionally accepted only when it was built with
+  `SPDLOG_FMT_EXTERNAL`, to avoid linking two fmt copies into one binary.
+
+### Removed
+
+- Build options `PROFILER_HUB_USE_SYSTEM_SPDLOG`, `PROFILER_HUB_USE_SYSTEM_NLOHMANN_JSON`,
+  `PROFILER_HUB_USE_SYSTEM_GTEST`, and `PROFILER_HUB_USE_SYSTEM_BENCHMARK`. These
+  were always-on toggles that only suppressed the system `find_package` lookup;
+  callers that need bundled builds can simply remove the system package or set
+  `CMAKE_DISABLE_FIND_PACKAGE_<name>=ON`.
 
 ## [0.1.0] - 2026-05-05
 

@@ -41,37 +41,64 @@ This includes the ROCm profilers, dependencies, and base packages.
    install dependencies and configure GPU access permissions.
 
 2. Install the ROCm Profiler package that matches your desired ROCm version.
-   Package names use the following format:
-
-   .. code-block:: shell-session
-
-      amdrocm-profiler<rocm_version>
-
-   Where ``<rocm_version>`` is the ROCm Core SDK version to install. Omit this
-   suffix to install the latest available version.
-
-   For example, to install the latest ROCm Profiler package release for
-   supported GPU architectures:
 
    .. tab-set::
 
-      .. tab-item:: Debian-based distros
+      .. tab-item:: Package manager
+
+         On Linux, package names use the following format:
+
+         .. code-block:: shell-session
+
+            amdrocm-profiler<rocm_version>
+
+         ``<rocm_version>`` represents the ROCm Core SDK version to install. Omit
+         this suffix to install the latest available version.
+
+         For example, to install the latest ROCm Profiler package release for
+         supported GPU architectures:
+
+         .. tab-set::
+
+            .. tab-item:: Debian-based distros
+
+               Use the following command on Ubuntu and other Debian-based Linux
+               distributions to install ROCm profilers:
+
+               .. code-block:: bash
+
+                  sudo apt install amdrocm-profiler
+
+            .. tab-item:: RHEL-based distros
+
+               Use the following command on RHEL, Oracle Linux, and other RHEL-based
+               Linux distributions to install ROCm profilers:
+
+               .. code-block:: bash
+
+                  sudo dnf install amdrocm-profiler
+
+            .. tab-item:: SLES
+
+               Use the following command on SLES to install ROCm profilers:
+
+               .. code-block:: bash
+
+                  sudo zypper install amdrocm-profiler
+
+      .. tab-item:: pip
+
+         Use the following commands to create and activate a Python virtual
+         environment, then install ROCm with the ``[profiler]`` extra:
 
          .. code-block:: bash
 
-            sudo apt install amdrocm-profiler
+            # Create and activate a Python virtual environment.
+            python3 -m venv .venv
+            source .venv/bin/activate
 
-      .. tab-item:: RHEL-based distros
-
-         .. code-block:: bash
-
-            sudo dnf install amdrocm-profiler
-
-      .. tab-item:: SLES
-
-         .. code-block:: bash
-
-            sudo zypper install amdrocm-profiler
+            # Install ROCm and the profilers from the AMD package repository.
+            python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[profiler]"
 
 Install from source
 ===================

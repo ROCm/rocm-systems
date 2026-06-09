@@ -46,7 +46,6 @@
 #include "signal_wait_until_on_stream_tester.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
-#include "primitive_mr_tester.hpp"
 #include "primitive_tester.hpp"
 #include "random_access_tester.hpp"
 #include "shmem_ptr_tester.hpp"
@@ -106,6 +105,8 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipMalloc((void**)&end_time, sizeof(long long int) * num_timers));
   CHECK_HIP(hipHostMalloc((void**)&verification_error, sizeof(bool)));
   *verification_error = false;
+
+  batch_size = (args.batch > 0) ? args.batch : args.loop;
 
   max_msg_size = args.max_msg_size;
   if (args.max_volume_size) {
@@ -527,10 +528,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Non-Blocking WG level Puts";
       testers.push_back(new WorkGroupPrimitiveTester(args));
       break;
-    case PutNBIMRTestType:
-      test_name = "Non-Blocking Put message rate";
-      testers.push_back(new PrimitiveMRTester(args));
-      break;
     case WAVEGetTestType:
       test_name = "Blocking WAVE level Gets";
       testers.push_back(new WaveFrontPrimitiveTester(args));
@@ -937,12 +934,16 @@ void flush_hdp() {
   CHECK_HIP(hipGetDevice(&hip_dev_id));
   CHECK_HIP(hipDeviceGetAttribute(reinterpret_cast<int*>(&hdp_flush_ptr_),
                         hipDeviceAttributeHdpMemFlushCntl, hip_dev_id));
-  __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  if (hdp_flush_ptr_ != nullptr) {
+    __atomic_store_n(hdp_flush_ptr_, 0x1, __ATOMIC_SEQ_CST);
+  }
 }
 
 void Tester::barrier() {
   rocshmem_barrier_all();
+#if defined USE_HDP_FLUSH
   flush_hdp();
+#endif
 }
 
 double Tester::gpuCyclesToMicroseconds(long long int cycles) {

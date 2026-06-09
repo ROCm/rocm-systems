@@ -145,6 +145,29 @@ struct metrics
     std::uint32_t mem_clock_mhz = 0;  // current_uclk (MHz)
 };
 
+// Socket power: prefer the instantaneous "current" reading, falling back to the
+// time-averaged reading only when current is unavailable.
+[[nodiscard]] inline bool
+has_current_socket_power(const enabled_metrics& enabled)
+{
+    return enabled.bits.current_socket_power != 0;
+}
+
+[[nodiscard]] inline double
+select_socket_power(const enabled_metrics& enabled, const metrics& values)
+{
+    return has_current_socket_power(enabled)
+               ? static_cast<double>(values.current_socket_power)
+               : static_cast<double>(values.average_socket_power);
+}
+
+// Display label for the socket-power track, matching select_socket_power().
+[[nodiscard]] inline const char*
+socket_power_track_label(const enabled_metrics& enabled)
+{
+    return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
+}
+
 template <typename T>
 [[nodiscard]] constexpr bool
 is_metric_supported(T value, T invalid_sentinel = std::numeric_limits<T>::max())

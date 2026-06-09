@@ -404,6 +404,22 @@ int QueuePair::buffer_unregister(uintptr_t addr) {
   return ROCSHMEM_SUCCESS;
 }
 
+void QueuePair::buffer_unregister_all() {
+  int err;
+
+  /* Deregister every memory region registered with this QP */
+  for (auto &entry : user_buffer_mrs) {
+    err = ibv.dereg_mr(entry.second);
+    CHECK_ZERO(err, "ibv_dereg_mr (buffer_unregister_all)");
+  }
+
+  user_buffer_mrs.clear();
+
+  /* Clear all user buffer info slots */
+  CHECK_HIP(hipMemset(user_buf_info, 0,
+                      sizeof(struct user_buf_info_t) * num_user_buffers));
+}
+
 __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
   /* Check if in heap */
   if (is_ptr_in_range(base_heap, base_heap_size, addr)) {

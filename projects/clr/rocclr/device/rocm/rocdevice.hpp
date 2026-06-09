@@ -490,6 +490,8 @@ class Device : public NullDevice {
   virtual void RetainGlobalSignal(void* signal) const override;
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
+  virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
@@ -506,6 +508,10 @@ class Device : public NullDevice {
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+
+  //! Symmetric counterpart to hostLock(): revoke this device's GPU access to the
+  //! pinned range (SVM-API/HMM path only) and then unlock it.
+  void hostUnlock(void* hostMem, size_t size) const;
 
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
@@ -783,12 +789,6 @@ class Device : public NullDevice {
   friend void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 
  public:
-
-  //! Count of schedulerQueue_ instances per device
-  //! Windows AQL device-enqueue path.
-  std::atomic<uint32_t> hasSchedulerQueue_{0};
-  static std::atomic<bool> skipHsaShutdown_;
-
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
