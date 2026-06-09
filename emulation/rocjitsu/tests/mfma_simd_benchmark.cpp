@@ -384,6 +384,38 @@ TEST(MfmaSimdBenchmark, F32_16x16x32_fp8) {
   bench("v_mfma_f32_16x16x32_fp8", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }
 
+// Dense fp8/bf8 shapes: dedicated constexpr specializations (256-entry LUT
+// bulk convert instead of per-element extract_fp8/extract_bf8).
+TEST(MfmaSimdBenchmark, F32_16x16x32_fp8_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, B = 1, bits = 8;
+  fx.seed(S0_OFF, 8, bits, mma_test::SmallGen(5));
+  fx.seed(S1_OFF, 8, bits, mma_test::SmallGen(6));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>(*fx.cu, fx.vbase + DST_OFF,
+                                                          fx.vbase + S0_OFF, fx.vbase + S1_OFF, 0,
+                                                          /*const_acc=*/0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_16x16x32_fp8_fp8 [specialized]", fx, run, double(M) * N * K * B,
+        /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_32x32x16_bf8_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 16, B = 1, bits = 8;
+  fx.seed(S0_OFF, 8, bits, mma_test::SmallGen(15));
+  fx.seed(S1_OFF, 8, bits, mma_test::SmallGen(16));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, false, false>(*fx.cu, fx.vbase + DST_OFF,
+                                                            fx.vbase + S0_OFF, fx.vbase + S1_OFF, 0,
+                                                            /*const_acc=*/0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_32x32x16_bf8_bf8 [specialized]", fx, run, double(M) * N * K * B,
+        /*is_int=*/false);
+}
+
 // v_mfma_i32_16x16x32_i8: integer path, exact SIMD-vs-scalar agreement.
 TEST(MfmaSimdBenchmark, I32_16x16x32_i8) {
   SKIP_IF_NO_SIMD();

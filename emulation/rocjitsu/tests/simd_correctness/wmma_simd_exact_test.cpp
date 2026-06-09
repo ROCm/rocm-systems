@@ -159,6 +159,40 @@ TEST(WmmaSimdExact, F8Dense) {
   }
 }
 
+// --- specialized dense fp8/bf8 kernels (constexpr dims + LUT bulk convert):
+// all four A/B format pairs, K=64 and K=128, f32 and f16 output. ---
+TEST(WmmaSimdExact, F8SpecDense) {
+  SKIP_IF_NO_SIMD();
+  auto spec_f32 = [](auto fn, Fmt fmt, const char *label) {
+    run_case(label, fmt, Fmt::F32, [fn](WmmaFixture &fx, uint32_t ca) {
+      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca);
+    });
+  };
+  auto spec_f16 = [](auto fn, Fmt fmt, const char *label) {
+    run_case(label, fmt, Fmt::F16, [fn](WmmaFixture &fx, uint32_t ca) {
+      fn(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, ca);
+    });
+  };
+  spec_f32(amdgpu::exec_wmma_f32_f8_spec<16, 16, 64, true, true>, Fmt::FP8, "spec_f32_fp8_fp8_k64");
+  spec_f32(amdgpu::exec_wmma_f32_f8_spec<16, 16, 64, true, false>, Fmt::FP8,
+           "spec_f32_fp8_bf8_k64");
+  spec_f32(amdgpu::exec_wmma_f32_f8_spec<16, 16, 64, false, true>, Fmt::BF8,
+           "spec_f32_bf8_fp8_k64");
+  spec_f32(amdgpu::exec_wmma_f32_f8_spec<16, 16, 64, false, false>, Fmt::BF8,
+           "spec_f32_bf8_bf8_k64");
+  spec_f32(amdgpu::exec_wmma_f32_f8_spec<16, 16, 128, true, true>, Fmt::FP8,
+           "spec_f32_fp8_fp8_k128");
+  spec_f32(amdgpu::exec_wmma_f32_f8_spec<16, 16, 128, false, false>, Fmt::BF8,
+           "spec_f32_bf8_bf8_k128");
+  spec_f16(amdgpu::exec_wmma_f16_f8_spec<16, 16, 64, true, true>, Fmt::FP8, "spec_f16_fp8_fp8_k64");
+  spec_f16(amdgpu::exec_wmma_f16_f8_spec<16, 16, 64, false, false>, Fmt::BF8,
+           "spec_f16_bf8_bf8_k64");
+  spec_f16(amdgpu::exec_wmma_f16_f8_spec<16, 16, 128, true, false>, Fmt::FP8,
+           "spec_f16_fp8_bf8_k128");
+  spec_f16(amdgpu::exec_wmma_f16_f8_spec<16, 16, 128, false, true>, Fmt::BF8,
+           "spec_f16_bf8_fp8_k128");
+}
+
 // --- sparse f16/fp8 SWMMAC ---
 TEST(WmmaSimdExact, Sparse) {
   SKIP_IF_NO_SIMD();
