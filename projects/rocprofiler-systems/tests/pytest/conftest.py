@@ -2437,7 +2437,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
         gpu_category_to_skip: GPU categories to skip tagged validation queries for
-            (e.g. ``["apu"]``). Omit or pass empty to run all queries.
+            (instinct, radeon, apu). Omit or pass empty to run all queries
     """
     if _is_assert_disabled(request, "assert_rocpd"):
         return lambda *args, **kwargs: None

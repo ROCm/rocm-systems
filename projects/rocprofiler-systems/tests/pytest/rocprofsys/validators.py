@@ -346,7 +346,7 @@ def validate_rocpd_database(
         rules_files: List of JSON rules files to use for validation
         timeout: Validation timeout in seconds
         gpu_category_to_skip: GPU categories to skip tagged validation queries for
-            (e.g. ``["apu"]``). Omit or pass empty to run all queries.
+            (instinct, radeon, apu). Omit or pass empty to run all queries
 
     Returns:
         ValidationResult with validation status
