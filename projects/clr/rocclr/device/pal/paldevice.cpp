@@ -2520,6 +2520,7 @@ bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   GpuEvent event;
   vgpu->eventEnd(MainEngine, event);
   vgpu->setGpuEvent(event);
+  vgpu->waitForEvent(&event);
 
   if (result != Pal::Result::Success) {
     LogPrintfError("PAL virtualMap: RemapVirtualMemoryPages (map) failed: %d",
@@ -2583,6 +2584,7 @@ bool Device::virtualUnmap(void* va, size_t size) {
   GpuEvent event;
   vgpu->eventEnd(MainEngine, event);
   vgpu->setGpuEvent(event);
+  vgpu->waitForEvent(&event);
 
   if (result != Pal::Result::Success) {
     LogPrintfError("PAL virtualUnmap: RemapVirtualMemoryPages (unmap) failed: %d",
