@@ -65,7 +65,7 @@ void run_i8(const char *label, uint32_t M, uint32_t N, uint32_t K, uint32_t B) {
 
 // --- exec_f32 generic, f16 inputs: every dispatched CDNA4 f16 shape ---
 TEST(MfmaSimdExact, F32_f16_AllShapes) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   const struct {
     uint32_t m, n, k, b;
   } shapes[] = {{16, 16, 32, 1}, {32, 32, 16, 1}, {32, 32, 8, 1}, {16, 16, 16, 1},
@@ -76,7 +76,7 @@ TEST(MfmaSimdExact, F32_f16_AllShapes) {
 
 // --- exec_f32 generic, bf16 inputs ---
 TEST(MfmaSimdExact, F32_bf16_AllShapes) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   const struct {
     uint32_t m, n, k, b;
   } shapes[] = {{16, 16, 32, 1}, {32, 32, 16, 1}, {4, 4, 4, 16}, {16, 16, 4, 4}, {32, 32, 4, 2}};
@@ -87,7 +87,7 @@ TEST(MfmaSimdExact, F32_bf16_AllShapes) {
 
 // --- exec_f32 generic, fp8/bf8 inputs incl. mixed A/B pairs ---
 TEST(MfmaSimdExact, F32_f8_AllShapes) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   const struct {
     uint32_t m, n, k;
   } shapes[] = {{16, 16, 32}, {32, 32, 16}, {16, 16, 128}, {32, 32, 64}};
@@ -101,14 +101,14 @@ TEST(MfmaSimdExact, F32_f8_AllShapes) {
 
 // --- exec_f32 generic, f32 inputs (4x4 stays generic; bigger go specialized) ---
 TEST(MfmaSimdExact, F32_f32_Generic4x4) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_f32("f32_f32_4x4x1x16", Fmt::F32, 4, 4, 1, 16, 32, amdgpu::extract_f32, amdgpu::extract_f32);
   run_f32("f32_f32_4x4x4x16", Fmt::F32, 4, 4, 4, 16, 32, amdgpu::extract_f32, amdgpu::extract_f32);
 }
 
 // --- cbsz/abid/blgp lane-permutation paths (folded into the SIMD hoist) ---
 TEST(MfmaSimdExact, F32_f16_Permuted) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_f32("f32_f16_cbsz1", Fmt::F16, 16, 16, 4, 4, 16, amdgpu::extract_f16, amdgpu::extract_f16,
           /*cbsz=*/1, /*abid=*/0, /*blgp=*/0);
   run_f32("f32_f16_blgp1", Fmt::F16, 16, 16, 4, 4, 16, amdgpu::extract_f16, amdgpu::extract_f16,
@@ -117,7 +117,7 @@ TEST(MfmaSimdExact, F32_f16_Permuted) {
 
 // --- specialized f16 kernels (constexpr dims + F16C bulk convert) ---
 TEST(MfmaSimdExact, F16Spec_AllShapes) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   auto spec = [](auto fn, const char *label) {
     run_case(label, Fmt::F16, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
@@ -131,7 +131,7 @@ TEST(MfmaSimdExact, F16Spec_AllShapes) {
 
 // --- specialized f32 kernels ---
 TEST(MfmaSimdExact, F32Spec_AllShapes) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   auto spec = [](auto fn, const char *label) {
     run_case(label, Fmt::F32, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
       fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
@@ -145,7 +145,7 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
 
 // --- MX-scaled fp8/bf8 (per-32-block e8m0 scales: power-of-two, exact) ---
 TEST(MfmaSimdExact, F32Scaled) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   constexpr uint32_t SCALE_A = 240, SCALE_B = 248;
   auto scaled = [&](const char *label, Fmt fmt, uint32_t m, uint32_t n, uint32_t k, auto ex) {
     run_case(label, fmt, Fmt::F32, [=](MfmaFixture &fx, uint32_t const_acc) {
@@ -162,7 +162,7 @@ TEST(MfmaSimdExact, F32Scaled) {
 
 // --- integer i8 MFMA: exact MAC, every dispatched shape ---
 TEST(MfmaSimdExact, I32_i8_AllShapes) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   const struct {
     uint32_t m, n, k, b;
   } shapes[] = {{16, 16, 64, 1}, {32, 32, 32, 1}, {32, 32, 16, 1}, {16, 16, 32, 1},
@@ -173,7 +173,7 @@ TEST(MfmaSimdExact, I32_i8_AllShapes) {
 
 // --- f64 MFMA ---
 TEST(MfmaSimdExact, F64_AllShapes) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   if (util::native<double>::size() <= 1)
     GTEST_SKIP() << "no native f64 SIMD";
   const struct {

@@ -16,6 +16,7 @@
 ///   - f32/f16/bf16 output: SIMD uses fused FMA (matching the hardware) while the
 ///     scalar reference is non-fused, so results agree to a small tolerance.
 
+#include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -198,27 +199,6 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
   EXPECT_GT(sd, 0.0);
 }
 
-struct SmallGen {
-  std::mt19937 rng;
-  std::uniform_real_distribution<float> dist{-1.0f, 1.0f};
-  explicit SmallGen(uint32_t seed) : rng(seed) {}
-  float operator()() { return dist(rng); }
-};
-
-struct SmallI8Gen {
-  std::mt19937 rng;
-  std::uniform_int_distribution<int> dist{-8, 7};
-  explicit SmallI8Gen(uint32_t seed) : rng(seed) {}
-  int operator()() { return dist(rng); }
-};
-
-#define SKIP_IF_NO_SIMD()                                                                          \
-  if constexpr (!util::has_stdx_simd) {                                                            \
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";                    \
-  } else if (util::native<float>::size() <= 1) {                                                   \
-    GTEST_SKIP() << "host native_simd width is 1 — no SIMD speedup possible";                      \
-  }
-
 } // namespace
 
 // Dense WMMA, f32 output, f16 input (the common transformer shape).
@@ -226,8 +206,8 @@ TEST(WmmaSimdBenchmark, F32_16x16x16_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 16, bits = 16;
-  fx.seed(S0_OFF, 16, bits, SmallGen(1));
-  fx.seed(S1_OFF, 16, bits, SmallGen(2));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(1));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(2));
   auto run = [&] {
     amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                           fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
@@ -241,8 +221,8 @@ TEST(WmmaSimdBenchmark, F16_16x16x16_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 16, bits = 16;
-  fx.seed(S0_OFF, 16, bits, SmallGen(3));
-  fx.seed(S1_OFF, 16, bits, SmallGen(4));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(3));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(4));
   auto run = [&] {
     amdgpu::exec_wmma_f16(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                           fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
@@ -256,8 +236,8 @@ TEST(WmmaSimdBenchmark, Bf16_16x16x16_bf16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 16, bits = 16;
-  fx.seed(S0_OFF, 16, bits, SmallGen(5));
-  fx.seed(S1_OFF, 16, bits, SmallGen(6));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(5));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(6));
   auto run = [&] {
     amdgpu::exec_wmma_bf16(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                            fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
@@ -271,8 +251,8 @@ TEST(WmmaSimdBenchmark, I32_16x16x16_i8) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 16;
-  fx.seed_i8(S0_OFF, 16, SmallI8Gen(7));
-  fx.seed_i8(S1_OFF, 16, SmallI8Gen(8));
+  fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(7));
+  fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(8));
   auto run = [&] {
     amdgpu::exec_wmma_i32_i8(*fx.cu, M, N, K, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                              fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
@@ -285,8 +265,8 @@ TEST(WmmaSimdBenchmark, SwmmacF32_16x16x32_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
-  fx.seed(S0_OFF, 16, bits, SmallGen(9));
-  fx.seed(S1_OFF, 16, bits, SmallGen(10));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(9));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(10));
   fx.seed_words(INDEX_OFF, 2, 0xE4E4E4E4u); // arbitrary but valid 2-bit index set
   auto run = [&] {
     amdgpu::exec_swmmac_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
@@ -302,8 +282,8 @@ TEST(WmmaSimdBenchmark, SwmmacI32_16x16x32_i8) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 32;
-  fx.seed_i8(S0_OFF, 16, SmallI8Gen(11));
-  fx.seed_i8(S1_OFF, 16, SmallI8Gen(12));
+  fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(11));
+  fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(12));
   fx.seed_words(INDEX_OFF, 2, 0xE4E4E4E4u);
   auto run = [&] {
     amdgpu::exec_swmmac_i32_i8(*fx.cu, M, N, K, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
@@ -318,8 +298,8 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_f16) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
-  fx.seed(S0_OFF, 16, bits, SmallGen(13));
-  fx.seed(S1_OFF, 16, bits, SmallGen(14));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(13));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(14));
   auto run = [&] {
     amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                           fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
@@ -333,8 +313,8 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_f16_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
-  fx.seed(S0_OFF, 16, bits, SmallGen(13));
-  fx.seed(S1_OFF, 16, bits, SmallGen(14));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(13));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(14));
   auto run = [&] {
     amdgpu::exec_wmma_f32_16x16x32_f16(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                                        fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
@@ -347,8 +327,8 @@ TEST(WmmaSimdBenchmark, F32_16x16x4_f32_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 4, bits = 32;
-  fx.seed(S0_OFF, 16, bits, SmallGen(41));
-  fx.seed(S1_OFF, 16, bits, SmallGen(42));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(41));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(42));
   auto run = [&] {
     amdgpu::exec_wmma_f32_f32_spec<16, 16, 4>(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                                               fx.vbase + S1_OFF, fx.vbase + S2_OFF,
@@ -362,8 +342,8 @@ TEST(WmmaSimdBenchmark, F16_16x16x32_f16_Specialized) {
   SKIP_IF_NO_SIMD();
   BenchFixture fx;
   constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
-  fx.seed(S0_OFF, 16, bits, SmallGen(51));
-  fx.seed(S1_OFF, 16, bits, SmallGen(52));
+  fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(51));
+  fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(52));
   auto run = [&] {
     amdgpu::exec_wmma_f16_spec<16, 16, 32>(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
                                            fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
