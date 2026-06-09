@@ -151,6 +151,9 @@ jobs:
           docker exec \
             -e "AIS_GITHUB_OUTPUT=${{ env.AIS_GHA_CMD_FILES_DOCKER_DIR }}/${GITHUB_OUTPUT##*/}" \
             -e "_AIS_INPUT_PLATFORM=${AIS_INPUT_PLATFORM}" \
+            -e "_AIS_INPUT_ROCM_VERSION=${AIS_INPUT_ROCM_VERSION}" \
+            -e "_AIS_SAFE_COMPILER_NAME=${AIS_SAFE_COMPILER_NAME}" \
+            -e "_AIS_INPUT_CXX_STANDARD=${AIS_INPUT_CXX_STANDARD}" \
             -t \
             -w /ais/rocm-systems/projects/hipfile \
             "${AIS_CONTAINER_NAME}" \
@@ -158,7 +161,11 @@ jobs:
               .venv/bin/python -m build --sdist ./python
               shopt -s nullglob
               OLD_FILENAME="$(basename ./python/dist/hipfile-*.tar.gz)"
-              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}.tar.gz"
+              # python_bindings runs for every (platform, rocm, cxx) leg and the
+              # sdist version does not encode any of them, so disambiguate the
+              # artifact (named after the file) across all of them. Sanitized
+              # compiler avoids a "+" being read as a PEP 440 local version.
+              NEW_FILENAME="${OLD_FILENAME%.tar.gz}-${_AIS_INPUT_PLATFORM}-${_AIS_INPUT_ROCM_VERSION}-${_AIS_SAFE_COMPILER_NAME}-cxx${_AIS_INPUT_CXX_STANDARD}.tar.gz"
               mv ./python/dist/${OLD_FILENAME} ./python/dist/${NEW_FILENAME}
               echo "HIPFILE_PYTHON_SDIST_FILENAME=${NEW_FILENAME}" >> "${AIS_GITHUB_OUTPUT}"
             '
