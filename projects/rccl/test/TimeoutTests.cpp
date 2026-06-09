@@ -32,8 +32,6 @@ static ncclComm_t MakeMagicComm()
     ncclComm_t comm = new ncclComm();
     comm->startMagic = NCCL_MAGIC;
     comm->endMagic   = NCCL_MAGIC;
-    // asyncResult is 0 == ncclSuccess by default; other fields zero-initialised
-    // by the compiler — explicit memset is not needed.
     return comm;
 }
 
