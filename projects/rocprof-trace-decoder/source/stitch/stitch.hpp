@@ -165,7 +165,7 @@ public:
         sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, vec);
     };
     void sendEvent(
-        rocprofiler_thread_trace_decoder_event_type_t type, int64_t time, uint8_t me, uint8_t pipe, uint32_t payload
+        rocprofiler_thread_trace_decoder_event_type_t type, int64_t time, uint8_t me, uint8_t pipe, uint32_t payload, bool bop = false
     )
     {
         rocprofiler_thread_trace_decoder_event_t event{};
@@ -174,8 +174,9 @@ public:
         event.type = type;
         event.me_id = me;
         event.pipe_id = pipe;
-        event.reserved = 0;
+        event.flags = 0;
         event.payload = payload;
+        if (bop) event.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
         callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &event, 1, cbdata);
     };
     void sendDispatch(CSRegisterHandler& csregister, int64_t time, uint8_t me, uint8_t pipe)

@@ -52,8 +52,10 @@ namespace quick_scan
 // EVENT_CS(8), REG_CS_PRIV(15).
 //
 // `offset` is the token's first-byte position within the buffer passed to
-// scan_gfx9 (i.e. post-header for chunk 0; callers that need an offset
-// relative to their original `data` buffer must add the header skip).
+// scan_* (for nibble-packed gfx12 streams, this is the containing byte).
+// gfx9 scans chunk 0 post-header, so callers that need an offset relative to
+// their original `data` buffer must add the header skip; RDNA/MI400 buffers are
+// scanned without a header skip.
 // Packed as a 16:48 bitfield with `type` to keep sizeof at 16B. 48 bits of
 // offset covers chunks up to 256 TiB; placing `type` in the low bits lets
 // the consumer's hot dispatch (cmp tok.type, ...) fold the load+mask into

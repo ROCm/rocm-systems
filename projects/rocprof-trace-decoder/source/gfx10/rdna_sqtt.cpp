@@ -85,7 +85,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx10::misc_fields fields{};
 
                 auto generate_event = [&](rocprofiler_thread_trace_decoder_event_type_t type, uint64_t payload = 0)
-                { stitch.sendEvent(type, token.time, 0, 0, payload); };
+                { stitch.sendEvent(type, token.time, 0, 0, payload, false); };
 
                 if (tt_version >= 5)
                 {
@@ -529,7 +529,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     default: break;
                 }
 
-                if (type != ROCPROF_TRACE_DECODER_EVENT_NONE) stitch.sendEvent(type, token.time, 0, 0, 0);
+                if (type != ROCPROF_TRACE_DECODER_EVENT_NONE) stitch.sendEvent(type, token.time, 0, 0, 0, event.bop);
 
                 break;
             }
@@ -582,7 +582,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 if (generator.packetlost)
                 {
                     info.bPacketLost = true;
-                    stitch.sendEvent(ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS, token.time, 0, 0, 0);
+                    stitch.sendEvent(ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS, token.time, 0, 0, 0, false);
                     generator.packetlost = false;
                 }
                 break;

@@ -300,7 +300,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
  *
  * @param[in] handle Trace header handle.
  * @param[in] chunk_index Chunk index (double buffering)
- * @param[in] data Pointer to the shader engine trace data (post-header tokens).
+ * @param[in] data Pointer to the shader engine trace chunk data.
  * @param[in] data_size Size of the trace data in bytes.
  * @param[in] trace_callback Callback invoked once with the batch of decoded
  *   events. Not invoked when no events are produced.
@@ -329,7 +329,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
  *
  * @param[in] handle Trace header handle.
  * @param[in] chunk_index Chunk index (double buffering)
- * @param[in] data Pointer to the shader engine trace data (post-header tokens).
+ * @param[in] data Pointer to the shader engine trace chunk data.
  * @param[in] data_size Size of the trace data in bytes.
  * @param[in] offset_begin Byte offset where to start the standalone cut.
  * @param[in] offset_end Byte offset where to end the standalone cut.

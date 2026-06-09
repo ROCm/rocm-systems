@@ -226,7 +226,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_mi400_av
                 {
                     uint64_t contents;
                     std::memcpy(&contents, buf + bp + pos, 8);
-                    out[n_out++] = QuickToken{contents, T.rare_type[b]};
+                    out[n_out++] = QuickToken{contents, T.rare_type[b], bp + pos};
                     if (n_out >= out_cap) goto done;
                 }
 
@@ -262,7 +262,7 @@ done:
             const size_t avail = size - bp;
             const size_t to_copy = avail < 8 ? avail : 8;
             std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = QuickToken{contents, T.rare_type[b]};
+            out[n_out++] = QuickToken{contents, T.rare_type[b], bp};
             if (n_out >= out_cap) break;
         }
 

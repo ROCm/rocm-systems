@@ -439,8 +439,8 @@ union event_type
         uint64_t tm     : 3;
         uint64_t bop    : 1;
         uint64_t evtype : 2;
-        uint64_t me     : 2;
         uint64_t pipe   : 2;
+        uint64_t me     : 2;
         uint64_t id     : 6;
     };
     uint64_t raw;

@@ -69,6 +69,13 @@ using StatusToken = gfx9::build_standalone::StatusToken;
 
 size_t scan_none(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap) { return 0; };
 
+uint64_t load_header_word(const void* data)
+{
+    uint64_t header = 0;
+    std::memcpy(&header, data, sizeof(header));
+    return header;
+}
+
 rocprofiler_thread_trace_decoder_status_t process_events_none(
     CSRegisterHandler& csregister,
     const std::vector<QuickToken>& raw,
@@ -132,7 +139,9 @@ std::vector<StatusToken> build_rdna_status_tokens(const CSRegisterHandler& reg)
             if (dpkt != 0)
             {
                 out.push_back(encode_rdna_reg(me, pipe, COMPUTE_DISPATCH_PKT_LO, static_cast<uint32_t>(dpkt), true));
-                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_DISPATCH_PKT_HI, static_cast<uint32_t>(dpkt >> 32), true));
+                out.push_back(
+                    encode_rdna_reg(me, pipe, COMPUTE_DISPATCH_PKT_HI, static_cast<uint32_t>(dpkt >> 32), true)
+                );
             }
         }
     }
@@ -275,7 +284,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
                     ev.type = ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH;
                     ev.me_id = static_cast<uint8_t>(r.me);
                     ev.pipe_id = static_cast<uint8_t>(r.pipe);
-                    ev.reserved = 0;
+                    ev.flags = ROCPROF_TRACE_DECODER_EVENT_FLAGS_NONE;
                     ev.payload = 0;
                     ev.byte_offset = static_cast<uint64_t>(tok.offset) + header_skip;
                     auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
@@ -364,7 +373,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
             ev.type = type;
             ev.me_id = static_cast<uint8_t>(event.me);
             ev.pipe_id = static_cast<uint8_t>(event.pipe);
-            ev.reserved = 0;
+            ev.flags = event.bop ? ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP : ROCPROF_TRACE_DECODER_EVENT_FLAGS_NONE;
             ev.payload = 0;
             ev.byte_offset = static_cast<uint64_t>(tok.offset);
             auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
@@ -388,48 +397,35 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     void* userdata
 )
 {
-    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
     thread_local std::vector<quick_scan::QuickToken> raw{1u << 18};
 
-    if (!data || data_size == 0) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
-    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    if (!data || data_size == 0)
+    {
+        for (auto& r : raw) r = quick_scan::QuickToken{};
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+    }
 
     TIMING(t0);
 
     int gfxip = 0;
-    // Local working copy of the entry-state register tracker. For chunk 0
-    // this stays default-constructed; for later chunks we copy the
-    // previous chunk's pipestate slot into it under the read lock below.
-    // CSRegisterHandler move/copy is cheap (scalars + std::array + CowPtr
-    // refcount bumps) so neither path allocates per-chunk.
     CSRegisterHandler local;
 
     const uint8_t* buf = static_cast<const uint8_t*>(data);
-    // Only chunk 0 carries the 8-byte arch header at the start of the
-    // buffer; later chunks are pure token streams. `header_skip` is the byte
-    // distance between the caller's `data` and the buffer the scanner sees,
-    // and is added back to tok.offset when reporting byte_offsets so they
-    // stay relative to the caller's `data`.
     uint64_t header_skip = 0;
 
     if (chunk_index == 0)
     {
-        uint64_t header_word = static_cast<const uint64_t*>(data)[0];
+        uint64_t header_word = load_header_word(data);
         gfxip = extract_gfxip(header_word);
 
         auto decoder = HandleData::get_write_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
         decoder->gfxip = gfxip;
-        // Snapshot the raw chunk-0 header so build_standalone can prepend it
-        // to the rebuilt buffer (it isn't reachable any other way once the
-        // caller's data buffer is gone).
-        if (gfxip != 0) decoder->gfx9_header = header_word;
-        if (gfxip == 9)
-        {
-            header_skip = 8;
-        }
+        if (gfxip != 0) decoder->trace_header = header_word;
+        if (gfxip == 9) header_skip = 8;
 
         if (data_size == header_skip)
         {
@@ -443,7 +439,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-        if (decoder->gfxip == 0) decoder->gfxip = extract_gfxip(static_cast<const uint64_t*>(data)[0]);
+        if (decoder->gfxip == 0) decoder->gfxip = extract_gfxip(load_header_word(data));
 
         gfxip = decoder->gfxip;
     }
@@ -509,6 +505,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     TIMING(t3);
 
+    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
     rocprofiler_thread_trace_decoder_status_t status;
     if (gfxip == 9)
         status = process_events_gfx9<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
@@ -555,6 +553,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     if (!data || data_size <= 8 || !data_out || !size_out || offset_begin + 8 >= offset_end || offset_end > data_size)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    const uint8_t* buf = static_cast<const uint8_t*>(data);
+
     // Snapshot the gfxip, the saved arch header, and a copy of the
     // entry-state CSRegisterHandler under a single read lock. The local copy
     // owns its own state (CowPtr refcount bumps on the codeobj vector and
@@ -569,9 +569,19 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
         gfxip = decoder->gfxip;
-        header_word = decoder->gfx9_header;
+        header_word = decoder->trace_header;
 
-        if (const CSRegisterHandler* p = decoder->pipestate.get(chunk_index))
+        if (header_word == 0)
+        {
+            header_word = load_header_word(data);
+            if (gfxip == 0) gfxip = extract_gfxip(header_word);
+        }
+
+        if (chunk_index == 0)
+        {
+            temp = CSRegisterHandler{};
+        }
+        else if (const CSRegisterHandler* p = decoder->pipestate.get(chunk_index))
             temp = *p;
         else
             return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -579,8 +589,6 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     if (gfxip != 9 && gfxip != 12 && gfxip != 1250)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
-    const uint8_t* buf = static_cast<const uint8_t*>(data);
 
     // Walk the prefix [0, offset_begin) through the private CSRegisterHandler
     // copy taken above. EmitEvents=false: this is a state-advance pass,

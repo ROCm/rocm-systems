@@ -361,7 +361,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
     };
 
     auto generate_event = [&](int64_t time, rocprofiler_thread_trace_decoder_event_type_t type)
-    { stitch.sendEvent(type, time, 0, 0, 0); };
+    { stitch.sendEvent(type, time, 0, 0, 0, false); };
 
     while (generator.valid())
     {
