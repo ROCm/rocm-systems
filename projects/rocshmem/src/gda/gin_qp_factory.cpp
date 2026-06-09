@@ -50,6 +50,8 @@
 #include "rocshmem/rocshmem_common.hpp"
 
 #include <hip/hip_runtime.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 #include <cstring>
 #include <cstdlib>
 #include <vector>
@@ -166,6 +168,59 @@ static void* gin_pd_alloc_host(struct ibv_pd*, void*, size_t size,
 
 static void gin_pd_release(struct ibv_pd*, void*, void* ptr, uint64_t) {
   (void)hipFree(ptr);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Standalone rocm_memory_lock_to_fine_grain — does not depend on rocshmem_init()
+///////////////////////////////////////////////////////////////////////////////
+
+static int gin_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr, int gpu_id) {
+  // Get the GPU agent for gpu_id
+  hsa_agent_t gpu_agent{};
+  int gpu_count = 0;
+  auto gpu_cb = [](hsa_agent_t agent, void* data) -> hsa_status_t {
+    hsa_device_type_t type;
+    hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+    if (type == HSA_DEVICE_TYPE_GPU) {
+      auto* p = static_cast<std::pair<int, std::pair<int*, hsa_agent_t*>>*>(data);
+      if (*(p->second.first) == p->first) {
+        *(p->second.second) = agent;
+      }
+      (*(p->second.first))++;
+    }
+    return HSA_STATUS_SUCCESS;
+  };
+  auto gpu_data = std::make_pair(gpu_id, std::make_pair(&gpu_count, &gpu_agent));
+  hsa_iterate_agents(gpu_cb, &gpu_data);
+
+  // Get a CPU fine-grained+kernarg pool
+  hsa_amd_memory_pool_t cpu_pool{};
+  auto cpu_cb = [](hsa_agent_t agent, void* data) -> hsa_status_t {
+    hsa_device_type_t type;
+    hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+    if (type == HSA_DEVICE_TYPE_CPU) {
+      auto pool_cb = [](hsa_amd_memory_pool_t pool, void* pdata) -> hsa_status_t {
+        hsa_amd_memory_pool_global_flag_t flags;
+        hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags);
+        if (flags == (HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT |
+                      HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED)) {
+          *static_cast<hsa_amd_memory_pool_t*>(pdata) = pool;
+        }
+        return HSA_STATUS_SUCCESS;
+      };
+      hsa_amd_agent_iterate_memory_pools(agent, pool_cb, data);
+    }
+    return HSA_STATUS_SUCCESS;
+  };
+  hsa_iterate_agents(cpu_cb, &cpu_pool);
+
+  hsa_status_t status = hsa_amd_memory_lock_to_pool(
+      ptr, size, &gpu_agent, 1, cpu_pool, 0, gpu_ptr);
+  if (status != HSA_STATUS_SUCCESS) {
+    LOG_ERROR("gin_memory_lock_to_fine_grain failed: 0x%x", status);
+    return -1;
+  }
+  return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -890,7 +945,8 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     if (hipGetDevice(&hip_dev_id) != hipSuccess) return -1;
 
     void *gpu_db_page = nullptr;
-    rocm_memory_lock_to_fine_grain(dvctx.db_page, 0x1000, &gpu_db_page, hip_dev_id);
+    if (gin_memory_lock_to_fine_grain(dvctx.db_page, 0x1000, &gpu_db_page, hip_dev_id) != 0)
+      return -1;
 
     uint64_t *db_page_u64 = reinterpret_cast<uint64_t*>(dvctx.db_page);
     uint64_t *gpu_db_page_u64 = reinterpret_cast<uint64_t*>(gpu_db_page);
@@ -1004,9 +1060,10 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     );
 
     void *gpu_db_ptr = nullptr;
-    rocm_memory_lock_to_fine_grain(qp.uar->reg_addr,
-                                    MLX5_DB_BLUEFLAME_BUFFER_SIZE,
-                                    &gpu_db_ptr, hip_dev_id);
+    if (gin_memory_lock_to_fine_grain(qp.uar->reg_addr,
+                                      MLX5_DB_BLUEFLAME_BUFFER_SIZE,
+                                      &gpu_db_ptr, hip_dev_id) != 0)
+      return -1;
 
     gpu_qp->mlx5_sq = gda_mlx5_device_sq{
       (gda_mlx5_wqe*)qp.sq,
