@@ -1094,6 +1094,23 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
                              void ***out_gpu_qps) {
   log_pe_number = myRank;
 
+  // Initialize device-side logd_constants so LOGD_TRACE etc. work in QP code.
+  {
+    uint32_t log_flags = 0;
+    if (envvar::log_flags.show_error) log_flags |= logd_constants::SHOW_ERROR;
+    if (envvar::log_flags.show_warn)  log_flags |= logd_constants::SHOW_WARN;
+    if (envvar::log_flags.show_info)  log_flags |= logd_constants::SHOW_INFO;
+    if (envvar::log_flags.show_api)   log_flags |= logd_constants::SHOW_API;
+    if (envvar::log_flags.show_trace) log_flags |= logd_constants::SHOW_TRACE;
+    if (envvar::log_flags.show_color) log_flags |= logd_constants::SHOW_COLOR;
+    struct logd_constants host_logd{log_pe_number, log_flags};
+    struct logd_constants* logd_addr{nullptr};
+    if (hipGetSymbolAddress(reinterpret_cast<void**>(&logd_addr),
+                            HIP_SYMBOL(logd_constants)) == hipSuccess) {
+      hipMemcpy(logd_addr, &host_logd, sizeof(host_logd), hipMemcpyDefault);
+    }
+  }
+
   auto *set = new rocshmem_gin_qp_set();
   set->nRanks = nRanks;
   set->myRank = myRank;
