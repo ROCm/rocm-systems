@@ -1364,8 +1364,7 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     emit_gpu_scalar<amd_smi_gfx_track>(_device_id, _ts, _em.bits.gfx_activity, "GFX Busy",
                                        "%", _m.gfx_activity);
     emit_gpu_scalar<amd_smi_umc_track>(_device_id, _ts, _em.bits.umc_activity,
-                                       pmc::collectors::gpu::UMC_BUSY_TRACK_LABEL, "%",
-                                       _m.umc_activity);
+                                       "UMC Avg. Busy", "%", _m.umc_activity);
     emit_gpu_scalar<amd_smi_mm_track>(_device_id, _ts, _em.bits.mm_activity, "MM Busy",
                                       "%", _m.mm_activity);
 

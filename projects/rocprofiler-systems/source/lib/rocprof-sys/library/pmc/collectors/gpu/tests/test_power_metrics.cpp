@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 //
-// Unit tests for the shared socket-power selection / labeling helpers and the
-// UMC busy track label declared in library/pmc/collectors/gpu/types.hpp.
+// Unit tests for the shared socket-power selection / labeling helpers declared in
+// library/pmc/collectors/gpu/types.hpp.
 //
 // These helpers are the single source of truth used by the live Perfetto path
 // (perfetto_policy.hpp) and the replay paths (perfetto_processor.cpp /
@@ -14,8 +14,6 @@
 #include <cstdint>
 
 #include <gtest/gtest.h>
-
-#include <string>
 
 using namespace rocprofsys::pmc::collectors::gpu;
 
@@ -74,6 +72,3 @@ TEST(socket_power, TrackLabelMatchesSelectedReading)
     EXPECT_STREQ(socket_power_track_label(make_enabled(true, true)), "Current Power");
     EXPECT_STREQ(socket_power_track_label(make_enabled(false, true)), "Avg. Power");
 }
-
-// UMC busy is always an averaged reading; the label states so explicitly.
-TEST(umc_busy, LabelIsAverage) { EXPECT_STREQ(UMC_BUSY_TRACK_LABEL, "UMC Avg. Busy"); }

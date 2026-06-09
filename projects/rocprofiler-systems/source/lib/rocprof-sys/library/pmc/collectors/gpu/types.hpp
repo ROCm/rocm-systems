@@ -145,10 +145,6 @@ struct metrics
     std::uint32_t mem_clock_mhz = 0;  // current_uclk (MHz)
 };
 
-// AMD SMI reports UMC busy as a time-averaged value (average_umc_activity), so the
-// track is labeled to make the averaging explicit.
-inline constexpr const char* UMC_BUSY_TRACK_LABEL = "UMC Avg. Busy";
-
 // Socket power: prefer the instantaneous "current" reading, falling back to the
 // time-averaged reading only when current is unavailable.
 [[nodiscard]] inline bool

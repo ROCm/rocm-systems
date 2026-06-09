@@ -62,7 +62,7 @@ make_default_tracks()
 {
     return {
         { GFX_BUSY_VALUE, { "GFX Busy", "%", {} } },
-        { UMC_BUSY_VALUE, { UMC_BUSY_TRACK_LABEL, "%", {} } },
+        { UMC_BUSY_VALUE, { "UMC Avg. Busy", "%", {} } },
         { MM_BUSY_VALUE, { "MM Busy", "%", {} } },
         { TEMPERATURE_VALUE, { "Temperature", "deg C", {} } },
         { CURRENT_POWER_VALUE, { "Current Power", "watts", {} } },
