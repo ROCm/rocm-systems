@@ -6,11 +6,12 @@
 ///
 /// @details ROCR loads this shared library through `HSA_TOOLS_LIB` during
 /// `hsa_init()`. The hook saves the API table entries that are present at
-/// `OnLoad()` time, installs wrappers for memory-backed code-object readers and
-/// agent code-object loads, and invokes rocjitsu DBT before ROCR sees a guest
-/// code object. The MVP is deliberately strict: when translation is requested
-/// and fails, the hook returns an HSA error instead of retrying the original
-/// reader, because the original ELF may target a different GPU ISA.
+/// `OnLoad()` time, installs wrappers for code-object reader creation/destruction
+/// and agent code-object loads, and invokes rocjitsu DBT before ROCR sees a
+/// memory-backed guest code object. The MVP is deliberately strict: when
+/// translation is requested and fails, the hook returns an HSA error instead of
+/// retrying the original reader, because the original ELF may target a different
+/// GPU ISA.
 
 #include "hsa/hsa_api_trace_minimal.h"
 
@@ -18,26 +19,31 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
+#include "util/arena_alloc.h"
+#include "util/intrusive_list.h"
+#include "util/log.h"
 
 #include <array>
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace {
 
 using rocjitsu::AmdGpuCodeObject;
+using rocjitsu::arch_for_elf_mach;
 using rocjitsu::BinaryTranslator;
 using rocjitsu::BinaryTranslatorOptions;
 using rocjitsu::DiagnosticKind;
@@ -46,11 +52,11 @@ using rocjitsu::EF_AMDGPU_MACH;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1100;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1200;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1201;
-using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX940;
-using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX941;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX942;
 using rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX950;
 using rocjitsu::Elf64_Ehdr;
+using rocjitsu::elf_mach_for_arch;
+using rocjitsu::elf_mach_name;
 using rocjitsu::ELFCLASS64;
 using rocjitsu::EM_AMDGPU;
 using rocjitsu::has_error_diagnostic;
@@ -63,7 +69,7 @@ enum HookLogLevel : int {
   kLogDebug = 3,
 };
 
-int g_log_level = kLogDisabled;
+std::atomic<int> g_log_level{kLogDisabled};
 
 struct TargetInfo {
   std::string_view name;
@@ -71,16 +77,15 @@ struct TargetInfo {
   uint32_t mach;
 };
 
-constexpr std::array<TargetInfo, 9> kTargets = {{
-    {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942},
-    {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950},
-    {"gfx1100", ROCJITSU_CODE_ARCH_RDNA3, EF_AMDGPU_MACH_AMDGCN_GFX1100},
-    {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200},
-    {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1201},
-    {"cdna3", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942},
-    {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950},
-    {"rdna3", ROCJITSU_CODE_ARCH_RDNA3, EF_AMDGPU_MACH_AMDGCN_GFX1100},
-    {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200},
+constexpr std::array<uint32_t, 5> kAcceptedConcreteTargetMachs = {
+    EF_AMDGPU_MACH_AMDGCN_GFX942, EF_AMDGPU_MACH_AMDGCN_GFX950, EF_AMDGPU_MACH_AMDGCN_GFX1100,
+    EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201};
+
+constexpr std::array<TargetInfo, 4> kArchAliases = {{
+    {"cdna3", ROCJITSU_CODE_ARCH_CDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA3)},
+    {"cdna4", ROCJITSU_CODE_ARCH_CDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_CDNA4)},
+    {"rdna3", ROCJITSU_CODE_ARCH_RDNA3, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA3)},
+    {"rdna4", ROCJITSU_CODE_ARCH_RDNA4, elf_mach_for_arch(ROCJITSU_CODE_ARCH_RDNA4)},
 }};
 
 struct HookConfig {
@@ -90,7 +95,15 @@ struct HookConfig {
 };
 
 [[nodiscard]] std::optional<TargetInfo> parse_target(std::string_view value) {
-  for (const TargetInfo &target : kTargets) {
+  for (uint32_t mach : kAcceptedConcreteTargetMachs) {
+    std::string_view name = elf_mach_name(mach);
+    if (value == name) {
+      const rj_code_arch_t arch = arch_for_elf_mach(mach);
+      if (arch != ROCJITSU_CODE_ARCH_INVALID)
+        return TargetInfo{name, arch, mach};
+    }
+  }
+  for (const TargetInfo &target : kArchAliases) {
     if (value == target.name)
       return target;
   }
@@ -145,15 +158,16 @@ struct HookConfig {
 }
 
 void log_message(int required_level, const char *format, ...) {
-  if (g_log_level < required_level)
+  if (g_log_level.load(std::memory_order_relaxed) < required_level)
     return;
 
-  std::fprintf(stderr, "[rocjitsu-hooks] ");
+  std::array<char, 512> message{};
   va_list args;
   va_start(args, format);
-  std::vfprintf(stderr, format, args);
+  std::vsnprintf(message.data(), message.size(), format, args);
   va_end(args);
-  std::fprintf(stderr, "\n");
+
+  util::Logger::dbt_hooks(message.data());
 }
 
 [[nodiscard]] const char *arch_name(rj_code_arch_t arch) {
@@ -222,48 +236,43 @@ void print_diagnostics(FILE *stream, std::span<const TranslationDiagnostic> diag
   }
 }
 
-/// @brief Detect the rocjitsu ISA family from an AMDGPU ELF header.
+struct DetectedElfTarget {
+  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  uint32_t mach = 0;
+};
+
+/// @brief Detect the rocjitsu ISA family and exact ELF MACH from an AMDGPU ELF header.
 ///
 /// @details HSA code-object readers are opaque once created, so source ISA
 /// detection has to use the ELF bytes captured at reader creation time. The
-/// helper checks only ELF identity, machine type, and `EF_AMDGPU_MACH`; semantic
-/// validation remains the job of `AmdGpuCodeObject`.
-[[nodiscard]] rj_code_arch_t detect_arch_from_elf(const uint8_t *bytes, size_t size) {
+/// helper checks only ELF identity, machine type, and `EF_AMDGPU_MACH`. The
+/// exact MACH is kept because ROCR rejects same-family-but-different-stepping
+/// code objects such as gfx1200 ELFs loaded on gfx1201 agents.
+[[nodiscard]] DetectedElfTarget detect_target_from_elf(const uint8_t *bytes, size_t size) {
   if (bytes == nullptr || size < sizeof(Elf64_Ehdr))
-    return ROCJITSU_CODE_ARCH_INVALID;
+    return {};
 
   Elf64_Ehdr header{};
   std::memcpy(&header, bytes, sizeof(header));
   if (std::memcmp(header.e_ident, rocjitsu::EI_MAGIC, rocjitsu::EI_MAGIC_SIZE) != 0)
-    return ROCJITSU_CODE_ARCH_INVALID;
+    return {};
   if (header.e_ident[rocjitsu::EI_CLASS] != ELFCLASS64 || header.e_machine != EM_AMDGPU)
-    return ROCJITSU_CODE_ARCH_INVALID;
+    return {};
 
-  switch (header.e_flags & EF_AMDGPU_MACH) {
-  case EF_AMDGPU_MACH_AMDGCN_GFX940:
-  case EF_AMDGPU_MACH_AMDGCN_GFX941:
-  case EF_AMDGPU_MACH_AMDGCN_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
-  case EF_AMDGPU_MACH_AMDGCN_GFX950:
-    return ROCJITSU_CODE_ARCH_CDNA4;
-  case EF_AMDGPU_MACH_AMDGCN_GFX1100:
-    return ROCJITSU_CODE_ARCH_RDNA3;
-  case EF_AMDGPU_MACH_AMDGCN_GFX1200:
-  case EF_AMDGPU_MACH_AMDGCN_GFX1201:
-    return ROCJITSU_CODE_ARCH_RDNA4;
-  default:
-    return ROCJITSU_CODE_ARCH_INVALID;
-  }
+  const uint32_t mach = header.e_flags & EF_AMDGPU_MACH;
+  return DetectedElfTarget{arch_for_elf_mach(mach), mach};
 }
 
 /// @brief Process-local map from HSA code-object reader handles to ELF bytes.
 ///
 /// @details `hsa_executable_load_agent_code_object()` receives only an opaque
 /// reader handle. The create wrapper records memory-backed reader bytes here so
-/// the load wrapper can translate the original ELF. Entries for application
-/// readers are non-owning and rely on the application's reader lifetime. Entries
-/// for hidden translated readers own a vector so ROCR's memory-reader pointer
-/// remains valid while the translated load is in progress.
+/// the load wrapper can translate the original ELF. The registry uses rocjitsu's
+/// intrusive list and fixed-block arena so this C ABI path can report registry
+/// exhaustion as an HSA status instead of depending on throwing STL allocation.
+/// Entries for application readers are non-owning and rely on the application's
+/// reader lifetime. Entries for hidden translated readers own a vector so ROCR's
+/// memory-reader pointer remains valid while the translated load is in progress.
 class CodeObjectReaderRegistry {
 public:
   /// @brief Return the singleton registry used by all hook wrappers.
@@ -277,49 +286,94 @@ public:
   /// @param bytes Start of the ELF image.
   /// @param size Size of the ELF image in bytes.
   /// @param owned Optional owned storage for translated ELF bytes.
-  void store(hsa_code_object_reader_t reader, const uint8_t *bytes, size_t size,
-             std::unique_ptr<std::vector<uint8_t>> owned) {
+  [[nodiscard]] bool store(hsa_code_object_reader_t reader, const uint8_t *bytes, size_t size,
+                           std::vector<uint8_t> *owned) {
     std::unique_lock lock(mutex_);
-    entries_[reader.handle] = Entry{bytes, size, std::move(owned)};
+    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+      auto *entry = static_cast<Entry *>(it.node_pointer());
+      if (entry->handle == reader.handle) {
+        delete entry->owned;
+        entry->bytes = bytes;
+        entry->size = size;
+        entry->owned = owned;
+        return true;
+      }
+    }
+
+    void *storage = entry_pool_.try_allocate(sizeof(Entry));
+    if (storage == nullptr)
+      return false;
+    auto *entry = new (storage) Entry(reader.handle, bytes, size, owned);
+    entries_.push_front(*entry);
+    return true;
   }
 
   /// @brief Find bytes previously recorded for @p reader.
   /// @returns true when @p bytes and @p size were populated.
-  bool lookup(hsa_code_object_reader_t reader, const uint8_t **bytes, size_t *size) const {
+  bool lookup(hsa_code_object_reader_t reader, const uint8_t **bytes, size_t *size) {
     std::shared_lock lock(mutex_);
-    auto it = entries_.find(reader.handle);
-    if (it == entries_.end())
-      return false;
-    *bytes = it->second.bytes;
-    *size = it->second.size;
-    return true;
+    for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+      auto *entry = static_cast<Entry *>(it.node_pointer());
+      if (entry->handle == reader.handle) {
+        *bytes = entry->bytes;
+        *size = entry->size;
+        return true;
+      }
+    }
+    return false;
   }
 
   /// @brief Remove one reader entry and release owned translated bytes if any.
   void remove(hsa_code_object_reader_t reader) {
     std::unique_lock lock(mutex_);
-    entries_.erase(reader.handle);
+    for (auto it = entries_.begin(); it != entries_.end();) {
+      auto *entry = static_cast<Entry *>(it.node_pointer());
+      if (entry->handle == reader.handle) {
+        it = entries_.erase(it);
+        destroy_entry(entry);
+        return;
+      }
+      ++it;
+    }
   }
 
   /// @brief Clear all reader entries during tool unload.
   void clear() {
     std::unique_lock lock(mutex_);
-    entries_.clear();
+    while (!entries_.empty()) {
+      auto it = entries_.begin();
+      auto *entry = static_cast<Entry *>(it.node_pointer());
+      entries_.erase(it);
+      destroy_entry(entry);
+    }
   }
 
 private:
-  struct Entry {
+  struct Entry : util::IListNode<Entry> {
+    Entry(uint64_t h, const uint8_t *b, size_t s, std::vector<uint8_t> *o)
+        : handle(h), bytes(b), size(s), owned(o) {}
+
+    uint64_t handle = 0;
     const uint8_t *bytes = nullptr;
     size_t size = 0;
-    std::unique_ptr<std::vector<uint8_t>> owned;
+    std::vector<uint8_t> *owned = nullptr;
   };
 
+  void destroy_entry(Entry *entry) {
+    delete entry->owned;
+    entry->~Entry();
+    entry_pool_.deallocate(entry);
+  }
+
   mutable std::shared_mutex mutex_;
-  std::unordered_map<uint64_t, Entry> entries_;
+  util::ArenaAlloc<sizeof(Entry), 256, alignof(Entry)> entry_pool_;
+  util::IntrusiveList<Entry> entries_;
 };
 
 hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
     const void *code_object, size_t size, hsa_code_object_reader_t *code_object_reader);
+hsa_status_t HSA_API rj_code_object_reader_create_from_file(
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader);
 hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader);
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
@@ -346,19 +400,21 @@ public:
 
     table_ = table;
     core_ = table->core_;
-    g_log_level = config.log_level;
+    g_log_level.store(config.log_level, std::memory_order_relaxed);
     config_ = std::move(config);
+    original_create_from_file_ = core_->hsa_code_object_reader_create_from_file_fn;
     original_create_from_memory_ = core_->hsa_code_object_reader_create_from_memory_fn;
     original_destroy_ = core_->hsa_code_object_reader_destroy_fn;
     original_load_agent_code_object_ = core_->hsa_executable_load_agent_code_object_fn;
 
-    if (original_create_from_memory_ == nullptr || original_destroy_ == nullptr ||
-        original_load_agent_code_object_ == nullptr) {
+    if (original_create_from_file_ == nullptr || original_create_from_memory_ == nullptr ||
+        original_destroy_ == nullptr || original_load_agent_code_object_ == nullptr) {
       std::fprintf(stderr, "[rocjitsu-hooks] HSA core table contains null code-object entries\n");
       clear_unlocked();
       return false;
     }
 
+    core_->hsa_code_object_reader_create_from_file_fn = rj_code_object_reader_create_from_file;
     core_->hsa_code_object_reader_create_from_memory_fn = rj_code_object_reader_create_from_memory;
     core_->hsa_code_object_reader_destroy_fn = rj_code_object_reader_destroy;
     core_->hsa_executable_load_agent_code_object_fn = rj_executable_load_agent_code_object;
@@ -373,6 +429,9 @@ public:
   void uninstall() {
     std::lock_guard lock(mutex_);
     if (active_ && core_ != nullptr) {
+      if (core_->hsa_code_object_reader_create_from_file_fn ==
+          rj_code_object_reader_create_from_file)
+        core_->hsa_code_object_reader_create_from_file_fn = original_create_from_file_;
       if (core_->hsa_code_object_reader_create_from_memory_fn ==
           rj_code_object_reader_create_from_memory)
         core_->hsa_code_object_reader_create_from_memory_fn = original_create_from_memory_;
@@ -391,9 +450,14 @@ public:
     return config_ ? config_->log_level : kLogDisabled;
   }
 
-  [[nodiscard]] HookConfig config() const {
+  [[nodiscard]] std::optional<HookConfig> config() const {
     std::lock_guard lock(mutex_);
-    return *config_;
+    return config_;
+  }
+
+  [[nodiscard]] decltype(hsa_code_object_reader_create_from_file) *create_from_file() const {
+    std::lock_guard lock(mutex_);
+    return original_create_from_file_;
   }
 
   [[nodiscard]] decltype(hsa_code_object_reader_create_from_memory) *create_from_memory() const {
@@ -432,10 +496,11 @@ private:
 
   void clear_unlocked() {
     active_ = false;
-    g_log_level = kLogDisabled;
+    g_log_level.store(kLogDisabled, std::memory_order_relaxed);
     table_ = nullptr;
     core_ = nullptr;
     config_.reset();
+    original_create_from_file_ = nullptr;
     original_create_from_memory_ = nullptr;
     original_destroy_ = nullptr;
     original_load_agent_code_object_ = nullptr;
@@ -446,6 +511,7 @@ private:
   CoreApiTable *core_ = nullptr;
   std::optional<HookConfig> config_;
   bool active_ = false;
+  decltype(hsa_code_object_reader_create_from_file) *original_create_from_file_ = nullptr;
   decltype(hsa_code_object_reader_create_from_memory) *original_create_from_memory_ = nullptr;
   decltype(hsa_code_object_reader_destroy) *original_destroy_ = nullptr;
   decltype(hsa_executable_load_agent_code_object) *original_load_agent_code_object_ = nullptr;
@@ -464,10 +530,35 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 
   const hsa_status_t status = original(code_object, size, code_object_reader);
   if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr && code_object != nullptr) {
-    CodeObjectReaderRegistry::instance().store(
-        *code_object_reader, static_cast<const uint8_t *>(code_object), size, nullptr);
+    if (!CodeObjectReaderRegistry::instance().store(
+            *code_object_reader, static_cast<const uint8_t *>(code_object), size, nullptr)) {
+      if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+        (void)original_destroy(*code_object_reader);
+      *code_object_reader = {};
+      std::fprintf(stderr, "[rocjitsu-hooks] failed to track memory-backed code-object reader\n");
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
     log_message(kLogDebug, "registered reader=%llu bytes=%zu",
                 static_cast<unsigned long long>(code_object_reader->handle), size);
+  }
+  return status;
+}
+
+hsa_status_t HSA_API rj_code_object_reader_create_from_file(
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) {
+  auto *original = layer().create_from_file();
+  if (original == nullptr)
+    return HSA_STATUS_ERROR;
+
+  const hsa_status_t status = original(file, code_object_reader);
+  if (status == HSA_STATUS_SUCCESS && code_object_reader != nullptr) {
+    // File-backed readers do not expose stable ELF bytes through the later
+    // load-agent callback. Hook the create path anyway so users get a direct
+    // warning instead of an unexplained INVALID_ISA pass-through failure.
+    std::fprintf(stderr,
+                 "[rocjitsu-hooks] file-backed code-object reader=%llu is not translated; use "
+                 "hsa_code_object_reader_create_from_memory for DBT hook translation\n",
+                 static_cast<unsigned long long>(code_object_reader->handle));
   }
   return status;
 }
@@ -483,17 +574,30 @@ hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code
 
 [[nodiscard]] hsa_status_t create_translated_reader(std::vector<uint8_t> translated,
                                                     hsa_code_object_reader_t *translated_reader) {
-  auto owned = std::make_unique<std::vector<uint8_t>>(std::move(translated));
+  auto *owned = new (std::nothrow) std::vector<uint8_t>(std::move(translated));
+  if (owned == nullptr)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   auto *original_create = layer().create_from_memory();
-  if (original_create == nullptr)
+  if (original_create == nullptr) {
+    delete owned;
     return HSA_STATUS_ERROR;
+  }
 
   const hsa_status_t status = original_create(owned->data(), owned->size(), translated_reader);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
+    delete owned;
     return status;
+  }
 
-  CodeObjectReaderRegistry::instance().store(*translated_reader, owned->data(), owned->size(),
-                                             std::move(owned));
+  if (!CodeObjectReaderRegistry::instance().store(*translated_reader, owned->data(), owned->size(),
+                                                  owned)) {
+    if (auto *original_destroy = layer().destroy(); original_destroy != nullptr)
+      (void)original_destroy(*translated_reader);
+    *translated_reader = {};
+    delete owned;
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -512,42 +616,50 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return original_load(executable, agent, code_object_reader, options, loaded_code_object);
   }
 
-  HookConfig config = layer().config();
-  const rj_code_arch_t source_arch =
-      config.source_override ? config.source_override->arch : detect_arch_from_elf(bytes, size);
-  if (source_arch == ROCJITSU_CODE_ARCH_INVALID) {
+  auto config = layer().config();
+  if (!config) {
+    // `OnUnload()` should not normally race active ROCR callbacks, but returning
+    // an HSA error here is safer than dereferencing cleared hook state.
+    std::fprintf(stderr, "[rocjitsu-hooks] DBT hook layer is inactive during code-object load\n");
+    return HSA_STATUS_ERROR;
+  }
+
+  const DetectedElfTarget detected = detect_target_from_elf(bytes, size);
+  DetectedElfTarget source_target = detected;
+  if (config->source_override) {
+    source_target.arch = config->source_override->arch;
+    source_target.mach = config->source_override->mach;
+  }
+  if (source_target.arch == ROCJITSU_CODE_ARCH_INVALID || source_target.mach == 0) {
     std::fprintf(stderr, "[rocjitsu-hooks] failed to detect source ISA from code-object ELF\n");
     return HSA_STATUS_ERROR;
   }
 
-  if (source_arch == config.target.arch) {
-    log_message(kLogInfo, "source arch %s already matches target arch %s; passing through",
-                arch_name(source_arch), arch_name(config.target.arch));
+  if (source_target.arch == config->target.arch && source_target.mach == config->target.mach) {
+    log_message(kLogInfo,
+                "source target %s arch %s already matches requested target; passing through",
+                elf_mach_name(source_target.mach), arch_name(source_target.arch));
     return original_load(executable, agent, code_object_reader, options, loaded_code_object);
   }
 
-  log_message(kLogInfo, "translating reader=%llu %s -> %s mach=0x%x",
-              static_cast<unsigned long long>(code_object_reader.handle), arch_name(source_arch),
-              arch_name(config.target.arch), config.target.mach);
+  log_message(kLogInfo, "translating reader=%llu %s/%s -> %s/%s mach=0x%x",
+              static_cast<unsigned long long>(code_object_reader.handle),
+              elf_mach_name(source_target.mach), arch_name(source_target.arch),
+              config->target.name.data(), arch_name(config->target.arch), config->target.mach);
 
-  AmdGpuCodeObject source(bytes, size);
-  if (!source.is_valid()) {
+  AmdGpuCodeObject source_object(bytes, size);
+  if (!source_object.is_valid()) {
     std::fprintf(stderr, "[rocjitsu-hooks] source bytes are not a valid AMDGPU code object\n");
     return HSA_STATUS_ERROR;
   }
 
   rocjitsu::TranslatedCodeObject translated;
-  try {
-    BinaryTranslatorOptions translator_options;
-    BinaryTranslator translator(source_arch, config.target.arch, config.target.mach,
-                                translator_options);
-    translated = translator.translate(source);
-  } catch (const std::exception &e) {
-    std::fprintf(stderr, "[rocjitsu-hooks] translation threw exception: %s\n", e.what());
-    return HSA_STATUS_ERROR;
-  }
+  BinaryTranslatorOptions translator_options;
+  BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
+                              translator_options);
+  translated = translator.translate(source_object);
 
-  print_diagnostics(stderr, translated.diagnostics, config.log_level > kLogDisabled);
+  print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
     std::fprintf(stderr, "[rocjitsu-hooks] translation failed; refusing original code object\n");
     return HSA_STATUS_ERROR;

@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <string>
@@ -40,20 +41,52 @@ namespace {
 
 std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".o"; }
 
-hsa_agent_t find_gpu_agent() {
-  hsa_agent_t gpu{};
+struct GpuTarget {
+  hsa_agent_t agent{};
+  std::string isa_name;
+  std::vector<std::string> seen_gpu_isas;
+};
+
+std::string join_seen_isas(const std::vector<std::string> &isas) {
+  if (isas.empty())
+    return "<none>";
+  std::string out = isas.front();
+  for (size_t i = 1; i < isas.size(); ++i) {
+    out += ", ";
+    out += isas[i];
+  }
+  return out;
+}
+
+GpuTarget find_gpu_agent_for_isa(const char *target_isa) {
+  struct Ctx {
+    const char *target_isa = nullptr;
+    GpuTarget result;
+  } ctx{target_isa, {}};
+
   hsa_iterate_agents(
       [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        auto *ctx = static_cast<Ctx *>(data);
         hsa_device_type_t type{};
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-        if (type == HSA_DEVICE_TYPE_GPU) {
-          *static_cast<hsa_agent_t *>(data) = agent;
+        if (type != HSA_DEVICE_TYPE_GPU)
+          return HSA_STATUS_SUCCESS;
+
+        hsa_isa_t isa{};
+        char isa_name[128]{};
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
+        hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
+        ctx->result.seen_gpu_isas.emplace_back(isa_name);
+
+        if (ctx->target_isa != nullptr && std::strstr(isa_name, ctx->target_isa) != nullptr) {
+          ctx->result.agent = agent;
+          ctx->result.isa_name = isa_name;
           return HSA_STATUS_INFO_BREAK;
         }
         return HSA_STATUS_SUCCESS;
       },
-      &gpu);
-  return gpu;
+      &ctx);
+  return ctx.result;
 }
 
 hsa_agent_t find_cpu_agent() {
@@ -113,9 +146,16 @@ TEST(HsaHooksTest, TranslateGfx950Mfma16x16ThroughToolsLib) {
 
   ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
 
-  hsa_agent_t gpu = find_gpu_agent();
+  const char *target_isa = std::getenv("RJ_DBT_TARGET_ISA");
+  ASSERT_NE(target_isa, nullptr) << "HSA hook test requires RJ_DBT_TARGET_ISA";
+  // The hook target and dispatch agent must agree exactly. On multi-GPU hosts,
+  // the first HSA GPU can be a different gfx stepping from the CTest-selected
+  // RJ_DBT_TARGET_ISA, which makes ROCR reject the translated code object.
+  GpuTarget gpu_target = find_gpu_agent_for_isa(target_isa);
+  hsa_agent_t gpu = gpu_target.agent;
   hsa_agent_t cpu = find_cpu_agent();
-  ASSERT_NE(gpu.handle, 0u);
+  ASSERT_NE(gpu.handle, 0u) << "No GPU agent matched RJ_DBT_TARGET_ISA=" << target_isa
+                            << "; seen GPU ISAs: " << join_seen_isas(gpu_target.seen_gpu_isas);
   ASSERT_NE(cpu.handle, 0u);
 
   // Pass the original gfx950 ELF to ROCR. librocjitsu_hooks.so must perform the

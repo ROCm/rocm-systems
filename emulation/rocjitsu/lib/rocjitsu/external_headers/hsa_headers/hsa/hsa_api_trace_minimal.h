@@ -34,9 +34,10 @@ struct ApiTableVersion {
 ///
 /// @details The field order and types intentionally match ROCR
 /// `hsa_api_trace.h` through `hsa_executable_load_agent_code_object_fn`.
-/// Rocjitsu only overwrites the memory-reader create/destroy functions and the
-/// agent code-object loader, but preserving the preceding fields keeps the
-/// offsets identical to ROCR without vendoring extension-table dependencies.
+/// Rocjitsu overwrites the file-reader create function for diagnostics, the
+/// memory-reader create/destroy functions for translation state, and the agent
+/// code-object loader. Preserving the preceding fields keeps the offsets
+/// identical to ROCR without vendoring extension-table dependencies.
 struct CoreApiTable {
   ApiTableVersion version;
   decltype(hsa_init) *hsa_init_fn;
