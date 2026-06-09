@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <unistd.h>
 
 namespace rocprofsys::inline common::units
 {
@@ -23,5 +24,12 @@ inline constexpr std::int64_t GB = gigabyte;
 
 inline constexpr std::int64_t nanowatt = 1;
 inline constexpr std::int64_t watt     = 1000 * 1000 * 1000 * nanowatt;
+
+inline int64_t
+get_page_size()
+{
+    static auto page_size = sysconf(_SC_PAGESIZE);
+    return page_size;
+}
 
 }  // namespace rocprofsys::inline common::units
