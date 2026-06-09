@@ -132,6 +132,20 @@ public:
     return config_.functional_quantum == 0 ? UINT32_MAX : config_.functional_quantum;
   }
 
+  /// @brief Execute up to one functional quantum of instructions on this CU.
+  /// @returns true if any active wavefronts were stepped.
+  bool run_quantum() {
+    bool ran = false;
+    for (uint32_t i = 0, quantum = functional_quantum(); i < quantum; ++i) {
+      if (!has_active_wfs())
+        break;
+      ran = true;
+      if (!step())
+        break;
+    }
+    return ran;
+  }
+
   /// @brief Signal that work has been dispatched; begin processing.
   ///
   /// @details Schedules an engine event that calls advance() repeatedly

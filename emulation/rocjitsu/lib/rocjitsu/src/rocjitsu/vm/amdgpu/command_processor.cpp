@@ -101,19 +101,6 @@ bool sgpr_count_is_descriptor_encoded(rj_code_arch_t arch, uint32_t sgpr_gran) {
   }
 }
 
-bool run_cu_quantum(ComputeUnitCore *cu) {
-  bool ran = false;
-  const uint32_t quantum = cu->functional_quantum();
-  for (uint32_t i = 0; i < quantum; ++i) {
-    if (!cu->has_active_wfs())
-      break;
-    ran = true;
-    if (!cu->step())
-      break;
-  }
-  return ran;
-}
-
 bool cp_profile_enabled() {
   static bool enabled = std::getenv("RJ_CP_PROFILE") != nullptr;
   return enabled;
@@ -181,133 +168,17 @@ void atomic_max(std::atomic<uint64_t> &target, uint64_t value) {
 
 } // namespace
 
-class CpuDispatchPool {
-public:
-  explicit CpuDispatchPool(uint32_t threads) {
-    uint32_t worker_count = threads > 1 ? threads - 1 : 0;
-    workers_.reserve(worker_count);
-    for (uint32_t i = 0; i < worker_count; ++i)
-      workers_.emplace_back([this](std::stop_token stop) { worker_loop(stop); });
-  }
-
-  ~CpuDispatchPool() {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      stopping_ = true;
-      ++generation_;
-    }
-    work_cv_.notify_all();
-  }
-
-  uint32_t thread_count() const { return static_cast<uint32_t>(workers_.size() + 1); }
-
-  void run(std::span<ComputeUnitCore *> tasks, uint32_t threads) {
-    if (tasks.empty())
-      return;
-
-    threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(tasks.size()));
-    uint32_t worker_goal =
-        std::min<uint32_t>(threads > 1 ? threads - 1 : 0, static_cast<uint32_t>(workers_.size()));
-
-    if (worker_goal == 0) {
-      for (auto *cu : tasks)
-        run_cu_quantum(cu);
-      return;
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      tasks_.assign(tasks.begin(), tasks.end());
-      next_task_ = 0;
-      active_workers_ = 0;
-      started_workers_ = 0;
-      target_workers_ = worker_goal;
-      ++generation_;
-    }
-    for (uint32_t i = 0; i < worker_goal; ++i)
-      work_cv_.notify_one();
-
-    while (auto *cu = take_task()) {
-      run_cu_quantum(cu);
-      finish_task();
-    }
-
-    std::unique_lock<std::mutex> lock(mutex_);
-    done_cv_.wait(lock, [this]() { return next_task_ >= tasks_.size() && active_workers_ == 0; });
-    tasks_.clear();
-    target_workers_ = 0;
-  }
-
-private:
-  ComputeUnitCore *take_task() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (next_task_ >= tasks_.size())
-      return nullptr;
-    ++active_workers_;
-    return tasks_[next_task_++];
-  }
-
-  void finish_task() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    --active_workers_;
-    if (next_task_ >= tasks_.size() && active_workers_ == 0)
-      done_cv_.notify_one();
-  }
-
-  void worker_loop(std::stop_token stop) {
-    uint64_t seen_generation = 0;
-    while (true) {
-      std::unique_lock<std::mutex> lock(mutex_);
-      work_cv_.wait(lock, [this, &stop, seen_generation]() {
-        return stopping_ || stop.stop_requested() || generation_ != seen_generation;
-      });
-      if (stopping_ || stop.stop_requested())
-        return;
-      seen_generation = generation_;
-      if (started_workers_ >= target_workers_)
-        continue;
-      ++started_workers_;
-
-      while (next_task_ < tasks_.size()) {
-        auto *cu = tasks_[next_task_++];
-        ++active_workers_;
-        lock.unlock();
-        run_cu_quantum(cu);
-        lock.lock();
-        --active_workers_;
-      }
-
-      if (next_task_ >= tasks_.size() && active_workers_ == 0)
-        done_cv_.notify_one();
-    }
-  }
-
-  std::mutex mutex_;
-  std::condition_variable work_cv_;
-  std::condition_variable done_cv_;
-  std::vector<std::jthread> workers_;
-  std::vector<ComputeUnitCore *> tasks_;
-  size_t next_task_ = 0;
-  size_t active_workers_ = 0;
-  uint32_t started_workers_ = 0;
-  uint32_t target_workers_ = 0;
-  uint64_t generation_ = 0;
-  bool stopping_ = false;
-};
-
 CommandProcessor::CommandProcessor(std::string name) : simdojo::Component(std::move(name)) {}
 
-CommandProcessor::~CommandProcessor() {
-  stop_doorbell_monitor();
-  dispatch_pool_.reset();
-}
+CommandProcessor::~CommandProcessor() { stop_doorbell_monitor(); }
 
 void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   threads = std::max(threads, 1u);
   if (dispatch_threads_ == threads)
     return;
   dispatch_threads_ = threads;
-  dispatch_pool_.reset();
+  for (auto *spi : spis_)
+    spi->reset_dispatch_pool();
 }
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -900,13 +771,12 @@ bool CommandProcessor::has_active_cus() const {
 }
 
 bool CommandProcessor::run_active_cus_once() {
-  std::vector<ComputeUnitCore *> active;
-  active.reserve(cus_.size());
+  size_t active_cus = 0;
   for (auto *cu : cus_) {
     if (cu->has_active_wfs())
-      active.push_back(cu);
+      ++active_cus;
   }
-  if (active.empty()) {
+  if (active_cus == 0) {
     if (cp_profile_enabled()) {
       auto &profile = cp_profile_counters();
       profile.run_calls.fetch_add(1, std::memory_order_relaxed);
@@ -916,24 +786,31 @@ bool CommandProcessor::run_active_cus_once() {
   }
 
   uint32_t effective_threads =
-      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active.size()));
+      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cus));
   if (cp_profile_enabled()) {
     auto &profile = cp_profile_counters();
     profile.run_calls.fetch_add(1, std::memory_order_relaxed);
-    profile.active_cu_sum.fetch_add(active.size(), std::memory_order_relaxed);
+    profile.active_cu_sum.fetch_add(active_cus, std::memory_order_relaxed);
     profile.effective_thread_sum.fetch_add(effective_threads, std::memory_order_relaxed);
-    atomic_max(profile.max_active_cus, active.size());
+    atomic_max(profile.max_active_cus, active_cus);
     atomic_max(profile.max_effective_threads, effective_threads);
     if (effective_threads > 1)
       profile.parallel_run_calls.fetch_add(1, std::memory_order_relaxed);
   }
-  if (effective_threads > 1) {
-    if (!dispatch_pool_ || dispatch_pool_->thread_count() < effective_threads)
-      dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
-    dispatch_pool_->run(active, effective_threads);
-  } else {
-    for (auto *cu : active)
-      run_cu_quantum(cu);
+
+  // Wavefront execution is driven by the SPIs, which own the worker pools.
+  // The CP only orchestrates queue fetch, dispatch, and completion.
+  if (!spis_.empty()) {
+    bool ran = false;
+    for (auto *spi : spis_)
+      ran |= spi->run_active_cus_once(dispatch_threads_);
+    return ran;
+  }
+
+  // Fallback for topologies without SPIs (direct add_compute_unit harnesses).
+  for (auto *cu : cus_) {
+    if (cu->has_active_wfs())
+      cu->run_quantum();
   }
   return true;
 }
@@ -1356,6 +1233,11 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
                       entries_after - entries_before, entries_after);
   });
 
+  // While the lock is dropped, CU workers may append completions to
+  // new_queue_states_ (re-drained and indices re-validated after relock).
+  // Assumes no concurrent queue registration/unregistration during the
+  // unlock window — unregister_queue() erasing new_queue_states_ would
+  // invalidate references held by the dispatch loop.
   auto run_dispatch_workers = [&]() {
     if (dispatch_threads_ <= 1 || !has_active_cus())
       return false;

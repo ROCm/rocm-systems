@@ -49,8 +49,6 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace amdgpu {
 
-class CpuDispatchPool;
-
 /// @brief Description of an AQL hardware queue registered with the CP.
 struct HwQueue {
   uint32_t process_id = 0;
@@ -189,7 +187,9 @@ private:
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
 
-  /// @brief Execute one functional quantum on each active CU using the CP CPU pool.
+  /// @brief Execute one functional quantum on each active CU.
+  /// @details Delegates wavefront execution to the SPIs (which own the host
+  /// worker pools); falls back to serial execution when no SPIs are present.
   bool run_active_cus_once();
 
   bool has_active_cus() const;
@@ -245,7 +245,6 @@ private:
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
   uint32_t dispatch_threads_ = 1;
-  std::unique_ptr<CpuDispatchPool> dispatch_pool_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;

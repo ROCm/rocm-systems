@@ -14,12 +14,15 @@
 #define ROCJITSU_VM_AMDGPU_SPI_H_
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -111,6 +114,53 @@ public:
     return any_active;
   }
 
+  /// @brief Check whether any CU in this SE has active wavefronts.
+  bool has_active_cus() const {
+    for (auto *cu : cus_)
+      if (cu->has_active_wfs())
+        return true;
+    return false;
+  }
+
+  /// @brief Count CUs in this SE with active wavefronts.
+  uint32_t active_cu_count() const {
+    uint32_t count = 0;
+    for (auto *cu : cus_)
+      if (cu->has_active_wfs())
+        ++count;
+    return count;
+  }
+
+  /// @brief Execute one functional quantum on each active CU.
+  ///
+  /// @details Drives wavefront execution for this SE's CUs, fanning out
+  /// across up to @p threads host threads via an SPI-owned worker pool.
+  /// @returns true if any CU executed instructions.
+  bool run_active_cus_once(uint32_t threads) {
+    std::vector<ComputeUnitCore *> active;
+    active.reserve(cus_.size());
+    for (auto *cu : cus_) {
+      if (cu->has_active_wfs())
+        active.push_back(cu);
+    }
+    if (active.empty())
+      return false;
+
+    uint32_t effective_threads = std::min<uint32_t>(threads, static_cast<uint32_t>(active.size()));
+    if (effective_threads > 1) {
+      if (!dispatch_pool_ || dispatch_pool_->thread_count() < effective_threads)
+        dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective_threads);
+      dispatch_pool_->run(active, effective_threads);
+    } else {
+      for (auto *cu : active)
+        cu->run_quantum();
+    }
+    return true;
+  }
+
+  /// @brief Tear down the worker pool (e.g., on thread-count change).
+  void reset_dispatch_pool() { dispatch_pool_.reset(); }
+
   /// @brief Check if any WGs are queued or any CU is active.
   bool has_pending() const {
     for (auto &q : pipe_queues_)
@@ -163,6 +213,7 @@ private:
   size_t next_cu_ = 0;
   std::vector<std::deque<WgRequest>> pipe_queues_;
   size_t next_pipe_ = 0;
+  std::unique_ptr<CpuDispatchPool> dispatch_pool_; ///< Drives wavefront execution on host threads.
 };
 
 } // namespace amdgpu
