@@ -78,6 +78,10 @@ add_executable(${SMI_NODRM_EXAMPLE_EXE} "amd_smi_nodrm_example.cc")
 target_link_libraries(${SMI_NODRM_EXAMPLE_EXE} ${_AMDSMI_LINK_TARGET})
 target_compile_definitions(${SMI_NODRM_EXAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
 
+set(SMI_PARTITION_EXAMPLE_EXE "amd_smi_partition_ex")
+add_executable(${SMI_PARTITION_EXAMPLE_EXE} "amd_smi_partition_example.cc")
+target_link_libraries(${SMI_PARTITION_EXAMPLE_EXE} ${_AMDSMI_LINK_TARGET})
+
 if(ENABLE_ESMI_LIB)
     set(ESMI_SAMPLE_EXE "amd_smi_esmi_ex")
     add_executable(${ESMI_SAMPLE_EXE} "amdsmi_esmi_intg_example.cc")

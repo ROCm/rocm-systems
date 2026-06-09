@@ -64,6 +64,9 @@
 /emulation/                                                           @atgutier
 /emulation/mirage/                                                    @atgutier @amd-arosa
 
+# Profilers
+/profilers/profiler-hub                                               @ROCm/rocm-profiler-hub
+
 # Documentation-specific ownership by project (last to take precedence)
 
 /projects/clr/**/*.md                                                 @ROCm/clr-reviewers @ROCm/lrt-docs-reviewers

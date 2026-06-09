@@ -2149,6 +2149,7 @@ tool_fini(void* tool_data)
     static std::atomic_flag _once = ATOMIC_FLAG_INIT;
     if(_once.test_and_set()) return;
 
+    flush();
     stop();
     flush();
 

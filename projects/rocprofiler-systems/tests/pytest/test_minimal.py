@@ -52,8 +52,8 @@ class TestMinimal(RocprofsysTest):
             mode,
             "minimal-recursion",
             env=env,
-            rewrite_args=["--min-instructions", "0"],
-            runtime_args=["--min-instructions", "0"],
+            binary_rewrite_args=["--min-instructions", "0"],
+            runtime_instrument_args=["--min-instructions", "0"],
             run_args=[str(self.RECURSION_DEPTH)],
         )
         self.assert_regex(result)
