@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  setup:
+  nvidia-clr-build-setup:
     name: "Setup"
     runs-on: ubuntu-24.04
     env:
@@ -38,8 +38,8 @@ jobs:
         run: |
           SHOULD_BUILD=false
 
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SHOULD_BUILD=true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHOULD_BUILD=true;
           else
             CHANGED_FILES=$(git diff --name-only "${BASE_REF}")
             echo "Changed files:"
@@ -50,10 +50,9 @@ jobs:
               echo "No changes in clr/hip/hip-tests/hipother — skipping NVIDIA build"
             fi
           fi
-
           echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
 
-  build:
+  nvidia-clr-build:
     name: "Build clr + hip-tests (NVIDIA)"
     needs: setup
     if: ${{ needs.setup.outputs.should_build == 'true' }}
@@ -74,7 +73,7 @@ jobs:
             projects/hip-tests
             projects/hipother
 
-      - name: Checkout TheRock repository
+      - name: Checkout llvm-project repository # we only need hipcc to build HIP on nvidia platform
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/llvm-project"
@@ -127,7 +126,7 @@ jobs:
       - name: Build hip-tests
         run: cmake --build "${BUILD_DIR}/hip-tests" --parallel
 
-  ci-summary:
+  nvidia-clr-build-ci-summary:
     name: "HIP NVIDIA CI Summary"
     if: always()
     needs: [setup, build]
