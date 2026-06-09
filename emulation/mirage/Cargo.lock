@@ -1041,22 +1041,45 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "chrono",
  "clap",
  "futures-util",
  "libc",
+ "mirage_builtin",
  "mirage_core",
  "mirage_ctl",
  "mirage_daemon",
  "mirage_host",
+ "mirage_hotswap",
  "mirage_rocjitsu",
+ "nix",
  "predicates",
  "reqwest",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tracing-subscriber",
  "tungstenite 0.24.0",
+]
+
+[[package]]
+name = "mirage_builtin"
+version = "0.1.0"
+dependencies = [
+ "mirage_core",
+ "tempfile",
+]
+
+[[package]]
+name = "mirage_container"
+version = "0.1.0"
+dependencies = [
+ "mirage_core",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -1087,9 +1110,10 @@ dependencies = [
  "dialoguer",
  "futures",
  "libc",
+ "mirage_builtin",
  "mirage_core",
+ "mirage_hotswap",
  "mirage_rocjitsu",
- "nix",
  "serde",
  "serde_json",
  "tokio",
@@ -1136,7 +1160,9 @@ dependencies = [
  "chrono",
  "clap",
  "libc",
+ "mirage_container",
  "mirage_core",
+ "mirage_hotswap",
  "mirage_rocjitsu",
  "nix",
  "serde",
@@ -1147,10 +1173,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirage_hotswap"
+version = "0.1.0"
+dependencies = [
+ "mirage_core",
+]
+
+[[package]]
 name = "mirage_rocjitsu"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "mirage_builtin",
  "mirage_core",
  "serde",
  "serde_json",

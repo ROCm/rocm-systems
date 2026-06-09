@@ -294,6 +294,9 @@ namespace core {
       HSAKMT_PFN(hsaKmtSetTrapHandler) = (HSAKMT_DEF(hsaKmtSetTrapHandler)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetTrapHandler");
       if (HSAKMT_PFN(hsaKmtSetTrapHandler) == nullptr) goto LOAD_ERROR;
 
+      // only resolved when libhsakmt exposes the RAS-poison opt-in.
+      HSAKMT_PFN(hsaKmtSetSigbusDelay) = (HSAKMT_DEF(hsaKmtSetSigbusDelay)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetSigbusDelay");
+
       HSAKMT_PFN(hsaKmtGetTileConfig) = (HSAKMT_DEF(hsaKmtGetTileConfig)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetTileConfig");
       if (HSAKMT_PFN(hsaKmtGetTileConfig) == nullptr) goto LOAD_ERROR;
 
@@ -524,6 +527,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtMapGraphicHandle) = (HSAKMT_DEF(hsaKmtMapGraphicHandle)*)(&hsaKmtMapGraphicHandle);
       HSAKMT_PFN(hsaKmtUnmapGraphicHandle) = (HSAKMT_DEF(hsaKmtUnmapGraphicHandle)*)(&hsaKmtUnmapGraphicHandle);
       HSAKMT_PFN(hsaKmtSetTrapHandler) = (HSAKMT_DEF(hsaKmtSetTrapHandler)*)(&hsaKmtSetTrapHandler);
+      HSAKMT_PFN(hsaKmtSetSigbusDelay) = (HSAKMT_DEF(hsaKmtSetSigbusDelay)*)(&hsaKmtSetSigbusDelay);
       HSAKMT_PFN(hsaKmtGetTileConfig) = (HSAKMT_DEF(hsaKmtGetTileConfig)*)(&hsaKmtGetTileConfig);
       HSAKMT_PFN(hsaKmtQueryPointerInfo) = (HSAKMT_DEF(hsaKmtQueryPointerInfo)*)(&hsaKmtQueryPointerInfo);
       HSAKMT_PFN(hsaKmtSetMemoryUserData) = (HSAKMT_DEF(hsaKmtSetMemoryUserData)*)(&hsaKmtSetMemoryUserData);

@@ -88,16 +88,16 @@ jobs:
         run: |
           set -euo pipefail
           cd ~/rocm-systems/projects/rocr-runtime/libhsakmt
-          
+
           echo "Building libhsakmt in WSL with Windows SDK..."
-          
+
           # Use the detected Windows SDK version from the host
           WIN_SDK_VERSION="${WIN_SDK_VERSION:-10.0.26100.0}"
           export win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}/"
-          
+
           echo "Using Windows SDK version: ${WIN_SDK_VERSION}"
           echo "Windows SDK path: ${win_sdk}"
-          
+
           # Verify the Windows SDK is accessible from WSL
           if [ ! -d "${win_sdk}" ]; then
             echo "ERROR: Windows SDK not found at ${win_sdk}"
@@ -105,11 +105,11 @@ jobs:
             ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || echo "SDK directory not accessible"
             exit 1
           fi
-          
+
           # Build the library
           mkdir -p build
           cd build
           cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared"
           ninja
-          
+
           echo "libhsakmt build completed successfully!"

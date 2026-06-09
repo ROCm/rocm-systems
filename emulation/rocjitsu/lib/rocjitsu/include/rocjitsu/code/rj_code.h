@@ -43,8 +43,10 @@ typedef enum rj_code_arch_e {
   ROCJITSU_CODE_ARCH_RV32I = 9,
   /// @brief RISC-V 64-bit integer base ISA.
   ROCJITSU_CODE_ARCH_RV64I = 10,
+  /// @brief gfx1250 ISA architecture.
+  ROCJITSU_CODE_ARCH_GFX1250 = 11,
   /// @brief Total number of supported architectures.
-  ROCJITSU_CODE_ARCH_NUM_ARCHS = 11,
+  ROCJITSU_CODE_ARCH_NUM_ARCHS = 12,
   /// @brief Sentinel value representing an invalid architecture.
   ROCJITSU_CODE_ARCH_INVALID = ROCJITSU_CODE_ARCH_NUM_ARCHS
 } rj_code_arch_t;
@@ -104,6 +106,8 @@ typedef enum rj_code_target_id_t {
   ROCJITSU_CODE_TARGET_GFX1200,
   /// @brief gfx1201 target ID (RDNA4).
   ROCJITSU_CODE_TARGET_GFX1201,
+  /// @brief gfx1250 target ID.
+  ROCJITSU_CODE_TARGET_GFX1250,
   /// @brief Sentinel value representing an invalid target.
   ROCJITSU_CODE_TARGET_INVALID
 } rj_code_target_id_t;

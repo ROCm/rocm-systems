@@ -125,7 +125,11 @@ private:
     // loads data using volatile so it doesn't see stale data in L1.
     //
     // To be revisited for correctness on gfx1250
-#if defined(__gfx1200__) || defined(__gfx1201__)
+#if defined(__gfx950__)
+    // NET no-GDR can publish host-staged payloads from the CPU proxy.
+    // Acquire the tail before GPU workers consume the payload.
+    return ld_acquire_sys_global(ptr);
+#elif defined(__gfx1200__) || defined(__gfx1201__)
     return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
 #else
     return __atomic_load_n(ptr, __ATOMIC_RELAXED);
@@ -467,7 +471,9 @@ private:
 public:
   static inline __device__ void sendPeerNotify(int peer, int connIndex, int steps) {
 #ifdef ENABLE_WARP_SPEED
-    ncclDevChannelPeer* peerPtr = ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer];
+    ncclDevChannelPeer* peerPtr = ncclShmem.warpComm
+        ? ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer]
+        : ncclShmem.channel.peers[peer];
 #else
     ncclDevChannelPeer* peerPtr = ncclShmem.channel.peers[peer];
 #endif
@@ -478,7 +484,9 @@ public:
   static inline __device__ void recvPeerNotify(int peer, int connIndex, int steps) {
     int spins = 0;
 #ifdef ENABLE_WARP_SPEED
-    ncclDevChannelPeer* peerPtr = ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer];
+    ncclDevChannelPeer* peerPtr = ncclShmem.warpComm
+        ? ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer]
+        : ncclShmem.channel.peers[peer];
 #else
     ncclDevChannelPeer* peerPtr = ncclShmem.channel.peers[peer];
 #endif
@@ -752,7 +760,9 @@ public:
     barriers_pat = &ncclShmem.barrier_pat;
     this->nworkers = nthreads;
 #ifdef ENABLE_WARP_SPEED
-    auto *channel = &ncclShmem.warpChannel[tidInBlock/WARP_SIZE];
+    auto *channel = ncclShmem.warpComm
+        ? &ncclShmem.warpChannel[tidInBlock/WARP_SIZE]
+        : &ncclShmem.channel;
 #else
     auto *channel = &ncclShmem.channel;
 #endif
