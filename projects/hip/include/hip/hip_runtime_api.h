@@ -27,6 +27,7 @@
 #endif
 
 #include <hip/hip_version.h>
+#include <hip/hip_api_symbols.h>
 #include <hip/hip_common.h>
 #include <hip/linker_types.h>
 
@@ -1510,7 +1511,7 @@ typedef struct hipExternalSemaphoreWaitParams_st {
  * Internal use only. This API may change in the future
  * Pre-Compiled header for online compilation
  */
-void __hipGetPCH(const char** pch, unsigned int* size);
+void HIP_PRIVATE_SYMBOL(GetPCH)(const char** pch, unsigned int* size);
 #endif
 
 /**
@@ -2218,7 +2219,7 @@ typedef enum hipMemRangeFlags {
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
 // TODO-ctx - more description on error codes.
-hipError_t hipInit(unsigned int flags);
+hipError_t HIP_API_SYMBOL(Init)(unsigned int flags);
 
 /**
  * @brief Returns the approximate HIP driver version.
@@ -2237,7 +2238,7 @@ hipError_t hipInit(unsigned int flags);
  *
  * @see hipRuntimeGetVersion
  */
-hipError_t hipDriverGetVersion(int* driverVersion);
+hipError_t HIP_API_SYMBOL(DriverGetVersion)(int* driverVersion);
 /**
  * @brief Returns the approximate HIP Runtime version.
  *
@@ -2252,7 +2253,7 @@ hipError_t hipDriverGetVersion(int* driverVersion);
  *
  * @see hipDriverGetVersion
  */
-hipError_t hipRuntimeGetVersion(int* runtimeVersion);
+hipError_t HIP_API_SYMBOL(RuntimeGetVersion)(int* runtimeVersion);
 /**
  * @brief Returns a handle to a compute device
  * @param [out] device Handle of device
@@ -2260,7 +2261,7 @@ hipError_t hipRuntimeGetVersion(int* runtimeVersion);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
  */
-hipError_t hipDeviceGet(hipDevice_t* device, int ordinal);
+hipError_t HIP_API_SYMBOL(DeviceGet)(hipDevice_t* device, int ordinal);
 
 /**
  * @brief Returns the compute capability of the device
@@ -2270,7 +2271,7 @@ hipError_t hipDeviceGet(hipDevice_t* device, int ordinal);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
  */
-hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device);
+hipError_t HIP_API_SYMBOL(DeviceComputeCapability)(int* major, int* minor, hipDevice_t device);
 /**
  * @brief Returns an identifer string for the device.
  * @param [out] name String of the device name
@@ -2279,7 +2280,7 @@ hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
  */
-hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
+hipError_t HIP_API_SYMBOL(DeviceGetName)(char* name, int len, hipDevice_t device);
 /**
  * @brief Returns an UUID for the device.[BETA]
  * @param [out] uuid UUID for the device
@@ -2291,7 +2292,7 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue, #hipErrorNotInitialized,
  * #hipErrorDeinitialized
  */
-hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
+hipError_t HIP_API_SYMBOL(DeviceGetUuid)(hipUUID* uuid, hipDevice_t device);
 /**
  * @brief Returns a value for attribute of link between two devices
  * @param [out] value Pointer of the value for the attrubute
@@ -2301,7 +2302,7 @@ hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
  */
-hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
+hipError_t HIP_API_SYMBOL(DeviceGetP2PAttribute)(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                     int dstDevice);
 /**
  * @brief Returns a PCI Bus Id string for the device, overloaded to take int device ID.
@@ -2311,7 +2312,7 @@ hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDe
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
  */
-hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+hipError_t HIP_API_SYMBOL(DeviceGetPCIBusId)(char* pciBusId, int len, int device);
 /**
  * @brief Returns a handle to a compute device.
  * @param [out] device The handle of the device
@@ -2319,7 +2320,7 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  */
-hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId);
+hipError_t HIP_API_SYMBOL(DeviceGetByPCIBusId)(int* device, const char* pciBusId);
 /**
  * @brief Returns the total amount of memory on the device.
  * @param [out] bytes The size of memory in bytes, on the device
@@ -2327,7 +2328,7 @@ hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
  */
-hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device);
+hipError_t HIP_API_SYMBOL(DeviceTotalMem)(size_t* bytes, hipDevice_t device);
 // doxygen end initialization
 /**
  * @}
@@ -2347,7 +2348,7 @@ hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device);
  *
  * @see hipSetDevice, hipDeviceReset
  */
-hipError_t hipDeviceSynchronize(void);
+hipError_t HIP_API_SYMBOL(DeviceSynchronize)(void);
 /**
  * @brief The state of current device is discarded and updated to a fresh state.
  *
@@ -2359,7 +2360,7 @@ hipError_t hipDeviceSynchronize(void);
  *
  * @see hipDeviceSynchronize
  */
-hipError_t hipDeviceReset(void);
+hipError_t HIP_API_SYMBOL(DeviceReset)(void);
 /**
  * @brief Set default device to be used for subsequent hip API calls from this thread.
  *
@@ -2391,7 +2392,7 @@ hipError_t hipDeviceReset(void);
  *
  * @see #hipGetDevice, #hipGetDeviceCount
  */
-hipError_t hipSetDevice(int deviceId);
+hipError_t HIP_API_SYMBOL(SetDevice)(int deviceId);
 /**
  * @brief Set a list of devices that can be used.
  *
@@ -2404,7 +2405,7 @@ hipError_t hipSetDevice(int deviceId);
  * #hipSetDeviceFlags. #hipChooseDevice
  *
  * */
-hipError_t hipSetValidDevices(int* device_arr, int len);
+hipError_t HIP_API_SYMBOL(SetValidDevices)(int* device_arr, int len);
 /**
  * @brief Return the default device id for the calling host thread.
  *
@@ -2418,7 +2419,7 @@ hipError_t hipSetValidDevices(int* device_arr, int len);
  *
  * @see hipSetDevice, hipGetDevicesizeBytes
  */
-hipError_t hipGetDevice(int* deviceId);
+hipError_t HIP_API_SYMBOL(GetDevice)(int* deviceId);
 /**
  * @brief Return number of compute-capable devices.
  *
@@ -2431,7 +2432,7 @@ hipError_t hipGetDevice(int* deviceId);
  * are no such devices, then @ref hipGetDeviceCount will return #hipErrorNoDevice. If 1 or more
  * devices can be found, then hipGetDeviceCount returns #hipSuccess.
  */
-hipError_t hipGetDeviceCount(int* count);
+hipError_t HIP_API_SYMBOL(GetDeviceCount)(int* count);
 /**
  * @brief Query for a specific device attribute.
  *
@@ -2441,7 +2442,7 @@ hipError_t hipGetDeviceCount(int* count);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  */
-hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceId);
+hipError_t HIP_API_SYMBOL(DeviceGetAttribute)(int* pi, hipDeviceAttribute_t attr, int deviceId);
 /**
  * @brief Returns the default memory pool of the specified device
  *
@@ -2456,7 +2457,7 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceI
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  */
-hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device);
+hipError_t HIP_API_SYMBOL(DeviceGetDefaultMemPool)(hipMemPool_t* mem_pool, int device);
 /**
  * @brief Sets the current memory pool of a device
  *
@@ -2478,7 +2479,7 @@ hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device);
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  */
-hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool);
+hipError_t HIP_API_SYMBOL(DeviceSetMemPool)(int device, hipMemPool_t mem_pool);
 /**
  * @brief Gets the current memory pool for the specified device
  *
@@ -2498,7 +2499,7 @@ hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool);
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  */
-hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
+hipError_t HIP_API_SYMBOL(DeviceGetMemPool)(hipMemPool_t* mem_pool, int device);
 /**
  * @brief Returns device properties.
  *
@@ -2512,7 +2513,7 @@ hipError_t hipDeviceGetMemPool(hipMemPool_t* mem_pool, int device);
  *
  * Populates hipGetDeviceProperties with information for the specified device.
  */
-hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int deviceId);
+hipError_t HIP_API_SYMBOL(GetDevicePropertiesR0600)(hipDeviceProp_t* prop, int deviceId);
 /**
  * @brief Gets the maximum width for 1D linear textures on the specified device
  *
@@ -2529,7 +2530,7 @@ hipError_t hipGetDeviceProperties(hipDeviceProp_t* prop, int deviceId);
  *
  * @see hipDeviceGetAttribute, hipMalloc, hipTexRefSetAddressMode
  */
-hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* max_width, const hipChannelFormatDesc* desc,
+hipError_t HIP_API_SYMBOL(DeviceGetTexture1DLinearMaxWidth)(size_t* max_width, const hipChannelFormatDesc* desc,
                                                int device);
 /**
  * @brief Set L1/Shared cache partition.
@@ -2542,7 +2543,7 @@ hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* max_width, const hipChann
  * on AMD platform. If the function is called, it will return hipErrorNotSupported.
  *
  */
-hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig);
+hipError_t HIP_API_SYMBOL(DeviceSetCacheConfig)(hipFuncCache_t cacheConfig);
 /**
  * @brief Get Cache configuration for a specific Device
  *
@@ -2553,7 +2554,7 @@ hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig);
  * on these architectures.
  *
  */
-hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig);
+hipError_t HIP_API_SYMBOL(DeviceGetCacheConfig)(hipFuncCache_t* cacheConfig);
 /**
  * @brief Gets resource limits of current device
  *
@@ -2567,7 +2568,7 @@ hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig);
  * @returns #hipSuccess, #hipErrorUnsupportedLimit, #hipErrorInvalidValue
  *
  */
-hipError_t hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limit);
+hipError_t HIP_API_SYMBOL(DeviceGetLimit)(size_t* pValue, enum hipLimit_t limit);
 /**
  * @brief Sets resource limits of current device.
  *
@@ -2587,7 +2588,7 @@ hipError_t hipDeviceGetLimit(size_t* pValue, enum hipLimit_t limit);
  * @returns #hipSuccess, #hipErrorUnsupportedLimit, #hipErrorInvalidValue
  *
  */
-hipError_t hipDeviceSetLimit(enum hipLimit_t limit, size_t value);
+hipError_t HIP_API_SYMBOL(DeviceSetLimit)(enum hipLimit_t limit, size_t value);
 /**
  * @brief Returns bank width of shared memory for current device
  *
@@ -2599,7 +2600,7 @@ hipError_t hipDeviceSetLimit(enum hipLimit_t limit, size_t value);
  * ignored on those architectures.
  *
  */
-hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig);
+hipError_t HIP_API_SYMBOL(DeviceGetSharedMemConfig)(hipSharedMemConfig* pConfig);
 /**
  * @brief Gets the flags set for current device
  *
@@ -2607,7 +2608,7 @@ hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig);
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  */
-hipError_t hipGetDeviceFlags(unsigned int* flags);
+hipError_t HIP_API_SYMBOL(GetDeviceFlags)(unsigned int* flags);
 /**
  * @brief The bank width of shared memory on current device is set
  *
@@ -2619,7 +2620,7 @@ hipError_t hipGetDeviceFlags(unsigned int* flags);
  * ignored on those architectures.
  *
  */
-hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
+hipError_t HIP_API_SYMBOL(DeviceSetSharedMemConfig)(hipSharedMemConfig config);
 /**
  * @brief The current device behavior is changed according to the flags passed.
  *
@@ -2651,7 +2652,7 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
  *
  *
  */
-hipError_t hipSetDeviceFlags(unsigned flags);
+hipError_t HIP_API_SYMBOL(SetDeviceFlags)(unsigned flags);
 /**
  * @brief Device which matches hipDeviceProp_t is returned
  *
@@ -2660,7 +2661,7 @@ hipError_t hipSetDeviceFlags(unsigned flags);
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop);
+hipError_t HIP_API_SYMBOL(ChooseDeviceR0600)(int* device, const hipDeviceProp_t* prop);
 /**
  * @brief Returns the link type and hop count between two devices
  *
@@ -2674,7 +2675,7 @@ hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop);
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype,
+hipError_t HIP_API_SYMBOL(ExtGetLinkTypeAndHopCount)(int device1, int device2, uint32_t* linktype,
                                         uint32_t* hopcount);
 // TODO: implement IPC apis
 /**
@@ -2700,7 +2701,7 @@ hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* link
  * @note This IPC memory related feature API on Windows may behave differently from Linux.
  *
  */
-hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr);
+hipError_t HIP_API_SYMBOL(IpcGetMemHandle)(hipIpcMemHandle_t* handle, void* devPtr);
 /**
  * @brief Opens an interprocess memory handle exported from another process
  *          and returns a device pointer usable in the local process.
@@ -2736,7 +2737,7 @@ hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr);
  * @note This IPC memory related feature API on Windows may behave differently from Linux.
  *
  */
-hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags);
+hipError_t HIP_API_SYMBOL(IpcOpenMemHandle)(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags);
 /**
  * @brief Close memory mapped with hipIpcOpenMemHandle
  *
@@ -2754,7 +2755,7 @@ hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned
  * @note This IPC memory related feature API on Windows may behave differently from Linux.
  *
  */
-hipError_t hipIpcCloseMemHandle(void* devPtr);
+hipError_t HIP_API_SYMBOL(IpcCloseMemHandle)(void* devPtr);
 
 /**
  * @brief Gets an opaque interprocess handle for an event.
@@ -2772,7 +2773,7 @@ hipError_t hipIpcCloseMemHandle(void* devPtr);
  * @note This IPC event related feature API is currently applicable on Linux.
  *
  */
-hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event);
+hipError_t HIP_API_SYMBOL(IpcGetEventHandle)(hipIpcEventHandle_t* handle, hipEvent_t event);
 
 /**
  * @brief Opens an interprocess event handles.
@@ -2792,7 +2793,7 @@ hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event);
  * @note This IPC event related feature API is currently applicable on Linux.
  *
  */
-hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle);
+hipError_t HIP_API_SYMBOL(IpcOpenEventHandle)(hipEvent_t* event, hipIpcEventHandle_t handle);
 
 // end doxygen Device
 /**
@@ -2818,7 +2819,7 @@ hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle);
  * ignored on those architectures.
  *
  */
-hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value);
+hipError_t HIP_API_SYMBOL(FuncSetAttribute)(const void* func, hipFuncAttribute attr, int value);
 
 /**
  * @brief Set attribute for a specific kernel
@@ -2835,7 +2836,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
  *
  */
 
-hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
+hipError_t HIP_API_SYMBOL(KernelSetAttribute)(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
 
 /**
  * @brief Function will be extracted for specific kernel
@@ -2845,7 +2846,7 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound
  */
-hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+hipError_t HIP_API_SYMBOL(KernelGetFunction)(hipFunction_t* pFunc, hipKernel_t kernel);
 
 /**
  * @brief Set Cache configuration for a specific function
@@ -2859,7 +2860,7 @@ hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
  *
  */
 
-hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t config);
+hipError_t HIP_API_SYMBOL(FuncSetCacheConfig)(const void* func, hipFuncCache_t config);
 /**
  * @brief Set shared memory configuation for a specific function
  *
@@ -2872,7 +2873,7 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t config);
  * ignored on those architectures.
  *
  */
-hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config);
+hipError_t HIP_API_SYMBOL(FuncSetSharedMemConfig)(const void* func, hipSharedMemConfig config);
 // doxygen end execution
 /**
  * @}
@@ -2895,7 +2896,7 @@ hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config
  *
  * @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
  */
-hipError_t hipGetLastError(void);
+hipError_t HIP_API_SYMBOL(GetLastError)(void);
 
 /**
  * @brief Return last error returned by any HIP runtime API call and resets the stored error code to
@@ -2908,7 +2909,7 @@ hipError_t hipGetLastError(void);
  *
  * @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
  */
-hipError_t hipExtGetLastError(void);
+hipError_t HIP_API_SYMBOL(ExtGetLastError)(void);
 
 /**
  * @brief Return last error returned by any HIP runtime API call.
@@ -2920,7 +2921,7 @@ hipError_t hipExtGetLastError(void);
  *
  * @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
  */
-hipError_t hipPeekAtLastError(void);
+hipError_t HIP_API_SYMBOL(PeekAtLastError)(void);
 /**
  * @brief Return hip error as text string form.
  *
@@ -2929,7 +2930,7 @@ hipError_t hipPeekAtLastError(void);
  *
  * @see hipGetErrorString, hipGetLastError, hipPeakAtLastError, hipError_t
  */
-const char* hipGetErrorName(hipError_t hip_error);
+const char* HIP_API_SYMBOL(GetErrorName)(hipError_t hip_error);
 /**
  * @brief Return handy text string message to explain the error which occurred
  *
@@ -2938,7 +2939,7 @@ const char* hipGetErrorName(hipError_t hip_error);
  *
  * @see hipGetErrorName, hipGetLastError, hipPeakAtLastError, hipError_t
  */
-const char* hipGetErrorString(hipError_t hipError);
+const char* HIP_API_SYMBOL(GetErrorString)(hipError_t hipError);
 /**
  * @brief Return hip error as text string form.
  *
@@ -2948,7 +2949,7 @@ const char* hipGetErrorString(hipError_t hipError);
  *
  * @see hipGetErrorName, hipGetLastError, hipPeakAtLastError, hipError_t
  */
-hipError_t hipDrvGetErrorName(hipError_t hipError, const char** errorString);
+hipError_t HIP_API_SYMBOL(DrvGetErrorName)(hipError_t hipError, const char** errorString);
 /**
  * @brief Return handy text string message to explain the error which occurred
  *
@@ -2958,7 +2959,7 @@ hipError_t hipDrvGetErrorName(hipError_t hipError, const char** errorString);
  *
  * @see hipGetErrorName, hipGetLastError, hipPeakAtLastError, hipError_t
  */
-hipError_t hipDrvGetErrorString(hipError_t hipError, const char** errorString);
+hipError_t HIP_API_SYMBOL(DrvGetErrorString)(hipError_t hipError, const char** errorString);
 // end doxygen Error
 /**
  * @}
@@ -2992,7 +2993,7 @@ hipError_t hipDrvGetErrorString(hipError_t hipError, const char** errorString);
  * @see hipStreamCreateWithFlags, hipStreamCreateWithPriority, hipStreamSynchronize,
  * hipStreamWaitEvent, hipStreamDestroy
  */
-hipError_t hipStreamCreate(hipStream_t* stream);
+hipError_t HIP_API_SYMBOL(StreamCreate)(hipStream_t* stream);
 /**
  * @brief Creates an asynchronous stream with flag.
  *
@@ -3013,7 +3014,7 @@ hipError_t hipStreamCreate(hipStream_t* stream);
  * hipStreamDestroy.
  *
  */
-hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
+hipError_t HIP_API_SYMBOL(StreamCreateWithFlags)(hipStream_t* stream, unsigned int flags);
 /**
  * @brief Creates an asynchronous stream with the specified priority.
  *
@@ -3035,7 +3036,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags);
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
  *
  */
-hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, int priority);
+hipError_t HIP_API_SYMBOL(StreamCreateWithPriority)(hipStream_t* stream, unsigned int flags, int priority);
 /**
  * @brief Returns numerical values that correspond to the least and greatest stream priority.
  *
@@ -3054,7 +3055,7 @@ hipError_t hipStreamCreateWithPriority(hipStream_t* stream, unsigned int flags, 
  *
  * @warning This API is under development on AMD GPUs and simply returns #hipSuccess.
  */
-hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
+hipError_t HIP_API_SYMBOL(DeviceGetStreamPriorityRange)(int* leastPriority, int* greatestPriority);
 /**
  * @brief Destroys the specified stream.
  *
@@ -3072,7 +3073,7 @@ hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPrio
  * @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority, hipStreamQuery,
  * hipStreamWaitEvent, hipStreamSynchronize
  */
-hipError_t hipStreamDestroy(hipStream_t stream);
+hipError_t HIP_API_SYMBOL(StreamDestroy)(hipStream_t stream);
 /**
  * @brief Returns #hipSuccess if all of the operations in the specified @p stream have completed, or
  * #hipErrorNotReady if not.
@@ -3088,7 +3089,7 @@ hipError_t hipStreamDestroy(hipStream_t stream);
  * @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority, hipStreamWaitEvent,
  * hipStreamSynchronize, hipStreamDestroy
  */
-hipError_t hipStreamQuery(hipStream_t stream);
+hipError_t HIP_API_SYMBOL(StreamQuery)(hipStream_t stream);
 /**
  * @brief Waits for all commands in the stream to complete.
  *
@@ -3110,7 +3111,7 @@ hipError_t hipStreamQuery(hipStream_t stream);
  * hipStreamDestroy
  *
  */
-hipError_t hipStreamSynchronize(hipStream_t stream);
+hipError_t HIP_API_SYMBOL(StreamSynchronize)(hipStream_t stream);
 /**
  * @brief Makes the specified compute stream wait for the specified event
  *
@@ -3137,7 +3138,7 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  * @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority,
  * hipStreamSynchronize, hipStreamDestroy
  */
-hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags __dparm(0));
+hipError_t HIP_API_SYMBOL(StreamWaitEvent)(hipStream_t stream, hipEvent_t event, unsigned int flags __dparm(0));
 /**
  * @brief Returns flags associated with this stream.
  *
@@ -3147,7 +3148,7 @@ hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int
  *
  * @see hipStreamCreateWithFlags
  */
-hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
+hipError_t HIP_API_SYMBOL(StreamGetFlags)(hipStream_t stream, unsigned int* flags);
 /**
  * @brief Queries the Id of a stream.
  *
@@ -3157,7 +3158,7 @@ hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
  *
  * @see hipStreamCreateWithFlags, hipStreamGetFlags, hipStreamCreateWithPriority, hipStreamGetPriority
  */
-hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
+hipError_t HIP_API_SYMBOL(StreamGetId)(hipStream_t stream, unsigned long long* streamId);
 /**
  * @brief Queries the priority of a stream.
  *
@@ -3169,7 +3170,7 @@ hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
  *
  * @see hipStreamCreateWithPriority
  */
-hipError_t hipStreamGetPriority(hipStream_t stream, int* priority);
+hipError_t HIP_API_SYMBOL(StreamGetPriority)(hipStream_t stream, int* priority);
 /**
  * @brief Gets the device associated with the stream.
  *
@@ -3180,7 +3181,7 @@ hipError_t hipStreamGetPriority(hipStream_t stream, int* priority);
  *
  * @see hipStreamCreate, hipStreamDestroy, hipDeviceGetStreamPriorityRange
  */
-hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
+hipError_t HIP_API_SYMBOL(StreamGetDevice)(hipStream_t stream, hipDevice_t* device);
 /**
  * @brief Creates an asynchronous stream with the specified CU mask.
  *
@@ -3199,7 +3200,7 @@ hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
  *
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
  */
-hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize,
+hipError_t HIP_API_SYMBOL(ExtStreamCreateWithCUMask)(hipStream_t* stream, uint32_t cuMaskSize,
                                         const uint32_t* cuMask);
 /**
  * @brief Gets CU mask associated with an asynchronous stream
@@ -3213,7 +3214,7 @@ hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize
  *
  * @see hipStreamCreate, hipStreamSynchronize, hipStreamWaitEvent, hipStreamDestroy
  */
-hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32_t* cuMask);
+hipError_t HIP_API_SYMBOL(ExtStreamGetCUMask)(hipStream_t stream, uint32_t cuMaskSize, uint32_t* cuMask);
 /**
  * Stream CallBack struct
  */
@@ -3233,7 +3234,7 @@ typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status, void*
  * hipStreamWaitEvent, hipStreamDestroy, hipStreamCreateWithPriority
  *
  */
-hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void* userData,
+hipError_t HIP_API_SYMBOL(StreamAddCallback)(hipStream_t stream, hipStreamCallback_t callback, void* userData,
                                 unsigned int flags);
 
 /**
@@ -3243,7 +3244,7 @@ hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback
  * @param[in] value  - Attribute value for the attribute to set
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle
  */
-hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
+hipError_t HIP_API_SYMBOL(StreamSetAttribute)(hipStream_t stream, hipStreamAttrID attr,
                                  const hipStreamAttrValue* value);
 
 /**
@@ -3253,7 +3254,7 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
  * @param[out] value  - Attribute value output
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle
  */
-hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
+hipError_t HIP_API_SYMBOL(StreamGetAttribute)(hipStream_t stream, hipStreamAttrID attr,
                                  hipStreamAttrValue* value_out);
 
 /**
@@ -3262,7 +3263,7 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
  * @param[in] src - Source stream
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
+hipError_t HIP_API_SYMBOL(StreamCopyAttributes)(hipStream_t dst, hipStream_t src);
 
 // end doxygen Stream
 /**
@@ -3312,7 +3313,7 @@ hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
  * hipStreamWriteValue32, hipDeviceGetAttribute
  */
 
-hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr, uint32_t value, unsigned int flags,
+hipError_t HIP_API_SYMBOL(StreamWaitValue32)(hipStream_t stream, void* ptr, uint32_t value, unsigned int flags,
                                 uint32_t mask __dparm(0xFFFFFFFF));
 
 /**
@@ -3351,7 +3352,7 @@ hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr, uint32_t value, u
  * hipStreamWriteValue32, hipDeviceGetAttribute
  */
 
-hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, uint64_t value, unsigned int flags,
+hipError_t HIP_API_SYMBOL(StreamWaitValue64)(hipStream_t stream, void* ptr, uint64_t value, unsigned int flags,
                                 uint64_t mask __dparm(0xFFFFFFFFFFFFFFFF));
 
 /**
@@ -3374,7 +3375,7 @@ hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, uint64_t value, u
  * hipStreamWaitValue64
  */
 
-hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, uint32_t value, unsigned int flags);
+hipError_t HIP_API_SYMBOL(StreamWriteValue32)(hipStream_t stream, void* ptr, uint32_t value, unsigned int flags);
 /**
  * @brief Enqueues a write command to the stream.[BETA]
  *
@@ -3395,7 +3396,7 @@ hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, uint32_t value, 
  * hipStreamWaitValue64
  */
 
-hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, uint64_t value, unsigned int flags);
+hipError_t HIP_API_SYMBOL(StreamWriteValue64)(hipStream_t stream, void* ptr, uint64_t value, unsigned int flags);
 
 /**
  * @brief Enqueues an array of stream memory operations in the stream.[BETA]
@@ -3416,7 +3417,7 @@ hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, uint64_t value, 
  * hipStreamWaitValue64. hipStreamWriteValue64
  */
 
-hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+hipError_t HIP_API_SYMBOL(StreamBatchMemOp)(hipStream_t stream, unsigned int count,
                                hipStreamBatchMemOpParams* paramArray, unsigned int flags);
 
 /**
@@ -3436,7 +3437,7 @@ hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
  * @see hipStreamWriteValue32, hipStreamWaitValue32,
  * hipStreamWaitValue64. hipStreamWriteValue64, hipStreamBatchMemOp
  */
-hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
+hipError_t HIP_API_SYMBOL(GraphAddBatchMemOpNode)(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                      const hipGraphNode_t* dependencies, size_t numDependencies,
                                      const hipBatchMemOpNodeParams* nodeParams);
 
@@ -3460,7 +3461,7 @@ hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGr
  * hipStreamWaitValue64. hipStreamWriteValue64. hipGraphBatchMemOpNodeSetParams
  */
 
-hipError_t hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(GraphBatchMemOpNodeGetParams)(hipGraphNode_t hNode,
                                            hipBatchMemOpNodeParams* nodeParams_out);
 
 /**
@@ -3480,7 +3481,7 @@ hipError_t hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode,
  * hipStreamWaitValue64. hipStreamWriteValue64, hipGraphBatchMemOpNodeGetParams
  */
 
-hipError_t hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(GraphBatchMemOpNodeSetParams)(hipGraphNode_t hNode,
                                            hipBatchMemOpNodeParams* nodeParams);
 
 /**
@@ -3502,7 +3503,7 @@ hipError_t hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode,
  * @see hipStreamWriteValue32, hipStreamWaitValue32,
  * hipStreamWaitValue64. hipStreamWriteValue64, hipStreamBatchMemOp
  */
-hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(GraphExecBatchMemOpNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                                const hipBatchMemOpNodeParams* nodeParams);
 
 // end doxygen Stream Memory Operations
@@ -3541,7 +3542,7 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
  *
  * @see hipEventCreate, hipEventSynchronize, hipEventDestroy, hipEventElapsedTime
  */
-hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
+hipError_t HIP_API_SYMBOL(EventCreateWithFlags)(hipEvent_t* event, unsigned flags);
 /**
  *  Create an event
  *
@@ -3553,7 +3554,7 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
  * @see hipEventCreateWithFlags, hipEventRecord, hipEventQuery, hipEventSynchronize,
  * hipEventDestroy, hipEventElapsedTime
  */
-hipError_t hipEventCreate(hipEvent_t* event);
+hipError_t HIP_API_SYMBOL(EventCreate)(hipEvent_t* event);
 /**
  * @brief Record an event in the specified stream.
  *
@@ -3590,7 +3591,7 @@ hipError_t hipEventCreate(hipEvent_t* event);
  * hipEventDestroy, hipEventElapsedTime
  *
  */
-hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream __dparm(0),
+hipError_t HIP_API_SYMBOL(EventRecordWithFlags)(hipEvent_t event, hipStream_t stream __dparm(0),
                                    unsigned int flags __dparm(0));
 /**
  * @brief Record an event in the specified stream.
@@ -3623,9 +3624,9 @@ hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream __dparm(
  *
  */
 #ifdef __cplusplus
-hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream = NULL);
+hipError_t HIP_API_SYMBOL(EventRecord)(hipEvent_t event, hipStream_t stream = NULL);
 #else
-hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(EventRecord)(hipEvent_t event, hipStream_t stream);
 #endif
 /**
  *  @brief Destroy the specified event.
@@ -3643,7 +3644,7 @@ hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream);
  *
  * @returns #hipSuccess
  */
-hipError_t hipEventDestroy(hipEvent_t event);
+hipError_t HIP_API_SYMBOL(EventDestroy)(hipEvent_t event);
 /**
  *  @brief Wait for an event to complete.
  *
@@ -3662,7 +3663,7 @@ hipError_t hipEventDestroy(hipEvent_t event);
  *  @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventDestroy, hipEventRecord,
  * hipEventElapsedTime
  */
-hipError_t hipEventSynchronize(hipEvent_t event);
+hipError_t HIP_API_SYMBOL(EventSynchronize)(hipEvent_t event);
 /**
  * @brief Return the elapsed time between two events.
  *
@@ -3691,7 +3692,7 @@ hipError_t hipEventSynchronize(hipEvent_t event);
  * @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventDestroy, hipEventRecord,
  * hipEventSynchronize
  */
-hipError_t hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop);
+hipError_t HIP_API_SYMBOL(EventElapsedTime)(float* ms, hipEvent_t start, hipEvent_t stop);
 /**
  * @brief Query event status
  *
@@ -3708,7 +3709,7 @@ hipError_t hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop);
  * @see hipEventCreate, hipEventCreateWithFlags, hipEventRecord, hipEventDestroy,
  * hipEventSynchronize, hipEventElapsedTime
  */
-hipError_t hipEventQuery(hipEvent_t event);
+hipError_t HIP_API_SYMBOL(EventQuery)(hipEvent_t event);
 // end doxygen Events
 /**
  * @}
@@ -3740,7 +3741,7 @@ hipError_t hipEventQuery(hipEvent_t event);
  *           change and might have outstanding issues.
  *
  */
-hipError_t hipPointerSetAttribute(const void* value, hipPointer_attribute attribute,
+hipError_t HIP_API_SYMBOL(PointerSetAttribute)(const void* value, hipPointer_attribute attribute,
                                   hipDeviceptr_t ptr);
 
 
@@ -3763,7 +3764,7 @@ hipError_t hipPointerSetAttribute(const void* value, hipPointer_attribute attrib
  *
  *  @see hipPointerGetAttribute
  */
-hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void* ptr);
+hipError_t HIP_API_SYMBOL(PointerGetAttributes)(hipPointerAttribute_t* attributes, const void* ptr);
 /**
  *  @brief Returns information about the specified pointer.[BETA]
  *
@@ -3778,7 +3779,7 @@ hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void
  *
  *  @see hipPointerGetAttributes
  */
-hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, hipDeviceptr_t ptr);
+hipError_t HIP_API_SYMBOL(PointerGetAttribute)(void* data, hipPointer_attribute attribute, hipDeviceptr_t ptr);
 /**
  *  @brief Returns information about the specified pointer.[BETA]
  *
@@ -3795,7 +3796,7 @@ hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, hi
  *
  *  @see hipPointerGetAttribute
  */
-hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_attribute* attributes,
+hipError_t HIP_API_SYMBOL(DrvPointerGetAttributes)(unsigned int numAttributes, hipPointer_attribute* attributes,
                                       void** data, hipDeviceptr_t ptr);
 /**
  *-------------------------------------------------------------------------------------------------
@@ -3820,7 +3821,7 @@ hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_att
  *  @note  This API is currently not supported on Linux.
  *
  */
-hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
+hipError_t HIP_API_SYMBOL(ImportExternalSemaphore)(hipExternalSemaphore_t* extSem_out,
                                       const hipExternalSemaphoreHandleDesc* semHandleDesc);
 /**
  *  @brief Signals a set of external semaphore objects.
@@ -3837,7 +3838,7 @@ hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
  *  @note  This API is currently not supported on Linux.
  *
  */
-hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemArray,
+hipError_t HIP_API_SYMBOL(SignalExternalSemaphoresAsync)(const hipExternalSemaphore_t* extSemArray,
                                             const hipExternalSemaphoreSignalParams* paramsArray,
                                             unsigned int numExtSems, hipStream_t stream);
 /**
@@ -3855,7 +3856,7 @@ hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSem
  *  @note  This API is currently not supported on Linux.
  *
  */
-hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemArray,
+hipError_t HIP_API_SYMBOL(WaitExternalSemaphoresAsync)(const hipExternalSemaphore_t* extSemArray,
                                           const hipExternalSemaphoreWaitParams* paramsArray,
                                           unsigned int numExtSems, hipStream_t stream);
 /**
@@ -3871,7 +3872,7 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
  *  @note  This API is currently not supported on Linux.
  *
  */
-hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem);
+hipError_t HIP_API_SYMBOL(DestroyExternalSemaphore)(hipExternalSemaphore_t extSem);
 
 /**
  *  @brief Imports an external memory object.
@@ -3884,7 +3885,7 @@ hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem);
  *  @see
  *
  */
-hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
+hipError_t HIP_API_SYMBOL(ImportExternalMemory)(hipExternalMemory_t* extMem_out,
                                    const hipExternalMemoryHandleDesc* memHandleDesc);
 /**
  *  @brief Maps a buffer onto an imported memory object.
@@ -3897,7 +3898,7 @@ hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
  *
  *  @see
  */
-hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t extMem,
+hipError_t HIP_API_SYMBOL(ExternalMemoryGetMappedBuffer)(void** devPtr, hipExternalMemory_t extMem,
                                             const hipExternalMemoryBufferDesc* bufferDesc);
 /**
  *  @brief Destroys an external memory object.
@@ -3908,7 +3909,7 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
  *
  *  @see
  */
-hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem);
+hipError_t HIP_API_SYMBOL(DestroyExternalMemory)(hipExternalMemory_t extMem);
 /**
  *  @brief Maps a mipmapped array onto an external memory object.
  *
@@ -3923,7 +3924,7 @@ hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem);
  *  @see hipImportExternalMemory, hipDestroyExternalMemory, hipExternalMemoryGetMappedBuffer,
  * hipFreeMipmappedArray
  */
-hipError_t hipExternalMemoryGetMappedMipmappedArray(
+hipError_t HIP_API_SYMBOL(ExternalMemoryGetMappedMipmappedArray)(
     hipMipmappedArray_t* mipmap, hipExternalMemory_t extMem,
     const hipExternalMemoryMipmappedArrayDesc* mipmapDesc);
 // end of external resource
@@ -3943,7 +3944,7 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
  *  @see hipMallocPitch, hipFree, hipMallocArray, hipFreeArray, hipMalloc3D, hipMalloc3DArray,
  * hipHostFree, hipHostMalloc
  */
-hipError_t hipMalloc(void** ptr, size_t size);
+hipError_t HIP_API_SYMBOL(Malloc)(void** ptr, size_t size);
 /**
  *  @brief Allocate memory on the default accelerator
  *
@@ -3963,7 +3964,7 @@ hipError_t hipMalloc(void** ptr, size_t size);
  *  @see hipMallocPitch, hipFree, hipMallocArray, hipFreeArray, hipMalloc3D, hipMalloc3DArray,
  * hipHostFree, hiHostMalloc
  */
-hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flags);
+hipError_t HIP_API_SYMBOL(ExtMallocWithFlags)(void** ptr, size_t sizeBytes, unsigned int flags);
 
 
 /**
@@ -3989,7 +3990,7 @@ hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flag
  *  @warning  This API is deprecated, use hipHostMalloc() instead
  */
 HIP_DEPRECATED("use hipHostMalloc instead")
-hipError_t hipMallocHost(void** ptr, size_t size);
+hipError_t HIP_API_SYMBOL(MallocHost)(void** ptr, size_t size);
 /**
  *  @brief Allocate pinned host memory [Deprecated]
  *
@@ -4003,7 +4004,7 @@ hipError_t hipMallocHost(void** ptr, size_t size);
  *  @warning  This API is deprecated, use hipHostMalloc() instead
  */
 HIP_DEPRECATED("use hipHostMalloc instead")
-hipError_t hipMemAllocHost(void** ptr, size_t size);
+hipError_t HIP_API_SYMBOL(MemAllocHost)(void** ptr, size_t size);
 // end doxygen deprecated management memory
 /**
  * @}
@@ -4041,7 +4042,7 @@ hipError_t hipMemAllocHost(void** ptr, size_t size);
  *
  *  @see hipSetDeviceFlags, hiptHostFree
  */
-hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags);
+hipError_t HIP_API_SYMBOL(HostMalloc)(void** ptr, size_t size, unsigned int flags);
 /**
  *-------------------------------------------------------------------------------------------------
  *-------------------------------------------------------------------------------------------------
@@ -4076,7 +4077,7 @@ hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags);
  * @returns #hipSuccess, #hipErrorMemoryAllocation, #hipErrorNotSupported, #hipErrorInvalidValue
  *
  */
-hipError_t hipMallocManaged(void** dev_ptr, size_t size,
+hipError_t HIP_API_SYMBOL(MallocManaged)(void** dev_ptr, size_t size,
                             unsigned int flags __dparm(hipMemAttachGlobal));
 /**
  * @brief Prefetches memory to the specified destination device using HIP.
@@ -4090,7 +4091,7 @@ hipError_t hipMallocManaged(void** dev_ptr, size_t size,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
+hipError_t HIP_API_SYMBOL(MemPrefetchAsync)(const void* dev_ptr, size_t count, int device,
                                hipStream_t stream __dparm(0));
 /**
  * @brief Prefetches memory to the specified destination device using HIP.
@@ -4105,7 +4106,7 @@ hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocation location,
+hipError_t HIP_API_SYMBOL(MemPrefetchAsync_v2)(const void* dev_ptr, size_t count, hipMemLocation location,
                                   unsigned int flags, hipStream_t stream __dparm(0));
 
 /**
@@ -4124,7 +4125,7 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count,
+hipError_t HIP_API_SYMBOL(MemPrefetchBatchAsync)(void** dev_ptrs, size_t* sizes, size_t count,
                                     hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
                                     size_t num_prefetch_locs, unsigned long long flags,
                                     hipStream_t stream);
@@ -4147,7 +4148,7 @@ hipError_t hipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device);
+hipError_t HIP_API_SYMBOL(MemAdvise)(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device);
 /**
  * @brief Advise about the usage of a given memory range to HIP.
  *
@@ -4167,7 +4168,7 @@ hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advic
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
+hipError_t HIP_API_SYMBOL(MemAdvise_v2)(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                            hipMemLocation location);
 /**
  * @brief Query an attribute of a given memory range in HIP.
@@ -4183,7 +4184,7 @@ hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise ad
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttribute attribute,
+hipError_t HIP_API_SYMBOL(MemRangeGetAttribute)(void* data, size_t data_size, hipMemRangeAttribute attribute,
                                    const void* dev_ptr, size_t count);
 /**
  * @brief Query attributes of a given memory range in HIP.
@@ -4201,7 +4202,7 @@ hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttr
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
+hipError_t HIP_API_SYMBOL(MemRangeGetAttributes)(void** data, size_t* data_sizes,
                                     hipMemRangeAttribute* attributes, size_t num_attributes,
                                     const void* dev_ptr, size_t count);
 /**
@@ -4219,7 +4220,7 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
  * @warning This API is under development. Currently it is a no-operation (NOP)
  *          function on AMD GPUs and returns #hipSuccess.
  */
-hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t length __dparm(0),
+hipError_t HIP_API_SYMBOL(StreamAttachMemAsync)(hipStream_t stream, void* dev_ptr, size_t length __dparm(0),
                                    unsigned int flags __dparm(hipMemAttachSingle));
 // end doxygen Managed Memory
 /**
@@ -4281,7 +4282,7 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(MallocAsync)(void** dev_ptr, size_t size, hipStream_t stream);
 /**
  * @brief Frees memory with stream ordered semantics
  *
@@ -4306,7 +4307,7 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream);
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(FreeAsync)(void* dev_ptr, hipStream_t stream);
 /**
  * @brief Releases freed memory back to the OS
  *
@@ -4334,7 +4335,7 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream);
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold);
+hipError_t HIP_API_SYMBOL(MemPoolTrimTo)(hipMemPool_t mem_pool, size_t min_bytes_to_hold);
 /**
  * @brief Sets attributes of a memory pool
  *
@@ -4373,7 +4374,7 @@ hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold);
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value);
+hipError_t HIP_API_SYMBOL(MemPoolSetAttribute)(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value);
 /**
  * @brief Gets attributes of a memory pool
  *
@@ -4413,7 +4414,7 @@ hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, vo
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolGetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value);
+hipError_t HIP_API_SYMBOL(MemPoolGetAttribute)(hipMemPool_t mem_pool, hipMemPoolAttr attr, void* value);
 /**
  * @brief Controls visibility of the specified pool between devices
  *
@@ -4432,7 +4433,7 @@ hipError_t hipMemPoolGetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, vo
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMemAccessDesc* desc_list,
+hipError_t HIP_API_SYMBOL(MemPoolSetAccess)(hipMemPool_t mem_pool, const hipMemAccessDesc* desc_list,
                                size_t count);
 /**
  * @brief Returns the accessibility of a pool from a device
@@ -4453,7 +4454,7 @@ hipError_t hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMemAccessDesc* de
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags, hipMemPool_t mem_pool,
+hipError_t HIP_API_SYMBOL(MemPoolGetAccess)(hipMemAccessFlags* flags, hipMemPool_t mem_pool,
                                hipMemLocation* location);
 /**
  * @brief Creates a memory pool
@@ -4479,7 +4480,7 @@ hipError_t hipMemPoolGetAccess(hipMemAccessFlags* flags, hipMemPool_t mem_pool,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_props);
+hipError_t HIP_API_SYMBOL(MemPoolCreate)(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_props);
 /**
  * @brief Destroys the specified memory pool
  *
@@ -4507,7 +4508,7 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool);
+hipError_t HIP_API_SYMBOL(MemPoolDestroy)(hipMemPool_t mem_pool);
 /**
  * @brief Allocates memory from a specified pool with stream ordered semantics.
  *
@@ -4543,7 +4544,7 @@ hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool);
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_pool,
+hipError_t HIP_API_SYMBOL(MallocFromPoolAsync)(void** dev_ptr, size_t size, hipMemPool_t mem_pool,
                                   hipStream_t stream);
 /**
  * @brief Exports a memory pool to the requested handle type.
@@ -4571,7 +4572,7 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolExportToShareableHandle(void* shared_handle, hipMemPool_t mem_pool,
+hipError_t HIP_API_SYMBOL(MemPoolExportToShareableHandle)(void* shared_handle, hipMemPool_t mem_pool,
                                              hipMemAllocationHandleType handle_type,
                                              unsigned int flags);
 /**
@@ -4597,7 +4598,7 @@ hipError_t hipMemPoolExportToShareableHandle(void* shared_handle, hipMemPool_t m
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* shared_handle,
+hipError_t HIP_API_SYMBOL(MemPoolImportFromShareableHandle)(hipMemPool_t* mem_pool, void* shared_handle,
                                                hipMemAllocationHandleType handle_type,
                                                unsigned int flags);
 /**
@@ -4619,7 +4620,7 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* dev_ptr);
+hipError_t HIP_API_SYMBOL(MemPoolExportPointer)(hipMemPoolPtrExportData* export_data, void* dev_ptr);
 /**
  * @brief Import a memory pool allocation from another process.
  *
@@ -4648,20 +4649,20 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* d
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
+hipError_t HIP_API_SYMBOL(MemPoolImportPointer)(void** dev_ptr, hipMemPool_t mem_pool,
                                    hipMemPoolPtrExportData* export_data);
 /**
  * @brief Sets memory pool for memory location and allocation type.
  *
  *
  */
-hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
+hipError_t HIP_API_SYMBOL(MemSetMemPool)(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
 /**
  * @brief Retrieves memory pool for memory location and allocation type.
  *
  *
  */
-hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+hipError_t HIP_API_SYMBOL(MemGetMemPool)(hipMemPool_t* pool, hipMemLocation* location,
                             hipMemAllocationType type);
 // Doxygen end of ordered memory allocator
 /**
@@ -4687,7 +4688,7 @@ hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
  *
  *  @return #hipSuccess, #hipErrorOutOfMemory, #hipErrorInvalidValue
  */
-hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags);
+hipError_t HIP_API_SYMBOL(HostAlloc)(void** ptr, size_t size, unsigned int flags);
 /**
  *  @brief Get Device pointer from Host Pointer allocated through hipHostMalloc
  *
@@ -4699,7 +4700,7 @@ hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags);
  *
  *  @see hipSetDeviceFlags, hipHostMalloc
  */
-hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int flags);
+hipError_t HIP_API_SYMBOL(HostGetDevicePointer)(void** devPtr, void* hstPtr, unsigned int flags);
 /**
  *  @brief Return flags associated with host pointer
  *
@@ -4709,7 +4710,7 @@ hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int fla
  *
  *  @see hipHostMalloc
  */
-hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
+hipError_t HIP_API_SYMBOL(HostGetFlags)(unsigned int* flagsPtr, void* hostPtr);
 /**
  *  @brief Register host memory so it can be accessed from the current device.
  *
@@ -4747,7 +4748,7 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
  *
  *  @see hipHostUnregister, hipHostGetFlags, hipHostGetDevicePointer
  */
-hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
+hipError_t HIP_API_SYMBOL(HostRegister)(void* hostPtr, size_t sizeBytes, unsigned int flags);
 /**
  *  @brief Un-register host pointer
  *
@@ -4756,7 +4757,7 @@ hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
  *
  *  @see hipHostRegister
  */
-hipError_t hipHostUnregister(void* hostPtr);
+hipError_t HIP_API_SYMBOL(HostUnregister)(void* hostPtr);
 /**
  *  Allocates at least width (in bytes) * height bytes of linear memory
  *  Padding may occur to ensure alighnment requirements are met for the given row
@@ -4775,7 +4776,7 @@ hipError_t hipHostUnregister(void* hostPtr);
  *  @see hipMalloc, hipFree, hipMallocArray, hipFreeArray, hipHostFree, hipMalloc3D,
  * hipMalloc3DArray, hipHostMalloc
  */
-hipError_t hipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t height);
+hipError_t HIP_API_SYMBOL(MallocPitch)(void** ptr, size_t* pitch, size_t width, size_t height);
 /**
  *  Allocates at least width (in bytes) * height bytes of linear memory
  *  Padding may occur to ensure alighnment requirements are met for the given row
@@ -4798,7 +4799,7 @@ hipError_t hipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t height
  *  @see hipMalloc, hipFree, hipMallocArray, hipFreeArray, hipHostFree, hipMalloc3D,
  * hipMalloc3DArray, hipHostMalloc
  */
-hipError_t hipMemAllocPitch(hipDeviceptr_t* dptr, size_t* pitch, size_t widthInBytes, size_t height,
+hipError_t HIP_API_SYMBOL(MemAllocPitch)(hipDeviceptr_t* dptr, size_t* pitch, size_t widthInBytes, size_t height,
                             unsigned int elementSizeBytes);
 /**
  *  @brief Free memory allocated by the HIP-Clang hip memory allocation API.
@@ -4813,7 +4814,7 @@ hipError_t hipMemAllocPitch(hipDeviceptr_t* dptr, size_t* pitch, size_t widthInB
  *  @see hipMalloc, hipMallocPitch, hipMallocArray, hipFreeArray, hipHostFree, hipMalloc3D,
  * hipMalloc3DArray, hipHostMalloc
  */
-hipError_t hipFree(void* ptr);
+hipError_t HIP_API_SYMBOL(Free)(void* ptr);
 /**
  *  @brief Frees page-locked memory
  *  This API performs an implicit hipDeviceSynchronize() call.
@@ -4825,7 +4826,7 @@ hipError_t hipFree(void* ptr);
  *  with hipMalloc)
  *
  */
-hipError_t hipFreeHost(void* ptr);
+hipError_t HIP_API_SYMBOL(FreeHost)(void* ptr);
 /**
  *  @brief Free memory allocated by the HIP-Clang hip host memory allocation API
  *  This API performs an implicit hipDeviceSynchronize() call.
@@ -4842,7 +4843,7 @@ hipError_t hipFreeHost(void* ptr);
  * hipMalloc3DArray, hipHostMalloc
  *
  */
-hipError_t hipHostFree(void* ptr);
+hipError_t HIP_API_SYMBOL(HostFree)(void* ptr);
 /**
  *  @brief Copy data from src to dst.
  *
@@ -4872,7 +4873,7 @@ hipError_t hipHostFree(void* ptr);
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
+hipError_t HIP_API_SYMBOL(Memcpy)(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
 /**
  *  @brief Memory copy on the stream.
  *  It allows single or multiple devices to do memory copy on single or multiple streams.
@@ -4890,7 +4891,7 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind
  * hipLaunchKernelGGL
  *
  */
-hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
+hipError_t HIP_API_SYMBOL(MemcpyWithStream)(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                                hipStream_t stream);
 /**
  *  @brief Copy data from Host to Device
@@ -4909,7 +4910,7 @@ hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hip
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t sizeBytes);
+hipError_t HIP_API_SYMBOL(MemcpyHtoD)(hipDeviceptr_t dst, const void* src, size_t sizeBytes);
 /**
  *  @brief Copy data from Device to Host
  *
@@ -4927,7 +4928,7 @@ hipError_t hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t sizeBytes);
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes);
+hipError_t HIP_API_SYMBOL(MemcpyDtoH)(void* dst, hipDeviceptr_t src, size_t sizeBytes);
 /**
  *  @brief Copy data from Device to Device
  *
@@ -4945,7 +4946,7 @@ hipError_t hipMemcpyDtoH(void* dst, hipDeviceptr_t src, size_t sizeBytes);
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyDtoD(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes);
+hipError_t HIP_API_SYMBOL(MemcpyDtoD)(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes);
 /**
  *  @brief Copies from one 1D array to device memory.
  *
@@ -4964,7 +4965,7 @@ hipError_t hipMemcpyDtoD(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeByte
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray, size_t srcOffset,
+hipError_t HIP_API_SYMBOL(MemcpyAtoD)(hipDeviceptr_t dstDevice, hipArray_t srcArray, size_t srcOffset,
                          size_t ByteCount);
 /**
  *  @brief Copies from device memory to a 1D array.
@@ -4984,7 +4985,7 @@ hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray, size_t s
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset, hipDeviceptr_t srcDevice,
+hipError_t HIP_API_SYMBOL(MemcpyDtoA)(hipArray_t dstArray, size_t dstOffset, hipDeviceptr_t srcDevice,
                          size_t ByteCount);
 
 /**
@@ -5006,7 +5007,7 @@ hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset, hipDeviceptr_t s
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset, hipArray_t srcArray,
+hipError_t HIP_API_SYMBOL(MemcpyAtoA)(hipArray_t dstArray, size_t dstOffset, hipArray_t srcArray,
                          size_t srcOffset, size_t ByteCount);
 /**
  *  @brief Copy data from Host to Device asynchronously
@@ -5026,7 +5027,7 @@ hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset, hipArray_t srcAr
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyHtoDAsync)(hipDeviceptr_t dst, const void* src, size_t sizeBytes,
                               hipStream_t stream);
 /**
  *  @brief Copy data from Device to Host asynchronously
@@ -5046,7 +5047,7 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src, size_t sizeBy
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(MemcpyDtoHAsync)(void* dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream);
 /**
  *  @brief Copy data from Device to Device asynchronously
  *
@@ -5065,7 +5066,7 @@ hipError_t hipMemcpyDtoHAsync(void* dst, hipDeviceptr_t src, size_t sizeBytes, h
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyDtoDAsync)(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes,
                               hipStream_t stream);
 /**
  * @brief Copies from one 1D array to host memory.
@@ -5086,7 +5087,7 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src, size_t siz
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray, size_t srcOffset,
+hipError_t HIP_API_SYMBOL(MemcpyAtoHAsync)(void* dstHost, hipArray_t srcArray, size_t srcOffset,
                               size_t ByteCount, hipStream_t stream);
 /**
  * @brief Copies from host memory to a 1D array.
@@ -5107,7 +5108,7 @@ hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray, size_t srcOffs
  * hipMemcpyHtoDAsync, hipMemFree, hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo,
  * hipMemHostAlloc, hipMemHostGetDevicePointer
  */
-hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset, const void* srcHost,
+hipError_t HIP_API_SYMBOL(MemcpyHtoAAsync)(hipArray_t dstArray, size_t dstOffset, const void* srcHost,
                               size_t ByteCount, hipStream_t stream);
 /**
  *  @brief Returns a global pointer from a module.
@@ -5125,7 +5126,7 @@ hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset, const void*
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound, #hipErrorInvalidContext
  *
  */
-hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
+hipError_t HIP_API_SYMBOL(ModuleGetGlobal)(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name);
 
 /**
@@ -5137,7 +5138,7 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
  *  @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol);
+hipError_t HIP_API_SYMBOL(GetSymbolAddress)(void** devPtr, const void* symbol);
 
 
 /**
@@ -5149,7 +5150,7 @@ hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol);
  *  @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGetSymbolSize(size_t* size, const void* symbol);
+hipError_t HIP_API_SYMBOL(GetSymbolSize)(size_t* size, const void* symbol);
 
 /**
  * @brief Gets the pointer of requested HIP driver function.
@@ -5170,8 +5171,9 @@ hipError_t hipGetSymbolSize(size_t* size, const void* symbol);
  *
  * @returns #hipSuccess, #hipErrorInvalidValue.
  */
-hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
-                             hipDriverProcAddressQueryResult* symbolStatus);
+hipError_t HIP_API_SYMBOL(GetProcAddress)(const char* symbol, void** pfn, int hipVersion,
+                                          uint64_t flags,
+                                          hipDriverProcAddressQueryResult* symbolStatus);
 
 /**
  *  @brief Copies data to the given symbol on the device.
@@ -5194,7 +5196,7 @@ hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uin
  *  @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipMemcpyToSymbol(const void* symbol, const void* src, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyToSymbol)(const void* symbol, const void* src, size_t sizeBytes,
                              size_t offset __dparm(0),
                              hipMemcpyKind kind __dparm(hipMemcpyHostToDevice));
 
@@ -5211,7 +5213,7 @@ hipError_t hipMemcpyToSymbol(const void* symbol, const void* src, size_t sizeByt
  *  @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipMemcpyToSymbolAsync(const void* symbol, const void* src, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyToSymbolAsync)(const void* symbol, const void* src, size_t sizeBytes,
                                   size_t offset, hipMemcpyKind kind, hipStream_t stream __dparm(0));
 
 /**
@@ -5226,7 +5228,7 @@ hipError_t hipMemcpyToSymbolAsync(const void* symbol, const void* src, size_t si
  *  @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyFromSymbol)(void* dst, const void* symbol, size_t sizeBytes,
                                size_t offset __dparm(0),
                                hipMemcpyKind kind __dparm(hipMemcpyDeviceToHost));
 
@@ -5243,7 +5245,7 @@ hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol, size_t sizeBytes,
  *  @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBytes, size_t offset,
+hipError_t HIP_API_SYMBOL(MemcpyFromSymbolAsync)(void* dst, const void* symbol, size_t sizeBytes, size_t offset,
                                     hipMemcpyKind kind, hipStream_t stream __dparm(0));
 /**
  *  @brief Copies data from src to dst asynchronously.
@@ -5273,7 +5275,7 @@ hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBy
  * hipMemcpyFromArrayAsync, hipMemcpy2DFromArrayAsync, hipMemcpyToSymbolAsync,
  * hipMemcpyFromSymbolAsync
  */
-hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
+hipError_t HIP_API_SYMBOL(MemcpyAsync)(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                           hipStream_t stream __dparm(0));
 /**
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
@@ -5284,7 +5286,7 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcp
  *  @param[in]  sizeBytes  Data size in bytes
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemset(void* dst, int value, size_t sizeBytes);
+hipError_t HIP_API_SYMBOL(Memset)(void* dst, int value, size_t sizeBytes);
 /**
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
  * byte value value.
@@ -5294,7 +5296,7 @@ hipError_t hipMemset(void* dst, int value, size_t sizeBytes);
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count);
+hipError_t HIP_API_SYMBOL(MemsetD8)(hipDeviceptr_t dest, unsigned char value, size_t count);
 /**
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
  * byte value value.
@@ -5310,7 +5312,7 @@ hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count);
  *  @param[in]  stream  Stream identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD8Async(hipDeviceptr_t dest, unsigned char value, size_t count,
+hipError_t HIP_API_SYMBOL(MemsetD8Async)(hipDeviceptr_t dest, unsigned char value, size_t count,
                             hipStream_t stream __dparm(0));
 /**
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
@@ -5321,7 +5323,7 @@ hipError_t hipMemsetD8Async(hipDeviceptr_t dest, unsigned char value, size_t cou
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count);
+hipError_t HIP_API_SYMBOL(MemsetD16)(hipDeviceptr_t dest, unsigned short value, size_t count);
 /**
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dest with the constant
  * short value value.
@@ -5337,7 +5339,7 @@ hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count)
  *  @param[in]  stream  Stream identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short value, size_t count,
+hipError_t HIP_API_SYMBOL(MemsetD16Async)(hipDeviceptr_t dest, unsigned short value, size_t count,
                              hipStream_t stream __dparm(0));
 /**
  *  @brief Fills the memory area pointed to by dest with the constant integer
@@ -5348,7 +5350,7 @@ hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short value, size_t c
  *  @param[in]  count  Number of values to be set
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  */
-hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count);
+hipError_t HIP_API_SYMBOL(MemsetD32)(hipDeviceptr_t dest, int value, size_t count);
 /**
  *  @brief Fills the first sizeBytes bytes of the memory area pointed to by dev with the constant
  * byte value value.
@@ -5364,7 +5366,7 @@ hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count);
  *  @param[in]  stream  Stream identifier
  *  @return #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes, hipStream_t stream __dparm(0));
+hipError_t HIP_API_SYMBOL(MemsetAsync)(void* dst, int value, size_t sizeBytes, hipStream_t stream __dparm(0));
 /**
  *  @brief Fills the memory area pointed to by dev with the constant integer
  * value for specified number of times.
@@ -5380,7 +5382,7 @@ hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes, hipStream_t st
  *  @param[in]  stream  Stream identifier
  *  @return #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count,
+hipError_t HIP_API_SYMBOL(MemsetD32Async)(hipDeviceptr_t dst, int value, size_t count,
                              hipStream_t stream __dparm(0));
 /**
  *  @brief Fills the memory area pointed to by dst with the constant value.
@@ -5392,7 +5394,7 @@ hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count,
  *  @param[in]  height  Height size in bytes in 2D memory
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t height);
+hipError_t HIP_API_SYMBOL(Memset2D)(void* dst, size_t pitch, int value, size_t width, size_t height);
 /**
  *  @brief Fills asynchronously the memory area pointed to by dst with the constant value.
  *
@@ -5404,7 +5406,7 @@ hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t 
  *  @param[in]  stream  Stream identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, size_t height,
+hipError_t HIP_API_SYMBOL(Memset2DAsync)(void* dst, size_t pitch, int value, size_t width, size_t height,
                             hipStream_t stream __dparm(0));
 /**
  *  @brief Fills synchronously the memory area pointed to by pitchedDevPtr with the constant value.
@@ -5414,7 +5416,7 @@ hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, si
  *  @param[in]  extent  Size parameters for width field in bytes in device memory
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent);
+hipError_t HIP_API_SYMBOL(Memset3D)(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent);
 /**
  *  @brief Fills asynchronously the memory area pointed to by pitchedDevPtr with the constant value.
  *
@@ -5424,7 +5426,7 @@ hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent)
  *  @param[in]  stream  Stream identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
+hipError_t HIP_API_SYMBOL(Memset3DAsync)(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
                             hipStream_t stream __dparm(0));
 
 /**
@@ -5438,7 +5440,7 @@ hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value, hipExtent ex
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char value, size_t width,
+hipError_t HIP_API_SYMBOL(MemsetD2D8)(hipDeviceptr_t dst, size_t dstPitch, unsigned char value, size_t width,
                          size_t height);
 /**
  *  @brief Fills 2D memory range of 'width' 8-bit values asynchronously to the specified char value.
@@ -5452,7 +5454,7 @@ hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char valu
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char value,
+hipError_t HIP_API_SYMBOL(MemsetD2D8Async)(hipDeviceptr_t dst, size_t dstPitch, unsigned char value,
                               size_t width, size_t height, hipStream_t stream __dparm(0));
 
 /**
@@ -5466,7 +5468,7 @@ hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short value, size_t width,
+hipError_t HIP_API_SYMBOL(MemsetD2D16)(hipDeviceptr_t dst, size_t dstPitch, unsigned short value, size_t width,
                           size_t height);
 /**
  *  @brief Fills 2D memory range of 'width' 16-bit values asynchronously to the specified short
@@ -5480,7 +5482,7 @@ hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short va
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch, unsigned short value,
+hipError_t HIP_API_SYMBOL(MemsetD2D16Async)(hipDeviceptr_t dst, size_t dstPitch, unsigned short value,
                                size_t width, size_t height, hipStream_t stream __dparm(0));
 /**
  *  @brief Fills 2D memory range of 'width' 32-bit values synchronously to the specified int value.
@@ -5493,7 +5495,7 @@ hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch, unsigned sho
  *  @param[in] height    Number of rows
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int value, size_t width,
+hipError_t HIP_API_SYMBOL(MemsetD2D32)(hipDeviceptr_t dst, size_t dstPitch, unsigned int value, size_t width,
                           size_t height);
 /**
  *  @brief Fills 2D memory range of 'width' 32-bit values asynchronously to the specified int
@@ -5507,7 +5509,7 @@ hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int valu
  *  @param[in] stream    Stream Identifier
  *  @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemsetD2D32Async(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
+hipError_t HIP_API_SYMBOL(MemsetD2D32Async)(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
                                size_t width, size_t height, hipStream_t stream __dparm(0));
 
 /**
@@ -5526,7 +5528,7 @@ hipError_t hipMemsetD2D32Async(hipDeviceptr_t dst, size_t dstPitch, unsigned int
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
  **/
-hipError_t hipMemGetInfo(size_t* free, size_t* total);
+hipError_t HIP_API_SYMBOL(MemGetInfo)(size_t* free, size_t* total);
 
 /**
  * @brief Get allocated memory size via memory pointer.
@@ -5539,7 +5541,7 @@ hipError_t hipMemGetInfo(size_t* free, size_t* total);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  **/
-hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
+hipError_t HIP_API_SYMBOL(MemPtrGetInfo)(void* ptr, size_t* size);
 /**
  *  @brief Allocate an array on the device.
  *
@@ -5552,7 +5554,7 @@ hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
  *
  *  @see hipMalloc, hipMallocPitch, hipFree, hipFreeArray, hipHostMalloc, hipHostFree
  */
-hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, size_t width,
+hipError_t HIP_API_SYMBOL(MallocArray)(hipArray_t* array, const hipChannelFormatDesc* desc, size_t width,
                           size_t height __dparm(0), unsigned int flags __dparm(hipArrayDefault));
 /**
  *  @brief Create an array memory pointer on the device.
@@ -5564,7 +5566,7 @@ hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, s
  *
  *  @see hipMallocArray, hipArrayDestroy, hipFreeArray
  */
-hipError_t hipArrayCreate(hipArray_t* pHandle, const HIP_ARRAY_DESCRIPTOR* pAllocateArray);
+hipError_t HIP_API_SYMBOL(ArrayCreate)(hipArray_t* pHandle, const HIP_ARRAY_DESCRIPTOR* pAllocateArray);
 /**
  *  @brief Destroy an array memory pointer on the device.
  *
@@ -5574,7 +5576,7 @@ hipError_t hipArrayCreate(hipArray_t* pHandle, const HIP_ARRAY_DESCRIPTOR* pAllo
  *
  *  @see hipArrayCreate, hipArrayDestroy, hipFreeArray
  */
-hipError_t hipArrayDestroy(hipArray_t array);
+hipError_t HIP_API_SYMBOL(ArrayDestroy)(hipArray_t array);
 /**
  *  @brief Create a 3D array memory pointer on the device.
  *
@@ -5585,7 +5587,7 @@ hipError_t hipArrayDestroy(hipArray_t array);
  *
  *  @see hipMallocArray, hipArrayDestroy, hipFreeArray
  */
-hipError_t hipArray3DCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray);
+hipError_t HIP_API_SYMBOL(Array3DCreate)(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray);
 /**
  *  @brief Create a 3D memory pointer on the device.
  *
@@ -5596,7 +5598,7 @@ hipError_t hipArray3DCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAl
  *
  *  @see hipMallocPitch, hipMemGetInfo, hipFree
  */
-hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
+hipError_t HIP_API_SYMBOL(Malloc3D)(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
 /**
  *  @brief Frees an array on the device.
  *
@@ -5605,7 +5607,7 @@ hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
  *
  *  @see hipMalloc, hipMallocPitch, hipFree, hipMallocArray, hipHostMalloc, hipHostFree
  */
-hipError_t hipFreeArray(hipArray_t array);
+hipError_t HIP_API_SYMBOL(FreeArray)(hipArray_t array);
 /**
  *  @brief Allocate an array on the device.
  *
@@ -5617,7 +5619,7 @@ hipError_t hipFreeArray(hipArray_t array);
  *
  *  @see hipMalloc, hipMallocPitch, hipFree, hipFreeArray, hipHostMalloc, hipHostFree
  */
-hipError_t hipMalloc3DArray(hipArray_t* array, const struct hipChannelFormatDesc* desc,
+hipError_t HIP_API_SYMBOL(Malloc3DArray)(hipArray_t* array, const struct hipChannelFormatDesc* desc,
                             struct hipExtent extent, unsigned int flags);
 /**
  * @brief Gets info about the specified array
@@ -5631,7 +5633,7 @@ hipError_t hipMalloc3DArray(hipArray_t* array, const struct hipChannelFormatDesc
  *
  * @see hipArrayGetDescriptor, hipArray3DGetDescriptor
  */
-hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
+hipError_t HIP_API_SYMBOL(ArrayGetInfo)(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
                            hipArray_t array);
 /**
  * @brief Gets a 1D or 2D array descriptor
@@ -5650,7 +5652,7 @@ hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsign
  * hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo, hipMemHostAlloc,
  * hipMemHostGetDevicePointer, hipMemsetD8, hipMemsetD16, hipMemsetD32, hipArrayGetInfo
  */
-hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
+hipError_t HIP_API_SYMBOL(ArrayGetDescriptor)(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 /**
  * @brief Gets a 3D array descriptor
  *
@@ -5668,7 +5670,7 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
  * hipMemFreeHost, hipMemGetAddressRange, hipMemGetInfo, hipMemHostAlloc,
  * hipMemHostGetDevicePointer, hipMemsetD8, hipMemsetD16, hipMemsetD32, hipArrayGetInfo
  */
-hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
+hipError_t HIP_API_SYMBOL(Array3DGetDescriptor)(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 /**
  *  @brief Copies data between host and device.
  *
@@ -5703,7 +5705,7 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
  *  @see hipMemcpy, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
+hipError_t HIP_API_SYMBOL(Memcpy2D)(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                        size_t height, hipMemcpyKind kind);
 /**
  *  @brief Copies memory for 2D arrays.
@@ -5714,7 +5716,7 @@ hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch,
  *  @see hipMemcpy, hipMemcpy2D, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray,
  * hipMemcpyToSymbol, hipMemcpyAsync
  */
-hipError_t hipMemcpyParam2D(const hip_Memcpy2D* pCopy);
+hipError_t HIP_API_SYMBOL(MemcpyParam2D)(const hip_Memcpy2D* pCopy);
 /**
  *  @brief Copies memory for 2D arrays.
  *  @param[in]   pCopy Parameters for the memory copy
@@ -5725,7 +5727,7 @@ hipError_t hipMemcpyParam2D(const hip_Memcpy2D* pCopy);
  *  @see hipMemcpy, hipMemcpy2D, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray,
  * hipMemcpyToSymbol, hipMemcpyAsync
  */
-hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream __dparm(0));
+hipError_t HIP_API_SYMBOL(MemcpyParam2DAsync)(const hip_Memcpy2D* pCopy, hipStream_t stream __dparm(0));
 /**
  *  @brief Copies data between host and device asynchronously.
  *
@@ -5766,7 +5768,7 @@ hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream _
  *  @see hipMemcpy, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
+hipError_t HIP_API_SYMBOL(Memcpy2DAsync)(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                             size_t height, hipMemcpyKind kind, hipStream_t stream __dparm(0));
 /**
  *  @brief Copies data between host and device.
@@ -5785,7 +5787,7 @@ hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t sp
  *  @see hipMemcpy, hipMemcpyToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
+hipError_t HIP_API_SYMBOL(Memcpy2DToArray)(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
                               size_t spitch, size_t width, size_t height, hipMemcpyKind kind);
 /**
  *  @brief Copies data between host and device.
@@ -5805,7 +5807,7 @@ hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset, co
  *  @see hipMemcpy, hipMemcpyToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
+hipError_t HIP_API_SYMBOL(Memcpy2DToArrayAsync)(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
                                    size_t spitch, size_t width, size_t height, hipMemcpyKind kind,
                                    hipStream_t stream __dparm(0));
 /**
@@ -5826,7 +5828,7 @@ hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset, size_t hOffse
  *  @see hipMemcpy, hipMemcpyToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst, size_t hOffsetDst,
+hipError_t HIP_API_SYMBOL(Memcpy2DArrayToArray)(hipArray_t dst, size_t wOffsetDst, size_t hOffsetDst,
                                    hipArray_const_t src, size_t wOffsetSrc, size_t hOffsetSrc,
                                    size_t width, size_t height, hipMemcpyKind kind);
 /**
@@ -5848,7 +5850,7 @@ hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst, size_t hOf
  *  @warning  This API is deprecated.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
+hipError_t HIP_API_SYMBOL(MemcpyToArray)(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
                             size_t count, hipMemcpyKind kind);
 /**
  *  @brief Copies data between host and device [Deprecated]
@@ -5869,7 +5871,7 @@ hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset, cons
  * @warning  This API is deprecated.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray, size_t wOffset, size_t hOffset,
+hipError_t HIP_API_SYMBOL(MemcpyFromArray)(void* dst, hipArray_const_t srcArray, size_t wOffset, size_t hOffset,
                               size_t count, hipMemcpyKind kind);
 /**
  *  @brief Copies data between host and device.
@@ -5888,7 +5890,7 @@ hipError_t hipMemcpyFromArray(void* dst, hipArray_const_t srcArray, size_t wOffs
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset,
+hipError_t HIP_API_SYMBOL(Memcpy2DFromArray)(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset,
                                 size_t hOffset, size_t width, size_t height, hipMemcpyKind kind);
 /**
  *  @brief Copies data between host and device asynchronously.
@@ -5908,7 +5910,7 @@ hipError_t hipMemcpy2DFromArray(void* dst, size_t dpitch, hipArray_const_t src, 
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset,
+hipError_t HIP_API_SYMBOL(Memcpy2DFromArrayAsync)(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset,
                                      size_t hOffset, size_t width, size_t height,
                                      hipMemcpyKind kind, hipStream_t stream __dparm(0));
 /**
@@ -5924,7 +5926,7 @@ hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch, hipArray_const_t 
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray, size_t srcOffset, size_t count);
+hipError_t HIP_API_SYMBOL(MemcpyAtoH)(void* dst, hipArray_t srcArray, size_t srcOffset, size_t count);
 /**
  *  @brief Copies data between host and device.
  *
@@ -5938,7 +5940,7 @@ hipError_t hipMemcpyAtoH(void* dst, hipArray_t srcArray, size_t srcOffset, size_
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset, const void* srcHost, size_t count);
+hipError_t HIP_API_SYMBOL(MemcpyHtoA)(hipArray_t dstArray, size_t dstOffset, const void* srcHost, size_t count);
 /**
  *  @brief Copies data between host and device.
  *
@@ -5949,7 +5951,7 @@ hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset, const void* srcH
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy3D(const struct hipMemcpy3DParms* p);
+hipError_t HIP_API_SYMBOL(Memcpy3D)(const struct hipMemcpy3DParms* p);
 /**
  *  @brief Copies data between host and device asynchronously.
  *
@@ -5961,7 +5963,7 @@ hipError_t hipMemcpy3D(const struct hipMemcpy3DParms* p);
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream __dparm(0));
+hipError_t HIP_API_SYMBOL(Memcpy3DAsync)(const struct hipMemcpy3DParms* p, hipStream_t stream __dparm(0));
 /**
  *  @brief Copies data between host and device.
  *
@@ -5972,7 +5974,7 @@ hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms* p, hipStream_t stream
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy);
+hipError_t HIP_API_SYMBOL(DrvMemcpy3D)(const HIP_MEMCPY3D* pCopy);
 /**
  *  @brief Copies data between host and device asynchronously.
  *
@@ -5984,7 +5986,7 @@ hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy);
  *  @see hipMemcpy, hipMemcpy2DToArray, hipMemcpy2D, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
  */
-hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(DrvMemcpy3DAsync)(const HIP_MEMCPY3D* pCopy, hipStream_t stream);
 /**
  * @brief Get information on memory allocations.
  *
@@ -5997,7 +5999,7 @@ hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream);
  * @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
  * hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize, hipCtxGetDevice
  */
-hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr);
+hipError_t HIP_API_SYMBOL(MemGetAddressRange)(hipDeviceptr_t* pbase, size_t* psize, hipDeviceptr_t dptr);
 
 /**
  * @brief Perform Batch of 1D copies
@@ -6014,7 +6016,7 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count,
+hipError_t HIP_API_SYMBOL(MemcpyBatchAsync)(void** dsts, void** srcs, size_t* sizes, size_t count,
                                hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                size_t* failIdx, hipStream_t stream __dparm(0));
 
@@ -6030,7 +6032,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
+hipError_t HIP_API_SYMBOL(Memcpy3DBatchAsync)(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream __dparm(0));
 
 /**
@@ -6041,7 +6043,7 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, hipErrorInvalidDevice
  */
-hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
+hipError_t HIP_API_SYMBOL(Memcpy3DPeer)(hipMemcpy3DPeerParms* p);
 
 /**
  * @brief Performs 3D memory copies between devices asynchronously
@@ -6051,7 +6053,7 @@ hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, hipErrorInvalidDevice
  */
-hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dparm(0));
+hipError_t HIP_API_SYMBOL(Memcpy3DPeerAsync)(hipMemcpy3DPeerParms* p, hipStream_t stream __dparm(0));
 
 /**
  * @brief Returns the memory requirements of a HIP mipmapped array.
@@ -6068,7 +6070,7 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dp
  mipmapped array. The returned value in hipArrayMemoryRequirements::alignment represents the
  alignment necessary for mapping the HIP mipmapped array.
  */
-hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+hipError_t HIP_API_SYMBOL(MipmappedArrayGetMemoryRequirements)(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap, hipDevice_t device);
 // doxygen end Memory
 /**
@@ -6105,7 +6107,7 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
  * @returns #hipSuccess, #hipErrorInvalidDevice
  *
  */
-hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int deviceId, int peerDeviceId);
+hipError_t HIP_API_SYMBOL(DeviceCanAccessPeer)(int* canAccessPeer, int deviceId, int peerDeviceId);
 /**
  * @brief Enables direct access to memory allocations on a peer device.
  *
@@ -6120,7 +6122,7 @@ hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int deviceId, int peerDevi
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue,
  * @returns #hipErrorPeerAccessAlreadyEnabled if peer access is already enabled for this device.
  */
-hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags);
+hipError_t HIP_API_SYMBOL(DeviceEnablePeerAccess)(int peerDeviceId, unsigned int flags);
 /**
  * @brief Disables direct access to memory allocations on a peer device.
  *
@@ -6131,7 +6133,7 @@ hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags);
  *
  * @returns #hipSuccess, #hipErrorPeerAccessNotEnabled
  */
-hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
+hipError_t HIP_API_SYMBOL(DeviceDisablePeerAccess)(int peerDeviceId);
 
 /**
  * @brief Copies memory between two peer accessible devices.
@@ -6144,7 +6146,7 @@ hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice
  */
-hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDeviceId,
+hipError_t HIP_API_SYMBOL(MemcpyPeer)(void* dst, int dstDeviceId, const void* src, int srcDeviceId,
                          size_t sizeBytes);
 /**
  * @brief Copies memory between two peer accessible devices asynchronously.
@@ -6158,7 +6160,7 @@ hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDev
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice
  */
-hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int srcDevice,
+hipError_t HIP_API_SYMBOL(MemcpyPeerAsync)(void* dst, int dstDeviceId, const void* src, int srcDevice,
                               size_t sizeBytes, hipStream_t stream __dparm(0));
 
 // doxygen end PeerToPeer
@@ -6172,32 +6174,32 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
  *  @{
  *  This section describes execution context management functions of HIP runtime API.
  */
-hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+hipError_t HIP_API_SYMBOL(DeviceGetDevResource)(hipDevice_t device, hipDevResource* resource,
                                    hipDevResourceType type);
-hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+hipError_t HIP_API_SYMBOL(DevSmResourceSplitByCount)(hipDevResource* result, unsigned int* nbGroups,
                                         const hipDevResource* input, hipDevResource* remainder,
                                         unsigned int flags, unsigned int minCount);
-hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+hipError_t HIP_API_SYMBOL(DevSmResourceSplit)(hipDevResource* result, unsigned int nbGroups,
                                  const hipDevResource* input, hipDevResource* remainder,
                                  unsigned int flags,
                                  hipDevSmResourceGroupParams* groupParams);
-hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
+hipError_t HIP_API_SYMBOL(DevResourceGenerateDesc)(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
                                        unsigned int nbResources);
-hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
+hipError_t HIP_API_SYMBOL(GreenCtxCreate)(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
-hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
-hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
-hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
+hipError_t HIP_API_SYMBOL(ExecutionCtxDestroy)(hipExecutionCtx_t ctx);
+hipError_t HIP_API_SYMBOL(DeviceGetExecutionCtx)(hipExecutionCtx_t* ctx, int device);
+hipError_t HIP_API_SYMBOL(ExecutionCtxStreamCreate)(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                         unsigned int flags, int priority);
-hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
+hipError_t HIP_API_SYMBOL(ExecutionCtxGetDevResource)(hipExecutionCtx_t ctx, hipDevResource* resource,
                                           hipDevResourceType type);
-hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
-hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
-hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
+hipError_t HIP_API_SYMBOL(ExecutionCtxGetDevice)(int* device, hipExecutionCtx_t ctx);
+hipError_t HIP_API_SYMBOL(ExecutionCtxGetId)(hipExecutionCtx_t ctx, unsigned long long* ctxId);
+hipError_t HIP_API_SYMBOL(StreamGetDevResource)(hipStream_t hStream, hipDevResource* resource,
                                     hipDevResourceType type);
-hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
-hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
-hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t HIP_API_SYMBOL(ExecutionCtxRecordEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t HIP_API_SYMBOL(ExecutionCtxSynchronize)(hipExecutionCtx_t ctx);
+hipError_t HIP_API_SYMBOL(ExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
 /**
  * @}
  */
@@ -6239,7 +6241,7 @@ hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device);
+hipError_t HIP_API_SYMBOL(CtxCreate)(hipCtx_t* ctx, unsigned int flags, hipDevice_t device);
 /**
  * @brief Destroy a HIP context [Deprecated]
  *
@@ -6254,7 +6256,7 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxDestroy(hipCtx_t ctx);
+hipError_t HIP_API_SYMBOL(CtxDestroy)(hipCtx_t ctx);
 /**
  * @brief Pop the current/default context and return the popped context [Deprecated]
  *
@@ -6269,7 +6271,7 @@ hipError_t hipCtxDestroy(hipCtx_t ctx);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxPopCurrent(hipCtx_t* ctx);
+hipError_t HIP_API_SYMBOL(CtxPopCurrent)(hipCtx_t* ctx);
 /**
  * @brief Push the context to be set as current/ default context [Deprecated]
  *
@@ -6284,7 +6286,7 @@ hipError_t hipCtxPopCurrent(hipCtx_t* ctx);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxPushCurrent(hipCtx_t ctx);
+hipError_t HIP_API_SYMBOL(CtxPushCurrent)(hipCtx_t ctx);
 /**
  * @brief Set the passed context as current/default [Deprecated]
  *
@@ -6299,7 +6301,7 @@ hipError_t hipCtxPushCurrent(hipCtx_t ctx);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxSetCurrent(hipCtx_t ctx);
+hipError_t HIP_API_SYMBOL(CtxSetCurrent)(hipCtx_t ctx);
 /**
  * @brief Get the handle of the current/ default context [Deprecated]
  *
@@ -6314,7 +6316,7 @@ hipError_t hipCtxSetCurrent(hipCtx_t ctx);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxGetCurrent(hipCtx_t* ctx);
+hipError_t HIP_API_SYMBOL(CtxGetCurrent)(hipCtx_t* ctx);
 /**
  * @brief Get the handle of the device associated with current/default context [Deprecated]
  *
@@ -6329,7 +6331,7 @@ hipError_t hipCtxGetCurrent(hipCtx_t* ctx);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxGetDevice(hipDevice_t* device);
+hipError_t HIP_API_SYMBOL(CtxGetDevice)(hipDevice_t* device);
 /**
  * @brief Returns the approximate HIP api version.
  *
@@ -6351,7 +6353,7 @@ hipError_t hipCtxGetDevice(hipDevice_t* device);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxGetApiVersion(hipCtx_t ctx, unsigned int* apiVersion);
+hipError_t HIP_API_SYMBOL(CtxGetApiVersion)(hipCtx_t ctx, unsigned int* apiVersion);
 /**
  * @brief Get Cache configuration for a specific function [Deprecated]
  *
@@ -6369,7 +6371,7 @@ hipError_t hipCtxGetApiVersion(hipCtx_t ctx, unsigned int* apiVersion);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxGetCacheConfig(hipFuncCache_t* cacheConfig);
+hipError_t HIP_API_SYMBOL(CtxGetCacheConfig)(hipFuncCache_t* cacheConfig);
 /**
  * @brief Set L1/Shared cache partition [Deprecated]
  *
@@ -6387,7 +6389,7 @@ hipError_t hipCtxGetCacheConfig(hipFuncCache_t* cacheConfig);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxSetCacheConfig(hipFuncCache_t cacheConfig);
+hipError_t HIP_API_SYMBOL(CtxSetCacheConfig)(hipFuncCache_t cacheConfig);
 /**
  * @brief Set Shared memory bank configuration  [Deprecated]
  *
@@ -6405,7 +6407,7 @@ hipError_t hipCtxSetCacheConfig(hipFuncCache_t cacheConfig);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config);
+hipError_t HIP_API_SYMBOL(CtxSetSharedMemConfig)(hipSharedMemConfig config);
 /**
  * @brief Get Shared memory bank configuration [Deprecated]
  *
@@ -6423,7 +6425,7 @@ hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig* pConfig);
+hipError_t HIP_API_SYMBOL(CtxGetSharedMemConfig)(hipSharedMemConfig* pConfig);
 /**
  * @brief Blocks until the default context has completed all preceding requested tasks [Deprecated]
  *
@@ -6439,7 +6441,7 @@ hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig* pConfig);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxSynchronize(void);
+hipError_t HIP_API_SYMBOL(CtxSynchronize)(void);
 /**
  * @brief Return flags used for creating default context [Deprecated]
  *
@@ -6454,7 +6456,7 @@ hipError_t hipCtxSynchronize(void);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxGetFlags(unsigned int* flags);
+hipError_t HIP_API_SYMBOL(CtxGetFlags)(unsigned int* flags);
 /**
  * @brief Enables direct access to memory allocations in a peer context [Deprecated]
  *
@@ -6478,7 +6480,7 @@ hipError_t hipCtxGetFlags(unsigned int* flags);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags);
+hipError_t HIP_API_SYMBOL(CtxEnablePeerAccess)(hipCtx_t peerCtx, unsigned int flags);
 /**
  * @brief Disable direct access from current context's virtual address space to memory allocations
  * physically located on a peer context.Disables direct access to memory allocations in a peer
@@ -6499,7 +6501,7 @@ hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx);
+hipError_t HIP_API_SYMBOL(CtxDisablePeerAccess)(hipCtx_t peerCtx);
 
 /**
  * @brief Get the state of the primary context [Deprecated]
@@ -6517,7 +6519,7 @@ hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int* flags, int* active);
+hipError_t HIP_API_SYMBOL(DevicePrimaryCtxGetState)(hipDevice_t dev, unsigned int* flags, int* active);
 /**
  * @brief Release the primary context on the GPU.
  *
@@ -6534,7 +6536,7 @@ hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int* flags, int
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev);
+hipError_t HIP_API_SYMBOL(DevicePrimaryCtxRelease)(hipDevice_t dev);
 /**
  * @brief Retain the primary context on the GPU [Deprecated]
  *
@@ -6550,7 +6552,7 @@ hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipDevicePrimaryCtxRetain(hipCtx_t* pctx, hipDevice_t dev);
+hipError_t HIP_API_SYMBOL(DevicePrimaryCtxRetain)(hipCtx_t* pctx, hipDevice_t dev);
 /**
  * @brief Resets the primary context on the GPU [Deprecated]
  *
@@ -6565,7 +6567,7 @@ hipError_t hipDevicePrimaryCtxRetain(hipCtx_t* pctx, hipDevice_t dev);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev);
+hipError_t HIP_API_SYMBOL(DevicePrimaryCtxReset)(hipDevice_t dev);
 /**
  * @brief Set flags for the primary context [Deprecated]
  *
@@ -6581,7 +6583,7 @@ hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev);
  * NVIDIA platform.
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags);
+hipError_t HIP_API_SYMBOL(DevicePrimaryCtxSetFlags)(hipDevice_t dev, unsigned int flags);
 // doxygen end Context Management
 /**
  * @}
@@ -6606,7 +6608,7 @@ hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags);
  * #hipErrorOutOfMemory, #hipErrorSharedObjectInitFailed, #hipErrorNotInitialized
  *
  */
-hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin);
+hipError_t HIP_API_SYMBOL(ModuleLoadFatBinary)(hipModule_t* module, const void* fatbin);
 /**
  * @brief Loads code object from file into a module the currrent context.
  *
@@ -6620,7 +6622,7 @@ hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin);
  * #hipErrorOutOfMemory, #hipErrorSharedObjectInitFailed, #hipErrorNotInitialized
  *
  */
-hipError_t hipModuleLoad(hipModule_t* module, const char* fname);
+hipError_t HIP_API_SYMBOL(ModuleLoad)(hipModule_t* module, const char* fname);
 /**
  * @brief Frees the module
  *
@@ -6630,7 +6632,7 @@ hipError_t hipModuleLoad(hipModule_t* module, const char* fname);
  *
  * The module is freed, and the code objects associated with it are destroyed.
  */
-hipError_t hipModuleUnload(hipModule_t module);
+hipError_t HIP_API_SYMBOL(ModuleUnload)(hipModule_t module);
 /**
  * @brief Function with kname will be extracted if present in module
  *
@@ -6641,7 +6643,7 @@ hipError_t hipModuleUnload(hipModule_t module);
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext, #hipErrorNotInitialized,
  * #hipErrorNotFound,
  */
-hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, const char* kname);
+hipError_t HIP_API_SYMBOL(ModuleGetFunction)(hipFunction_t* function, hipModule_t module, const char* kname);
 
 /**
  * @brief Returns the number of functions within a module.
@@ -6652,7 +6654,7 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext, #hipErrorNotInitialized,
  * #hipErrorNotFound,
  */
-hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
+hipError_t HIP_API_SYMBOL(ModuleGetFunctionCount)(unsigned int* count, hipModule_t mod);
 
 /**
  * @brief Returns information about a kernel.
@@ -6681,7 +6683,7 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
  hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
  hipModuleGetFunction, hipFuncGetAttribute
  */
-hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+hipError_t HIP_API_SYMBOL(KernelGetAttribute)(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev);
 
 /**
@@ -6697,7 +6699,7 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
  * @param [in] numLibraryOptions Number of library options
  * @return #hipSuccess, #hipErrorInvalidValue,
  */
-hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
+hipError_t HIP_API_SYMBOL(LibraryLoadData)(hipLibrary_t* library, const void* code, hipJitOption* jitOptions,
                               void** jitOptionsValues, unsigned int numJitOptions,
                               hipLibraryOption* libraryOptions, void** libraryOptionValues,
                               unsigned int numLibraryOptions);
@@ -6715,7 +6717,7 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOpt
  * @param [in] numLibraryOptions Number of library options
  * @return #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
+hipError_t HIP_API_SYMBOL(LibraryLoadFromFile)(hipLibrary_t* library, const char* fileName,
                                   hipJitOption* jitOptions, void** jitOptionsValues,
                                   unsigned int numJitOptions, hipLibraryOption* libraryOptions,
                                   void** libraryOptionValues, unsigned int numLibraryOptions);
@@ -6726,7 +6728,7 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
  * @param [in] library Input created hip library
  * @return #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipLibraryUnload(hipLibrary_t library);
+hipError_t HIP_API_SYMBOL(LibraryUnload)(hipLibrary_t library);
 
 /**
  * @brief Get Kernel object from library
@@ -6736,7 +6738,7 @@ hipError_t hipLibraryUnload(hipLibrary_t library);
  * @param [in] name kernel name to be searched for
  * @return #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
+hipError_t HIP_API_SYMBOL(LibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
 
 /**
  * @brief Get Kernel count in library
@@ -6745,7 +6747,7 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
  * @param [in] library Input created hip library
  * @return #hipSuccess, #hipErrorInvalidValue
 */
-hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
+hipError_t HIP_API_SYMBOL(LibraryGetKernelCount)(unsigned int *count, hipLibrary_t library);
 
 /**
  * @brief Get device pointer to a `__device__` global variable defined in a library.
@@ -6761,7 +6763,7 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
  * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
  *         #hipErrorNotFound
  */
-hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
+hipError_t HIP_API_SYMBOL(LibraryGetGlobal)(void** dptr, size_t* bytes, hipLibrary_t library,
                                const char* name);
 
 /**
@@ -6780,7 +6782,7 @@ hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
  * @return #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle,
  *         #hipErrorNotFound
  */
-hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
+hipError_t HIP_API_SYMBOL(LibraryGetManaged)(void** dptr, size_t* bytes, hipLibrary_t library,
                                 const char* name);
 
 /**
@@ -6791,7 +6793,7 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
  * @oaram [in] library Library handle to query from
  * @return #hipSuccess, #hipErrorInvalidValue
 */
-hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
+hipError_t HIP_API_SYMBOL(LibraryEnumerateKernels)(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
 
 /**
@@ -6801,7 +6803,7 @@ hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKern
  * @param [in] kernel Kernel to retrieve library Handle
  * @return #hipSuccess, #hipErrorInvalidValue
 */
-hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
+hipError_t HIP_API_SYMBOL(KernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
 
 /**
  * @brief Returns a Kernel Name
@@ -6810,7 +6812,7 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
  * @param [in] kernel Kernel handle to retrieve name
  * @return #hipSuccess, #hipErrorInvalidValue
 */
-hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
+hipError_t HIP_API_SYMBOL(KernelGetName)(const char** name, hipKernel_t kernel);
 
 /**
  * @brief Returns the offset and size of a kernel parameter
@@ -6822,7 +6824,7 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
  *
  * @return #hipSuccess, #hipErrorInvalidValue
 */
-hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
+hipError_t HIP_API_SYMBOL(KernelGetParamInfo)(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
                                  size_t* paramSize);
 
 /**
@@ -6833,7 +6835,7 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDeviceFunction
  */
-hipError_t hipFuncGetAttributes(struct hipFuncAttributes* attr, const void* func);
+hipError_t HIP_API_SYMBOL(FuncGetAttributes)(struct hipFuncAttributes* attr, const void* func);
 /**
  * @brief Find out a specific attribute for a given function.
  * @ingroup Execution
@@ -6843,7 +6845,7 @@ hipError_t hipFuncGetAttributes(struct hipFuncAttributes* attr, const void* func
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDeviceFunction
  */
-hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunction_t hfunc);
+hipError_t HIP_API_SYMBOL(FuncGetAttribute)(int* value, hipFunction_attribute attrib, hipFunction_t hfunc);
 /**
  * @brief Gets pointer to device entry function that matches entry function symbolPtr.
  *
@@ -6853,7 +6855,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
  * @returns #hipSuccess, #hipErrorInvalidDeviceFunction
  *
  */
-hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr);
+hipError_t HIP_API_SYMBOL(GetFuncBySymbol)(hipFunction_t* functionPtr, const void* symbolPtr);
 /**
  * @brief Gets function pointer of a requested HIP API
  *
@@ -6865,7 +6867,7 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned long long flags,
+hipError_t HIP_API_SYMBOL(GetDriverEntryPoint)(const char* symbol, void** funcPtr, unsigned long long flags,
                                   hipDriverEntryPointQueryResult* driverStatus);
 /**
  * @brief returns the handle of the texture reference with the name from the module.
@@ -6876,7 +6878,7 @@ hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned l
  *
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorNotFound, #hipErrorInvalidValue
  */
-hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name);
+hipError_t HIP_API_SYMBOL(ModuleGetTexRef)(textureReference** texRef, hipModule_t hmod, const char* name);
 /**
  * @brief builds module from code object data which resides in host memory.
  *
@@ -6900,7 +6902,7 @@ hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const
  *
  * @returns hipSuccess, hipErrorNotInitialized, hipErrorOutOfMemory, hipErrorNotInitialized
  */
-hipError_t hipModuleLoadData(hipModule_t* module, const void* image);
+hipError_t HIP_API_SYMBOL(ModuleLoadData)(hipModule_t* module, const void* image);
 /**
  * @brief builds module from code object which resides in host memory. Image is pointer to that
  * location. Options are not used. hipModuleLoadData is called.
@@ -6913,7 +6915,7 @@ hipError_t hipModuleLoadData(hipModule_t* module, const void* image);
  *
  * @returns hipSuccess, hipErrorNotInitialized, hipErrorOutOfMemory, hipErrorNotInitialized
  */
-hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions,
+hipError_t HIP_API_SYMBOL(ModuleLoadDataEx)(hipModule_t* module, const void* image, unsigned int numOptions,
                                hipJitOption* options, void** optionValues);
 /**
  * @brief Adds bitcode data to be linked with options.
@@ -6933,7 +6935,7 @@ hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned 
  *
  * @see hipError_t
  */
-hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size,
+hipError_t HIP_API_SYMBOL(LinkAddData)(hipLinkState_t state, hipJitInputType type, void* data, size_t size,
                           const char* name, unsigned int numOptions, hipJitOption* options,
                           void** optionValues);
 
@@ -6953,7 +6955,7 @@ hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data
  *
  * @see hipError_t
  */
-hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path,
+hipError_t HIP_API_SYMBOL(LinkAddFile)(hipLinkState_t state, hipJitInputType type, const char* path,
                           unsigned int numOptions, hipJitOption* options, void** optionValues);
 
 /**
@@ -6970,7 +6972,7 @@ hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char
  * @see hipError_t
  */
 
-hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut);
+hipError_t HIP_API_SYMBOL(LinkComplete)(hipLinkState_t state, void** hipBinOut, size_t* sizeOut);
 
 /**
  * @brief Creates a linker instance with options.
@@ -6983,7 +6985,7 @@ hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeO
  *
  * @see hipSuccess
  */
-hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** optionValues,
+hipError_t HIP_API_SYMBOL(LinkCreate)(unsigned int numOptions, hipJitOption* options, void** optionValues,
                          hipLinkState_t* stateOut);
 /**
  * @brief Deletes the linker instance.
@@ -6993,7 +6995,7 @@ hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** 
  *
  * @see hipSuccess
  */
-hipError_t hipLinkDestroy(hipLinkState_t state);
+hipError_t HIP_API_SYMBOL(LinkDestroy)(hipLinkState_t state);
 
 /**
  * @brief launches kernel f with launch parameters and shared memory on stream with arguments passed
@@ -7023,7 +7025,7 @@ hipError_t hipLinkDestroy(hipLinkState_t state);
  *
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  */
-hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
+hipError_t HIP_API_SYMBOL(ModuleLaunchKernel)(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY,
                                  unsigned int gridDimZ, unsigned int blockDimX,
                                  unsigned int blockDimY, unsigned int blockDimZ,
                                  unsigned int sharedMemBytes, hipStream_t stream,
@@ -7056,7 +7058,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigne
  * #hipErrorInvalidConfiguration, #hipErrorLaunchFailure, #hipErrorLaunchOutOfResources,
  * #hipErrorLaunchTimeOut, #hipErrorCooperativeLaunchTooLarge, #hipErrorSharedObjectInitFailed
  */
-hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX,
+hipError_t HIP_API_SYMBOL(ModuleLaunchCooperativeKernel)(hipFunction_t f, unsigned int gridDimX,
                                             unsigned int gridDimY, unsigned int gridDimZ,
                                             unsigned int blockDimX, unsigned int blockDimY,
                                             unsigned int blockDimZ, unsigned int sharedMemBytes,
@@ -7075,7 +7077,7 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
  * #hipErrorLaunchOutOfResources, #hipErrorLaunchTimeOut, #hipErrorCooperativeLaunchTooLarge,
  * #hipErrorSharedObjectInitFailed
  */
-hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList,
+hipError_t HIP_API_SYMBOL(ModuleLaunchCooperativeKernelMultiDevice)(hipFunctionLaunchParams* launchParamsList,
                                                        unsigned int numDevices, unsigned int flags);
 /**
  * @brief Launches kernel f with launch parameters and shared memory on stream with arguments passed
@@ -7097,7 +7099,7 @@ hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* 
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  * #hipErrorCooperativeLaunchTooLarge
  */
-hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim, dim3 blockDimX,
+hipError_t HIP_API_SYMBOL(LaunchCooperativeKernel)(const void* f, dim3 gridDim, dim3 blockDimX,
                                       void** kernelParams, unsigned int sharedMemBytes,
                                       hipStream_t stream);
 /**
@@ -7111,7 +7113,7 @@ hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim, dim3 blockDim
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  *  #hipErrorCooperativeLaunchTooLarge
  */
-hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
+hipError_t HIP_API_SYMBOL(LaunchCooperativeKernelMultiDevice)(hipLaunchParams* launchParamsList, int numDevices,
                                                  unsigned int flags);
 
 // Doxygen end group ModuleCooperativeG
@@ -7128,7 +7130,7 @@ hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsLi
  *
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  */
-hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
+hipError_t HIP_API_SYMBOL(ExtLaunchMultiKernelMultiDevice)(hipLaunchParams* launchParamsList, int numDevices,
                                               unsigned int flags);
 /**
  * @brief Launches a HIP kernel using a generic function pointer and the specified configuration.
@@ -7143,7 +7145,7 @@ hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* launchParamsList,
  *
  * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
  */
-hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args);
+hipError_t HIP_API_SYMBOL(LaunchKernelExC)(const hipLaunchConfig_t* config, const void* fPtr, void** args);
 /**
  * @brief Launches a HIP kernel using the driver API with the specified configuration.
  * @ingroup Execution
@@ -7159,7 +7161,7 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
  *
  * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
  */
-hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
+hipError_t HIP_API_SYMBOL(DrvLaunchKernelEx)(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
                                 void** extra);
 /**
  * @brief Returns a handle for the address range requested.
@@ -7175,7 +7177,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
  *
  * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
  */
-hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
+hipError_t HIP_API_SYMBOL(MemGetHandleForAddressRange)(void* handle, hipDeviceptr_t dptr, size_t size,
                                           hipMemRangeHandleType handleType,
                                           unsigned long long flags);
 // doxygen end Module
@@ -7207,7 +7209,7 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
 // TODO - Match CUoccupancyB2DSize
-hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, hipFunction_t f,
+hipError_t HIP_API_SYMBOL(ModuleOccupancyMaxPotentialBlockSize)(int* gridSize, int* blockSize, hipFunction_t f,
                                                    size_t dynSharedMemPerBlk, int blockSizeLimit);
 /**
  * @brief determine the grid and block sizes to achieves maximum occupancy for a kernel
@@ -7225,7 +7227,7 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
 // TODO - Match CUoccupancyB2DSize
-hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* blockSize,
+hipError_t HIP_API_SYMBOL(ModuleOccupancyMaxPotentialBlockSizeWithFlags)(int* gridSize, int* blockSize,
                                                             hipFunction_t f,
                                                             size_t dynSharedMemPerBlk,
                                                             int blockSizeLimit, unsigned int flags);
@@ -7238,7 +7240,7 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* 
  * @param [in]  dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each block
  * @returns  #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunction_t f,
+hipError_t HIP_API_SYMBOL(ModuleOccupancyMaxActiveBlocksPerMultiprocessor)(int* numBlocks, hipFunction_t f,
                                                               int blockSize,
                                                               size_t dynSharedMemPerBlk);
 /**
@@ -7251,7 +7253,7 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hi
  * @param [in]  flags            Extra flags for occupancy calculation (only default supported)
  * @returns  #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+hipError_t HIP_API_SYMBOL(ModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)(
     int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags);
 /**
  * @brief Returns occupancy for a device function.
@@ -7262,7 +7264,7 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
  * @param [in]  dynSharedMemPerBlk Dynamic shared memory usage (in bytes) intended for each block
  * @returns  #hipSuccess, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue
  */
-hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f,
+hipError_t HIP_API_SYMBOL(OccupancyMaxActiveBlocksPerMultiprocessor)(int* numBlocks, const void* f,
                                                         int blockSize, size_t dynSharedMemPerBlk);
 /**
  * @brief Returns occupancy for a device function.
@@ -7274,7 +7276,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const vo
  * @param [in]  flags            Extra flags for occupancy calculation (currently ignored)
  * @returns  #hipSuccess, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue
  */
-hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+hipError_t HIP_API_SYMBOL(OccupancyMaxActiveBlocksPerMultiprocessorWithFlags)(
     int* numBlocks, const void* f, int blockSize, size_t dynSharedMemPerBlk,
     unsigned int flags __dparm(hipOccupancyDefault));
 /**
@@ -7291,7 +7293,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, const void* f,
+hipError_t HIP_API_SYMBOL(OccupancyMaxPotentialBlockSize)(int* gridSize, int* blockSize, const void* f,
                                              size_t dynSharedMemPerBlk, int blockSizeLimit);
 /**
  * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
@@ -7308,7 +7310,7 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, cons
  * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
  * #hipErrorUnknown
  */
-hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, const void* f,
+hipError_t HIP_API_SYMBOL(OccupancyAvailableDynamicSMemPerBlock)(size_t* dynamicSmemSize, const void* f,
                                                     int numBlocks, int blockSize);
 /**
  * @brief determines the amount of active kernel clusters can co-exist at the same time in a device
@@ -7320,7 +7322,7 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
  * @returns #hipSuccess, #hipErrorInvalidDeviceFunction, hipErrorInvalidClusterSize,
  *          #hipErrorInvalidValue
  */
-hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
+hipError_t HIP_API_SYMBOL(OccupancyMaxActiveClusters)(int* numClusters, const void* f,
                                          const hipLaunchConfig_t* config);
 /**
  * @brief returns the maximum cluster size (in number of blocks) that can run on the device
@@ -7332,7 +7334,7 @@ hipError_t hipOccupancyMaxActiveClusters(int* numClusters, const void* f,
  * @returns #hipSuccess, #hipErrorInvalidDeviceFunction, hipErrorInvalidClusterSize,
  *          #hipErrorInvalidValue
  */
-hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
+hipError_t HIP_API_SYMBOL(OccupancyMaxPotentialClusterSize)(int* clusterSize, const void* f,
                                                const hipLaunchConfig_t* config);
 
 // doxygen end Occupancy
@@ -7357,7 +7359,7 @@ hipError_t hipOccupancyMaxPotentialClusterSize(int* clusterSize, const void* f,
  * @warning hipProfilerStart API is deprecated, use roctracer/rocTX instead.
  */
 HIP_DEPRECATED("use roctracer/rocTX instead")
-hipError_t hipProfilerStart();
+hipError_t HIP_API_SYMBOL(ProfilerStart)();
 /**
  * @brief Stop recording of profiling information [Deprecated]
  * When using this API, start the profiler with profiling disabled.  (--startdisabled)
@@ -7365,7 +7367,7 @@ hipError_t hipProfilerStart();
  * @warning  hipProfilerStart API is deprecated, use roctracer/rocTX instead.
  */
 HIP_DEPRECATED("use roctracer/rocTX instead")
-hipError_t hipProfilerStop();
+hipError_t HIP_API_SYMBOL(ProfilerStop)();
 // doxygen end profiler
 /**
  * @}
@@ -7393,7 +7395,7 @@ hipError_t hipProfilerStop();
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  *
  */
-hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem __dparm(0),
+hipError_t HIP_API_SYMBOL(ConfigureCall)(dim3 gridDim, dim3 blockDim, size_t sharedMem __dparm(0),
                             hipStream_t stream __dparm(0));
 /**
  * @brief Set a kernel argument.
@@ -7405,7 +7407,7 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem __dpar
  * @param [in] offset Offset of the argument on the argument stack.
  *
  */
-hipError_t hipSetupArgument(const void* arg, size_t size, size_t offset);
+hipError_t HIP_API_SYMBOL(SetupArgument)(const void* arg, size_t size, size_t offset);
 /**
  * @brief Launch a kernel.
  *
@@ -7414,7 +7416,7 @@ hipError_t hipSetupArgument(const void* arg, size_t size, size_t offset);
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  *
  */
-hipError_t hipLaunchByPtr(const void* func);
+hipError_t HIP_API_SYMBOL(LaunchByPtr)(const void* func);
 /**
  * @brief Push configuration of a kernel launch.
  *
@@ -7431,8 +7433,9 @@ hipError_t hipLaunchByPtr(const void* func);
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  *
  */
-hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem __dparm(0),
-                                      hipStream_t stream __dparm(0));
+hipError_t HIP_COMPILER_API_SYMBOL(PushCallConfiguration)(dim3 gridDim, dim3 blockDim,
+                                                          size_t sharedMem __dparm(0),
+                                                          hipStream_t stream __dparm(0));
 /**
  * @brief Pop configuration of a kernel launch.
  *
@@ -7452,8 +7455,24 @@ hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t shared
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  *
  */
-hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
-                                     hipStream_t* stream);
+hipError_t HIP_COMPILER_API_SYMBOL(PopCallConfiguration)(dim3* gridDim, dim3* blockDim,
+                                                         size_t* sharedMem, hipStream_t* stream);
+void** HIP_COMPILER_API_SYMBOL(RegisterFatBinary)(const void* data);
+void HIP_COMPILER_API_SYMBOL(RegisterFunction)(void** modules, const void* hostFunction,
+                                               char* deviceFunction, const char* deviceName,
+                                               unsigned int threadLimit, uint3* tid, uint3* bid,
+                                               dim3* blockDim, dim3* gridDim, int* wSize);
+void HIP_COMPILER_API_SYMBOL(RegisterManagedVar)(void* hipModule, void** pointer,
+                                                 void* init_value, const char* name, size_t size,
+                                                 unsigned align);
+void HIP_COMPILER_API_SYMBOL(RegisterSurface)(void** modules, void* var, char* hostVar,
+                                              char* deviceVar, int type, int ext);
+void HIP_COMPILER_API_SYMBOL(RegisterTexture)(void** modules, void* var, char* hostVar,
+                                              char* deviceVar, int type, int norm, int ext);
+void HIP_COMPILER_API_SYMBOL(RegisterVar)(void** modules, void* var, char* hostVar,
+                                          char* deviceVar, int ext, size_t size, int constant,
+                                          int global);
+void HIP_COMPILER_API_SYMBOL(UnregisterFatBinary)(void** modules);
 /**
  * @brief C compliant kernel launch API
  *
@@ -7470,7 +7489,7 @@ hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* shar
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
+hipError_t HIP_API_SYMBOL(LaunchKernel)(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
                            void** args, size_t sharedMemBytes __dparm(0),
                            hipStream_t stream __dparm(0));
 
@@ -7500,7 +7519,7 @@ hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks, dim3 di
  * @warning  This API is marked as beta, meaning, while this is feature complete,
  * it is still open to changes and may have outstanding issues.
  */
-hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void* userData);
+hipError_t HIP_API_SYMBOL(LaunchHostFunc)(hipStream_t stream, hipHostFn_t fn, void* userData);
 
 /**
  * Copies memory for 2D arrays.
@@ -7509,7 +7528,7 @@ hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void* userData)
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy);
+hipError_t HIP_API_SYMBOL(DrvMemcpy2DUnaligned)(const hip_Memcpy2D* pCopy);
 // TODO: Move this to hip_ext.h
 /**
  * @brief Launches kernel from the pointer address, with arguments and shared memory on stream.
@@ -7532,7 +7551,7 @@ hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D* pCopy);
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue.
  *
  */
-hipError_t hipExtLaunchKernel(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
+hipError_t HIP_API_SYMBOL(ExtLaunchKernel)(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
                               void** args, size_t sharedMemBytes, hipStream_t stream,
                               hipEvent_t startEvent, hipEvent_t stopEvent, int flags);
 // doxygen end Clang launch
@@ -7561,7 +7580,7 @@ hipError_t hipExtLaunchKernel(const void* function_address, dim3 numBlocks, dim3
  * hipCreateTextureObject will return hipErrorNotSupported.
  *
  */
-hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
+hipError_t HIP_API_SYMBOL(CreateTextureObject)(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
                                   const hipTextureDesc* pTexDesc,
                                   const struct hipResourceViewDesc* pResViewDesc);
 
@@ -7573,7 +7592,7 @@ hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResou
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDestroyTextureObject(hipTextureObject_t textureObject);
+hipError_t HIP_API_SYMBOL(DestroyTextureObject)(hipTextureObject_t textureObject);
 
 /**
  * @brief Gets the channel descriptor in an array.
@@ -7584,7 +7603,7 @@ hipError_t hipDestroyTextureObject(hipTextureObject_t textureObject);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array);
+hipError_t HIP_API_SYMBOL(GetChannelDesc)(hipChannelFormatDesc* desc, hipArray_const_t array);
 
 /**
  * @brief Gets resource descriptor for the texture object.
@@ -7595,7 +7614,7 @@ hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array)
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGetTextureObjectResourceDesc(hipResourceDesc* pResDesc,
+hipError_t HIP_API_SYMBOL(GetTextureObjectResourceDesc)(hipResourceDesc* pResDesc,
                                            hipTextureObject_t textureObject);
 
 /**
@@ -7607,7 +7626,7 @@ hipError_t hipGetTextureObjectResourceDesc(hipResourceDesc* pResDesc,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGetTextureObjectResourceViewDesc(struct hipResourceViewDesc* pResViewDesc,
+hipError_t HIP_API_SYMBOL(GetTextureObjectResourceViewDesc)(struct hipResourceViewDesc* pResViewDesc,
                                                hipTextureObject_t textureObject);
 
 /**
@@ -7619,7 +7638,7 @@ hipError_t hipGetTextureObjectResourceViewDesc(struct hipResourceViewDesc* pResV
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc,
+hipError_t HIP_API_SYMBOL(GetTextureObjectTextureDesc)(hipTextureDesc* pTexDesc,
                                           hipTextureObject_t textureObject);
 
 /**
@@ -7633,7 +7652,7 @@ hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE_DESC* pResDesc,
+hipError_t HIP_API_SYMBOL(TexObjectCreate)(hipTextureObject_t* pTexObject, const HIP_RESOURCE_DESC* pResDesc,
                               const HIP_TEXTURE_DESC* pTexDesc,
                               const HIP_RESOURCE_VIEW_DESC* pResViewDesc);
 
@@ -7645,7 +7664,7 @@ hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipTexObjectDestroy(hipTextureObject_t texObject);
+hipError_t HIP_API_SYMBOL(TexObjectDestroy)(hipTextureObject_t texObject);
 
 /**
  * @brief Gets resource descriptor of a texture object.
@@ -7656,7 +7675,7 @@ hipError_t hipTexObjectDestroy(hipTextureObject_t texObject);
  * @returns #hipSuccess, #hipErrorNotSupported, #hipErrorInvalidValue
  *
  */
-hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC* pResDesc, hipTextureObject_t texObject);
+hipError_t HIP_API_SYMBOL(TexObjectGetResourceDesc)(HIP_RESOURCE_DESC* pResDesc, hipTextureObject_t texObject);
 
 /**
  * @brief Gets resource view descriptor of a texture object.
@@ -7667,7 +7686,7 @@ hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC* pResDesc, hipTextureOb
  * @returns #hipSuccess, #hipErrorNotSupported, #hipErrorInvalidValue
  *
  */
-hipError_t hipTexObjectGetResourceViewDesc(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
+hipError_t HIP_API_SYMBOL(TexObjectGetResourceViewDesc)(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
                                            hipTextureObject_t texObject);
 
 /**
@@ -7679,7 +7698,7 @@ hipError_t hipTexObjectGetResourceViewDesc(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
  * @returns #hipSuccess, #hipErrorNotSupported, #hipErrorInvalidValue
  *
  */
-hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC* pTexDesc, hipTextureObject_t texObject);
+hipError_t HIP_API_SYMBOL(TexObjectGetTextureDesc)(HIP_TEXTURE_DESC* pTexDesc, hipTextureObject_t texObject);
 
 /**
  * @brief Allocate a mipmapped array on the device.
@@ -7695,7 +7714,7 @@ hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC* pTexDesc, hipTextureObje
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  *
  */
-hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
+hipError_t HIP_API_SYMBOL(MallocMipmappedArray)(hipMipmappedArray_t* mipmappedArray,
                                    const struct hipChannelFormatDesc* desc, struct hipExtent extent,
                                    unsigned int numLevels, unsigned int flags __dparm(0));
 
@@ -7709,7 +7728,7 @@ hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  *
  */
-hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray);
+hipError_t HIP_API_SYMBOL(FreeMipmappedArray)(hipMipmappedArray_t mipmappedArray);
 
 /**
  * @brief Gets a mipmap level of a HIP mipmapped array.
@@ -7723,7 +7742,7 @@ hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray);
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  *
  */
-hipError_t hipGetMipmappedArrayLevel(hipArray_t* levelArray,
+hipError_t HIP_API_SYMBOL(GetMipmappedArrayLevel)(hipArray_t* levelArray,
                                      hipMipmappedArray_const_t mipmappedArray, unsigned int level);
 
 /**
@@ -7737,7 +7756,7 @@ hipError_t hipGetMipmappedArrayLevel(hipArray_t* levelArray,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t* pHandle,
+hipError_t HIP_API_SYMBOL(MipmappedArrayCreate)(hipMipmappedArray_t* pHandle,
                                    HIP_ARRAY3D_DESCRIPTOR* pMipmappedArrayDesc,
                                    unsigned int numMipmapLevels);
 
@@ -7751,7 +7770,7 @@ hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t* pHandle,
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  *
  */
-hipError_t hipMipmappedArrayDestroy(hipMipmappedArray_t hMipmappedArray);
+hipError_t HIP_API_SYMBOL(MipmappedArrayDestroy)(hipMipmappedArray_t hMipmappedArray);
 
 /**
  * @brief Get a mipmapped array on a mipmapped level.
@@ -7765,7 +7784,7 @@ hipError_t hipMipmappedArrayDestroy(hipMipmappedArray_t hMipmappedArray);
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  *
  */
-hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray, hipMipmappedArray_t hMipMappedArray,
+hipError_t HIP_API_SYMBOL(MipmappedArrayGetLevel)(hipArray_t* pLevelArray, hipMipmappedArray_t hMipMappedArray,
                                      unsigned int level);
 
 /**
@@ -7787,7 +7806,7 @@ hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray, hipMipmappedArray_
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipBindTextureToMipmappedArray(const textureReference* tex,
+hipError_t HIP_API_SYMBOL(BindTextureToMipmappedArray)(const textureReference* tex,
                                           hipMipmappedArray_const_t mipmappedArray,
                                           const hipChannelFormatDesc* desc);
 
@@ -7802,7 +7821,7 @@ hipError_t hipBindTextureToMipmappedArray(const textureReference* tex,
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipGetTextureReference(const textureReference** texref, const void* symbol);
+hipError_t HIP_API_SYMBOL(GetTextureReference)(const textureReference** texref, const void* symbol);
 
 /**
  * @brief Gets the border color used by a texture reference [Deprecated]
@@ -7815,7 +7834,7 @@ hipError_t hipGetTextureReference(const textureReference** texref, const void* s
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetBorderColor)(float* pBorderColor, const textureReference* texRef);
 
 /**
  * @brief Gets the array bound to a texture reference [Deprecated]
@@ -7829,7 +7848,7 @@ hipError_t hipTexRefGetBorderColor(float* pBorderColor, const textureReference* 
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetArray)(hipArray_t* pArray, const textureReference* texRef);
 
 /**
  * @brief Sets address mode for a texture reference [Deprecated]
@@ -7843,7 +7862,7 @@ hipError_t hipTexRefGetArray(hipArray_t* pArray, const textureReference* texRef)
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetAddressMode(textureReference* texRef, int dim,
+hipError_t HIP_API_SYMBOL(TexRefSetAddressMode)(textureReference* texRef, int dim,
                                    enum hipTextureAddressMode am);
 /**
  * @brief Binds an array as a texture reference [Deprecated]
@@ -7858,7 +7877,7 @@ hipError_t hipTexRefSetAddressMode(textureReference* texRef, int dim,
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetArray(textureReference* tex, hipArray_const_t array, unsigned int flags);
+hipError_t HIP_API_SYMBOL(TexRefSetArray)(textureReference* tex, hipArray_const_t array, unsigned int flags);
 /**
  * @brief Set filter mode for a texture reference [Deprecated]
  *
@@ -7871,7 +7890,7 @@ hipError_t hipTexRefSetArray(textureReference* tex, hipArray_const_t array, unsi
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetFilterMode(textureReference* texRef, enum hipTextureFilterMode fm);
+hipError_t HIP_API_SYMBOL(TexRefSetFilterMode)(textureReference* texRef, enum hipTextureFilterMode fm);
 /**
  * @brief Set flags for a texture reference [Deprecated]
  *
@@ -7884,7 +7903,7 @@ hipError_t hipTexRefSetFilterMode(textureReference* texRef, enum hipTextureFilte
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetFlags(textureReference* texRef, unsigned int Flags);
+hipError_t HIP_API_SYMBOL(TexRefSetFlags)(textureReference* texRef, unsigned int Flags);
 /**
  * @brief Set format for a texture reference [Deprecated]
  *
@@ -7898,7 +7917,7 @@ hipError_t hipTexRefSetFlags(textureReference* texRef, unsigned int Flags);
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetFormat(textureReference* texRef, hipArray_Format fmt,
+hipError_t HIP_API_SYMBOL(TexRefSetFormat)(textureReference* texRef, hipArray_Format fmt,
                               int NumPackedComponents);
 /**
  * @brief Binds a memory area to a texture [Deprecated]
@@ -7915,7 +7934,7 @@ hipError_t hipTexRefSetFormat(textureReference* texRef, hipArray_Format fmt,
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipBindTexture(size_t* offset, const textureReference* tex, const void* devPtr,
+hipError_t HIP_API_SYMBOL(BindTexture)(size_t* offset, const textureReference* tex, const void* devPtr,
                           const hipChannelFormatDesc* desc, size_t size __dparm(UINT_MAX));
 /**
  * @brief Binds a 2D memory area to a texture [Deprecated]
@@ -7934,7 +7953,7 @@ hipError_t hipBindTexture(size_t* offset, const textureReference* tex, const voi
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipBindTexture2D(size_t* offset, const textureReference* tex, const void* devPtr,
+hipError_t HIP_API_SYMBOL(BindTexture2D)(size_t* offset, const textureReference* tex, const void* devPtr,
                             const hipChannelFormatDesc* desc, size_t width, size_t height,
                             size_t pitch);
 /**
@@ -7950,7 +7969,7 @@ hipError_t hipBindTexture2D(size_t* offset, const textureReference* tex, const v
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipBindTextureToArray(const textureReference* tex, hipArray_const_t array,
+hipError_t HIP_API_SYMBOL(BindTextureToArray)(const textureReference* tex, hipArray_const_t array,
                                  const hipChannelFormatDesc* desc);
 /**
  * @brief Get the offset of the alignment in a texture [Deprecated]
@@ -7964,7 +7983,7 @@ hipError_t hipBindTextureToArray(const textureReference* tex, hipArray_const_t a
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipGetTextureAlignmentOffset(size_t* offset, const textureReference* texref);
+hipError_t HIP_API_SYMBOL(GetTextureAlignmentOffset)(size_t* offset, const textureReference* texref);
 /**
  * @brief Unbinds a texture [Deprecated]
  *
@@ -7976,7 +7995,7 @@ hipError_t hipGetTextureAlignmentOffset(size_t* offset, const textureReference* 
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipUnbindTexture(const textureReference* tex);
+hipError_t HIP_API_SYMBOL(UnbindTexture)(const textureReference* tex);
 /**
  * @brief Gets the address for a texture reference [Deprecated]
  *
@@ -7989,7 +8008,7 @@ hipError_t hipUnbindTexture(const textureReference* tex);
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetAddress(hipDeviceptr_t* dev_ptr, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetAddress)(hipDeviceptr_t* dev_ptr, const textureReference* texRef);
 /**
  * @brief Gets the address mode for a texture reference [Deprecated]
  *
@@ -8003,7 +8022,7 @@ hipError_t hipTexRefGetAddress(hipDeviceptr_t* dev_ptr, const textureReference* 
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetAddressMode(enum hipTextureAddressMode* pam, const textureReference* texRef,
+hipError_t HIP_API_SYMBOL(TexRefGetAddressMode)(enum hipTextureAddressMode* pam, const textureReference* texRef,
                                    int dim);
 /**
  * @brief Gets filter mode for a texture reference [Deprecated]
@@ -8017,7 +8036,7 @@ hipError_t hipTexRefGetAddressMode(enum hipTextureAddressMode* pam, const textur
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetFilterMode(enum hipTextureFilterMode* pfm, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetFilterMode)(enum hipTextureFilterMode* pfm, const textureReference* texRef);
 /**
  * @brief Gets flags for a texture reference [Deprecated]
  *
@@ -8030,7 +8049,7 @@ hipError_t hipTexRefGetFilterMode(enum hipTextureFilterMode* pfm, const textureR
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetFlags(unsigned int* pFlags, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetFlags)(unsigned int* pFlags, const textureReference* texRef);
 /**
  * @brief Gets texture format for a texture reference [Deprecated]
  *
@@ -8044,7 +8063,7 @@ hipError_t hipTexRefGetFlags(unsigned int* pFlags, const textureReference* texRe
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetFormat(hipArray_Format* pFormat, int* pNumChannels,
+hipError_t HIP_API_SYMBOL(TexRefGetFormat)(hipArray_Format* pFormat, int* pNumChannels,
                               const textureReference* texRef);
 /**
  * @brief Gets the maximum anisotropy for a texture reference [Deprecated]
@@ -8058,7 +8077,7 @@ hipError_t hipTexRefGetFormat(hipArray_Format* pFormat, int* pNumChannels,
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetMaxAnisotropy(int* pmaxAnsio, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetMaxAnisotropy)(int* pmaxAnsio, const textureReference* texRef);
 /**
  * @brief Gets the mipmap filter mode for a texture reference [Deprecated]
  *
@@ -8071,7 +8090,7 @@ hipError_t hipTexRefGetMaxAnisotropy(int* pmaxAnsio, const textureReference* tex
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode* pfm,
+hipError_t HIP_API_SYMBOL(TexRefGetMipmapFilterMode)(enum hipTextureFilterMode* pfm,
                                         const textureReference* texRef);
 /**
  * @brief Gets the mipmap level bias for a texture reference [Deprecated]
@@ -8085,7 +8104,7 @@ hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode* pfm,
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetMipmapLevelBias(float* pbias, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetMipmapLevelBias)(float* pbias, const textureReference* texRef);
 /**
  * @brief Gets the minimum and maximum mipmap level clamps for a texture reference [Deprecated]
  *
@@ -8099,7 +8118,7 @@ hipError_t hipTexRefGetMipmapLevelBias(float* pbias, const textureReference* tex
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp, float* pmaxMipmapLevelClamp,
+hipError_t HIP_API_SYMBOL(TexRefGetMipmapLevelClamp)(float* pminMipmapLevelClamp, float* pmaxMipmapLevelClamp,
                                         const textureReference* texRef);
 /**
  * @brief Gets the mipmapped array bound to a texture reference [Deprecated]
@@ -8113,7 +8132,7 @@ hipError_t hipTexRefGetMipmapLevelClamp(float* pminMipmapLevelClamp, float* pmax
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray, const textureReference* texRef);
+hipError_t HIP_API_SYMBOL(TexRefGetMipMappedArray)(hipMipmappedArray_t* pArray, const textureReference* texRef);
 /**
  * @brief Sets an bound address for a texture reference [Deprecated]
  *
@@ -8128,7 +8147,7 @@ hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t* pArray, const texture
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetAddress(size_t* ByteOffset, textureReference* texRef, hipDeviceptr_t dptr,
+hipError_t HIP_API_SYMBOL(TexRefSetAddress)(size_t* ByteOffset, textureReference* texRef, hipDeviceptr_t dptr,
                                size_t bytes);
 /**
  * @brief Set a bind an address as a 2D texture reference [Deprecated]
@@ -8144,7 +8163,7 @@ hipError_t hipTexRefSetAddress(size_t* ByteOffset, textureReference* texRef, hip
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetAddress2D(textureReference* texRef, const HIP_ARRAY_DESCRIPTOR* desc,
+hipError_t HIP_API_SYMBOL(TexRefSetAddress2D)(textureReference* texRef, const HIP_ARRAY_DESCRIPTOR* desc,
                                  hipDeviceptr_t dptr, size_t Pitch);
 /**
  * @brief Sets the maximum anisotropy for a texture reference [Deprecated]
@@ -8158,7 +8177,7 @@ hipError_t hipTexRefSetAddress2D(textureReference* texRef, const HIP_ARRAY_DESCR
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef, unsigned int maxAniso);
+hipError_t HIP_API_SYMBOL(TexRefSetMaxAnisotropy)(textureReference* texRef, unsigned int maxAniso);
 /**
  * @brief Sets border color for a texture reference [Deprecated]
  *
@@ -8171,7 +8190,7 @@ hipError_t hipTexRefSetMaxAnisotropy(textureReference* texRef, unsigned int maxA
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetBorderColor(textureReference* texRef, float* pBorderColor);
+hipError_t HIP_API_SYMBOL(TexRefSetBorderColor)(textureReference* texRef, float* pBorderColor);
 /**
  * @brief Sets mipmap filter mode for a texture reference [Deprecated]
  *
@@ -8184,7 +8203,7 @@ hipError_t hipTexRefSetBorderColor(textureReference* texRef, float* pBorderColor
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef, enum hipTextureFilterMode fm);
+hipError_t HIP_API_SYMBOL(TexRefSetMipmapFilterMode)(textureReference* texRef, enum hipTextureFilterMode fm);
 /**
  * @brief Sets mipmap level bias for a texture reference [Deprecated]
  *
@@ -8197,7 +8216,7 @@ hipError_t hipTexRefSetMipmapFilterMode(textureReference* texRef, enum hipTextur
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef, float bias);
+hipError_t HIP_API_SYMBOL(TexRefSetMipmapLevelBias)(textureReference* texRef, float bias);
 /**
  * @brief Sets mipmap level clamp for a texture reference [Deprecated]
  *
@@ -8211,7 +8230,7 @@ hipError_t hipTexRefSetMipmapLevelBias(textureReference* texRef, float bias);
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef, float minMipMapLevelClamp,
+hipError_t HIP_API_SYMBOL(TexRefSetMipmapLevelClamp)(textureReference* texRef, float minMipMapLevelClamp,
                                         float maxMipMapLevelClamp);
 /**
  * @brief Binds mipmapped array to a texture reference [Deprecated]
@@ -8226,7 +8245,7 @@ hipError_t hipTexRefSetMipmapLevelClamp(textureReference* texRef, float minMipMa
  *
  */
 HIP_DEPRECATED(HIP_DEPRECATED_MSG)
-hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
+hipError_t HIP_API_SYMBOL(TexRefSetMipmappedArray)(textureReference* texRef,
                                       struct hipMipmappedArray* mipmappedArray, unsigned int Flags);
 
 // doxygen end deprecated texture management
@@ -8267,7 +8286,7 @@ hipError_t hipTexRefSetMipmappedArray(textureReference* texRef,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-const char* hipApiName(uint32_t id);
+const char* HIP_API_SYMBOL(ApiName)(uint32_t id);
 /**
  * @brief Returns kernel name reference by function name.
  *
@@ -8276,7 +8295,7 @@ const char* hipApiName(uint32_t id);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-const char* hipKernelNameRef(const hipFunction_t f);
+const char* HIP_API_SYMBOL(KernelNameRef)(const hipFunction_t f);
 /**
  * @brief Retrives kernel for a given host pointer, unless stated otherwise.
  *
@@ -8286,7 +8305,7 @@ const char* hipKernelNameRef(const hipFunction_t f);
  * @returns The name of the passed kernel function object, or nullptr.
  *
  */
-const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
+const char* HIP_API_SYMBOL(KernelNameRefByPtr)(const void* hostFunction, hipStream_t stream);
 /**
  * @brief Returns device ID on the stream.
  *
@@ -8295,7 +8314,7 @@ const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
  * @returns The device ID on the stream.
  *
  */
-int hipGetStreamDeviceId(hipStream_t stream);
+int HIP_API_SYMBOL(GetStreamDeviceId)(hipStream_t stream);
 
 // doxygen end Callback
 /**
@@ -8319,7 +8338,7 @@ int hipGetStreamDeviceId(hipStream_t stream);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode);
+hipError_t HIP_API_SYMBOL(StreamBeginCapture)(hipStream_t stream, hipStreamCaptureMode mode);
 
 /**
 * @brief Begins graph capture on a stream to an existing graph.
@@ -8340,7 +8359,7 @@ passed as nullptr. This API is marked as beta, meaning, while this is feature co
 open to changes and may have outstanding issues.
 *
 */
-hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(StreamBeginCaptureToGraph)(hipStream_t stream, hipGraph_t graph,
                                         const hipGraphNode_t* dependencies,
                                         const hipGraphEdgeData* dependencyData,
                                         size_t numDependencies, hipStreamCaptureMode mode);
@@ -8354,7 +8373,7 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);
+hipError_t HIP_API_SYMBOL(StreamEndCapture)(hipStream_t stream, hipGraph_t* pGraph);
 
 /**
  * @brief Get capture status of a stream.
@@ -8366,7 +8385,7 @@ hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);
  * @returns #hipSuccess, #hipErrorStreamCaptureImplicit
  *
  */
-hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus,
+hipError_t HIP_API_SYMBOL(StreamGetCaptureInfo)(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus,
                                    unsigned long long* pId);
 
 /**
@@ -8383,7 +8402,7 @@ hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptureStatus* p
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureImplicit
  *
  */
-hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
+hipError_t HIP_API_SYMBOL(StreamGetCaptureInfo_v2)(hipStream_t stream, hipStreamCaptureStatus* captureStatus_out,
                                       unsigned long long* id_out __dparm(0),
                                       hipGraph_t* graph_out __dparm(0),
                                       const hipGraphNode_t** dependencies_out __dparm(0),
@@ -8398,7 +8417,7 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorStreamCaptureImplicit
  *
  */
-hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus);
+hipError_t HIP_API_SYMBOL(StreamIsCapturing)(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus);
 
 /**
  * @brief Update the set of dependencies in a capturing stream
@@ -8411,7 +8430,7 @@ hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCap
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorIllegalState
  *
  */
-hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t* dependencies,
+hipError_t HIP_API_SYMBOL(StreamUpdateCaptureDependencies)(hipStream_t stream, hipGraphNode_t* dependencies,
                                               size_t numDependencies,
                                               unsigned int flags __dparm(0));
 
@@ -8422,7 +8441,7 @@ hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode);
+hipError_t HIP_API_SYMBOL(ThreadExchangeStreamCaptureMode)(hipStreamCaptureMode* mode);
 
 /**
  * @brief Creates a graph
@@ -8433,7 +8452,7 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode);
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorMemoryAllocation
  *
  */
-hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
+hipError_t HIP_API_SYMBOL(GraphCreate)(hipGraph_t* pGraph, unsigned int flags);
 
 /**
  * @brief Destroys a graph
@@ -8443,7 +8462,7 @@ hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphDestroy(hipGraph_t graph);
+hipError_t HIP_API_SYMBOL(GraphDestroy)(hipGraph_t graph);
 
 /**
  * @brief Adds dependency edges to a graph.
@@ -8455,7 +8474,7 @@ hipError_t hipGraphDestroy(hipGraph_t graph);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
+hipError_t HIP_API_SYMBOL(GraphAddDependencies)(hipGraph_t graph, const hipGraphNode_t* from,
                                    const hipGraphNode_t* to, size_t numDependencies);
 
 /**
@@ -8468,7 +8487,7 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* from,
+hipError_t HIP_API_SYMBOL(GraphRemoveDependencies)(hipGraph_t graph, const hipGraphNode_t* from,
                                       const hipGraphNode_t* to, size_t numDependencies);
 
 /**
@@ -8486,7 +8505,7 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
  * edges actually returned will be written to numEdges.
  *
  */
-hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
+hipError_t HIP_API_SYMBOL(GraphGetEdges)(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                             size_t* numEdges);
 
 /**
@@ -8503,7 +8522,7 @@ hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode
  * obtained will be returned in numNodes.
  *
  */
-hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* numNodes);
+hipError_t HIP_API_SYMBOL(GraphGetNodes)(hipGraph_t graph, hipGraphNode_t* nodes, size_t* numNodes);
 
 /**
  * @brief Returns a graph's root nodes.
@@ -8519,7 +8538,7 @@ hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* num
  * and the number of nodes actually obtained will be returned in pNumRootNodes.
  *
  */
-hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
+hipError_t HIP_API_SYMBOL(GraphGetRootNodes)(hipGraph_t graph, hipGraphNode_t* pRootNodes,
                                 size_t* pNumRootNodes);
 
 /**
@@ -8536,7 +8555,7 @@ hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
  * to NULL, and the number of nodes actually obtained will be returned in pNumDependencies.
  *
  */
-hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
+hipError_t HIP_API_SYMBOL(GraphNodeGetDependencies)(hipGraphNode_t node, hipGraphNode_t* pDependencies,
                                        size_t* pNumDependencies);
 
 /**
@@ -8554,7 +8573,7 @@ hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDep
  * in pNumDependentNodes.
  *
  */
-hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+hipError_t HIP_API_SYMBOL(GraphNodeGetDependentNodes)(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
                                          size_t* pNumDependentNodes);
 
 /**
@@ -8565,7 +8584,7 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
+hipError_t HIP_API_SYMBOL(GraphNodeGetType)(hipGraphNode_t node, hipGraphNodeType* pType);
 
 /**
  * @brief Remove a node from the graph.
@@ -8574,7 +8593,7 @@ hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphDestroyNode(hipGraphNode_t node);
+hipError_t HIP_API_SYMBOL(GraphDestroyNode)(hipGraphNode_t node);
 
 /**
  * @brief Clones a graph.
@@ -8584,7 +8603,7 @@ hipError_t hipGraphDestroyNode(hipGraphNode_t node);
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorMemoryAllocation
  *
  */
-hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
+hipError_t HIP_API_SYMBOL(GraphClone)(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
 
 /**
  * @brief Finds a cloned version of a node.
@@ -8595,7 +8614,7 @@ hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t originalNode,
+hipError_t HIP_API_SYMBOL(GraphNodeFindInClone)(hipGraphNode_t* pNode, hipGraphNode_t originalNode,
                                    hipGraph_t clonedGraph);
 
 /**
@@ -8611,7 +8630,7 @@ hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t origina
  * @returns #hipSuccess, #hipErrorOutOfMemory
  *
  */
-hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphInstantiate)(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                hipGraphNode_t* pErrorNode, char* pLogBuffer, size_t bufferSize);
 
 /**
@@ -8624,7 +8643,7 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
  *
  * @warning This API does not support any of flag and is behaving as hipGraphInstantiate.
  */
-hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphInstantiateWithFlags)(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                         unsigned long long flags);
 
 /**
@@ -8636,7 +8655,7 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphInstantiateWithParams)(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                          hipGraphInstantiateParams* instantiateParams);
 /**
  * @brief Launches an executable graph in the specified stream.
@@ -8646,7 +8665,7 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(GraphLaunch)(hipGraphExec_t graphExec, hipStream_t stream);
 
 /**
  * @brief Uploads an executable graph to a stream
@@ -8656,7 +8675,7 @@ hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(GraphUpload)(hipGraphExec_t graphExec, hipStream_t stream);
 
 /**
  * @brief Creates a kernel execution node and adds it to a graph.
@@ -8669,7 +8688,7 @@ hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream);
  * @returns #hipSuccess, #hipErrorInvalidValue.
  *
  */
-hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                            const hipGraphNode_t* pDependencies, size_t numDependencies,
                            hipGraphNodeParams* nodeParams);
 
@@ -8681,7 +8700,7 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue.
  *
  */
-hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* flags);
+hipError_t HIP_API_SYMBOL(GraphExecGetFlags)(hipGraphExec_t graphExec, unsigned long long* flags);
 
 /**
  * @brief Updates parameters of a graph's node.
@@ -8692,7 +8711,7 @@ hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* fl
  * #hipErrorNotSupported.
  *
  */
-hipError_t hipGraphNodeSetParams(hipGraphNode_t node, hipGraphNodeParams* nodeParams);
+hipError_t HIP_API_SYMBOL(GraphNodeSetParams)(hipGraphNode_t node, hipGraphNodeParams* nodeParams);
 
 /**
  * @brief Updates parameters of an executable graph's node.
@@ -8704,7 +8723,7 @@ hipError_t hipGraphNodeSetParams(hipGraphNode_t node, hipGraphNodeParams* nodePa
  * #hipErrorNotSupported.
  *
  */
-hipError_t hipGraphExecNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecNodeSetParams)(hipGraphExec_t graphExec, hipGraphNode_t node,
                                      hipGraphNodeParams* nodeParams);
 
 /**
@@ -8715,7 +8734,7 @@ hipError_t hipGraphExecNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t no
  * @returns #hipSuccess.
  *
  */
-hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec);
+hipError_t HIP_API_SYMBOL(GraphExecDestroy)(hipGraphExec_t graphExec);
 
 // Check whether an executable graph can be updated with a graph and perform the update if possible.
 /**
@@ -8729,7 +8748,7 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec);
  * @returns #hipSuccess, #hipErrorGraphExecUpdateFailure
  *
  */
-hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
+hipError_t HIP_API_SYMBOL(GraphExecUpdate)(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
                               hipGraphNode_t* hErrorNode_out,
                               hipGraphExecUpdateResult* updateResult_out);
 
@@ -8744,7 +8763,7 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDeviceFunction
  *
  */
-hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddKernelNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
                                  const hipKernelNodeParams* pNodeParams);
 
@@ -8756,7 +8775,7 @@ hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node, hipKernelNodeParams* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphKernelNodeGetParams)(hipGraphNode_t node, hipKernelNodeParams* pNodeParams);
 
 /**
  * @brief Sets a kernel node's parameters.
@@ -8766,7 +8785,7 @@ hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node, hipKernelNodeParams*
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphKernelNodeSetParams)(hipGraphNode_t node, const hipKernelNodeParams* pNodeParams);
 
 /**
  * @brief Sets the parameters for a kernel node in the given graphExec.
@@ -8777,7 +8796,7 @@ hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeP
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecKernelNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                            const hipKernelNodeParams* pNodeParams);
 
 /**
@@ -8792,7 +8811,7 @@ hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
+hipError_t HIP_API_SYMBOL(DrvGraphAddMemcpyNode)(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                     const hipGraphNode_t* dependencies, size_t numDependencies,
                                     const HIP_MEMCPY3D* copyParams, hipCtx_t ctx);
 /**
@@ -8806,7 +8825,7 @@ hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddMemcpyNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
                                  const hipMemcpy3DParms* pCopyParams);
 /**
@@ -8817,7 +8836,7 @@ hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node, hipMemcpy3DParms* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphMemcpyNodeGetParams)(hipGraphNode_t node, hipMemcpy3DParms* pNodeParams);
 
 /**
  * @brief Sets a memcpy node's parameters.
@@ -8827,7 +8846,7 @@ hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node, hipMemcpy3DParms* pN
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node, const hipMemcpy3DParms* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphMemcpyNodeSetParams)(hipGraphNode_t node, const hipMemcpy3DParms* pNodeParams);
 
 /**
  * @brief Sets a node's attribute.
@@ -8838,7 +8857,7 @@ hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node, const hipMemcpy3DPar
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
+hipError_t HIP_API_SYMBOL(GraphKernelNodeSetAttribute)(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
                                           const hipKernelNodeAttrValue* value);
 /**
  * @brief Gets a node's attribute.
@@ -8849,7 +8868,7 @@ hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
+hipError_t HIP_API_SYMBOL(GraphKernelNodeGetAttribute)(hipGraphNode_t hNode, hipKernelNodeAttrID attr,
                                           hipKernelNodeAttrValue* value);
 /**
  * @brief Sets the parameters of a memcpy node in the given graphExec.
@@ -8860,7 +8879,7 @@ hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecMemcpyNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                            hipMemcpy3DParms* pNodeParams);
 
 /**
@@ -8877,7 +8896,7 @@ hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddMemcpyNode1D)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                    const hipGraphNode_t* pDependencies, size_t numDependencies,
                                    void* dst, const void* src, size_t count, hipMemcpyKind kind);
 
@@ -8892,7 +8911,7 @@ hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst, const void* src,
+hipError_t HIP_API_SYMBOL(GraphMemcpyNodeSetParams1D)(hipGraphNode_t node, void* dst, const void* src,
                                          size_t count, hipMemcpyKind kind);
 
 /**
@@ -8908,7 +8927,7 @@ hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst, const v
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecMemcpyNodeSetParams1D)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                              void* dst, const void* src, size_t count,
                                              hipMemcpyKind kind);
 
@@ -8927,7 +8946,7 @@ hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraph
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddMemcpyNodeFromSymbol)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                            const hipGraphNode_t* pDependencies,
                                            size_t numDependencies, void* dst, const void* symbol,
                                            size_t count, size_t offset, hipMemcpyKind kind);
@@ -8944,7 +8963,7 @@ hipError_t hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode, hipGraph_
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(hipGraphNode_t node, void* dst, const void* symbol,
+hipError_t HIP_API_SYMBOL(GraphMemcpyNodeSetParamsFromSymbol)(hipGraphNode_t node, void* dst, const void* symbol,
                                                  size_t count, size_t offset, hipMemcpyKind kind);
 
 /**
@@ -8961,7 +8980,7 @@ hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(hipGraphNode_t node, void* dst,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecMemcpyNodeSetParamsFromSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecMemcpyNodeSetParamsFromSymbol)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                                      void* dst, const void* symbol, size_t count,
                                                      size_t offset, hipMemcpyKind kind);
 
@@ -8980,7 +8999,7 @@ hipError_t hipGraphExecMemcpyNodeSetParamsFromSymbol(hipGraphExec_t hGraphExec, 
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddMemcpyNodeToSymbol)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                          const hipGraphNode_t* pDependencies,
                                          size_t numDependencies, const void* symbol,
                                          const void* src, size_t count, size_t offset,
@@ -8998,7 +9017,7 @@ hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t 
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* symbol,
+hipError_t HIP_API_SYMBOL(GraphMemcpyNodeSetParamsToSymbol)(hipGraphNode_t node, const void* symbol,
                                                const void* src, size_t count, size_t offset,
                                                hipMemcpyKind kind);
 
@@ -9016,7 +9035,7 @@ hipError_t hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* 
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecMemcpyNodeSetParamsToSymbol)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                                    const void* symbol, const void* src,
                                                    size_t count, size_t offset, hipMemcpyKind kind);
 
@@ -9031,7 +9050,7 @@ hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hi
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddMemsetNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
                                  const hipMemsetParams* pMemsetParams);
 
@@ -9043,7 +9062,7 @@ hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphMemsetNodeGetParams)(hipGraphNode_t node, hipMemsetParams* pNodeParams);
 
 /**
  * @brief Sets a memset node's parameters.
@@ -9053,7 +9072,7 @@ hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNo
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParams* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphMemsetNodeSetParams)(hipGraphNode_t node, const hipMemsetParams* pNodeParams);
 
 /**
  * @brief Sets the parameters for a memset node in the given graphExec.
@@ -9064,7 +9083,7 @@ hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParam
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecMemsetNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                            const hipMemsetParams* pNodeParams);
 
 /**
@@ -9078,7 +9097,7 @@ hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddHostNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                const hipGraphNode_t* pDependencies, size_t numDependencies,
                                const hipHostNodeParams* pNodeParams);
 
@@ -9090,7 +9109,7 @@ hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node, hipHostNodeParams* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphHostNodeGetParams)(hipGraphNode_t node, hipHostNodeParams* pNodeParams);
 
 /**
  * @brief Sets a host node's parameters.
@@ -9100,7 +9119,7 @@ hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node, hipHostNodeParams* pNo
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParams* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphHostNodeSetParams)(hipGraphNode_t node, const hipHostNodeParams* pNodeParams);
 
 /**
  * @brief Sets the parameters for a host node in the given graphExec.
@@ -9111,7 +9130,7 @@ hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParam
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecHostNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                          const hipHostNodeParams* pNodeParams);
 
 /**
@@ -9125,7 +9144,7 @@ hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddChildGraphNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                      const hipGraphNode_t* pDependencies, size_t numDependencies,
                                      hipGraph_t childGraph);
 
@@ -9137,7 +9156,7 @@ hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t grap
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGraph);
+hipError_t HIP_API_SYMBOL(GraphChildGraphNodeGetGraph)(hipGraphNode_t node, hipGraph_t* pGraph);
 
 /**
  * @brief Updates node parameters in the child graph node in the given graphExec.
@@ -9148,7 +9167,7 @@ hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGrap
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+hipError_t HIP_API_SYMBOL(GraphExecChildGraphNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t node,
                                                hipGraph_t childGraph);
 
 /**
@@ -9161,7 +9180,7 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddEmptyNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                 const hipGraphNode_t* pDependencies, size_t numDependencies);
 
 
@@ -9176,7 +9195,7 @@ hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddEventRecordNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                       const hipGraphNode_t* pDependencies, size_t numDependencies,
                                       hipEvent_t event);
 
@@ -9188,7 +9207,7 @@ hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t gra
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node, hipEvent_t* event_out);
+hipError_t HIP_API_SYMBOL(GraphEventRecordNodeGetEvent)(hipGraphNode_t node, hipEvent_t* event_out);
 
 /**
  * @brief Sets an event record node's event.
@@ -9198,7 +9217,7 @@ hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node, hipEvent_t* even
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node, hipEvent_t event);
+hipError_t HIP_API_SYMBOL(GraphEventRecordNodeSetEvent)(hipGraphNode_t node, hipEvent_t event);
 
 /**
  * @brief Sets the event for an event record node in the given graphExec.
@@ -9209,7 +9228,7 @@ hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node, hipEvent_t event
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(GraphExecEventRecordNodeSetEvent)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                                hipEvent_t event);
 
 /**
@@ -9223,7 +9242,7 @@ hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t hGraphExec, hipGra
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddEventWaitNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                     const hipGraphNode_t* pDependencies, size_t numDependencies,
                                     hipEvent_t event);
 
@@ -9236,7 +9255,7 @@ hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node, hipEvent_t* event_out);
+hipError_t HIP_API_SYMBOL(GraphEventWaitNodeGetEvent)(hipGraphNode_t node, hipEvent_t* event_out);
 
 /**
  * @brief Sets an event wait node's event.
@@ -9246,7 +9265,7 @@ hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node, hipEvent_t* event_
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node, hipEvent_t event);
+hipError_t HIP_API_SYMBOL(GraphEventWaitNodeSetEvent)(hipGraphNode_t node, hipEvent_t event);
 
 /**
  * @brief Sets the event for an event record node in the given graphExec.
@@ -9257,7 +9276,7 @@ hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node, hipEvent_t event);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(GraphExecEventWaitNodeSetEvent)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                              hipEvent_t event);
 
 /**
@@ -9272,7 +9291,7 @@ hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t hGraphExec, hipGraph
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddMemAllocNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                    const hipGraphNode_t* pDependencies, size_t numDependencies,
                                    hipMemAllocNodeParams* pNodeParams);
 
@@ -9284,7 +9303,7 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams);
+hipError_t HIP_API_SYMBOL(GraphMemAllocNodeGetParams)(hipGraphNode_t node, hipMemAllocNodeParams* pNodeParams);
 
 /**
  * @brief Creates a memory free node and adds it to a graph
@@ -9297,7 +9316,7 @@ hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodePar
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+hipError_t HIP_API_SYMBOL(GraphAddMemFreeNode)(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                   const hipGraphNode_t* pDependencies, size_t numDependencies,
                                   void* dev_ptr);
 
@@ -9309,7 +9328,7 @@ hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void* dev_ptr);
+hipError_t HIP_API_SYMBOL(GraphMemFreeNodeGetParams)(hipGraphNode_t node, void* dev_ptr);
 
 /**
  * @brief Get the mem attribute for graphs.
@@ -9320,7 +9339,7 @@ hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void* dev_ptr);
  * @returns #hipSuccess, #hipErrorInvalidDevice
  *
  */
-hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value);
+hipError_t HIP_API_SYMBOL(DeviceGetGraphMemAttribute)(int device, hipGraphMemAttributeType attr, void* value);
 
 /**
  * @brief Set the mem attribute for graphs.
@@ -9331,7 +9350,7 @@ hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType at
  * @returns #hipSuccess, #hipErrorInvalidDevice
  *
  */
-hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value);
+hipError_t HIP_API_SYMBOL(DeviceSetGraphMemAttribute)(int device, hipGraphMemAttributeType attr, void* value);
 
 /**
  * @brief Free unused memory reserved for graphs on a specific device and return it back to the OS.
@@ -9340,7 +9359,7 @@ hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType at
  * @returns #hipSuccess, #hipErrorInvalidDevice
  *
  */
-hipError_t hipDeviceGraphMemTrim(int device);
+hipError_t HIP_API_SYMBOL(DeviceGraphMemTrim)(int device);
 
 /**
  * @brief Create an instance of userObject to manage lifetime of a resource.
@@ -9353,7 +9372,7 @@ hipError_t hipDeviceGraphMemTrim(int device);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy,
+hipError_t HIP_API_SYMBOL(UserObjectCreate)(hipUserObject_t* object_out, void* ptr, hipHostFn_t destroy,
                                unsigned int initialRefcount, unsigned int flags);
 
 /**
@@ -9364,7 +9383,7 @@ hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count __dparm(1));
+hipError_t HIP_API_SYMBOL(UserObjectRelease)(hipUserObject_t object, unsigned int count __dparm(1));
 
 /**
  * @brief Retain number of references to resource.
@@ -9374,7 +9393,7 @@ hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count __dpa
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count __dparm(1));
+hipError_t HIP_API_SYMBOL(UserObjectRetain)(hipUserObject_t object, unsigned int count __dparm(1));
 
 /**
  * @brief Retain user object for graphs.
@@ -9386,7 +9405,7 @@ hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count __dpar
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object,
+hipError_t HIP_API_SYMBOL(GraphRetainUserObject)(hipGraph_t graph, hipUserObject_t object,
                                     unsigned int count __dparm(1), unsigned int flags __dparm(0));
 
 /**
@@ -9398,7 +9417,7 @@ hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object,
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object,
+hipError_t HIP_API_SYMBOL(GraphReleaseUserObject)(hipGraph_t graph, hipUserObject_t object,
                                      unsigned int count __dparm(1));
 
 /**
@@ -9410,7 +9429,7 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object,
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorOperatingSystem
  *
  */
-hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags);
+hipError_t HIP_API_SYMBOL(GraphDebugDotPrint)(hipGraph_t graph, const char* path, unsigned int flags);
 
 /**
  * @brief Copies attributes from source node to destination node.
@@ -9425,7 +9444,7 @@ hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned in
  * @returns #hipSuccess, #hipErrorInvalidContext
  *
  */
-hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst);
+hipError_t HIP_API_SYMBOL(GraphKernelNodeCopyAttributes)(hipGraphNode_t hSrc, hipGraphNode_t hDst);
 
 /**
  * @brief Enables or disables the specified node in the given graphExec
@@ -9448,7 +9467,7 @@ hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t 
  * @returns #hipSuccess, #hipErrorInvalidValue,
  *
  */
-hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(GraphNodeSetEnabled)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                   unsigned int isEnabled);
 /**
  * @brief Query whether a node in the given graphExec is enabled
@@ -9469,7 +9488,7 @@ hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(GraphNodeGetEnabled)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                   unsigned int* isEnabled);
 
 /**
@@ -9483,7 +9502,7 @@ hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddExternalSemaphoresWaitNode(
+hipError_t HIP_API_SYMBOL(GraphAddExternalSemaphoresWaitNode)(
     hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies,
     size_t numDependencies, const hipExternalSemaphoreWaitNodeParams* nodeParams);
 
@@ -9498,7 +9517,7 @@ hipError_t hipGraphAddExternalSemaphoresWaitNode(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphAddExternalSemaphoresSignalNode(
+hipError_t HIP_API_SYMBOL(GraphAddExternalSemaphoresSignalNode)(
     hipGraphNode_t* pGraphNode, hipGraph_t graph, const hipGraphNode_t* pDependencies,
     size_t numDependencies, const hipExternalSemaphoreSignalNodeParams* nodeParams);
 /**
@@ -9509,7 +9528,7 @@ hipError_t hipGraphAddExternalSemaphoresSignalNode(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExternalSemaphoresSignalNodeSetParams(
+hipError_t HIP_API_SYMBOL(GraphExternalSemaphoresSignalNodeSetParams)(
     hipGraphNode_t hNode, const hipExternalSemaphoreSignalNodeParams* nodeParams);
 /**
  * @brief Updates node parameters in the external semaphore wait node.
@@ -9519,7 +9538,7 @@ hipError_t hipGraphExternalSemaphoresSignalNodeSetParams(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExternalSemaphoresWaitNodeSetParams(
+hipError_t HIP_API_SYMBOL(GraphExternalSemaphoresWaitNodeSetParams)(
     hipGraphNode_t hNode, const hipExternalSemaphoreWaitNodeParams* nodeParams);
 /**
  * @brief Returns external semaphore signal node params.
@@ -9529,7 +9548,7 @@ hipError_t hipGraphExternalSemaphoresWaitNodeSetParams(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExternalSemaphoresSignalNodeGetParams(
+hipError_t HIP_API_SYMBOL(GraphExternalSemaphoresSignalNodeGetParams)(
     hipGraphNode_t hNode, hipExternalSemaphoreSignalNodeParams* params_out);
 /**
  * @brief Returns external semaphore wait node params.
@@ -9539,7 +9558,7 @@ hipError_t hipGraphExternalSemaphoresSignalNodeGetParams(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExternalSemaphoresWaitNodeGetParams(
+hipError_t HIP_API_SYMBOL(GraphExternalSemaphoresWaitNodeGetParams)(
     hipGraphNode_t hNode, hipExternalSemaphoreWaitNodeParams* params_out);
 /**
  * @brief Updates node parameters in the external semaphore signal node in the given graphExec.
@@ -9550,7 +9569,7 @@ hipError_t hipGraphExternalSemaphoresWaitNodeGetParams(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecExternalSemaphoresSignalNodeSetParams(
+hipError_t HIP_API_SYMBOL(GraphExecExternalSemaphoresSignalNodeSetParams)(
     hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
     const hipExternalSemaphoreSignalNodeParams* nodeParams);
 /**
@@ -9562,7 +9581,7 @@ hipError_t hipGraphExecExternalSemaphoresSignalNodeSetParams(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
+hipError_t HIP_API_SYMBOL(GraphExecExternalSemaphoresWaitNodeSetParams)(
     hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
     const hipExternalSemaphoreWaitNodeParams* nodeParams);
 
@@ -9574,7 +9593,7 @@ hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDrvGraphMemcpyNodeGetParams(hipGraphNode_t hNode, HIP_MEMCPY3D* nodeParams);
+hipError_t HIP_API_SYMBOL(DrvGraphMemcpyNodeGetParams)(hipGraphNode_t hNode, HIP_MEMCPY3D* nodeParams);
 
 /**
  * @brief Sets a memcpy node's parameters.
@@ -9584,7 +9603,7 @@ hipError_t hipDrvGraphMemcpyNodeGetParams(hipGraphNode_t hNode, HIP_MEMCPY3D* no
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDrvGraphMemcpyNodeSetParams(hipGraphNode_t hNode, const HIP_MEMCPY3D* nodeParams);
+hipError_t HIP_API_SYMBOL(DrvGraphMemcpyNodeSetParams)(hipGraphNode_t hNode, const HIP_MEMCPY3D* nodeParams);
 
 /**
  * @brief Creates a memset node and adds it to a graph.
@@ -9598,7 +9617,7 @@ hipError_t hipDrvGraphMemcpyNodeSetParams(hipGraphNode_t hNode, const HIP_MEMCPY
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
+hipError_t HIP_API_SYMBOL(DrvGraphAddMemsetNode)(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                     const hipGraphNode_t* dependencies, size_t numDependencies,
                                     const hipMemsetParams* memsetParams, hipCtx_t ctx);
 
@@ -9613,7 +9632,7 @@ hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
+hipError_t HIP_API_SYMBOL(DrvGraphAddMemFreeNode)(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
                                      const hipGraphNode_t* dependencies, size_t numDependencies,
                                      hipDeviceptr_t dptr);
 
@@ -9627,7 +9646,7 @@ hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGr
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(DrvGraphExecMemcpyNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                               const HIP_MEMCPY3D* copyParams, hipCtx_t ctx);
 
 /**
@@ -9640,7 +9659,7 @@ hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGrap
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
+hipError_t HIP_API_SYMBOL(DrvGraphExecMemsetNodeSetParams)(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                               const hipMemsetParams* memsetParams, hipCtx_t ctx);
 
 /**
@@ -9658,7 +9677,7 @@ hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGrap
  *
  * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
  */
-hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
+hipError_t HIP_API_SYMBOL(DrvLaunchKernelEx)(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
                                 void** extra);
 
 // doxygen end graph API
@@ -9692,7 +9711,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemAddressFree(void* devPtr, size_t size);
+hipError_t HIP_API_SYMBOL(MemAddressFree)(void* devPtr, size_t size);
 
 /**
  * @brief Reserves an address range
@@ -9708,7 +9727,7 @@ hipError_t hipMemAddressFree(void* devPtr, size_t size);
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void* addr,
+hipError_t HIP_API_SYMBOL(MemAddressReserve)(void** ptr, size_t size, size_t alignment, void* addr,
                                 unsigned long long flags);
 
 /**
@@ -9731,7 +9750,7 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
+hipError_t HIP_API_SYMBOL(MemCreate)(hipMemGenericAllocationHandle_t* handle, size_t size,
                         const hipMemAllocationProp* prop, unsigned long long flags);
 
 /**
@@ -9747,7 +9766,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemExportToShareableHandle(void* shareableHandle,
+hipError_t HIP_API_SYMBOL(MemExportToShareableHandle)(void* shareableHandle,
                                          hipMemGenericAllocationHandle_t handle,
                                          hipMemAllocationHandleType handleType,
                                          unsigned long long flags);
@@ -9764,7 +9783,7 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* location, void* ptr);
+hipError_t HIP_API_SYMBOL(MemGetAccess)(unsigned long long* flags, const hipMemLocation* location, void* ptr);
 
 /**
  * @brief Calculates either the minimal or recommended granularity.
@@ -9779,7 +9798,7 @@ hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* loca
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  *
  */
-hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAllocationProp* prop,
+hipError_t HIP_API_SYMBOL(MemGetAllocationGranularity)(size_t* granularity, const hipMemAllocationProp* prop,
                                           hipMemAllocationGranularity_flags option);
 
 /**
@@ -9793,7 +9812,7 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
+hipError_t HIP_API_SYMBOL(MemGetAllocationPropertiesFromHandle)(hipMemAllocationProp* prop,
                                                    hipMemGenericAllocationHandle_t handle);
 
 /**
@@ -9808,7 +9827,7 @@ hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle, void* osHandle,
+hipError_t HIP_API_SYMBOL(MemImportFromShareableHandle)(hipMemGenericAllocationHandle_t* handle, void* osHandle,
                                            hipMemAllocationHandleType shHandleType);
 
 /**
@@ -9825,7 +9844,7 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle,
+hipError_t HIP_API_SYMBOL(MemMap)(void* ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle,
                      unsigned long long flags);
 
 /**
@@ -9838,7 +9857,7 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
  * @warning This API is under development. Currently it is not supported on AMD
  *          GPUs and returns #hipErrorNotSupported.
  */
-hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int count,
+hipError_t HIP_API_SYMBOL(MemMapArrayAsync)(hipArrayMapInfo* mapInfoList, unsigned int count,
                                hipStream_t stream);
 
 /**
@@ -9852,7 +9871,7 @@ hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int count,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle);
+hipError_t HIP_API_SYMBOL(MemRelease)(hipMemGenericAllocationHandle_t handle);
 
 /**
  * @brief Returns the allocation handle of the backing memory allocation given the address.
@@ -9865,7 +9884,7 @@ hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle);
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void* addr);
+hipError_t HIP_API_SYMBOL(MemRetainAllocationHandle)(hipMemGenericAllocationHandle_t* handle, void* addr);
 
 /**
  * @brief Set the access flags for each location specified in desc for the given virtual address
@@ -9881,7 +9900,7 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc, size_t count);
+hipError_t HIP_API_SYMBOL(MemSetAccess)(void* ptr, size_t size, const hipMemAccessDesc* desc, size_t count);
 
 /**
  * @brief Unmap memory allocation of a given address range.
@@ -9894,7 +9913,7 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
  *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
-hipError_t hipMemUnmap(void* ptr, size_t size);
+hipError_t HIP_API_SYMBOL(MemUnmap)(void* ptr, size_t size);
 
 // doxygen end virtual memory management API
 /**
@@ -9918,7 +9937,7 @@ hipError_t hipMemUnmap(void* ptr, size_t size);
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorInvalidResourceHandle
  *
  */
-hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
+hipError_t HIP_API_SYMBOL(GraphicsMapResources)(int count, hipGraphicsResource_t* resources,
                                    hipStream_t stream __dparm(0));
 /**
  * @brief Get an array through which to access a subresource of a mapped graphics resource.
@@ -9933,7 +9952,7 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
  * @note  In this API, the value of arrayIndex higher than zero is currently not supported.
  *
  */
-hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsResource_t resource,
+hipError_t HIP_API_SYMBOL(GraphicsSubResourceGetMappedArray)(hipArray_t* array, hipGraphicsResource_t resource,
                                                 unsigned int arrayIndex, unsigned int mipLevel);
 /**
  * @brief Gets device accessible address of a graphics resource.
@@ -9945,7 +9964,7 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
+hipError_t HIP_API_SYMBOL(GraphicsResourceGetMappedPointer)(void** devPtr, size_t* size,
                                                hipGraphicsResource_t resource);
 /**
  * @brief Unmaps graphics resources.
@@ -9957,7 +9976,7 @@ hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorContextIsDestroyed
  *
  */
-hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources,
+hipError_t HIP_API_SYMBOL(GraphicsUnmapResources)(int count, hipGraphicsResource_t* resources,
                                      hipStream_t stream __dparm(0));
 /**
  * @brief Unregisters a graphics resource.
@@ -9967,7 +9986,7 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
  * @returns #hipSuccess
  *
  */
-hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource);
+hipError_t HIP_API_SYMBOL(GraphicsUnregisterResource)(hipGraphicsResource_t resource);
 // doxygen end GraphicsInterop
 /**
  * @}
@@ -9994,7 +10013,7 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource);
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
  */
-hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject, const hipResourceDesc* pResDesc);
+hipError_t HIP_API_SYMBOL(CreateSurfaceObject)(hipSurfaceObject_t* pSurfObject, const hipResourceDesc* pResDesc);
 /**
  * @brief Destroy a surface object.
  *
@@ -10002,7 +10021,7 @@ hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject, const hipReso
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  */
-hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject);
+hipError_t HIP_API_SYMBOL(DestroySurfaceObject)(hipSurfaceObject_t surfaceObject);
 // end of surface
 
 
@@ -10016,7 +10035,7 @@ hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject);
  *
  * @see hipExtDisableLogging, hipExtSetLoggingParams
  */
-hipError_t hipExtEnableLogging();
+hipError_t HIP_API_SYMBOL(ExtEnableLogging)();
 /**
  * @brief Disable HIP runtime logging.
  *
@@ -10027,7 +10046,7 @@ hipError_t hipExtEnableLogging();
  *
  * @see hipExtEnableLogging, hipExtSetLoggingParams
  */
-hipError_t hipExtDisableLogging();
+hipError_t HIP_API_SYMBOL(ExtDisableLogging)();
 /**
  * @brief Set HIP runtime logging parameters.
  *
@@ -10042,7 +10061,7 @@ hipError_t hipExtDisableLogging();
  *
  * @see hipExtEnableLogging, hipExtDisableLogging
  */
-hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
+hipError_t HIP_API_SYMBOL(ExtSetLoggingParams)(size_t log_level, size_t log_size, size_t log_mask);
 /**
  * @brief Launches a HIP kernel using a generic function pointer and the specified configuration.
  * @ingroup Execution
@@ -10056,7 +10075,7 @@ hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_
  *
  * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
  */
-hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr, void** args);
+hipError_t HIP_API_SYMBOL(LaunchKernelExC)(const hipLaunchConfig_t* config, const void* fPtr, void** args);
 /**
  * @brief Launches a HIP kernel using the driver API with the specified configuration.
  * @ingroup Execution
@@ -10072,7 +10091,7 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
  *
  * @returns #hipSuccess if the kernel is launched successfully, otherwise an appropriate error code.
  */
-hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
+hipError_t HIP_API_SYMBOL(DrvLaunchKernelEx)(const HIP_LAUNCH_CONFIG* config, hipFunction_t f, void** params,
                                 void** extra);
 /**
 * @}
@@ -10080,7 +10099,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
 #ifdef __cplusplus
 } /* extern "c" */
 #endif
-#ifdef __cplusplus
+#if defined(__cplusplus) && HIP_ABI_MODE != HIP_ABI_MODE_BACKEND
 #if defined(__clang__) && defined(__HIP__)
 template <typename T> static hipError_t __host__ inline hipOccupancyMaxPotentialBlockSize(
     int* gridSize, int* blockSize, T f, size_t dynSharedMemPerBlk = 0, int blockSizeLimit = 0) {
@@ -10091,7 +10110,7 @@ template <typename T> static hipError_t __host__ inline hipOccupancyMaxPotential
     int* gridSize, int* blockSize, T f, size_t dynSharedMemPerBlk = 0, int blockSizeLimit = 0,
     unsigned int flags = 0) {
   (void)flags;
-  return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, reinterpret_cast<const void*>(f),
+  return HIP_API_SYMBOL(OccupancyMaxPotentialBlockSize)(gridSize, blockSize, reinterpret_cast<const void*>(f),
                                            dynSharedMemPerBlk, blockSizeLimit);
 }
 #endif  // defined(__clang__) && defined(__HIP__)
@@ -10555,8 +10574,8 @@ template <class T, int dim, enum hipTextureReadMode readMode> HIP_DEPRECATED(HIP
 static inline hipError_t
     hipBindTextureToArray(const struct texture<T, dim, readMode>& tex, hipArray_const_t array) {
   struct hipChannelFormatDesc desc;
-  hipError_t err = hipGetChannelDesc(&desc, array);
-  return (err == hipSuccess) ? hipBindTextureToArray(&tex, array, &desc) : err;
+  hipError_t err = HIP_API_SYMBOL(GetChannelDesc)(&desc, array);
+  return (err == hipSuccess) ? HIP_API_SYMBOL(BindTextureToArray)(&tex, array, &desc) : err;
 }
 /**
  * @brief Binds an array to a texture [Deprecated]
@@ -10592,12 +10611,12 @@ static inline hipError_t hipBindTextureToMipmappedArray(const struct texture<T, 
                                                         hipMipmappedArray_const_t mipmappedArray) {
   struct hipChannelFormatDesc desc;
   hipArray_t levelArray;
-  hipError_t err = hipGetMipmappedArrayLevel(&levelArray, mipmappedArray, 0);
+  hipError_t err = HIP_API_SYMBOL(GetMipmappedArrayLevel)(&levelArray, mipmappedArray, 0);
   if (err != hipSuccess) {
     return err;
   }
   err = hipGetChannelDesc(&desc, levelArray);
-  return (err == hipSuccess) ? hipBindTextureToMipmappedArray(&tex, mipmappedArray, &desc) : err;
+  return (err == hipSuccess) ? HIP_API_SYMBOL(BindTextureToMipmappedArray)(&tex, mipmappedArray, &desc) : err;
 }
 /**
  * @brief Binds a mipmapped array to a texture [Deprecated]
@@ -10721,7 +10740,7 @@ static inline __host__ hipError_t hipLaunchKernelEx(const hipLaunchConfig_t* con
                                                     Params&&... args) {
   return [&](KernelArgs... convertedArgs) {
     void* pArgs[] = {&convertedArgs...};
-    return ::hipLaunchKernelExC(config, reinterpret_cast<void*>(kernel), pArgs);
+    return ::HIP_API_SYMBOL(LaunchKernelExC)(config, reinterpret_cast<void*>(kernel), pArgs);
   }(std::forward<Params>(args)...);
 }
 /**
@@ -10729,7 +10748,7 @@ static inline __host__ hipError_t hipLaunchKernelEx(const hipLaunchConfig_t* con
  */
 
 
-#endif  // __cplusplus
+#endif  // defined(__cplusplus) && HIP_ABI_MODE != HIP_ABI_MODE_BACKEND
 
 #ifdef __GNUC__
 #pragma GCC visibility pop
@@ -10754,7 +10773,8 @@ static inline __host__ hipError_t hipLaunchKernelEx(const hipLaunchConfig_t* con
  *
  * @see hipMalloc
  */
-#if defined(__cplusplus) && !defined(__HIP_DISABLE_CPP_FUNCTIONS__)
+#if defined(__cplusplus) && !defined(__HIP_DISABLE_CPP_FUNCTIONS__) && \
+    HIP_ABI_MODE != HIP_ABI_MODE_BACKEND
 template <class T> static inline hipError_t hipMalloc(T** devPtr, size_t size) {
   return hipMalloc((void**)devPtr, size);
 }

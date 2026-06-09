@@ -7,6 +7,15 @@
 #ifndef HIP_INCLUDE_HIP_AMD_DETAIL_HIP_RUNTIME_PROF_H
 #define HIP_INCLUDE_HIP_AMD_DETAIL_HIP_RUNTIME_PROF_H
 
+#if __cplusplus
+#include <cstdint>
+#else
+#include <stdbool.h>
+#include <stdint.h>
+#endif
+
+#include <hip/hip_api_symbols.h>
+
 // HIP ROCclr Op IDs enumeration
 enum HipVdiOpId {
   kHipVdiOpIdDispatch = 0,
@@ -50,12 +59,20 @@ void hipInitActivityCallback(void* id_callback, void* op_callback, void* arg);
 bool hipEnableActivityCallback(uint32_t op, bool enable);
 
 /**
+ * @brief Registers a HIP API tracer callback.
+ *
+ * @param [input] function Callback invoked for traced HIP API activity.
+ */
+void HIP_API_SYMBOL(RegisterTracerCallback)(int (*function)(int domain, uint32_t operation_id,
+                                                            void* data));
+
+/**
  * @brief Returns the description string for the operation kind
  *
  * @param [input] id      Command kind id (@see HipVdiCommandKind)
  *
  * @returns A pointer to a const string with the command description
  */
-const char* hipGetCmdName(uint32_t id);
+const char* HIP_API_SYMBOL(GetCmdName)(uint32_t id);
 
 #endif  // HIP_INCLUDE_HIP_AMD_DETAIL_HIP_RUNTIME_PROF_H

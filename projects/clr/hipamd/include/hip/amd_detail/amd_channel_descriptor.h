@@ -8,6 +8,7 @@
 #define HIP_INCLUDE_HIP_AMD_DETAIL_CHANNEL_DESCRIPTOR_H
 
 #if !defined(__HIPCC_RTC__)
+#include <hip/hip_api_symbols.h>
 #include <hip/hip_common.h>
 #include <hip/driver_types.h>
 #include <hip/amd_detail/amd_hip_vector_types.h>
@@ -15,8 +16,10 @@
 
 #ifdef __cplusplus
 
-extern "C" HIP_PUBLIC_API hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
-                                                                    hipChannelFormatKind f);
+extern "C" HIP_PUBLIC_API hipChannelFormatDesc HIP_API_SYMBOL(CreateChannelDesc)(
+    int x, int y, int z, int w, hipChannelFormatKind f);
+
+#if HIP_ABI_MODE != HIP_ABI_MODE_BACKEND
 
 static inline hipChannelFormatDesc hipCreateChannelDescHalf() {
   int e = (int)sizeof(unsigned short) * 8;
@@ -285,10 +288,12 @@ template <> inline hipChannelFormatDesc hipCreateChannelDesc<long4>() {
 }
 #endif /* !__LP64__ */
 
+#endif /* HIP_ABI_MODE != HIP_ABI_MODE_BACKEND */
+
 #else
 
-struct hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
-                                                 enum hipChannelFormatKind f);
+struct hipChannelFormatDesc HIP_API_SYMBOL(CreateChannelDesc)(int x, int y, int z, int w,
+                                                              enum hipChannelFormatKind f);
 
 #endif /* __cplusplus */
 

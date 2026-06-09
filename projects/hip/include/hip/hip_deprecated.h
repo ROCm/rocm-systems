@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <hip/hip_api_symbols.h>
+
 // This file will add older hip functions used in the versioning system
 // Find the deprecated functions and structs in hip_device.cpp
 
@@ -96,8 +98,8 @@ typedef struct hipDeviceProp_tR0000 {
 extern "C" {
 #endif
 
-hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device);
-hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* prop);
+hipError_t HIP_API_SYMBOL(GetDevicePropertiesR0000)(hipDeviceProp_tR0000* prop, int device);
+hipError_t HIP_API_SYMBOL(ChooseDeviceR0000)(int* device, const hipDeviceProp_tR0000* prop);
 
 #ifdef __cplusplus
 }

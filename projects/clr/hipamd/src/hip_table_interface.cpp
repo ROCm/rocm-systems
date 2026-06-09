@@ -53,15 +53,19 @@ template <> hipError_t HandleException<hipError_t>() {
 #define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
 #define CATCHRET(RETURN_TYPE) } catch(...) { return hip::HandleException<RETURN_TYPE>(); }
 
-extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
-                                                hipStream_t* stream) {
+extern "C" hipError_t HIP_COMPILER_API_SYMBOL(PopCallConfiguration)(dim3* gridDim,
+                                                                    dim3* blockDim,
+                                                                    size_t* sharedMem,
+                                                                    hipStream_t* stream) {
   TRY;
   return hip::GetHipCompilerDispatchTable()->__hipPopCallConfiguration_fn(gridDim, blockDim,
                                                                           sharedMem, stream);
   CATCH;
 }
-extern "C" hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem,
-                                                 hipStream_t stream) {
+extern "C" hipError_t HIP_COMPILER_API_SYMBOL(PushCallConfiguration)(dim3 gridDim,
+                                                                     dim3 blockDim,
+                                                                     size_t sharedMem,
+                                                                     hipStream_t stream) {
   TRY;
   return hip::GetHipCompilerDispatchTable()->__hipPushCallConfiguration_fn(gridDim, blockDim,
                                                                            sharedMem, stream);
@@ -472,7 +476,7 @@ hipError_t hipDeviceTotalMem(size_t* bytes, hipDevice_t device) {
   return hip::GetHipDispatchTable()->hipDeviceTotalMem_fn(bytes, device);
   CATCH;
 }
-hipError_t hipDriverGetVersion(int* driverVersion) {
+hipError_t HIP_API_SYMBOL(DriverGetVersion)(int* driverVersion) {
   TRY;
   return hip::GetHipDispatchTable()->hipDriverGetVersion_fn(driverVersion);
   CATCH;
@@ -661,12 +665,12 @@ hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array)
   return hip::GetHipDispatchTable()->hipGetChannelDesc_fn(desc, array);
   CATCH;
 }
-hipError_t hipGetDevice(int* deviceId) {
+hipError_t HIP_API_SYMBOL(GetDevice)(int* deviceId) {
   TRY;
   return hip::GetHipDispatchTable()->hipGetDevice_fn(deviceId);
   CATCH;
 }
-hipError_t hipGetDeviceCount(int* count) {
+hipError_t HIP_API_SYMBOL(GetDeviceCount)(int* count) {
   TRY;
   return hip::GetHipDispatchTable()->hipGetDeviceCount_fn(count);
   CATCH;
@@ -1311,7 +1315,7 @@ hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
       phGraphNode, hGraph, dependencies, numDependencies, memsetParams, ctx);
   CATCH;
 }
-hipError_t hipInit(unsigned int flags) {
+hipError_t HIP_API_SYMBOL(Init)(unsigned int flags) {
   TRY;
   return hip::GetHipDispatchTable()->hipInit_fn(flags);
   CATCH;
@@ -2137,12 +2141,12 @@ hipError_t hipProfilerStop() {
   return hip::GetHipDispatchTable()->hipProfilerStop_fn();
   CATCH;
 }
-hipError_t hipRuntimeGetVersion(int* runtimeVersion) {
+hipError_t HIP_API_SYMBOL(RuntimeGetVersion)(int* runtimeVersion) {
   TRY;
   return hip::GetHipDispatchTable()->hipRuntimeGetVersion_fn(runtimeVersion);
   CATCH;
 }
-hipError_t hipSetDevice(int deviceId) {
+hipError_t HIP_API_SYMBOL(SetDevice)(int deviceId) {
   TRY;
   return hip::GetHipDispatchTable()->hipSetDevice_fn(deviceId);
   CATCH;

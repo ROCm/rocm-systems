@@ -137,7 +137,7 @@ hip::Stream* getNullStream(bool wait) {
   return device ? device->NullStream(wait) : nullptr;
 }
 
-hipError_t hipInit(unsigned int flags) {
+hipError_t HIP_API_SYMBOL(Init)(unsigned int flags) {
   HIP_INIT_API(hipInit, flags);
 
   if (flags != 0) {
@@ -198,7 +198,7 @@ hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig* pConfig) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipRuntimeGetVersion(int* runtimeVersion) {
+hipError_t HIP_API_SYMBOL(RuntimeGetVersion)(int* runtimeVersion) {
   HIP_INIT_API_NO_RETURN(hipRuntimeGetVersion, runtimeVersion);
 
   if (!runtimeVersion) {
@@ -266,7 +266,7 @@ hipError_t hipCtxPushCurrent(hipCtx_t ctx) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipDriverGetVersion(int* driverVersion) {
+hipError_t HIP_API_SYMBOL(DriverGetVersion)(int* driverVersion) {
   HIP_INIT_API_NO_RETURN(hipDriverGetVersion, driverVersion);
 
   if (!driverVersion) {

@@ -76,113 +76,114 @@
 extern "C" {
 #endif
 
-hipError_t hipMemcpy_spt(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
+hipError_t HIP_API_SYMBOL(Memcpy_spt)(void* dst, const void* src, size_t sizeBytes,
+                                      hipMemcpyKind kind);
 
-hipError_t hipMemcpyToSymbol_spt(const void* symbol, const void* src, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyToSymbol_spt)(const void* symbol, const void* src, size_t sizeBytes,
                                  size_t offset __dparm(0),
                                  hipMemcpyKind kind __dparm(hipMemcpyHostToDevice));
 
-hipError_t hipMemcpyFromSymbol_spt(void* dst, const void* symbol, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyFromSymbol_spt)(void* dst, const void* symbol, size_t sizeBytes,
                                    size_t offset __dparm(0),
                                    hipMemcpyKind kind __dparm(hipMemcpyDeviceToHost));
 
-hipError_t hipMemcpy2D_spt(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
+hipError_t HIP_API_SYMBOL(Memcpy2D_spt)(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                            size_t height, hipMemcpyKind kind);
 
-hipError_t hipMemcpy2DFromArray_spt(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset,
+hipError_t HIP_API_SYMBOL(Memcpy2DFromArray_spt)(void* dst, size_t dpitch, hipArray_const_t src, size_t wOffset,
                                     size_t hOffset, size_t width, size_t height,
                                     hipMemcpyKind kind);
 
-hipError_t hipMemcpy3D_spt(const struct hipMemcpy3DParms* p);
+hipError_t HIP_API_SYMBOL(Memcpy3D_spt)(const struct hipMemcpy3DParms* p);
 
-hipError_t hipMemset_spt(void* dst, int value, size_t sizeBytes);
+hipError_t HIP_API_SYMBOL(Memset_spt)(void* dst, int value, size_t sizeBytes);
 
-hipError_t hipMemsetAsync_spt(void* dst, int value, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemsetAsync_spt)(void* dst, int value, size_t sizeBytes,
                               hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemset2D_spt(void* dst, size_t pitch, int value, size_t width, size_t height);
+hipError_t HIP_API_SYMBOL(Memset2D_spt)(void* dst, size_t pitch, int value, size_t width, size_t height);
 
-hipError_t hipMemset2DAsync_spt(void* dst, size_t pitch, int value, size_t width, size_t height,
+hipError_t HIP_API_SYMBOL(Memset2DAsync_spt)(void* dst, size_t pitch, int value, size_t width, size_t height,
                                 hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemset3DAsync_spt(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
+hipError_t HIP_API_SYMBOL(Memset3DAsync_spt)(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
                                 hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemset3D_spt(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent);
+hipError_t HIP_API_SYMBOL(Memset3D_spt)(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent);
 
-hipError_t hipMemcpyAsync_spt(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
+hipError_t HIP_API_SYMBOL(MemcpyAsync_spt)(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                               hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemcpy3DAsync_spt(const hipMemcpy3DParms* p,
+hipError_t HIP_API_SYMBOL(Memcpy3DAsync_spt)(const hipMemcpy3DParms* p,
                                 hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemcpy2DAsync_spt(void* dst, size_t dpitch, const void* src, size_t spitch,
+hipError_t HIP_API_SYMBOL(Memcpy2DAsync_spt)(void* dst, size_t dpitch, const void* src, size_t spitch,
                                 size_t width, size_t height, hipMemcpyKind kind,
                                 hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemcpyFromSymbolAsync_spt(void* dst, const void* symbol, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyFromSymbolAsync_spt)(void* dst, const void* symbol, size_t sizeBytes,
                                         size_t offset, hipMemcpyKind kind,
                                         hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemcpyToSymbolAsync_spt(const void* symbol, const void* src, size_t sizeBytes,
+hipError_t HIP_API_SYMBOL(MemcpyToSymbolAsync_spt)(const void* symbol, const void* src, size_t sizeBytes,
                                       size_t offset, hipMemcpyKind kind,
                                       hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemcpyFromArray_spt(void* dst, hipArray_const_t src, size_t wOffsetSrc,
+hipError_t HIP_API_SYMBOL(MemcpyFromArray_spt)(void* dst, hipArray_const_t src, size_t wOffsetSrc,
                                   size_t hOffset, size_t count, hipMemcpyKind kind);
 
-hipError_t hipMemcpy2DToArray_spt(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
+hipError_t HIP_API_SYMBOL(Memcpy2DToArray_spt)(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
                                   size_t spitch, size_t width, size_t height, hipMemcpyKind kind);
 
-hipError_t hipMemcpy2DFromArrayAsync_spt(void* dst, size_t dpitch, hipArray_const_t src,
+hipError_t HIP_API_SYMBOL(Memcpy2DFromArrayAsync_spt)(void* dst, size_t dpitch, hipArray_const_t src,
                                          size_t wOffsetSrc, size_t hOffsetSrc, size_t width,
                                          size_t height, hipMemcpyKind kind,
                                          hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipMemcpy2DToArrayAsync_spt(hipArray_t dst, size_t wOffset, size_t hOffset,
+hipError_t HIP_API_SYMBOL(Memcpy2DToArrayAsync_spt)(hipArray_t dst, size_t wOffset, size_t hOffset,
                                        const void* src, size_t spitch, size_t width, size_t height,
                                        hipMemcpyKind kind,
                                        hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipStreamQuery_spt(hipStream_t stream);
+hipError_t HIP_API_SYMBOL(StreamQuery_spt)(hipStream_t stream);
 
-hipError_t hipStreamSynchronize_spt(hipStream_t stream);
+hipError_t HIP_API_SYMBOL(StreamSynchronize_spt)(hipStream_t stream);
 
-hipError_t hipStreamGetPriority_spt(hipStream_t stream, int* priority);
+hipError_t HIP_API_SYMBOL(StreamGetPriority_spt)(hipStream_t stream, int* priority);
 
-hipError_t hipStreamWaitEvent_spt(hipStream_t stream, hipEvent_t event,
+hipError_t HIP_API_SYMBOL(StreamWaitEvent_spt)(hipStream_t stream, hipEvent_t event,
                                   unsigned int flags __dparm(0));
 
-hipError_t hipStreamGetFlags_spt(hipStream_t stream, unsigned int* flags);
+hipError_t HIP_API_SYMBOL(StreamGetFlags_spt)(hipStream_t stream, unsigned int* flags);
 
-hipError_t hipStreamAddCallback_spt(hipStream_t stream, hipStreamCallback_t callback,
+hipError_t HIP_API_SYMBOL(StreamAddCallback_spt)(hipStream_t stream, hipStreamCallback_t callback,
                                     void* userData, unsigned int flags);
 
-hipError_t hipEventRecord_spt(hipEvent_t event, hipStream_t stream __dparm(hipStreamPerThread));
+hipError_t HIP_API_SYMBOL(EventRecord_spt)(hipEvent_t event, hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 blockDim,
+hipError_t HIP_API_SYMBOL(LaunchCooperativeKernel_spt)(const void* f, dim3 gridDim, dim3 blockDim,
                                           void** kernelParams, uint32_t sharedMemBytes,
                                           hipStream_t hStream __dparm(hipStreamPerThread));
 
-hipError_t hipLaunchKernel_spt(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
+hipError_t HIP_API_SYMBOL(LaunchKernel_spt)(const void* function_address, dim3 numBlocks, dim3 dimBlocks,
                                void** args, size_t sharedMemBytes,
                                hipStream_t stream __dparm(hipStreamPerThread));
 
-hipError_t hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream);
-hipError_t hipStreamBeginCapture_spt(hipStream_t stream, hipStreamCaptureMode mode);
-hipError_t hipStreamEndCapture_spt(hipStream_t stream, hipGraph_t* pGraph);
-hipError_t hipStreamIsCapturing_spt(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus);
-hipError_t hipStreamGetCaptureInfo_spt(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus,
+hipError_t HIP_API_SYMBOL(GraphLaunch_spt)(hipGraphExec_t graphExec, hipStream_t stream);
+hipError_t HIP_API_SYMBOL(StreamBeginCapture_spt)(hipStream_t stream, hipStreamCaptureMode mode);
+hipError_t HIP_API_SYMBOL(StreamEndCapture_spt)(hipStream_t stream, hipGraph_t* pGraph);
+hipError_t HIP_API_SYMBOL(StreamIsCapturing_spt)(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus);
+hipError_t HIP_API_SYMBOL(StreamGetCaptureInfo_spt)(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus,
                                        unsigned long long* pId);
-hipError_t hipStreamGetCaptureInfo_v2_spt(hipStream_t stream,
+hipError_t HIP_API_SYMBOL(StreamGetCaptureInfo_v2_spt)(hipStream_t stream,
                                           hipStreamCaptureStatus* captureStatus_out,
                                           unsigned long long* id_out, hipGraph_t* graph_out,
                                           const hipGraphNode_t** dependencies_out,
                                           size_t* numDependencies_out);
-hipError_t hipLaunchHostFunc_spt(hipStream_t stream, hipHostFn_t fn, void* userData);
-hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long flags,
+hipError_t HIP_API_SYMBOL(LaunchHostFunc_spt)(hipStream_t stream, hipHostFn_t fn, void* userData);
+hipError_t HIP_API_SYMBOL(GetDriverEntryPoint_spt)(const char* symbol, void** funcPtr, unsigned long long flags,
                                       hipDriverEntryPointQueryResult* status);
-hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+hipError_t HIP_API_SYMBOL(GetProcAddress_spt)(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                                  hipDriverProcAddressQueryResult* symbolStatus);
 
 

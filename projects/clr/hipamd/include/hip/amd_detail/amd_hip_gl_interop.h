@@ -7,6 +7,8 @@
 #ifndef HIP_INCLUDE_AMD_HIP_GL_INTEROP_H
 #define HIP_INCLUDE_AMD_HIP_GL_INTEROP_H
 
+#include <hip/hip_api_symbols.h>
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -58,7 +60,7 @@ typedef unsigned int GLenum;
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
  *
  */
-hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
+hipError_t HIP_API_SYMBOL(GLGetDevices)(unsigned int* pHipDeviceCount, int* pHipDevices,
                            unsigned int hipDeviceCount, hipGLDeviceList deviceList);
 /**
  * @brief Registers a GL Buffer for interop and returns corresponding graphics resource.
@@ -70,7 +72,7 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorInvalidResourceHandle
  *
  */
-hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint buffer,
+hipError_t HIP_API_SYMBOL(GraphicsGLRegisterBuffer)(hipGraphicsResource** resource, GLuint buffer,
                                        unsigned int flags);
 /**
  * @brief Register a GL Image for interop and returns the corresponding graphic resource.
@@ -83,7 +85,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown, #hipErrorInvalidResourceHandle
  *
  */
-hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint image, GLenum target,
+hipError_t HIP_API_SYMBOL(GraphicsGLRegisterImage)(hipGraphicsResource** resource, GLuint image, GLenum target,
                                       unsigned int flags);
 /**
  * @}

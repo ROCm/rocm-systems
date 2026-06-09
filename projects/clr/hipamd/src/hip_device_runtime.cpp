@@ -686,7 +686,7 @@ int ihipGetDevice() {
   return device->deviceId();
 }
 
-hipError_t hipGetDevice(int* deviceId) {
+hipError_t HIP_API_SYMBOL(GetDevice)(int* deviceId) {
   HIP_INIT_API(hipGetDevice, deviceId);
 
   if (deviceId == nullptr) {
@@ -702,7 +702,7 @@ hipError_t hipGetDevice(int* deviceId) {
   HIP_RETURN(hipSuccess, *deviceId);
 }
 
-hipError_t hipGetDeviceCount(int* count) {
+hipError_t HIP_API_SYMBOL(GetDeviceCount)(int* count) {
   HIP_INIT_API_NO_RETURN(hipGetDeviceCount, count);
 
   HIP_RETURN(ihipDeviceGetCount(count));
@@ -772,7 +772,7 @@ hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsign
   HIP_RETURN(hipGetDriverEntryPoint_common(symbol, funcPtr, flags, status));
 }
 
-hipError_t hipSetDevice(int device) {
+hipError_t HIP_API_SYMBOL(SetDevice)(int device) {
   HIP_INIT_API_NO_RETURN(hipSetDevice, device);
 
   hip::tls.isSetDeviceCalled = true;

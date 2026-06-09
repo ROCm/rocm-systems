@@ -29,6 +29,9 @@ list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 #############################
 option(__HIP_ENABLE_PCH "Enable/Disable pre-compiled hip headers" ON)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
+option(HIP_ENABLE_LOADER_BACKEND_MODE
+  "Build the HIP runtime DSO as a private backend for the HIP loader"
+  OFF)
 option(THEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS
   "Stamp git revisions into generated library version metadata"
   ON)

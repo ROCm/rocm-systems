@@ -228,7 +228,7 @@ static_assert(sizeof(hipApiRecordExt) == 256, "hipApiRecordExt must be 256 bytes
  *                              ignored.
  * @return hipSuccess
  */
-hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state);
+hipError_t HIP_API_SYMBOL(ProfilerEnableExt)(uint64_t* start_record_id, uint64_t state);
 
 /**
  * @brief Disable built-in profiling.  Already-collected records are kept.
@@ -247,7 +247,7 @@ hipError_t hipProfilerEnableExt(uint64_t* start_record_id, uint64_t state);
  *                            of the last record for this session).  May be NULL.
  * @return hipSuccess
  */
-hipError_t hipProfilerDisableExt(uint64_t* end_record_id);
+hipError_t HIP_API_SYMBOL(ProfilerDisableExt)(uint64_t* end_record_id);
 
 /**
  * @brief Return the raw profiler chunk array without copying.
@@ -282,7 +282,7 @@ hipError_t hipProfilerDisableExt(uint64_t* end_record_id);
  * @param[out] chunk_size   Capacity of each chunk in records.
  * @param[out] total_count  Total number of valid records across all chunks.
  */
-hipError_t hipProfilerGetRecordsExt(const hipApiRecordExt* const** chunks,
+hipError_t HIP_API_SYMBOL(ProfilerGetRecordsExt)(const hipApiRecordExt* const** chunks,
                                     size_t* chunk_count,
                                     size_t* chunk_size,
                                     size_t* total_count);
@@ -321,7 +321,7 @@ typedef void (*hipProfilerChunkCallback)(
  * @param user_data  Opaque pointer forwarded to every callback invocation.
  * @return hipSuccess
  */
-hipError_t hipProfilerRegisterChunkCallbackExt(hipProfilerChunkCallback cb, void* user_data);
+hipError_t HIP_API_SYMBOL(ProfilerRegisterChunkCallbackExt)(hipProfilerChunkCallback cb, void* user_data);
 
 #ifdef __cplusplus
 }

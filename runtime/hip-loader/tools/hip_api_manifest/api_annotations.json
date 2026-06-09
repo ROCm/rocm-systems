@@ -1,0 +1,246 @@
+{
+  "backend_api_major": 7,
+  "stale_exports": [
+    "hiprtcCompileProgram",
+    "hiprtcCreateProgram",
+    "hiprtcDestroyProgram",
+    "hiprtcGetLoweredName",
+    "hiprtcGetProgramLog",
+    "hiprtcGetProgramLogSize",
+    "hiprtcGetCode",
+    "hiprtcGetCodeSize",
+    "hiprtcGetErrorString",
+    "hiprtcAddNameExpression",
+    "hiprtcVersion",
+    "hiprtcLinkCreate",
+    "hiprtcLinkAddFile",
+    "hiprtcLinkAddData",
+    "hiprtcLinkComplete",
+    "hiprtcLinkDestroy",
+    "hiprtcGetBitcode",
+    "hiprtcGetBitcodeSize"
+  ],
+  "loader_owned_symbols": [
+    "hipGetProcAddress",
+    "hipGetProcAddress_spt",
+    "hipGetDriverEntryPoint",
+    "hipGetDriverEntryPoint_spt"
+  ],
+  "compiler_api_symbols": [
+    "__hipPopCallConfiguration",
+    "__hipPushCallConfiguration",
+    "__hipRegisterFatBinary",
+    "__hipRegisterFunction",
+    "__hipRegisterManagedVar",
+    "__hipRegisterSurface",
+    "__hipRegisterTexture",
+    "__hipRegisterVar",
+    "__hipUnregisterFatBinary"
+  ],
+  "private_api_symbols": [
+    "__hipGetPCH"
+  ],
+  "compatibility": {
+    "6": {
+      "hipGetDeviceProperties": {
+        "backend_symbol": "hipBackendV7GetDevicePropertiesR0600",
+        "backend_signature": "hipGetDevicePropertiesR0600",
+        "compat_function": "hip_loader_v6_compat_GetDevicePropertiesR0000",
+        "reason": "output_struct_layout"
+      },
+      "hipGetDevicePropertiesR0000": {
+        "backend_symbol": "hipBackendV7GetDevicePropertiesR0600",
+        "backend_signature": "hipGetDevicePropertiesR0600",
+        "compat_function": "hip_loader_v6_compat_GetDevicePropertiesR0000",
+        "reason": "output_struct_layout"
+      },
+      "hipChooseDevice": {
+        "backend_symbol": "hipBackendV7ChooseDeviceR0600",
+        "backend_signature": "hipChooseDeviceR0600",
+        "compat_function": "hip_loader_v6_compat_ChooseDeviceR0000",
+        "reason": "input_struct_layout"
+      },
+      "hipChooseDeviceR0000": {
+        "backend_symbol": "hipBackendV7ChooseDeviceR0600",
+        "backend_signature": "hipChooseDeviceR0600",
+        "compat_function": "hip_loader_v6_compat_ChooseDeviceR0000",
+        "reason": "input_struct_layout"
+      },
+      "hipDrvGraphAddMemsetNode": {
+        "backend_symbol": "hipBackendV7DrvGraphAddMemsetNode",
+        "backend_signature": "hipDrvGraphAddMemsetNode",
+        "compat_function": "hip_loader_v6_compat_DrvGraphAddMemsetNode",
+        "reason": "input_struct_layout_same_symbol",
+        "public_signature": {
+          "return_type": "hipError_t",
+          "params": [
+            {"type": "hipGraphNode_t*", "name": "phGraphNode"},
+            {"type": "hipGraph_t", "name": "hGraph"},
+            {"type": "const hipGraphNode_t*", "name": "dependencies"},
+            {"type": "size_t", "name": "numDependencies"},
+            {"type": "const HIP_MEMSET_NODE_PARAMS*", "name": "memsetParams"},
+            {"type": "hipCtx_t", "name": "ctx"}
+          ]
+        }
+      },
+      "hipDrvGraphExecMemsetNodeSetParams": {
+        "backend_symbol": "hipBackendV7DrvGraphExecMemsetNodeSetParams",
+        "backend_signature": "hipDrvGraphExecMemsetNodeSetParams",
+        "compat_function": "hip_loader_v6_compat_DrvGraphExecMemsetNodeSetParams",
+        "reason": "input_struct_layout_same_symbol",
+        "public_signature": {
+          "return_type": "hipError_t",
+          "params": [
+            {"type": "hipGraphExec_t", "name": "hGraphExec"},
+            {"type": "hipGraphNode_t", "name": "hNode"},
+            {"type": "const HIP_MEMSET_NODE_PARAMS*", "name": "memsetParams"},
+            {"type": "hipCtx_t", "name": "ctx"}
+          ]
+        }
+      }
+    },
+    "7": {
+      "hipGetDeviceProperties": {
+        "backend_symbol": "hipBackendV7GetDevicePropertiesR0600",
+        "backend_signature": "hipGetDevicePropertiesR0600",
+        "compat_function": "hip_loader_v6_compat_GetDevicePropertiesR0000",
+        "reason": "current_public_legacy_alias"
+      },
+      "hipGetDevicePropertiesR0000": {
+        "backend_symbol": "hipBackendV7GetDevicePropertiesR0600",
+        "backend_signature": "hipGetDevicePropertiesR0600",
+        "compat_function": "hip_loader_v6_compat_GetDevicePropertiesR0000",
+        "reason": "current_public_legacy_alias"
+      },
+      "hipChooseDevice": {
+        "backend_symbol": "hipBackendV7ChooseDeviceR0600",
+        "backend_signature": "hipChooseDeviceR0600",
+        "compat_function": "hip_loader_v6_compat_ChooseDeviceR0000",
+        "reason": "current_public_legacy_alias"
+      },
+      "hipChooseDeviceR0000": {
+        "backend_symbol": "hipBackendV7ChooseDeviceR0600",
+        "backend_signature": "hipChooseDeviceR0600",
+        "compat_function": "hip_loader_v6_compat_ChooseDeviceR0000",
+        "reason": "current_public_legacy_alias"
+      }
+    }
+  },
+  "signature_overrides": {
+    "hipGetDeviceProperties": {
+      "return_type": "hipError_t",
+      "params": [
+        {"type": "hipDeviceProp_tR0000*", "name": "prop"},
+        {"type": "int", "name": "device"}
+      ]
+    },
+    "hipChooseDevice": {
+      "return_type": "hipError_t",
+      "params": [
+        {"type": "int*", "name": "device"},
+        {"type": "const hipDeviceProp_tR0000*", "name": "prop"}
+      ]
+    },
+    "hipChooseDeviceR0600": {
+      "return_type": "hipError_t",
+      "params": [
+        {"type": "int*", "name": "device"},
+        {"type": "const hipDeviceProp_tR0600*", "name": "prop"}
+      ]
+    },
+    "hipGetCmdName": {
+      "return_type": "const char*",
+      "params": [
+        {"type": "unsigned", "name": "op"}
+      ]
+    },
+    "__hipGetPCH": {
+      "return_type": "void",
+      "params": [
+        {"type": "const char**", "name": "pch"},
+        {"type": "unsigned int*", "name": "size"}
+      ],
+      "backend_symbol": "hipBackendV7PrivateGetPCH"
+    },
+    "__gnu_h2f_ieee": {
+      "return_type": "float",
+      "params": [
+        {"type": "unsigned short", "name": "h"}
+      ],
+      "backend_symbol": "hipBackendV7GnuH2fIeee"
+    },
+    "__gnu_f2h_ieee": {
+      "return_type": "unsigned short",
+      "params": [
+        {"type": "float", "name": "f"}
+      ],
+      "backend_symbol": "hipBackendV7GnuF2hIeee"
+    },
+    "amd_dbgapi_get_build_name": {
+      "return_type": "const char*",
+      "params": [],
+      "backend_symbol": "hipBackendV7AmdDbgapiGetBuildName"
+    },
+    "amd_dbgapi_get_git_hash": {
+      "return_type": "const char*",
+      "params": [],
+      "backend_symbol": "hipBackendV7AmdDbgapiGetGitHash"
+    },
+    "amd_dbgapi_get_build_id": {
+      "return_type": "size_t",
+      "params": [],
+      "backend_symbol": "hipBackendV7AmdDbgapiGetBuildId"
+    },
+    "hipRegisterTracerCallback": {
+      "return_type": "void",
+      "params": [
+        {"type": "int (*)(int domain, uint32_t operation_id, void* data)", "name": "function"}
+      ]
+    },
+    "hipProfilerEnableExt": {
+      "return_type": "hipError_t",
+      "params": [
+        {"type": "uint64_t*", "name": "start_record_id"},
+        {"type": "uint64_t", "name": "state"}
+      ]
+    },
+    "hipProfilerDisableExt": {
+      "return_type": "hipError_t",
+      "params": [
+        {"type": "uint64_t*", "name": "end_record_id"}
+      ]
+    },
+    "hipProfilerGetRecordsExt": {
+      "return_type": "hipError_t",
+      "params": [
+        {"type": "const hipApiRecordExt* const**", "name": "chunks"},
+        {"type": "size_t*", "name": "chunk_count"},
+        {"type": "size_t*", "name": "chunk_size"},
+        {"type": "size_t*", "name": "total_count"}
+      ]
+    },
+    "hipProfilerRegisterChunkCallbackExt": {
+      "return_type": "hipError_t",
+      "params": [
+        {"type": "hipProfilerChunkCallback", "name": "cb"},
+        {"type": "void*", "name": "user_data"}
+      ]
+    }
+  },
+  "public_major_max_version_node": {
+    "6": "hip_6.4",
+    "7": "hip_7.14"
+  },
+  "hip_get_proc_address_aliases": {
+    "hipGetDeviceProperties": {
+      "before_version": 600,
+      "legacy_symbol": "hipGetDeviceProperties",
+      "current_symbol": "hipGetDevicePropertiesR0600"
+    },
+    "hipChooseDevice": {
+      "before_version": 600,
+      "legacy_symbol": "hipChooseDevice",
+      "current_symbol": "hipChooseDeviceR0600"
+    }
+  }
+}

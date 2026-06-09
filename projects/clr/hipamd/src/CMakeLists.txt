@@ -49,7 +49,11 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 if(BUILD_SHARED_LIBS)
   add_library(amdhip64 SHARED)
   if(WIN32)
-    set_target_properties(amdhip64 PROPERTIES RUNTIME_OUTPUT_NAME "amdhip64_${HIP_VERSION_MAJOR}")
+    if(HIP_ENABLE_LOADER_BACKEND_MODE)
+      set_target_properties(amdhip64 PROPERTIES RUNTIME_OUTPUT_NAME "amdhip-clr")
+    else()
+      set_target_properties(amdhip64 PROPERTIES RUNTIME_OUTPUT_NAME "amdhip64_${HIP_VERSION_MAJOR}")
+    endif()
   endif()
   # Windows doesn't have a strip utility, so CMAKE_STRIP won't be set.
   if((CMAKE_BUILD_TYPE STREQUAL "Release") AND NOT ("${CMAKE_STRIP}" STREQUAL ""))
@@ -74,7 +78,9 @@ else()
   set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 17)
 endif()
 
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+if(HIP_ENABLE_LOADER_BACKEND_MODE)
+  set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip-clr")
+elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64")
 else()
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip32")
@@ -134,7 +140,7 @@ if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)
 endif()
 
-if(BUILD_SHARED_LIBS)
+if(BUILD_SHARED_LIBS AND NOT HIP_ENABLE_LOADER_BACKEND_MODE)
   if(WIN32)
     set(AMDHIP_DEF_OUTPUT "${PROJECT_BINARY_DIR}/amdhip.def")
 
@@ -159,6 +165,11 @@ if(BUILD_SHARED_LIBS)
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
   endif()
+elseif(BUILD_SHARED_LIBS AND HIP_ENABLE_LOADER_BACKEND_MODE)
+  # Backend mode must eventually use a generated backend export list containing
+  # HIP_API_SYMBOL, HIP_PRIVATE_SYMBOL, and HIP_COMPILER_API_SYMBOL names only.
+  # Skipping the public export files here keeps the backend SONAME from claiming
+  # the public HIP ABI.
 endif()
 
 if(WIN32)
@@ -173,6 +184,11 @@ target_include_directories(amdhip64
     ${PROJECT_BINARY_DIR}/include)
 
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
+if(HIP_ENABLE_LOADER_BACKEND_MODE)
+  target_compile_definitions(amdhip64 PRIVATE
+    HIP_ABI_MODE=HIP_ABI_MODE_BACKEND
+    HIP_API_VERSION=${HIP_VERSION_MAJOR})
+endif()
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 # Add link to comgr, hsa-runtime and other required libraries in target files
