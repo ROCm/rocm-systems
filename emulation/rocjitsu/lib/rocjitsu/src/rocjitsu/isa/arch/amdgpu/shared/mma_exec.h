@@ -961,6 +961,84 @@ void exec_wmma_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
   exec_wmma_f32_mixed(cu, M, N, K, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc);
 }
 
+/// Fast path for v_wmma_f32_16x16x32_f16 (gfx1250, wave32) — the WMMA analogue
+/// of exec_f32_mfma_16x16x32_f16. Compile-time M/N/K let the compiler fully
+/// unroll the 16-row x 32-K matmul into straight-line AVX-512 FMAs; the f16
+/// inputs are bulk-converted once with F16C (one vector op per 16 halves)
+/// instead of branchy per-element extract_f16; VGPRs are accessed through one
+/// vgpr_data base pointer per operand and the result scatters directly (no
+/// Result staging vector). Falls back to the generic exec_wmma_f32 without
+/// AVX-512 / under force-scalar.
+inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
+                                       uint32_t s1, uint32_t s2,
+                                       uint32_t const_acc = ACC_FROM_VGPR) {
+  constexpr uint32_t M = 16, N = 16, K = 32, in_bits = 16;
+  if constexpr (!util::has_stdx_simd) {
+    exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+                  const_acc);
+    return;
+  } else {
+    if (util::force_scalar() || util::native<float>::size() != 16) {
+      exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+                    const_acc);
+      return;
+    }
+    require_wmma_wave32(cu);
+    const uint32_t wf = cu.wf_size();
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    alignas(64) float A_buf[M * K]; // A[row][k]
+    alignas(64) float B_buf[K * N]; // B[k][col]
+    alignas(64) float C_buf[M * N]; // C[row][col]
+    // A and B each occupy 8 VGPRs x wf lanes = 2*8*wf packed f16 (16 f16/lane
+    // for K=32). Bulk-convert the region to f32 once, then the hoist is a pure
+    // f32 index-shuffle (f16 j of word w sub s -> flat (w*wf+lane)*2+s).
+    constexpr uint32_t NUM_IN_REGS = 8;
+    const uint32_t n_halves = 2 * NUM_IN_REGS * wf;
+    alignas(64) float A_f32[2 * NUM_IN_REGS * 64];
+    alignas(64) float B_f32[2 * NUM_IN_REGS * 64];
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, n_halves);
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, n_halves);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                   ? std::bit_cast<float>(const_acc)
+                                   : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = wmma_input_loc(M, K, row, k, in_bits);
+        A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 2 + al.sub_element];
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = wmma_input_loc(N, K, col, k, in_bits);
+        B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
+      }
+    // Dense 16x32 * 32x16 -> 16x16 matmul, 16-lane stdx FMA per row.
+    for (uint32_t row = 0; row < M; ++row) {
+      util::native<float> c_row;
+      c_row.copy_from(&C_buf[row * N], util::stdx::vector_aligned);
+      for (uint32_t k = 0; k < K; ++k) {
+        util::native<float> a_bcast(A_buf[row * K + k]);
+        util::native<float> b_row;
+        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
+        c_row = util::stdx::fma(a_bcast, b_row, c_row);
+      }
+      c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
+    }
+    // Scatter directly back to VGPRs (no Result staging vector).
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+      }
+  }
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
                            uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
