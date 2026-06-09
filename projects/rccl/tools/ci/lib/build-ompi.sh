@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
-# Build a GPU-aware OpenMPI (--with-rocm) for the device-API CI job and cache it
-# on the shared NFS path. Built against the ROCm tree fetch-rocm.sh resolved, so
-# the MPI stack matches the ROCm that RCCL links against.
-#
-# Result: writes $WORKDIR/.ci-out/ompi.env exporting MPI_HOME so the RCCL /
-# rccl-tests / run steps pick up the same install.
-#
-# The versioned install is reused across runs and only rebuilt when missing or
-# when the ROCm it was built --with-rocm against changes.
+# Build a GPU-aware OpenMPI (--with-rocm) against ROCM_PATH and cache it on the
+# shared NFS path. Rebuilt only when missing or when ROCm changed. Writes
+# .ci-out/ompi.env (MPI_HOME) for the later RCCL / rccl-tests / run stages.
 #
 # Environment:
-#   ROCM_PATH              ROCm tree to build against (REQUIRED; from fetch-rocm.sh)
+#   ROCM_PATH              ROCm tree to build against (REQUIRED)
 #   RCCL_DEVICE_API_CACHE  Persistent cache root (default: /apps/rccl-ci)
-#   MPI_HOME_OVERRIDE      Use this existing OpenMPI install; skips building.
-#                          An ambient MPI_HOME is intentionally ignored (a stray
-#                          one from the node environment must not bypass the build).
+#   MPI_HOME_OVERRIDE      Use this existing install; skips the build.
+#                          Ambient MPI_HOME is never trusted.
 #   OMPI_MAJOR_MINOR       OpenMPI major.minor (default: 5.0)
 #   OMPI_VERSION           OpenMPI patch version (default: 5.0.9)
 #   RCCL_BUILD_JOBS        Parallel build jobs (default: $(nproc))

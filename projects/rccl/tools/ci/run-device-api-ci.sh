@@ -1,31 +1,22 @@
 #!/usr/bin/env bash
-# Run the RCCL device-API benchmark suite (symmetric memory / LSA device
-# kernels / GIN proxy) against a freshly built rccl-tests tree.
+# Run the RCCL device-API benchmark suite (symmetric memory / LSA device kernels
+# / GIN proxy) against the freshly built rccl-tests tree. Mirrors the legacy
+# rocJenkins "device-api" testCommand.
 #
-# Mirrors the legacy rocJenkins "device-api" testCommand. Consumes the trees the
-# earlier sbatch stages produced:
-#   $ROCM_PATH                              Cached ROCm tree (from fetch-rocm.sh)
-#   $MPI_HOME                               OpenMPI install   (from build-ompi.sh)
-#   $WORKDIR/projects/rccl/build/release    librccl.so (in-tree RCCL build)
-#   $WORKDIR/rccl-tests/build               rccl-tests perf binaries
-# where $WORKDIR == the rocm-systems checkout root.
+# Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), the in-tree RCCL build at
+# projects/rccl/build/release, and rccl-tests/build. ROCM_PATH / MPI_HOME come
+# from the environment (device-api.sbatch exports them) or, when run standalone,
+# from $WORKDIR/.ci-out/{rocm,ompi}.env.
 #
-# ROCM_PATH / MPI_HOME are normally already in the environment (device-api.sbatch
-# exports them). When run standalone they are read from the env fragments the
-# build stages wrote ($WORKDIR/.ci-out/{rocm,ompi}.env).
-#
-# Each benchmark is wrapped in `timeout` so a hung mpirun / driver (e.g. GIN
-# dmabuf failures wedging ranks in unkillable HSA waits) cannot wedge the
-# whole CI job. Failures are collected into FAILED_RUNS and surfaced at the
-# end; the script exits non-zero iff any run failed.
+# Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
+# failures are collected and surfaced at the end (exit non-zero iff any failed).
 #
 # Environment overrides:
-#   ROCM_PATH           ROCm tree (else read from .ci-out/rocm.env).
-#   MPI_HOME            OpenMPI install (else read from .ci-out/ompi.env).
-#   NP                  MPI ranks per run         (default: 8)
-#   BENCH_ARGS          Common bench args         (default: "-b 8 -e 1G -f 2 -g 1")
-#   BENCH_TIMEOUT       Per-bench wall-clock cap  (default: 600s)
-#   BENCH_KILL_AFTER    SIGKILL grace after BENCH_TIMEOUT (default: 30s)
+#   ROCM_PATH / MPI_HOME   Else read from .ci-out/{rocm,ompi}.env
+#   NP                     MPI ranks per run         (default: 8)
+#   BENCH_ARGS             Common bench args         (default: "-b 8 -e 1G -f 2 -g 1")
+#   BENCH_TIMEOUT          Per-bench wall-clock cap  (default: 600s)
+#   BENCH_KILL_AFTER       SIGKILL grace after BENCH_TIMEOUT (default: 30s)
 
 set -euo pipefail
 
@@ -41,9 +32,7 @@ WORKDIR="$(cd "${RCCL_DIR}/../.." && pwd)"
 RCCL_LIB_DIR="${WORKDIR}/projects/rccl/build/release"
 RCCL_TESTS_DIR="${WORKDIR}/rccl-tests"
 
-# The env fragments the build stages wrote are the authoritative record of what
-# was actually built; prefer them over any ambient ROCM_PATH / MPI_HOME so a
-# stray value from the node environment cannot shadow the trees under test.
+# Prefer the build stages' env fragments over any ambient ROCM_PATH / MPI_HOME.
 # shellcheck source=/dev/null  # runtime fragment written by fetch-rocm.sh
 [[ -f "${WORKDIR}/.ci-out/rocm.env" ]] && source "${WORKDIR}/.ci-out/rocm.env"
 # shellcheck source=/dev/null  # runtime fragment written by build-ompi.sh
@@ -93,8 +82,7 @@ GIN_ENV="${BASE_ENV} -x NCCL_DMABUF_ENABLE=1 -x NCCL_GIN_TYPE=2 -x HSA_NO_SCRATC
 
 FAILED_RUNS=()
 
-# Word-splitting on $env_flags / $BENCH_ARGS / $extra_args is intentional so
-# the mpirun flag list can grow without per-call array gymnastics.
+# Word-splitting on the flag vars below is intentional.
 # shellcheck disable=SC2086
 run_bench() {
   local mode="$1"

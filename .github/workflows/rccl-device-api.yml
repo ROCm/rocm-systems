@@ -1,25 +1,19 @@
 name: RCCL device-API CI
 
-# Standalone (non-TheRock) pipeline that builds RCCL + rccl-tests with
-# ENABLE_DEVICE_API=1 and runs the device-API benchmark suite (symmetric
-# memory / LSA device kernels / GIN proxy) on a single 8-GPU node of the
-# Ruby MI350 slurm-backed scale runner.
+# Builds RCCL + rccl-tests with ENABLE_DEVICE_API=1 and runs the device-API
+# benchmark suite (symmetric memory / LSA device kernels / GIN proxy) on a single
+# 8-GPU node of the Ruby MI350 slurm-backed scale runner.
 #
-# Topology (same sbatch-dispatch pattern as therock-rccl-test-packages-multi-node.yml):
-#   GH runner (ruby-linux-slurm-scale-runner)  ── login / scheduling node
-#       └─ `sbatch --wait` ──► compute node (8x MI350)
-#                                  └─ projects/rccl/tools/ci/lib/device-api.sbatch  (orchestrator)
-#                                        ├─ lib/fetch-rocm.sh  ROCm (TheRock nightly)  → /apps/rccl-ci/rocm/rocm-<ver>
-#                                        ├─ lib/build-ompi.sh  OpenMPI (--with-rocm)   → /apps/rccl-ci/ompi/install/<ver>
-#                                        ├─ projects/rccl/install.sh  RCCL (release)   → projects/rccl/build/release (in-tree)
-#                                        ├─ rccl-tests install.sh  (ENABLE_DEVICE_API) → $WORKDIR/rccl-tests (fresh each run)
-#                                        └─ run-device-api-ci.sh  device-API benchmarks
+# Topology:
+#   GH runner (ruby-linux-slurm-scale-runner)  ── login node
+#       ├─ lib/fetch-rocm.sh   download ROCm dist tarball (curl+tar) off the
+#       │                       GPU allocation → /apps/rccl-ci, writes rocm.env
+#       └─ `sbatch --wait` ──► compute node → lib/device-api.sbatch:
+#              build-ompi.sh (OpenMPI) → RCCL install.sh → rccl-tests install.sh
+#              → run-device-api-ci.sh (benchmarks)
 #
-# ROCm/OpenMPI are version-keyed and cached on the shared /apps/rccl-ci NFS
-# mount (persist across runs, visible to the compute node). RCCL and rccl-tests
-# are rebuilt every run so breakage is caught. ROCm is fetched with TheRock's
-# build_tools/install_rocm_from_artifacts.py (nightly tarball for the family),
-# NOT from /opt/rocm on the node.
+# ROCm/OpenMPI are version-keyed and cached on the shared /apps/rccl-ci NFS mount;
+# RCCL and rccl-tests are rebuilt every run so breakage is caught.
 
 on:
   workflow_dispatch:
@@ -71,6 +65,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
+      - name: Provision ROCm (TheRock nightly) on the head node
+        env:
+          RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # Persistent cache for ROCm/OpenMPI/rccl-tests on the cluster's
+          # shared /apps NFS mount. Survives ephemeral runner recreation and
+          # actions/checkout's `git clean`, and is the same path on the compute
+          # node. Mirrors the Ruby multi-node convention (/apps/cvs_tests).
+          export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
+          echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
+          # Create the cache tree up front (no-op if it exists). Fail loudly here
+          # rather than mid-build if /apps isn't writable by the runner user.
+          if ! mkdir -p "${RCCL_DEVICE_API_CACHE}"/{rocm,ompi,downloads}; then
+            echo "ERROR: cannot create ${RCCL_DEVICE_API_CACHE} (is /apps writable by $(id -un)?)" >&2
+            exit 1
+          fi
+
+          # Fetch ROCm HERE on the login node (curl + tar of TheRock's dist
+          # tarball) so the large download/extract happens off the GPU
+          # allocation. fetch-rocm.sh writes .ci-out/rocm.env (ROCM_PATH) onto
+          # the shared workspace, which the sbatch job then sources.
+          "${{ github.workspace }}/projects/rccl/tools/ci/lib/fetch-rocm.sh"
+
       - name: Submit device-API build+test to SLURM
         env:
           RCCL_DEVICE_API_WORKDIR: ${{ github.workspace }}
@@ -80,18 +98,8 @@ jobs:
           mkdir -p "${logs_dir}"
           cd "${logs_dir}"
 
-          # Persistent cache for ROCm/OpenMPI/rccl-tests on the cluster's
-          # shared /apps NFS mount. Survives ephemeral runner recreation and
-          # actions/checkout's `git clean`, and is the same path on the compute
-          # node. Mirrors the Ruby multi-node convention (/apps/cvs_tests).
           export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
           echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
-          # Create the cache tree up front (no-op if it exists). Fail loudly here
-          # rather than mid-build if /apps isn't writable by the runner user.
-          if ! mkdir -p "${RCCL_DEVICE_API_CACHE}"/{rocm,ompi,downloads,therock}; then
-            echo "ERROR: cannot create ${RCCL_DEVICE_API_CACHE} (is /apps writable by $(id -un)?)" >&2
-            exit 1
-          fi
 
           # `--wait` blocks until the job reaches a terminal state and
           # propagates the job's exit code as sbatch's exit code.
