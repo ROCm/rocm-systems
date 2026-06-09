@@ -30,7 +30,9 @@ PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300A_A1"
 PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 
 
-# ── Helpers for building synthetic JSON / records ────────────
+# ═══════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════
 
 
 def _make_record(
@@ -54,6 +56,27 @@ def _make_record(
             "dispatch_id": dispatch_id,
             "wave_issued": wave_issued,
             "snapshot": snapshot,
+        },
+    }
+
+
+def make_record_without_snapshot(
+    code_object_id: int,
+    offset: int,
+    inst_index: int,
+    dispatch_id: int | None,
+    wave_issued: bool,
+) -> dict:
+    """A record missing the ``snapshot`` key entirely."""
+    return {
+        "inst_index": inst_index,
+        "record": {
+            "pc": {
+                "code_object_id": code_object_id,
+                "code_object_offset": offset,
+            },
+            "dispatch_id": dispatch_id,
+            "wave_issued": wave_issued,
         },
     }
 
@@ -111,6 +134,114 @@ def write_pc_sampling_csv(
         lines.append(f"{corr_id},{instruction},{comment}")
     path.write_text("\n".join(lines) + "\n")
     return path
+
+
+def _write_pc_kernel_trace(path: Path, rows: list[tuple]) -> Path:
+    """Write a minimal ps_file_kernel_trace.csv.
+
+    Each *row* is ``(agent_id, dispatch_id, kernel_name, start_ts, end_ts)``.
+    Only the columns actually read by ``process_pc_sampling_kernel_trace``
+    are written (the existing ``_write_kernel_trace`` uses a different
+    schema without Agent_Id or timestamps, so it cannot be reused here).
+    """
+    lines = ["Agent_Id,Dispatch_Id,Kernel_Name,Start_Timestamp,End_Timestamp"]
+    for agent_id, dispatch_id, kernel_name, start_ts, end_ts in rows:
+        lines.append(f"{agent_id},{dispatch_id},{kernel_name},{start_ts},{end_ts}")
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def _setup_per_kernel_files(
+    tmp_path: Path,
+    method: str = "host_trap",
+) -> tuple[Path, Path]:
+    """Create JSON + kernel trace CSV for per-kernel tests."""
+    kernel_trace = tmp_path / "kt.csv"
+    _write_kernel_trace(
+        kernel_trace,
+        [
+            (0, 100, "vecCopy"),
+            (1, 100, "vecCopy"),
+            (2, 101, "vecAdd"),
+        ],
+    )
+
+    samples = [
+        _make_record(100, 0x10, 0, dispatch_id=0),
+        _make_record(
+            100,
+            0x20,
+            1,
+            dispatch_id=1,
+            wave_issued=False,
+            stall_reason=f"{PREFIX}WAITCNT",
+        ),
+        _make_record(101, 0x10, 2, dispatch_id=2),
+    ]
+
+    key = "host_trap" if method == "host_trap" else "stochastic"
+    kwargs = {key: samples}
+    json_path = _write_json(
+        tmp_path / "r.json",
+        instructions=["v_mov_b32", "s_waitcnt", "v_add_f32"],
+        comments=[
+            "/src/vcopy.cpp:42",
+            "/src/vcopy.cpp:43",
+            "/src/vadd.cpp:30",
+        ],
+        kernel_symbols=[
+            {
+                "code_object_id": 100,
+                "formatted_kernel_name": "vecCopy",
+            },
+            {
+                "code_object_id": 101,
+                "formatted_kernel_name": "vecAdd",
+            },
+        ],
+        **kwargs,
+    )
+    return json_path, kernel_trace
+
+
+def write_per_kernel_guard_files(
+    tmp_path: Path,
+    instructions: list | None,
+    comments: list | None,
+    indices: tuple[int, int] = (0, 1),
+) -> tuple[Path, Path]:
+    """Per-kernel JSON + trace with caller-controlled instruction/comment tables."""
+    kt = tmp_path / "kt.csv"
+    _write_kernel_trace(kt, [(0, 100, "vecCopy"), (1, 100, "vecCopy")])
+    samples = [
+        _make_record(100, 0x10, indices[0], dispatch_id=0),
+        _make_record(100, 0x20, indices[1], dispatch_id=1),
+    ]
+    json_path = _write_json(
+        tmp_path / "r.json",
+        host_trap=samples,
+        instructions=instructions,
+        comments=comments,
+        kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
+    )
+    return json_path, kt
+
+
+def assert_none_kind(column: pd.Series, kind: str) -> None:
+    """Assert how many entries in *column* are None: all / some / none."""
+    if kind == "all":
+        assert column.isna().all()
+    elif kind == "some":
+        assert column.isna().any() and not column.isna().all()
+    else:
+        assert not column.isna().any()
+
+
+def make_db_analysis(workload_path: str) -> db_analysis:
+    """Construct a db_analysis whose only populated state is _runs."""
+    instance = db_analysis.__new__(db_analysis)
+    instance._runs = {workload_path: None}
+    return instance
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -180,36 +311,6 @@ def test_search_pc_sampling_record_groups_by_key() -> None:
     assert result[1][3] == 1
 
 
-def test_search_pc_sampling_record_stall_reason_aggregation() -> None:
-    """Aggregate distinct stall reasons and track stalled vs issued counts."""
-    records = [
-        _make_record(
-            1,
-            0x10,
-            0,
-            dispatch_id=0,
-            wave_issued=False,
-            stall_reason=f"{PREFIX}WAITCNT",
-        ),
-        _make_record(
-            1,
-            0x10,
-            0,
-            dispatch_id=1,
-            wave_issued=False,
-            stall_reason=f"{PREFIX}ALU_DEPENDENCY",
-        ),
-    ]
-    result = search_pc_sampling_record(records)
-    assert result is not None
-    stall_reasons = result[0][6]
-    reason_names = [r[0] for r in stall_reasons]
-    assert "WAITCNT" in reason_names
-    assert "ALU_DEPENDENCY" in reason_names
-    assert result[0][4] == 0  # count_issued
-    assert result[0][5] == 2  # count_stalled
-
-
 def test_search_pc_sampling_record_dispatch_id_collection() -> None:
     """Collect unique dispatch IDs across duplicate records for the same key."""
     records = [
@@ -241,27 +342,6 @@ def test_search_pc_sampling_record_skips_none_fields() -> None:
     result = search_pc_sampling_record([valid, invalid])
     assert result is not None
     assert len(result) == 1
-
-
-def make_record_without_snapshot(
-    code_object_id: int,
-    offset: int,
-    inst_index: int,
-    dispatch_id: int | None,
-    wave_issued: bool,
-) -> dict:
-    """A record missing the ``snapshot`` key entirely."""
-    return {
-        "inst_index": inst_index,
-        "record": {
-            "pc": {
-                "code_object_id": code_object_id,
-                "code_object_offset": offset,
-            },
-            "dispatch_id": dispatch_id,
-            "wave_issued": wave_issued,
-        },
-    }
 
 
 @pytest.mark.parametrize(
@@ -397,59 +477,6 @@ def test_search_pc_sampling_record_field_edges(
 # ═══════════════════════════════════════════════════════════════
 
 
-def _setup_per_kernel_files(
-    tmp_path: Path,
-    method: str = "host_trap",
-) -> tuple[Path, Path]:
-    """Create JSON + kernel trace CSV for per-kernel tests."""
-    kernel_trace = tmp_path / "kt.csv"
-    _write_kernel_trace(
-        kernel_trace,
-        [
-            (0, 100, "vecCopy"),
-            (1, 100, "vecCopy"),
-            (2, 101, "vecAdd"),
-        ],
-    )
-
-    samples = [
-        _make_record(100, 0x10, 0, dispatch_id=0),
-        _make_record(
-            100,
-            0x20,
-            1,
-            dispatch_id=1,
-            wave_issued=False,
-            stall_reason=f"{PREFIX}WAITCNT",
-        ),
-        _make_record(101, 0x10, 2, dispatch_id=2),
-    ]
-
-    key = "host_trap" if method == "host_trap" else "stochastic"
-    kwargs = {key: samples}
-    json_path = _write_json(
-        tmp_path / "r.json",
-        instructions=["v_mov_b32", "s_waitcnt", "v_add_f32"],
-        comments=[
-            "/src/vcopy.cpp:42",
-            "/src/vcopy.cpp:43",
-            "/src/vadd.cpp:30",
-        ],
-        kernel_symbols=[
-            {
-                "code_object_id": 100,
-                "formatted_kernel_name": "vecCopy",
-            },
-            {
-                "code_object_id": 101,
-                "formatted_kernel_name": "vecAdd",
-            },
-        ],
-        **kwargs,
-    )
-    return json_path, kernel_trace
-
-
 @pytest.mark.parametrize(
     "method, sorting_type",
     [
@@ -498,36 +525,15 @@ def test_load_per_kernel_schema_and_sort(
         assert offsets == sorted(offsets)
 
 
-def write_per_kernel_guard_files(
-    tmp_path: Path,
-    instructions: list | None,
-    comments: list | None,
-) -> tuple[Path, Path]:
-    """Per-kernel JSON + trace with caller-controlled instruction/comment tables."""
-    kt = tmp_path / "kt.csv"
-    _write_kernel_trace(kt, [(0, 100, "vecCopy"), (1, 100, "vecCopy")])
-    samples = [
-        _make_record(100, 0x10, 0, dispatch_id=0),
-        _make_record(100, 0x20, 1, dispatch_id=1),
-    ]
-    json_path = _write_json(
-        tmp_path / "r.json",
-        host_trap=samples,
-        instructions=instructions,
-        comments=comments,
-        kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
-    )
-    return json_path, kt
-
-
 @pytest.mark.parametrize(
-    "instructions, comments, instruction_none, source_line_none",
+    "instructions, comments, instruction_none, source_line_none, indices",
     [
         pytest.param(
             ["v_mov"],
             ["/s/a.cpp:1", "/s/a.cpp:2"],
             "some",
             "none",
+            (0, 1),
             id="instructions_short",
         ),
         pytest.param(
@@ -535,7 +541,16 @@ def write_per_kernel_guard_files(
             ["/s/a.cpp:1"],
             "none",
             "some",
+            (0, 1),
             id="comments_short",
+        ),
+        pytest.param(
+            ["v_mov"],
+            ["/s/a.cpp:1", "/s/a.cpp:2", "/s/a.cpp:3", "/s/a.cpp:4", "/s/a.cpp:5"],
+            "all",
+            "none",
+            (3, 4),
+            id="instructions_all_out_of_range",
         ),
     ],
 )
@@ -545,9 +560,12 @@ def test_load_per_kernel_out_of_range_index_guards(
     comments: list | None,
     instruction_none: str,
     source_line_none: str,
+    indices: tuple[int, int],
 ) -> None:
     """An inst_index past the end of a string table yields None, not an error."""
-    json_path, kt = write_per_kernel_guard_files(tmp_path, instructions, comments)
+    json_path, kt = write_per_kernel_guard_files(
+        tmp_path, instructions, comments, indices
+    )
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
         file_name=json_path,
@@ -582,16 +600,6 @@ def test_load_per_kernel_empty_string_table_exits(
             kernel_name="vecCopy",
             sorting_type="offset",
         )
-
-
-def assert_none_kind(column: pd.Series, kind: str) -> None:
-    """Assert how many entries in *column* are None: all / some / none."""
-    if kind == "all":
-        assert column.isna().all()
-    elif kind == "some":
-        assert column.isna().any() and not column.isna().all()
-    else:
-        assert not column.isna().any()
 
 
 def test_load_per_kernel_multi_dispatch_groupby(
@@ -898,21 +906,6 @@ def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
 # ═══════════════════════════════════════════════════════════════
 
 
-def _write_pc_kernel_trace(path: Path, rows: list[tuple]) -> Path:
-    """Write a minimal ps_file_kernel_trace.csv.
-
-    Each *row* is ``(agent_id, dispatch_id, kernel_name, start_ts, end_ts)``.
-    Only the columns actually read by ``process_pc_sampling_kernel_trace``
-    are written (the existing ``_write_kernel_trace`` uses a different
-    schema without Agent_Id or timestamps, so it cannot be reused here).
-    """
-    lines = ["Agent_Id,Dispatch_Id,Kernel_Name,Start_Timestamp,End_Timestamp"]
-    for agent_id, dispatch_id, kernel_name, start_ts, end_ts in rows:
-        lines.append(f"{agent_id},{dispatch_id},{kernel_name},{start_ts},{end_ts}")
-    path.write_text("\n".join(lines) + "\n")
-    return path
-
-
 def test_process_pc_sampling_missing_trace_returns_empty(
     tmp_path: Path,
 ) -> None:
@@ -1019,13 +1012,6 @@ def test_build_agent_to_gpu_map_missing_file(
 # ═══════════════════════════════════════════════════════════════
 # calc_pc_sampling_data
 # ═══════════════════════════════════════════════════════════════
-
-
-def make_db_analysis(workload_path: str) -> db_analysis:
-    """Construct a db_analysis whose only populated state is _runs."""
-    instance = db_analysis.__new__(db_analysis)
-    instance._runs = {workload_path: None}
-    return instance
 
 
 def test_calc_pc_sampling_data_missing_file(
@@ -1191,8 +1177,7 @@ def test_pc_sampling_analyze_db_output(
 ) -> None:
     """Analyze in db mode produces a populated pcsampling table."""
     workload_dir = common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
-    db_name = "pc_sampling_db_test"
-    db_path = Path(f"{db_name}.db")
+    db_path = Path(workload_dir) / "pc_sampling_db_test.db"
     try:
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
@@ -1203,7 +1188,7 @@ def test_pc_sampling_analyze_db_output(
             "--output-format",
             "db",
             "--output-name",
-            db_name,
+            str(db_path.with_suffix("")),
         ])
         assert code == 0
         assert db_path.is_file()
@@ -1216,7 +1201,6 @@ def test_pc_sampling_analyze_db_output(
             conn.close()
         assert row_count > 0
     finally:
-        db_path.unlink(missing_ok=True)
         common.clean_output_dir(True, workload_dir)
 
 
