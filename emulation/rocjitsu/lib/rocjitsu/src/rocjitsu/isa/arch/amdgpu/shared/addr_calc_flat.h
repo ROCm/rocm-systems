@@ -38,6 +38,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   uint64_t exec = wf.exec();
   d.lane_mask = exec;
   d.exec_mask = exec;
+  d.wf_size = wf.wf_size();
 
   // Compute signed 13-bit offset for GLOBAL/SCRATCH, unsigned 12-bit for FLAT.
   int64_t offset;

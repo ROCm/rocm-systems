@@ -32,22 +32,21 @@ fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
     let kmd = mirage_rocjitsu::kmd_preload()?;
     // Build a minimal EmulatorDef referencing a builtin agent so
     // rocjitsu can synthesise the sim config.
-    let _ = mirage_core::agent::store::ensure_builtins(false).ok()?;
+    let _ = mirage_builtin::ensure_agents(false).ok()?;
     let agents = mirage_core::agent::store::list().ok()?;
     let agent_name = agents.into_iter().next()?;
     let def = mirage_core::emulator::EmulatorDef {
-        emulator: "rocjitsu".to_string(),
+        emulator: mirage_core::emulator::EmulatorKind::Rocjitsu,
         plugins: Default::default(),
         exec_mode: mirage_core::emulator::ExecMode::Functional,
         options: Default::default(),
         topology: mirage_core::common::MaybeRef::Owned(mirage_core::topology::TopologyDef {
-            racks: 1,
-            nodes_per_rack: 1,
+            num_nodes: 1,
             gpus_per_node: 1,
             agent: mirage_core::common::MaybeRef::Ref(agent_name),
         }),
     };
-    let (cfg, schema) = mirage_rocjitsu::kmd_config(&def).ok()?;
+    let (cfg, schema) = mirage_rocjitsu::kmd_config(&def, None).ok()?;
     Some((kmd, cfg, schema))
 }
 
@@ -126,7 +125,11 @@ fn compile_tiny_hip(out_dir: &Path) -> PathBuf {
         .arg(&bin)
         .status()
         .expect("failed to invoke hipcc");
-    assert!(status.success(), "hipcc failed to compile {}", src.display());
+    assert!(
+        status.success(),
+        "hipcc failed to compile {}",
+        src.display()
+    );
     bin
 }
 
@@ -364,4 +367,3 @@ fn hip_kernel_runs_inside_container_with_kmd_preload() {
         "expected `hip_kernel_ok`; stdout was:\n{stdout}"
     );
 }
-
