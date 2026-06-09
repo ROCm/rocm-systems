@@ -264,12 +264,14 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 # inexact transcendentals (sin/cos) are excluded.
 # VOP1 base mnemonics whose VOP3 form applies float abs/neg/omod/clamp modifiers
 # over an f32 source and result (so the VOP3 twin routes through the f32 unary
-# modifier glue rather than reusing the plain VOP1 path). v_mov_b32's VOP3 body
-# treats src0 as f32 and applies the same modifiers, so it belongs here too.
-# v_accvgpr_mov_b32 (acc<->acc move) has the identical f32-modifier VOP3 body.
+# modifier glue rather than reusing the plain VOP1 path).
+# NOTE: v_mov_b32 / v_accvgpr_mov_b32 are deliberately NOT here. They are integer
+# bit-moves: OMOD/CLAMP are float-only modifiers, so their generated VOP3 scalar
+# body is a raw copy that ignores them. Routing them through the f32 modifier glue
+# made the SIMD path apply clamp/omod the scalar never does (clamp=1: scalar keeps
+# the raw bits vs simd clamps to 1.0). They fall through to the plain VOP1 unary
+# raw-copy path below, matching the scalar body for every modifier combination.
 _VOP3_UNARY_FP_F32 = {
-    'v_mov_b32',
-    'v_accvgpr_mov_b32',
     'v_floor_f32',
     'v_ceil_f32',
     'v_trunc_f32',
@@ -1782,11 +1784,12 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     # for all non-NaN inputs; NaN-result lanes are skipped by the A/B test.
     'v_rcp_f64_vop3': '[](auto a) { return util::native<double>(1.0) / a; }',
     'v_rsq_f64_vop3': '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
-    # v_mov_b64 with VOP3 modifiers: scalar bit_casts to double, applies
-    # abs/neg/omod/clamp, bit_casts back. The f64 unary glue operates entirely
-    # in native<double> domain, so an identity functor + the same modifier
-    # helpers reproduce the scalar bit pattern exactly.
-    'v_mov_b64_vop3': '[](auto a) { return a; }',
+    # NOTE: v_mov_b64 is deliberately NOT here. It is an integer 64-bit bit-move;
+    # OMOD/CLAMP are float-only, so its generated VOP3 scalar body is a raw copy
+    # that ignores them. Routing it through the f64 modifier glue made the SIMD
+    # path apply clamp/omod the scalar never does (clamp=1: scalar keeps the raw
+    # bits vs simd clamps to 1.0). With no entry here it stays scalar (a 64-bit
+    # register copy gains nothing from vectorization anyway).
 }
 
 

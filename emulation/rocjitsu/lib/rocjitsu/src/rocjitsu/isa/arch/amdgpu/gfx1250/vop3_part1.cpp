@@ -805,7 +805,14 @@ VMovB64Vop3::VMovB64Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
 }
 
-void VMovB64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b64_vop3(*this, wf); }
+void VMovB64Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    vdst.write_lane64(wf, lane, static_cast<uint64_t>(src0.read_lane64(wf, lane)));
+  }
+}
 
 VTanhF32Vop3::VTanhF32Vop3(const MachineInst *inst)
     : Vop3("v_tanh_f32", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VTanhF32Vop3>()),
