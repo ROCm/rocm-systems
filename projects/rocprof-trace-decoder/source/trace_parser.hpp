@@ -519,6 +519,8 @@ public:
         return event;
     }
 
+    static constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
+
     rocprofiler_thread_trace_decoder_dispatch_t PopulateDispatch(int64_t time, int me, int pipe, int tt_version = 0)
     {
         rocprofiler_thread_trace_decoder_dispatch_t event{};
@@ -527,7 +529,7 @@ public:
         event.me_id = me;
         event.pipe_id = pipe;
 
-        uint64_t pc = wave_start_addr.at(me).at(pipe) << 8;
+        uint64_t pc = (wave_start_addr.at(me).at(pipe) << 8) & BITMASK;
         event.entry_point = pcinfo_t{.address = pc, .code_object_id = 0};
         for (const auto& co : active_codeobjs.read())
             if (co.inrange(pc))
@@ -564,7 +566,6 @@ public:
 
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
-        constexpr uint64_t BITMASK = (uint64_t{1} << 48) - 1;
         return ToPcV2(table.write(), (wave_start_addr.at_reg(token) << 8) & BITMASK);
     }
 

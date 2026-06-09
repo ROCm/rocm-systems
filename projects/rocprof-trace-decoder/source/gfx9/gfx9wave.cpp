@@ -361,7 +361,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
     };
 
     auto generate_event = [&](int64_t time, rocprofiler_thread_trace_decoder_event_type_t type)
-    { stitch.sendEvent(type, time, 0, 0, 0, false); };
+    { stitch.sendEvent(type, time, 0, 0, 0, false, false); };
 
     while (generator.valid())
     {
@@ -579,7 +579,9 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                         token.time,
                         token.fields.regcs.me,
                         token.fields.regcs.pipe,
-                        0
+                        0,
+                        false,
+                        false
                     );
                 }
 
@@ -605,7 +607,9 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                             token.time,
                             token.fields.reg.me,
                             token.fields.reg.pipe,
-                            static_cast<uint32_t>(ev.id)
+                            static_cast<uint32_t>(ev.id),
+                            false,
+                            true
                         );
                         break;
                     case CSRegisterHandler::RegUpdateEvent::CODEOBJ_UNLOAD:
@@ -614,7 +618,9 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                             token.time,
                             token.fields.reg.me,
                             token.fields.reg.pipe,
-                            static_cast<uint32_t>(ev.id)
+                            static_cast<uint32_t>(ev.id),
+                            false,
+                            true
                         );
                         break;
                     case CSRegisterHandler::RegUpdateEvent::NONE: break;

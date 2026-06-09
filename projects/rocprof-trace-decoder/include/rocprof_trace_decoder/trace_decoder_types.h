@@ -262,7 +262,8 @@ typedef enum rocprofiler_thread_trace_decoder_event_type_t
 typedef enum rocprofiler_thread_trace_decoder_event_flags_t
 {
     ROCPROF_TRACE_DECODER_EVENT_FLAGS_NONE = 0,
-    ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP = 0x1,
+    ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE = 0x1,
+    ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP = 0x2,
     ROCPROF_TRACE_DECODER_EVENT_FLAGS_LAST = ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP,
 } rocprofiler_thread_trace_decoder_event_flags_t;
 
