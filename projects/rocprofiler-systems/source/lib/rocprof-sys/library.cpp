@@ -1280,10 +1280,11 @@ rocprofsys_finalize_hidden(void)
 
     if(_push_count > _pop_count)
     {
-        LOG_ERROR("rocprofsys_push_trace was called more times than "
-                  "rocprofsys_pop_trace. The inverse is fine but the current state "
-                  "means not every measurement was ended :: pushed: {} vs. popped: {}.",
-                  _push_count, _pop_count);
+        LOG_WARNING("rocprofsys_push_trace was called more times than "
+                    "rocprofsys_pop_trace. This is not fatal, but trace output will "
+                    "not include regions that were still open during finalization :: "
+                    "pushed: {} vs. popped: {}.",
+                    _push_count, _pop_count);
     }
 
     // debug::close_file();

@@ -77,7 +77,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
-- Some workloads may report an imbalance in the push/pop trace counts.
+- A push/pop trace count imbalance can occur for workloads that instrument runtime
+  internals such as OMPT. When pushes exceed pops, rocprof-sys completes
+  finalization, emits a warning, and omits any still-open trace regions from the
+  generated trace output.
 
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 
