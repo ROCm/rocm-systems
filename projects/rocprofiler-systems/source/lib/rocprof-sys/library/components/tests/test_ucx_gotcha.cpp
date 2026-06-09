@@ -288,8 +288,7 @@ TEST_F(ucx_gotcha_test, test_audit_outgoing_no_return)
     MockedGotchaData data;
     data.tool_id = "ucp_tag_send_nbx";
 
-    // This is the key regression guard requested in review: the outgoing audit with no
-    // return value must call category_region::stop so the region is always closed.
+    // Outgoing audit with no return value must still call stop so the region is closed.
     EXPECT_CALL(*test_globals::g_category_region_gmock, stop_generic)
         .Times(1)
         .WillOnce([](std::string_view name) { EXPECT_EQ(name, "ucp_tag_send_nbx"); });
