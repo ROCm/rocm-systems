@@ -39,6 +39,7 @@ public:
   get_hardware_fingerprint(uint64_t &fingerprint) const = 0;
   amdcuid_status_t get_derived_cuid(amdcuid_derived_id &id,
                                     cuid_hmac *hmac = nullptr) const;
+  amdcuid_status_t is_temporary_cuid(bool *is_temporary) const;
 
   // Virtual accessors for common device properties with default wrong device
   // type implementations

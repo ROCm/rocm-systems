@@ -680,6 +680,16 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle,
       std::memcpy(data, bdf.c_str(), required_length);
     *length = required_length;
   } break;
+  case AMDCUID_QUERY_TEMPORARY_CUID: {
+    if (*length < sizeof(bool)) {
+      return AMDCUID_STATUS_INSUFFICIENT_SIZE;
+    }
+    bool is_temporary = false;
+    status = device->is_temporary_cuid(&is_temporary);
+    if (data != nullptr)
+      *(bool *)data = is_temporary;
+    *length = sizeof(bool);
+  } break;
   default:
     status = AMDCUID_STATUS_INVALID_ARGUMENT;
     break;

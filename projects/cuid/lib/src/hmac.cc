@@ -171,9 +171,6 @@ amdcuid_status_t cuid_hmac::set_hmac_key(const uint8_t key_data[key_length]) {
   if (geteuid() != 0) {
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
-  if (sizeof(key_data) != key_length) {
-    return AMDCUID_STATUS_INVALID_ARGUMENT;
-  }
 
   if (key) {
     delete[] key;

@@ -38,16 +38,12 @@
 #include <iostream>
 #include <iterator>
 #include <mutex>
+#include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <sstream>
 #include <sys/types.h>
 #include <unistd.h>
 #include <vector>
-
-#define TEMP_DERIVED_CUID_PUBLIC_KEY                                           \
-  "329jf8d+024j1l8i89f4hako1gm2n3-2" // 32-byte key for generating synthetic
-                                     // derived CUIDs when primary CUID is not
-                                     // available
 
 // helper function to get a hash from the raw bytes of a derived ID
 void get_hash_from_raw(uint8_t raw_bytes[16], uint8_t out_hash[14]) {
@@ -174,100 +170,57 @@ amdcuid_status_t CuidDevice::get_derived_cuid(amdcuid_derived_id &id,
 
   // if not found, generate derived CUID
   amdcuid_primary_id primary;
-  amdcuid_status_t primary_status = AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  if (geteuid() == 0) {
-    if (!hmac) {
-      // since primary id is available here, should use real key for derived
-      // CUID generation for fully function CUID
-      return AMDCUID_STATUS_INVALID_ARGUMENT;
-    }
-    primary_status = get_primary_cuid(primary);
+  status = get_primary_cuid(primary);
+  // check the temporary bit in the primary CUID to determine whether to use the
+  // real HMAC key or the temp key for derived CUID generation
+  bool temp = primary.raw_bits[14] &
+              0x04; // check the temp indicator bit in the reserved bits
+  if (temp) {
+    // machine id is what needs to be protected and under HMAC system, message
+    // is not guaranteed protection when output is well known so use machine id
+    // (recorded in the primary CUID) as the key for generating the derived
+    // CUID, and use a fixed application ID as the message to generate a
+    // consistent derived CUID for non-privileged users without access to the
+    // real HMAC key or primary CUID
+    amdcuid_primary_id fixed_app_id = {};
+    // Application UUID: UUID_v5(NAMESPACE_DNS, "com.amd.cuid.v1")
+    static const uint8_t CUID_APP_UUID[16] = {
+        0xac, 0x05, 0xca, 0x9f, 0x1a, 0xc4, 0x58, 0xb9,
+        0x92, 0x7e, 0x2e, 0x17, 0x51, 0x47, 0x9c, 0x01};
+    memcpy(fixed_app_id.raw_bits, CUID_APP_UUID, 16);
+    CuidUtilities::add_UUIDv8_bits(fixed_app_id.raw_bits,
+                                   &fixed_app_id.UUIDv8_representation);
 
-    if (primary_status == AMDCUID_STATUS_SUCCESS) {
-      primary_status =
-          CuidUtilities::generate_derived_cuid(&primary, &id, hmac, false);
-    }
-  }
-  if (geteuid() != 0 || primary_status != AMDCUID_STATUS_SUCCESS) {
-    // If we can't get the primary ID (e.g. non-privileged user) or the
-    // generation failed for some reason, fallback to using the temp generation
-    // method
-    uint64_t fingerprint = 0;
-
-    // if the device is a pci, use bdf for fingerprint
-    if (this->type() == AMDCUID_DEVICE_TYPE_GPU ||
-        this->type() == AMDCUID_DEVICE_TYPE_NIC ||
-        this->type() == AMDCUID_DEVICE_TYPE_NPU) {
-      std::string bdf;
-      status = this->get_bdf(bdf);
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        return status;
-      }
-      std::string bdf_hex;
-      std::copy_if(bdf.begin(), bdf.end(), std::back_inserter(bdf_hex),
-                   [](unsigned char c) { return std::isxdigit(c); });
-      if (bdf_hex.empty()) {
-        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
-      }
-      if (!CuidUtilities::is_valid_bdf(bdf)) {
-        return AMDCUID_STATUS_INVALID_FORMAT;
-      }
-      try {
-        fingerprint = std::stoull(bdf_hex, nullptr, 16);
-      } catch (...) {
-        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
-      }
-
-    } else {
-      // for non-pci devices, use machine id
-      std::ifstream machine_id_file("/etc/machine-id");
-      if (!machine_id_file.is_open()) {
-        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
-      }
-      std::string machine_id;
-      std::getline(machine_id_file, machine_id);
-      machine_id_file.close();
-      std::string machine_id_hex = machine_id.substr(0, 16);
-      if (machine_id_hex.empty()) {
-        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
-      }
-      try {
-        fingerprint = std::stoull(machine_id_hex, nullptr, 16);
-      } catch (...) {
-        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
-      }
-    }
-
-    // create primary ID with fingerprint
-    uint16_t unit_id = 0;
-    this->get_unit_id(unit_id);
-    uint8_t revision_id = 0;
-    this->get_revision_id(revision_id);
-    uint16_t device_id = 0;
-    this->get_device_id(device_id);
-    uint16_t vendor_id = 0;
-    this->get_vendor_id(vendor_id);
-    status = CuidUtilities::generate_primary_cuid(
-        fingerprint, unit_id, revision_id, device_id, vendor_id, this->type(),
-        &primary);
-
-    // use a fixed hmac context with a hardcoded public key since we can't rely
-    // on the caller to provide a valid HMAC context without access to the key,
-    // and we just need something consistent for the derived CUID generation
-    // since we don't have access to the real primary CUID
-    uint8_t temp_key[key_length];
-    static_assert(sizeof(TEMP_DERIVED_CUID_PUBLIC_KEY) - 1 == key_length,
-                  "TEMP_DERIVED_CUID_PUBLIC_KEY length must match key_length");
-    std::memcpy(temp_key, TEMP_DERIVED_CUID_PUBLIC_KEY, key_length);
-
-    cuid_hmac temp_hmac = cuid_hmac(temp_key);
+    // Use the machine ID from the primary CUID as the key for HMAC, so that the
+    // derived CUID is consistent for the same machine even for non-privileged
+    // users
+    uint8_t padded_key[key_length] = {};
+    memcpy(padded_key, primary.raw_bits, sizeof(primary.raw_bits));
+    cuid_hmac temp_hmac = cuid_hmac(padded_key);
     temp_hmac.set_hmac_algorithm(EVP_sha256());
-
-    // Use hardware fingerprint and device type to generate a synthetic primary
-    // ID for derived CUID generation
     status =
-        CuidUtilities::generate_derived_cuid(&primary, &id, &temp_hmac, true);
+        CuidUtilities::generate_derived_cuid(&fixed_app_id, &id, &temp_hmac);
+  } else {
+    status = CuidUtilities::generate_derived_cuid(&primary, &id, hmac);
   }
 
-  return status;
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidDevice::is_temporary_cuid(bool *is_temp) const {
+  if (!is_temp) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+  *is_temp = false;
+  // Check the temporary bit in the primary CUID to determine if the CUID is
+  // temporary
+  amdcuid_primary_id primary;
+  amdcuid_status_t status = get_primary_cuid(primary);
+  if (status != AMDCUID_STATUS_SUCCESS) {
+    return status;
+  }
+  *is_temp = primary.raw_bits[14] &
+             0x04; // check the temp indicator bit in the reserved bits
+
+  return AMDCUID_STATUS_SUCCESS;
 }

@@ -43,7 +43,7 @@ extern "C" {
 
 //! Minor version should be updated for each API change, but without changing
 //! headers
-#define AMDCUID_LIB_VERSION_MINOR 3
+#define AMDCUID_LIB_VERSION_MINOR 4
 
 //! Patch version should be updated for each bug fix or non-API change
 #define AMDCUID_LIB_VERSION_PATCH 0
@@ -306,7 +306,18 @@ typedef enum {
   AMDCUID_QUERY_BDF =
       15, ///< Query the PCI BDF (string in format "bus:device.function", e.g.
           ///< "0000:03:00.0"). Supported by GPU and NIC device types.
-  AMDCUID_QUERY_LAST = 15
+  AMDCUID_QUERY_TEMPORARY_CUID =
+      16, ///< Query to determine if a CUID is temporary (bool). This is true if
+          ///< the CUID is not derived from a hardware fingerprint that is not
+          ///< stable or accessible, and thus the library generated a CUID based
+          ///< on non unique device information. Temporary CUIDs will be clearly
+          ///< indicated as such when converted to strings by
+          ///< amdcuid_id_to_string() to warn users that the CUID may not be
+          ///< unique or stable. Users should not rely on temporary CUIDs for
+          ///< use cases that require uniqueness or stability, as they may
+          ///< change or may not be unique if devices are shifted around within
+          ///< a system.
+  AMDCUID_QUERY_LAST = 16
 } amdcuid_query_t;
 
 /**

@@ -559,6 +559,10 @@ amdcuid_status_t CuidFile::save() {
              << CuidUtilities::get_cuid_as_string(&entry.primary_cuid) << "\n";
       }
 
+      // Write if CUID is temporary
+      file << "is_temporary=" << (entry.is_temporary ? "true" : "false")
+           << "\n";
+
       // Write derived CUID
       file << "derived_cuid="
            << CuidUtilities::get_cuid_as_string(&entry.derived_cuid) << "\n";
@@ -747,15 +751,6 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
   // Create file handlers
   CuidFile cuid_file(file, is_privileged);
 
-  // Initialize HMAC for derived CUID generation if privileged
-  cuid_hmac hmac;
-  if (is_privileged) {
-    hmac = cuid_hmac();
-  } else {
-    // For unprivileged file, HMAC is not used
-    hmac = nullptr;
-  }
-
   // Clear existing entries
   cuid_file.clear();
 
@@ -777,10 +772,7 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
 
     amdcuid_status_t status;
     if (is_privileged) {
-      if (!hmac.is_valid()) {
-        std::cerr << "Error: Failed to initialize HMAC with key" << std::endl;
-        return AMDCUID_STATUS_KEY_ERROR;
-      }
+      cuid_hmac hmac = cuid_hmac();
 
       // Get primary CUID
       amdcuid_primary_id primary_id = {};
@@ -824,6 +816,17 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
       }
       entry.derived_cuid = derived_id.UUIDv8_representation;
     }
+
+    // Check if the CUID is temporary
+    bool is_temporary = false;
+    status = device->is_temporary_cuid(&is_temporary);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      std::cerr
+          << "Warning: Failed to get temporary CUID status for device type "
+          << entry.device_type << " status: " << status << std::endl;
+      continue;
+    }
+    entry.is_temporary = is_temporary;
 
     // Fill in device-specific information
     switch (entry.device_type) {
@@ -916,7 +919,6 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
     std::cerr << "Error: Failed to save CUID file: " << file << std::endl;
     return status;
   }
-  std::cout << "Successfully generated: " << file << std::endl;
 
   return AMDCUID_STATUS_SUCCESS;
 }
@@ -930,12 +932,5 @@ amdcuid_status_t CuidFileGenerator::generate_unpriv_from_devices(
 amdcuid_status_t CuidFileGenerator::generate_priv_from_devices(
     const std::vector<std::shared_ptr<CuidDevice>> &devices,
     const std::string &priv_file_path) {
-  if (geteuid() != 0) {
-    std::cerr
-        << "Error: Generating privileged CUID file requires root permissions"
-        << std::endl;
-    return AMDCUID_STATUS_PERMISSION_DENIED;
-  }
-
   return generate_from_devices(devices, priv_file_path, true);
 }

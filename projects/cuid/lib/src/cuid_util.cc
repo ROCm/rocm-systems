@@ -21,6 +21,7 @@
  */
 
 #include "cuid_util.h"
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <dirent.h>
@@ -381,9 +382,29 @@ uint16_t CuidUtilities::get_gpu_vf_id(const std::string &device_path) {
 }
 
 amdcuid_status_t
+CuidUtilities::make_fallback_fingerprint(const std::string &id,
+                                         uint64_t &fingerprint) {
+  std::ifstream machine_id_file("/etc/machine-id");
+  if (!machine_id_file.is_open()) {
+    return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+  }
+  std::string machine_id;
+  std::getline(machine_id_file, machine_id);
+  machine_id_file.close();
+
+  std::string id_hex;
+  std::copy_if(id.begin(), id.end(), std::back_inserter(id_hex),
+               [](unsigned char c) { return std::isxdigit(c); });
+
+  std::string combined = id_hex + machine_id;
+  fingerprint = std::stoull(combined.substr(0, 16), nullptr, 16);
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t
 CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
                                      amdcuid_derived_id *derived_id,
-                                     cuid_hmac *hmac, bool temp) {
+                                     cuid_hmac *hmac) {
   if (!primary_id || !hmac) {
     // Return invalid on null input
     return AMDCUID_STATUS_INVALID_ARGUMENT;
@@ -407,7 +428,7 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   derived_id->hash[13] &= 0xFC; // 11111100
 
   // Get the unit id parts from the primary ID
-  uint8_t temp_indicator = temp ? 1 : 0;
+  uint8_t reserved_2 = 0;
   uint8_t reserved_1 = 0;
   // Map the 256-bit hash to 122-bit CUID format
   uint8_t id_bits[16] = {0};
@@ -424,8 +445,8 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   id_bits[14] &= 0xFC;
 
   // bits 118-121: reserved bits part 2 (4 bits)
-  id_bits[14] |= (temp_indicator >> 2); // upper 2 bits of reserved bits part 2
-  id_bits[15] |= (temp_indicator & 0x03)
+  id_bits[14] |= (reserved_2 >> 2); // upper 2 bits of reserved bits part 2
+  id_bits[15] |= (reserved_2 & 0x03)
                  << 6; // lower 2 bits of reserved bits part 2
   // last 6 bits are padding (bits 122-127)
   id_bits[15] &= 0xC0;
@@ -433,47 +454,15 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
   memcpy(derived_id->raw_bits, id_bits, 16);
 
   // Apply UUIDv8 format according to RFC 9562
-  // Bits 0-47: ID value part 1 (LSB)
-  derived_id->UUIDv8_representation.bytes[0] = id_bits[0];
-  derived_id->UUIDv8_representation.bytes[1] = id_bits[1];
-  derived_id->UUIDv8_representation.bytes[2] = id_bits[2];
-  derived_id->UUIDv8_representation.bytes[3] = id_bits[3];
-  derived_id->UUIDv8_representation.bytes[4] = id_bits[4];
-  derived_id->UUIDv8_representation.bytes[5] = id_bits[5];
-
-  // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-  derived_id->UUIDv8_representation.bytes[6] =
-      ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
-  derived_id->UUIDv8_representation.bytes[7] =
-      ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
-
-  // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-  derived_id->UUIDv8_representation.bytes[8] =
-      0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
-  // everything past here is now shifted by 6 bits
-  derived_id->UUIDv8_representation.bytes[9] =
-      ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
-  derived_id->UUIDv8_representation.bytes[10] =
-      ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
-  derived_id->UUIDv8_representation.bytes[11] =
-      ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
-  derived_id->UUIDv8_representation.bytes[12] =
-      ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
-  derived_id->UUIDv8_representation.bytes[13] =
-      ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
-  derived_id->UUIDv8_representation.bytes[14] =
-      ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
-  derived_id->UUIDv8_representation.bytes[15] =
-      ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
+  add_UUIDv8_bits(id_bits, &derived_id->UUIDv8_representation);
 
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t
-CuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
-                                     uint8_t revision_id, uint16_t device_id,
-                                     uint16_t vendor_id, uint8_t device_type,
-                                     amdcuid_primary_id *primary_id) {
+amdcuid_status_t CuidUtilities::generate_primary_cuid(
+    uint64_t serial_number, uint16_t unit_id, uint8_t revision_id,
+    uint16_t device_id, uint16_t vendor_id, uint8_t device_type,
+    amdcuid_primary_id *primary_id, bool temp) {
 
   // Build 122-bit value in little-endian order
   uint8_t id_bits[16] = {0}; // 128 bits total (122 bits + 6 bits padding)
@@ -499,46 +488,18 @@ CuidUtilities::generate_primary_cuid(uint64_t serial_number, uint16_t unit_id,
   id_bits[12] = vendor_id & 0xFF;
   id_bits[13] = (vendor_id >> 8) & 0xFF;
 
-  // Bits 112-117: UnitID part 2 (6 bits) + Bits 118-121: Component Type (4
+  // Bits 112-116: UnitID part 2 (5 bits) + Bits 118-121: Component Type (4
   // bits)
-  id_bits[14] = (unit_id_part2 << 2) | ((device_type & 0xC) >> 2);
+  uint8_t temp_bit = temp ? 1 : 0;
+  id_bits[14] =
+      (unit_id_part2 << 3) | (temp_bit << 2) | ((device_type & 0xC) >> 2);
   id_bits[15] = (device_type & 0x3) << 6; // Last 6 bits are padding
 
   memcpy(primary_id->raw_bits, id_bits, 16);
 
   // Apply UUIDv8 format according to RFC 9562
-  // Bits 0-47: ID value part 1 (LSB)
-  primary_id->UUIDv8_representation.bytes[0] = id_bits[0];
-  primary_id->UUIDv8_representation.bytes[1] = id_bits[1];
-  primary_id->UUIDv8_representation.bytes[2] = id_bits[2];
-  primary_id->UUIDv8_representation.bytes[3] = id_bits[3];
-  primary_id->UUIDv8_representation.bytes[4] = id_bits[4];
-  primary_id->UUIDv8_representation.bytes[5] = id_bits[5];
 
-  // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
-  primary_id->UUIDv8_representation.bytes[6] =
-      ((id_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
-  primary_id->UUIDv8_representation.bytes[7] =
-      ((id_bits[6] & 0x0F) << 4) | ((id_bits[7] & 0xF0) >> 4);
-
-  // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
-  primary_id->UUIDv8_representation.bytes[8] =
-      0x80 | (id_bits[7] & 0x0F) << 2 | (id_bits[8] & 0xC0) >> 6;
-  // everything past here is now shifted by 6 bits
-  primary_id->UUIDv8_representation.bytes[9] =
-      ((id_bits[8] & 0x3F) << 2) | ((id_bits[9] & 0xC0) >> 6);
-  primary_id->UUIDv8_representation.bytes[10] =
-      ((id_bits[9] & 0x3F) << 2) | ((id_bits[10] & 0xC0) >> 6);
-  primary_id->UUIDv8_representation.bytes[11] =
-      ((id_bits[10] & 0x3F) << 2) | ((id_bits[11] & 0xC0) >> 6);
-  primary_id->UUIDv8_representation.bytes[12] =
-      ((id_bits[11] & 0x3F) << 2) | ((id_bits[12] & 0xC0) >> 6);
-  primary_id->UUIDv8_representation.bytes[13] =
-      ((id_bits[12] & 0x3F) << 2) | ((id_bits[13] & 0xC0) >> 6);
-  primary_id->UUIDv8_representation.bytes[14] =
-      ((id_bits[13] & 0x3F) << 2) | ((id_bits[14] & 0xC0) >> 6);
-  primary_id->UUIDv8_representation.bytes[15] =
-      ((id_bits[14] & 0x3F) << 2) | ((id_bits[15] & 0xC0) >> 6);
+  add_UUIDv8_bits(id_bits, &primary_id->UUIDv8_representation);
 
   return AMDCUID_STATUS_SUCCESS;
 }
@@ -577,6 +538,38 @@ void CuidUtilities::remove_UUIDv8_bits(amdcuid_id_t *id,
   out_raw_bits[14] =
       ((id->bytes[14] & 0x03) << 6) | ((id->bytes[15] & 0xFC) >> 2);
   out_raw_bits[15] = (id->bytes[15] & 0x03) << 6; // last 6 bits are padding
+}
+
+void CuidUtilities::add_UUIDv8_bits(const uint8_t raw_bits[16],
+                                    amdcuid_id_t *id) {
+  if (!raw_bits || !id) {
+    return;
+  }
+
+  // Apply UUIDv8 formatting according to RFC 9562
+  // Bits 0-47: ID value part 1 (LSB)
+  id->bytes[0] = raw_bits[0];
+  id->bytes[1] = raw_bits[1];
+  id->bytes[2] = raw_bits[2];
+  id->bytes[3] = raw_bits[3];
+  id->bytes[4] = raw_bits[4];
+  id->bytes[5] = raw_bits[5];
+
+  // Bits 48-51: Version (8) + Bits 52-63: ID value part 2
+  id->bytes[6] =
+      ((raw_bits[6] & 0xF0) >> 4) | 0x80; // Version 8 in upper 4 bits
+  id->bytes[7] = ((raw_bits[6] & 0x0F) << 4) | ((raw_bits[7] & 0xF0) >> 4);
+
+  // Bits 64-65: Variant (10b) + Bits 66-127: ID value part 3 (MSB)
+  id->bytes[8] = 0x80 | (raw_bits[7] & 0x0F) << 2 | (raw_bits[8] & 0xC0) >> 6;
+  // everything past here is now shifted by 6 bits
+  id->bytes[9] = ((raw_bits[8] & 0x3F) << 2) | ((raw_bits[9] & 0xC0) >> 6);
+  id->bytes[10] = ((raw_bits[9] & 0x3F) << 2) | ((raw_bits[10] & 0xC0) >> 6);
+  id->bytes[11] = ((raw_bits[10] & 0x3F) << 2) | ((raw_bits[11] & 0xC0) >> 6);
+  id->bytes[12] = ((raw_bits[11] & 0x3F) << 2) | ((raw_bits[12] & 0xC0) >> 6);
+  id->bytes[13] = ((raw_bits[12] & 0x3F) << 2) | ((raw_bits[13] & 0xC0) >> 6);
+  id->bytes[14] = ((raw_bits[13] & 0x3F) << 2) | ((raw_bits[14] & 0xC0) >> 6);
+  id->bytes[15] = ((raw_bits[14] & 0x3F) << 2) | ((raw_bits[15] & 0xC0) >> 6);
 }
 
 std::string CuidUtilities::get_cuid_as_string(const amdcuid_id_t *id) {

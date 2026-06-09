@@ -478,9 +478,12 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
   } else {
     status = get_devices_from_file_entries(unpriv_cuid_file_);
     if (status != AMDCUID_STATUS_SUCCESS || devices_.empty()) {
-      // refresh to get devices from system since none found
+      // refresh to get devices from system using daemon or ioctl since none
+      // found
       status = request_refresh();
       if (status != AMDCUID_STATUS_SUCCESS) {
+        // go through temp cuid fall back to get devices from system if refresh
+        // fails
         status = get_devices_on_system();
         if (status != AMDCUID_STATUS_SUCCESS) {
           return status;
@@ -562,9 +565,10 @@ std::vector<amdcuid_id_t> CuidDeviceManager::get_all_handles() const {
 amdcuid_status_t CuidDeviceManager::save_registry_to_files() {
   std::lock_guard<std::mutex> lock(manager_mutex_);
 
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
   if (geteuid() == 0) {
     // Generate new priv CUID file from current device list
-    amdcuid_status_t status = CuidFileGenerator::generate_priv_from_devices(
+    status = CuidFileGenerator::generate_priv_from_devices(
         devices_, priv_cuid_file_.get_file_path());
     if (status != AMDCUID_STATUS_SUCCESS) {
       return status;
@@ -575,7 +579,7 @@ amdcuid_status_t CuidDeviceManager::save_registry_to_files() {
   }
 
   // Generate new unpriv CUID file from current device list
-  amdcuid_status_t status = CuidFileGenerator::generate_unpriv_from_devices(
+  status = CuidFileGenerator::generate_unpriv_from_devices(
       devices_, unpriv_cuid_file_.get_file_path());
   if (status != AMDCUID_STATUS_SUCCESS) {
     return status;
