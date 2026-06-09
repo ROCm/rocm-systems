@@ -23,15 +23,7 @@
 #ifndef SRC_UTIL_HSA_RSRC_FACTORY_H_
 #define SRC_UTIL_HSA_RSRC_FACTORY_H_
 
-// Deliberate include cycle: aqlprofile.hpp -> hsa_rsrc_factory.h (when
-// ROCPROFILER_EXTERNAL_AQLPROFILE == 0) -> aqlprofile.hpp. The cycle is safe
-// because aqlprofile.hpp drives the ROCPROFILER_INTERNAL_AQLPROFILE_INCLUDE
-// gate and includes aql_profile_v2.h *before* including this header, and our
-// own include guard (SRC_UTIL_HSA_RSRC_FACTORY_H_) short-circuits the
-// re-entry. Do not reorder the includes in aqlprofile.hpp, or this cycle
-// will produce an incomplete aqlprofile_cu_bitmap_t at AgentInfo's point of
-// use below.
-#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t (gated aql_profile_v2.h)
+#include "lib/aqlprofile/aqlprofile.hpp"  // aqlprofile_cu_bitmap_t
 #include "lib/aqlprofile/hsa_includes.h"
 
 #include <cstdint>
