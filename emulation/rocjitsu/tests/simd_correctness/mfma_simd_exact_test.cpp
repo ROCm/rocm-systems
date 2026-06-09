@@ -127,6 +127,8 @@ TEST(MfmaSimdExact, F16Spec_AllShapes) {
   spec(amdgpu::exec_f32_mfma_f16_spec<32, 32, 16>, "spec_f16_32x32x16");
   spec(amdgpu::exec_f32_mfma_f16_spec<32, 32, 8>, "spec_f16_32x32x8");
   spec(amdgpu::exec_f32_mfma_f16_spec<16, 16, 16>, "spec_f16_16x16x16");
+  spec(amdgpu::exec_f32_mfma_f16_spec<32, 32, 4, 2>, "spec_f16_32x32x4x2");
+  spec(amdgpu::exec_f32_mfma_f16_spec<16, 16, 4, 4>, "spec_f16_16x16x4x4");
 }
 
 // --- specialized bf16 kernels (constexpr dims + bf16 zero-extend bulk convert) ---
@@ -141,6 +143,8 @@ TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
   spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 16>, "spec_bf16_32x32x16");
   spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 8>, "spec_bf16_32x32x8");
   spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 16>, "spec_bf16_16x16x16");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4, 2>, "spec_bf16_32x32x4x2");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 4, 4>, "spec_bf16_16x16x4x4");
 }
 
 // --- specialized fp8/bf8 kernels (constexpr dims + LUT bulk convert), all four
@@ -219,6 +223,8 @@ TEST(MfmaSimdExact, I8Spec_AllShapes) {
   spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 32>, "spec_i8_32x32x32");
   spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 16>, "spec_i8_32x32x16");
   spec(amdgpu::exec_i32_mfma_i8_spec<16, 16, 32>, "spec_i8_16x16x32");
+  spec(amdgpu::exec_i32_mfma_i8_spec<32, 32, 4, 2>, "spec_i8_32x32x4x2");
+  spec(amdgpu::exec_i32_mfma_i8_spec<16, 16, 4, 4>, "spec_i8_16x16x4x4");
 }
 
 // --- f64 MFMA ---

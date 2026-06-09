@@ -3025,11 +3025,11 @@ inline void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, ui
   }
 }
 
-template <uint32_t M, uint32_t N, uint32_t K>
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 inline void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
                                    uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
                                    uint32_t abid, uint32_t blgp) {
-  constexpr uint32_t B = 1, in_bits = 16;
+  constexpr uint32_t B = BATCH, in_bits = 16;
   static_assert(N % 16 == 0, "specialized f16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
@@ -3046,58 +3046,60 @@ inline void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, ui
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    alignas(64) float A_buf[M * K]; // A[row][k]
-    alignas(64) float B_buf[K * N]; // B[k][col]
-    alignas(64) float C_buf[M * N]; // C[row][col]
-    // A/B occupy M*K and N*K packed f16 over their VGPRs. Bulk-convert each whole
-    // region to f32 once with F16C (one vector op per 16 halves) instead of
-    // branchy per-element f16_to_f32, then the hoist is a pure f32 index-shuffle
-    // (f16 of word w lane l sub s -> flat (w*wf+l)*2+s).
-    alignas(64) float A_f32[M * K];
-    alignas(64) float B_f32[N * K];
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K);
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K);
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                   ? std::bit_cast<float>(const_acc)
-                                   : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
-      }
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = input_loc(M, K, B, row, k, 0, in_bits);
-        A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 2 + al.sub_element];
-      }
-    for (uint32_t k = 0; k < K; ++k)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto bl = input_loc(N, K, B, col, k, 0, in_bits);
-        B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
-      }
-    // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t c0 = 0; c0 < N; c0 += W) {
-        util::native<float> c_row;
-        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
-        for (uint32_t k = 0; k < K; ++k) {
-          util::native<float> a_bcast(A_buf[row * K + k]);
-          util::native<float> b_row;
-          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
-          c_row = util::stdx::fma(a_bcast, b_row, c_row);
-        }
-        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
-      }
-    // Scatter directly back to VGPRs (no Result staging vector).
     uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
+    alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
+    alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
+    // A/B occupy M*K*B and N*K*B packed f16 over their VGPRs. Bulk-convert each
+    // whole region to f32 once with F16C (one vector op per 16 halves) instead
+    // of branchy per-element f16_to_f32, then the hoist is a pure f32
+    // index-shuffle (f16 of word w lane l sub s -> flat (w*wf+l)*2+s).
+    alignas(64) float A_f32[M * K * B];
+    alignas(64) float B_f32[N * K * B];
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K * B);
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K * B);
     bool has_nan_or_inf = false;
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        float fv = C_buf[row * N + col];
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
-        if (std::isnan(fv) || std::isinf(fv))
-          has_nan_or_inf = true;
-      }
+    for (uint32_t b = 0; b < B; ++b) {
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                     ? std::bit_cast<float>(const_acc)
+                                     : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = input_loc(M, K, B, row, k, b, in_bits);
+          A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 2 + al.sub_element];
+        }
+      for (uint32_t k = 0; k < K; ++k)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto bl = input_loc(N, K, B, col, k, b, in_bits);
+          B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
+        }
+      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t c0 = 0; c0 < N; c0 += W) {
+          util::native<float> c_row;
+          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          for (uint32_t k = 0; k < K; ++k) {
+            util::native<float> a_bcast(A_buf[row * K + k]);
+            util::native<float> b_row;
+            b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+            c_row = util::stdx::fma(a_bcast, b_row, c_row);
+          }
+          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        }
+      // Scatter directly back to VGPRs (no Result staging vector).
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          float fv = C_buf[row * N + col];
+          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          if (std::isnan(fv) || std::isinf(fv))
+            has_nan_or_inf = true;
+        }
+    }
     if (has_nan_or_inf) {
       util::Logger::vm([&](auto &os) {
         os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} {}x{}x{}_f16", dst,
@@ -3111,11 +3113,11 @@ inline void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, ui
 /// the f16 specialization except the bulk input convert is the bf16 zero-extend
 /// (no F16C needed). Falls back to the generic exec_f32 without AVX-512 / under
 /// force-scalar / with cbsz|blgp.
-template <uint32_t M, uint32_t N, uint32_t K>
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 inline void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
                                     uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
                                     uint32_t abid, uint32_t blgp) {
-  constexpr uint32_t B = 1, in_bits = 16;
+  constexpr uint32_t B = BATCH, in_bits = 16;
   static_assert(N % 16 == 0, "specialized bf16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
@@ -3132,56 +3134,58 @@ inline void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, u
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
     const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
-    alignas(64) float A_buf[M * K]; // A[row][k]
-    alignas(64) float B_buf[K * N]; // B[k][col]
-    alignas(64) float C_buf[M * N]; // C[row][col]
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    alignas(64) float A_buf[M * K]; // A[row][k] (one batch block)
+    alignas(64) float B_buf[K * N]; // B[k][col] (one batch block)
+    alignas(64) float C_buf[M * N]; // C[row][col] (one batch block)
     // Bulk-convert the packed bf16 regions to f32 once (zero-extend + shift),
     // then the hoist is a pure f32 index-shuffle.
-    alignas(64) float A_f32[M * K];
-    alignas(64) float B_f32[N * K];
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K);
-    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K);
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
-                                   ? std::bit_cast<float>(const_acc)
-                                   : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
-      }
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = input_loc(M, K, B, row, k, 0, in_bits);
-        A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 2 + al.sub_element];
-      }
-    for (uint32_t k = 0; k < K; ++k)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto bl = input_loc(N, K, B, col, k, 0, in_bits);
-        B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
-      }
-    // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t c0 = 0; c0 < N; c0 += W) {
-        util::native<float> c_row;
-        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
-        for (uint32_t k = 0; k < K; ++k) {
-          util::native<float> a_bcast(A_buf[row * K + k]);
-          util::native<float> b_row;
-          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
-          c_row = util::stdx::fma(a_bcast, b_row, c_row);
-        }
-        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
-      }
-    // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    alignas(64) float A_f32[M * K * B];
+    alignas(64) float B_f32[N * K * B];
+    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K * B);
+    util::bf16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K * B);
     bool has_nan_or_inf = false;
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        float fv = C_buf[row * N + col];
-        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
-        if (std::isnan(fv) || std::isinf(fv))
-          has_nan_or_inf = true;
-      }
+    for (uint32_t b = 0; b < B; ++b) {
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                     ? std::bit_cast<float>(const_acc)
+                                     : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = input_loc(M, K, B, row, k, b, in_bits);
+          A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 2 + al.sub_element];
+        }
+      for (uint32_t k = 0; k < K; ++k)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto bl = input_loc(N, K, B, col, k, b, in_bits);
+          B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
+        }
+      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t c0 = 0; c0 < N; c0 += W) {
+          util::native<float> c_row;
+          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          for (uint32_t k = 0; k < K; ++k) {
+            util::native<float> a_bcast(A_buf[row * K + k]);
+            util::native<float> b_row;
+            b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+            c_row = util::stdx::fma(a_bcast, b_row, c_row);
+          }
+          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        }
+      // Scatter directly back to VGPRs (no Result staging vector).
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          float fv = C_buf[row * N + col];
+          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          if (std::isnan(fv) || std::isinf(fv))
+            has_nan_or_inf = true;
+        }
+    }
     if (has_nan_or_inf) {
       util::Logger::vm([&](auto &os) {
         os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} {}x{}x{}_bf16",
@@ -3278,18 +3282,19 @@ inline void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uin
   }
 }
 
-/// Fast path for the dense (B=1) i8-input MFMA shapes (v_mfma_i32_*_i8). Same
-/// structure as the f16 specialization but integer: the packed i8 inputs are
-/// bulk sign-extended to int32 once, the hoist is a pure i32 index-shuffle,
-/// and the matmul runs as constexpr-unrolled zmm-wide int32 MACs. There is no
-/// clamp on the i8 MFMA path: both scalar and SIMD accumulate (and wrap) in
-/// 32 bits, so they agree bit for bit on every output (SIMD wraps in uint32
-/// to keep the wrap well-defined). Falls back to the generic exec_i32_i8
-/// without AVX-512 / under force-scalar.
-template <uint32_t M, uint32_t N, uint32_t K>
+/// Fast path for the dense i8-input MFMA shapes (v_mfma_i32_*_i8), including
+/// the batched (BATCH>1) variants. Same structure as the f16 specialization
+/// but integer: the packed i8 inputs are bulk sign-extended to int32 once,
+/// the hoist is a pure i32 index-shuffle, and the matmul runs as
+/// constexpr-unrolled zmm-wide int32 MACs. There is no clamp on the i8 MFMA
+/// path: both scalar and SIMD accumulate (and wrap) in 32 bits, so they agree
+/// bit for bit on every output (SIMD wraps in uint32 to keep the wrap
+/// well-defined). Falls back to the generic exec_i32_i8 without AVX-512 /
+/// under force-scalar.
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
 inline void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
                                   uint32_t s1, uint32_t s2, uint32_t const_acc) {
-  constexpr uint32_t B = 1, in_bits = 8;
+  constexpr uint32_t B = BATCH, in_bits = 8;
   static_assert(N % 16 == 0, "specialized i8 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_i32_i8(cu, M, N, K, B, dst, s0, s1, s2, const_acc);
@@ -3307,52 +3312,54 @@ inline void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uin
     // Accumulate in unsigned 32-bit (wrap is well-defined and identical mod
     // 2^32 to the intended signed wrap), so the SIMD path has no signed-
     // overflow UB.
-    alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-extended bits)
-    alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-extended bits)
-    alignas(64) uint32_t C_buf[M * N]; // C[row][col]
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    alignas(64) uint32_t A_buf[M * K]; // A[row][k] (sign-extended bits, one batch block)
+    alignas(64) uint32_t B_buf[K * N]; // B[k][col] (sign-extended bits, one batch block)
+    alignas(64) uint32_t C_buf[M * N]; // C[row][col] (one batch block)
     // Bulk sign-extend the packed i8 regions to int32 once, then the hoist is
     // a pure i32 index-shuffle (byte of word w lane l sub s -> (w*wf+l)*4+s).
-    alignas(64) int32_t A_i32[M * K];
-    alignas(64) int32_t B_i32[N * K];
-    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(a_words), A_i32, M * K);
-    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(b_words), B_i32, N * K);
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        C_buf[row * N + col] =
-            (const_acc != ACC_FROM_VGPR) ? const_acc : c_words[out.reg * wf + out.lane];
-      }
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t k = 0; k < K; ++k) {
-        auto al = input_loc(M, K, B, row, k, 0, in_bits);
-        A_buf[row * K + k] = A_i32[(al.vgpr_offset * wf + al.lane) * 4 + al.sub_element];
-      }
-    for (uint32_t k = 0; k < K; ++k)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto bl = input_loc(N, K, B, col, k, 0, in_bits);
-        B_buf[k * N + col] = B_i32[(bl.vgpr_offset * wf + bl.lane) * 4 + bl.sub_element];
-      }
-    // Dense MxKxN matmul, W-lane (zmm) stdx u32 MAC over N (N/W chunks per
-    // row); unsigned wrap matches the scalar signed accumulation mod 2^32.
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t c0 = 0; c0 < N; c0 += W) {
-        util::native<uint32_t> c_row;
-        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
-        for (uint32_t k = 0; k < K; ++k) {
-          util::native<uint32_t> a_bcast(A_buf[row * K + k]);
-          util::native<uint32_t> b_row;
-          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
-          c_row += a_bcast * b_row;
+    alignas(64) int32_t A_i32[M * K * B];
+    alignas(64) int32_t B_i32[N * K * B];
+    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(a_words), A_i32, M * K * B);
+    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(b_words), B_i32, N * K * B);
+    for (uint32_t b = 0; b < B; ++b) {
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          C_buf[row * N + col] =
+              (const_acc != ACC_FROM_VGPR) ? const_acc : c_words[out.reg * wf + out.lane];
         }
-        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
-      }
-    // Scatter directly back to VGPRs (no Result staging vector).
-    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t col = 0; col < N; ++col) {
-        auto out = output_loc_32(M, N, row, col, 0);
-        d_words[out.reg * wf + out.lane] = C_buf[row * N + col];
-      }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = input_loc(M, K, B, row, k, b, in_bits);
+          A_buf[row * K + k] = A_i32[(al.vgpr_offset * wf + al.lane) * 4 + al.sub_element];
+        }
+      for (uint32_t k = 0; k < K; ++k)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto bl = input_loc(N, K, B, col, k, b, in_bits);
+          B_buf[k * N + col] = B_i32[(bl.vgpr_offset * wf + bl.lane) * 4 + bl.sub_element];
+        }
+      // Dense MxKxN matmul, W-lane (zmm) stdx u32 MAC over N (N/W chunks per
+      // row); unsigned wrap matches the scalar signed accumulation mod 2^32.
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t c0 = 0; c0 < N; c0 += W) {
+          util::native<uint32_t> c_row;
+          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          for (uint32_t k = 0; k < K; ++k) {
+            util::native<uint32_t> a_bcast(A_buf[row * K + k]);
+            util::native<uint32_t> b_row;
+            b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+            c_row += a_bcast * b_row;
+          }
+          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        }
+      // Scatter directly back to VGPRs (no Result staging vector).
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          d_words[out.reg * wf + out.lane] = C_buf[row * N + col];
+        }
+    }
   }
 }
 
