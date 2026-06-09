@@ -212,6 +212,32 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         ' return util::f32_to_f16_simd('
         'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
     ),
+    # IEEE-2019 maximumNumber/minimumNumber (gfx1250/rdna4). Their generated
+    # scalar bodies are std::fmax / std::fmin — byte-for-byte the legacy
+    # v_max_f*/v_min_f* bodies above — so the functors are identical and inherit
+    # the same accepted NaN-payload / signed-zero-tie carve-out. The _vop3 twins
+    # auto-route from these _vop2 entries (f32 -> VOP3_BINARY_FP, f16 ->
+    # VOP3_BINARY_INT with the widening functor, mirroring v_max_f16_vop3).
+    'v_max_num_f32_vop2': (
+        'float32_t',
+        '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
+    ),
+    'v_min_num_f32_vop2': (
+        'float32_t',
+        '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+    ),
+    'v_max_num_f16_vop2': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' return util::f32_to_f16_simd('
+        'util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
+    ),
+    'v_min_num_f16_vop2': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' return util::f32_to_f16_simd('
+        'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
+    ),
     # --- f16 binary (low 16 bits f16, result zero-extended). Same f32
     # intermediate as the scalar bodies (single final round) ⇒ bit-identical. ---
     'v_add_f16_vop2': (
@@ -1748,6 +1774,9 @@ SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
     'v_max_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
     'v_min_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+    # IEEE-2019 num twins: scalar bodies are the same std::fmax / std::fmin.
+    'v_max_num_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
+    'v_min_num_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
 }
 
 # Plain f64 unary: scalar bodies are std::ceil / std::floor / std::trunc /
@@ -1849,6 +1878,12 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     # minmax = max(min(a,b),c); maxmin = min(max(a,b),c). (RDNA3+.)
     'v_minmax_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    # IEEE-2019 num twins (gfx1250/rdna4): identical fmax/fmin compositions as
+    # the legacy max3/min3/minmax/maxmin bodies above.
+    'v_max3_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
+    'v_min3_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
+    'v_minmax_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
+    'v_maxmin_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
     # v_div_fixup_f32: per-AMD-spec `else if` cascade selecting the result
     # among NaN/Inf/zero copysign cases. Lives as a helper in simd_glue.h
     # (div_fixup_f32_simd) — bit-exact match to the scalar body's predicate
@@ -1883,6 +1918,11 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_med3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
     'v_minmax_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
     'v_maxmin_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    # IEEE-2019 num twins (f16): same fmax/fmin compositions, widened by the glue.
+    'v_max3_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
+    'v_min3_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
+    'v_minmax_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
+    'v_maxmin_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
 }
 
 # f64 ternary FMA.
