@@ -312,9 +312,9 @@ uint64_t ReadSystemClock() {
 }
 
 uint64_t SystemClockFrequency() {
-  LARGE_INTEGER frequency;
-  QueryPerformanceFrequency(&frequency);
-  return frequency.QuadPart;
+  // Return 1 GHz to match libhsakmt's SystemClockCounter (nanoseconds via
+  // os::TimeNanos()) and Linux (CLOCK_BOOTTIME, 1ns resolution).
+  return 1000000000;
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {

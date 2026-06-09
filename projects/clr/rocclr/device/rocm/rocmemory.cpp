@@ -24,6 +24,19 @@
 
 namespace amd::roc {
 
+// RAII guard to ensure owning agent is set on successful buffer creation
+class OwningAgentGuard {
+  Buffer* buffer_;
+  bool* success_;
+public:
+  OwningAgentGuard(Buffer* buf, bool* success) : buffer_(buf), success_(success) {}
+  ~OwningAgentGuard() {
+    if (success_ && *success_ && buffer_->getDeviceMemory() != nullptr) {
+      buffer_->computeAndSetOwningAgent();
+    }
+  }
+};
+
 // ======================================= roc::Memory ============================================
 Memory::Memory(const roc::Device& dev, amd::Memory& owner)
     : device::Memory(owner),
@@ -32,7 +45,8 @@ Memory::Memory(const roc::Device& dev, amd::Memory& owner)
       kind_(MEMORY_KIND_NORMAL),
       amdImageDesc_(nullptr),
       persistent_host_ptr_(nullptr),
-      pinnedMemory_(nullptr) {}
+      pinnedMemory_(nullptr),
+      owningAgentHandle_(0) {}
 
 Memory::Memory(const roc::Device& dev, size_t size)
     : device::Memory(size),
@@ -41,7 +55,8 @@ Memory::Memory(const roc::Device& dev, size_t size)
       kind_(MEMORY_KIND_NORMAL),
       amdImageDesc_(nullptr),
       persistent_host_ptr_(nullptr),
-      pinnedMemory_(nullptr) {}
+      pinnedMemory_(nullptr),
+      owningAgentHandle_(0) {}
 
 Memory::~Memory() {
   // Destory pinned memory
@@ -691,7 +706,7 @@ void Buffer::destroy() {
       if (memFlags & CL_MEM_USE_HOST_PTR) {
         // unlock svm host pointer from memory pool
         if (!dev().info().hmmSupported_) {
-          Hsa::memory_unlock(owner()->getSvmPtr());
+          dev().hostUnlock(owner()->getSvmPtr(), size());
         }
         // destroy system memory
         if (!(amd::Os::releaseMemory(deviceMemory_, size()))) {
@@ -734,7 +749,8 @@ void Buffer::destroy() {
 
     if (needUnlockHostMem) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-        if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
+        if (dev().agent_profile() != HSA_PROFILE_FULL)
+          dev().hostUnlock(owner()->getHostMem(), size());
       }
     }
   }
@@ -748,18 +764,21 @@ void Buffer::destroy() {
 
 // ================================================================================================
 bool Buffer::create(bool alloc_local) {
+  bool success = false;
+  OwningAgentGuard guard(this, &success);
+
   if (owner() == nullptr) {
     if (alloc_local) {
       deviceMemory_ = dev().deviceLocalAlloc(size());
       if (deviceMemory_ != nullptr) {
         flags_ |= HostMemoryDirectAccess;
-        return true;
+        return (success = true);
       }
     } else {
       deviceMemory_ = dev().hostAlloc(size(), 1, Device::MemorySegment::kNoAtomics);
       if (deviceMemory_ != nullptr) {
         flags_ |= HostMemoryDirectAccess;
-        return true;
+        return (success = true);
       }
     }
     return false;
@@ -807,7 +826,7 @@ bool Buffer::create(bool alloc_local) {
 
     owner()->setSvmPtr(reinterpret_cast<void*>(owner()->getUserData().hsa_handle));
 
-    return true;
+    return (success = true);
   }
 
   if ((owner()->parent() == nullptr) && (owner()->getSvmPtr() != nullptr)) {
@@ -903,7 +922,7 @@ bool Buffer::create(bool alloc_local) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), false);
     }
 
-    return deviceMemory_ != nullptr;
+    return (success = (deviceMemory_ != nullptr));
   }
 
   // Interop buffer
@@ -919,9 +938,9 @@ bool Buffer::create(bool alloc_local) {
           ext_memory->Type() == amd::ExternalMemory::HandleType::D3D11ResourceKmt) {
         map_flags = HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
       }
-      return interopMapBuffer(ext_memory->Handle(), map_flags) == HSA_STATUS_SUCCESS;
+      return (success = (interopMapBuffer(ext_memory->Handle(), map_flags) == HSA_STATUS_SUCCESS));
     } else if (glObject != nullptr) {
-      return createInteropBuffer(GL_ARRAY_BUFFER, 0);
+      return (success = createInteropBuffer(GL_ARRAY_BUFFER, 0));
     }
   }
   if (nullptr != owner()->parent()) {
@@ -948,7 +967,7 @@ bool Buffer::create(bool alloc_local) {
       owner()->setHostMem(nullptr);
     }
 
-    return true;
+    return (success = true);
   }
 
 #ifdef WITH_AMDGPU_PRO
@@ -959,7 +978,7 @@ bool Buffer::create(bool alloc_local) {
       return false;
     }
     persistent_host_ptr_ = host_ptr;
-    return true;
+    return (success = true);
   }
 #endif
 
@@ -1010,10 +1029,11 @@ bool Buffer::create(bool alloc_local) {
       // Release host memory, since runtime copied data
       owner()->setHostMem(nullptr);
       bufferView->release();
-      return ret;
+
+      return (success = ret);
     }
 
-    return deviceMemory_ != nullptr;
+    return (success = (deviceMemory_ != nullptr));
   }
   assert(owner()->getHostMem() != nullptr || (owner()->getContext().devices().size() == 1));
 
@@ -1026,7 +1046,7 @@ bool Buffer::create(bool alloc_local) {
       Hsa::memory_register(deviceMemory_, size());
     }
 
-    return deviceMemory_ != nullptr;
+    return (success = (deviceMemory_ != nullptr));
   }
 
   // Just one device and allocation must be done in the backend
@@ -1048,7 +1068,54 @@ bool Buffer::create(bool alloc_local) {
     deviceMemory_ = owner()->getHostMem();
   }
 
-  return deviceMemory_ != nullptr;
+  return (success = (deviceMemory_ != nullptr));
+}
+
+// Helper function to compute and cache the owning agent
+void Buffer::computeAndSetOwningAgent() {
+  hsa_agent_t agent;
+
+  // Sub-buffers must inherit agent from parent, not recompute it
+  if (owner() != nullptr && owner()->parent() != nullptr) {
+    const Memory* parentMemory = static_cast<const Memory*>(
+        owner()->parent()->getDeviceMemory(dev_));
+    if (parentMemory != nullptr) {
+      agent = parentMemory->getOwningAgent();
+      setOwningAgent(agent);
+      return;
+    }
+    // Fallback if parent not available (shouldn't happen)
+    LogWarning("Sub-buffer parent not available for agent inheritance");
+  }
+
+  // Check if this is IPC shared memory that needs pointer_info query
+  if (owner() != nullptr && (owner()->ipcShared() || owner()->vmmImported())) {
+    hsa_amd_pointer_info_t info = {};
+    info.size = sizeof(info);
+    hsa_status_t err = hsa_amd_pointer_info(
+        reinterpret_cast<address>(deviceMemory_), &info, nullptr, nullptr, nullptr);
+
+    if (err == HSA_STATUS_SUCCESS && info.type == HSA_EXT_POINTER_TYPE_IPC) {
+      agent = info.agentOwner;
+    } else {
+      // Fallback to backend device
+      agent = dev().getBackendDevice();
+    }
+  } else if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {
+    // Arena and host memory use CPU agent
+    agent = dev().getCpuAgent();
+  } else if (kind_ == MEMORY_KIND_INTEROP) {
+    // Interop memory uses backend device
+    agent = dev().getBackendDevice();
+  } else if (flags_ & HostMemoryDirectAccess) {
+    // Host-accessible memory uses CPU agent
+    agent = dev().getCpuAgent();
+  } else {
+    // Normal device memory uses backend device agent
+    agent = dev().getBackendDevice();
+  }
+
+  setOwningAgent(agent);
 }
 
 // ================================================================================================
@@ -1317,6 +1384,8 @@ bool Image::create(bool alloc_local) {
     deviceMemory_ = orgImage->deviceMemory_;
     hsaImageObject_ = orgImage->hsaImageObject_;
     ownsHsaImageObject_ = false;
+    // Inherit agent from original image
+    setOwningAgent(orgImage->getOwningAgent());
     return true;
   }
 
@@ -1365,6 +1434,13 @@ bool Image::create(bool alloc_local) {
   if (status != HSA_STATUS_SUCCESS) {
     LogPrintfError("[OCL] Fail to allocate image memory, failed with hsa_status: %d \n", status);
     return false;
+  }
+
+  // Set the owning agent after successful creation
+  if (kind_ == MEMORY_KIND_HOST) {
+    setOwningAgent(dev().getCpuAgent());
+  } else {
+    setOwningAgent(dev().getBackendDevice());
   }
 
   return true;
@@ -1498,6 +1574,9 @@ bool Image::createView(const Memory& parent) {
   } else {
     owner()->setHostMem(nullptr);
   }
+
+  // Image view inherits agent from parent
+  setOwningAgent(parent.getOwningAgent());
 
   return true;
 }

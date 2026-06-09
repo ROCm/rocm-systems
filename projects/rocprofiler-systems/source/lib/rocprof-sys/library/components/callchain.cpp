@@ -34,7 +34,6 @@
 #include <timemory/storage.hpp>
 #include <timemory/units.hpp>
 #include <timemory/unwind/entry.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 

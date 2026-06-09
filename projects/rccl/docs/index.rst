@@ -20,9 +20,9 @@ The RCCL public repository is located at `<https://github.com/ROCm/rccl>`_.
 
   .. grid-item-card:: Install
 
-    * :doc:`Installing RCCL using the install script <./install/installation>`
+    * :doc:`Install RCCL <./install/installation>`
+    * :doc:`Build from source <./install/building-installing>`
     * :doc:`Running RCCL using Docker <./install/docker-install>`
-    * :doc:`Building and installing RCCL from source code <./install/building-installing>`
 
   .. grid-item-card:: How to
 
@@ -34,8 +34,8 @@ The RCCL public repository is located at `<https://github.com/ROCm/rccl>`_.
 
   .. grid-item-card:: Examples
 
-    * `RCCL Tuner plugin examples <https://github.com/ROCm/rccl/tree/develop/ext-tuner/example>`_
-    * `NCCL Net plugin examples <https://github.com/ROCm/rccl/tree/develop/ext-net/example>`_
+    * `RCCL Tuner plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/tuner/example>`_
+    * `NCCL Net plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/net/example>`_
 
   .. grid-item-card:: API reference
 

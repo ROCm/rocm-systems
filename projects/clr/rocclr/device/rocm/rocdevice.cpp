@@ -76,8 +76,6 @@ bool roc::Device::isHsaInitialized_ = false;
 std::vector<hsa_agent_t> roc::Device::gpu_agents_;
 std::vector<AgentInfo> roc::Device::cpu_agents_;
 
-std::atomic<bool> Device::skipHsaShutdown_{false};
-
 address Device::mg_sync_ = nullptr;
 
 bool NullDevice::create(const amd::Isa& isa) {
@@ -224,25 +222,17 @@ Device::~Device() {
   delete xferQueue_;
   xferQueue_ = nullptr;
 
-#if defined(_WIN32)
-  if (hasSchedulerQueue_.load(std::memory_order_acquire) > 0) {
-    skipHsaShutdown_.store(true, std::memory_order_release);
-    queuePool_.clear();
-  } else
-#endif  // _WIN32
-  {
-    for (auto& it : queuePool_) {
-      for (auto qIter = it.begin(); qIter != it.end();) {
-        hsa_queue_t* queue = qIter->first;
-        auto& qInfo = qIter->second;
-        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
-                queue->base_address);
-        qIter = it.erase(qIter);
-        Hsa::queue_destroy(queue);
-      }
+  for (auto& it : queuePool_) {
+    for (auto qIter = it.begin(); qIter != it.end();) {
+      hsa_queue_t* queue = qIter->first;
+      auto& qInfo = qIter->second;
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
+              queue->base_address);
+      qIter = it.erase(qIter);
+      Hsa::queue_destroy(queue);
     }
-    queuePool_.clear();
   }
+  queuePool_.clear();
 
   delete blitProgram_;
 
@@ -350,7 +340,7 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
   return stat;
 }
 
-hsa_ven_amd_loader_1_00_pfn_t Device::amd_loader_ext_table = {nullptr};
+hsa_ven_amd_loader_1_03_pfn_t Device::amd_loader_ext_table = {nullptr};
 
 hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** host) {
   return amd_loader_ext_table.hsa_ven_amd_loader_query_host_address
@@ -360,9 +350,6 @@ hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** hos
 
 // ================================================================================================
 bool Device::init() {
-#if defined(_WIN32)
-  skipHsaShutdown_.store(false, std::memory_order_release);
-#endif
   if (!Hsa::LoadLib()) {
     LogPrintfWarning("Failed to load rocr library!");
     return false;
@@ -545,11 +532,6 @@ extern const char* SchedulerSourceCode;
 
 void Device::tearDown() {
   NullDevice::tearDown();
-#if defined(_WIN32)
-  if (skipHsaShutdown_.load(std::memory_order_acquire)) {
-    return;
-  }
-#endif  // _WIN32
   Hsa::shut_down();
 }
 
@@ -2221,6 +2203,28 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
   return deviceMemory;
 }
 
+void Device::hostUnlock(void* hostMem, size_t size) const {
+  // Nothing to unlock for a null pointer; hsa_amd_memory_unlock rejects it.
+  if (hostMem == nullptr) {
+    return;
+  }
+  // Before releasing the pin, revoke this device's GPU access to the range so
+  // the kernel-side SVM range is not left with stale GPU-access attributes once
+  // the host pages are freed.  Only the SVM-API (HMM) path needs this; the
+  // legacy userptr deregister already unmaps on its own.  Best-effort: a failed
+  // revoke must not block the unlock.
+  if (info().hmmSupported_) {
+    hsa_amd_svm_attribute_pair_t attr{HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS,
+                                      getBackendDevice().handle};
+    hsa_status_t status = Hsa::svm_attributes_set(hostMem, size, &attr, 1);
+    if (status != HSA_STATUS_SUCCESS) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
+              "hostUnlock: NO_ACCESS revoke failed for %p, status: %d", hostMem, status);
+    }
+  }
+  Hsa::memory_unlock(hostMem);
+}
+
 void Device::hostFree(void* ptr, size_t size) const { memFree(ptr, size); }
 
 bool Device::deviceAllowAccess(void* ptr) const {
@@ -3717,6 +3721,35 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
+  // Re-arm pooled signals for reuse by a new graph launch. The caller
+  // guarantees these signals belong to a completed (drained) launch, so this
+  // cannot corrupt an in-flight launch. Avoids signal_create/destroy on the
+  // hot launch path.
+  for (void* hw_event : hw_events) {
+    if (hw_event != nullptr) {
+      auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+      Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      ps->flags_.done_ = true;
+      ps->ResetCachedTiming();
+    }
+  }
+}
+
+// ================================================================================================
+void Device::QuiesceHwEvents(const std::vector<void*>& hw_events) const {
+  // Pooled signals rest in the armed state (value 1). Before destruction, store
+  // the completed value (0) so ~ProfilingSignal does not block waiting on a
+  // signal that is armed but idle (no GPU work will ever drain it).
+  for (void* hw_event : hw_events) {
+    if (hw_event != nullptr) {
+      auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+      Hsa::signal_silent_store_relaxed(ps->signal_, 0);
+    }
+  }
+}
+
+// ================================================================================================
 uint8_t* Device::CreateBarrierPacket() const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
@@ -3750,6 +3783,16 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
+
+      // Prepare this signal for profiling: mark it as active and classify
+      // the packet type so checkGpuTime → addTimestamps only fires for
+      // kernel dispatches (not synthetic barriers).
+      ps->flags_.done_ = false;
+      uint16_t hdr;
+      memcpy(&hdr, raw, sizeof(hdr));
+      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      ps->flags_.isPacketDispatch_ =
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
@@ -4123,4 +4166,92 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
 #endif
 #endif
+
+// ================================================================================================
+namespace {
+
+inline bool MapHandleType(amd::ExternalSemaphoreHandleType t,
+                          hsa_amd_external_semaphore_handle_type_t* out) {
+  switch (t) {
+    case amd::ExternalSemaphoreHandleType::OpaqueFd:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32Kmt:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT;
+      return true;
+    default:
+      // Reject amd:: enum values with no HSA counterpart
+      // (D3D11/D3D12Fence, NvSciSync, KeyedMutex*, TimelineSemaphore*).
+      // Types we do map (e.g. OpaqueFd, OpaqueWin32Kmt) may still fail
+      // at libhsakmt import time on platforms without KMD support;
+      // capability ground-truth lives in the lower layer.
+      return false;
+  }
+}
+
+}  // namespace
+
+// ================================================================================================
+bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                amd::ExternalSemaphoreHandleType sem_handle_type) {
+  if (extSemaphore == nullptr) return false;
+
+  hsa_amd_external_semaphore_handle_descriptor_t desc = {};
+  if (!MapHandleType(sem_handle_type, &desc.type)) return false;
+
+  // Populate the descriptor union by the *mapped* HSA type, not by
+  // build platform: amd::Os::FileDesc is void* on Windows and int on
+  // POSIX, but the HSA layer reads the union member dictated by
+  // desc.type. Reading a member that wasn't written is undefined
+  // behaviour, so reject combinations where the platform's FileDesc
+  // shape doesn't match the requested handle type.
+  switch (desc.type) {
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32:
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT:
+#if defined(_WIN32)
+      desc.handle.win32_handle = handle;
+      break;
+#else
+      // Win32 NT handles aren't routable through a non-Windows KMD.
+      return false;
+#endif
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD:
+#if defined(_WIN32)
+      // POSIX FDs aren't routable through WDDM.
+      return false;
+#else
+      desc.handle.fd = handle;
+      break;
+#endif
+    default:
+      return false;
+  }
+
+  // Heap-allocated holder so the caller gets an opaque pointer for
+  // DestroyExtSemaphore. Storing the hsa_amd_external_semaphore_t
+  // preserves the syncobj identity that submitExternalSemaphoreCmd
+  // will consume once the queue signal/wait submission path lands.
+  auto* holder = new hsa_amd_external_semaphore_t{};
+
+  hsa_status_t s = hsa_amd_external_semaphore_handle_open(bkendDevice_, &desc, holder);
+  if (s != HSA_STATUS_SUCCESS) {
+    delete holder;
+    return false;
+  }
+
+  *extSemaphore = holder;
+  return true;
+}
+
+// ================================================================================================
+void Device::DestroyExtSemaphore(void* extSemaphore) {
+  if (extSemaphore == nullptr) return;
+  auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);
+  hsa_amd_external_semaphore_handle_close(*holder);
+  delete holder;
+}
+
 }  // namespace amd::roc

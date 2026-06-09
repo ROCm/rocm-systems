@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "amd_smi.hpp"
 #include "common/defines.h"
+#include "common/environment.hpp"
 #include "common/static_object.hpp"
 #include "constraint.hpp"
 #include "gpu.hpp"
@@ -19,8 +20,6 @@
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/backends/threading.hpp>
-#include <timemory/environment.hpp>
-#include <timemory/environment/types.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
@@ -43,6 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -65,8 +65,8 @@ using settings = tim::settings;
 
 namespace
 {
-int  verbose_value  = tim::get_env<int>("ROCPROFSYS_VERBOSE", 0, false);
-bool debug_value    = tim::get_env<bool>("ROCPROFSYS_DEBUG", false, false);
+int  verbose_value  = rocprofsys::get_env<int>("ROCPROFSYS_VERBOSE", 0);
+bool debug_value    = rocprofsys::get_env<bool>("ROCPROFSYS_DEBUG", false);
 auto configure_once = std::once_flag{};
 
 TIMEMORY_NOINLINE bool&
@@ -236,10 +236,10 @@ configure_settings(bool _init)
     auto _config = *get_config_impl();
 
     // if using timemory, default to perfetto being off
-    auto _default_perfetto_v = !tim::get_env<bool>("ROCPROFSYS_PROFILE", false, false);
+    auto _default_perfetto_v = !rocprofsys::get_env<bool>("ROCPROFSYS_PROFILE", false);
 
     auto _system_backend =
-        tim::get_env("ROCPROFSYS_PERFETTO_BACKEND_SYSTEM", false, false);
+        rocprofsys::get_env("ROCPROFSYS_PERFETTO_BACKEND_SYSTEM", false);
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_LOG_LEVEL",
                               "Rocprofiler-systems log level", "info", "debugging",
@@ -251,7 +251,7 @@ configure_settings(bool _init)
                               "rocprof-sys-log.txt", "debugging", "advanced");
 
     auto _rocprofsys_debug = _config->get<bool>("ROCPROFSYS_DEBUG");
-    if(_rocprofsys_debug) tim::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
+    if(_rocprofsys_debug) rocprofsys::set_env("TIMEMORY_DEBUG_SETTINGS", "1", 0);
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_MODE",
@@ -574,12 +574,12 @@ configure_settings(bool _init)
         "you want to restrict samples to particular threads.",
         std::string{}, "sampling", "advanced");
 
-    auto _backend = tim::get_env_choice<std::string>(
+    auto _backend = rocprofsys::get_env_choice<std::string>(
         "ROCPROFSYS_PERFETTO_BACKEND",
         (_system_backend) ? "system"  // if ROCPROFSYS_PERFETTO_BACKEND_SYSTEM is true,
                                       // default to system.
                           : "inprocess",  // Otherwise, default to inprocess
-        { "inprocess", "system", "all" }, false);
+        { "inprocess", "system", "all" });
 
     ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_PERFETTO_BACKEND",
                               "Specify the perfetto backend to activate. Options are: "
@@ -1081,7 +1081,7 @@ configure_settings(bool _init)
 
     // always initialize timemory because gotcha wrappers are always used
     auto _cmd     = tim::read_command_line(process::get_id());
-    auto _cmd_env = tim::get_env<std::string>("ROCPROFSYS_COMMAND_LINE", "");
+    auto _cmd_env = rocprofsys::get_env<std::string>("ROCPROFSYS_COMMAND_LINE", "");
     if(!_cmd_env.empty()) _cmd = tim::delimit(_cmd_env, " ");
     auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
     get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
@@ -1183,8 +1183,8 @@ configure_settings(bool _init)
 
     auto _dl_verbose = _config->find("ROCPROFSYS_DL_VERBOSE");
     if(_dl_verbose->second->get_config_updated())
-        tim::set_env(std::string{ _dl_verbose->first }, _dl_verbose->second->as_string(),
-                     0);
+        rocprofsys::set_env(std::string{ _dl_verbose->first },
+                            _dl_verbose->second->as_string(), 0);
 
     if(_config->get_papi_events().empty())
     {
@@ -1264,7 +1264,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(_config->get<bool>("ROCPROFSYS_USE_KOKKOSP"))
     {
-        auto _current_kokkosp_lib = tim::get_env<std::string>("KOKKOS_TOOLS_LIBS");
+        auto _current_kokkosp_lib = rocprofsys::get_env<std::string>("KOKKOS_TOOLS_LIBS");
         if(_current_kokkosp_lib.find("librocprof-sys-dl.so") == std::string::npos &&
            _current_kokkosp_lib.find("librocprof-sys.so") == std::string::npos)
         {
@@ -1277,12 +1277,12 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
                     fmt::format(" (forced. Previous value: '{}')", _current_kokkosp_lib);
             }
             LOG_WARNING("Setting KOKKOS_TOOLS_LIBS={}{}", "librocprof-sys.so", _message);
-            tim::set_env("KOKKOS_TOOLS_LIBS", "librocprof-sys.so", _force);
+            rocprofsys::set_env("KOKKOS_TOOLS_LIBS", "librocprof-sys.so", _force);
         }
     }
 
     // recycle all subsequent thread ids
-    threading::recycle_ids() = tim::get_env<bool>(
+    threading::recycle_ids() = rocprofsys::get_env<bool>(
         "ROCPROFSYS_RECYCLE_TIDS", !_config->get<bool>("ROCPROFSYS_USE_SAMPLING"));
 
     if(!_config->get_enabled())
@@ -1361,13 +1361,12 @@ void
 configure_signal_handler(const std::shared_ptr<settings>& _config)
 {
     auto _ignore_dyninst_trampoline =
-        tim::get_env("ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE", false);
+        rocprofsys::get_env("ROCPROFSYS_IGNORE_DYNINST_TRAMPOLINE", false);
     // this is how dyninst looks up the env variable
     static auto _dyninst_trampoline_signal =
         getenv("DYNINST_SIGNAL_TRAMPOLINE_SIGILL") ? SIGILL : SIGTRAP;
 
-    static auto root_pid =
-        get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
+    static auto root_pid = get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id());
     if(_config->get_enable_signal_handler())
     {
         tim::signals::disable_signal_detection();
@@ -1656,8 +1655,9 @@ print_settings(
 
     std::stringstream _os{};
 
-    bool _print_desc = get_debug() || tim::get_env("ROCPROFSYS_SETTINGS_DESC", false);
-    bool _md         = tim::get_env<bool>("ROCPROFSYS_SETTINGS_DESC_MARKDOWN", false);
+    bool _print_desc =
+        get_debug() || rocprofsys::get_env("ROCPROFSYS_SETTINGS_DESC", false);
+    bool _md = rocprofsys::get_env<bool>("ROCPROFSYS_SETTINGS_DESC_MARKDOWN", false);
 
     constexpr size_t nfields = 3;
     using str_array_t        = std::array<std::string, nfields>;
@@ -1826,7 +1826,7 @@ get_mode()
 {
     if(!settings_are_configured())
     {
-        auto _mode = tim::get_env_choice<std::string>(
+        auto _mode = rocprofsys::get_env_choice<std::string>(
             "ROCPROFSYS_MODE", "trace", { "trace", "sampling", "causal", "coverage" });
         if(_mode == "sampling")
             return Mode::Sampling;
@@ -1877,19 +1877,19 @@ get_debug_env()
 {
     return (settings_are_configured())
                ? get_debug()
-               : tim::get_env<bool>("ROCPROFSYS_DEBUG", false, false);
+               : rocprofsys::get_env<bool>("ROCPROFSYS_DEBUG", false);
 }
 
 bool
 get_debug_init()
 {
-    return tim::get_env<bool>("ROCPROFSYS_DEBUG_INIT", get_debug_env());
+    return rocprofsys::get_env<bool>("ROCPROFSYS_DEBUG_INIT", get_debug_env());
 }
 
 bool
 get_debug_finalize()
 {
-    return tim::get_env<bool>("ROCPROFSYS_DEBUG_FINALIZE", false);
+    return rocprofsys::get_env<bool>("ROCPROFSYS_DEBUG_FINALIZE", false);
 }
 
 bool
@@ -1902,9 +1902,9 @@ get_debug()
 bool
 get_debug_sampling()
 {
-    static bool _v =
-        tim::get_env<bool>("ROCPROFSYS_DEBUG_SAMPLING",
-                           (settings_are_configured() ? get_debug() : get_debug_env()));
+    static bool _v = rocprofsys::get_env<bool>(
+        "ROCPROFSYS_DEBUG_SAMPLING",
+        (settings_are_configured() ? get_debug() : get_debug_env()));
     return _v;
 }
 
@@ -1913,7 +1913,7 @@ get_verbose_env()
 {
     return (settings_are_configured())
                ? get_verbose()
-               : tim::get_env<int>("ROCPROFSYS_VERBOSE", 0, false);
+               : rocprofsys::get_env<int>("ROCPROFSYS_VERBOSE", 0);
 }
 
 int
@@ -2511,7 +2511,8 @@ get_debug_tid()
 {
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
-            tim::get_env<std::string>("ROCPROFSYS_DEBUG_TIDS", ""), "debug tids", 1L);
+            rocprofsys::get_env<std::string>("ROCPROFSYS_DEBUG_TIDS", ""), "debug tids",
+            1L);
     static thread_local bool _v =
         _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
     return _v;
@@ -2522,7 +2523,8 @@ get_debug_pid()
 {
     static auto _vlist =
         parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(
-            tim::get_env<std::string>("ROCPROFSYS_DEBUG_PIDS", ""), "debug pids", 1L);
+            rocprofsys::get_env<std::string>("ROCPROFSYS_DEBUG_PIDS", ""), "debug pids",
+            1L);
     static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
                      _vlist.count(dmp::rank()) > 0;
     return _v;
@@ -2754,34 +2756,54 @@ get_rank_filter_logs()
 #endif
 
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+// Return the first env var in `env_var_options` that holds an unsigned integer.
+// `label` is used only for logging (e.g. "MPI rank", "MPI world size").
 std::optional<std::uint64_t>
-get_mpi_rank_from_env()
+get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
+                       const std::string&              label)
 {
-    const std::vector<std::string> rank_env_var_options = {
-        // rank env vars: user-provided then most generic to most runtime-specific
-        get_rank_filter_id(),  "MPI_RANK",
-        "MPI_LOCALRANKID",     "MPI_RANKID",
-        "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK"
-    };
-
-    for(const auto& env_var : rank_env_var_options)
+    for(const auto& env_var : env_var_options)
     {
-        const std::string rank_str = get_env(env_var, std::string{}, false);
+        const std::string value_str = get_env(env_var, std::string{});
 
-        if(rank_str.empty()) continue;
-        try
+        if(value_str.empty()) continue;
+
+        std::uint64_t value  = 0;
+        const char*   first  = value_str.data();
+        const char*   last   = first + value_str.size();
+        const auto    result = std::from_chars(first, last, value);
+
+        if(result.ec != std::errc{} || result.ptr != last)
         {
-            const auto rank = std::stoul(rank_str);
-            LOG_DEBUG("MPI output filtering: using MPI rank = {} from {}", rank, env_var);
-            return rank;
-        } catch(const std::exception& e)
-        {
-            LOG_WARNING("MPI output filtering: failed to get MPI rank from {}='{}': {}",
-                        env_var, rank_str, e.what());
+            LOG_WARNING("MPI output filtering: failed to parse {} from {}='{}' as a "
+                        "non-negative integer",
+                        label, env_var, value_str);
+            continue;
         }
+
+        LOG_DEBUG("MPI output filtering: using {} = {} from {}", label, value, env_var);
+        return value;
     }
 
     return std::nullopt;
+}
+
+std::optional<std::uint64_t>
+get_mpi_rank_from_env()
+{
+    // global rank env-vars: user-provided, then runtime-specific
+    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
+                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
+                                    "SLURM_PROCID" },
+                                  "MPI rank");
+}
+
+std::optional<std::uint64_t>
+get_mpi_world_size_from_env()
+{
+    return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
+                                    "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
+                                  "MPI world size");
 }
 #endif
 }  // namespace
@@ -2808,8 +2830,49 @@ is_rank_in_filter(std::string enabled_ranks_str)
         return true;
     }
 
-    const auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
+    auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
+
+    // Check current_rank and enabled_ranks against total number of existing MPI ranks
+    const auto world_size = get_mpi_world_size_from_env();
+    if(world_size.has_value())
+    {
+        if(world_size.value() == 0)
+        {
+            LOG_WARNING("MPI output filtering DISABLED: total number of MPI ranks (world "
+                        "size) is 0");
+            return true;
+        }
+
+        for(auto it = enabled_ranks.begin(); it != enabled_ranks.end();)
+        {
+            if(*it < 0 || static_cast<std::uint64_t>(*it) >= world_size.value())
+            {
+                LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
+                            "existing ranks [0-{}]. Ignoring",
+                            *it, world_size.value() - 1);
+                it = enabled_ranks.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        if(current_rank.value() >= world_size.value())
+        {
+            LOG_WARNING("MPI output filtering DISABLED: MPI rank {} not in range of "
+                        "existing ranks [0-{}]",
+                        current_rank.value(), world_size.value() - 1);
+            return true;
+        }
+    }
+
+    if(enabled_ranks.empty())
+    {
+        LOG_WARNING("MPI output filtering DISABLED: no valid enabled ranks provided");
+        return true;
+    }
 
     const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),
@@ -3081,8 +3144,8 @@ get_causal_mode()
 {
     if(!settings_are_configured())
     {
-        auto _mode = tim::get_env_choice<std::string>("ROCPROFSYS_CAUSAL_MODE",
-                                                      "function", { "line", "function" });
+        auto _mode = rocprofsys::get_env_choice<std::string>(
+            "ROCPROFSYS_CAUSAL_MODE", "function", { "line", "function" });
         if(_mode == "line") return CausalMode::Line;
         return CausalMode::Function;
     }

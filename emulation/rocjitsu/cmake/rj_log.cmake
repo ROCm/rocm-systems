@@ -26,12 +26,12 @@ set(RJ_LOG_GROUPS
 
 # --- Group name → bit mapping (keep in sync with Logger::Group in log.h) ---
 set(_RJ_GROUP_VM 1) # bit 0
+set(_RJ_GROUP_CP 2) # bit 1
 # Future groups:
-# set(_RJ_GROUP_CODE  2)  # bit 1
 # set(_RJ_GROUP_KFD   4)  # bit 2
 
 # All known group bits OR'd together.
-math(EXPR _RJ_GROUP_ALL "${_RJ_GROUP_VM}")
+math(EXPR _RJ_GROUP_ALL "${_RJ_GROUP_VM} | ${_RJ_GROUP_CP}")
 
 # --- Resolve the user value to a numeric bitmask ---
 set(_rj_groups_resolved 0)
@@ -58,7 +58,7 @@ else()
         else()
             message(
                 FATAL_ERROR
-                "Unknown log group '${_group}'. Known groups: VM. Use OFF or ALL for all."
+                "Unknown log group '${_group}'. Known groups: VM, CP. Use OFF or ALL for all."
             )
         endif()
     endforeach()

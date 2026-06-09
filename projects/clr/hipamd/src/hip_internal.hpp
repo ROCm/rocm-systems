@@ -654,18 +654,30 @@ namespace hip {
   extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
-  extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size = 0);
-  extern std::vector<amd::Memory*> getMemoryObjectBatch(void* const* ptrs, size_t count,
+  extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
+                                       size_t size = 0);
+  extern std::vector<amd::Memory*> getMemoryObjectBatch(hip::Device* device, void* const* ptrs,
+                                                         size_t count,
                                                          std::vector<size_t>& offsets);
-  extern void getMemoryObjectBatchPairs(void* const* srcs, void* const* dsts, size_t count,
+  extern void getMemoryObjectBatchPairs(hip::Device* device, void* const* srcs, void* const* dsts,
+                                         size_t count,
                                          std::vector<amd::Memory*>& src_memories,
                                          std::vector<amd::Memory*>& dst_memories,
                                          std::vector<size_t>& src_offsets,
                                          std::vector<size_t>& dst_offsets);
-  extern void getMemoryObjectPairs(const void* src, const void* dst,
+  extern void getMemoryObjectPairs(hip::Device* device, const void* src, const void* dst,
                                     amd::Memory*& src_memory, amd::Memory*& dst_memory,
                                     size_t& src_offset, size_t& dst_offset);
-  extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size = 0);
+  extern amd::Memory* getMemoryObjectWithOffset(hip::Device* device, const void* ptr,
+                                                 const size_t size = 0);
+
+  /// Convenience wrapper for use in Command::submit() bodies (graph and non-graph) where
+  /// hoisting hip::getCurrentDevice() across worker-thread state is unsafe. Re-fetches TLS
+  /// each call. Do NOT use from API entry points — use the explicit-device getMemoryObject.
+  inline amd::Memory* getMemoryObjectForCurrentDevice(const void* ptr, size_t& offset,
+                                                       size_t size = 0) {
+    return getMemoryObject(getCurrentDevice(), ptr, offset, size);
+  }
   extern void getStreamPerThread(hipStream_t& stream);
   extern hipStream_t getPerThreadDefaultStream();
   extern hipError_t ihipUnbindTexture(textureReference* texRef);
@@ -681,6 +693,36 @@ namespace hip {
                         hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true);
   hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream = nullptr,
                           bool isAsync = false);
+
+  extern hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj,
+                                                size_t sizeBytes, size_t offset, bool read_write);
+
+  inline hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                                         amd::Memory* srcMemory, size_t sizeBytes,
+                                         size_t dstOffset, size_t srcOffset) {
+    hipError_t status =
+        ihipMemcpy_validate_memory(device, srcMemory, sizeBytes, srcOffset, /*read_write*/ false);
+    if (status != hipSuccess) return status;
+    status =
+        ihipMemcpy_validate_memory(device, dstMemory, sizeBytes, dstOffset, /*read_write*/ true);
+    if (status != hipSuccess) return status;
+    return hipSuccess;
+  }
+
+  // Two-size variant used by the batch memcpy path: indirect copies place a
+  // sizeof(void*) pointer-holder on one side and the real data buffer on the other,
+  // so src and dst must be validated against independent region sizes.
+  inline hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                                         amd::Memory* srcMemory, size_t srcSizeBytes,
+                                         size_t dstSizeBytes, size_t dstOffset, size_t srcOffset) {
+    hipError_t status = ihipMemcpy_validate_memory(device, srcMemory, srcSizeBytes, srcOffset,
+                                                    /*read_write*/ false);
+    if (status != hipSuccess) return status;
+    status = ihipMemcpy_validate_memory(device, dstMemory, dstSizeBytes, dstOffset,
+                                         /*read_write*/ true);
+    if (status != hipSuccess) return status;
+    return hipSuccess;
+  }
 
   constexpr bool kMarkerDisableFlush = true;  //!< Avoids command batch flush in ROCclr
 

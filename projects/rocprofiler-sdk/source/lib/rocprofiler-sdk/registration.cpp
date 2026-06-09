@@ -263,8 +263,8 @@ get_status()
 
 struct attach_status
 {
-    bool has_attach_table = false;
-    bool is_attached      = false;
+    std::atomic<bool> has_attach_table{false};
+    std::atomic<bool> is_attached{false};
 };
 
 auto*
@@ -761,6 +761,9 @@ invoke_client_attaches()
         }
     }
 
+    if(ret == ROCPROFILER_STATUS_SUCCESS && get_attach_status())
+        get_attach_status()->is_attached.store(true, std::memory_order_release);
+
     return ret;
 }
 
@@ -800,6 +803,9 @@ invoke_client_detaches()
             ROCP_INFO << "Client " << itr->name << " does not have tool_detach function";
         }
     }
+
+    if(get_attach_status())
+        get_attach_status()->is_attached.store(false, std::memory_order_release);
 
     return ret;
 }
@@ -842,9 +848,18 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 }  // namespace
 
 bool
+is_attached()
+{
+    return (get_attach_status()) ? get_attach_status()->is_attached.load(std::memory_order_acquire)
+                                 : false;
+}
+
+bool
 supports_attachment()
 {
-    return (get_attach_status()) ? get_attach_status()->has_attach_table : false;
+    return (get_attach_status())
+               ? get_attach_status()->has_attach_table.load(std::memory_order_acquire)
+               : false;
 }
 
 void

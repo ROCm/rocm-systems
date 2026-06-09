@@ -43,12 +43,16 @@ make_nic_metric_value(std::initializer_list<std::uint8_t> bit_positions)
     return value;
 }
 
-const auto RX_RDMA_UCAST_BYTES_VALUE = make_nic_metric_value({ 0 });
-const auto TX_RDMA_UCAST_BYTES_VALUE = make_nic_metric_value({ 1 });
-const auto RX_RDMA_UCAST_PKTS_VALUE  = make_nic_metric_value({ 2 });
-const auto TX_RDMA_UCAST_PKTS_VALUE  = make_nic_metric_value({ 3 });
-const auto RX_RDMA_CNP_PKTS_VALUE    = make_nic_metric_value({ 4 });
-const auto TX_RDMA_CNP_PKTS_VALUE    = make_nic_metric_value({ 5 });
+inline constexpr auto RX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 0 });
+inline constexpr auto TX_RDMA_UCAST_BYTES_VALUE     = make_nic_metric_value({ 1 });
+inline constexpr auto RX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 2 });
+inline constexpr auto TX_RDMA_UCAST_PKTS_VALUE      = make_nic_metric_value({ 3 });
+inline constexpr auto RX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 4 });
+inline constexpr auto TX_RDMA_CNP_PKTS_VALUE        = make_nic_metric_value({ 5 });
+inline constexpr auto TX_RDMA_ACK_TIMEOUT_VALUE     = make_nic_metric_value({ 6 });
+inline constexpr auto RESP_TX_PKT_SEQ_ERR_VALUE     = make_nic_metric_value({ 7 });
+inline constexpr auto REQ_RX_PKT_SEQ_ERR_VALUE      = make_nic_metric_value({ 8 });
+inline constexpr auto REQ_RX_IMPL_NAK_SEQ_ERR_VALUE = make_nic_metric_value({ 9 });
 
 struct nic_perfetto_sample
 {
@@ -117,48 +121,88 @@ struct perfetto_policy
         if(enabled_metric_config.bits.rx_rdma_ucast_bytes)
         {
             device_tracks[RX_RDMA_UCAST_BYTES_VALUE] = {
-                "RX RDMA Bytes", "bytes",
-                counter_track::emplace(device_index, addendum("RX RDMA Bytes"), "bytes")
+                "RX RDMA BYTES", "bytes",
+                counter_track::emplace(device_index, addendum("RX RDMA BYTES"), "bytes")
             };
         }
 
         if(enabled_metric_config.bits.tx_rdma_ucast_bytes)
         {
             device_tracks[TX_RDMA_UCAST_BYTES_VALUE] = {
-                "TX RDMA Bytes", "bytes",
-                counter_track::emplace(device_index, addendum("TX RDMA Bytes"), "bytes")
+                "TX RDMA BYTES", "bytes",
+                counter_track::emplace(device_index, addendum("TX RDMA BYTES"), "bytes")
             };
         }
 
         if(enabled_metric_config.bits.rx_rdma_ucast_pkts)
         {
             device_tracks[RX_RDMA_UCAST_PKTS_VALUE] = {
-                "RX RDMA Pkts", "packets",
-                counter_track::emplace(device_index, addendum("RX RDMA Pkts"), "packets")
+                "RX RDMA PACKETS", "packets",
+                counter_track::emplace(device_index, addendum("RX RDMA PACKETS"),
+                                       "packets")
             };
         }
 
         if(enabled_metric_config.bits.tx_rdma_ucast_pkts)
         {
             device_tracks[TX_RDMA_UCAST_PKTS_VALUE] = {
-                "TX RDMA Pkts", "packets",
-                counter_track::emplace(device_index, addendum("TX RDMA Pkts"), "packets")
+                "TX RDMA PACKETS", "packets",
+                counter_track::emplace(device_index, addendum("TX RDMA PACKETS"),
+                                       "packets")
             };
         }
 
         if(enabled_metric_config.bits.rx_rdma_cnp_pkts)
         {
             device_tracks[RX_RDMA_CNP_PKTS_VALUE] = {
-                "RX CNP Pkts", "packets",
-                counter_track::emplace(device_index, addendum("RX CNP Pkts"), "packets")
+                "RX CNP PACKETS", "packets",
+                counter_track::emplace(device_index, addendum("RX CNP PACKETS"),
+                                       "packets")
             };
         }
 
         if(enabled_metric_config.bits.tx_rdma_cnp_pkts)
         {
             device_tracks[TX_RDMA_CNP_PKTS_VALUE] = {
-                "TX CNP Pkts", "packets",
-                counter_track::emplace(device_index, addendum("TX CNP Pkts"), "packets")
+                "TX CNP PACKETS", "packets",
+                counter_track::emplace(device_index, addendum("TX CNP PACKETS"),
+                                       "packets")
+            };
+        }
+
+        if(enabled_metric_config.bits.tx_rdma_ack_timeout)
+        {
+            device_tracks[TX_RDMA_ACK_TIMEOUT_VALUE] = {
+                "TX ACK TIMEOUT", "timeouts",
+                counter_track::emplace(device_index, addendum("TX ACK TIMEOUT"),
+                                       "timeouts")
+            };
+        }
+
+        if(enabled_metric_config.bits.resp_tx_pkt_seq_err)
+        {
+            device_tracks[RESP_TX_PKT_SEQ_ERR_VALUE] = {
+                "RESP TX PKT SEQ ERR", "errors",
+                counter_track::emplace(device_index, addendum("RESP TX PKT SEQ ERR"),
+                                       "errors")
+            };
+        }
+
+        if(enabled_metric_config.bits.req_rx_pkt_seq_err)
+        {
+            device_tracks[REQ_RX_PKT_SEQ_ERR_VALUE] = {
+                "REQ RX PKT SEQ ERR", "errors",
+                counter_track::emplace(device_index, addendum("REQ RX PKT SEQ ERR"),
+                                       "errors")
+            };
+        }
+
+        if(enabled_metric_config.bits.req_rx_impl_nak_seq_err)
+        {
+            device_tracks[REQ_RX_IMPL_NAK_SEQ_ERR_VALUE] = {
+                "REQ RX IMPL NAK SEQ ERR", "errors",
+                counter_track::emplace(device_index, addendum("REQ RX IMPL NAK SEQ ERR"),
+                                       "errors")
             };
         }
     }
@@ -325,6 +369,59 @@ struct perfetto_policy
                         "nic_tx_cnp_pkts",
                         counter_track::at(device_index, it->second.track_index), ts,
                         static_cast<double>(sample.metric_values.tx_rdma_cnp_pkts));
+                }
+            }
+
+            // TX RDMA ACK timeouts
+            if(effective_metrics.bits.tx_rdma_ack_timeout)
+            {
+                auto it = device_tracks.find(TX_RDMA_ACK_TIMEOUT_VALUE);
+                if(it != device_tracks.end())
+                {
+                    TRACE_COUNTER(
+                        "nic_tx_rdma_ack_timeout",
+                        counter_track::at(device_index, it->second.track_index), ts,
+                        static_cast<double>(sample.metric_values.tx_rdma_ack_timeout));
+                }
+            }
+
+            // RESP TX PKT SEQ errors
+            if(effective_metrics.bits.resp_tx_pkt_seq_err)
+            {
+                auto it = device_tracks.find(RESP_TX_PKT_SEQ_ERR_VALUE);
+                if(it != device_tracks.end())
+                {
+                    TRACE_COUNTER(
+                        "nic_resp_tx_pkt_seq_err",
+                        counter_track::at(device_index, it->second.track_index), ts,
+                        static_cast<double>(sample.metric_values.resp_tx_pkt_seq_err));
+                }
+            }
+
+            // REQ RX PKT SEQ errors
+            if(effective_metrics.bits.req_rx_pkt_seq_err)
+            {
+                auto it = device_tracks.find(REQ_RX_PKT_SEQ_ERR_VALUE);
+                if(it != device_tracks.end())
+                {
+                    TRACE_COUNTER(
+                        "nic_req_rx_pkt_seq_err",
+                        counter_track::at(device_index, it->second.track_index), ts,
+                        static_cast<double>(sample.metric_values.req_rx_pkt_seq_err));
+                }
+            }
+
+            // REQ RX IMPL NAK SEQ errors
+            if(effective_metrics.bits.req_rx_impl_nak_seq_err)
+            {
+                auto it = device_tracks.find(REQ_RX_IMPL_NAK_SEQ_ERR_VALUE);
+                if(it != device_tracks.end())
+                {
+                    TRACE_COUNTER("nic_req_rx_impl_nak_seq_err",
+                                  counter_track::at(device_index, it->second.track_index),
+                                  ts,
+                                  static_cast<double>(
+                                      sample.metric_values.req_rx_impl_nak_seq_err));
                 }
             }
         }

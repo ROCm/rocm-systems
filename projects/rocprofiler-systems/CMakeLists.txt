@@ -218,7 +218,7 @@ include(Compilers) # compiler identification
 include(BuildSettings) # compiler flags
 
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Object code libraries (lib)" FORCE)
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "CXX language standard")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "CXX language standard")
 
 rocprofiler_systems_add_feature(CMAKE_BUILD_TYPE "Build optimization level")
 rocprofiler_systems_add_feature(CMAKE_INSTALL_PREFIX "Installation prefix")
@@ -239,6 +239,9 @@ rocprofiler_systems_add_option(CMAKE_INSTALL_RPATH_USE_LINK_PATH
 set(CMAKE_INSTALL_MESSAGE "LAZY" CACHE STRING "Installation message")
 mark_as_advanced(CMAKE_INSTALL_MESSAGE)
 
+rocprofiler_systems_add_option(ROCPROFSYS_USE_CCACHE
+    "Auto-wire ccache as the compiler launcher when present" ON
+)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_CLANG_TIDY "Enable clang-tidy" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_BFD
     "Enable BFD support (map call-stack samples to LOC)" ON
@@ -410,9 +413,20 @@ include(Packages) # finds third-party libraries
 rocprofiler_systems_activate_clang_tidy()
 
 # custom visibility settings
-if(ROCPROFSYS_BUILD_HIDDEN_VISIBILITY)
-    set(CMAKE_C_VISIBILITY_PRESET "internal")
-    set(CMAKE_CXX_VISIBILITY_PRESET "internal")
+#
+# When building with a sanitizer, keep default (not hidden) visibility.
+# Hidden visibility combined with sanitizer builds causes lld to reject
+# mismatched COMDAT group leaders; the complementary fix for timemory's
+# explicit instantiations is in cmake/Packages.cmake.  Non-sanitizer builds
+# keep hidden visibility for a smaller .dynsym and to prevent unintended
+# symbol export.
+#
+# Detect sanitizer via CMAKE_CXX_FLAGS because the flag is injected by the
+# super-project before this build is configured.
+string(FIND "${CMAKE_CXX_FLAGS}" "-fsanitize" _rocprofsys_sanitizer_flag_pos)
+if(ROCPROFSYS_BUILD_HIDDEN_VISIBILITY AND _rocprofsys_sanitizer_flag_pos EQUAL -1)
+    set(CMAKE_C_VISIBILITY_PRESET "hidden")
+    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 endif()
 
@@ -430,6 +444,32 @@ endif()
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME core)
 
 if(ROCPROFSYS_BUILD_CODECOV)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m gcovr --version
+        OUTPUT_VARIABLE _gcovr_version_output
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _gcovr_result
+    )
+    if(NOT _gcovr_result EQUAL 0)
+        message(
+            FATAL_ERROR
+            "gcovr not found in the active Python environment (${Python3_EXECUTABLE}). "
+            "Install with: pip install 'gcovr>=8.4'"
+        )
+    endif()
+    string(REGEX MATCH "([0-9]+)\\.([0-9]+)" _gcovr_version "${_gcovr_version_output}")
+    set(_gcovr_major ${CMAKE_MATCH_1})
+    set(_gcovr_minor ${CMAKE_MATCH_2})
+    if(_gcovr_major LESS 8 OR (_gcovr_major EQUAL 8 AND _gcovr_minor LESS 4))
+        message(
+            FATAL_ERROR
+            "gcovr >= 8.4 is required for ROCPROFSYS_BUILD_CODECOV "
+            "(found ${_gcovr_version}). Install with: pip install 'gcovr>=8.4'"
+        )
+    endif()
+    message(STATUS "Found gcovr: ${Python3_EXECUTABLE} -m gcovr (${_gcovr_version})")
+
     rocprofiler_systems_save_variables(CODECOV_FLAGS VARIABLES CMAKE_C_FLAGS
         CMAKE_CXX_FLAGS
     )

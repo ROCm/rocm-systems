@@ -18,6 +18,8 @@
 #include "profiler.h"
 #include "transport.h"
 #include "shm.h"
+#include "compiler.h"
+#include <atomic>
 #include <assert.h>
 #include "graph.h"
 #include "graph/topo.h"
@@ -166,6 +168,8 @@ struct recvNetResources {
 struct netRegInfo {
   uintptr_t buffer;
   size_t size;
+  // Number of physical mapped segments that a buffer spans
+  int numSegments;
 };
 
 /* Determine if two peers can communicate with NET */
@@ -643,20 +647,24 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
     if (!map->sameProcess) NCCLCHECK(netMapShm(comm, &send->proxyConn, map->mems + NCCL_NET_MAP_HOSTMEM));
     if (map->mems[NCCL_NET_MAP_DEVMEM].size) {
       map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr = NULL;
+      // NET transport import: No ownerVA available, mark as Persist (do not release)
       NCCLCHECK(ncclP2pImportShareableBuffer(comm, send->proxyConn.rank,
                                             map->mems[NCCL_NET_MAP_DEVMEM].size,
                                             &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
-                                            (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+                                            (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr,
+                                            nullptr, ncclMemPersist));
       map->mems[NCCL_NET_MAP_DEVMEM].cpuPtr = NULL;
     }
     if (map->mems[NCCL_NET_MAP_SHARED_DEVMEM].size) {
       void** sharedDevMemPtr = comm->proxyState->sharedDevMems + send->proxyConn.tpLocalRank;
       if (*sharedDevMemPtr == NULL) {
         map->mems[NCCL_NET_MAP_SHARED_DEVMEM].gpuPtr = NULL;
+        // NET transport shared import: No ownerVA, mark as Persist (do not release)
         NCCLCHECK(ncclP2pImportShareableBuffer(comm, send->proxyConn.rank,
                                               map->mems[NCCL_NET_MAP_SHARED_DEVMEM].size,
                                               &map->mems[NCCL_NET_MAP_SHARED_DEVMEM].ipcDesc,
-                                              sharedDevMemPtr));
+                                              sharedDevMemPtr,
+                                              nullptr, ncclMemPersist));
       }
       map->mems[NCCL_NET_MAP_SHARED_DEVMEM].gpuPtr = (char*)(*sharedDevMemPtr);
       map->mems[NCCL_NET_MAP_SHARED_DEVMEM].cpuPtr = NULL;
@@ -778,8 +786,10 @@ static ncclResult_t recvConnect(struct ncclComm* comm, struct ncclConnect* conne
   return ncclSuccess;
 }
 
-static ncclResult_t sendFree(struct ncclConnector* send) {
+static ncclResult_t sendFree(struct ncclComm* comm, struct ncclConnector* send) {
   struct connectMap* map = (struct connectMap*)(send->transportResources);
+  // RCCL: check if the communicator was provided
+  struct ncclMemManager* mgr = comm ? comm->memManager : nullptr;
   if (map) {
     int cudaDev;
     CUDACHECK(cudaGetDevice(&cudaDev));
@@ -787,7 +797,7 @@ static ncclResult_t sendFree(struct ncclConnector* send) {
       if (ncclCuMemEnable()) {
         // cuMem API support
         NCCLCHECK(ncclP2pFreeShareableBuffer(&map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc));
-        NCCLCHECK(ncclCuMemFree(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+        NCCLCHECK(ncclCuMemFree(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, mgr));
       } else {
         // Legacy CUDA IPC support
         CUDACHECK(cudaIpcCloseMemHandle(map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
@@ -802,7 +812,7 @@ static ncclResult_t sendFree(struct ncclConnector* send) {
   return ncclSuccess;
 }
 
-static ncclResult_t recvFree(struct ncclConnector* recv) {
+static ncclResult_t recvFree(struct ncclComm* comm, struct ncclConnector* recv) {
   if (recv->transportResources) free(recv->transportResources);
   return ncclSuccess;
 }
@@ -834,18 +844,18 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int 
 
   if (cuda && state->cudaBuff == NULL) {
     if (sameProcess == 0 || ncclCuMemEnable()) {
-      NCCLCHECK(ncclP2pAllocateShareableBuffer(state->size, 0, &state->ipcDesc, (void**)&state->cudaBuff));
+      NCCLCHECK(ncclP2pAllocateShareableBuffer(state->size, 0, &state->ipcDesc, (void**)&state->cudaBuff, /*peerRank=*/-1, proxyState->memManager));
     } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
-      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size,
+      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
         cuda ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
 #else
-      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size,
+      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
         cuda ? hipDeviceMallocUncached : hipDeviceMallocDefault));
 #endif
 #else
-      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size,
+      NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, state->size, proxyState->memManager, ncclMemPersist,
         cuda ? hipDeviceMallocFinegrained : hipDeviceMallocDefault));
 #endif
     }
@@ -878,7 +888,7 @@ static ncclResult_t sharedNetBuffersDestroy(struct ncclProxyState* proxyState, i
       if (!connection->sameProcess || ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pFreeShareableBuffer(&state->ipcDesc));
       }
-      NCCLCHECK(ncclCudaFree(state->cudaBuff));
+      NCCLCHECK(ncclCudaFree(state->cudaBuff, proxyState->memManager));
     }
     if (state->hostBuff) NCCLCHECK(ncclCudaHostFree(state->hostBuff));
   }
@@ -1157,7 +1167,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       if (!map->sameProcess || ncclCuMemEnable()) {
         ALIGN_SIZE(map->mems[NCCL_NET_MAP_DEVMEM].size, CUDA_IPC_MIN);
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
-                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, /*peerRank=*/-1, proxyState->memManager));
 #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
         // Get DMA-BUF fd for cuMem VMM allocations via cuMemGetHandleForAddressRange.
         // Required even when DMA-BUF is globally disabled: ibv_reg_mr on cuMem RDMA
@@ -1174,14 +1184,14 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocUncached : hipDeviceMallocDefault));
 #endif
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocFinegrained : hipDeviceMallocDefault));
 #endif
       }
@@ -1200,7 +1210,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   }
   if (ncclGdrCopy && map->sameProcess && ncclParamGdrCopySyncEnable()) {
     uint64_t *cpuPtr, *gpuPtr;
-    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 1, &resources->gdrDesc));
+    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 1, &resources->gdrDesc, proxyState->memManager));
 
     resources->gdcSync = cpuPtr;
     struct connectMapMem* gdcMem = map->mems+NCCL_NET_MAP_GDCMEM;
@@ -1238,7 +1248,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 #else
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd, &offset));
@@ -1383,7 +1393,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     if (resources->shared == 0) {
       if (ncclCuMemEnable()) {
         NCCLCHECK(ncclP2pAllocateShareableBuffer(map->mems[NCCL_NET_MAP_DEVMEM].size, 0, &map->mems[NCCL_NET_MAP_DEVMEM].ipcDesc,
-                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr));
+                                                (void**)&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, /*peerRank=*/-1, proxyState->memManager));
 #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
         // Get DMA-BUF fd for cuMem VMM allocations. Required even when DMA-BUF is
         // globally disabled to avoid ibv_reg_mr on VMM memory.
@@ -1398,14 +1408,14 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
       } else {
 #if defined(HIP_UNCACHED_MEMORY)
 #if defined(HIP_CONTIGUOUS_MEMORY)
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? (rcclParamNetContiguousMem() ? hipDeviceMallocContiguous : hipDeviceMallocUncached) : hipDeviceMallocDefault));
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocUncached : hipDeviceMallocDefault));
 #endif
 #else
-        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size,
+        NCCLCHECK(ncclCudaCalloc(&map->mems[NCCL_NET_MAP_DEVMEM].gpuPtr, map->mems[NCCL_NET_MAP_DEVMEM].size, proxyState->memManager, ncclMemPersist,
           resources->useGdr ? hipDeviceMallocFinegrained : hipDeviceMallocDefault));
 #endif
       }
@@ -1416,7 +1426,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   map->mems[NCCL_NET_MAP_HOSTMEM].gpuPtr = map->mems[NCCL_NET_MAP_HOSTMEM].cpuPtr;
   if (ncclGdrCopy && map->sameProcess) {
     uint64_t *cpuPtr, *gpuPtr;
-    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc));
+    NCCLCHECK(ncclGdrCudaCalloc(&cpuPtr, &gpuPtr, 2, &resources->gdrDesc, proxyState->memManager));
 
     if (ncclParamGdrCopySyncEnable()) {
       resources->gdcSync = cpuPtr;
@@ -1452,7 +1462,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 #else
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd, &offset));
@@ -1486,6 +1496,12 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
   }
 
   if (connection->state == connConnected) {
+    while (!ncclIntruQueueEmpty(&connection->proxyMemHandleQueue)) {
+      struct proxyMemHandle* memHandle = ncclIntruQueueDequeue(&connection->proxyMemHandleQueue);
+      NCCLCHECK(proxyState->ncclNet->deregMr(resources->netSendComm, memHandle->handle));
+      free(memHandle);
+    }
+
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (resources->buffers[p]) {
         NCCLCHECK(proxyState->ncclNet->deregMr(resources->netSendComm, resources->mhandles[p]));
@@ -1502,14 +1518,14 @@ static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct
       (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
       mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
     }
-    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
+    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr, proxyState->memManager));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
       if (mems[NCCL_NET_MAP_DEVMEM].size) {
         NCCLCHECK(ncclP2pFreeShareableBuffer(&mems[NCCL_NET_MAP_DEVMEM].ipcDesc));
       }
     }
-    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc));
+    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc, proxyState->memManager));
     if (resources->shared) {
       NCCLCHECK(sharedNetBuffersDestroy(proxyState, resources->tpLocalRank, 0, connection));
       if (resources->maxRecvs > 1 && ncclParamNetSharedComms()) {
@@ -1536,6 +1552,12 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
   }
 
   if (connection->state == connConnected) {
+    while (!ncclIntruQueueEmpty(&connection->proxyMemHandleQueue)) {
+      struct proxyMemHandle* memHandle = ncclIntruQueueDequeue(&connection->proxyMemHandleQueue);
+      NCCLCHECK(proxyState->ncclNet->deregMr(resources->netRecvComm, memHandle->handle));
+      free(memHandle);
+    }
+
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (resources->buffers[p]) {
         NCCLCHECK(proxyState->ncclNet->deregMr(resources->netRecvComm, resources->mhandles[p]));
@@ -1548,14 +1570,14 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
       (void)close(mems[NCCL_NET_MAP_DEVMEM].dmaBufFd);
       mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = -1;
     }
-    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr));
+    NCCLCHECK(ncclCudaFree(mems[NCCL_NET_MAP_DEVMEM].cpuPtr, proxyState->memManager));
     if (!resources->map.sameProcess || ncclCuMemEnable()) {
       // cuMem API support
       if (mems[NCCL_NET_MAP_DEVMEM].size) {
         NCCLCHECK(ncclP2pFreeShareableBuffer(&mems[NCCL_NET_MAP_DEVMEM].ipcDesc));
       }
     }
-    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc));
+    if (mems[NCCL_NET_MAP_GDCMEM].cpuPtr) NCCLCHECK(ncclGdrCudaFree(resources->gdrDesc, proxyState->memManager));
     if (resources->shared) {
       NCCLCHECK(sharedNetBuffersDestroy(proxyState, resources->tpLocalRank, 1, connection));
       if (resources->maxRecvs > 1 && ncclParamNetSharedComms()) {
@@ -1635,7 +1657,7 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
             int offset;
             NCCLCHECK(sharedBuffersGet(proxyState, sub->channelId, sharedBuffSlot*args->nsubs+s, &offset, NULL));
             __atomic_store_n(&resources->recvMem->connFifo[buffSlot].offset, offset, __ATOMIC_RELAXED);
-            __sync_synchronize();
+            std::atomic_thread_fence(std::memory_order_seq_cst);
           }
           volatile uint64_t* sendHead = resources->gdcSync ? resources->gdcSync : &resources->sendMem->head;
           sub->posted += args->sliceSteps;
@@ -1819,7 +1841,7 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
 #endif
           // Make sure size is reset to -1 before we update the head.
           connFifo[buffSlot].size = -1;
-          __sync_synchronize();
+          std::atomic_thread_fence(std::memory_order_seq_cst);
           TRACE(NCCL_NET, "sendProxy [%ld/%d/%d] request %p done", sub->done, buffSlot, sub->nsteps, sub->requests[buffSlot]);
           sub->done += args->sliceSteps;
           ncclProfilerStopProxyStepEvent(s, args, doneStepId);
@@ -1961,7 +1983,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             ptrs[subCount] = localBuff+buffSlot*stepSize;
             sizes[subCount] = stepSize*args->sliceSteps;
           }
-          if (sub->nbytes < sizes[subCount]) sizes[subCount] = sub->nbytes;
+          // if (sub->nbytes < sizes[subCount]) sizes[subCount] = sub->nbytes;
           tags[subCount] = resources->tpRemoteRank;
           mhandles[subCount] = sub->recvMhandle;
           phandles[subCount] = &sub->pHandles[DIVUP(postedStepId, args->sliceSteps)%NCCL_STEPS];
@@ -2068,7 +2090,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             if (rcclParamNetHdpFlush() && resources->curr_hdp_reg) {
               static bool once = true;
               *resources->curr_hdp_reg = 0x1;
-              __sync_synchronize();
+              std::atomic_thread_fence(std::memory_order_seq_cst);
               if (once) {
                 once = false;
                 INFO(NCCL_INIT, "%s: flushed HDP %p", __func__, resources->curr_hdp_reg);
@@ -2151,7 +2173,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
               proxyState->proxyTrace->updateProxyOpCounter(sub->traceKey, facebook_rccl::ProxyCounterTypes::TRANSMITTED, sub->transmitted);
             }
             if (step < sub->nsteps) {
-              __sync_synchronize();
+              std::atomic_thread_fence(std::memory_order_seq_cst);
               struct recvNetResources* resources = (struct recvNetResources*) (sub->connection->transportResources);
               volatile uint64_t* recvTail = resources->gdcSync ? resources->gdcSync : &resources->recvMem->tail;
               *recvTail = sub->base + sub->transmitted;
@@ -2223,7 +2245,7 @@ ncclResult_t ncclNetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector
   return ncclSuccess;
 }
 
-static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, struct ncclConnector** peerConns, int nPeers, struct ncclReg* regRecord, int* outRegBufFlag, void** outHandle) {
+static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, struct ncclConnector** peerConns, int nPeers, struct ncclReg* regRecord, int* outRegBufFlag, void** outHandle, int numSegments) {
   ncclResult_t ret = ncclSuccess;
   int gdrFlag = 1;
 
@@ -2248,7 +2270,7 @@ static ncclResult_t netRegisterBuffer(ncclComm* comm, const void* userbuff, size
         outHandle[p] = netHandle->handle;
         INFO(NCCL_REG, "rank %d - NET reuse buffer %p size %ld (baseAddr %p size %ld) handle %p", comm->rank, userbuff, buffSize, (void*)regRecord->begAddr, regRecord->endAddr - regRecord->begAddr, netHandle->handle);
       } else {
-        struct netRegInfo info = { regRecord->begAddr, regRecord->endAddr - regRecord->begAddr };
+        struct netRegInfo info = { regRecord->begAddr, regRecord->endAddr - regRecord->begAddr, numSegments};
         void* handle = NULL;
 
         if (peerConn->conn.flags & NCCL_DIRECT_NIC) {
@@ -2295,9 +2317,10 @@ ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, si
     NCCLCHECKGOTO(ncclRegFind(comm, userbuff, buffSize, &regRecord), ret, fail);
     NCCLCHECKGOTO(ncclRegLocalIsValid(regRecord, &isValid), ret, fail);
     if (isValid) {
-      CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&base, &baseSize, (CUdeviceptr)userbuff), ret, fail);
-      if ((uint64_t)base + baseSize < (uint64_t)userbuff + buffSize) goto exit;
-      NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle), ret, fail);
+      int numSegments = 0;
+      NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr) userbuff, buffSize, (CUdeviceptr*)&base, &baseSize, &numSegments));
+      if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
+      NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle, numSegments), ret, fail);
     }
   }
 
@@ -2330,10 +2353,11 @@ ncclResult_t ncclNetGraphRegisterBuffer(ncclComm* comm, const void* userbuff, si
 
   *outRegBufFlag = 0;
   if (comm && userbuff && buffSize > 0 && nPeers > 0) {
-    CUCHECKGOTO(cuMemGetAddressRange((CUdeviceptr *)&base, &baseSize, (CUdeviceptr)userbuff), ret, fail);
-    if ((uint64_t)base + baseSize < (uint64_t)userbuff + buffSize) goto exit;
+    int numSegments = 0;
+    NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr) userbuff, buffSize, (CUdeviceptr*)&base, &baseSize, &numSegments));
+    if (numSegments > 1 && !ncclParamMultiSegmentRegister()) goto exit;
     NCCLCHECKGOTO(ncclCommGraphRegister(comm, base, baseSize, (void**)&regRecord), ret, fail);
-    NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle), ret, fail);
+    NCCLCHECKGOTO(netRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, regRecord, outRegBufFlag, outHandle, numSegments), ret, fail);
     if (*outRegBufFlag) {
       NCCLCHECKGOTO(ncclCalloc(&record, 1), ret, fail);
       record->base.fn = cleanupNet;
@@ -2353,10 +2377,12 @@ fail:
 }
 
 static ncclResult_t sendProxyRegBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
-  void* handle;
+  void* handle = NULL;
   struct netRegInfo* info = (struct netRegInfo*)reqBuff;
+  int numSegments = info->numSegments;
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
-  ncclResult_t ret = ncclSuccess;
+  // The value of ret is ignored
+  ncclResult_t ret;
   bool needReg = true;
 
   assert(reqSize == sizeof(struct netRegInfo));
@@ -2384,10 +2410,22 @@ peermem:
 peermem:
 #endif
   if (needReg) {
-    NCCLCHECKGOTO(proxyState->ncclNet->regMr(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);
+    // Non-dmabuf regMr does not support multiple physical segments
+    if (numSegments > 1) {
+      INFO(NCCL_NET|NCCL_REG, "Buffer %p (size %zu, numSegments %d) not registered as DMABuf is not available. Non-DMABuf registration currently does not support multiple segments.", (void *)info->buffer, info->size, numSegments);
+      goto fail;
+    } else {
+      NCCLCHECKGOTO(proxyState->ncclNet->regMr(resources->netSendComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);
+    }
   }
 
 exit:
+  if (handle) {
+    struct proxyMemHandle* memHandle;
+    NCCLCHECK(ncclCalloc(&memHandle, 1));
+    memHandle->handle = handle;
+    ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+  }
   memcpy(respBuff, (void*)&handle, sizeof(void*));
   *done = 1;
   return ncclSuccess;
@@ -2397,10 +2435,12 @@ fail:
 }
 
 static ncclResult_t recvProxyRegBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
-  void* handle;
+  void* handle = NULL;
   struct netRegInfo* info = (struct netRegInfo*)reqBuff;
+  int numSegments = info->numSegments;
   struct recvNetResources* resources = (struct recvNetResources*)(connection->transportResources);
-  ncclResult_t ret = ncclSuccess;
+  // The value of ret is ignored
+  ncclResult_t ret;
   bool needReg = true;
 
   assert(reqSize == sizeof(struct netRegInfo));
@@ -2428,10 +2468,22 @@ peermem:
 peermem:
 #endif
   if (needReg) {
-    NCCLCHECKGOTO(proxyState->ncclNet->regMr(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);
+    // Non-dmabuf regMr does not support multiple physical segments
+    if (numSegments > 1) {
+      INFO(NCCL_NET|NCCL_REG, "Buffer %p (size %zu, numSegments %d) not registered as DMABuf is not available. Non-DMABuf registration currently does not support multiple segments.", (void *)info->buffer, info->size, numSegments);
+      goto fail;
+    } else {
+      NCCLCHECKGOTO(proxyState->ncclNet->regMr(resources->netRecvComm, (void*)info->buffer, info->size, NCCL_PTR_CUDA, &handle), ret, fail);
+    }
   }
 
 exit:
+  if (handle) {
+    struct proxyMemHandle* memHandle;
+    NCCLCHECK(ncclCalloc(&memHandle, 1));
+    memHandle->handle = handle;
+    ncclIntruQueueEnqueue(&connection->proxyMemHandleQueue, memHandle);
+  }
   memcpy(respBuff, (void*)&handle, sizeof(void*));
   *done = 1;
   return ncclSuccess;
@@ -2440,12 +2492,23 @@ fail:
   goto exit;
 }
 
+static bool netHandleCmp(struct proxyMemHandle* a, struct proxyMemHandle* b) {
+  return a->handle == b->handle;
+}
+
 static ncclResult_t sendProxyDeregBuffer(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, int* done) {
   void* handle;
   struct sendNetResources* resources = (struct sendNetResources*)(connection->transportResources);
 
   assert(reqSize == sizeof(void*));
   memcpy(&handle, reqBuff, sizeof(void*));
+  if (handle) {
+    struct proxyMemHandle memHandle = {};
+    struct proxyMemHandle* deletedHandle;
+    memHandle.handle = handle;
+    deletedHandle = ncclIntruQueueDelete(&connection->proxyMemHandleQueue, &memHandle, netHandleCmp);
+    free(deletedHandle);
+  }
   NCCLCHECK(proxyState->ncclNet->deregMr(resources->netSendComm, handle));
   *done = 1;
   return ncclSuccess;
@@ -2457,6 +2520,13 @@ static ncclResult_t recvProxyDeregBuffer(struct ncclProxyConnection* connection,
 
   assert(reqSize == sizeof(void*));
   memcpy(&handle, reqBuff, sizeof(void*));
+  if (handle) {
+    struct proxyMemHandle memHandle = {};
+    struct proxyMemHandle* deletedHandle;
+    memHandle.handle = handle;
+    deletedHandle = ncclIntruQueueDelete(&connection->proxyMemHandleQueue, &memHandle, netHandleCmp);
+    free(deletedHandle);
+  }
   NCCLCHECK(proxyState->ncclNet->deregMr(resources->netRecvComm, handle));
   *done = 1;
   return ncclSuccess;
