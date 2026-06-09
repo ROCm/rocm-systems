@@ -2044,9 +2044,10 @@ inline void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
     }
   };
 
-  // SIMD fast path: int32 accumulation is exact and cannot overflow for WMMA's
-  // i8/i4 inputs at K <= 128 (max |acc| ~1M << 2^31), so it matches the scalar
-  // int64+clamp result bit-for-bit; the final pack_i32_acc still clamps.
+  // SIMD fast path: the K-sum of products is exact in int32 for WMMA's i8/i4
+  // inputs at K <= 128 (max |sum| ~2M << 2^31). The int32 accumulator is added
+  // in 64-bit at pack time so pack_i32_acc saturates exactly like the scalar
+  // int64 reference even when C sits near INT32_MAX/INT32_MIN.
   if constexpr (util::has_stdx_simd) {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<int32_t>::size());
     const uint32_t stride = ((N + W - 1) / W) * W;
@@ -2059,14 +2060,6 @@ inline void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
       alignas(64) int32_t Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
       alignas(64) int32_t Cbuf[WMMA_SIMD_MAX_C] = {};
       for (uint32_t row = 0; row < M; ++row)
-        for (uint32_t col = 0; col < N; ++col) {
-          auto out = wmma_output_loc_32(M, N, row, col);
-          Cbuf[row * stride + col] =
-              (const_acc != ACC_FROM_VGPR)
-                  ? static_cast<int32_t>(const_acc)
-                  : static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane));
-        }
-      for (uint32_t row = 0; row < M; ++row)
         for (uint32_t k = 0; k < K; ++k)
           Abuf[row * K + k] = ea(cu, s0, wmma_input_loc(M, K, row, k, in_bits));
       for (uint32_t k = 0; k < K; ++k)
@@ -2076,8 +2069,12 @@ inline void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, u
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
           auto out = wmma_output_loc_32(M, N, row, col);
-          results.push_back({out.reg, out.lane,
-                             pack_i32_acc(static_cast<int64_t>(Cbuf[row * stride + col]), clamp)});
+          int64_t acc = (const_acc != ACC_FROM_VGPR)
+                            ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
+                            : static_cast<int64_t>(
+                                  static_cast<int32_t>(cu.read_vgpr(s2 + out.reg, out.lane)));
+          acc += static_cast<int64_t>(Cbuf[row * stride + col]);
+          results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
         }
     }
   } else {
@@ -2092,6 +2089,88 @@ inline void exec_wmma_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N
                              uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
                              uint32_t const_acc = ACC_FROM_VGPR) {
   exec_wmma_i32(cu, M, N, K, 8, dst, s0, s1, s2, extract_i8, extract_i8, false, const_acc);
+}
+
+/// Fast path for v_wmma_i32_16x16x64_iu8 (gfx1250, wave32, dense). Same recipe
+/// as the f16/bf16 specializations: bulk sign-/zero-extend the packed i8
+/// inputs (per the A/B sign selects from the neg bits) to int32 once, then run
+/// a constexpr-unrolled int32 matmul with direct vgpr_data access. The K-sum
+/// of products is exact in int32 (|sum| <= 64 * 16384) and is added to the
+/// int32 accumulator in 64-bit at pack time, so clamp saturation matches the
+/// scalar int64 reference bit for bit; with clamp off both wrap mod 2^32.
+/// Falls back to the generic exec_wmma_i32 without AVX-512 / under
+/// force-scalar.
+inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
+                                       uint32_t s1, uint32_t s2, bool a_signed, bool b_signed,
+                                       bool clamp, uint32_t const_acc = ACC_FROM_VGPR) {
+  constexpr uint32_t M = 16, N = 16, K = 64, in_bits = 8;
+  auto fallback = [&]() {
+    exec_wmma_i32(cu, M, N, K, in_bits, dst, s0, s1, s2, a_signed ? extract_i8 : extract_u8,
+                  b_signed ? extract_i8 : extract_u8, clamp, const_acc);
+  };
+  if constexpr (!util::has_stdx_simd) {
+    fallback();
+    return;
+  } else {
+    if (util::force_scalar() || util::native<float>::size() != 16) {
+      fallback();
+      return;
+    }
+    require_wmma_wave32(cu);
+    const uint32_t wf = cu.wf_size();
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    alignas(64) int32_t A_buf[M * K]; // A[row][k]
+    alignas(64) int32_t B_buf[K * N]; // B[k][col]
+    alignas(64) int32_t S_buf[M * N]; // sum-of-products, accumulator added at pack
+    // Bulk-extend the packed byte regions to int32 once, then the hoist is a
+    // pure i32 index-shuffle (byte j of word w lane l sub s -> (w*wf+l)*4+s).
+    alignas(64) int32_t A_i32[M * K];
+    alignas(64) int32_t B_i32[N * K];
+    if (a_signed)
+      util::i8_to_i32_block(reinterpret_cast<const int8_t *>(a_words), A_i32, M * K);
+    else
+      util::u8_to_i32_block(reinterpret_cast<const uint8_t *>(a_words), A_i32, M * K);
+    if (b_signed)
+      util::i8_to_i32_block(reinterpret_cast<const int8_t *>(b_words), B_i32, N * K);
+    else
+      util::u8_to_i32_block(reinterpret_cast<const uint8_t *>(b_words), B_i32, N * K);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = wmma_input_loc(M, K, row, k, in_bits);
+        A_buf[row * K + k] = A_i32[(al.vgpr_offset * wf + al.lane) * 4 + al.sub_element];
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = wmma_input_loc(N, K, col, k, in_bits);
+        B_buf[k * N + col] = B_i32[(bl.vgpr_offset * wf + bl.lane) * 4 + bl.sub_element];
+      }
+    // Dense 16x64 * 64x16 -> 16x16 product-sum, 16-lane stdx i32 MAC per row.
+    for (uint32_t row = 0; row < M; ++row) {
+      util::native<int32_t> s_row(0);
+      for (uint32_t k = 0; k < K; ++k) {
+        util::native<int32_t> a_bcast(A_buf[row * K + k]);
+        util::native<int32_t> b_row;
+        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
+        s_row += a_bcast * b_row;
+      }
+      s_row.copy_to(&S_buf[row * N], util::stdx::vector_aligned);
+    }
+    // Add the accumulator in 64-bit and pack (saturating when clamp is set),
+    // scattering directly back to VGPRs.
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        int64_t acc =
+            (const_acc != ACC_FROM_VGPR)
+                ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
+                : static_cast<int64_t>(static_cast<int32_t>(c_words[out.reg * wf + out.lane]));
+        acc += static_cast<int64_t>(S_buf[row * N + col]);
+        d_words[out.reg * wf + out.lane] = pack_i32_acc(acc, clamp);
+      }
+  }
 }
 
 template <typename ExtractA, typename ExtractB>
@@ -2138,8 +2217,10 @@ inline void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N,
   };
 
   // SIMD fast path: per-row gather, single row through the int32 matmul core
-  // (M=1). int32 accumulation is exact for i8/i4 inputs (no overflow), matching
-  // the scalar int64+clamp result; pack_i32_acc still clamps at the end.
+  // (M=1). The K-sum of products is exact in int32 for i8/i4 inputs (no
+  // overflow); the int32 accumulator is added in 64-bit at pack time so
+  // pack_i32_acc saturates exactly like the scalar int64 reference even when
+  // C sits near INT32_MAX/INT32_MIN.
   if constexpr (util::has_stdx_simd) {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<int32_t>::size());
     const uint32_t stride = ((N + W - 1) / W) * W;
@@ -2152,12 +2233,8 @@ inline void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N,
       alignas(64) int32_t Bbuf[WMMA_SIMD_MAX_BSTRIDE] = {};
       alignas(64) int32_t Cbuf[WMMA_SIMD_MAX_C] = {};
       for (uint32_t row = 0; row < M; ++row) {
-        for (uint32_t col = 0; col < N; ++col) {
-          auto out = wmma_output_loc_32(M, N, row, col);
-          Cbuf[col] = (const_acc != ACC_FROM_VGPR)
-                          ? static_cast<int32_t>(const_acc)
-                          : static_cast<int32_t>(cu.read_vgpr(acc_base + out.reg, out.lane));
-        }
+        for (uint32_t col = 0; col < N; ++col)
+          Cbuf[col] = 0;
         for (uint32_t ck = 0; ck < compressed_k; ++ck) {
           Abuf[ck] = ea(cu, s0, wmma_input_loc(M, K / 2, row, ck, in_bits));
           const uint32_t dense_k = dense_k_for(row, ck);
@@ -2167,8 +2244,12 @@ inline void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N,
         wmma_simd_matmul<int32_t>(1, N, compressed_k, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t col = 0; col < N; ++col) {
           auto out = wmma_output_loc_32(M, N, row, col);
-          results.push_back(
-              {out.reg, out.lane, pack_i32_acc(static_cast<int64_t>(Cbuf[col]), clamp)});
+          int64_t acc = (const_acc != ACC_FROM_VGPR)
+                            ? static_cast<int64_t>(static_cast<int32_t>(const_acc))
+                            : static_cast<int64_t>(
+                                  static_cast<int32_t>(cu.read_vgpr(acc_base + out.reg, out.lane)));
+          acc += static_cast<int64_t>(Cbuf[col]);
+          results.push_back({out.reg, out.lane, pack_i32_acc(acc, clamp)});
         }
       }
     }
@@ -2917,6 +2998,80 @@ inline void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, u
                           dst, s0, s1, s2, M, N, K);
       });
     }
+  }
+}
+
+/// Fast path for the dense (B=1) i8-input MFMA shapes (v_mfma_i32_*_i8). Same
+/// structure as the f16 specialization but integer: the packed i8 inputs are
+/// bulk sign-extended to int32 once, the hoist is a pure i32 index-shuffle,
+/// and the matmul runs as constexpr-unrolled zmm-wide int32 MACs. There is no
+/// clamp on the i8 MFMA path: both scalar and SIMD accumulate (and wrap) in
+/// 32 bits, so they agree bit for bit on every output. Falls back to the
+/// generic exec_i32_i8 without AVX-512 / under force-scalar.
+template <uint32_t M, uint32_t N, uint32_t K>
+inline void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
+                                  uint32_t s1, uint32_t s2, uint32_t const_acc) {
+  constexpr uint32_t B = 1, in_bits = 8;
+  static_assert(N % 16 == 0, "specialized i8 MFMA assumes N is a multiple of the zmm width");
+  if constexpr (!util::has_stdx_simd) {
+    exec_i32_i8(cu, M, N, K, B, dst, s0, s1, s2, const_acc);
+    return;
+  } else {
+    if (util::force_scalar() || util::native<float>::size() != 16) {
+      exec_i32_i8(cu, M, N, K, B, dst, s0, s1, s2, const_acc);
+      return;
+    }
+    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
+    const uint32_t wf = cu.wf_size();
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    alignas(64) int32_t A_buf[M * K]; // A[row][k]
+    alignas(64) int32_t B_buf[K * N]; // B[k][col]
+    alignas(64) int32_t C_buf[M * N]; // C[row][col]
+    // Bulk sign-extend the packed i8 regions to int32 once, then the hoist is
+    // a pure i32 index-shuffle (byte of word w lane l sub s -> (w*wf+l)*4+s).
+    alignas(64) int32_t A_i32[M * K];
+    alignas(64) int32_t B_i32[N * K];
+    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(a_words), A_i32, M * K);
+    util::i8_to_i32_block(reinterpret_cast<const int8_t *>(b_words), B_i32, N * K);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = output_loc_32(M, N, row, col, 0);
+        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                   ? static_cast<int32_t>(const_acc)
+                                   : static_cast<int32_t>(c_words[out.reg * wf + out.lane]);
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = input_loc(M, K, B, row, k, 0, in_bits);
+        A_buf[row * K + k] = A_i32[(al.vgpr_offset * wf + al.lane) * 4 + al.sub_element];
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = input_loc(N, K, B, col, k, 0, in_bits);
+        B_buf[k * N + col] = B_i32[(bl.vgpr_offset * wf + bl.lane) * 4 + bl.sub_element];
+      }
+    // Dense MxKxN matmul, W-lane (zmm) stdx i32 MAC over N (N/W chunks per row).
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t c0 = 0; c0 < N; c0 += W) {
+        util::native<int32_t> c_row;
+        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        for (uint32_t k = 0; k < K; ++k) {
+          util::native<int32_t> a_bcast(A_buf[row * K + k]);
+          util::native<int32_t> b_row;
+          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+          c_row += a_bcast * b_row;
+        }
+        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+      }
+    // Scatter directly back to VGPRs (no Result staging vector).
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = output_loc_32(M, N, row, col, 0);
+        d_words[out.reg * wf + out.lane] = static_cast<uint32_t>(C_buf[row * N + col]);
+      }
   }
 }
 

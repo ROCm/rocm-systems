@@ -202,6 +202,53 @@ TEST(WmmaSimdExact, I32) {
   });
 }
 
+// --- specialized dense iu8 kernel: all sign combos, clamp on and off ---
+TEST(WmmaSimdExact, I32Iu8Spec) {
+  SKIP_IF_NO_SIMD();
+  for (bool clamp : {false, true})
+    for (bool a_signed : {false, true})
+      for (bool b_signed : {false, true})
+        run_case("wmma_i32_16x16x64_iu8_spec", Fmt::I8, Fmt::I8, [=](WmmaFixture &fx, uint32_t ca) {
+          amdgpu::exec_wmma_i32_16x16x64_iu8(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                             fx.vbase + ACC, a_signed, b_signed, clamp, ca);
+        });
+}
+
+// --- specialized dense iu8 kernel: saturation corners ---
+// Accumulator seeded just below INT32_MAX / just above INT32_MIN so the i64
+// add crosses the int32 boundary: with clamp it must saturate, without it
+// wrap, identically to the scalar reference.
+TEST(WmmaSimdExact, I32Iu8SpecSaturation) {
+  SKIP_IF_NO_SIMD();
+  struct Corner {
+    uint32_t acc_word;
+    Mode a_mode; // sum direction picked via A pattern: 0x7F = up, 0x80 = down
+  };
+  const Corner corners[] = {{0x7FFFFF00u, Mode::MaxFinite}, {0x80000100u, Mode::Denorm}};
+  for (auto c : corners)
+    for (bool clamp : {false, true}) {
+      WmmaFixture fx;
+      ASSERT_NE(fx.wf, nullptr);
+      fx.seed(S0, IN_REGS, Fmt::I8, c.a_mode, 1);        // A: all 0x7F or all 0x80 (signed -128)
+      fx.seed(S1, IN_REGS, Fmt::I8, Mode::MaxFinite, 2); // B: all 0x7F
+      auto reseed_acc = [&] {
+        for (uint32_t reg = 0; reg < ACC_REGS; ++reg)
+          for (uint32_t lane = 0; lane < WF; ++lane)
+            fx.cu->write_vgpr(fx.vbase + ACC + reg, lane, c.acc_word);
+      };
+      expect_bit_exact(
+          "wmma_i32_16x16x64_iu8_spec_sat", c.a_mode, fx, reseed_acc,
+          [&] {
+            amdgpu::exec_wmma_i32_16x16x64_iu8(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                               fx.vbase + ACC, /*a_signed=*/true,
+                                               /*b_signed=*/false, clamp, amdgpu::ACC_FROM_VGPR);
+          },
+          ACC, ACC_REGS);
+      if (testing::Test::HasFatalFailure())
+        return;
+    }
+}
+
 // --- mixed-format dense (fp4/fp6/bf6 paths) and fp4 32x16 shape ---
 TEST(WmmaSimdExact, MixedFmt) {
   SKIP_IF_NO_SIMD();

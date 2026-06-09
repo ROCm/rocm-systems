@@ -210,6 +210,67 @@ inline void bf16_to_f32_block(const uint16_t *src, float *dst, size_t n) {
     dst[i] = bf16_to_f32(src[i]);
 }
 
+namespace detail {
+
+#if defined(UTIL_HAS_X86_F16C)
+/// x86 specialization: i8->i32 / u8->i32 are plain sign-/zero-extends, no
+/// F16C needed. AVX-512 does 16/instr, AVX2 8.
+inline void i8_to_i32_block_arch(const int8_t *src, int32_t *dst, size_t n, size_t &i) {
+#if defined(__AVX512F__)
+  for (; i + 16 <= n; i += 16)
+    _mm512_storeu_si512(
+        reinterpret_cast<__m512i *>(&dst[i]),
+        _mm512_cvtepi8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+#if defined(__AVX2__)
+  for (; i + 8 <= n; i += 8)
+    _mm256_storeu_si256(
+        reinterpret_cast<__m256i *>(&dst[i]),
+        _mm256_cvtepi8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+}
+inline void u8_to_i32_block_arch(const uint8_t *src, int32_t *dst, size_t n, size_t &i) {
+#if defined(__AVX512F__)
+  for (; i + 16 <= n; i += 16)
+    _mm512_storeu_si512(
+        reinterpret_cast<__m512i *>(&dst[i]),
+        _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+#if defined(__AVX2__)
+  for (; i + 8 <= n; i += 8)
+    _mm256_storeu_si256(
+        reinterpret_cast<__m256i *>(&dst[i]),
+        _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(src + i))));
+#endif
+}
+#else
+/// Portable fallback: no vector advance; the scalar extend loops below do all
+/// the work (and trivially auto-vectorize).
+inline void i8_to_i32_block_arch(const int8_t *, int32_t *, size_t, size_t &) {}
+inline void u8_to_i32_block_arch(const uint8_t *, int32_t *, size_t, size_t &) {}
+#endif
+
+} // namespace detail
+
+/// @brief Sign-extend `n` contiguous int8 values to int32.
+///
+/// Exact widening, so vector and scalar paths are bit-identical for every
+/// input. Hot path: integer MFMA/WMMA i8 input gather.
+inline void i8_to_i32_block(const int8_t *src, int32_t *dst, size_t n) {
+  size_t i = 0;
+  detail::i8_to_i32_block_arch(src, dst, n, i);
+  for (; i < n; ++i)
+    dst[i] = static_cast<int32_t>(src[i]);
+}
+
+/// @brief Zero-extend `n` contiguous uint8 values to int32 (unsigned iu8 WMMA).
+inline void u8_to_i32_block(const uint8_t *src, int32_t *dst, size_t n) {
+  size_t i = 0;
+  detail::u8_to_i32_block_arch(src, dst, n, i);
+  for (; i < n; ++i)
+    dst[i] = static_cast<int32_t>(src[i]);
+}
+
 /// @brief Convert a float to 16-bit BFloat16 with round-to-nearest-even.
 inline uint16_t f32_to_bf16_rne(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);

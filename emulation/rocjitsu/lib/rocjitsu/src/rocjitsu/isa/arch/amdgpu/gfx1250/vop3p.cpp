@@ -5494,10 +5494,9 @@ void VWmmaI3216x16x64Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = src2.read_scalar(wf);
   }
-  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i8 : amdgpu::extract_u8;
-  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i8 : amdgpu::extract_u8;
-  amdgpu::exec_wmma_i32(cu, 16, 16, 64, 8, dst, src0_base, src1_base, s2, extract_a, extract_b,
-                        inst_.clamp, const_acc);
+  amdgpu::exec_wmma_i32_16x16x64_iu8(cu, dst, src0_base, src1_base, s2,
+                                     /*a_signed=*/(inst_.neg & 0x1u) != 0,
+                                     /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp, const_acc);
 }
 
 VSwmmacF3216x16x128Fp8Fp8Vop3p::VSwmmacF3216x16x128Fp8Fp8Vop3p(const MachineInst *inst)

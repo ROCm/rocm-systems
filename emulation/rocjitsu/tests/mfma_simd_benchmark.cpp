@@ -412,6 +412,60 @@ TEST(MfmaSimdBenchmark, I32_32x32x16_i8) {
   bench("v_mfma_i32_32x32x16_i8", fx, run, double(M) * N * K * B, /*is_int=*/true);
 }
 
+// Dense i8 shapes: dedicated constexpr specializations (i8 bulk sign-extend
+// convert instead of per-element extract_i8).
+TEST(MfmaSimdBenchmark, I32_16x16x32_i8_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, B = 1;
+  fx.seed_i8(S0_OFF, 8, mma_test::SmallI8Gen(7));
+  fx.seed_i8(S1_OFF, 8, mma_test::SmallI8Gen(8));
+  auto run = [&] {
+    amdgpu::exec_i32_mfma_i8_spec<16, 16, 32>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                              fx.vbase + S1_OFF, 0, /*const_acc=*/0);
+  };
+  bench("v_mfma_i32_16x16x32_i8 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/true);
+}
+
+TEST(MfmaSimdBenchmark, I32_32x32x16_i8_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 16, B = 1;
+  fx.seed_i8(S0_OFF, 8, mma_test::SmallI8Gen(9));
+  fx.seed_i8(S1_OFF, 8, mma_test::SmallI8Gen(10));
+  auto run = [&] {
+    amdgpu::exec_i32_mfma_i8_spec<32, 32, 16>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                              fx.vbase + S1_OFF, 0, /*const_acc=*/0);
+  };
+  bench("v_mfma_i32_32x32x16_i8 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/true);
+}
+
+TEST(MfmaSimdBenchmark, I32_16x16x64_i8_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 64, B = 1;
+  fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(11));
+  fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(12));
+  auto run = [&] {
+    amdgpu::exec_i32_mfma_i8_spec<16, 16, 64>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                              fx.vbase + S1_OFF, 0, /*const_acc=*/0);
+  };
+  bench("v_mfma_i32_16x16x64_i8 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/true);
+}
+
+TEST(MfmaSimdBenchmark, I32_32x32x32_i8_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 32, B = 1;
+  fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(13));
+  fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(14));
+  auto run = [&] {
+    amdgpu::exec_i32_mfma_i8_spec<32, 32, 32>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                              fx.vbase + S1_OFF, 0, /*const_acc=*/0);
+  };
+  bench("v_mfma_i32_32x32x32_i8 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/true);
+}
+
 // v_mfma_scale_f32_16x16x128_f8f6f4: MX-scaled fp8 path (exec_f32_scaled),
 // in_bits=8, K=128 (4 K-blocks), N=16. Scales seeded to e8m0 127 (factor 1).
 TEST(MfmaSimdBenchmark, F32Scaled_16x16x128_fp8) {
