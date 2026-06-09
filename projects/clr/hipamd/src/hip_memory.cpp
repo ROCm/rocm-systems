@@ -3075,6 +3075,11 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     const bool isIndirect = ops != nullptr &&
         (ops[i] & (hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst));
 
+    // Swap and indirect are mutually exclusive, regardless of source (attrs or ops).
+    if (isSwap && isIndirect) {
+      return hipErrorInvalidValue;
+    }
+
     if (isSwap) {
       // Swap requires D2D — both buffers must be device memory.
       switch (type) {
@@ -3185,7 +3190,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
         // Copy tail: A[sizeB..sizeA-1] → B[sizeB..sizeA-1].
         // In swap semantics: dsts[i]=A (dstMemory), srcs[i]=B (srcMemory).
         // For the tail copy, source is A (dstMemories) and dest is B (srcMemories).
-        amd::CopyMetadata copyMeta(isAsync, amd::CopyMetadata::CopyEnginePreference::NONE);
+        // Inherit engine preference from the swap metadata, only override op type.
+        amd::CopyMetadata copyMeta = metadata;
+        copyMeta.copyOpType_ = amd::CopyMetadata::kCopyOpLinear;
         copyOps.emplace_back(dstMemories[idx], srcMemories[idx],
                              dstOffsets[idx] + sizeB, srcOffsets[idx] + sizeB,
                              sizes[idx] - sizeB, copyMeta);
