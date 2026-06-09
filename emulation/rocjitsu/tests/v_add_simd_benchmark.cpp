@@ -105,7 +105,10 @@ struct BenchFixture {
       }
       cu->write_vgpr(vbase + 0, lane, r0);
       cu->write_vgpr(vbase + 1, lane, r1);
-      cu->write_vgpr(vbase + 2, lane, 0u); // dst
+      uint32_t r2 = static_cast<uint32_t>(rng());
+      if (sanitize_finite)
+        r2 = sanitize(r2);
+      cu->write_vgpr(vbase + 2, lane, r2); // dst / accumulator
     }
     wf->set_exec(~0ULL); // All lanes active.
   }
@@ -199,6 +202,16 @@ TEST(VAddSimdBenchmark, Cdna4_VAddU32_Vop2) {
   }
   uint32_t enc = vop2_encode(/*opcode=*/52, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
   run_one("v_add_u32 v2, v0, v1", enc, /*sanitize_finite=*/false);
+}
+
+// v_mul_f32 v2, v0, v1  (CDNA4 VOP2 opcode 5)
+TEST(VAddSimdBenchmark, Cdna4_VMulF32_Vop2) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
+    return;
+  }
+  uint32_t enc = vop2_encode(/*opcode=*/5, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);
+  run_one("v_mul_f32 v2, v0, v1", enc, /*sanitize_finite=*/true);
 }
 
 // v_add_u16 v2, v0, v1  (CDNA4 VOP2 opcode 38) — 16-bit integer, low-16 path.
