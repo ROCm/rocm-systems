@@ -57,6 +57,9 @@ set(EXECUTABLE_NAME "rocprof-compute")
 include(ExternalProject)
 include(GNUInstallDirs)
 include(utils.cmake)
+# Must run before asan_build_dependencies.cmake, whose pthread guard reads the
+# ENABLE_SANITIZER that this module resolves.
+include(cmake/sanitizers.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/asan_build_dependencies.cmake)
 
 set(BUILD_ENABLE_LINTIAN_OVERRIDES ON CACHE BOOL "Enable/Disable Lintian Overrides")
@@ -114,6 +117,7 @@ set(PYTHON_TEST_COMMAND
     CACHE STRING
     "Python command for running tests (portable)"
 )
+enable_sanitizer_python_launcher(PYTHON_TEST_COMMAND)
 message(STATUS "Python test command: ${PYTHON_TEST_COMMAND}")
 
 # ----------------------
