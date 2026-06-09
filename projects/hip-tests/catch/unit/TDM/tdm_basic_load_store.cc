@@ -4,10 +4,9 @@
 
 #include <string>
 
+#if defined(__clang__) && defined(__HIP__)
 typedef int v4i __attribute__((ext_vector_type(4)));
 typedef int v8i __attribute__((ext_vector_type(8)));
-
-#if defined(__clang__) && defined(__HIP__)
 __global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
                                        [[maybe_unused]] int* result,
                                        [[maybe_unused]] int sizex,
@@ -29,8 +28,8 @@ __global__ void  TDM_load_store_tester([[maybe_unused]] const int* data,
     group1.tileDim0(sizex);
     group1.tileDim1(sizey);
 
-    v4i v4i_zeros = (v4i){0, 0, 0, 0};
-    v8i v8i_zeros = (v8i){0, 0, 0, 0, 0, 0, 0, 0};
+    v4i v4i_zeros{0, 0, 0, 0};
+    v8i v8i_zeros{0, 0, 0, 0, 0, 0, 0, 0};
     __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, v4i_zeros, v4i_zeros, v8i_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     __syncthreads();
