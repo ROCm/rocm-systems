@@ -180,7 +180,7 @@ json_has_project_name_root(const std::string& json_path)
     }
     try
     {
-        auto json = nlohmann::json::parse(ifs);
+        const auto json = nlohmann::json::parse(ifs);
         return json.is_object() && json.contains(TIMEMORY_PROJECT_NAME);
     } catch(const nlohmann::json::exception&)
     {
