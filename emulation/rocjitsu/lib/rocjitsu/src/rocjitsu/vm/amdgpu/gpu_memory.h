@@ -42,11 +42,9 @@ public:
       auto &hdr = msg->header();
       auto *data = reinterpret_cast<uint8_t *>(msg->payload());
       if (hdr.op == simdojo::MessageOp::READ) {
-        for (uint32_t i = 0; i < hdr.size_bytes; ++i)
-          data[i] = read8(hdr.addr + i);
+        read_block(hdr.addr, data, hdr.size_bytes);
       } else if (hdr.op == simdojo::MessageOp::WRITE) {
-        for (uint32_t i = 0; i < hdr.size_bytes; ++i)
-          write8(hdr.addr + i, data[i]);
+        write_block(hdr.addr, data, hdr.size_bytes);
       }
       hdr.op = simdojo::MessageOp::RESPONSE;
     });
@@ -174,8 +172,7 @@ public:
       if (auto *p = translate(ea, vmid)) {
         std::memcpy(dst + copied, p + page_offset, chunk);
       } else {
-        for (uint32_t i = 0; i < chunk; ++i)
-          dst[copied + i] = SparseMemory::read8(ea + i);
+        SparseMemory::read_block(ea, dst + copied, chunk);
       }
       copied += chunk;
     }
@@ -226,8 +223,7 @@ public:
       if (auto *p = translate(ea, vmid)) {
         std::memcpy(p + page_offset, src + copied, chunk);
       } else {
-        for (uint32_t i = 0; i < chunk; ++i)
-          SparseMemory::write8(ea + i, src[copied + i]);
+        SparseMemory::write_block(ea, src + copied, chunk);
       }
       copied += chunk;
     }

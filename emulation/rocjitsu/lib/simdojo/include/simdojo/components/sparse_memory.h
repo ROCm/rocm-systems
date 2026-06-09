@@ -112,6 +112,33 @@ public:
     return val;
   }
 
+  /// @brief Read a block of bytes from sparse memory.
+  /// @param addr Starting memory address.
+  /// @param dst Destination buffer.
+  /// @param size Number of bytes to read.
+  void read_block(uint64_t addr, uint8_t *dst, size_t size) const {
+    size_t copied = 0;
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const size_t page_off = ea & PAGE_MASK;
+      const size_t chunk = std::min(size - copied, PAGE_SIZE - page_off);
+      {
+        std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
+        auto it = host_page_map_.find(ea >> PAGE_SHIFT);
+        if (it != host_page_map_.end()) {
+          std::memcpy(dst + copied, it->second + page_off, chunk);
+          copied += chunk;
+          continue;
+        }
+      }
+      {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        read_bytes(ea, dst + copied, chunk);
+      }
+      copied += chunk;
+    }
+  }
+
   /// @brief Write an 8-bit value to the given address.
   /// @param addr Memory address to write to.
   /// @param val Value to write.
@@ -174,6 +201,33 @@ public:
     }
     std::unique_lock<std::shared_mutex> lock(mutex_);
     write_bytes(addr, &val, sizeof(val));
+  }
+
+  /// @brief Write a block of bytes to sparse memory.
+  /// @param addr Starting memory address.
+  /// @param src Source buffer.
+  /// @param size Number of bytes to write.
+  void write_block(uint64_t addr, const uint8_t *src, size_t size) {
+    size_t copied = 0;
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const size_t page_off = ea & PAGE_MASK;
+      const size_t chunk = std::min(size - copied, PAGE_SIZE - page_off);
+      {
+        std::shared_lock<std::shared_mutex> lock(host_range_mutex_);
+        auto it = host_page_map_.find(ea >> PAGE_SHIFT);
+        if (it != host_page_map_.end()) {
+          std::memcpy(it->second + page_off, src + copied, chunk);
+          copied += chunk;
+          continue;
+        }
+      }
+      {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        write_bytes(ea, src + copied, chunk);
+      }
+      copied += chunk;
+    }
   }
 
   /// @brief Instruction fetch - read a 32-bit word (little-endian).
