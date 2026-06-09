@@ -37,8 +37,10 @@ struct ginRocshmemCollCtx {
 };
 
 static ncclResult_t ginRocshmemInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  // rocshmem_init already called from init.cc
   *ctx = nullptr;
+  const char *gin_type = getenv("NCCL_GIN_TYPE");
+  if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_API)
+    return ncclInternalError;
   return ncclSuccess;
 }
 

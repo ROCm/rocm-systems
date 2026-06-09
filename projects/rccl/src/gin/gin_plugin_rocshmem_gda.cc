@@ -30,6 +30,11 @@ struct ginRocshmemGdaCollCtx {
 
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   *ctx = nullptr;
+  const char *gin_type = getenv("NCCL_GIN_TYPE");
+  // If GIN_TYPE is explicitly set to something else, don't interfere
+  if (gin_type && atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
+    return ncclInternalError;
+  // Auto-select or explicit GIN_TYPE=5: probe for supported hardware
   return (rocshmem_gin_probe_devices() > 0) ? ncclSuccess : ncclInternalError;
 }
 
