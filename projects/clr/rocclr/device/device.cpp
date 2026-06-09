@@ -244,11 +244,6 @@ uint32_t cachedIsaMetaUint(const Isa& isa, const char* key, uint32_t defaultValu
 }
 }  // namespace
 
-uint32_t Isa::simdPerCU() const {
-  // "EUsPerCU" (execution units per CU) is comgr's name for the number of SIMDs per CU.
-  return cachedIsaMetaUint(*this, "EUsPerCU", (versionMajor_ <= 9) ? 4 : 2);
-}
-
 uint32_t Isa::localMemSizePerCU() const {
   return cachedIsaMetaUint(*this, "LocalMemorySize", 64 * Ki);
 }

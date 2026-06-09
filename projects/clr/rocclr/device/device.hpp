@@ -1600,14 +1600,12 @@ class Isa {
   /// @returns This Isa's stepping version.
   uint32_t versionStepping() const { return versionStepping_; }
 
-  /// @returns This Isa's number of SIMDs per CU. Sourced at runtime from comgr ISA
-  /// metadata ("EUsPerCU") rather than a hardcoded table, so unreleased-target device
-  /// information is never published in source.
-  uint32_t simdPerCU() const;
+  /// @returns This Isa's base SIMDs per CU, derived from ISA version (gfx9 and earlier: 4,
+  /// gfx10+: 2). Online devices report the driver/HSA value via Device::info().simdPerCU_.
+  uint32_t simdPerCU() const { return (versionMajor_ <= 9) ? 4 : 2; }
 
-  /// @returns This Isa's number of work-items processed per SIMD. Derived from the ISA
-  /// version: wave64 architectures (gfx9 and earlier) use 16, wave32 architectures
-  /// (gfx10 and later) use 32.
+  /// @returns This Isa's work-items processed per SIMD, derived from ISA version
+  /// (gfx9 and earlier: 16, gfx10+: 32).
   uint32_t simdWidth() const { return (versionMajor_ <= 9) ? 16 : 32; }
 
   /// @returns This Isa's number of instructions processed per SIMD.
