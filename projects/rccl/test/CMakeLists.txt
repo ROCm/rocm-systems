@@ -146,6 +146,16 @@ if(BUILD_TESTS)
     list(APPEND RCCL_COMMON_LINK_LIBS ${MPI_CXX_LIBRARIES})
   endif()
 
+  # The transport/VerbsMPI/ tests use raw libibverbs for RDMA acceptance checks.
+  if(ENABLE_MPI_TESTS)
+    find_library(IBVERBS_LIBRARY NAMES ibverbs)
+    if(IBVERBS_LIBRARY)
+      list(APPEND RCCL_COMMON_LINK_LIBS ${IBVERBS_LIBRARY})
+    else()
+      message(WARNING "libibverbs not found; transport/VerbsMPI tests will fail to link")
+    endif()
+  endif()
+
   # Get the compile definitions from the main rccl target
   # These helps to keep the test compile definitions in sync with the main rccl target
   # Also, all the structure layout remains the same across all the targets
@@ -315,6 +325,8 @@ if(BUILD_TESTS)
       ce/CeMPITests.cpp
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
+      transport/VerbsMPI/ConnectionTests.cpp
+      transport/VerbsMPI/RdmaTransferTests.cpp
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
