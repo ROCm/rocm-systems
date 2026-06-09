@@ -575,7 +575,7 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment);
   virtual bool virtualFree(void* addr);
 
-  //! Direct synchronous map/unmap path (stub; real impl lands in next commit)
+  //! Direct synchronous map/unmap path
   virtual bool virtualMap(void* va, size_t size, amd::Memory* phys);
   virtual bool virtualUnmap(void* va, size_t size);
 
