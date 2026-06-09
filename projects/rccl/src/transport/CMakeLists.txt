@@ -20,6 +20,17 @@ list(APPEND TRANSPORT_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/net_ib.cc)
 add_subdirectory(net_ib_cast)
 # <<< RCCL-DELTA
 
+# >>> RCCL-DELTA: transport/ headers staged for hipify (NCCL does not track headers in CMake).
+#     net_ib/gin.h and net_ib/gdaki/gin_host_gdaki.h belong to the modular net_ib/ subtree that
+#     RCCL does not build, but RCCL's monolithic net_ib path still needs them staged, so they
+#     are listed here in the wired transport leaf rather than the unbuilt net_ib/ leaves.
+list(APPEND TRANSPORT_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_limits.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib/gin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib/gdaki/gin_host_gdaki.h
+)
+# <<< RCCL-DELTA
+
 # Add transport sources to parent scope
 set(TRANSPORT_SOURCES ${TRANSPORT_SOURCES} PARENT_SCOPE)
 

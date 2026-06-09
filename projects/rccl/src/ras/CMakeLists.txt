@@ -13,5 +13,9 @@ set(RAS_SOURCES
 list(APPEND RAS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/client.cc)
 # <<< RCCL-DELTA
 
+# >>> RCCL-DELTA: ras/ headers staged for hipify (NCCL does not track headers in CMake).
+list(APPEND RAS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/ras_internal.h)
+# <<< RCCL-DELTA
+
 # Add RAS sources to parent scope
 set(RAS_SOURCES ${RAS_SOURCES} PARENT_SCOPE)

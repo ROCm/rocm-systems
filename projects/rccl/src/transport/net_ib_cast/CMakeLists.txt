@@ -1,7 +1,8 @@
 # Transport sources (paths relative to PROJECT_SOURCE_DIR to match SRC_FILES convention)
+# Note: net_ib_limits.h lives in src/transport/ and is staged by the transport leaf.
 set(NET_IB_CAST_SOURCES
-    src/transport/net_ib_limits.h
     src/transport/net_ib_cast/net_ib_cast_inspect.h
+    src/transport/net_ib_cast/net_ib_fault_inject.h
     src/transport/net_ib_cast/common_cast.h
     src/transport/net_ib_cast/connect_cast.h
     src/transport/net_ib_cast/gin_cast.h

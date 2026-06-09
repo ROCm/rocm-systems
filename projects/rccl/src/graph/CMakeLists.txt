@@ -17,5 +17,16 @@ list(APPEND GRAPH_SOURCES
 )
 # <<< RCCL-DELTA
 
+# >>> RCCL-DELTA: graph/ headers staged for hipify. NCCL does not track headers in CMake;
+#     RCCL must hipify them, so they are listed here (in their own directory's leaf).
+list(APPEND GRAPH_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/rings.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rome_models.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rome_topo_consensus.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/topo.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/xml.h
+)
+# <<< RCCL-DELTA
+
 # Add graph sources to parent scope
 set(GRAPH_SOURCES ${GRAPH_SOURCES} PARENT_SCOPE)

@@ -114,3 +114,45 @@ if(GENERATE_SYM_KERNELS)
   endif()
 endif()
 # <<< RCCL-DELTA
+
+# >>> RCCL-DELTA: device/ headers staged for hipify. NCCL does not track headers in CMake
+#     (and compiles device code as a CUDA OBJECT library), so RCCL lists the device headers
+#     here and exports them for the hipify pipeline in src/CMakeLists.txt. The hand-written
+#     device sources device/common.cu and device/onerank.cu remain in src/CMakeLists.txt
+#     because they are routed through the RCCL device-linker filters there.
+set(DEVICE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/all_gather.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/all_reduce.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/alltoall_pivot.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/alltoall_gda.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/alltoallv_gda.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/broadcast.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/common.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/common_kernel.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/op128.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/primitives.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/prims_ll128.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/prims_ll.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/prims_simple.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/reduce.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/reduce_kernel.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/reduce_scatter.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rccl_metadata.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/sendrecv.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/hierarchical_ag_shuffle.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/network/unpack/unpack_defs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/network/unpack/unpack.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/all_gather.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/all_gather_gin.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/all_reduce.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/data_ops.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/gin_scratch.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/gin_scratch__funcs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/gin_scratch__types.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/kernel.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/primitives.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/reduce_scatter.cuh
+    ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/reduce_scatter_gin.cuh
+)
+set(DEVICE_SOURCES ${DEVICE_SOURCES} PARENT_SCOPE)
+# <<< RCCL-DELTA
