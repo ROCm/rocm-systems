@@ -21,11 +21,9 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
       if (++wb_count <= 3)
         util::Logger::vm("L2 writeback(backing) #", wb_count, " addr=0x", std::hex, addr,
                          " size=", std::dec, size);
-      for (uint32_t i = 0; i < size; ++i)
-        backing_memory_->write8(addr + i, data[i], vmid);
+      backing_memory_->write_block(addr, data, size, vmid);
     } else {
-      for (uint32_t i = 0; i < size; ++i)
-        data[i] = backing_memory_->read8(addr + i, vmid);
+      backing_memory_->read_block(addr, data, size, vmid);
     }
     return;
   }

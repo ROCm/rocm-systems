@@ -42,6 +42,7 @@ add_executable(
     matmul_test.cpp
     vector_add_test.cpp
     gfx1250_sim_test.cpp
+    l2_cache_test.cpp
     simdojo_sim_test.cpp
     partitioning_test.cpp
     simulated_driver_test.cpp

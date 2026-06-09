@@ -12,7 +12,6 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
 
-#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -44,17 +43,11 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// Provides structural ports for the topology graph (IN for CU L1 miss
 /// requests, OUT for HBM/fabric traffic).
 ///
-/// THREAD SAFETY: The L2's read(), write(), fetch_line(), writeback_line(),
-/// ensure_line(), and flush_line() methods are NOT thread-safe. They operate on
-/// the underlying CacheStore without locking. Only atomic_rmw() is protected
-/// (via striped mutexes for cross-CU atomics to the same L2).
-///
-/// All CUs sharing an L2 instance MUST be assigned to the same simulation
-/// partition. This invariant ensures that only one worker thread accesses the
-/// L2's non-atomic paths at any given time. Violating this constraint (e.g.,
-/// placing CUs connected to the same L2 in different partitions) will cause
-/// data races on the cache data structure. The partitioner must enforce this
-/// constraint.
+/// @par Thread safety
+/// Public cache operations are thread-safe. A single L2 mutex protects the
+/// underlying CacheStore, matching the functional simulator's coarse L2
+/// arbitration point while avoiding races when CPU dispatch workers share an
+/// XCD-local L2.
 class L2Cache : public simdojo::Component {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -129,8 +122,6 @@ public:
   ///           old value, compute the new value, and write it in place.
   template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
     std::lock_guard<std::recursive_mutex> cache_lock(mutex_);
-    uint32_t stripe = (addr >> LINE_SIZE_BITS) & (ATOMIC_STRIPE_COUNT - 1);
-    std::lock_guard<std::mutex> lock(atomic_stripes_[stripe]);
     ensure_line(addr, vmid);
 
     uint32_t offset = CacheStore::line_offset(addr);
@@ -196,16 +187,10 @@ private:
   void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
                     uint32_t vmid = 0);
 
-  static constexpr uint32_t ATOMIC_STRIPE_COUNT = 64;
-
   CacheStore cache_;
   mutable std::recursive_mutex mutex_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
-  /// @brief Striped locks for atomic RMW serialization. Each stripe covers
-  /// a range of cache lines, allowing atomics to different lines to proceed
-  /// in parallel (matching real L2 arbitration behavior).
-  std::array<std::mutex, ATOMIC_STRIPE_COUNT> atomic_stripes_;
   std::vector<simdojo::Port *> cpl_ports_;
   uint64_t write_count_ = 0; ///< Debug: total L2 writes (for trace).
 };

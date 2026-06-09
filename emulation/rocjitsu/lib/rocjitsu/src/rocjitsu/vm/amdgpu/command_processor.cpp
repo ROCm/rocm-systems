@@ -145,8 +145,7 @@ public:
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
-    done_cv_.wait(lock,
-                  [this]() { return next_task_ >= tasks_.size() && active_workers_ == 0; });
+    done_cv_.wait(lock, [this]() { return next_task_ >= tasks_.size() && active_workers_ == 0; });
     tasks_.clear();
   }
 
@@ -1206,9 +1205,7 @@ void CommandProcessor::fetch_packets() {
     fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
 }
 
-void CommandProcessor::handle_doorbell(simdojo::Tick timestamp) {
-  handle_doorbell_sync(timestamp);
-}
+void CommandProcessor::handle_doorbell(simdojo::Tick timestamp) { handle_doorbell_sync(timestamp); }
 
 void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
   util::Logger::cp(

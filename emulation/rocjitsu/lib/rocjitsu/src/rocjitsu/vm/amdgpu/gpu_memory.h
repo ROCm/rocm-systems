@@ -12,6 +12,7 @@
 #include "simdojo/sim/component.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <memory>
@@ -129,6 +130,23 @@ public:
     return SparseMemory::read8(addr);
   }
 
+  void read_block(uint64_t addr, uint8_t *dst, uint32_t size, uint32_t vmid = 0) const {
+    uint32_t copied = 0;
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const size_t page_offset = ea & PAGE_MASK;
+      const uint32_t chunk =
+          std::min<uint32_t>(size - copied, static_cast<uint32_t>(PAGE_SIZE - page_offset));
+      if (auto *p = translate(ea, vmid)) {
+        std::memcpy(dst + copied, p + page_offset, chunk);
+      } else {
+        for (uint32_t i = 0; i < chunk; ++i)
+          dst[copied + i] = SparseMemory::read8(ea + i);
+      }
+      copied += chunk;
+    }
+  }
+
   uint16_t read16(uint64_t addr, uint32_t vmid = 0) const {
     if (auto *p = translate(addr, vmid); p && (addr & PAGE_MASK) + 2 <= PAGE_SIZE) {
       uint16_t val;
@@ -162,6 +180,23 @@ public:
       return;
     }
     SparseMemory::write8(addr, val);
+  }
+
+  void write_block(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid = 0) {
+    uint32_t copied = 0;
+    while (copied < size) {
+      const uint64_t ea = addr + copied;
+      const size_t page_offset = ea & PAGE_MASK;
+      const uint32_t chunk =
+          std::min<uint32_t>(size - copied, static_cast<uint32_t>(PAGE_SIZE - page_offset));
+      if (auto *p = translate(ea, vmid)) {
+        std::memcpy(p + page_offset, src + copied, chunk);
+      } else {
+        for (uint32_t i = 0; i < chunk; ++i)
+          SparseMemory::write8(ea + i, src[copied + i]);
+      }
+      copied += chunk;
+    }
   }
 
   void write16(uint64_t addr, uint16_t val, uint32_t vmid = 0) {
