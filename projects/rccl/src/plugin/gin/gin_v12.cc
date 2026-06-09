@@ -125,35 +125,35 @@ ncclGin_t* getNcclGin_v12(void* lib) {
   return nullptr;
 }
 
-static const int ncclGin_built_in_count = 4;
-static ncclGin_t ncclGin_built_in[ncclGin_built_in_count];
-static int ncclGin_built_in_idx = 0;
-ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12) {
-  if ((ncclGin_built_in_idx >= ncclGin_built_in_count) || !ncclGin_v12) {
+
+ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12_ext) {
+  if (ncclGin_v12 != NULL) {
+    INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: cannot load built-in v12 gin iface. preoccupied with %s (v12)", ncclGin_v12->name); 
     return nullptr;
   }
+  ncclGin_v12 = ncclGin_v12_ext;
 
-  ncclGin_t* __ncclGin = &ncclGin_built_in[ncclGin_built_in_idx++];
-  __ncclGin->name = ncclGin_v12->name;
-  __ncclGin->init = ncclGin_v12->init;
-  __ncclGin->devices = ncclGin_v12->devices;
-  __ncclGin->getProperties = ncclGin_getProperties;
-  __ncclGin->listen = ncclGin_v12->listen;
-  __ncclGin->connect = ncclGin_connect;
-  __ncclGin->createContext = ncclGin_createContext;
-  __ncclGin->regMrSym = ncclGin_v12->regMrSym;
-  __ncclGin->regMrSymDmaBuf = ncclGin_v12->regMrSymDmaBuf;
-  __ncclGin->deregMrSym = ncclGin_v12->deregMrSym;
-  __ncclGin->destroyContext = ncclGin_destroyContext;
-  __ncclGin->closeColl = ncclGin_v12->closeColl;
-  __ncclGin->closeListen = ncclGin_v12->closeListen;
-  __ncclGin->iput = ncclGin_iput;
-  __ncclGin->iputSignal = ncclGin_iputSignal;
-  __ncclGin->iget = NULL;
-  __ncclGin->iflush = ncclGin_iflush;
-  __ncclGin->test = ncclGin_v12->test;
-  __ncclGin->ginProgress = ncclGin_v12->ginProgress;
-  __ncclGin->queryLastError = ncclGin_v12->queryLastError;
-  __ncclGin->finalize = ncclGin_v12->finalize;
-  return __ncclGin;
+  INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded gin plugin %s (v12)", ncclGin_v12->name);
+  ncclGin.name = ncclGin_v12->name;
+  ncclGin.init = ncclGin_v12->init;
+  ncclGin.devices = ncclGin_v12->devices;
+  ncclGin.getProperties = ncclGin_getProperties;
+  ncclGin.listen = ncclGin_v12->listen;
+  ncclGin.connect = ncclGin_connect;
+  ncclGin.createContext = ncclGin_createContext;
+  ncclGin.regMrSym = ncclGin_v12->regMrSym;
+  ncclGin.regMrSymDmaBuf = ncclGin_v12->regMrSymDmaBuf;
+  ncclGin.deregMrSym = ncclGin_v12->deregMrSym;
+  ncclGin.destroyContext = ncclGin_destroyContext;
+  ncclGin.closeColl = ncclGin_v12->closeColl;
+  ncclGin.closeListen = ncclGin_v12->closeListen;
+  ncclGin.iput = ncclGin_iput;
+  ncclGin.iputSignal = ncclGin_iputSignal;
+  ncclGin.iget = NULL;
+  ncclGin.iflush = ncclGin_iflush;
+  ncclGin.test = ncclGin_v12->test;
+  ncclGin.ginProgress = ncclGin_v12->ginProgress;
+  ncclGin.queryLastError = ncclGin_v12->queryLastError;
+  ncclGin.finalize = ncclGin_v12->finalize;
+  return &ncclGin;
 }

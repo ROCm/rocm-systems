@@ -241,10 +241,10 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
 
-  ginPluginLibs[pluginCounter].ncclGin = getNcclGin_v12_internal(&ncclGinIb);
+  ginPluginLibs[pluginCounter].ncclGin = getNcclGin_v12_internal(&ncclGinIbProxy);
   ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-  ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[2];
-  ginPluginLibs[pluginCounter].ncclRma = getNcclGin_v12_internal(&ncclGinIbProxy);
+  ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
+  ginPluginLibs[pluginCounter].ncclRma = ginPluginLibs[pluginCounter].ncclGin;
   ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
   ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
 

@@ -33,6 +33,7 @@ extern int64_t ncclParamGinType();
 
 NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
+RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
 
 
 #include <signal.h>
@@ -134,6 +135,10 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   // Allocate the signals on the GPU and then register the memory region with the GIN plugin.
   // Enforcing strong ordering on the signals mr is vital to ensure ordering between puts and signals.
   size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
+  ncclNetProperties_t props_tmp = rmaProxyCtx->props;
+  if (rcclParamRmaProxyUseDMABUF() == 0) {
+    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+  }
 #if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->signalsDev, &rmaProxyCtx->signalsCumemhandle,
                            CU_MEM_HANDLE_TYPE_NONE, signalsBufSize , comm->memManager));
@@ -141,7 +146,7 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->signalsDev, signalsBufSize, hipDeviceMallocUncached));
 #endif
   CUDACHECK(cudaMemset(rmaProxyCtx->signalsDev, 0, signalsBufSize));
-  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->signalsDev, signalsBufSize,
+  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, props_tmp, rmaProxyCtx->signalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
                                  &rmaProxyCtx->signalsMhandle, &rmaProxyCtx->signalsGinHandle));
   // Allocate the host buffer to track the expected values of the signals
@@ -216,7 +221,7 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclGin_t* 
 #endif
   CUDACHECK(cudaMemset(rmaProxyCtx->flushBufDev, 0, flushBufSize));
   NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->flushBufDev, flushBufSize,
-                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
+                                  NCCL_PTR_HOST, NCCL_NET_MR_FLAG_FORCE_SO,
                                   &rmaProxyCtx->flushBufMhandle, &rmaProxyCtx->flushBufGinHandle));
   // Allocate and initialize persistent descriptor queue
   rmaProxyCtx->persistentQueues = ncclMemoryStackAlloc<struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>>(&comm->memPermanent, comm->nRanks);
@@ -352,7 +357,6 @@ ncclResult_t ncclRmaProxyDestroyContext(ncclGin_t* ginComm, void* rmaProxyCtx){
 }
 
 // ---- Memory registration ----
-RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
 ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
     void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS],
     ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]){
