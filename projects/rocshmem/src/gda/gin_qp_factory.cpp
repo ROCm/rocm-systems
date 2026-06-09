@@ -1092,6 +1092,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
                              void* allgather_ctx,
                              rocshmem_gin_qp_set_t *out_qp_set,
                              void ***out_gpu_qps) {
+  log_pe_number = myRank;
+
   auto *set = new rocshmem_gin_qp_set();
   set->nRanks = nRanks;
   set->myRank = myRank;
