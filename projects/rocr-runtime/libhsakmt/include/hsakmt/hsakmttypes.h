@@ -81,6 +81,9 @@ typedef HSAuint64          HSA_QUEUEID;
 // // A HSA_NODEID that is never a valid node ID.
 #define INVALID_NODEID 0xFFFFFFFF
 
+struct _HsaKFDContext;
+typedef struct _HsaKFDContext HsaKFDContext;
+
 // This is included in order to force the alignments to be 4 bytes so that
 // it avoids extra padding added by the compiler when a 64-bit binary is generated.
 #pragma pack(push, hsakmttypes_h, 4)
