@@ -1257,6 +1257,21 @@ SIMD_VOP3P_PK_TERNARY_FP16: dict[str, str] = {
     'v_pk_fma_f16_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
 }
 
+# VOP3P packed-f32 binary. Each operand is a 64-bit consecutive-VGPR pair of two
+# f32 (lo/hi). Glue extracts each f32 half (narrow32 width), applies neg/neg_hi
+# (sign-bit toggle), runs the per-half functor, repacks. No clamp on any pk_f32
+# scalar body. Default packing only (op_sel = 0, op_sel_hi = 3).
+SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {
+    'v_pk_add_f32_vop3p': '[](auto a, auto b) { return a + b; }',
+    'v_pk_mul_f32_vop3p': '[](auto a, auto b) { return a * b; }',
+}
+
+# pk_fma_f32 — 3-source FMA per half. op_sel_hi_2 == 1 gate (src2-hi select).
+# NaN-input payload divergence accepted.
+SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
+    'v_pk_fma_f32_vop3p': '[](auto a, auto b, auto c) { return util::stdx::fma(a, b, c); }',
+}
+
 # v_pk_mov_b32 — default-packing-only fast path. Each src is a 64-bit pair
 # (consecutive VGPRs), result is (src0_lo, src1_hi). Functorless / fixed-op.
 SIMD_VOP3P_MOV_B32: set[str] = {
@@ -2036,6 +2051,18 @@ SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
         '[](auto a) { return util::stdx::static_simd_cast<util::native<float>>('
         'util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a))); }',
     ),
+    # f64 source -> float(exp) dst. Mixed-width (read64 / narrow32 store): the new
+    # cvt-vop3 f64->b32 glue applies the f64 src abs/neg + float omod/clamp.
+    # frexp_exp_f64_simd returns the int32 exp in the low 32 bits of each 64-bit
+    # lane; narrow to uint32 (scalar `(uint32_t)exp`) then to float (scalar
+    # unsigned `(float)(uint32_t)exp`). The intermediate uint32 narrow is
+    # load-bearing — a direct uint64->float would convert the full 64-bit value.
+    'v_frexp_exp_i32_f64_vop3': (
+        'fp64cvt',
+        '[](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>('
+        'util::stdx::static_simd_cast<util::narrow32<uint32_t>>('
+        'util::frexp_exp_f64_simd(s))); }',
+    ),
 }
 
 
@@ -2693,6 +2720,12 @@ def simd_probe_line(template_name: str) -> str | None:
     specpkf16t = SIMD_VOP3P_PK_TERNARY_FP16.get(template_name)
     if specpkf16t is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_FP16({specpkf16t});'
+    specpkf32 = SIMD_VOP3P_PK_BINARY_F32.get(template_name)
+    if specpkf32 is not None:
+        return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32({specpkf32});'
+    specpkf32t = SIMD_VOP3P_PK_TERNARY_F32.get(template_name)
+    if specpkf32t is not None:
+        return f'  ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32({specpkf32t});'
     if template_name in SIMD_VOP3P_MOV_B32:
         return '  ROCJITSU_TRY_SIMD_VOP3P_MOV_B32();'
     # VOP3P integer dot products (dot4 i8/u8, dot8 i4/u4, dot2 i16/u16).
@@ -2771,6 +2804,8 @@ def simd_probe_line(template_name: str) -> str | None:
         route, fn = specfrexp
         if route == 'fp16':
             return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16({fn});'
+        if route == 'fp64cvt':
+            return f'  ROCJITSU_TRY_SIMD_CVT_VOP3_F64_TO_B32_FP({fn});'
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {fn});'
     spec3unaf16 = SIMD_VOP3_UNARY_FP16.get(template_name)
     if spec3unaf16 is not None:
