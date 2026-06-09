@@ -127,7 +127,10 @@ target_link_libraries(
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
-gtest_discover_tests(rocjitsu_tests)
+# Benchmarks are timing tools, not correctness tests; keep them out of the
+# default ctest run (invoke them directly via
+# ./rocjitsu_tests --gtest_filter='*Benchmark*').
+gtest_discover_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
 
 add_executable(
     rj_dbt_translate_smoke_test
