@@ -1386,16 +1386,16 @@ L2 - Fabric interface detailed metrics:
     rst: The total number of L2 requests to Infinity Fabric to read :ref:`uncached data <memory-type>` from any memory location, per :ref:`normalization unit <normalization-units>`. 64B requests for uncached data are counted as two 32B uncached data requests. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
   Read Bandwidth - PCIe:
-    plain: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
-    rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
+    plain: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Read Bandwidth - Infinity Fabric™:
-    plain: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
-    rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
+    plain: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Read Bandwidth - HBM:
-    plain: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
-    rst: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
+    plain: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write and Atomic (32B):
     plain: The total number of L2 requests to Infinity Fabric to write or atomically update 32B of data to any memory location, per normalization unit.
@@ -1410,28 +1410,28 @@ L2 - Fabric interface detailed metrics:
     rst: The total number of L2 requests to Infinity Fabric to write or atomically update 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
   Write Bandwidth - PCIe:
-    plain: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
-    rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
+    plain: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write Bandwidth - Infinity Fabric™:
-    plain: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
-    rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
+    plain: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write Bandwidth - HBM:
-    plain: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
-    rst: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
+    plain: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - PCIe:
-    plain: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
-    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
+    plain: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - Infinity Fabric™:
-    plain: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
-    rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
+    plain: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - HBM:
-    plain: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
-    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
+    plain: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration. See docs for more detail.
+    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic:
     plain: The total number of L2 requests to Infinity Fabric to atomically update 32B or 64B of data in any memory location, per normalization unit. See Request flow for more detail. Note that on current CDNA accelerators, such as the MI2XX, requests are only considered atomic by Infinity Fabric if they are targeted at non-write-cacheable memory, such as fine-grained memory allocations or uncached memory allocations on the MI2XX.

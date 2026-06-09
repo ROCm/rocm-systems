@@ -144,7 +144,7 @@
         "1400_scalar_l1_data_cache.yaml": "9358238e7adc61c0da89323626eb01c6",
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "7d6d8cfd60256877f20d78e037c5ddad",
         "1600_vector_l1_data_cache.yaml": "fb29fd502f3937daeec4dfd4a2434ead",
-        "1700_l2_cache.yaml": "36e6e8c68673b7ab0dc32337ffa30a4d",
+        "1700_l2_cache.yaml": "2e040ea9e0fbf12021447eadfb914862",
         "1800_l2_cache_per_channel.yaml": "0d2447fc336fc797a4bb38ef95688afb",
         "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
         "3000_mem_bw.yaml": "bdc167a85a3bffd439fb4d651b3c2df8"
