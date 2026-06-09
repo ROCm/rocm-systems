@@ -67,7 +67,9 @@ DynCO::~DynCO() {
           assert(err == hipSuccess);
           // The amd::Memory object is now released; drop the cached pointer so
           // ~Var() does not dereference the freed object (heap-use-after-free).
-          elem.second->ResetDeviceVarPtr(dev->deviceId());
+          if (err == hipSuccess) {
+            elem.second->ResetDeviceVarPtr(dev->deviceId());
+          }
         }
       }
     }
