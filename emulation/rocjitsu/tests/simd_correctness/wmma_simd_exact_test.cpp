@@ -125,6 +125,14 @@ TEST(WmmaSimdExact, Bf16) {
     amdgpu::exec_wmma_bf16(*fx.cu, 16, 16, 32, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
                            fx.vbase + ACC, amdgpu::extract_bf16, amdgpu::extract_bf16, ca);
   });
+  run_case("wmma_f32_16x16x32_bf16_spec", Fmt::BF16, Fmt::F32, [](WmmaFixture &fx, uint32_t ca) {
+    amdgpu::exec_wmma_f32_16x16x32_bf16(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                        fx.vbase + ACC, ca);
+  });
+  run_case("wmma_bf16_16x16x32_bf16_spec", Fmt::BF16, Fmt::BF16, [](WmmaFixture &fx, uint32_t ca) {
+    amdgpu::exec_wmma_bf16_spec<16, 16, 32>(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                            fx.vbase + ACC, ca);
+  });
   run_sparse_f32("swmmac_f32_16x16x64_bf16", Fmt::BF16, 64, 16, amdgpu::extract_bf16,
                  amdgpu::extract_bf16);
   run_case("swmmac_bf16_16x16x64_bf16", Fmt::BF16, Fmt::BF16, [](WmmaFixture &fx, uint32_t ca) {
