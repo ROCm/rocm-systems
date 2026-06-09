@@ -288,6 +288,7 @@ if(HSA_RUNTIME64)
         set(HAS_DBT_VECTOR_ADD_GPU FALSE)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
+        set(HAS_GFX1201_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
                 COMMAND ${ROCM_AGENT_ENUM}
@@ -307,6 +308,9 @@ if(HSA_RUNTIME64)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
                 set(HAS_RDNA4_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
+                set(HAS_GFX1201_GPU TRUE)
             endif()
         endif()
 
@@ -339,12 +343,60 @@ if(HSA_RUNTIME64)
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
 
+        add_executable(hsa_hooks_test dbt/hsa_hooks_test.cpp)
+        target_include_directories(
+            hsa_hooks_test
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                ${CMAKE_SOURCE_DIR}/lib/util/include
+                ${RJ_HSA_INCLUDE_DIR}
+        )
+        target_link_libraries(
+            hsa_hooks_test
+            PRIVATE
+                ${RJ_OBJECT_LIBS}
+                ${HSA_RUNTIME64}
+                GTest::gtest
+                GTest::gtest_main
+        )
+        target_link_options(
+            hsa_hooks_test
+            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+        )
+        target_compile_definitions(
+            hsa_hooks_test
+            PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+        )
+        add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
+        rj_configure_target(hsa_hooks_test TEST)
+
         if(HAS_RDNA4_GPU)
             add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
+        endif()
+
+        if(HAS_GFX1201_GPU)
+            add_test(
+                NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                COMMAND
+                    hsa_hooks_test
+                    --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(
+                "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                PROPERTIES
+                    TIMEOUT 60
+                    ENVIRONMENT
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
+            )
+        endif()
+
+        if(HAS_RDNA4_GPU)
             add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
                 COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
