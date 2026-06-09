@@ -41,6 +41,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi` crashing (`SIGSEGV`) at startup on certain CPUs when the reported per-socket core capacity exceeds the number of online cores**.  
+  - For CPU family `0x1A` models `0x00`-`0x1F` and `0x50`-`0x5F`, the esmi library reads the per-socket core capacity from CPUID `0x80000008` and derives the socket count as `total_sockets = online_cpus / cores_per_socket`. When fewer cores are online than the reported capacity, this division truncates to `0`, after which esmi performs a zero-size allocation for its socket map and writes past it - crashing inside `esmi_init()`. Because the crash is a native `SIGSEGV` it could not be caught by the CLI, taking down GPU and NIC functionality with it.
+  - The CLI now reproduces the same socket-count computation before enabling CPU/ESMI initialization and skips it when the result would be `0`, so GPU and NIC discovery proceed normally. All other CPUs - and any CPUID read failure - are treated as safe and initialize unchanged.
+
 - **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  
   - The CLI now displays the canonical vendor name `Advanced Micro Devices, Inc. [AMD/ATI]` when the board manufacturer name is reported as the raw AMD PCI vendor ID (`0x1002`) because the host `pci.ids` lookup is unavailable. The C and Python APIs continue to return the raw value unchanged.
   - Standardized the hardcoded AMD vendor string on the canonical `pci.ids` spelling (with the comma) so `VENDOR_NAME` and `MANUFACTURER_NAME` are consistent with `lspci`.

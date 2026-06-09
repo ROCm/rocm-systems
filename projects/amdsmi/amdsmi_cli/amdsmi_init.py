@@ -24,6 +24,7 @@
 import atexit
 import logging
 import signal
+import struct
 import sys
 import os
 import threading
@@ -93,6 +94,43 @@ def check_amd_ionic_driver():
     return False
 
 
+def _check_esmi_safe():
+    """Returns False when esmi_init() is predicted to crash, True otherwise.
+
+    For CPU family 0x1A models 0x00-0x1F and 0x50-0x5F, the esmi library reads
+    the per-socket core capacity from CPUID 0x80000008 and derives the socket
+    count as ``total_sockets = online_cpus // cores_per_socket``. When the
+    number of online cores is smaller than that reported capacity the division
+    truncates to 0, after which esmi performs a zero-size allocation for its
+    socket map and writes past it - crashing with a SIGSEGV inside esmi_init().
+    Native crashes cannot be caught by a Python try/except, so this reproduces
+    the same computation up front and lets the caller skip CPU init when it
+    would divide to zero.
+
+    The CPUID 0x80000008 capacity field is only read for the family/model above
+    (see ``detect_packages()`` in esmi_ib_library/src/e_smi.c); every other CPU,
+    and any read/parse failure, returns True (treat as safe and let the normal
+    init path proceed).
+    """
+    try:
+        fd = os.open("/dev/cpu/0/cpuid", os.O_RDONLY)
+        try:
+            os.lseek(fd, 0x1, os.SEEK_SET)
+            eax = struct.unpack("IIII", os.read(fd, 16))[0]
+            family = ((eax >> 8) & 0xF) + ((eax >> 20) & 0xFF)
+            model = ((eax >> 16) & 0xF) * 0x10 + ((eax >> 4) & 0xF)
+            if family != 0x1A or not (0x00 <= model <= 0x1F or 0x50 <= model <= 0x5F):
+                return True
+            os.lseek(fd, 0x80000008, os.SEEK_SET)
+            ecx = struct.unpack("IIII", os.read(fd, 16))[2]
+        finally:
+            os.close(fd)
+        cores_per_socket = (ecx & 0xFFF) + 1
+        return (os.cpu_count() or 1) >= cores_per_socket
+    except Exception:
+        return True
+
+
 def amdsmi_cli_init():
     """Initializes AMDSMI Library for the CLI
 
@@ -117,8 +155,10 @@ def amdsmi_cli_init():
         logging.debug("amdgpu driver's initstate is live")
     if cpu_init_disabled:
         logging.debug("CPU/ESMI init disabled via AMDSMI_DISABLE_CPU_INIT")
-    elif check_amd_hsmp_driver() and hasattr(
-        amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles"
+    elif (
+        check_amd_hsmp_driver()
+        and hasattr(amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles")
+        and _check_esmi_safe()
     ):
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
         logging.debug("hsmp driver's initstate is live")
