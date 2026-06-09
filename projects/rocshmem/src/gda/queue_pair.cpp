@@ -237,6 +237,7 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
 }
 
 __device__ void QueuePair::quiet([[maybe_unused]] ActiveWFInfo &wf_info) {
+  LOGD_TRACE("quiet: is_pe_group_first=%d", (int)wf_info.is_pe_group_first);
   if(wf_info.is_pe_group_first) {
       switch (gda_provider_) {
     #if defined(GDA_IONIC)
@@ -394,6 +395,8 @@ __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
 
 __device__ void QueuePair::atomic_add_with_keys(void *raddr, uint32_t rkey,
     int64_t value, ActiveWFInfo &wf_info, bool fence) {
+  LOGD_TRACE("atomic_add_with_keys: dst=%p rkey=0x%x value=%lld fence=%d",
+             raddr, rkey, (long long)value, (int)fence);
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
   post_wqe_amo_with_keys(r, rkey, gda_op_atomic_fa, value, wf_info, fence);
 }
