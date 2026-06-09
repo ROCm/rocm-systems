@@ -768,12 +768,12 @@ def gen_vector_ternary(
             'fma': 'std::fma(a, b, c)',
             'min3': 'std::fmin(std::fmin(a, b), c)',
             'max3': 'std::fmax(std::fmax(a, b), c)',
-            'minimum3': 'std::fmin(std::fmin(a, b), c)',
-            'maximum3': 'std::fmax(std::fmax(a, b), c)',
+            'minimum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',
+            'maximum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b); return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }()',
             'minmax': 'std::fmin(a, std::fmax(b, c))',
             'maxmin': 'std::fmax(a, std::fmin(b, c))',
-            'minimummaximum': 'std::fmin(std::fmax(a, b), c)',
-            'maximumminimum': 'std::fmax(std::fmin(a, b), c)',
+            'minimummaximum': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }()',
+            'maximumminimum': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',
             'minmax_num': 'std::fmin(a, std::fmax(b, c))',
             'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
             'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
@@ -852,12 +852,12 @@ def gen_vector_ternary(
             'fma': 'std::fma(a, b, c)',
             'min3': 'std::fmin(std::fmin(a, b), c)',
             'max3': 'std::fmax(std::fmax(a, b), c)',
-            'minimum3': 'std::fmin(std::fmin(a, b), c)',
-            'maximum3': 'std::fmax(std::fmax(a, b), c)',
+            'minimum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<double>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',
+            'maximum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<double>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b); return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }()',
             'minmax': 'std::fmin(a, std::fmax(b, c))',
             'maxmin': 'std::fmax(a, std::fmin(b, c))',
-            'minimummaximum': 'std::fmin(std::fmax(a, b), c)',
-            'maximumminimum': 'std::fmax(std::fmin(a, b), c)',
+            'minimummaximum': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<double>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }()',
+            'maximumminimum': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<double>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',
             'minmax_num': 'std::fmin(a, std::fmax(b, c))',
             'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
             'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
@@ -892,12 +892,12 @@ def gen_vector_ternary(
             'fma': 'std::fma(a, b, c)',
             'min3': 'std::fmin(std::fmin(a, b), c)',
             'max3': 'std::fmax(std::fmax(a, b), c)',
-            'minimum3': 'std::fmin(std::fmin(a, b), c)',
-            'maximum3': 'std::fmax(std::fmax(a, b), c)',
+            'minimum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',
+            'maximum3': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b); return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }()',
             'minmax': 'std::fmin(a, std::fmax(b, c))',
             'maxmin': 'std::fmax(a, std::fmin(b, c))',
-            'minimummaximum': 'std::fmin(std::fmax(a, b), c)',
-            'maximumminimum': 'std::fmax(std::fmin(a, b), c)',
+            'minimummaximum': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? a : b) : (a < b ? a : b); return (ab == c) ? (std::signbit(ab) ? c : ab) : (ab > c ? ab : c); }()',
+            'maximumminimum': '[&]() { if (std::isnan(a) || std::isnan(b) || std::isnan(c)) return std::numeric_limits<float>::quiet_NaN(); auto ab = (a == b) ? (std::signbit(a) ? b : a) : (a > b ? a : b); return (ab == c) ? (std::signbit(ab) ? ab : c) : (ab < c ? ab : c); }()',
             'minmax_num': 'std::fmin(a, std::fmax(b, c))',
             'maxmin_num': 'std::fmax(a, std::fmin(b, c))',
             'med3': 'std::fmax(std::fmin(std::fmax(a, b), c), std::fmin(a, b))',
@@ -959,7 +959,9 @@ def gen_vector_ternary(
             f'    int32_t b = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;'
         )
         L.append(f'    int32_t c = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(a * b + c));')
+        L.append(
+            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(static_cast<int64_t>(a) * b + c));'
+        )
     elif dtype in ('u24',):
         L.append(f'    uint32_t a = {s0}.read_lane(wf, lane) & 0x00FFFFFFu;')
         L.append(f'    uint32_t b = {s1}.read_lane(wf, lane) & 0x00FFFFFFu;')

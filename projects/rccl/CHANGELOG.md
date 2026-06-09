@@ -25,6 +25,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Resolved Issues
 * Fixed MSCCLPP_ENABLE_CLIP CMake build flag, which was not being properly honored.
 * Fixed static build (`BUILD_SHARED_LIBS=OFF`) failing with `install(EXPORT "rccl-targets" ...)` error when `fmt` is fetched via `FetchContent`. The `fmt-header-only` target is now scoped to the build interface and excluded from RCCL's exported usage requirements.
+* Fixed proxy channel staging buffers ignoring the new GDR mode selection on HIP < 7.12 builds. The legacy `#else` branch in `sendProxyConnect` / `recvProxyConnect` now honors `resources->useDmaBuf`, so peermem-equipped hosts on older HIP no longer fall through to `hsa_amd_portable_export_dmabuf` when peermem was selected in `*ProxySetup`. Workaround for affected RCCL builds: `NCCL_DMABUF_ENABLE=0`.
 
 ## Unreleased - RCCL 2.27.7 for ROCm 7.2.0
 

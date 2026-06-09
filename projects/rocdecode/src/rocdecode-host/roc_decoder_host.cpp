@@ -30,7 +30,7 @@ RocDecoderHost::~RocDecoderHost() {
 }
 
 rocDecStatus RocDecoderHost::InitializeDecoder() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     if (!decoder_create_info_.user_data) {
         CriticalLog(g_rocdec_logger, "Invalid function callback pointer passed");
@@ -48,7 +48,7 @@ rocDecStatus RocDecoderHost::InitializeDecoder() {
 }
 
 rocDecStatus RocDecoderHost::DecodeFrame(RocdecPicParamsHost *pic_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(pic_params));
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = avcodec_video_decoder_.SubmitDecode(pic_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
@@ -59,7 +59,7 @@ rocDecStatus RocDecoderHost::DecodeFrame(RocdecPicParamsHost *pic_params) {
 }
 
 rocDecStatus RocDecoderHost::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* decode_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(decode_status));
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     rocdec_status = avcodec_video_decoder_.GetDecodeStatus(pic_idx, decode_status);
     if (rocdec_status != ROCDEC_SUCCESS) {
@@ -70,7 +70,7 @@ rocDecStatus RocDecoderHost::GetDecodeStatus(int pic_idx, RocdecDecodeStatus* de
 }
 
 rocDecStatus RocDecoderHost::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(reconfig_params));
     if (reconfig_params == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -86,7 +86,8 @@ rocDecStatus RocDecoderHost::ReconfigureDecoder(RocdecReconfigureDecoderInfo *re
 }
 
 rocDecStatus RocDecoderHost::GetVideoFrame(int pic_idx, void **frame_ptr, uint32_t *line_size, RocdecProcParams *vid_postproc_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(frame_ptr) + ", " +
+                             RocDecFmtPtr(line_size) + ", " + RocDecFmtPtr(vid_postproc_params));
     if (vid_postproc_params == nullptr || frame_ptr == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;

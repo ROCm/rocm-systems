@@ -95,6 +95,7 @@ def execute_tests(env: Dict[str, str], test_source_dir: Path, build_dir: Path) -
     cmd = [
         "cmake",
         "-GNinja",
+        "-DENABLE_EXTENDED_TESTS=ON",
         str(test_source_dir),
     ]
     logging.info(f"++ Exec [{build_dir}]$ {shlex.join(cmd)}")
