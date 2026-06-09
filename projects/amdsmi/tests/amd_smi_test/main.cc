@@ -23,6 +23,7 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/api_support_read.h"
+#include "functional/computepartition_memallocmode_read_write.h"
 #include "functional/computepartition_read_write.h"
 #include "functional/cross_process_serialization.h"
 #include "functional/err_cnt_read.h"
@@ -310,6 +311,12 @@ TEST(amdsmitstReadOnly, TestCrossProcessSerialization) {
 TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestComputePartitionReadWrite tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadWrite, TestComputePartitionMemAllocModeReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestComputePartitionMemAllocModeReadWrite tst;
   RunGenericTest(&tst);
 }
 

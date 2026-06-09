@@ -11,7 +11,6 @@
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -44,14 +43,13 @@ public:
   /// @param[in] elf_size Size of the ELF image in bytes.
   AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size);
 
-  /// @brief Construct from a region within an already-open ELF file (used by AmdGpuExecutable).
+  /// @brief Construct from an embedded ELF image copied out of a HIP fat binary.
   /// @param[in] size Size of the embedded ELF in bytes.
-  /// @param[in] elf_file Open file stream positioned at the start of the embedded ELF.
+  /// @param[in] elf_bytes Pointer to the embedded ELF image.
   /// @param[in] offload_kind Clang offload bundle kind string (e.g. "hip", "hipv4").
-  /// @param[in] target_triple GPU target triple string (e.g. "gfx942", "gfx950").
-  /// @param[in] fatbin_offset Absolute byte offset of this ELF within the top-level file.
-  AmdGpuCodeObject(uint64_t size, std::ifstream &elf_file, std::string offload_kind,
-                   std::string target_triple, int64_t fatbin_offset);
+  /// @param[in] target_triple GPU target triple string (e.g. "gfx942", "gfx950", "gfx1250").
+  AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size, std::string offload_kind,
+                   std::string target_triple);
 
   /// @brief The target ID for this code object (e.g. ROCJITSU_CODE_TARGET_GFX942).
   /// @returns Target ID enum value.
@@ -64,13 +62,11 @@ public:
   uint64_t kernel_descriptor_offset(const std::string &kernel_name) const override;
 
 private:
-  void load_sections(std::ifstream &elf_file);
-  void parse_symbols();
+  void load_sections();
 
   rj_code_target_id_t target_id_ = ROCJITSU_CODE_TARGET_INVALID;
   std::string offload_kind_;
   std::string target_triple_;
-  int64_t fatbin_offset_ = 0;
   std::unordered_map<std::string, uint64_t> kd_offsets_; ///< kernel_name -> .kd symbol offset
 };
 
