@@ -12,4 +12,4 @@
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 ROCJITSU_DEFINE_PLUGIN(rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race",
-                       "rocjitsu@amd.com", "1.0", "{}")
+                       "James Newling <James.Newling@amd.com>", "1.0", "{}")

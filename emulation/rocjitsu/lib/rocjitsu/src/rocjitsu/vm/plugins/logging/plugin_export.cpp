@@ -12,4 +12,4 @@
 #include "rocjitsu/vm/plugins/plugin_abi.h"
 
 ROCJITSU_DEFINE_PLUGIN(rocjitsu::amdgpu::KernelLoggingPlugin, "logging",
-                       "rocjitsu@amd.com", "1.0", "{}")
+                       "James Newling <James.Newling@amd.com>", "1.0", "{}")
