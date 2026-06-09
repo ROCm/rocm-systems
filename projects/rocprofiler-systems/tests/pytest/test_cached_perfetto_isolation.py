@@ -17,6 +17,7 @@ import sys
 
 import pytest
 from conftest import RocprofsysTest
+from rocprofsys import trace_processor_shell_args
 
 pytestmark = [pytest.mark.mpi]
 
@@ -70,7 +71,8 @@ class TestCachedPerfettoIsolation(RocprofsysTest):
                     "--input",
                     str(proto),
                     "--per-pid-isolation",
-                ],
+                ]
+                + trace_processor_shell_args(),
                 capture_output=True,
                 text=True,
                 timeout=120,

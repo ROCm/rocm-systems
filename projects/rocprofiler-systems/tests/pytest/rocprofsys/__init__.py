@@ -30,6 +30,7 @@ from .runners import (
 )
 from .validators import (
     ValidationResult,
+    trace_processor_shell_args,
     validate_perfetto_trace,
     validate_rocpd_database,
     validate_timemory_json,

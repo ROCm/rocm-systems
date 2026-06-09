@@ -239,6 +239,12 @@ def _run_validation_script(
 # ============================================================================
 
 
+def trace_processor_shell_args() -> list[str]:
+    """``-t <path>`` if ``ROCPROFSYS_TRACE_PROC_SHELL`` is set, else ``[]``."""
+    env_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
+    return ["-t", env_path] if env_path else []
+
+
 def validate_perfetto_trace(
     trace_path: Path,
     tests_dir: Path,
@@ -284,7 +290,6 @@ def validate_perfetto_trace(
     if not trace_path.exists():
         return ValidationResult(False, f"Trace file not found: {trace_path}")
 
-    # Allow override of trace_processor_path to allow perfetto validation using older GLIBC versions
     env_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
     if env_path:
         trace_processor_path = Path(env_path)

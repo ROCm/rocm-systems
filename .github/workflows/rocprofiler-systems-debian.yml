@@ -103,6 +103,15 @@ jobs:
           fi
         done
 
+    - name: Install Perfetto Trace Processor
+      shell: bash
+      run: |
+        wget -q \
+          https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell \
+          -P /opt/trace_processor/bin
+        chmod +x /opt/trace_processor/bin/trace_processor_shell
+        echo "ROCPROFSYS_TRACE_PROC_SHELL=/opt/trace_processor/bin/trace_processor_shell" >> $GITHUB_ENV
+
     - name: Configure ROCm Environment
       shell: bash
       run: |

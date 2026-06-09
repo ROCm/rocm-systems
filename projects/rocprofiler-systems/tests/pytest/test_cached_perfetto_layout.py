@@ -32,6 +32,7 @@ import sys
 
 import pytest
 from conftest import RocprofsysTest
+from rocprofsys import trace_processor_shell_args
 
 pytestmark = [pytest.mark.mpi]
 
@@ -71,7 +72,8 @@ def _run_single_file_checks(validator, proto):
             "--input",
             str(proto),
             "--single-file-checks",
-        ],
+        ]
+        + trace_processor_shell_args(),
         capture_output=True,
         text=True,
         timeout=120,
@@ -101,7 +103,8 @@ def _run_per_pid_isolation(validator, proto):
             "--input",
             str(proto),
             "--per-pid-isolation",
-        ],
+        ]
+        + trace_processor_shell_args(),
         capture_output=True,
         text=True,
         timeout=120,
