@@ -1415,6 +1415,27 @@ def test_bench_only_mutual_exclusion(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+def test_pc_sampling_requires_experimental(binary_handler_profile_rocprof_compute):
+    """
+    --pc-sampling must be rejected at argparse time when --experimental is
+    not also passed (ExperimentalAction gating). This fires before hardware
+    detection, so it is intentionally not gated on SoC support.
+    """
+    options = ["--pc-sampling"]
+    workload_dir = common.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=False
+    )
+
+    assert returncode != 0, (
+        "Expected --pc-sampling without --experimental to fail, "
+        f"but command exited with {returncode}"
+    )
+
+    common.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_1
 def test_bench_only_no_roof_mutual_exclusion(binary_handler_profile_rocprof_compute):
     """
@@ -2302,7 +2323,7 @@ def test_live_attach_detach_pc_sampling(
 ):
     common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
 
-    options = ["-b", "21"]
+    options = ["--experimental", "--pc-sampling"]
     workload_dir = common.get_output_dir()
 
     # TODO: temp fix for sdk defautly disable attach/detach,

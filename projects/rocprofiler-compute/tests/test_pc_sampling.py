@@ -61,6 +61,8 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     common.skip_unsupported_pc_sampling_soc()
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -97,6 +99,8 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
     common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -141,6 +145,8 @@ def test_multi_rank_pc_sampling_only(
     workload_dir = common.get_output_dir()
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -182,6 +188,8 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     workload_dir = common.get_output_dir()
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "2",
@@ -224,6 +232,8 @@ def test_pc_sampling_profile_then_analyze(
     common.skip_unsupported_pc_sampling_soc()
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -310,6 +320,8 @@ def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
     common.skip_unsupported_pc_sampling_soc()
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "2",
