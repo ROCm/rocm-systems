@@ -360,6 +360,34 @@ class CodeGenerator:
 
             namespace {
 
+            // VOPD slot opcode values are the MRISA <Opcode> values for V_DUAL_* encodings.
+            constexpr uint16_t kVopdFmacF32 = 0;
+            constexpr uint16_t kVopdFmaakF32 = 1;
+            constexpr uint16_t kVopdFmamkF32 = 2;
+            constexpr uint16_t kVopdMulF32 = 3;
+            constexpr uint16_t kVopdAddF32 = 4;
+            constexpr uint16_t kVopdSubF32 = 5;
+            constexpr uint16_t kVopdSubrevF32 = 6;
+            constexpr uint16_t kVopdMulDx9ZeroF32 = 7;
+            constexpr uint16_t kVopdMovB32 = 8;
+            constexpr uint16_t kVopdCndmaskB32 = 9;
+            constexpr uint16_t kVopdMaxNumF32 = 10;
+            constexpr uint16_t kVopdMinNumF32 = 11;
+            constexpr uint16_t kVopdAddNcU32 = 16;
+            constexpr uint16_t kVopdLshlrevB32 = 17;
+            constexpr uint16_t kVopdBitop2B32 = 18;
+            constexpr uint16_t kVopdFmaF32 = 19;
+            constexpr uint16_t kVopdSubNcU32 = 20;
+            constexpr uint16_t kVopdLshrrevB32 = 21;
+            constexpr uint16_t kVopdAshrrevI32 = 22;
+            constexpr uint16_t kVopdMaxI32 = 23;
+            constexpr uint16_t kVopdMinI32 = 24;
+            constexpr uint16_t kVopdAddF64 = 32;
+            constexpr uint16_t kVopdMulF64 = 33;
+            constexpr uint16_t kVopdMinNumF64 = 34;
+            constexpr uint16_t kVopdMaxNumF64 = 35;
+            constexpr uint16_t kVopdFmacF64 = 36;
+
             Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal,
                               uint16_t encoded) {
               if (use_literal && encoded == 255)
@@ -382,57 +410,57 @@ class CodeGenerator:
 
             const char *Vopd::op_name(uint16_t op) {
               switch (op) {
-              case 0:
+              case kVopdFmacF32:
                 return "v_dual_fmac_f32";
-              case 1:
+              case kVopdFmaakF32:
                 return "v_dual_fmaak_f32";
-              case 2:
+              case kVopdFmamkF32:
                 return "v_dual_fmamk_f32";
-              case 3:
+              case kVopdMulF32:
                 return "v_dual_mul_f32";
-              case 4:
+              case kVopdAddF32:
                 return "v_dual_add_f32";
-              case 5:
+              case kVopdSubF32:
                 return "v_dual_sub_f32";
-              case 6:
+              case kVopdSubrevF32:
                 return "v_dual_subrev_f32";
-              case 7:
+              case kVopdMulDx9ZeroF32:
                 return "v_dual_mul_dx9_zero_f32";
-              case 8:
+              case kVopdMovB32:
                 return "v_dual_mov_b32";
-              case 9:
+              case kVopdCndmaskB32:
                 return "v_dual_cndmask_b32";
-              case 10:
+              case kVopdMaxNumF32:
                 return "v_dual_max_num_f32";
-              case 11:
+              case kVopdMinNumF32:
                 return "v_dual_min_num_f32";
-              case 16:
+              case kVopdAddNcU32:
                 return "v_dual_add_nc_u32";
-              case 17:
+              case kVopdLshlrevB32:
                 return "v_dual_lshlrev_b32";
-              case 18:
+              case kVopdBitop2B32:
                 return "v_dual_bitop2_b32";
-              case 19:
+              case kVopdFmaF32:
                 return "v_dual_fma_f32";
-              case 20:
+              case kVopdSubNcU32:
                 return "v_dual_sub_nc_u32";
-              case 21:
+              case kVopdLshrrevB32:
                 return "v_dual_lshrrev_b32";
-              case 22:
+              case kVopdAshrrevI32:
                 return "v_dual_ashrrev_i32";
-              case 23:
+              case kVopdMaxI32:
                 return "v_dual_max_i32";
-              case 24:
+              case kVopdMinI32:
                 return "v_dual_min_i32";
-              case 32:
+              case kVopdAddF64:
                 return "v_dual_add_f64";
-              case 33:
+              case kVopdMulF64:
                 return "v_dual_mul_f64";
-              case 34:
+              case kVopdMinNumF64:
                 return "v_dual_min_num_f64";
-              case 35:
+              case kVopdMaxNumF64:
                 return "v_dual_max_num_f64";
-              case 36:
+              case kVopdFmacF64:
                 return "v_dual_fmac_f64";
               default:
                 return "v_dual_unknown";
@@ -441,17 +469,17 @@ class CodeGenerator:
 
             bool Vopd::is_float32_op(uint16_t op) {
               switch (op) {
-              case 0:
-              case 1:
-              case 2:
-              case 3:
-              case 4:
-              case 5:
-              case 6:
-              case 7:
-              case 10:
-              case 11:
-              case 19:
+              case kVopdFmacF32:
+              case kVopdFmaakF32:
+              case kVopdFmamkF32:
+              case kVopdMulF32:
+              case kVopdAddF32:
+              case kVopdSubF32:
+              case kVopdSubrevF32:
+              case kVopdMulDx9ZeroF32:
+              case kVopdMaxNumF32:
+              case kVopdMinNumF32:
+              case kVopdFmaF32:
                 return true;
               default:
                 return false;
@@ -485,85 +513,85 @@ class CodeGenerator:
               }
 
               switch (slot.op) {
-              case 0: {
+              case kVopdFmacF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src1),
                                         std::bit_cast<float>(slot.dst->read_lane(wf, lane)));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 1: {
+              case kVopdFmaakF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src1),
                                         std::bit_cast<float>(src2));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 2: {
+              case kVopdFmamkF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src2),
                                         std::bit_cast<float>(src1));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 3: {
+              case kVopdMulF32: {
                 float result = std::bit_cast<float>(src0) * std::bit_cast<float>(src1);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 7: {
+              case kVopdMulDx9ZeroF32: {
                 float lhs = std::bit_cast<float>(src0);
                 float rhs = std::bit_cast<float>(src1);
                 if (lhs == 0.0f || rhs == 0.0f)
                   return std::bit_cast<uint32_t>(0.0f);
                 return std::bit_cast<uint32_t>(lhs * rhs);
               }
-              case 4: {
+              case kVopdAddF32: {
                 float result = std::bit_cast<float>(src0) + std::bit_cast<float>(src1);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 5: {
+              case kVopdSubF32: {
                 float result = std::bit_cast<float>(src0) - std::bit_cast<float>(src1);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 6: {
+              case kVopdSubrevF32: {
                 float result = std::bit_cast<float>(src1) - std::bit_cast<float>(src0);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 8:
+              case kVopdMovB32:
                 return src0;
-              case 9: {
+              case kVopdCndmaskB32: {
                 uint64_t condition = slot.uses_vcc ? wf.vcc() : slot.src2->read_scalar64(wf);
                 return ((condition >> lane) & 1u) ? src1 : src0;
               }
-              case 10: {
+              case kVopdMaxNumF32: {
                 float result = std::fmax(std::bit_cast<float>(src0),
                                          std::bit_cast<float>(src1));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 11: {
+              case kVopdMinNumF32: {
                 float result = std::fmin(std::bit_cast<float>(src0),
                                          std::bit_cast<float>(src1));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 16:
+              case kVopdAddNcU32:
                 return src0 + src1;
-              case 17:
+              case kVopdLshlrevB32:
                 return src1 << (src0 & 31u);
-              case 18:
+              case kVopdBitop2B32:
                 return bitop2(src0, src1, slot.src2_imm);
-              case 19: {
+              case kVopdFmaF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src1),
                                         std::bit_cast<float>(src2));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 20:
+              case kVopdSubNcU32:
                 return src0 - src1;
-              case 21:
+              case kVopdLshrrevB32:
                 return src1 >> (src0 & 31u);
-              case 22:
+              case kVopdAshrrevI32:
                 return static_cast<uint32_t>(static_cast<int32_t>(src1) >> (src0 & 31u));
-              case 23:
+              case kVopdMaxI32:
                 return static_cast<uint32_t>(std::max(static_cast<int32_t>(src0),
                                                       static_cast<int32_t>(src1)));
-              case 24:
+              case kVopdMinI32:
                 return static_cast<uint32_t>(std::min(static_cast<int32_t>(src0),
                                                       static_cast<int32_t>(src1)));
               default:
@@ -610,10 +638,10 @@ class CodeGenerator:
                 srcy0_ = make_src0(32, true, false, 0, srcy0);
                 srcx1_ = Operand(32, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(32, OperandType::OPR_VGPR, vsrcy1);
-                srcx2_ = (opx_ == 9) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
-                                     : Operand(32, OperandType::OPR_VGPR, vsrcx2);
-                srcy2_ = (opy_ == 9) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
-                                     : Operand(32, OperandType::OPR_VGPR, vsrcy2);
+                srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
+                                                   : Operand(32, OperandType::OPR_VGPR, vsrcx2);
+                srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
+                                                   : Operand(32, OperandType::OPR_VGPR, vsrcy2);
               } else {
                 format_ = Format::VopdXy;
                 encoding_id_ = 0x32;
@@ -626,8 +654,9 @@ class CodeGenerator:
                 uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
                 uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
                 uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
-                has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == 1 ||
-                               opx_ == 2 || opy_ == 1 || opy_ == 2;
+                has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == kVopdFmaakF32 ||
+                               opx_ == kVopdFmamkF32 || opy_ == kVopdFmaakF32 ||
+                               opy_ == kVopdFmamkF32;
                 size_ = has_literal_ ? 12 : 8;
                 if (has_literal_) {
                   word2_ = words[2];
@@ -666,20 +695,20 @@ class CodeGenerator:
                         false};
 
               if (vopd3) {
-                x_.has_src2_operand = opx_ == 9 || opx_ == 19;
-                y_.has_src2_operand = opy_ == 9 || opy_ == 19;
-                x_.src2_is_imm = opx_ == 18;
-                y_.src2_is_imm = opy_ == 18;
+                x_.has_src2_operand = opx_ == kVopdCndmaskB32 || opx_ == kVopdFmaF32;
+                y_.has_src2_operand = opy_ == kVopdCndmaskB32 || opy_ == kVopdFmaF32;
+                x_.src2_is_imm = opx_ == kVopdBitop2B32;
+                y_.src2_is_imm = opy_ == kVopdBitop2B32;
                 x_.src2_imm = static_cast<uint32_t>(srcx2_.encoding_value());
                 y_.src2_imm = static_cast<uint32_t>(srcy2_.encoding_value());
               } else {
-                x_.uses_vcc = opx_ == 9;
-                y_.uses_vcc = opy_ == 9;
-                if (opx_ == 1 || opx_ == 2) {
+                x_.uses_vcc = opx_ == kVopdCndmaskB32;
+                y_.uses_vcc = opy_ == kVopdCndmaskB32;
+                if (opx_ == kVopdFmaakF32 || opx_ == kVopdFmamkF32) {
                   x_.src2_is_imm = true;
                   x_.src2_imm = literal_;
                 }
-                if (opy_ == 1 || opy_ == 2) {
+                if (opy_ == kVopdFmaakF32 || opy_ == kVopdFmamkF32) {
                   y_.src2_is_imm = true;
                   y_.src2_imm = literal_;
                 }
@@ -687,39 +716,70 @@ class CodeGenerator:
 
               dst_operands_[0] = &dstx_;
               dst_operands_[1] = &dsty_;
-              src_operands_[0] = &srcx0_;
-              src_operands_[1] = &srcx1_;
-              src_operands_[2] = &srcy0_;
-              src_operands_[3] = &srcy1_;
               num_dst_ = 2;
-              num_src_ = 4;
+              num_src_ = 0;
+
+              const auto add_src = [this](Operand *op) {
+                if (op)
+                  src_operands_[num_src_++] = op;
+              };
+              const auto add_slot_sources = [&](const Slot &slot) {
+                switch (slot.op) {
+                case kVopdFmacF32:
+                  add_src(slot.dst);
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  break;
+                case kVopdMovB32:
+                  add_src(slot.src0);
+                  break;
+                case kVopdCndmaskB32:
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  if (!slot.uses_vcc)
+                    add_src(slot.src2);
+                  break;
+                case kVopdFmaF32:
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  add_src(slot.src2);
+                  break;
+                default:
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  break;
+                }
+              };
+
+              add_slot_sources(x_);
+              add_slot_sources(y_);
             }
 
             std::string Vopd::format_slot(const Slot &slot) const {
               std::string out = op_name(slot.op);
               out += " ";
               switch (slot.op) {
-              case 8:
+              case kVopdMovB32:
                 out += slot.dst->name() + ", " + slot.src0->name();
                 break;
-              case 9:
+              case kVopdCndmaskB32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1);
                 if (!slot.uses_vcc)
                   out += ", " + slot.src2->name();
                 break;
-              case 18:
+              case kVopdBitop2B32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1);
                 out += std::format(" bitop3:0x{:02x}", slot.src2_imm & 0xFF);
                 break;
-              case 19:
+              case kVopdFmaF32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1) + ", " +
                        slot.src2->name();
                 break;
-              case 1:
+              case kVopdFmaakF32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1);
                 out += std::format(", 0x{:08x}", slot.src2_imm);
                 break;
-              case 2:
+              case kVopdFmamkF32:
                 out += slot.dst->name() + ", " + slot.src0->name();
                 out += std::format(", 0x{:08x}, ", slot.src2_imm);
                 out += slot.src1->name();
@@ -1314,6 +1374,25 @@ class CodeGenerator:
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
         return f'gfx1250_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
+
+    @staticmethod
+    def _vbuffer_vaddr_operand_size_expr(enc_name: str, opnd_name: str) -> str | None:
+        if enc_name.upper() != 'ENC_VBUFFER' or opnd_name != 'vaddr':
+            return None
+        return 'vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
+
+    @staticmethod
+    def _emit_vbuffer_helpers() -> str:
+        return textwrap.dedent('''\
+            namespace {
+            uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
+              if (inst->idxen && inst->offen)
+                return 64;
+              if (inst->idxen || inst->offen)
+                return 32;
+              return 0;
+            }
+            } // namespace''')
 
     @staticmethod
     def _emit_gfx1250_matrix_fmt_helpers() -> str:
@@ -4275,6 +4354,10 @@ class CodeGenerator:
                             gfx1250_f8f6f4_shape, opnd.name
                         )
                         if opnd_size_expr is None:
+                            opnd_size_expr = self._vbuffer_vaddr_operand_size_expr(
+                                enc.enc_name, opnd.name
+                            )
+                        if opnd_size_expr is None:
                             opnd_size_expr = str(opnd.size)
                         operand_size_exprs[opnd.name] = opnd_size_expr
                         if opnd.is_input:
@@ -4661,6 +4744,7 @@ class CodeGenerator:
                         'S_WAITCNT',
                         'S_WAIT_LOADCNT',
                         'S_WAIT_STORECNT',
+                        'S_WAIT_XCNT',
                         'S_WAIT_EXPCNT',
                         'S_WAIT_DSCNT',
                         'S_WAIT_KMCNT',
@@ -5279,6 +5363,9 @@ class CodeGenerator:
                     class_func_impls.insert(
                         0, cgen.Line(self._emit_gfx1250_matrix_fmt_helpers())
                     )
+
+                if enc.enc_name.upper() == 'ENC_VBUFFER':
+                    class_func_impls.insert(0, cgen.Line(self._emit_vbuffer_helpers()))
 
                 if has_getreg and profile.use_hwreg_helpers and not is_mem_enc:
                     class_func_impls.insert(0, cgen.Line(self._emit_hwreg_helpers()))
@@ -6165,6 +6252,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             )
         ref_impl = (
             f'std::optional<RegisterRef> Operand::to_register_ref() const {{\n'
+            f'if (size_bits_ == 0)\n'
+            f'  return std::nullopt;\n'
             f'// Liveness tracks operands as contiguous 32-bit register lanes.\n'
             f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'
             f'{packed_16bit_ref_check}'
