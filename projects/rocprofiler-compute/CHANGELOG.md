@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added support for GPU metrics on gfx1150 and gfx1152 hardware.
 
+* Added GPU benchmarking support for gfx1150 and gfx1152 hardware.
+
 * Added Roofline profiling and analysis support for gfx1151 architecture
   * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations
 
