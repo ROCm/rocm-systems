@@ -34,6 +34,7 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
   hdr.addr = addr;
   hdr.size_bytes = size;
   hdr.op = op;
+  hdr.vmid = vmid;
   msg->set_payload(reinterpret_cast<uintptr_t>(data));
   req_port_->send(std::move(msg));
 }

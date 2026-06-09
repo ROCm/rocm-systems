@@ -17,6 +17,7 @@
 /// event_age to 1; auto-reset clears it to 0. The wait predicate checks
 /// event_age >= last_event_age for signal events only.
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -101,20 +102,45 @@ public:
   size_t page_size = 0; ///< Size of the mapped event page in bytes.
 
 private:
+  static constexpr uint32_t kFastEventSlots = 4096;
+  static constexpr uint8_t kFastEventValid = 1u << 0;
+  static constexpr uint8_t kFastEventSignal = 1u << 1;
+  static constexpr uint8_t kFastEventAutoReset = 1u << 2;
+  static constexpr uint8_t kFastEventSignaled = 1u << 3;
+  static constexpr uint64_t kFastEventAgeShift = 8;
+  static constexpr uint64_t kFastEventAgeMask = (1ull << 56) - 1;
+
+  static constexpr uint64_t pack_fast_event_state(uint64_t age, uint8_t flags) {
+    return ((age & kFastEventAgeMask) << kFastEventAgeShift) | flags;
+  }
+
+  static constexpr uint8_t fast_event_flags(uint64_t state) {
+    return static_cast<uint8_t>(state & 0xffu);
+  }
+
+  static constexpr uint64_t fast_event_age(uint64_t state) {
+    return (state >> kFastEventAgeShift) & kFastEventAgeMask;
+  }
+
+  struct FastEventSlot {
+    std::atomic<uint64_t> state{0};
+  };
+
   /// @brief Internal event representation.
   struct GpuEvent {
     uint32_t event_id = 0;   ///< KFD event ID (1-based, matches slot index).
     uint32_t event_type = 0; ///< HSA event type (0 = signal, others = system).
     bool auto_reset = false; ///< If true, signaled clears after wakeup.
     bool signaled = false;   ///< True when the event has been signaled.
-    uint64_t event_age = 1;  ///< Monotonic age counter (starts at 1, matching real KFD).
+    uint64_t event_age = 0;  ///< Binary age (0 = unsignaled, 1 = signaled).
     std::vector<std::condition_variable *> waiters; ///< Per-event waiter list (kernel wait_queue).
   };
 
   std::mutex mutex_;                              ///< Protects all mutable event state.
   std::unordered_map<uint32_t, GpuEvent> events_; ///< Event table keyed by event_id.
-  uint32_t next_event_id_ = 1;                    ///< Next event ID to allocate.
-  std::atomic<bool> closing_{false};              ///< Set by notify_closing() for shutdown.
+  std::array<FastEventSlot, kFastEventSlots> fast_events_{};
+  uint32_t next_event_id_ = 1;       ///< Next event ID to allocate.
+  std::atomic<bool> closing_{false}; ///< Set by notify_closing() for shutdown.
 };
 
 } // namespace rocjitsu

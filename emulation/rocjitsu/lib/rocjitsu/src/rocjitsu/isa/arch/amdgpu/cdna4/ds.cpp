@@ -2639,13 +2639,24 @@ void DsWriteB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data0;
   d->store_data.resize(wf.wf_size() * 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t lo0 = cu.read_vgpr(data_base + 0, lane);
-    uint32_t hi0 = cu.read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
-    std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
+  if (!cu.plugin_hooks_enabled()) {
+    const uint32_t *data0 = cu.vgpr_lanes32(data_base + 0);
+    const uint32_t *data1 = cu.vgpr_lanes32(data_base + 1);
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      std::memcpy(&d->store_data[lane * 8 + 0], &data0[lane], 4);
+      std::memcpy(&d->store_data[lane * 8 + 4], &data1[lane], 4);
+    }
+  } else {
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t lo0 = cu.read_vgpr(data_base + 0, lane);
+      uint32_t hi0 = cu.read_vgpr(data_base + 1, lane);
+      std::memcpy(&d->store_data[lane * 8 + 0], &lo0, 4);
+      std::memcpy(&d->store_data[lane * 8 + 4], &hi0, 4);
+    }
   }
   set_data(std::move(d));
 }
@@ -4449,17 +4460,32 @@ void DsWriteB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.data0;
   d->store_data.resize(wf.wf_size() * 16);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
-    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
-    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
-    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
-    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
-    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
+  if (!cu.plugin_hooks_enabled()) {
+    const uint32_t *data0 = cu.vgpr_lanes32(data_base + 0);
+    const uint32_t *data1 = cu.vgpr_lanes32(data_base + 1);
+    const uint32_t *data2 = cu.vgpr_lanes32(data_base + 2);
+    const uint32_t *data3 = cu.vgpr_lanes32(data_base + 3);
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      std::memcpy(&d->store_data[lane * 16 + 0], &data0[lane], 4);
+      std::memcpy(&d->store_data[lane * 16 + 4], &data1[lane], 4);
+      std::memcpy(&d->store_data[lane * 16 + 8], &data2[lane], 4);
+      std::memcpy(&d->store_data[lane * 16 + 12], &data3[lane], 4);
+    }
+  } else {
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
+      std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
+      uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+      std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
+      uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+      std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
+      uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+      std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
+    }
   }
   set_data(std::move(d));
 }

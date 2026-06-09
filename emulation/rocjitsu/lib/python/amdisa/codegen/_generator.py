@@ -3936,6 +3936,35 @@ class CodeGenerator:
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
+        if esz in (4, 8):
+            reg_count = ne if esz == 4 else ne * 2
+            L.append('  if (!cu.plugin_hooks_enabled()) {')
+            for i in range(reg_count):
+                L.append(
+                    f'    const uint32_t *data{i} = cu.vgpr_lanes32(data_base + {i});'
+                )
+            L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            L.append('      if (!(exec & (1ULL << lane))) continue;')
+            for i in range(ne):
+                off = i * esz
+                if esz == 8:
+                    lo = i * 2
+                    hi = lo + 1
+                    L.append(
+                        f'      std::memcpy(&d->store_data[lane * {stride} + {off}], '
+                        f'&data{lo}[lane], 4);'
+                    )
+                    L.append(
+                        f'      std::memcpy(&d->store_data[lane * {stride} + {off + 4}], '
+                        f'&data{hi}[lane], 4);'
+                    )
+                else:
+                    L.append(
+                        f'      std::memcpy(&d->store_data[lane * {stride} + {off}], '
+                        f'&data{i}[lane], 4);'
+                    )
+            L.append('    }')
+            L.append('  } else {')
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         for i in range(ne):
@@ -3974,6 +4003,8 @@ class CodeGenerator:
                     f'    d->store_data[lane * {stride} + {off}] = static_cast<uint8_t>(val{i});'
                 )
         L.append('  }')
+        if esz in (4, 8):
+            L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)

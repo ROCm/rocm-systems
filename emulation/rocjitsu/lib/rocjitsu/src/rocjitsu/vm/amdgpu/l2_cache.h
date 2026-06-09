@@ -188,13 +188,13 @@ public:
   const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
 
 private:
-  std::recursive_mutex &set_mutex(uint64_t addr) const {
+  std::mutex &set_mutex(uint64_t addr) const {
     return set_mutexes_[CacheStore::set_index(addr)];
   }
 
   class AllSetLocks {
   public:
-    explicit AllSetLocks(std::array<std::recursive_mutex, NUM_SETS> &mutexes) : mutexes_(mutexes) {
+    explicit AllSetLocks(std::array<std::mutex, NUM_SETS> &mutexes) : mutexes_(mutexes) {
       try {
         for (auto &mutex : mutexes_) {
           mutex.lock();
@@ -219,7 +219,7 @@ private:
       }
     }
 
-    std::array<std::recursive_mutex, NUM_SETS> &mutexes_;
+    std::array<std::mutex, NUM_SETS> &mutexes_;
     size_t locked_ = 0;
   };
 
@@ -231,7 +231,7 @@ private:
                     uint32_t vmid = 0);
 
   CacheStore cache_;
-  mutable std::array<std::recursive_mutex, NUM_SETS> set_mutexes_;
+  mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   std::vector<simdojo::Port *> cpl_ports_;

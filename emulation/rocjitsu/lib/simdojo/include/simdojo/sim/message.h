@@ -38,6 +38,7 @@ struct MessageHeader {
   uint64_t addr = 0;              ///< Memory address (unused for non-memory ops).
   MessageOp op = MessageOp::NONE; ///< Operation type.
   uint8_t mtype = 0;              ///< Memory type (Mtype enum, unused for non-memory ops).
+  uint32_t vmid = 0;              ///< Address-space identifier for memory requests.
 };
 
 /// @brief Simulation message sent over links between components.

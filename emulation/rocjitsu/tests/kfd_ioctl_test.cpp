@@ -16,6 +16,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -155,6 +156,54 @@ TEST_F(KfdIoctlTest, RuntimeEnableAndDisable) {
   rc = driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &args);
   EXPECT_EQ(rc, 0);
   EXPECT_EQ(args.capabilities_mask, 0u);
+}
+
+TEST_F(KfdIoctlTest, MultiAutoResetSignalWaitClearsSignaledState) {
+  kfd_ioctl_create_event_args create_a{};
+  create_a.event_type = KFD_IOC_EVENT_SIGNAL;
+  create_a.auto_reset = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &create_a), 0);
+
+  kfd_ioctl_create_event_args create_b{};
+  create_b.event_type = KFD_IOC_EVENT_SIGNAL;
+  create_b.auto_reset = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &create_b), 0);
+
+  kfd_ioctl_set_event_args set_a{};
+  set_a.event_id = create_a.event_id;
+  kfd_ioctl_set_event_args set_b{};
+  set_b.event_id = create_b.event_id;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_EVENT, &set_a), 0);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_SET_EVENT, &set_b), 0);
+
+  std::array<kfd_event_data, 2> events{};
+  events[0].event_id = create_a.event_id;
+  events[0].signal_event_data.last_event_age = 1;
+  events[1].event_id = create_b.event_id;
+  events[1].signal_event_data.last_event_age = 1;
+
+  kfd_ioctl_wait_events_args wait{};
+  wait.events_ptr = reinterpret_cast<uint64_t>(events.data());
+  wait.num_events = events.size();
+  wait.wait_for_all = 1;
+  wait.timeout = 0;
+
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
+  EXPECT_EQ(events[0].signal_event_data.last_event_age, 1u);
+  EXPECT_EQ(events[1].signal_event_data.last_event_age, 1u);
+
+  events = {};
+  events[0].event_id = create_a.event_id;
+  events[1].event_id = create_b.event_id;
+  wait = {};
+  wait.events_ptr = reinterpret_cast<uint64_t>(events.data());
+  wait.num_events = events.size();
+  wait.wait_for_all = 0;
+  wait.timeout = 0;
+
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), 0);
+  EXPECT_EQ(wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
 }
 
 } // namespace

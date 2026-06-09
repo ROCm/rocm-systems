@@ -649,6 +649,12 @@ public:
   void write_vgpr_lanes32(uint32_t reg_idx, uint64_t lane_mask, const uint8_t *src,
                           uint32_t src_stride) override {
     auto &reg = vgpr_file_[reg_idx];
+    constexpr uint64_t full_lane_mask =
+        Isa::WF_SIZE >= 64 ? ~uint64_t{0} : ((uint64_t{1} << Isa::WF_SIZE) - 1);
+    if (lane_mask == full_lane_mask && src_stride == sizeof(uint32_t)) {
+      std::memcpy(&reg[0], src, Isa::WF_SIZE * sizeof(uint32_t));
+      return;
+    }
     for (uint32_t lane = 0; lane < Isa::WF_SIZE; ++lane) {
       if (!(lane_mask & (uint64_t{1} << lane)))
         continue;
