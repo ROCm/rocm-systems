@@ -170,6 +170,47 @@ inline uint16_t f32_to_bf16(float val) {
   return static_cast<uint16_t>(f >> 16);
 }
 
+namespace detail {
+
+#if defined(UTIL_HAS_X86_F16C)
+/// x86 specialization: bf16->f32 is a zero-extend + 16-bit left shift, so it
+/// needs no F16C, only the wide integer ops. AVX-512 does 16/instr, AVX2 8.
+inline void bf16_to_f32_block_arch(const uint16_t *src, float *dst, size_t n, size_t &i) {
+#if defined(__AVX512F__)
+  for (; i + 16 <= n; i += 16) {
+    __m512i w =
+        _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + i)));
+    _mm512_storeu_ps(&dst[i], _mm512_castsi512_ps(_mm512_slli_epi32(w, 16)));
+  }
+#endif
+#if defined(__AVX2__)
+  for (; i + 8 <= n; i += 8) {
+    __m256i w = _mm256_cvtepu16_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i *>(src + i)));
+    _mm256_storeu_ps(&dst[i], _mm256_castsi256_ps(_mm256_slli_epi32(w, 16)));
+  }
+#endif
+}
+#else
+/// Portable fallback: no vector advance; the scalar shift loop in
+/// bf16_to_f32_block does all the work (and trivially auto-vectorizes).
+inline void bf16_to_f32_block_arch(const uint16_t *, float *, size_t, size_t &) {}
+#endif
+
+} // namespace detail
+
+/// @brief Convert `n` contiguous BFloat16 values to float.
+///
+/// The bf16->f32 widening is exact (zero-extend into the low mantissa bits),
+/// so the vector and scalar paths are bit-identical for every input including
+/// NaN payloads. Hot path: MFMA/WMMA bf16 input gather.
+inline void bf16_to_f32_block(const uint16_t *src, float *dst, size_t n) {
+  size_t i = 0;
+  detail::bf16_to_f32_block_arch(src, dst, n, i);
+  for (; i < n; ++i)
+    dst[i] = bf16_to_f32(src[i]);
+}
+
+/// @brief Convert a float to 16-bit BFloat16 with round-to-nearest-even.
 inline uint16_t f32_to_bf16_rne(float val) {
   uint32_t f = std::bit_cast<uint32_t>(val);
   if ((f & 0x7f800000u) != 0x7f800000u) {

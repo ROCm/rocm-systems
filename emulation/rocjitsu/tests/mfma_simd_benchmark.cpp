@@ -101,6 +101,16 @@ struct BenchFixture {
     }
   }
 
+  // Pack `regs` words of small bf16 values into the source VGPR range.
+  template <typename Gen> void seed_bf16(uint32_t off, uint32_t regs, Gen gen) {
+    for (uint32_t reg = 0; reg < regs; ++reg)
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+        uint16_t lo = util::f32_to_bf16(gen());
+        uint16_t hi = util::f32_to_bf16(gen());
+        cu->write_vgpr(vbase + off + reg, lane, lo | (static_cast<uint32_t>(hi) << 16));
+      }
+  }
+
   // Pack `regs` words of small int8 values into the source VGPR range.
   template <typename Gen> void seed_i8(uint32_t off, uint32_t regs, Gen gen) {
     for (uint32_t reg = 0; reg < regs; ++reg)
@@ -286,6 +296,77 @@ TEST(MfmaSimdBenchmark, F32_32x32x16_f16) {
                      /*const_acc=*/0);
   };
   bench("v_mfma_f32_32x32x16_f16", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+// bf16 shapes: generic baseline + the four specialized kernels (bf16 bulk
+// zero-extend convert instead of F16C).
+TEST(MfmaSimdBenchmark, F32_16x16x32_bf16) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, B = 1, bits = 16;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(41));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(42));
+  auto run = [&] {
+    amdgpu::exec_f32(*fx.cu, M, N, K, B, bits, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                     fx.vbase + S1_OFF, 0, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                     /*const_acc=*/0);
+  };
+  bench("v_mfma_f32_16x16x32_bf16", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_16x16x32_bf16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, B = 1;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(41));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(42));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_bf16_spec<16, 16, 32>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                                fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_16x16x32_bf16 [specialized]", fx, run, double(M) * N * K * B,
+        /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_32x32x8_bf16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 8, B = 1;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(43));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(44));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_bf16_spec<32, 32, 8>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                               fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_32x32x8_bf16 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_16x16x16_bf16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 16, B = 1;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(45));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(46));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_bf16_spec<16, 16, 16>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                                fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_16x16x16_bf16 [specialized]", fx, run, double(M) * N * K * B,
+        /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_32x32x16_bf16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 16, B = 1;
+  fx.seed_bf16(S0_OFF, 8, mma_test::SmallGen(47));
+  fx.seed_bf16(S1_OFF, 8, mma_test::SmallGen(48));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_bf16_spec<32, 32, 16>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                                fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_32x32x16_bf16 [specialized]", fx, run, double(M) * N * K * B,
+        /*is_int=*/false);
 }
 
 // v_mfma_f32_16x16x32_bf8 (fp8 path, in_bits=8, N=16).

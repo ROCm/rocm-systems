@@ -129,6 +129,20 @@ TEST(MfmaSimdExact, F16Spec_AllShapes) {
   spec(amdgpu::exec_f32_mfma_f16_spec<16, 16, 16>, "spec_f16_16x16x16");
 }
 
+// --- specialized bf16 kernels (constexpr dims + bf16 zero-extend bulk convert) ---
+TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
+  SKIP_IF_NO_SIMD();
+  auto spec = [](auto fn, const char *label) {
+    run_case(label, Fmt::BF16, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
+      fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
+    });
+  };
+  spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 32>, "spec_bf16_16x16x32");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 16>, "spec_bf16_32x32x16");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<32, 32, 8>, "spec_bf16_32x32x8");
+  spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 16>, "spec_bf16_16x16x16");
+}
+
 // --- specialized f32 kernels ---
 TEST(MfmaSimdExact, F32Spec_AllShapes) {
   SKIP_IF_NO_SIMD();
