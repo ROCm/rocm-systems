@@ -1288,6 +1288,35 @@ SIMD_VOP3P_DOT_F16: set[str] = {
     'v_dot2_f32_bf16_vop3p',
 }
 
+# VOP3P mixed-sign integer dots: per-operand signedness from inst.neg bits 0/1
+# at runtime (src0/src1); int32 accumulate from src2; lower-clamp-to-0; no
+# op_sel/neg_hi in the scalar bodies. key -> ElemBits.
+SIMD_VOP3P_DOT_INT_MIXED: dict[str, str] = {
+    'v_dot4_i32_iu8_vop3p': '8',
+    'v_dot8_i32_iu4_vop3p': '4',
+}
+
+# VOP2/VOP3 dst-accumulate integer dots (the "c" forms). Accumulator is vdst
+# (read + write), NOT src2; all signed; no op_sel/neg/clamp. Keyed by full
+# template_name (incl _vop2/_vop3) — the only structural difference is the 2nd
+# source member (vsrc1 vs src1), passed as the Vop3 bool. Value = "ElemBits, Vop3".
+SIMD_DOTC_INT: dict[str, str] = {
+    'v_dot2c_i32_i16_vop2': '16, false',
+    'v_dot2c_i32_i16_vop3': '16, true',
+    'v_dot4c_i32_i8_vop2': '8, false',
+    'v_dot4c_i32_i8_vop3': '8, true',
+    'v_dot8c_i32_i4_vop2': '4, false',
+    'v_dot8c_i32_i4_vop3': '4, true',
+}
+
+# VOP2/VOP3 dst-accumulate f16 dot (v_dot2c_f32_f16). Accumulator is vdst (f32
+# bits); bracketing acc + (a0*b0 + a1*b1) matches the scalar facc += ... form.
+# Value = "Vop3".
+SIMD_DOTC_F16: dict[str, str] = {
+    'v_dot2c_f32_f16_vop2': 'false',
+    'v_dot2c_f32_f16_vop3': 'true',
+}
+
 
 # --- VOPC compare -> VCC ---------------------------------------------------
 #
@@ -2672,6 +2701,17 @@ def simd_probe_line(template_name: str) -> str | None:
         return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT({specdot});'
     if template_name in SIMD_VOP3P_DOT_F16:
         return '  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();'
+    # VOP3P mixed-sign integer dots (dot4 iu8, dot8 iu4).
+    specdotm = SIMD_VOP3P_DOT_INT_MIXED.get(template_name)
+    if specdotm is not None:
+        return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT_MIXED({specdotm});'
+    # VOP2/VOP3 dst-accumulate integer dots (v_dot{2,4,8}c_*; vdst is the accum).
+    specdotc = SIMD_DOTC_INT.get(template_name)
+    if specdotc is not None:
+        return f'  ROCJITSU_TRY_SIMD_DOTC_INT({specdotc});'
+    specdotcf16 = SIMD_DOTC_F16.get(template_name)
+    if specdotcf16 is not None:
+        return f'  ROCJITSU_TRY_SIMD_DOTC_F16({specdotcf16});'
     # VOP3P fma_mix / mad_mix (six ops, three destination shapes). Same body
     # for all; the routing picks the matching glue specialization.
     if template_name in SIMD_VOP3P_FMA_MIX_F32:
