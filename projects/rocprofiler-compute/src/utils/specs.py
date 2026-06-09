@@ -953,17 +953,22 @@ def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, i
         console_error("Failed to retrieve GPU cache information from AMD-SMI.")
 
     cache_sizes = {}
+
+    # vL1D is the level-1 data cache with the most instances (one per CU).
+    # Match by instance count, not num_cu, to stay correct on harvested parts.
+    l1_data_caches = [
+        cache_values
+        for cache_values in cache_info["cache"]
+        if cache_values["cache_level"] == 1
+        and "DATA_CACHE" in cache_values["cache_properties"]
+    ]
+    if l1_data_caches:
+        vl1d = max(l1_data_caches, key=lambda cache: cache["num_cache_instance"])
+        cache_sizes["L1"] = vl1d["cache_size"] * 1024
+
+    # L2 and L3/MALL cache sizes
     for cache_values in cache_info["cache"]:
-        # Cache level is L1 and we are looking for vL1d which means
-        # there should be a cache instance per CU available on the GPU
-        if (
-            cache_values["cache_level"] == 1
-            and cache_values["num_cache_instance"] == num_cu
-        ):
-            cache_sizes["L1"] = cache_values["cache_size"] * 1024
-        # Cache levels L2 and L3/MALL are shared across all CUs
-        # therefore only have one cache instance
-        elif cache_values["cache_level"] == 2:
+        if cache_values["cache_level"] == 2:
             cache_sizes["L2"] = cache_values["cache_size"] * 1024
         elif cache_values["cache_level"] == 3 and num_dies > 0:
             cache_sizes["MALL"] = int(cache_values["cache_size"] * 1024 / num_dies)
