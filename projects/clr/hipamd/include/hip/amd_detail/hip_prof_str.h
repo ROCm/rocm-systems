@@ -2021,7 +2021,7 @@ typedef struct hip_api_data_s {
       hipExtMemcpySignal* signals;
       hipExtMemcpySignal signals__val;
       hipExtMemcpyOp* ops;
-      unsigned int ops__val;
+      hipExtMemcpyOp ops__val;
       size_t count;
       hipMemcpyAttributes* attrs;
       hipMemcpyAttributes attrs__val;
@@ -4900,7 +4900,7 @@ typedef struct hip_api_data_s {
   cb_data.args.hipExtMallocWithFlags.sizeBytes = (size_t)sizeBytes; \
   cb_data.args.hipExtMallocWithFlags.flags = (unsigned int)flags; \
 };
-// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('unsigned int*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('size_t*', 'failIdx'), ('hipStream_t', 'stream')]
+// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('hipExtMemcpyOp*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('size_t*', 'failIdx'), ('hipStream_t', 'stream')]
 #define INIT_hipExtMemcpyBatchAsync_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipExtMemcpyBatchAsync.dsts = (void**)dsts; \
   cb_data.args.hipExtMemcpyBatchAsync.srcs = (void**)srcs; \
@@ -4908,7 +4908,7 @@ typedef struct hip_api_data_s {
   cb_data.args.hipExtMemcpyBatchAsync.sizesB = (size_t*)sizesB; \
   cb_data.args.hipExtMemcpyBatchAsync.waits = (hipExtMemcpyWait*)waits; \
   cb_data.args.hipExtMemcpyBatchAsync.signals = (hipExtMemcpySignal*)signals; \
-  cb_data.args.hipExtMemcpyBatchAsync.ops = (unsigned int*)ops; \
+  cb_data.args.hipExtMemcpyBatchAsync.ops = (hipExtMemcpyOp*)ops; \
   cb_data.args.hipExtMemcpyBatchAsync.count = (size_t)count; \
   cb_data.args.hipExtMemcpyBatchAsync.attrs = (hipMemcpyAttributes*)attrs; \
   cb_data.args.hipExtMemcpyBatchAsync.attrsIdxs = (size_t*)attrsIdxs; \
@@ -7697,7 +7697,7 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipExtMallocWithFlags:
       if (data->args.hipExtMallocWithFlags.ptr) data->args.hipExtMallocWithFlags.ptr__val = *(data->args.hipExtMallocWithFlags.ptr);
       break;
-// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('unsigned int*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('size_t*', 'failIdx'), ('hipStream_t', 'stream')]
+// hipExtMemcpyBatchAsync[('void**', 'dsts'), ('void**', 'srcs'), ('size_t*', 'sizesA'), ('size_t*', 'sizesB'), ('hipExtMemcpyWait*', 'waits'), ('hipExtMemcpySignal*', 'signals'), ('hipExtMemcpyOp*', 'ops'), ('size_t', 'count'), ('hipMemcpyAttributes*', 'attrs'), ('size_t*', 'attrsIdxs'), ('size_t', 'numAttrs'), ('size_t*', 'failIdx'), ('hipStream_t', 'stream')]
     case HIP_API_ID_hipExtMemcpyBatchAsync:
       if (data->args.hipExtMemcpyBatchAsync.dsts) data->args.hipExtMemcpyBatchAsync.dsts__val = *(data->args.hipExtMemcpyBatchAsync.dsts);
       if (data->args.hipExtMemcpyBatchAsync.srcs) data->args.hipExtMemcpyBatchAsync.srcs__val = *(data->args.hipExtMemcpyBatchAsync.srcs);

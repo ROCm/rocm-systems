@@ -3021,11 +3021,6 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
   std::vector<size_t> writeBufferIndices;
   std::vector<size_t> readBufferIndices;
 
-  // Ext operations (swap, indirect) are only honored by the SDMA batch path.
-  // Check both attrs.flags (legacy) and ops (new API) for ext operations.
-  const unsigned int kExtOpAttrsMask = hipMemcpyFlagExtOpSwap;
-  const unsigned int kExtOpOpsMask =
-      hipExtMemcpyOpSwap | hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst;
   size_t attrIdx = 0;
 
   for (size_t i = 0; i < count; ++i) {
@@ -3041,14 +3036,29 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
 
     const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
-    const bool hasExtOp = (copyFlags & kExtOpAttrsMask) ||
-                          (ops != nullptr && (ops[i] & kExtOpOpsMask));
-    if (hasExtOp) {
+    const bool isSwap = (copyFlags & hipMemcpyFlagExtOpSwap) ||
+                        (ops != nullptr && (ops[i] & hipExtMemcpyOpSwap));
+    const bool isIndirect = ops != nullptr &&
+        (ops[i] & (hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst));
+
+    if (isSwap) {
+      // Swap requires D2D — both buffers must be device memory.
+      switch (type) {
+        case hipCopyBuffer:
+        case hipCopyBufferSDMA:
+        case hipCopyBufferP2P:
+          break;  // D2D is valid for swap
+        default:
+          return hipErrorNotSupported;
+      }
+    }
+
+    if (isIndirect) {
+      // Indirect requires heterogeneous memory types (H<->D).
       switch (type) {
         case hipCopyBuffer:
         case hipCopyBufferSDMA:
         case hipCopyBufferP2P: {
-          // Narrow to H<->D for both swap and indirect.
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
           if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
@@ -3056,10 +3066,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
           }
           break;
         }
-        case hipHostToHost:
-        case hipWriteBuffer:
-        case hipReadBuffer:
-
+        default:
           return hipErrorNotSupported;
       }
     }
