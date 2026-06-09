@@ -16,7 +16,7 @@
 #include "compiler.h"
 #include <cmath>
 #ifdef ENABLE_ROCSHMEM_GIN
-#include "gin/gin_host_rocshmem.h"
+#include "gin/gin_host_rocshmem_api.h"
 #include "gin/gin_host_rocshmem_gda.h"
 #endif
 

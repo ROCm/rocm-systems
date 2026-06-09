@@ -25,7 +25,7 @@ ncclResult_t ncclGinRocshmemDestroyContext(ncclGin_t *ginComm, void *ginCtx);
 ncclResult_t ncclGinRocshmemProgress(ncclGin_t *ginComm, void *ginCtx);
 ncclResult_t ncclGinRocshmemQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError);
 
-// Called from gin_plugin_rocshmem.cc (plugin interface, no ncclComm)
+// Called from gin_plugin_rocshmem_api.cc (plugin interface, no ncclComm)
 ncclResult_t ncclGinRocshmemCreateContextFromPlugin(int nSignals, int nCounters,
                                                      void **outGinCtx,
                                                      ncclNetDeviceHandle_v11_t **outDevHandle);

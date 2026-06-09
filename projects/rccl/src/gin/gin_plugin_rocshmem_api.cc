@@ -19,9 +19,9 @@
  * GIN-managed queue pairs.
  */
 
-#include "gin/gin_host_rocshmem.h"
+#include "gin/gin_host_rocshmem_api.h"
 #include "comm.h"
-#include "nccl_device/gin/rocshmem/gin_rocshmem_device_host_common.h"
+#include "nccl_device/gin/rocshmem/gin_rocshmem_api_device_host_common.h"
 #include "plugin/nccl_net.h"
 
 #include <rocshmem/rocshmem.hpp>
@@ -95,7 +95,7 @@ static ncclResult_t ginRocshmemFinalize(void* ctx) {
   return ncclSuccess;
 }
 
-// Delegate to gin_host_rocshmem.cc implementations
+// Delegate to gin_host_rocshmem_api.cc implementations
 // Note: createContext/regMrSym don't use collComm for rocshmem (transport is internal)
 
 static ncclResult_t ginRocshmemCreateContext(void* collComm, int nSignals, int nCounters,

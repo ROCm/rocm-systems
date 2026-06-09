@@ -6,10 +6,10 @@
 
 #ifdef ENABLE_ROCSHMEM_GIN
 
-#include "gin/gin_host_rocshmem.h"
+#include "gin/gin_host_rocshmem_api.h"
 #include "comm.h"
 #include "dev_runtime.h"
-#include "nccl_device/gin/rocshmem/gin_rocshmem_device_host_common.h"
+#include "nccl_device/gin/rocshmem/gin_rocshmem_api_device_host_common.h"
 
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>

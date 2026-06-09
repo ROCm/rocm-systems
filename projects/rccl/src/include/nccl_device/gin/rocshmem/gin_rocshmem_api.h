@@ -8,7 +8,7 @@
 #define _NCCL_DEVICE_GIN_ROCSHMEM_H_
 
 #include "../gin_device_common.h"
-#include "gin_rocshmem_device_host_common.h"
+#include "gin_rocshmem_api_device_host_common.h"
 #include <rocshmem/rocshmem.hpp>
 
 template <>
