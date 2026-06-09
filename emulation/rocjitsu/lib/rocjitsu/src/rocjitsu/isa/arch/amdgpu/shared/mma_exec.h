@@ -558,6 +558,48 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
 // Execution kernels
 // ---------------------------------------------------------------------------
 
+/// Shared SIMD core for the MFMA/WMMA/SWMMAC executors. For every (row,col),
+/// Cbuf[row*stride+col] += sum_k Abuf[row*K+k] * Bbuf[k*stride+col], run as
+/// native-width rows over the col (N) dimension with a scalar tail. A/B/C must
+/// already be hoisted into dense buffers (lane permutation, per-element scale,
+/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA
+/// (matching the hardware's single-rounding MACs; the scalar reference is
+/// non-fused, so f32 agrees to a few ULP and packed f16/bf16 rounds identically);
+/// integer MAC is exact, so the SIMD and scalar paths are bit-identical.
+/// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
+/// on a platform without <experimental/simd>.
+template <typename T>
+inline void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
+                             const T *Abuf, const T *Bbuf, T *Cbuf) {
+  for (uint32_t row = 0; row < M; ++row) {
+    uint32_t col = 0;
+    for (; col + W <= N; col += W) {
+      util::native<T> c;
+      c.copy_from(&Cbuf[row * stride + col], util::stdx::vector_aligned);
+      for (uint32_t k = 0; k < K; ++k) {
+        util::native<T> a(Abuf[row * K + k]);
+        util::native<T> bv;
+        bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
+        if constexpr (std::is_floating_point_v<T>)
+          c = util::stdx::fma(a, bv, c);
+        else
+          c += a * bv;
+      }
+      c.copy_to(&Cbuf[row * stride + col], util::stdx::vector_aligned);
+    }
+    for (; col < N; ++col) {
+      T acc = Cbuf[row * stride + col];
+      for (uint32_t k = 0; k < K; ++k) {
+        if constexpr (std::is_floating_point_v<T>)
+          acc = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], acc);
+        else
+          acc += Abuf[row * K + k] * Bbuf[k * stride + col];
+      }
+      Cbuf[row * stride + col] = acc;
+    }
+  }
+}
+
 /// Generic MFMA execute for f32 output: D = C + A x B.
 ///
 /// All inputs are read before any outputs are written to avoid WAR hazards
@@ -658,26 +700,7 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
               bl.lane = permute_b_lane(bl.lane, blgp);
             Bbuf[k * stride + col] = eb(cu, s1, bl);
           }
-        for (uint32_t row = 0; row < M; ++row) {
-          uint32_t col = 0;
-          for (; col + W <= N; col += W) {
-            util::native<float> c;
-            c.copy_from(&Cbuf[row * stride + col], util::stdx::vector_aligned);
-            for (uint32_t k = 0; k < K; ++k) {
-              util::native<float> a(Abuf[row * K + k]);
-              util::native<float> bv;
-              bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
-              c = util::stdx::fma(a, bv, c);
-            }
-            c.copy_to(&Cbuf[row * stride + col], util::stdx::vector_aligned);
-          }
-          for (; col < N; ++col) {
-            float acc = Cbuf[row * stride + col];
-            for (uint32_t k = 0; k < K; ++k)
-              acc = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], acc);
-            Cbuf[row * stride + col] = acc;
-          }
-        }
+        wmma_simd_matmul<float>(M, N, K, W, stride, Abuf, Bbuf, Cbuf);
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
             auto out = output_loc_32(M, N, row, col, b);
@@ -746,48 +769,6 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
 constexpr size_t WMMA_SIMD_MAX_AB = 2048;      // max M*K
 constexpr size_t WMMA_SIMD_MAX_BSTRIDE = 4096; // max K*stride
 constexpr size_t WMMA_SIMD_MAX_C = 1024;       // max M*stride
-
-/// Shared SIMD core for the WMMA/SWMMAC executors. For every (row,col),
-/// Cbuf[row*stride+col] += sum_k Abuf[row*K+k] * Bbuf[k*stride+col], run as
-/// native-width rows over the col (N) dimension with a scalar tail. A/B/C must
-/// already be hoisted into dense buffers (lane permutation, per-element scale,
-/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA
-/// (matching the hardware's single-rounding MACs; the scalar reference is
-/// non-fused, so f32 agrees to a few ULP and packed f16/bf16 rounds identically);
-/// integer MAC is exact, so the SIMD and scalar paths are bit-identical.
-/// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
-/// on a platform without <experimental/simd>.
-template <typename T>
-inline void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
-                             const T *Abuf, const T *Bbuf, T *Cbuf) {
-  for (uint32_t row = 0; row < M; ++row) {
-    uint32_t col = 0;
-    for (; col + W <= N; col += W) {
-      util::native<T> c;
-      c.copy_from(&Cbuf[row * stride + col], util::stdx::vector_aligned);
-      for (uint32_t k = 0; k < K; ++k) {
-        util::native<T> a(Abuf[row * K + k]);
-        util::native<T> bv;
-        bv.copy_from(&Bbuf[k * stride + col], util::stdx::vector_aligned);
-        if constexpr (std::is_floating_point_v<T>)
-          c = util::stdx::fma(a, bv, c);
-        else
-          c += a * bv;
-      }
-      c.copy_to(&Cbuf[row * stride + col], util::stdx::vector_aligned);
-    }
-    for (; col < N; ++col) {
-      T acc = Cbuf[row * stride + col];
-      for (uint32_t k = 0; k < K; ++k) {
-        if constexpr (std::is_floating_point_v<T>)
-          acc = std::fma(Abuf[row * K + k], Bbuf[k * stride + col], acc);
-        else
-          acc += Abuf[row * K + k] * Bbuf[k * stride + col];
-      }
-      Cbuf[row * stride + col] = acc;
-    }
-  }
-}
 
 template <typename ExtractA, typename ExtractB>
 void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,

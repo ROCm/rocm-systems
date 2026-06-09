@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "../mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -279,12 +280,5 @@ inline std::vector<std::pair<Mode, uint32_t>> trials_for(Fmt fmt) {
     t.push_back({Mode::Inf, 0});
   return t;
 }
-
-#define MMA_SKIP_IF_NO_SIMD()                                                                      \
-  if constexpr (!util::has_stdx_simd) {                                                            \
-    GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";                    \
-  } else if (util::native<float>::size() <= 1) {                                                   \
-    GTEST_SKIP() << "host native_simd width is 1 — SIMD path never taken";                         \
-  }
 
 } // namespace mma_exact

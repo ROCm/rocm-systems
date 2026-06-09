@@ -88,7 +88,7 @@ void run_sparse_f16(const char *label, Fmt fmt, uint32_t K, uint32_t bits, Ea ea
 
 // --- dense f32-out, f16 inputs (generic + both specialized kernels) ---
 TEST(WmmaSimdExact, F32_f16) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_dense_f32("wmma_f32_16x16x16_f16", Fmt::F16, 16, 16, 16, 16, amdgpu::extract_f16,
                 amdgpu::extract_f16);
   run_dense_f32("wmma_f32_16x16x32_f16", Fmt::F16, 16, 16, 32, 16, amdgpu::extract_f16,
@@ -105,7 +105,7 @@ TEST(WmmaSimdExact, F32_f16) {
 
 // --- dense f16-out (packed16, generic + specialized) ---
 TEST(WmmaSimdExact, F16_f16) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_dense_f16("wmma_f16_16x16x16_f16", Fmt::F16, 16, 16, amdgpu::extract_f16,
                 amdgpu::extract_f16);
   run_dense_f16("wmma_f16_16x16x32_f16", Fmt::F16, 32, 16, amdgpu::extract_f16,
@@ -118,7 +118,7 @@ TEST(WmmaSimdExact, F16_f16) {
 
 // --- dense bf16 inputs: f32-out and packed bf16-out ---
 TEST(WmmaSimdExact, Bf16) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_dense_f32("wmma_f32_16x16x32_bf16", Fmt::BF16, 16, 16, 32, 16, amdgpu::extract_bf16,
                 amdgpu::extract_bf16);
   run_case("wmma_bf16_16x16x32_bf16", Fmt::BF16, Fmt::BF16, [](WmmaFixture &fx, uint32_t ca) {
@@ -136,7 +136,7 @@ TEST(WmmaSimdExact, Bf16) {
 
 // --- dense fp8/bf8 inputs, all four A/B combos, K=64 and K=128, f32/f16 out ---
 TEST(WmmaSimdExact, F8Dense) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   for (uint32_t k : {64u, 128u}) {
     run_dense_f32("wmma_f32_fp8_fp8", Fmt::FP8, 16, 16, k, 8, amdgpu::extract_fp8,
                   amdgpu::extract_fp8);
@@ -153,7 +153,7 @@ TEST(WmmaSimdExact, F8Dense) {
 
 // --- sparse f16/fp8 SWMMAC ---
 TEST(WmmaSimdExact, Sparse) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_sparse_f32("swmmac_f32_16x16x32_f16", Fmt::F16, 32, 16, amdgpu::extract_f16,
                  amdgpu::extract_f16);
   run_sparse_f32("swmmac_f32_16x16x64_f16", Fmt::F16, 64, 16, amdgpu::extract_f16,
@@ -172,7 +172,7 @@ TEST(WmmaSimdExact, Sparse) {
 
 // --- integer WMMA/SWMMAC, signed/unsigned, clamp on and off ---
 TEST(WmmaSimdExact, I32) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_case("wmma_i32_16x16x16_i8", Fmt::I8, Fmt::I8, [](WmmaFixture &fx, uint32_t ca) {
     amdgpu::exec_wmma_i32_i8(*fx.cu, 16, 16, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
                              fx.vbase + ACC, ca);
@@ -196,7 +196,7 @@ TEST(WmmaSimdExact, I32) {
 
 // --- mixed-format dense (fp4/fp6/bf6 paths) and fp4 32x16 shape ---
 TEST(WmmaSimdExact, MixedFmt) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   run_dense_f32("wmma_f32_32x16x128_fp4", Fmt::RAW4, 32, 16, 128, 4, amdgpu::extract_fp4,
                 amdgpu::extract_fp4);
   run_case("wmma_f32_mixed_fp4_fp4", Fmt::RAW4, Fmt::F32, [](WmmaFixture &fx, uint32_t ca) {
@@ -221,7 +221,7 @@ TEST(WmmaSimdExact, MixedFmt) {
 // after the a*b product while the SIMD hoist folds them into A and B, so the
 // two only agree bit-for-bit while no intermediate overflows or underflows.
 TEST(WmmaSimdExact, ScaledMixed) {
-  MMA_SKIP_IF_NO_SIMD();
+  SKIP_IF_NO_SIMD();
   auto seed_scales = [](WmmaFixture &fx, uint32_t off, uint32_t seed) {
     std::mt19937 rng(seed);
     for (uint32_t reg = 0; reg < 4; ++reg)
