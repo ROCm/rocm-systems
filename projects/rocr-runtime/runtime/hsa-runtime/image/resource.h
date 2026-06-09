@@ -143,9 +143,12 @@ protected:
   void const printSRD() const {
     char hexStr[200];
     size_t hexStrLen = 0;
-    for (int i = 0; i < sizeof(srd) / sizeof(srd[0]); i++)
-      hexStrLen += sprintf(&hexStr[hexStrLen], "0x%08x ", srd[i]);
-
+    for (int i = 0; i < sizeof(srd) / sizeof(srd[0]); i++) {
+      int written = snprintf(&hexStr[hexStrLen], sizeof(hexStr) - hexStrLen, "0x%08x ", srd[i]);
+      if (written > 0 && hexStrLen + written < sizeof(hexStr)) {
+        hexStrLen += written;
+      }
+    }
     printf("\nSRD:%s\n\n", hexStr);
   }
 

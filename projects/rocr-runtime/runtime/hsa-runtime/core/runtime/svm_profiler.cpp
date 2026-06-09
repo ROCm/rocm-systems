@@ -223,7 +223,10 @@ void SvmProfileControl::PollSmi() {
             int pid;
             int offset = 0;
             int args = sscanf(cursor, "%x %" SCNu64 " -%u%n", &event_id, &time, &pid, &offset);
-            assert(args == 3 && "Parsing error!");
+            if (args != 3) {
+              fprintf(logFile, "ROCr HMM event error: Failed to parse event header\n");
+              continue;
+            }
 
             std::string detail;
             cursor += offset + 1;
@@ -237,7 +240,10 @@ void SvmProfileControl::PollSmi() {
                 uint32_t fetch, pref;
                 args = sscanf(cursor, "@%" SCNx64 "(%x) %x->%x %x:%x %u", &addr, &size, &from, &to, &fetch,
                               &pref, &trigger);
-                assert(args == 7 && "Parsing error!");
+                if (args != 7) {
+                  detail = "parse error";
+                  break;
+                }
 
                 addr *= 4096;
                 size *= 4096;
@@ -256,7 +262,10 @@ void SvmProfileControl::PollSmi() {
                 uint32_t from, to;
                 uint32_t trigger;
                 args = sscanf(cursor, "@%" SCNx64 "(%x) %x->%x %u", &addr, &size, &from, &to, &trigger);
-                assert(args == 5 && "Parsing error!");
+                if (args != 5) {
+                  detail = "parse error";
+                  break;
+                }
 
                 addr *= 4096;
                 size *= 4096;
@@ -274,10 +283,13 @@ void SvmProfileControl::PollSmi() {
                 uint32_t gpuid;
                 char mode;
                 args = sscanf(cursor, "@%" SCNx64 "(%x) %c", &addr, &gpuid, &mode);
+                if (args != 3) {
+                  detail = "parse error";
+                  break;
+                }
 
                 addr *= 4096;
 
-                assert(args == 3 && "Parsing error!");
                 std::string agent = format_agent(gpuid);
                 std::string range = std::to_string(addr);
                 std::string cause = (mode == 'W') ? "Write" : "Read";
@@ -290,7 +302,10 @@ void SvmProfileControl::PollSmi() {
                 uint32_t gpuid;
                 char mode;
                 args = sscanf(cursor, "@%" SCNx64 "(%x) %c", &addr, &gpuid, &mode);
-                assert(args == 3 && "Parsing error!");
+                if (args != 3) {
+                  detail = "parse error";
+                  break;
+                }
 
                 addr *= 4096;
 
@@ -305,7 +320,10 @@ void SvmProfileControl::PollSmi() {
                 uint32_t gpuid;
                 uint32_t trigger;
                 args = sscanf(cursor, "%x %u", &gpuid, &trigger);
-                assert(args == 2 && "Parsing error!");
+                if (args != 2) {
+                  detail = "parse error";
+                  break;
+                }
                 std::string agent = format_agent(gpuid);
                 std::string cause = smi_eviction_string(trigger);
                 detail = cause + " " + agent;
@@ -315,7 +333,10 @@ void SvmProfileControl::PollSmi() {
               case HSA_SMI_EVENT_QUEUE_RESTORE: {
                 uint32_t gpuid;
                 args = sscanf(cursor, "%x", &gpuid);
-                assert(args == 1 && "Parsing error!");
+                if (args != 1) {
+                  detail = "parse error";
+                  break;
+                }
                 std::string agent = format_agent(gpuid);
                 detail = agent;
                 break;
@@ -327,7 +348,10 @@ void SvmProfileControl::PollSmi() {
                 uint32_t gpuid;
                 uint32_t trigger;
                 args = sscanf(cursor, "@%" SCNx64 "(%x) %x %u", &addr, &size, &gpuid, &trigger);
-                assert(args == 4 && "Parsing error!");
+                if (args != 4) {
+                  detail = "parse error";
+                  break;
+                }
 
                 addr *= 4096;
                 size *= 4096;
