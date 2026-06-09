@@ -5664,3 +5664,19 @@ operator<<(std::ostream& out, const hipArrayMapInfo& v)
     ::rocprofiler::hip::detail::operator<<(out, v);
     return out;
 }
+
+inline static std::ostream&
+operator<<(std::ostream& out, const hipExtMemcpyWait& v)
+{
+    out << "{addr=" << v.addr << ", value=" << v.value
+        << ", mask=" << v.mask << ", compareOp=" << v.compareOp << "}";
+    return out;
+}
+
+inline static std::ostream&
+operator<<(std::ostream& out, const hipExtMemcpySignal& v)
+{
+    out << "{addr=" << v.addr << ", data=" << v.data
+        << ", signalOp=" << v.signalOp << "}";
+    return out;
+}
