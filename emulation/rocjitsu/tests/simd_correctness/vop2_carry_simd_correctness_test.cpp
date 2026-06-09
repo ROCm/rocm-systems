@@ -195,12 +195,12 @@ void check_case(const CarryCase &c, uint64_t exec) {
             << c.label << ": clobbered inactive dst lane " << lane;
       }
     }
-    // Inactive EXEC lanes must keep their incoming VCC bit.
+    // Inactive EXEC lanes must be zeroed in the carry-out.
     const uint64_t inactive = ~exec;
-    EXPECT_EQ(simd_out.vcc & inactive, vcc_in & inactive)
-        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": altered an inactive-lane VCC bit";
-    EXPECT_EQ(scalar_out.vcc & inactive, vcc_in & inactive)
-        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": altered an inactive-lane VCC bit";
+    EXPECT_EQ(simd_out.vcc & inactive, 0ULL)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": inactive-lane VCC bit not zeroed";
+    EXPECT_EQ(scalar_out.vcc & inactive, 0ULL)
+        << c.label << " vcc_in=0x" << std::hex << vcc_in << ": inactive-lane VCC bit not zeroed";
   }
 }
 
