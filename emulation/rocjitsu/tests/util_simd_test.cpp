@@ -781,6 +781,43 @@ TEST(UtilSimd, CubeMa_F32_BitExact) {
       scalar_cubema);
 }
 
+// --- Normalized pack-convert lanes (v_cvt_pk[_]norm_{i16,u16}_*) -------------
+
+int16_t scalar_cvt_pknorm_i16(float f) {
+  if (std::isnan(f))
+    return 0;
+  return static_cast<int16_t>(std::clamp(f * 32767.0f, -32768.0f, 32767.0f));
+}
+uint16_t scalar_cvt_pknorm_u16(float f) {
+  if (std::isnan(f))
+    return 0;
+  return static_cast<uint16_t>(std::clamp(f * 65535.0f, 0.0f, 65535.0f));
+}
+
+TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
+  SKIP_IF_NO_SIMD();
+  using V = util::native<float>;
+  constexpr std::size_t W = V::size();
+  const std::array<float, 14> grid = {{0.0f, -0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 2.0f, -2.0f, 0.99999f,
+                                       1e30f, -1e30f, std::numeric_limits<float>::infinity(),
+                                       -std::numeric_limits<float>::infinity(),
+                                       std::numeric_limits<float>::quiet_NaN()}};
+  for (float fv : grid) {
+    alignas(V) float fb[W];
+    for (std::size_t i = 0; i < W; ++i)
+      fb[i] = fv;
+    V f(fb, util::stdx::vector_aligned);
+    auto ri = util::cvt_pknorm_i16_f32_simd(f);
+    auto ru = util::cvt_pknorm_u16_f32_simd(f);
+    for (std::size_t i = 0; i < W; ++i) {
+      EXPECT_EQ(static_cast<uint16_t>(static_cast<int32_t>(ri[i])),
+                static_cast<uint16_t>(scalar_cvt_pknorm_i16(fv)))
+          << "i16 f=" << fv << " lane=" << i;
+      EXPECT_EQ(static_cast<uint16_t>(ru[i]), scalar_cvt_pknorm_u16(fv)) << "u16 f=" << fv;
+    }
+  }
+}
+
 #undef SKIP_IF_NO_SIMD
 
 } // namespace
