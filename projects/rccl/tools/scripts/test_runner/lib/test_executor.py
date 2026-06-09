@@ -757,7 +757,6 @@ class TestExecutor:
         - rccl_home:      Path to the RCCL install/build to link against. Defaults to
                           the RCCL build_dir produced by build_rccl(). Exported as both
                           NCCL_HOME and RCCL_HOME for the build.
-        - parallel_jobs:  Number of parallel compilation jobs (passed via -j).
         - env_variables:  Extra environment variables to set during the build.
 
         Returns:
@@ -2157,6 +2156,30 @@ class TestExecutor:
         if not device_elfs and self.args.verbose:
             print("NOTE: no device-*.elf found next to librccl.so; device-side "
                   "coverage will not appear (was the build ENABLE_DEVICE_COVERAGE=ON?)")
+
+        # Add rccl-tests perf binaries and their device objects. When rccl-tests
+        # is built with --enable-device-coverage, each *_perf binary carries its
+        # own host + device coverage mapping (and emits device-*.elf alongside),
+        # so they must be passed as --object for that coverage to be attributed.
+        if rccl_tests_build_dir and os.path.isdir(rccl_tests_build_dir):
+            perf_binaries = sorted(glob.glob(os.path.join(rccl_tests_build_dir, "*_perf")))
+            for perf_binary in perf_binaries:
+                if os.path.isfile(perf_binary):
+                    object_files.extend(["--object", perf_binary])
+                    if self.args.verbose:
+                        print(f"Found perf binary: {perf_binary}")
+
+            rccl_tests_device_elfs = sorted(
+                glob.glob(os.path.join(rccl_tests_build_dir, "**/device-*.elf"), recursive=True)
+            )
+            for device_elf in rccl_tests_device_elfs:
+                object_files.extend(["--object", device_elf])
+                if self.args.verbose:
+                    print(f"Found rccl-tests device object: {device_elf}")
+            if perf_binaries and not rccl_tests_device_elfs and self.args.verbose:
+                print("NOTE: no device-*.elf found under the rccl-tests build dir; "
+                      "rccl-tests device coverage will not appear (was it built with "
+                      "--enable-device-coverage?)")
 
         if not object_files:
             print("WARNING: No object files found for coverage report")
