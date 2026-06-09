@@ -101,8 +101,8 @@ private:
    * @return doorbell producer index.
    */
   __device__ uint32_t commit_sq(const ActiveWFInfo& wf_info, uint32_t my_sq_prod,
-                                uint32_t my_sq_pos, uint32_t num_wqes);
-  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
+                                uint32_t num_wqes);
+  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t num_wqes);
 
   __device__ void ring_doorbell(uint32_t pos);
   __device__ void ring_doorbell_single(uint32_t pos);
@@ -110,7 +110,7 @@ private:
   /**
    * @brief Helper method to poll the next completion queue entry.
    */
-  __device__ __attribute__((noinline)) void poll_wave_cqes(uint64_t active_lane_mask);
+  __device__ __attribute__((noinline)) void poll_wave_cqes(uint64_t activemask);
 
   /**
    * @brief Helper method to drain completion queue entries.
@@ -139,6 +139,17 @@ private:
 
   static constexpr size_t inline_threshold = sizeof(ionic_v1_pld);
   static_assert(inline_threshold == 32, "ionic can send up to 32 bytes inline in a WQE");
+
+  enum ionic_v1_cqe_qtf_bits_be : uint32_t {
+    IONIC_V1_CQE_COLOR_BE = endian::to_be<uint32_t>(IONIC_V1_CQE_COLOR),
+    IONIC_V1_CQE_ERROR_BE = endian::to_be<uint32_t>(IONIC_V1_CQE_ERROR),
+  };
+
+  enum ionic_v1_op_be : uint16_t {
+    IONIC_V1_FLAG_INL_BE   = endian::to_be<uint16_t>(IONIC_V1_FLAG_INL),
+    IONIC_V1_FLAG_SIG_BE   = endian::to_be<uint16_t>(IONIC_V1_FLAG_SIG),
+    IONIC_V1_FLAG_COLOR_BE = endian::to_be<uint16_t>(IONIC_V1_FLAG_COLOR),
+  };
 };
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
@@ -157,11 +168,11 @@ __device__ void QueuePairIONIC::post_wqe_rma(
   uint16_t wqe_flags = 0;
 
   if (!(my_sq_pos & (sq.mask + 1))) {
-    wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_COLOR);
+    wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
   }
 
   if (wf_info.is_pe_group_last) {
-    wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_SIG);
+    wqe_flags |= IONIC_V1_FLAG_SIG_BE;
   }
 
   // TODO why is this needed?
@@ -187,7 +198,7 @@ __device__ void QueuePairIONIC::post_wqe_rma(
       send_inline = size <= inline_threshold;
     }
     if (send_inline) {
-      wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_INL);
+      wqe_flags |= IONIC_V1_FLAG_INL_BE;
       wqe->base.num_sge_key = 0;
       if (!laddr) {
         // TODO why is this needed?
@@ -205,7 +216,7 @@ __device__ void QueuePairIONIC::post_wqe_rma(
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
     __HIP_MEMORY_SCOPE_AGENT);
 
-  commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
+  commit_sq(wf_info, my_sq_prod, num_wqes);
 }
 
 // precondition: called with all active lanes using different QPs
@@ -219,14 +230,16 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
   uint16_t wqe_flags = 0;
 
   if (!(my_sq_pos & (sq.mask + 1))) {
-    wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_COLOR);
+    wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
   }
 
-  wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_SIG);
+  wqe_flags |= IONIC_V1_FLAG_SIG_BE;
 
   // TODO why is this needed?
-  if (size && !laddr && opcode == IONIC_V2_OP_RDMA_WRITE) {
-    size = 1;
+  if constexpr (Op == OpCode::RDMA_WRITE) {
+    if (size && !laddr) {
+      size = 1;
+    }
   }
 
   wqe->base.wqe_idx = my_sq_pos;
@@ -245,7 +258,7 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
       send_inline = size <= inline_threshold;
     }
     if (send_inline) {
-      wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_INL);
+      wqe_flags |= IONIC_V1_FLAG_INL_BE;
       wqe->base.num_sge_key = 0;
       if (!laddr) {
         // TODO why is this needed?
@@ -262,7 +275,7 @@ __device__ void QueuePairIONIC::post_wqe_rma_single(
 
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 
-  commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
+  commit_sq_single(my_sq_prod, num_wqes);
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
@@ -292,11 +305,11 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
   }
 
   if (!(my_sq_pos & (sq.mask + 1))) {
-    wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_COLOR);
+    wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
   }
 
   if (wf_info.is_pe_group_last) {
-    wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_SIG);
+    wqe_flags |= IONIC_V1_FLAG_SIG_BE;
   }
 
   wqe->base.wqe_idx = my_sq_pos;
@@ -322,7 +335,7 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo(
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
     __HIP_MEMORY_SCOPE_AGENT);
 
-  cons = commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
+  cons = commit_sq(wf_info, my_sq_prod, num_wqes);
 
   if constexpr (Fetch == AMOFetchType::Blocking) {
     quiet_internal(wf_info, cons);
@@ -358,10 +371,10 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
   }
 
   if (!(my_sq_pos & (sq.mask + 1))) {
-    wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_COLOR);
+    wqe_flags |= IONIC_V1_FLAG_COLOR_BE;
   }
 
-  wqe_flags |= endian::to_be<uint16_t>(IONIC_V1_FLAG_SIG);
+  wqe_flags |= IONIC_V1_FLAG_SIG_BE;
 
   wqe->base.wqe_idx = my_sq_pos;
   wqe->base.op = static_cast<uint8_t>(Op);
@@ -385,7 +398,7 @@ __device__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wqe_amo_single(
 
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 
-  cons = commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
+  cons = commit_sq_single(my_sq_prod, num_wqes);
 
   if constexpr (Fetch == AMOFetchType::Blocking) {
     quiet_internal_ccqe_single(cons);
