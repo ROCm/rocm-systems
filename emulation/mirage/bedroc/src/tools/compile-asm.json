@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "id": "compile-asm",
+    "name": "Assembler",
+    "description": "Assemble a handwritten AMDGPU assembly kernel into a code object for the target architecture.",
+    "category": "compile",
+    "cost": 60,
+    "cacheable": true,
+    "requires": ["source:asm"],
+    "produces": ["compiled:${target}"],
+    "per_target": true,
+    "needs_tools": [],
+    "needs_gpu": false
+}

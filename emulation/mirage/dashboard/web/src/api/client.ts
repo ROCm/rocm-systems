@@ -6,6 +6,11 @@
 
 import type {
   AgentDef,
+  BedrocFuzzSummary,
+  BedrocProof,
+  BedrocRequestBody,
+  BedrocRunResponse,
+  BedrocTool,
   EmulatorEntry,
   ExecListItem,
   ExecStatus,
@@ -160,3 +165,13 @@ export function attachUrl(sessionId: string, execId: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}${API}/sessions/${encodeURIComponent(sessionId)}/execs/${encodeURIComponent(execId)}/attach`;
 }
+
+// ── Bedroc ──────────────────────────────────────────────────────────────────
+
+export const listBedrocTools = () => get<BedrocTool[]>("/bedroc/tools");
+export const bedrocPlan = (body: BedrocRequestBody) =>
+  post<BedrocProof>("/bedroc/plan", body);
+export const bedrocRun = (body: BedrocRequestBody) =>
+  post<BedrocRunResponse>("/bedroc/run", body);
+export const bedrocFuzz = (iterations: number, seed: number) =>
+  post<BedrocFuzzSummary>("/bedroc/fuzz", { iterations, seed });

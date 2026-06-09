@@ -1065,6 +1065,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirage_bedroc"
+version = "0.1.0"
+dependencies = [
+ "mirage_core",
+ "mirage_solver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "mirage_builtin"
 version = "0.1.0"
 dependencies = [
@@ -1110,10 +1122,12 @@ dependencies = [
  "dialoguer",
  "futures",
  "libc",
+ "mirage_bedroc",
  "mirage_builtin",
  "mirage_core",
  "mirage_hotswap",
  "mirage_rocjitsu",
+ "mirage_solver",
  "serde",
  "serde_json",
  "tokio",
@@ -1132,9 +1146,11 @@ dependencies = [
  "clap",
  "futures",
  "futures-util",
+ "mirage_bedroc",
  "mirage_core",
  "mirage_ctl",
  "mirage_dashboard",
+ "mirage_solver",
  "reqwest",
  "serde",
  "serde_json",
@@ -1191,6 +1207,16 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "mirage_solver"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

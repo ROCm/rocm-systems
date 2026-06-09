@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "id": "compile-hip",
+    "name": "HIP C++ compiler",
+    "description": "Compile a HIP C++ kernel into a code object for the target architecture.",
+    "category": "compile",
+    "cost": 100,
+    "cacheable": true,
+    "requires": ["source:hip"],
+    "produces": ["compiled:${target}"],
+    "per_target": true,
+    "needs_tools": [],
+    "needs_gpu": false
+}

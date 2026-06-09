@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "id": "waitcheck",
+    "name": "Static Wait Check / Hazard Detector",
+    "description": "Static final-ISA analysis over an assembled kernel that flags missing waitcnt and target-specific hazards. Frontend-agnostic; runs without a GPU.",
+    "category": "analyze",
+    "cost": 15,
+    "cacheable": true,
+    "requires": ["compiled:${target}"],
+    "produces": ["no_hazards:${target}"],
+    "per_target": true,
+    "needs_tools": [],
+    "needs_gpu": false
+}

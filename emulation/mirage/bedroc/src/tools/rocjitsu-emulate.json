@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "id": "rocjitsu-emulate",
+    "name": "rocjitsu emulator",
+    "description": "Execute the kernel under the rocjitsu software GPU emulator to observe its behavior and validate its output against the requested semantics.",
+    "category": "emulate",
+    "cost": 500,
+    "cacheable": true,
+    "requires": ["compiled:${target}"],
+    "produces": ["emulated:${target}", "correct_output:${target}"],
+    "per_target": true,
+    "needs_tools": ["rocjitsu"],
+    "needs_gpu": false
+}

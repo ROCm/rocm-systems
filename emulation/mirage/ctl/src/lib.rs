@@ -26,6 +26,9 @@ use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
+mod bedroc;
+pub use bedroc::BedrocCmd;
+
 /// Log directive that detached child processes (notably the per-session
 /// `mirage host`) should inherit, derived from the CLI's `-v`/`-vv`.
 ///
@@ -230,6 +233,10 @@ pub enum CtlCmd {
     /// Manage mirage's on-disk state (builtin topologies, purge).
     #[command(subcommand)]
     State(StateCmd),
+
+    /// Plan and prove kernel-correctness properties (Project Bedroc).
+    #[command(subcommand)]
+    Bedroc(BedrocCmd),
 
     /// Convenience: create session, run a command, attach, clean up.
     Run(RunArgs),
@@ -580,6 +587,7 @@ pub async fn dispatch<C: MirageCtl + 'static>(
         CtlCmd::Session(c) => session_cmd(&*ctl, c, json).await,
         CtlCmd::Exec(c) => exec_cmd(ctl.clone(), c, json).await,
         CtlCmd::State(c) => state_cmd(ctl.clone(), c, json).await,
+        CtlCmd::Bedroc(c) => bedroc::dispatch(c, json),
         CtlCmd::Run(a) => run_cmd(ctl.clone(), a).await,
         CtlCmd::Attach(a) => attach_cmd(ctl.clone(), a).await,
         CtlCmd::Logs(a) => logs_cmd(ctl.clone(), a).await,

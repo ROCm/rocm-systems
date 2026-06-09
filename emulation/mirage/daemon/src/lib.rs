@@ -40,6 +40,7 @@ use axum::Router;
 use clap::{Args, Subcommand};
 
 mod api;
+mod bedroc;
 mod server;
 mod service;
 mod spa;

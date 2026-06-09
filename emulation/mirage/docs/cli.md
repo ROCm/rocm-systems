@@ -119,6 +119,27 @@ Flags:
   finishes. Only meaningful when mirage created the session.
 * `--workdir DIR` sets the working directory.
 
+## `mirage bedroc`
+
+Compose data-defined correctness tools into an optimal plan and proof
+for a kernel — e.g. *prove this kernel has no data hazards on MI350*.
+
+```text
+mirage bedroc tools [-l] [--tools-dir DIR]
+mirage bedroc plan  --source FILE --source-kind hip
+                    --target mi350 --prove no-data-hazards
+                    [--target ...] [--prove ...] [--tools-dir DIR]
+mirage bedroc run   <same flags as plan> [--no-cache]
+mirage bedroc fuzz  [--iterations N] [--seed N] [--tools-dir DIR]
+```
+
+Tools are JSON manifests, never hardcoded: drop a `.json` file in
+`<MIRAGE_CONFIG>/bedroc/tools/` (or pass `--tools-dir`) to extend the
+catalogue. `run` exits non-zero if any requested property is unproven.
+
+See [bedroc.md](bedroc.md) for the request model, the full manifest
+schema, and a guide to adding tools.
+
 ## Environment variables
 
 | Variable               | Purpose                                                   |

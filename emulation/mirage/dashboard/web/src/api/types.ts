@@ -131,3 +131,96 @@ export type StreamPacket =
     }
   | { NodeExit: { node: number; exit_code: number } }
   | { ExecExit: { exit_code: number } };
+
+// ── Bedroc (Project Bedroc kernel-correctness planner) ──────────────────────
+
+/// Mirror of `mirage_bedroc::ToolManifest` plus the daemon's `available`
+/// flag describing whether the tool can run in the current environment.
+export interface BedrocTool {
+  schema_version: number;
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  cost: number;
+  cacheable?: boolean;
+  requires?: string[];
+  produces: string[];
+  per_target?: boolean;
+  needs_tools?: string[];
+  needs_gpu?: boolean;
+  available: boolean;
+}
+
+export interface BedrocResolvedTarget {
+  requested: string;
+  gfx: string;
+}
+
+export interface BedrocProofStep {
+  tool_id: string;
+  manifest_id: string;
+  name: string;
+  produces: string[];
+  cached: boolean;
+  cost: number;
+}
+
+export interface BedrocGoalOutcome {
+  goal: string;
+  target: string;
+  fact: string;
+  proven: boolean;
+  reason?: string;
+}
+
+export interface BedrocUnavailableTool {
+  id: string;
+  reason: string;
+}
+
+export interface BedrocProof {
+  request: unknown;
+  targets: BedrocResolvedTarget[];
+  plan: BedrocProofStep[];
+  total_cost: number;
+  goals: BedrocGoalOutcome[];
+  available_tools: string[];
+  unavailable_tools: BedrocUnavailableTool[];
+}
+
+export interface BedrocExecutedStep {
+  tool_id: string;
+  name: string;
+  produces: string[];
+  cached: boolean;
+  fingerprint: string;
+}
+
+export interface BedrocExecutionReport {
+  steps: BedrocExecutedStep[];
+  cache_hits: number;
+  executed: number;
+  established: string[];
+  unestablished: string[];
+}
+
+export interface BedrocRunResponse {
+  proof: BedrocProof;
+  execution: BedrocExecutionReport;
+}
+
+export interface BedrocFuzzSummary {
+  requests: number;
+  goals_checked: number;
+  total_routes: number;
+  multi_route_goals: number;
+  inconsistencies: string[];
+}
+
+export interface BedrocRequestBody {
+  source?: string;
+  source_kind?: string;
+  targets: string[];
+  goals: string[];
+}

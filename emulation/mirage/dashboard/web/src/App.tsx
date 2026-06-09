@@ -3,6 +3,7 @@ import { Layout } from "./components/Layout";
 import { ToastProvider } from "./components/ui/Toast";
 import { AgentEditorPage } from "./pages/AgentEditorPage";
 import { AgentsPage } from "./pages/AgentsPage";
+import { BedrocPage } from "./pages/BedrocPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { SessionsPage } from "./pages/SessionsPage";
@@ -23,6 +24,7 @@ function App() {
           <Route path="agents/edit/:name" element={<AgentEditorPage />} />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="sessions/:id" element={<SessionDetailPage />} />
+          <Route path="bedroc" element={<BedrocPage />} />
         </Route>
       </Routes>
     </ToastProvider>

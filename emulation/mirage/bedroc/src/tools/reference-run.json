@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "id": "reference-run",
+    "name": "Simulator reference oracle",
+    "description": "Run the kernel under the full rocjitsu simulator as a slow but authoritative oracle, observing every instruction and memory event to validate the output. An alternative, higher-fidelity route to correct_output.",
+    "category": "reference",
+    "cost": 900,
+    "cacheable": true,
+    "requires": ["compiled:${target}"],
+    "produces": ["correct_output:${target}"],
+    "per_target": true,
+    "needs_tools": ["rocjitsu"],
+    "needs_gpu": false
+}

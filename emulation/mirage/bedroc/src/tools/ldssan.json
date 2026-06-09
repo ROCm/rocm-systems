@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "id": "ldssan",
+    "name": "LdsSan shared-memory race detector",
+    "description": "Dynamic binary instrumentation over the emulated kernel that detects missing barriers and shared-memory (LDS) races for the high-performance profile (ordinary loads/stores plus waits and barriers; atomics/fences rejected).",
+    "category": "analyze",
+    "cost": 350,
+    "cacheable": true,
+    "requires": ["emulated:${target}"],
+    "produces": ["no_races:${target}"],
+    "per_target": true,
+    "needs_tools": ["rocjitsu"],
+    "needs_gpu": false
+}

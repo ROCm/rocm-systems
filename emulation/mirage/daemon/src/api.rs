@@ -58,6 +58,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/sessions/{id}/execs/{exec}/signal", post(signal_exec))
         .route("/sessions/{id}/execs/{exec}/stdin", post(stdin_exec))
         .route("/sessions/{id}/execs/{exec}/attach", get(attach_exec))
+        .merge(crate::bedroc::routes())
         .with_state(state)
 }
 

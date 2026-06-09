@@ -36,7 +36,7 @@ libc = { workspace = true }
 nix = { workspace = true }
 
 [workspace]
-members = ["builtin","core", "container", "ctl", "daemon", "dashboard", "host", "hotswap", "rocjitsu"]
+members = ["builtin","core", "container", "ctl", "daemon", "dashboard", "host", "hotswap", "rocjitsu", "solver", "bedroc"]
 
 [workspace.dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -64,3 +64,5 @@ mirage_daemon = { path = "daemon" }
 mirage_rocjitsu = { path = "rocjitsu" }
 mirage_hotswap = { path = "hotswap" }
 mirage_container = { path = "container" }
+mirage_solver = { path = "solver" }
+mirage_bedroc = { path = "bedroc" }

@@ -1,0 +1,14 @@
+{
+    "schema_version": 1,
+    "id": "fpsan",
+    "name": "FPSan floating-point sanitizer",
+    "description": "Source-level floating-point sanitizer for HIP C++ that validates numeric behavior (payload algebra, conversion and math-operation rules) before lowering erases FP semantics.",
+    "category": "analyze",
+    "cost": 200,
+    "cacheable": true,
+    "requires": ["source:hip", "compiled:${target}"],
+    "produces": ["fp_correct:${target}"],
+    "per_target": true,
+    "needs_tools": [],
+    "needs_gpu": false
+}
