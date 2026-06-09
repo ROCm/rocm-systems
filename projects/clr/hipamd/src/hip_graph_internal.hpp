@@ -880,13 +880,11 @@ class Graph {
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
-    // Single-segment graphs run entirely on the launch stream — no sync needed.
-    if (segments_.size() <= 1) return false;
-    size_t leafCount = 0;
-    for (const auto& seg : segments_) {
-      if (seg.segment_ids_edges.empty() && ++leafCount > 1) return true;
-    }
-    return false;
+    // A single-segment graph runs entirely on the launch stream; no explicit sync needed.
+    // For all multi-segment graphs we always require leaf sync: a single leaf segment
+    // can still be on a different HW queue (e.g. child-graph segments dispatch on their
+    // own stream pool).  EnqueueSegmentedGraph skips same-stream leaves cheaply.
+    return segments_.size() > 1;
   }
 
  protected:

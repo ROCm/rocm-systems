@@ -1057,6 +1057,10 @@ hsa_status_t GpuAgent::PostToolsInit() {
   BindTrapHandler();
   InitDma();
 
+  const auto& flag = core::Runtime::runtime_singleton_->flag();
+  if (flag.poison_sigbus_delay_set())
+    driver().SetSigbusDelay(node_id(), flag.poison_sigbus_delay_ms());
+
   return HSA_STATUS_SUCCESS;
 }
 

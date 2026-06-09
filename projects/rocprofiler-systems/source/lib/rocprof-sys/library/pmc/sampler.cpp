@@ -139,6 +139,55 @@ std::vector<collectors::collector_slice> g_collector_slices;
 
 std::atomic<bool> g_reinit_pending{ false };
 
+// Tears down the AMD SMI collector slices and marks the sampler uninitialized.
+// This is the only teardown performed on the post-fork reinit path: that reinit
+// exists solely to refresh AMD SMI device handles in the child.
+void
+shutdown_amd_smi_collectors()
+{
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    if(!is_initialized())
+    {
+        return;
+    }
+
+    LOG_DEBUG("Shutting down AMD-SMI PMC sampler.");
+
+    try
+    {
+        for(auto& slice : g_collector_slices)
+        {
+            slice.shutdown();
+        }
+    } catch(const std::runtime_error& _e)
+    {
+        LOG_ERROR("Exception thrown when shutting down AMD-SMI PMC sampler: {}",
+                  _e.what());
+    }
+
+    is_initialized() = false;
+}
+
+// Tears down the rocprofiler-sdk GPU hardware perf-counter collector. This must
+// NOT run on the post-fork reinit path: the collector is registered once (from
+// sdk_tool_configure) and is never recreated by setup(); its SDK contexts are
+// owned by the parent and survive fork(), so tearing it down would permanently
+// disable GPU hardware-counter sampling. Only the real finalize resets it.
+void
+shutdown_gpu_hw_collector()
+{
+#if ROCPROFILER_VERSION >= 600
+    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
+
+    LOG_DEBUG("Shutting down rocprofiler-sdk GPU hardware counter collector.");
+
+    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
+    g_gpu_perf_counter_collector.reset();
+    g_gpu_perf_counter_provider.reset();
+#endif
+}
+
 void
 reinit_if_pending()
 {
@@ -146,7 +195,7 @@ reinit_if_pending()
     if(!g_reinit_pending.compare_exchange_strong(_expected, false)) return;
 
     LOG_DEBUG("Performing deferred PMC reinit after fork.");
-    shutdown();
+    shutdown_amd_smi_collectors();
     setup();
 }
 
@@ -244,32 +293,8 @@ setup()
 void
 shutdown()
 {
-    auto_lock_t _lk{ type_mutex<category::amd_smi>() };
-
-    if(!is_initialized())
-    {
-        return;
-    }
-
-    LOG_DEBUG("Shutting down PMC sampler.");
-
-    try
-    {
-        for(auto& slice : g_collector_slices)
-        {
-            slice.shutdown();
-        }
-    } catch(const std::runtime_error& _e)
-    {
-        LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
-    }
-
-    is_initialized() = false;
-#if ROCPROFILER_VERSION >= 600
-    if(g_gpu_perf_counter_collector) g_gpu_perf_counter_collector->shutdown();
-    g_gpu_perf_counter_collector.reset();
-    g_gpu_perf_counter_provider.reset();
-#endif
+    shutdown_amd_smi_collectors();
+    shutdown_gpu_hw_collector();
 }
 
 void
