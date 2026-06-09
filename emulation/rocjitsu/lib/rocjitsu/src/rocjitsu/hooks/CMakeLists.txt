@@ -2,8 +2,13 @@
 # SPDX-License-Identifier: MIT
 
 add_library(rocjitsu_hooks SHARED rj_hsa_dbt_hooks.cpp)
+add_library(rocjitsu_hip_intercept_hooks SHARED rj_hip_device_intercept.cpp)
 
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
+set_target_properties(
+    rocjitsu_hip_intercept_hooks
+    PROPERTIES OUTPUT_NAME rocjitsu_hip_intercept_hooks
+)
 
 target_include_directories(
     rocjitsu_hooks
@@ -32,11 +37,18 @@ target_link_libraries(
         Threads::Threads
 )
 
+target_link_libraries(rocjitsu_hip_intercept_hooks PRIVATE ${CMAKE_DL_LIBS})
+
 if(MSVC)
     target_compile_options(rocjitsu_hooks PRIVATE /W4 /WX)
+    target_compile_options(rocjitsu_hip_intercept_hooks PRIVATE /W4 /WX)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(
         rocjitsu_hooks
+        PRIVATE -Wall -Wextra -Wpedantic -Werror
+    )
+    target_compile_options(
+        rocjitsu_hip_intercept_hooks
         PRIVATE -Wall -Wextra -Wpedantic -Werror
     )
 endif()
