@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -237,6 +238,20 @@ def strip_ansi(s: str) -> str:
     return ansi_escape.sub("", s)
 
 
+def patch_console(monkeypatch, module, *names, **overrides):
+    """Patch ``module.console_<name>`` with a Mock for each name; return {name: Mock}.
+
+    Pass ``name=callable`` to substitute a specific mock (e.g. a record-and-raise
+    stub for the console_error exit path).
+    """
+    mocks = {}
+    for name in names:
+        mock = overrides.get(name, Mock())
+        monkeypatch.setattr(f"{module}.console_{name}", mock)
+        mocks[name] = mock
+    return mocks
+
+
 def gpu_soc():
     """Return (arch, model) from rocminfo, e.g. ('gfx942', 'MI300').
 
@@ -270,3 +285,12 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
 
     if soc in unsupported_socs:
         pytest.skip(f"PC sampling is not supported on {soc}")
+
+
+def require_pc_sampling_gpu(is_stochastic=False):
+    """Skip the test unless a GPU that supports the selected PC sampling mode is
+    present."""
+    _, soc = gpu_soc()
+    if not soc:
+        pytest.skip("GPU not supported")
+    skip_unsupported_pc_sampling_soc(is_stochastic=is_stochastic)

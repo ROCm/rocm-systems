@@ -1101,9 +1101,8 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
 
 
 def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
-    """run_prof and pc_sampling_prof must log only profiler-added env vars,
-    never the user's full environment, to avoid leaking secrets into
-    shared workload logs."""
+    """run_prof must log only profiler-added env vars, never the user's full
+    environment, to avoid leaking secrets into shared workload logs."""
     monkeypatch.setenv("LEAK_CANARY_TOKEN", "SHOULD_NOT_APPEAR")
 
     logs = []
@@ -1138,11 +1137,8 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
         logging.INFO,
         "csv",
     )
-    utils_profile.pc_sampling_prof(
-        {"APP_CMD": ["my_app", "--arg"]}, "host_trap", 1000, str(tmp_path)
-    )
 
-    assert sum("env vars" in m for m in logs) >= 2
+    assert sum("env vars" in m for m in logs) >= 1
     env_log_lines = [m for m in logs if "env vars" in m]
     assert any("ROCPROF_COUNTER_COLLECTION" in m for m in env_log_lines)
     assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
@@ -4146,186 +4142,6 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     assert "Accum_VGPR" in result_df.columns
     assert result_df["Accum_VGPR"].iloc[0] == 0
     assert result_df["Accum_VGPR"].dtype == "int64"
-
-
-# ===================================================================
-# Test PC_sampling function
-# ===================================================================
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
-    """
-    Edge Case: rocprofiler_sdk_tool_path is valid, but librocprofiler-sdk-tool.so
-    is NOT found next to it (or in rocprofiler-sdk subdir).
-    This test primarily checks if the paths are constructed. The actual check for
-    file existence before `capture_subprocess_output` is not in the provided snippet,
-    but we test the path construction.
-    """
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        method = "host_trap"
-        interval = 1000
-        workload_dir = str(tmp_path)
-        options = {"APP_CMD": "my_app --arg"}
-
-        sdk_lib_dir = tmp_path / "rocm_sdk" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path).touch()
-
-        expected_tool_path = str(
-            sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
-        )
-
-        options["LD_PRELOAD"] = expected_tool_path
-
-        mock_capture_subprocess.return_value = (True, "Success output")
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        call_args = mock_capture_subprocess.call_args
-        called_env = call_args.kwargs.get("new_env", {})
-
-        assert "LD_PRELOAD" in called_env
-        assert called_env["LD_PRELOAD"] == expected_tool_path
-
-        mock_console_error.assert_not_called()
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_subprocess_fails(
-    mock_console_debug, mock_capture_subprocess, tmp_path, monkeypatch
-):
-    """
-    Edge Case: The capture_subprocess_output returns success=False.
-    This should trigger the console_error("PC sampling failed.").
-    """
-    console_error_calls = []
-
-    def mock_console_error(msg, exit=True):
-        console_error_calls.append(msg)
-        if exit:
-            raise RuntimeError("console_error called")
-
-    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
-
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
-        method = "stochastic"
-        interval = 5000
-        workload_dir = str(tmp_path)
-        options = ["another_app"]
-
-        with pytest.raises(RuntimeError, match="console_error called"):
-            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        mock_capture_subprocess.assert_not_called()
-        assert console_error_calls == [
-            "APP_CMD, the workload's executable must be provided "
-            "when not in live attach mode"
-        ]
-
-    mock_capture_subprocess.reset_mock()
-    console_error_calls.clear()
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        options = {"APP_CMD": "another_app"}
-        sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path_sdk).touch()
-
-        tool_dir = sdk_lib_dir / "rocprofiler-sdk"
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        (tool_dir / "librocprofiler-sdk-tool.so").touch()
-
-        mock_capture_subprocess.return_value = (
-            False,
-            "Error output from SDK subprocess",
-        )
-
-        with pytest.raises(RuntimeError, match="console_error called"):
-            utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        mock_capture_subprocess.assert_called_once()
-        assert console_error_calls == ["PC sampling failed."]
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_empty_appcmd(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
-    """
-    Edge Case: The appcmd is an empty string.
-    The function should still attempt to run it. The behavior of
-    capture_subprocess_output with an empty command is external to this function.
-    """
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
-        method = "host_trap"
-        interval = 100
-        workload_dir = str(tmp_path)
-        options = ["--"]
-        rocprofiler_sdk_tool_path = "/some/path/librocprofiler_sdk.so"  # noqa: F841
-
-        mock_capture_subprocess.return_value = (True, "Output with empty appcmd")
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        options_list = mock_capture_subprocess.call_args[0][0]
-        assert options_list[-1] == "--"
-        mock_console_error.assert_not_called()
-
-    mock_capture_subprocess.reset_mock()
-    mock_console_error.reset_mock()
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprofiler-sdk"):
-        sdk_lib_dir = tmp_path / "rocm_sdk_empty" / "lib"
-        sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-        rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-        Path(rocprofiler_sdk_tool_path_sdk).touch()
-        tool_dir = sdk_lib_dir / "rocprofiler-sdk"
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        (tool_dir / "librocprofiler-sdk-tool.so").touch()
-
-        mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
-        options = {"APP_CMD": ""}
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        assert mock_capture_subprocess.call_args[0][0] == ""
-        mock_console_error.assert_not_called()
-
-
-@mock.patch("utils.utils_profile.capture_subprocess_output")
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
-def test_pc_sampling_prof_multiarg_appcmd(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
-    """All arguments after '--' in profiler_options must appear
-    in the subprocess call."""
-    with mock.patch("utils.utils_common._rocprof_cmd", "rocprof_cli_tool"):
-        method = "host_trap"
-        interval = 100
-        workload_dir = str(tmp_path)
-        options = ["--kernel-trace", "--", "./myapp", "arg1", "arg2"]
-
-        mock_capture_subprocess.return_value = (True, "Success")
-
-        utils_profile.pc_sampling_prof(options, method, interval, workload_dir)
-
-        assert mock_capture_subprocess.called
-        options_list = mock_capture_subprocess.call_args[0][0]
-        separator_index = options_list.index("--")
-        assert options_list[separator_index:] == ["--", "./myapp", "arg1", "arg2"]
-        mock_console_error.assert_not_called()
 
 
 def test_set_parser():

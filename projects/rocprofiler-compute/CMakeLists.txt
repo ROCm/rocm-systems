@@ -709,6 +709,18 @@ add_test(
 )
 
 # -----------------------------------
+# PC sampling profiler unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_pc_sampling_profile
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_pc_sampling_profile.xml ${COV_OPTION}
+        tests/test_pc_sampling_profile.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # SoC base counter allocation tests
 # -----------------------------------
 
@@ -877,6 +889,13 @@ install(
 # src/rocprof_compute_profile
 install(
     DIRECTORY src/rocprof_compute_profile
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/pc_sampling
+install(
+    DIRECTORY src/pc_sampling
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE

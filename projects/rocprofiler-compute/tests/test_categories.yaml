@@ -21,6 +21,7 @@ test_categories:
       - test_roofline_calc_ai_analyze
       - test_num_xcds_spec_class
       - test_profiler_base
+      - test_pc_sampling_profile
       - test_num_xcds_cli_output
       - test_mi_gpu_spec
       - test_utils_profile_csv
@@ -75,6 +76,7 @@ test_categories:
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_profiler_base
+      - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
       - test-rocprofiler-compute-tool
@@ -123,6 +125,7 @@ test_categories:
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_profiler_base
+      - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
       - test-rocprofiler-compute-tool
@@ -171,6 +174,7 @@ test_categories:
       - test_pc_sampling_analysis
       - test_utils_profile_csv
       - test_profiler_base
+      - test_pc_sampling_profile
       - test_mem_chart
       - test_native_tool_finder
       - test-rocprofiler-compute-tool
