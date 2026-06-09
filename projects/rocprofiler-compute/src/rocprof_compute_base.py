@@ -156,7 +156,7 @@ class RocProfCompute:
 
         self._validate_list_option_exclusions()
 
-        # Validate block 30 requires --membw-analysis and --experimental
+        # Validate block 30 / block 21 require their respective experimental flags
         filter_list: list[str] = []
         if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
             filter_list = self.__args.filter_blocks
@@ -170,11 +170,28 @@ class RocProfCompute:
             ):
                 if not self.__args.membw_analysis or not self.__args.experimental:
                     console_error(
-                        "Block 30 (Memory Bandwidth Analysis) is an experimental :"
-                        f"feature.\n"
+                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
+                        "feature.\n"
                         f'To use "-b {block_input}", you must also specify: '
-                        f"--membw-analysis --experimental"
+                        "--membw-analysis --experimental"
                     )
+            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
+            # from the profiling config yaml.
+            if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
+                if not self.__args.pc_sampling or not self.__args.experimental:
+                    console_error(
+                        "Block 21 (PC Sampling) is an experimental feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        "--pc-sampling --experimental"
+                    )
+
+        # When --pc-sampling is set, inject "21" into filter_blocks so the
+        # profiling config yaml records it and downstream code is unchanged.
+        if self.__mode == "profile" and self.__args.pc_sampling:
+            current = list(self.__args.filter_blocks or [])
+            if "21" not in current:
+                current.append("21")
+            self.__args.filter_blocks = current
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()

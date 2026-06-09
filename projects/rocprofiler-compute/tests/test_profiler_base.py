@@ -8,6 +8,7 @@ from unittest.mock import patch
 import common
 import pytest
 
+from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
 from utils.utils_exceptions import (
@@ -286,3 +287,113 @@ def test_attach_library_resolution_with_fallback():
             profiler.get_profiler_options()
 
     common.clean_output_dir(True, str(output_dir))
+
+
+# ---------------------------------------------------------------------------
+# RocProfCompute.sanitize(): block 21 / block 30 experimental-gating
+# ---------------------------------------------------------------------------
+def _make_rpc_args(
+    *,
+    filter_blocks=None,
+    filter_metrics=None,
+    pc_sampling=False,
+    membw_analysis=False,
+    experimental=False,
+    mode="profile",
+) -> argparse.Namespace:
+    """Build a minimal Namespace for RocProfCompute.sanitize() unit tests."""
+    return argparse.Namespace(
+        mode=mode,
+        list_metrics=None,
+        list_blocks=None,
+        list_available_metrics=False,
+        list_sets=False,
+        specs=False,
+        filter_blocks=filter_blocks,
+        filter_metrics=filter_metrics,
+        pc_sampling=pc_sampling,
+        membw_analysis=membw_analysis,
+        experimental=experimental,
+        set_selected=None,
+        roof_only=False,
+        bench_only=False,
+        no_roof=False,
+        format_rocprof_output="csv",
+        name="unit-test",
+        output_directory="/tmp/unit-test",
+    )
+
+
+def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
+    """Construct a RocProfCompute without invoking __init__."""
+    instance = RocProfCompute.__new__(RocProfCompute)
+    # Name-mangled private attributes consumed by sanitize().
+    instance._RocProfCompute__args = args
+    instance._RocProfCompute__mode = args.mode
+    return instance
+
+
+@pytest.mark.parametrize(
+    "args, expect_error, expected_filter_blocks",
+    [
+        pytest.param(
+            _make_rpc_args(filter_blocks=["21"]),
+            True,
+            None,
+            id="block21_without_pc_sampling_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["21"], pc_sampling=True),
+            True,
+            None,
+            id="pc_sampling_without_experimental_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["pc_sampling"]),
+            True,
+            None,
+            id="block_alias_without_pc_sampling_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[]),
+            False,
+            ["21"],
+            id="pc_sampling_with_experimental_injects_21",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["21"], pc_sampling=True, experimental=True),
+            False,
+            ["21"],
+            id="block21_with_pc_sampling_experimental_passes",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["30"]),
+            True,
+            None,
+            id="block30_without_membw_analysis_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["30"], membw_analysis=True),
+            True,
+            None,
+            id="membw_analysis_without_experimental_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["30"], membw_analysis=True, experimental=True
+            ),
+            False,
+            ["30"],
+            id="block30_with_membw_analysis_experimental_passes",
+        ),
+    ],
+)
+def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_blocks):
+    """Unit test: block 21 and block 30 require their experimental flags."""
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance.sanitize()
+    else:
+        instance.sanitize()
+        assert args.filter_blocks == expected_filter_blocks
