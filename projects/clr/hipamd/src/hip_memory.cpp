@@ -2905,7 +2905,13 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   if (flags & hipMemcpyFlagExtOpSwap) {
     metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
   }
-  // Indirect copy is only supported via hipExtMemcpyOp (per-entry ops parameter).
+  if ((flags & hipMemcpyFlagExtOpIndirectSrc) && (flags & hipMemcpyFlagExtOpIndirectDst)) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrcDst;
+  } else if (flags & hipMemcpyFlagExtOpIndirectSrc) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectSrc;
+  } else if (flags & hipMemcpyFlagExtOpIndirectDst) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpIndirectDst;
+  }
   return metadata;
 }
 
@@ -2995,8 +3001,10 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     // the eventual data buffer.
     const unsigned int copyFlags =
         getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, validateAttrIdx);
-    const bool indirectSrc = (ops != nullptr && (ops[i] & hipExtMemcpyOpIndirectSrc));
-    const bool indirectDst = (ops != nullptr && (ops[i] & hipExtMemcpyOpIndirectDst));
+    const bool indirectSrc = (copyFlags & hipMemcpyFlagExtOpIndirectSrc) ||
+        (ops != nullptr && (ops[i] & hipExtMemcpyOpIndirectSrc));
+    const bool indirectDst = (copyFlags & hipMemcpyFlagExtOpIndirectDst) ||
+        (ops != nullptr && (ops[i] & hipExtMemcpyOpIndirectDst));
     const size_t actualSrcSize = indirectSrc ? sizeof(void*) : sizes[i];
     const size_t actualDstSize = indirectDst ? sizeof(void*) : sizes[i];
 
@@ -3039,12 +3047,23 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     }
   }
 
-  if (!stream.device().settings().sdma_indirect_supported_ && ops != nullptr) {
-    const unsigned int kIndirectMask =
-        hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst;
-    for (size_t i = 0; i < count; ++i) {
-      if (ops[i] & kIndirectMask) {
-        return hipErrorNotSupported;
+  if (!stream.device().settings().sdma_indirect_supported_) {
+    const unsigned int kIndirectAttrMask =
+        hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+    if (attrs != nullptr) {
+      for (size_t i = 0; i < numAttrs; ++i) {
+        if (attrs[i].flags & kIndirectAttrMask) {
+          return hipErrorNotSupported;
+        }
+      }
+    }
+    if (ops != nullptr) {
+      const unsigned int kIndirectOpsMask =
+          hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst;
+      for (size_t i = 0; i < count; ++i) {
+        if (ops[i] & kIndirectOpsMask) {
+          return hipErrorNotSupported;
+        }
       }
     }
   }
@@ -3072,8 +3091,9 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
     const unsigned int copyFlags = getBatchCopyFlags(attrs, attrsIdxs, numAttrs, i, attrIdx);
     const bool isSwap = (copyFlags & hipMemcpyFlagExtOpSwap) ||
                         (ops != nullptr && (ops[i] & hipExtMemcpyOpSwap));
-    const bool isIndirect = ops != nullptr &&
-        (ops[i] & (hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst));
+    const bool isIndirect =
+        (copyFlags & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst)) ||
+        (ops != nullptr && (ops[i] & (hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst)));
 
     // Swap and indirect are mutually exclusive, regardless of source (attrs or ops).
     if (isSwap && isIndirect) {
