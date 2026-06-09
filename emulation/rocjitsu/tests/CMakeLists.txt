@@ -108,6 +108,14 @@ add_executable(
     data_types_test.cpp
     drm_info_layout_test.cpp
 )
+if(RJ_ENABLE_EXPENSIVE_CHECKS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            simd_correctness/mfma_simd_exact_test.cpp
+            simd_correctness/wmma_simd_exact_test.cpp
+    )
+endif()
 target_link_libraries(
     rocjitsu_tests
     PRIVATE
