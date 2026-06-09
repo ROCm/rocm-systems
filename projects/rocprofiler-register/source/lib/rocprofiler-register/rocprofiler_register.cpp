@@ -418,7 +418,7 @@ get_library_handle(std::string_view _rocp_reg_lib)
         }
     }
 
-    // try to load with the absoulte path
+    // try to load with the absolute path
     if(!rocprofiler_lib_handle)
     {
         _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
