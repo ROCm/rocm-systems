@@ -208,6 +208,11 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
                                    "ROCSHMEM_TEAM_SHARED") != ROCSHMEM_SUCCESS) {
     return ROCSHMEM_ERROR;
   }
+  if (copy_device_symbol_to_module(constmem, "_ZN8rocshmem8constmemE",
+                                   sizeof(constmem_t), module, stream,
+                                   "constmem") != ROCSHMEM_SUCCESS) {
+    return ROCSHMEM_ERROR;
+  }
   return ROCSHMEM_SUCCESS;
 }
 
