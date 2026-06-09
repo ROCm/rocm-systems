@@ -662,6 +662,13 @@ class TestAmdSmiPython(unittest.TestCase):
         )
         return
 
+    def test_get_gpu_compute_partition_mem_alloc_mode(self):
+        self.common.print_func_name("")
+        self.common.Test_API_Per_GPU(
+            amdsmi_get_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode
+        )
+        return
+
     def test_get_gpu_compute_process_gpus(self):
         self.common.print_func_name("")
 
@@ -1809,7 +1816,7 @@ if __name__ == "__main__":
     #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
     # ---------------------------------------------------------------------------
 
-    runner = unittest.TextTestRunner(
+    runner = common.GTestSummaryRunner(
         stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
     )
     common.expand_glob_k_arg(globals())

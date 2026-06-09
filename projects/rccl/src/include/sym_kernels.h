@@ -133,6 +133,7 @@ extern int ncclSymkKernelMaxDynamicSmem[/*ncclSymkKernelCount*/]; // initialized
 int ncclSymkGetKernelIndex(ncclSymkKernelId kernelId, int/*ncclDevRedOp_t*/ red, ncclDataType_t ty);
 const char* ncclSymkKernelIdToString(int kernelId);
 ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin, ncclSymRegType_t* winRegType);
+bool rcclSymkKernelIdIsLL(int kernelId);
 
 int ncclSymkLLKernelMask();
 int ncclSymkDynamicSmemKernelMask();

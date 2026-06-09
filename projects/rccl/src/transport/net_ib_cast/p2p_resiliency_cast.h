@@ -11,7 +11,7 @@
 #include "common_cast.h"
 #include "connect_cast.h"
 
-#define NCCL_IB_UD_GRH_SIZE 40
+#define NCCL_IB_UD_GRH_SIZE (40)
 
 struct RecoveryQpnEntry {
   uint32_t qpIndex;

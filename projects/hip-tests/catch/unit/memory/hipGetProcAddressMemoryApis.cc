@@ -1438,7 +1438,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams) {
       reinterpret_cast<hipError_t (*)(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>(
           hipMemcpyWithStream_ptr);
   int N = 4096;
-  const int Ns = 4;
+  const int Ns = isQuickLevel() ? 2 : 4;
   int Nbytes = N * sizeof(int);
   int value = 2;
   // Validating hipMemcpyHtoDAsync API
