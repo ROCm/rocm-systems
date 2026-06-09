@@ -26,6 +26,8 @@ set(RJ_OBJECT_LIBS
     rocjitsu_kmd
     rocjitsu_vm
     rocjitsu_vm_amdgpu
+    rocjitsu_plugin_logging
+    rocjitsu_plugin_race_detector
     rocjitsu_vm_risc_v
     rocjitsu_config
 )
@@ -98,6 +100,8 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    race-detector/race_detector_tests.cpp
+    race-detector/interval_set_tests.cpp
 )
 target_link_libraries(
     rocjitsu_tests
@@ -152,6 +156,11 @@ set(RJ_CDNA4_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json")
 set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json")
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
+set(RJ_KMD_PRELOAD_ENV
+    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
+    "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4.json"
+)
+
 # --- rocminfo test (requires rocminfo binary + HSA runtime + CLI launcher) ---
 # Spawns rocminfo via the rocjitsu CLI and validates output.
 
@@ -205,6 +214,15 @@ if(ROCMINFO_EXECUTABLE)
         NAME "RocminfoTest.ReportsWavefrontSize"
         COMMAND rocminfo_test --gtest_filter=RocminfoTest.ReportsWavefrontSize
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(
+        "RocminfoTest.ExitsSuccessfully"
+        "RocminfoTest.InterposerActive"
+        "RocminfoTest.HsaSystemAttributes"
+        "RocminfoTest.DetectsGpuAgent"
+        "RocminfoTest.ReportsGfx950"
+        "RocminfoTest.ReportsWavefrontSize"
+        PROPERTIES ENVIRONMENT "${RJ_KMD_PRELOAD_ENV}"
     )
     message(STATUS "rocminfo test enabled (found ${ROCMINFO_EXECUTABLE})")
 else()
@@ -270,6 +288,7 @@ if(HSA_RUNTIME64)
         set(HAS_DBT_VECTOR_ADD_GPU FALSE)
         set(HAS_CDNA3_GPU FALSE)
         set(HAS_RDNA4_GPU FALSE)
+        set(HAS_GFX1201_GPU FALSE)
         if(ROCM_AGENT_ENUM)
             execute_process(
                 COMMAND ${ROCM_AGENT_ENUM}
@@ -289,6 +308,9 @@ if(HSA_RUNTIME64)
             endif()
             if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx120[01]")
                 set(HAS_RDNA4_GPU TRUE)
+            endif()
+            if(_agent_rc EQUAL 0 AND _agents MATCHES "gfx1201")
+                set(HAS_GFX1201_GPU TRUE)
             endif()
         endif()
 
@@ -321,12 +343,60 @@ if(HSA_RUNTIME64)
         add_dependencies(hsa_translate_test device_kernels)
         rj_configure_target(hsa_translate_test TEST)
 
+        add_executable(hsa_hooks_test dbt/hsa_hooks_test.cpp)
+        target_include_directories(
+            hsa_hooks_test
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                ${CMAKE_SOURCE_DIR}/lib/util/include
+                ${RJ_HSA_INCLUDE_DIR}
+        )
+        target_link_libraries(
+            hsa_hooks_test
+            PRIVATE
+                ${RJ_OBJECT_LIBS}
+                ${HSA_RUNTIME64}
+                GTest::gtest
+                GTest::gtest_main
+        )
+        target_link_options(
+            hsa_hooks_test
+            PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+        )
+        target_compile_definitions(
+            hsa_hooks_test
+            PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+        )
+        add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
+        rj_configure_target(hsa_hooks_test TEST)
+
         if(HAS_RDNA4_GPU)
             add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchVectorAdd"
                 COMMAND hsa_translate_test --gtest_filter=*VectorAdd*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             )
+        endif()
+
+        if(HAS_GFX1201_GPU)
+            add_test(
+                NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                COMMAND
+                    hsa_hooks_test
+                    --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            )
+            set_tests_properties(
+                "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
+                PROPERTIES
+                    TIMEOUT 60
+                    ENVIRONMENT
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
+            )
+        endif()
+
+        if(HAS_RDNA4_GPU)
             add_test(
                 NAME "HsaTranslateTest.TranslateAndDispatchMfma16x16"
                 COMMAND hsa_translate_test --gtest_filter=*Mfma16x16*
@@ -499,7 +569,13 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 
     # Helper: register a HIP test case run through the CLI launcher.
     function(rj_add_hip_test_case TEST_BIN TEST_CASE)
-        cmake_parse_arguments(ARG "" "CONFIG;NAME" "" ${ARGN})
+        cmake_parse_arguments(
+            ARG
+            ""
+            "CONFIG;NAME;TIMEOUT"
+            "ENVIRONMENT"
+            ${ARGN}
+        )
         if(NOT ARG_CONFIG)
             set(ARG_CONFIG ${RJ_CDNA4_KMD_CONFIG})
         endif()
@@ -513,6 +589,16 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
                 ${CMAKE_CURRENT_BINARY_DIR}/${TEST_BIN}
                 --gtest_filter=${TEST_CASE}
         )
+        if(ARG_ENVIRONMENT)
+            list(JOIN ARG_ENVIRONMENT ";" _ENV_STR)
+            set_tests_properties(
+                ${ARG_NAME}
+                PROPERTIES ENVIRONMENT "${_ENV_STR}"
+            )
+        endif()
+        if(ARG_TIMEOUT)
+            set_tests_properties(${ARG_NAME} PROPERTIES TIMEOUT ${ARG_TIMEOUT})
+        endif()
     endfunction()
 
     rj_add_hip_test(hip_memcpy_test)
@@ -650,6 +736,43 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
 
     rj_add_hip_test(hip_bfe_2d_test)
     rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
+
+    # --- Logging plugin end-to-end test ---
+    rj_add_hip_test(hip_logging_test SOURCE logging/hip_logging_test.hip)
+    set(LOGGING_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/logging_test_output)
+    set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
+    file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
+    file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
+    rj_add_hip_test_case(
+        hip_logging_test "LoggingTest.dispatch_logged"
+        TIMEOUT 30
+        ENVIRONMENT
+            "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
+            "RJ_LOG=1"
+            "RJ_SINKS=file"
+            "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
+    )
+
+    # --- Profiled plugin group end-to-end test ---
+    rj_add_hip_test(
+        hip_profiled_plugin_test
+        SOURCE logging/hip_profiled_plugin_test.hip
+    )
+    set(PROFILED_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/profiled_test_output)
+    set(PROFILED_RUNTIME_DIR ${PROFILED_SINK_DIR}/runtime)
+    file(MAKE_DIRECTORY ${PROFILED_SINK_DIR})
+    file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
+    rj_add_hip_test_case(
+        hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
+        TIMEOUT 30
+        ENVIRONMENT
+            "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
+            "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
+            "RJ_SINKS=file"
+            "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
+    )
+
+    add_subdirectory(race-detector)
 
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()

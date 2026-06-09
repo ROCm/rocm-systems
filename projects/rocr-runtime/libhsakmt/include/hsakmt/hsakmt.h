@@ -1342,6 +1342,17 @@ hsaKmtModelEnabled(
 
 
 /**
+ * Forwards the SIGBUS delay
+ */
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetSigbusDelay(
+    HSAuint32 NodeId,    //IN
+    HSAuint32 DelayMs    //IN
+);
+
+
+/**
  *  Experimental APIs to abstract DRM calls to thunk
 */
 HSAKMT_STATUS

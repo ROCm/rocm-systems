@@ -221,6 +221,7 @@ target_link_libraries(
         rocjitsu_vm
         rocjitsu_vm_amdgpu
         rocjitsu_plugin_logging
+        rocjitsu_plugin_race_detector
         rocjitsu_vm_risc_v
         rocjitsu_config
         util
@@ -256,7 +257,10 @@ install(
 )
 
 # Libraries: lib/
-install(TARGETS rocjitsu_shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(
+    TARGETS rocjitsu_shared rocjitsu_hooks
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(
