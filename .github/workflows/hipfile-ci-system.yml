@@ -6,6 +6,8 @@ env:
   AIS_INPUT_HIPFILE_PKG_DEV_FILENAME: ${{ inputs.ais_hipfile_pkg_dev_filename }}
   AIS_INPUT_HIPFILE_PKG_FILENAME: ${{ inputs.ais_hipfile_pkg_filename }}
   AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
+  AIS_INPUT_CXX_STANDARD: ${{ inputs.cxx_standard }}
   AIS_INPUT_PLATFORM: ${{ inputs.platform }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
   AIS_MOUNT_PATH: /mnt/ais/ext4
@@ -37,6 +39,14 @@ on:
       ci_image:
         required: true
         type: string
+      cxx_compiler:
+        description: "C++ compiler the build artifacts were built with"
+        required: true
+        type: string
+      cxx_standard:
+        description: "C++ standard the build artifacts were built with"
+        required: true
+        type: number
       platform:
         required: true
         type: string

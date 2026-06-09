@@ -31,6 +31,17 @@ jobs:
     env:
       # Matrix variables go here in JSON notation.
       # '>-' strips newlines
+      CXX_COMPILER: >-
+        [
+          "amdclang++",
+          "clang++",
+          "g++"
+        ]
+      CXX_STANDARD: >-
+        [
+          20,
+          23
+        ]
       # Note: If adding distros or ROCm versions, ensure they have been properly excluded.
       SUPPORTED_PLATFORMS: >-
         [
@@ -56,6 +67,7 @@ jobs:
       # combination of CI parameters in include as the matrix axes grow.
       MATRIX_EXCLUDE: >-
         [
+          {"supported_platforms": "rocky8", "cxx_standard": 23},
           {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
           {"supported_platforms": "rocky", "rocm_versions": "nightly"},
           {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
@@ -213,5 +225,7 @@ jobs:
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
       ci_image_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
+      cxx_compiler: ${{ matrix.cxx_compiler }}
+      cxx_standard: ${{ matrix.cxx_standard }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}
