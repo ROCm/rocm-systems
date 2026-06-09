@@ -100,50 +100,33 @@ def _validate_regex(
     if use_abort_fail_regex:
         fail_patterns.extend(ROCPROFSYS_ABORT_FAIL_REGEX)
 
-    # Build combined regex with named groups
-    all_patterns: list[str] = []
-    fail_indices: set[str] = set()
-    pass_indices: set[str] = set()
-
-    if fail_patterns:
-        for i, pattern in enumerate(fail_patterns):
-            all_patterns.append(f"(?P<f{i}>{pattern})")
-            fail_indices.add(f"f{i}")
-
-    if pass_regex:
-        for i, pattern in enumerate(pass_regex):
-            all_patterns.append(f"(?P<p{i}>{pattern})")
-            pass_indices.add(f"p{i}")
-
-    if not all_patterns:
+    if not fail_patterns and not pass_regex:
         return ValidationResult(is_valid=True, message="No patterns to validate")
 
     # Use re.DOTALL so '.' matches newlines (like CMake regex behavior)
-    combined_regex = re.compile("|".join(all_patterns), re.DOTALL)
-    found_pass: set[str] = set()
+    flags = re.DOTALL
 
-    for match in combined_regex.finditer(text):
-        matched_group = match.lastgroup
-
-        if matched_group in fail_indices:
-            original_idx = int(matched_group[1:])
+    # Fail patterns: one combined alternation, short-circuit on first hit
+    if fail_patterns:
+        fail_re = re.compile(
+            "|".join(f"(?P<f{i}>{p})" for i, p in enumerate(fail_patterns)), flags
+        )
+        m = fail_re.search(text)
+        if m is not None:
+            idx = int(m.lastgroup[1:])
             return ValidationResult(
                 is_valid=False,
-                message=f"Fail pattern matched: {fail_patterns[original_idx]}",
+                message=f"Fail pattern matched: {fail_patterns[idx]}",
             )
 
-        if matched_group in pass_indices:
-            found_pass.add(matched_group)
-
-    # Check if all pass patterns were found
+    # Pass patterns: individual re.search per pattern
     if pass_regex:
-        missing = pass_indices - found_pass
-        if missing:
-            missing_idx = int(next(iter(missing))[1:])
-            return ValidationResult(
-                is_valid=False,
-                message=f"Pass pattern not found: {pass_regex[missing_idx]}",
-            )
+        for pattern in pass_regex:
+            if re.search(pattern, text, flags) is None:
+                return ValidationResult(
+                    is_valid=False,
+                    message=f"Pass pattern not found: {pattern}",
+                )
 
     return ValidationResult(is_valid=True, message="All patterns validated successfully")
 

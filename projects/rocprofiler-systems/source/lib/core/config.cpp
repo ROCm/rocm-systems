@@ -265,12 +265,6 @@ configure_settings(bool _init)
                               "for continuous integration)",
                               false, "debugging", "advanced");
 
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK",
-        "Skip CI validation check for push/pop trace count mismatch "
-        "(used only for tests with known imbalances)",
-        false, "debugging", "advanced");
-
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MONOCHROME", "Disable colorized logging",
                               false, "debugging", "advanced");
 
@@ -1278,7 +1272,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(!_config->get_enabled())
     {
-        _set("ROCPROFSYS_USE_TRACE", false);
+        _set("ROCPROFSYS_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
@@ -1459,7 +1453,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("ROCPROFSYS_USE_PROCESS_SAMPLING", "process_sampling");
     _handle_use_option("ROCPROFSYS_USE_CAUSAL", "causal");
     _handle_use_option("ROCPROFSYS_USE_KOKKOSP", "kokkos");
-    _handle_use_option("ROCPROFSYS_USE_TRACE", "perfetto");
+    _handle_use_option("ROCPROFSYS_TRACE", "perfetto");
     _handle_use_option("ROCPROFSYS_PROFILE", "timemory");
     _handle_use_option("ROCPROFSYS_USE_OMPT", "ompt");
     _handle_use_option("ROCPROFSYS_USE_RCCLP", "rcclp");

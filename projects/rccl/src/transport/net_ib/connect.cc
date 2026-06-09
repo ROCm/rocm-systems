@@ -21,6 +21,7 @@ NCCL_PARAM(IbTc, "IB_TC", -1);
 NCCL_PARAM(IbFifoTc, "IB_FIFO_TC", -1);
 NCCL_PARAM(IbEceEnable,"IB_ECE_ENABLE",1);
 
+extern int64_t rcclParamIbGdrFlushGpuMemNoRelaxedOrdering();
 enum ncclIbCommState {
   ncclIbCommStateStart = 0,
   ncclIbCommStateConnect = 1,
@@ -44,10 +45,24 @@ struct ncclIbCommStage {
 struct ncclIbHandle {
   union ncclSocketAddress connectAddr; // Filled by the target
   uint64_t magic; // random number to help debugging
+  int isP2p; // P2P flag
   struct ncclIbCommStage stage; // Used by the other side when connecting
 };
 
 NCCL_PARAM(IbQpsPerConn, "IB_QPS_PER_CONNECTION", 1);
+RCCL_PARAM(IbQpsPerP2p, "IB_QPS_PER_P2P", 0);
+
+// Calculate number of QPs based on P2P flag and device counts
+static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const char* funcName) {
+  auto qp_multiplier = (rcclParamIbQpsPerP2p() > 0 && isP2p) ?
+                       rcclParamIbQpsPerP2p() : ncclParamIbQpsPerConn();
+  int localNqps = qp_multiplier * localNdevs;
+  int remoteNqps = qp_multiplier * remoteNdevs;
+  int maxNqps = (remoteNqps > localNqps) ? remoteNqps : localNqps;
+  INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d",
+       funcName, maxNqps, localNqps, remoteNqps);
+  return maxNqps;
+}
 
 ncclResult_t ncclIbInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int cqSize) {
   base->ibDevN = ibDevN;
@@ -525,6 +540,7 @@ ncclResult_t ncclIbConnect(void* ctx, int dev, void* opaqueHandle, void** sendCo
   struct ncclIbCommStage* stage = &handle->stage;
   struct ncclIbSendComm* comm = (struct ncclIbSendComm*)stage->comm;
   int ready;
+  int isP2p = 0;
   uint8_t link_layer = IBV_LINK_LAYER_UNSPECIFIED;
   *sendComm = NULL;
 
@@ -585,10 +601,11 @@ ib_recv_dev_list:
   memcpy(&remoteVProps, stage->buffer, sizeof(ncclNetVDeviceProps_t));
   mergedDev = ncclIbMergedDevs + dev;
   comm->base.vProps = mergedDev->vProps;
-  int localNqps, remoteNqps;
-  localNqps  = ncclParamIbQpsPerConn() * comm->base.vProps.ndevs; // We must have at least 1 qp per-device
-  remoteNqps = ncclParamIbQpsPerConn() * remoteVProps.ndevs;
-  comm->base.nqps = remoteNqps > localNqps ? remoteNqps : localNqps; // Select max nqps (local or remote)
+  // Read isP2p from handle
+  isP2p = handle->isP2p;
+  INFO(NCCL_NET, "NET/IB: ncclIbConnect isP2p=%d", isP2p);
+  comm->base.nqps = ncclIbCalculateNqps(isP2p, comm->base.vProps.ndevs,
+                                         remoteVProps.ndevs, __func__);
 
   comm->base.nDataQps = std::max(comm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -616,6 +633,7 @@ ib_recv_dev_list:
 
   memset(&meta, 0, sizeof(meta));
   meta.ndevs = comm->base.vProps.ndevs;
+  meta.isP2p = isP2p;
 
   // Create QPs on the sender side
   NCCLCHECKGOTO(ncclIbSenderQpsCreate(comm, &meta), ret, fail);
@@ -652,13 +670,13 @@ ib_recv_dev_list:
           INFO(NCCL_NET,"NET/IB: %s: %s %d IbDev %d Port %d qp_num %d mtu %d LID %d subnet-prefix %lu  FLID %d ctsFifoRkey=0x%x ctsFifoLkey=0x%x", __func__,
                comm->base.vProps.ndevs > 2 ? "NCCL MergedDev" : "NCCL Dev",
                dev, commDev->base.ibDevN, ibDev->portNum, meta.qpInfo[q].qpn, devInfo->mtu, devInfo->lid,
-               (uint64_t)devInfo->gid.global.subnet_prefix, ncclIbExtractFlid(&devInfo->gid), commDev->ctsFifoMr->rkey, commDev->ctsFifoMr->lkey);
+               devInfo->gid.global.subnet_prefix, ncclIbExtractFlid(&devInfo->gid), commDev->ctsFifoMr->rkey, commDev->ctsFifoMr->lkey);
         } else { // RoCE
           INFO(NCCL_NET,"NET/IB: %s: %s %d IbDev %d Port %d qp_num %d mtu %d GID %ld (%lX/%lX) ctsFifoRkey=0x%x ctsFifoLkey=0x%x", __func__,
                comm->base.vProps.ndevs > 2 ? "NCCL MergedDev" : "NCCL Dev", dev,
                commDev->base.ibDevN, ibDev->portNum, meta.qpInfo[q].qpn, devInfo->mtu,
                (int64_t)commDev->base.gidInfo.localGidIndex,
-               (uint64_t)devInfo->gid.global.subnet_prefix, devInfo->gid.global.interface_id, commDev->ctsFifoMr->rkey, commDev->ctsFifoMr->lkey);
+               devInfo->gid.global.subnet_prefix, devInfo->gid.global.interface_id, commDev->ctsFifoMr->rkey, commDev->ctsFifoMr->lkey);
         }
         // Log ECE info
         if (meta.qpInfo[q].ece_supported) {
@@ -893,7 +911,7 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.ibPort = ibDev->portNum;
       qpCreateAttrs.cq = rCommDev->base.cq;
       qpCreateAttrs.pd = rCommDev->base.pd;
-      qpCreateAttrs.accessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
+      qpCreateAttrs.accessFlags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
       qpCreateAttrs.maxRecvWorkRequest = 0;
       qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
       NCCLCHECK(ncclIbCreateQp(&qpCreateAttrs, &rComm->base.stats, &rCommDev->gpuFlush.qp));
@@ -914,6 +932,7 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       devInfo.gid.global.subnet_prefix        = rCommDev->base.gidInfo.localGid.global.subnet_prefix;
       devInfo.gid.global.interface_id         = rCommDev->base.gidInfo.localGid.global.interface_id;
       devInfo.mtu         = ibDev->portAttr.active_mtu;
+      devInfo.ibv_dev_index = rCommDev->base.ibDevN;
       NCCLCHECK(ncclIbRtrQp(rCommDev->gpuFlush.qp.qp, &rCommDev->base.gidInfo, rCommDev->gpuFlush.qp.qp->qp_num, &devInfo, false, remMeta->tc, remMeta->sl));
       NCCLCHECK(ncclIbRtsQp(rCommDev->gpuFlush.qp.qp));
     }
@@ -955,6 +974,13 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)stage->comm;
   int ready;
   int link_layer = IBV_LINK_LAYER_UNSPECIFIED;
+  // Pre-declare dmabuf variables because of goto
+  bool useDmaBuf = false;
+  bool peermemAvailable = false;
+  bool dmabufSupported = false;
+  bool dmabufEnabled = false;
+  bool dmabufAvailable = false;
+  bool forceDmaBuf = false;
   *recvComm = NULL;
 
   if (stage->state == ncclIbCommStateAccept)   goto ib_accept_check;
@@ -1004,10 +1030,6 @@ ib_recv_dev_list:
   NCCLCHECK(ncclIbCheckVProps(&mergedDev->vProps, &remoteVProps));
   rComm->base.vProps = mergedDev->vProps;
   memcpy(stage->buffer, &rComm->base.vProps, sizeof(ncclNetVDeviceProps_t));
-  int localNqps, remoteNqps;
-  localNqps  = ncclParamIbQpsPerConn() * rComm->base.vProps.ndevs; // We must have at least 1 qp per-device
-  remoteNqps = ncclParamIbQpsPerConn() * remoteVProps.ndevs;
-  rComm->base.nqps = remoteNqps > localNqps ? remoteNqps : localNqps; // Select max nqps (local or remote)
 
   rComm->base.nDataQps = std::max(rComm->base.vProps.ndevs, remoteVProps.ndevs);
 
@@ -1031,6 +1053,8 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
+  rComm->base.nqps = ncclIbCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs,
+                                          remMeta.ndevs, __func__);
 
   // IB setup
   // Pre-declare variables because of goto
@@ -1052,7 +1076,7 @@ ib_recv:
   // up to 2 completions (one for the CTS message and one for the completion
   // of a receive request) per QP, in the worst case.
   int cqSize;
-  cqSize = 2*NET_IB_MAX_REQUESTS*ncclParamIbQpsPerConn();
+  cqSize = 3*NET_IB_MAX_REQUESTS*ncclParamIbQpsPerConn();
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
     ibDevN = rComm->base.vProps.devs[i];
@@ -1098,8 +1122,37 @@ ib_recv:
 
   // Determine if Flush is enabled for this Comm. Must be done before creating
   // QPs. If Flush is enabled, extra QPs will be created for Flush operations.
-  rComm->flushEnabled = ((ncclIbGdrSupport() == ncclSuccess || ncclIbDmaBufSupport(lComm->dev) == ncclSuccess)
-                            && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;
+  // GDR mode selection logic
+  peermemAvailable = (ncclIbGdrSupport() == ncclSuccess);
+  dmabufSupported = (ncclIbDmaBufSupport(lComm->dev) == ncclSuccess);
+  dmabufEnabled = (ncclParamDmaBufEnable() != 0);
+  dmabufAvailable = dmabufSupported && dmabufEnabled;
+  forceDmaBuf = rcclParamForceEnableDMABUF();
+
+  if (forceDmaBuf) {
+    // RCCL_FORCE_ENABLE_DMABUF=1: always try DMAbuf, skip peermem
+    useDmaBuf = dmabufAvailable;
+    if (dmabufAvailable) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB: Using GPU Direct RDMA (DMAbuf - forced) for device %d", lComm->dev);
+    } else {
+      WARN("NET/IB: RCCL_FORCE_ENABLE_DMABUF=1 but DMAbuf not available, GPU Direct RDMA disabled for device %d", lComm->dev);
+    }
+  } else {
+    // Normal path: prefer peermem over dmabuf
+    useDmaBuf = !peermemAvailable && dmabufAvailable;
+    if (peermemAvailable) {
+      INFO(NCCL_INIT|NCCL_NET, "NET/IB: Using GPU Direct RDMA (peermem) for device %d", lComm->dev);
+    } else if (useDmaBuf) {
+      WARN("NET/IB: Peermem not available, falling back to GPU Direct RDMA (DMAbuf) for device %d", lComm->dev);
+    } else if (!peermemAvailable && dmabufSupported && !dmabufEnabled) {
+      WARN("NET/IB: Peermem not available and DMAbuf is disabled (NCCL_DMABUF_ENABLE=0), GPU Direct RDMA disabled for device %d", lComm->dev);
+    } else {
+      WARN("NET/IB: GPU Direct RDMA not available for device %d", lComm->dev);
+    }
+  }
+
+  rComm->flushEnabled = ((peermemAvailable || useDmaBuf)
+                            && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;              
 
   NCCLCHECKGOTO(ncclIbReceiverQpsCreateToRts(rComm, &remMeta, &meta), ret, fail);
   if (rComm->prepostReceiveWorkRequests) {
@@ -1131,6 +1184,64 @@ ib_recv:
 
     // Allocate Flush dummy buffer for GPU Direct RDMA
     if (rComm->flushEnabled) {
+      bool gpuFlushRegistered = false;
+      rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+      rCommDev->gpuFlush.gpuMr = nullptr;
+      rCommDev->gpuFlush.dmabuf_fd = -1;
+
+      if (rcclParamIbGdrFlushGpuMemNoRelaxedOrdering()) {
+        #if CUDA_VERSION >= 11070 || HIP_VERSION >= 71260540
+        if (ncclCuMemEnable()) {
+          NCCLCHECKGOTO(ncclMemAlloc((void**)&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int)), ret, fail);
+          CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&rCommDev->gpuFlush.dmabuf_fd,
+                      (CUdeviceptr)rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int),
+                      CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0), ret, cumem_flush_hsa);
+          NCCLCHECKGOTO(wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd,
+                        0, sizeof(int), (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem,
+                        rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ), ret, cumem_flush_hsa);
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+cumem_flush_hsa:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
+          }
+        }
+#else
+#if defined(HIP_UNCACHED_MEMORY)
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocUncached), ret, fail);
+#else
+        NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocFinegrained), ret, fail);
+#endif
+        if (useDmaBuf)
+        {
+          uint64_t export_offset = 0;
+          void *aligned_ptr = NULL;
+          size_t aligned_size = 0;
+          get_aligned_ptr_and_size(rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), &aligned_ptr, &aligned_size);
+          HSACHECKGOTO(hsa_amd_portable_export_dmabuf(aligned_ptr, aligned_size, &rCommDev->gpuFlush.dmabuf_fd, &export_offset), ret, peermem_flush);
+          if (wrap_ibv_reg_dmabuf_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, export_offset, sizeof(int),
+                        (uint64_t)rCommDev->gpuFlush.gpuFlushGpuMem, rCommDev->gpuFlush.dmabuf_fd,
+                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) != ncclSuccess) goto peermem_flush;
+          gpuFlushRegistered = true;
+          goto flush_reg_done;
+peermem_flush:
+          if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
+            close(rCommDev->gpuFlush.dmabuf_fd);
+            rCommDev->gpuFlush.dmabuf_fd = -1;
+          }
+        }
+        #endif
+        flush_reg_done:
+                if (!gpuFlushRegistered) {
+                  if (rCommDev->gpuFlush.gpuFlushGpuMem) {
+                    ncclCudaFree(rCommDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr);
+                    rCommDev->gpuFlush.gpuFlushGpuMem = nullptr;
+                  }
+                  rCommDev->gpuFlush.gpuMr = nullptr;
+        }
+      }
       NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->gpuFlush.hostMr, rCommDev->base.pd, &rComm->gpuFlushHostMem, sizeof(int), IBV_ACCESS_LOCAL_WRITE), ret, fail);
       rCommDev->gpuFlush.sge.addr = (uint64_t)&rComm->gpuFlushHostMem;
       rCommDev->gpuFlush.sge.length = 1;
@@ -1144,12 +1255,14 @@ ib_recv:
     meta.devs[i].gid.global.subnet_prefix       = rCommDev->base.gidInfo.localGid.global.subnet_prefix;
     meta.devs[i].gid.global.interface_id        = rCommDev->base.gidInfo.localGid.global.interface_id;
     meta.devs[i].mtu                            = ibDev->portAttr.active_mtu;
+    meta.devs[i].ibv_dev_index                  = rCommDev->base.ibDevN;
   }
   meta.addr = (uint64_t)rComm->cmplsRecords;
   meta.sl = remMeta.sl;
   meta.tc = remMeta.tc;
 
   meta.ndevs = rComm->base.vProps.ndevs;
+  meta.isP2p = remMeta.isP2p;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;
@@ -1231,6 +1344,13 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {
+        if (commDev->gpuFlush.gpuFlushGpuMem != nullptr) {
+          NCCLCHECK(ncclCudaFree(commDev->gpuFlush.gpuFlushGpuMem, /*manager=*/nullptr));
+          commDev->gpuFlush.gpuFlushGpuMem = nullptr;
+          if (commDev->gpuFlush.gpuMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.gpuMr));
+          commDev->gpuFlush.gpuMr = nullptr;
+          if(commDev->gpuFlush.dmabuf_fd > 0) { close(commDev->gpuFlush.dmabuf_fd);}
+        }
         if (commDev->gpuFlush.qp.qp != NULL) NCCLCHECK(wrap_ibv_destroy_qp(commDev->gpuFlush.qp.qp));
         if (commDev->gpuFlush.hostMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->gpuFlush.hostMr));
       }
@@ -1255,5 +1375,13 @@ ncclResult_t ncclIbCloseListen(void* listenComm) {
     NCCLCHECK(ncclSocketClose(&comm->sock));
     free(comm);
   }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p) {
+  if (!handle) return ncclInvalidArgument;
+  struct ncclIbHandle* ibHandle = (struct ncclIbHandle*)handle;
+  if (ibHandle->magic != NCCL_SOCKET_MAGIC) return ncclInvalidArgument;
+  ibHandle->isP2p = isP2p;
   return ncclSuccess;
 }

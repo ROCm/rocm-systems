@@ -119,6 +119,9 @@ public:
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
+    if (completion_) {
+      completion_->set_plugin_group(plugin_group_);
+    }
   }
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
