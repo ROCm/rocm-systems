@@ -12,9 +12,16 @@ set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 # net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
 add_subdirectory(transport/net_ib_cast)
 
-# Collect list of all source files
+# Collect headers + RCCL-managed source files
 #==================================================================================================
-# E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
+# This list intentionally holds:
+#   * every header that must be hipified into the staging tree, and
+#   * compiled sources that are NOT provided by a per-directory CMakeLists.txt
+#     (top-level src/ sources, device/, transport/, and RCCL-only sources).
+# Compiled sources that live under a wired subdirectory (misc, graph, register,
+# ras, scheduler, os, gin, rma, plugin, nccl_device) are pulled from those leaf
+# CMakeLists.txt files further below so that upstream NCCL source-list changes
+# merge cleanly AND take effect. Keep this list free of those subdir sources.
 set(SRC_FILES
   allocator.cc
   bootstrap.cc
@@ -73,20 +80,12 @@ set(SRC_FILES
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
-  graph/connect.cc
-  graph/paths.cc
-  graph/rings.cc
   graph/rings.h
   graph/rome_models.cc
   graph/rome_models.h
   graph/rome_topo_consensus.cc
   graph/rome_topo_consensus.h
-  graph/search.cc
-  graph/topo.cc
   graph/topo.h
-  graph/trees.cc
-  graph/tuning.cc
-  graph/xml.cc
   graph/xml.h
   include/alloc.h
   include/mem_manager.h
@@ -289,82 +288,23 @@ set(SRC_FILES
   include/plugin/gin/gin_v12.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
-  misc/argcheck.cc
   misc/api_trace.c
   misc/api_trace.cc
-# misc/cudawrap.cc
-# misc/gdrwrap.cc
-  misc/ibvsymbols.cc
-  misc/ibvwrap.cc
-  misc/ipcsocket.cc
-  misc/mlx5dvsymbols.cc
-  misc/mlx5dvwrap.cc
   misc/ionicdvsymbols.cc
   misc/ionicdvwrap.cc
   misc/npkit.cc
-# misc/nvmlwrap.cc
   misc/nvmlwrap_stub.cc
-  misc/param.cc
   misc/rocmwrap.cc
   misc/roctx.cc
   misc/recorder.cc
-  misc/shmutils.cc
   misc/signals.cc
-  misc/socket.cc
-  misc/strongstream.cc
-  misc/utils.cc
   misc/proxy_trace/proxy_trace.cc
-  nccl_device/core.cc
-  nccl_device/gin_barrier.cc
-  nccl_device/gin_scratch.cc
-  nccl_device/ll_a2a.cc
-  nccl_device/lsa_barrier.cc
-  os/linux.cc
   include/os.h
-  rma/rma.cc
-  rma/rma_ce.cc
-  rma/rma_proxy.cc
   include/rma/rma.h
   include/rma/rma_ce.h
   include/rma/rma_proxy.h
-  plugin/net.cc
-  plugin/env.cc
-  plugin/env/env_v1.cc
-  plugin/plugin_open.cc
-  plugin/profiler.cc
-  plugin/tuner.cc
-  plugin/net/net_v6.cc
-  plugin/net/net_v7.cc
-  plugin/net/net_v8.cc
-  plugin/net/net_v9.cc
-  plugin/net/net_v10.cc
-  plugin/net/net_v11.cc
-  plugin/profiler/profiler_v1.cc
-  plugin/profiler/profiler_v2.cc
-  plugin/profiler/profiler_v3.cc
-  plugin/profiler/profiler_v4.cc
-  plugin/profiler/profiler_v5.cc
-  plugin/profiler/profiler_v6.cc
-  plugin/tuner/tuner_v2.cc
-  plugin/tuner/tuner_v3.cc
-  plugin/tuner/tuner_v4.cc
-  plugin/tuner/tuner_v5.cc
-  plugin/tuner/csv_tuner.cc
-  plugin/gin.cc
-  plugin/gin/gin_v11.cc
-  plugin/gin/gin_v12.cc
   ras/client.cc
-  ras/client_support.cc
-  ras/collectives.cc
-  ras/peers.cc
-  ras/ras.cc
   ras/ras_internal.h
-  ras/rasnet.cc
-  register/coll_reg.cc
-  register/register.cc
-  register/sendrecv_reg.cc
-  scheduler/symmetric_sched.cc
-  scheduler/allgatherv_sched.cc
   transport/coll_net.cc
   transport/generic.cc
   transport/net.cc
@@ -380,8 +320,6 @@ set(SRC_FILES
   transport/p2p.cc
   transport/profiler.cc
   transport/shm.cc
-  gin/gin_host.cc
-  gin/gin_host_proxy.cc
   transport/net_ib/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
@@ -415,6 +353,64 @@ endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
 # NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
+
+# Compiled translation units sourced from per-directory CMakeLists.txt (NCCL-aligned)
+#==================================================================================================
+# The leaf CMakeLists.txt files below are kept byte-identical to upstream NCCL so that an
+# NCCL source-list change merges cleanly into RCCL *and* takes effect (instead of silently
+# merging into a list RCCL never reads). RCCL's per-subdirectory deltas are applied centrally
+# in the fenced RCCL-DELTA block, so the leaf files themselves stay pristine.
+#
+# Deliberately NOT wired here (kept explicit in SRC_FILES above), because their leaf
+# CMakeLists.txt contain ROCm-incompatible build logic:
+#   * device/    - builds a CUDA OBJECT library via generate.py (RCCL replaces this entirely
+#                  with its hipify + device-linker pipeline).
+#   * transport/ - recursively add_subdirectory()s net_ib/* and NVIDIA DOCA (gdaki) sources
+#                  that RCCL does not build. RCCL's transport sources stay listed explicitly.
+add_subdirectory(misc)
+add_subdirectory(graph)
+add_subdirectory(register)
+add_subdirectory(ras)
+add_subdirectory(scheduler)
+add_subdirectory(os)
+add_subdirectory(gin)
+add_subdirectory(rma)
+add_subdirectory(plugin)
+add_subdirectory(nccl_device)
+
+set(SUBDIR_LIB_SOURCES
+  ${MISC_SOURCES}
+  ${GRAPH_SOURCES}
+  ${REGISTER_SOURCES}
+  ${RAS_SOURCES}
+  ${SCHEDULER_SOURCES}
+  ${OS_SOURCES}
+  ${GIN_SOURCES}
+  ${RMA_SOURCES}
+  ${PLUGIN_SOURCES}
+  ${SYM_SOURCES}
+)
+
+# Leaf files emit absolute paths (${CMAKE_CURRENT_SOURCE_DIR}/...). Convert each to a
+# project-root-relative path (src/<dir>/<file>) to match the hipify staging convention.
+set(SUBDIR_LIB_SOURCES_REL "")
+foreach(_abs IN LISTS SUBDIR_LIB_SOURCES)
+  file(RELATIVE_PATH _rel "${PROJECT_SOURCE_DIR}" "${_abs}")
+  list(APPEND SUBDIR_LIB_SOURCES_REL "${_rel}")
+endforeach()
+
+# >>> RCCL-DELTA: NCCL subdir sources RCCL does not build.
+#     cudawrap/gdrwrap/nvmlwrap are CUDA/NVML host wrappers replaced by RCCL equivalents;
+#     git_version.cc is replaced by a build-time generated git_version.cpp.
+list(REMOVE_ITEM SUBDIR_LIB_SOURCES_REL
+  src/misc/cudawrap.cc
+  src/misc/gdrwrap.cc
+  src/misc/nvmlwrap.cc
+  src/misc/git_version.cc
+)
+# <<< RCCL-DELTA
+
+list(APPEND SRC_FILES ${SUBDIR_LIB_SOURCES_REL})
 
 # Hipify source files (copy of source generated into hipify directory)
 #==================================================================================================
