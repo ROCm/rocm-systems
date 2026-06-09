@@ -1783,7 +1783,6 @@ class CodeGenerator:
                 'scalar_cvt_pkrtz_f16_f32',
                 'scalar_saveexec',
                 'scalar_bfe',
-                'vector_cmp_class',
                 'vector_swap',
                 'vector_mov',
                 'vector_binop',
@@ -1816,29 +1815,28 @@ class CodeGenerator:
                     if 'omod' in inst_fields:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
-                omap_dtype = dtype
-                omap_kwargs = {}
-                name_lower = inst.name.lower()
-                # AMD naming: V_CVT_DST_SRC — last suffix is source type
-                if name_lower.endswith('_f64'):
-                    omap_kwargs['src_width'] = 64
-                elif 'cvt_f64_' in name_lower:
-                    omap_kwargs['dst_width'] = 64
-                if 'frexp_exp_i32_f64' in name_lower:
-                    omap_kwargs['src_width'] = 64
-                elif 'frexp_mant_f64' in name_lower:
-                    omap_kwargs['src_width'] = 64
-                    omap_kwargs['dst_width'] = 64
-                if cls == 'scalar_bitcmp':
-                    omap_kwargs['src_widths'] = {1: 32}
-                omap_kwargs['src_reg_classes'] = {
+                # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
+                # bit widths (op_widths) subsume the old src_width/dst_width name
+                # heuristics: mixed-width instructions (e.g. the f64<->32-bit
+                # conversions, frexp_*_f64) bind each operand to its own declared
+                # lane width via op.size instead of a single instruction-level
+                # dtype width.
+                omap_dtype = 'b64' if cls == 'scalar_saveexec' else dtype
+                op_widths = {op.name: op.size for op in inst.operands}
+                src_reg_classes = {
                     i: _semantic_reg_class(opnd) for i, opnd in enumerate(src_operands)
                 }
-                omap_kwargs['dst_reg_classes'] = {
+                dst_reg_classes = {
                     i: _semantic_reg_class(opnd) for i, opnd in enumerate(dst_operands)
                 }
                 omap = OperandMap.from_operand_names(
-                    src_ops, dst_ops, sema_block.pragma, omap_dtype, **omap_kwargs
+                    src_ops,
+                    dst_ops,
+                    sema_block.pragma,
+                    omap_dtype,
+                    op_widths,
+                    src_reg_classes,
+                    dst_reg_classes,
                 )
                 lctx = LoweringContext(exec_model=sema_block.pragma, operand_map=omap)
                 if (
@@ -4883,12 +4881,35 @@ class CodeGenerator:
                         can_share = self._can_share_execute(
                             inst.mnemonic, inst, enc.enc_name
                         )
+                        # Ops with an arch-portable SIMD fast-path probe must
+                        # route through the shared execute template even when
+                        # _can_share_execute is False for this ISA: the probe
+                        # lives only in the shared kernel (simd_probe_line is
+                        # emitted in _write_shared_execute_templates), and
+                        # delegating keeps the DPP/SDWA cleanup + postamble
+                        # running around the call (an inlined body with the
+                        # probe's early `return` would skip them). Without this,
+                        # the dst-accumulate v_fmac_f64 / v_fmac_f32 / v_mac_*
+                        # family inlines its scalar loop on CDNA4 and the probe
+                        # is dead code. Only *arch-portable* probes qualify: the
+                        # inline-literal FMA forms (v_fmaak/fmamk/madak/madmk)
+                        # read the literal through an ISA-divergent member, so a
+                        # single shared body can't serve every ISA — those are
+                        # left to the genuine shared plan.
+                        from amdisa.codegen.execute.simd_codegen import (
+                            simd_probe_arch_portable as _simd_probe_arch_portable,
+                        )
+
+                        _enc_key_for_probe = enc.enc_name.lower().replace('enc_', '')
+                        _portable_probe = _simd_probe_arch_portable(
+                            f'{inst.mnemonic}_{_enc_key_for_probe}'
+                        )
                         if body_throws:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
                                 f'(amdgpu::Wavefront &wf) {{ (void)wf; throw util::UnimplementedInst(mnemonic()); }}'
                             )
-                        elif can_share:
+                        elif can_share or _portable_probe:
                             enc_key = enc.enc_name.lower().replace('enc_', '')
                             tmpl_name = f'{inst.mnemonic}_{enc_key}'
                             exec_impl = cgen.Line(
@@ -4899,13 +4920,38 @@ class CodeGenerator:
                                 f'{_dpp_cleanup}'
                                 f'{_sdwa_postamble}}}'
                             )
+                            # Store the shared template body. First writer wins:
+                            # for a can_share op that is its plan owner; for a
+                            # force-shared portable probe op (no plan owner on any
+                            # ISA) the body is arch-independent, so whichever ISA
+                            # writes first is correct. That arch-independence is an
+                            # invariant, not a hope: verify it. If a later ISA
+                            # produces a DIFFERENT body for the same
+                            # (mnemonic, enc) key, the "shared" body is silently
+                            # arch-dependent and emitting just the first writer's
+                            # version would miscompile the other arch. Assert
+                            # instead of discarding.
                             body_key = (inst.mnemonic, enc.enc_name)
-                            self._shared_execute_bodies[body_key] = (
-                                inst,
-                                sem,
-                                body,
-                                enc.enc_name,
-                            )
+                            existing = self._shared_execute_bodies.get(body_key)
+                            if existing is None:
+                                self._shared_execute_bodies[body_key] = (
+                                    inst,
+                                    sem,
+                                    body,
+                                    enc.enc_name,
+                                )
+                            elif existing[2] != body:
+                                _exist_inst, _, _exist_body, _ = existing
+                                raise AssertionError(
+                                    'shared execute body collision: '
+                                    f'mnemonic={inst.mnemonic!r} '
+                                    f'enc={enc.enc_name!r} produced two '
+                                    'different bodies for the same shared-template '
+                                    'key (the body is not arch-independent, so '
+                                    'first-writer-wins would miscompile one arch).'
+                                    f'\n--- first writer body ---\n{_exist_body}'
+                                    f'\n--- this writer body ---\n{body}'
+                                )
                         else:
                             exec_impl = cgen.Line(
                                 f'void {inst.fmt_name}::execute_impl'
@@ -5109,11 +5155,23 @@ class CodeGenerator:
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
                 if self.shared_plan is not None:
-                    has_shared = any(
-                        self._can_share_execute(i.mnemonic, i, enc.enc_name)
-                        for i in all_insts
-                        if self.semantics and i.name in self.semantics.instructions
+                    from amdisa.codegen.execute.simd_codegen import (
+                        simd_probe_arch_portable as _simd_probe_arch_portable,
                     )
+
+                    enc_key = enc.enc_name.lower().replace('enc_', '')
+
+                    def _delegates_to_shared(i: Instruction) -> bool:
+                        if (
+                            not self.semantics
+                            or i.name not in self.semantics.instructions
+                        ):
+                            return False
+                        return self._can_share_execute(
+                            i.mnemonic, i, enc.enc_name
+                        ) or _simd_probe_arch_portable(f'{i.mnemonic}_{enc_key}')
+
+                    has_shared = any(_delegates_to_shared(i) for i in all_insts)
                     if has_shared:
                         cpp_includes.append(
                             (

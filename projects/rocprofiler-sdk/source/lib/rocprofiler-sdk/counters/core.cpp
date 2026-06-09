@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -217,7 +218,26 @@ stop_context(const context::context* ctx)
         enabled = false;
     });
 
-    if(controller) controller->disable_serialization();
+    if(controller)
+    {
+        controller->disable_serialization();
+
+        // In attach mode, remove counter callbacks when stopping the context so
+        // new dispatches during detach drain can pass through without incrementing
+        // _active_kernels. In normal profiling, keep callbacks registered to avoid
+        // dropping counter data for in-flight dispatches.
+        if(registration::is_attached())
+        {
+            for(auto& cb : ctx->dispatch_counter_collection->callbacks)
+            {
+                if(cb->queue_id != rocprofiler::hsa::ClientID{-1})
+                {
+                    controller->remove_callback(cb->queue_id);
+                    cb->queue_id = rocprofiler::hsa::ClientID{-1};
+                }
+            }
+        }
+    }
 
     callback_thread_stop();
 }

@@ -1,9 +1,12 @@
-# Goal: extend to all projects using a single root .pre-commit-config.yaml.
-# Currently only checks emulation/rocjitsu/ and .github/ with its own config.
-name: "Pre-commit (rocjitsu)"
+# Formatting checks for emulation/rocjitsu/.
+name: "rocjitsu-formatting"
 
 on:
   pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-*.yml"
+      - ".pre-commit-config.yaml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -48,4 +51,4 @@ jobs:
 
           echo "Checking files:"
           echo "$FILES"
-          pre-commit run --config emulation/rocjitsu/.pre-commit-config.yaml --files $FILES
+          pre-commit run --files $FILES

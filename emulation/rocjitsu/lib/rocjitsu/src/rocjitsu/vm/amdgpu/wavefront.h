@@ -11,11 +11,14 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
 
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -48,6 +51,10 @@ struct RegAllocation {
 /// (wf_id) at construction time. These persist across reset()/dispatch
 /// cycles. Dynamic dispatch state (wg_id, pc, register allocations,
 /// execution masks) is set when the slot is activated and reset by reset().
+///
+/// Plugin state (plugin_states_) is NOT cleared by reset(). Plugins must
+/// set their per-wavefront state in onAmdgpuWorkgroupDispatched, which
+/// fires before the wavefront's first instruction.
 ///
 /// A slot is considered dispatched (active) when it has a nonzero register
 /// allocation (sgpr_alloc_.count > 0). After clear(), the slot is idle.
@@ -240,6 +247,8 @@ public:
   /// @param vmcnt VM counter threshold.
   /// @param lgkmcnt LGKM counter threshold.
   /// @param expcnt Export counter threshold.
+  const WaitTarget &wait_target() const { return wait_target_; }
+
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
     wait_target_.vmcnt = vmcnt;
     wait_target_.lgkmcnt = lgkmcnt;
@@ -483,7 +492,22 @@ public:
   uint64_t ready_cycle() const { return ready_cycle_; }
   void set_ready_cycle(uint64_t c) { ready_cycle_ = c; }
 
+  WavefrontState *plugin_state(uint32_t slot) const {
+    assert(slot < plugin_states_.size());
+    return plugin_states_[slot].get();
+  }
+  void set_plugin_state(uint32_t slot, std::unique_ptr<WavefrontState> s) {
+    if (plugin_states_.size() <= slot)
+      plugin_states_.resize(slot + 1);
+    plugin_states_[slot] = std::move(s);
+  }
+
 private:
+  // Mutable: plugin state is externally-attached observer state, not part of
+  // the wavefront's GPU simulation contract. The SIMD register-read path is
+  // const (it doesn't alter GPU state), but plugins need to update their own
+  // tracking during reads.
+  mutable std::vector<std::unique_ptr<WavefrontState>> plugin_states_;
   uint64_t ready_cycle_ = 0;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
