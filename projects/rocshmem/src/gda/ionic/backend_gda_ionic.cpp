@@ -68,8 +68,11 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 }
 
 void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
-#if 0
-  NicDevice &nic = nic_for_qp(conn_num);
+  ibv_qp* qp = qps[conn_num];
+  int pe = conn_num % num_pes;
+  int nic_idx = nic_idx_for_qp(conn_num);
+  const NicDevice& nic = nic_for_qp(conn_num);
+
   ionic_dv_ctx dvctx;
   ionic_dv.get_ctx(&dvctx, nic.context);
 
@@ -87,41 +90,37 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_db_cq = &gpu_db_ptr[dvctx.cq_qtype];
   gpu_db_sq = &gpu_db_ptr[dvctx.sq_qtype];
 
-  uint8_t udma_idx = ionic_dv.qp_get_udma_idx(qps[conn_num]);
+  uint8_t udma_idx = ionic_dv.qp_get_udma_idx(qp);
 
   ionic_dv_cq dvcq;
   ionic_dv.get_cq(&dvcq, cqs[conn_num], udma_idx);
 
-  gpu_qp->cq_dbreg = gpu_db_cq;
-  gpu_qp->cq_dbval = dvcq.q.db_val;
-  gpu_qp->cq_mask = dvcq.q.mask;
-
-  gpu_qp->ionic_cq_buf = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
-
   ionic_dv_qp dvqp;
-  ionic_dv.get_qp(&dvqp, qps[conn_num]);
+  ionic_dv.get_qp(&dvqp, qp);
 
-  gpu_qp->sq_dbreg = gpu_db_sq;
-  gpu_qp->sq_dbval = dvqp.sq.db_val;
-  gpu_qp->sq_mask = dvqp.sq.mask;
-  gpu_qp->ionic_sq_buf = reinterpret_cast<ionic_v1_wqe *>(dvqp.sq.ptr);
+  uint32_t qpn       = qp->qp_num;
+  void*    base_heap = heap.get_local_heap_base();
+  size_t   heap_size = heap.get_size();
+  uint32_t lkey      = nic.heap_mr->lkey;
+  uint32_t rkey      = heap_rkey[pe * num_nics_ + nic_idx];
+  ibv_pd*  pd        = nic.pd_orig;
 
-  strncpy(gpu_qp->dev_name,
-          qps[conn_num]->context->device->name,
-          sizeof(gpu_qp->dev_name));
-  gpu_qp->dev_name[sizeof(gpu_qp->dev_name) - 1] = 0;
+  ionic_v1_wqe* sq_buf   = reinterpret_cast<ionic_v1_wqe*>(dvqp.sq.ptr);
+  uint64_t*     sq_dbreg = gpu_db_sq;
+  uint64_t      sq_dbval = dvqp.sq.db_val;
+  uint16_t      sq_mask  = dvqp.sq.mask;
 
-  gpu_qp->qp_num = qps[conn_num]->qp_num;
-  int pe = conn_num % num_pes;
-  int nic_idx = nic_idx_for_qp(conn_num);
-  gpu_qp->lkey = nic.heap_mr->lkey;
-  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
-  gpu_qp->inline_threshold = 32;
+  ionic_v1_cqe* cq_buf   = reinterpret_cast<ionic_v1_cqe*>(dvcq.q.ptr);
+  uint64_t*     cq_dbreg = gpu_db_cq;
+  uint64_t      cq_dbval = dvcq.q.db_val;
+  uint16_t      cq_mask  = dvcq.q.mask;
 
-  /* Base Heap information */
-  gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
-  gpu_qp->base_heap_size = heap.get_size();
-#endif
+  /* QueuePair is either QueuePairIONIC or QueuePairMux
+   * both have a constructor that accepts rvalue reference QueuePairMLX5&&,
+   * so just use that instead of trying to figure out which one we're using */
+  new (gpu_qp) QueuePair{QueuePairIONIC{qpn, base_heap, heap_size, lkey, rkey, pd,
+                                        ionic_device_sq{sq_buf, sq_dbreg, sq_dbval, sq_mask},
+                                        ionic_device_cq{cq_buf, cq_dbreg, cq_dbval, cq_mask}}};
 }
 
 void GDABackend::ionic_setup_parent_domain(NicDevice &nic, struct ibv_parent_domain_init_attr* pattr) {
