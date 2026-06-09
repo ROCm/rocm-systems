@@ -2550,7 +2550,10 @@ def simd_probe_line(template_name: str) -> str | None:
     return None
 
 
-def simd_probe_arch_portable(template_name: str) -> bool:
+def simd_probe_arch_portable(
+    template_name: str,
+    vop3p_opsel_fields: tuple[str, str] = ('op_sel', 'op_sel_hi'),
+) -> bool:
     """Whether a SIMD-probe kernel can be force-routed through the shared
     execute template on an ISA that is not in its cross-ISA shared group.
 
@@ -2565,11 +2568,26 @@ def simd_probe_arch_portable(template_name: str) -> bool:
     expression in SIMD_VOP2_TERNARY and are left to the genuine shared plan;
     the dst-accumulate forms (literal ``"0u"``: v_fmac/v_mac, and v_fmac_f64)
     are portable.
+
+    A second non-portable family is VOP3P: the shared VOP3P execute template
+    reads the op_sel field by its canonical member name (``op_sel`` /
+    ``op_sel_hi``), but RDNA4/gfx1250 rename it to ``opsel`` / ``opsel_hi`` in
+    their ``Vop3pMachineInst`` struct.  An ISA that renames the field cannot
+    compile against the canonical-named shared body, so it must NOT be
+    force-routed through it — it falls back to an inline body generated with
+    its own (renamed) field accessors.  ``vop3p_opsel_fields`` carries the
+    calling ISA's profile field names; when they differ from the canonical
+    pair, VOP3P probes are not portable for that ISA.
     """
     if simd_probe_line(template_name) is None:
         return False
     spect = SIMD_VOP2_TERNARY.get(template_name)
     if spect is not None and spect[1] != '0u':
+        return False
+    if template_name.endswith('_vop3p') and vop3p_opsel_fields != (
+        'op_sel',
+        'op_sel_hi',
+    ):
         return False
     return True
 

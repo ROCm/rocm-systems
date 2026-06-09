@@ -4902,7 +4902,8 @@ class CodeGenerator:
 
                         _enc_key_for_probe = enc.enc_name.lower().replace('enc_', '')
                         _portable_probe = _simd_probe_arch_portable(
-                            f'{inst.mnemonic}_{_enc_key_for_probe}'
+                            f'{inst.mnemonic}_{_enc_key_for_probe}',
+                            self.isa_spec.profile.vop3p_opsel_fields,
                         )
                         if body_throws:
                             exec_impl = cgen.Line(
