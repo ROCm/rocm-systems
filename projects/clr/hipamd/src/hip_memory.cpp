@@ -2924,17 +2924,51 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
                            hipExtMemcpyOp* ops, size_t count,
                            hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                            size_t* failIdx, hip::Stream& stream, bool isAsync) {
+  // Common input validation for both hipMemcpyBatchAsync and hipExtMemcpyBatchAsync.
+  if (dsts == nullptr || srcs == nullptr || sizes == nullptr || count == 0) {
+    return hipErrorInvalidValue;
+  }
+
+  if (numAttrs > 0) {
+    if (attrs == nullptr || attrsIdxs == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    if (attrsIdxs[0] != 0 || numAttrs > count) {
+      return hipErrorInvalidValue;
+    }
+    for (size_t i = 1; i < numAttrs; ++i) {
+      if (attrsIdxs[i] <= attrsIdxs[i - 1] || attrsIdxs[i] >= count) {
+        return hipErrorInvalidValue;
+      }
+    }
+    for (size_t i = 0; i < numAttrs; ++i) {
+      if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
+          attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
+        return hipErrorInvalidValue;
+      }
+    }
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    if (sizes[i] == 0) {
+      if (failIdx != nullptr) *failIdx = i;
+      return hipErrorInvalidValue;
+    }
+  }
+
+  if (failIdx != nullptr) *failIdx = SIZE_MAX;
+
+  // Per-entry waits/signals are not yet wired to the SDMA packet builder.
+  if (waits != nullptr || signals != nullptr) {
+    return hipErrorNotSupported;
+  }
+
   // Pre-compute memory objects once per copy to avoid repeated expensive
   // getMemoryObject calls later in validation, classification, and submission.
   std::vector<amd::Memory*> srcMemories(count, nullptr);
   std::vector<amd::Memory*> dstMemories(count, nullptr);
   std::vector<size_t> srcOffsets(count, 0);
   std::vector<size_t> dstOffsets(count, 0);
-
-  // Per-entry waits/signals are not yet wired to the SDMA packet builder.
-  if (waits != nullptr || signals != nullptr) {
-    return hipErrorNotSupported;
-  }
 
   for (size_t i = 0; i < count; ++i) {
     if (dsts[i] == nullptr || srcs[i] == nullptr) {
@@ -3213,70 +3247,14 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
                                size_t* failIdx, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyBatchAsync, dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx,
                stream);
-  // validate stream
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
-  // validate inputs
-  if (dsts == nullptr || srcs == nullptr || sizes == nullptr || count == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  // Validate attributes structure if provided
-  if (numAttrs > 0) {
-    if (attrs == nullptr || attrsIdxs == nullptr) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-    // First index must be 0
-    if (attrsIdxs[0] != 0) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-    // numAttrs must not exceed count
-    if (numAttrs > count) {
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-    // Validate attrsIdxs is monotonically increasing
-    for (size_t i = 1; i < numAttrs; ++i) {
-      if (attrsIdxs[i] <= attrsIdxs[i - 1] || attrsIdxs[i] >= count) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-    }
-    // Validate srcAccessOrder values and flags
-    for (size_t i = 0; i < numAttrs; ++i) {
-      if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
-          attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-
-      const unsigned int kIndirectFlagMask =
-          hipExtMemcpyOpIndirectSrc | hipExtMemcpyOpIndirectDst;
-      if ((attrs[i].flags & hipExtMemcpyOpSwap) &&
-          (attrs[i].flags & kIndirectFlagMask)) {
-        HIP_RETURN(hipErrorInvalidValue);
-      }
-    }
-  }
-
-  // Validate individual sizes and find first error
-  for (size_t i = 0; i < count; ++i) {
-    if (sizes[i] == 0) {
-      if (failIdx != nullptr) *failIdx = i;
-      HIP_RETURN(hipErrorInvalidValue);
-    }
-  }
-
-  if (failIdx != nullptr) *failIdx = SIZE_MAX;
-
-  // Call internal batch implementation
-  hipError_t status = ihipMemcpyBatch(
-      dsts, srcs, sizes, nullptr,
-      nullptr, nullptr, nullptr, count,
-      attrs, attrsIdxs, numAttrs,
-      failIdx, *hip::getStream(stream),
-      true);
-
-  HIP_RETURN(status);
+  HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizes, nullptr,
+                             nullptr, nullptr, nullptr, count,
+                             attrs, attrsIdxs, numAttrs,
+                             failIdx, *hip::getStream(stream), true));
 }
 
 hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
@@ -3292,8 +3270,7 @@ hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
   if (!hip::isValid(stream)) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
-  // TODO: waits and signals are accepted but not yet wired to the SDMA
-  // packet builder. ops are wired and override attrs.flags for ext ops.
+
   HIP_RETURN(ihipMemcpyBatch(dsts, srcs, sizesA, sizesB,
                              waits, signals, ops, count,
                              attrs, attrsIdxs, numAttrs, failIdx,
