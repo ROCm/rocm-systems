@@ -856,7 +856,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->doneEvent = doneEvent;
   comm->lastStream = nullptr;
   comm->lastStreamValid = false;
-  CUDACHECK(cudaGetDevice(&comm->cudaDev));
 
   // RCCL: create persistent stream for calloc
   NCCLCHECK(ncclCreateSideStream(comm->cudaDev));
@@ -877,7 +876,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   NCCLCHECK(rocm_smi_init());
   NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, (unsigned int*)&comm->nvmlDev));
 #endif
-  comm->compCap = ncclCudaCompCap();
   TRACE(NCCL_INIT,"comm %p rank %d nranks %d cudaDev %d busId %lx compCap %d", comm, rank, ndev, comm->cudaDev, comm->busId, comm->compCap);
 
   comm->checkMode = ncclParamCheckPointers() == 1 ? ncclCheckModeDebugLocal : ncclCheckModeDefault;
@@ -1564,11 +1562,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     if (comm->peerInfo[i].hostHash != comm->peerInfo[rank].hostHash) nNodes++;
     if (!comm->peerInfo[i].cuMemSupport) comm->cuMemSupport = 0;
-    if ((i != rank) && (comm->peerInfo[i].hostHash == comm->peerInfo[rank].hostHash) && (comm->peerInfo[i].busId == comm->peerInfo[rank].busId)) {
-      WARN("Duplicate GPU detected : rank %d and rank %d both on CUDA device %lx", rank, i, comm->peerInfo[rank].busId);
-      ret = ncclInvalidUsage;
-      goto fail;
-    }
     globalGinSupport &= (comm->peerInfo[i].supportedGinType == comm->sharedRes->ginState.ginType);
     globalCrossNicSupport &= comm->peerInfo[i].crossNicSupport;
     globalRmaPluginSupport &= comm->peerInfo[i].rmaPluginAvailable;
