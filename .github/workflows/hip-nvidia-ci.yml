@@ -54,8 +54,8 @@ jobs:
 
   nvidia-clr-build:
     name: "Build clr + hip-tests (NVIDIA)"
-    needs: setup
-    if: ${{ needs.setup.outputs.should_build == 'true' }}
+    needs: nvidia-clr-build-setup
+    if: ${{ needs.nvidia-clr-build-setup.outputs.should_build == 'true' }}
     runs-on: azure-linux-scale-rocm
     container:
       # CUDA 13.1.2 Ubuntu 24.04
@@ -129,7 +129,7 @@ jobs:
   nvidia-clr-build-ci-summary:
     name: "HIP NVIDIA CI Summary"
     if: always()
-    needs: [setup, build]
+    needs: [nvidia-clr-build-setup, nvidia-clr-build]
     runs-on: ubuntu-24.04
     steps:
       - name: Check results
