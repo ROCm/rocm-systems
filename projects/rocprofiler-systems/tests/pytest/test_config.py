@@ -88,7 +88,7 @@ class TestConfig(RocprofsysTest):
         )
 
     @pytest.mark.timeout(120)
-    def test_trace_category_enabled_in_runtime_config(self, config_target: str):
+    def test_trace_category_enabled_in_runtime(self, config_target: str):
         """Perfetto settings must appear in the runtime config print when tracing is on.
 
         Regression for the phantom ``ROCPROFSYS_USE_TRACE`` key: the perfetto
