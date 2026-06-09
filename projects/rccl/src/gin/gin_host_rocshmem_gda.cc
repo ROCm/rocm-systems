@@ -114,7 +114,7 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
 
   // Allocate signal and counter arrays on GPU
   if (nSignals > 0) {
-    if (hipMalloc(&ctx->gpuCtxHost.signals, sizeof(uint64_t) * nSignals) != hipSuccess) {
+    if (hipExtMallocWithFlags((void**)&ctx->gpuCtxHost.signals, sizeof(uint64_t) * nSignals, hipDeviceMallocFinegrained) != hipSuccess) {
       ret = ncclSystemError;
       goto fail;
     }
@@ -166,7 +166,7 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
   }
 
   if (nCounters > 0) {
-    if (hipMalloc(&ctx->gpuCtxHost.counters, sizeof(uint64_t) * nCounters) != hipSuccess) {
+    if (hipExtMallocWithFlags((void**)&ctx->gpuCtxHost.counters, sizeof(uint64_t) * nCounters, hipDeviceMallocFinegrained) != hipSuccess) {
       ret = ncclSystemError;
       goto fail;
     }
