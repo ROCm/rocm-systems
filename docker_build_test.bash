@@ -3,15 +3,17 @@
 set -euxo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: $0 <np> <msg_size> [<build-flag> [<gpu-arch>]]"
+  echo "Usage: $0 <nnodes> <ppn> <msg_size> [<build-flag> [<gpu-arch>]]"
   exit 1
 fi
 
-NP=${1}
-MSG_SIZE=${2}
-BUILD_FLAG=${3:-false}
-# TARGET_GPU_ARCH=${4:-gfx942}
-TARGET_GPU_ARCH=${4:-gfx950}
+NNODES=${1}
+PPN=${2}
+NP=$(( ${NNODES} * ${PPN} ))
+MSG_SIZE=${3}
+BUILD_FLAG=${4:-false}
+TARGET_GPU_ARCH=${5:-gfx942}
+# TARGET_GPU_ARCH=${5:-gfx950}
 
 DOCKERFILE="Dockerfile-rccl-gin-anvil"
 DOCKER_IMAGE="gin-anvil:latest"
@@ -21,7 +23,11 @@ MAX_BYTES=$((${NP} * ${MSG_SIZE}))
 # No -it: script is often run over non-interactive SSH.
 DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
+HFILE="my_hostfile"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
+MPIRUN_BASE_HFILE="-n ${NP} --hostfile ${HFILE} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
+
+scontrol show hostnames "$SLURM_JOB_NODELIST" | awk '{print $1 " slots="'${PPN}'}' > my_hosts
 
 # --- build
 if ${BUILD_FLAG}; then
@@ -39,6 +45,7 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
   echo '=== workspace ==='
   pwd
   ls -la /workspace 2>/dev/null || true
+  cat /workspace/my_hostfile 2>/dev/null || true
   ls -la /workspace/rocshmem/bin 2>/dev/null || true
   ls -la /workspace/rccl/lib 2>/dev/null || true
   ls -la /workspace/rccl-tests/alltoall_perf 2>/dev/null || true
@@ -231,32 +238,27 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
 fi
 
 # 
-if [ 0 -eq 1 ]; then
+if [ 1 -eq 1 ]; then
 # Example: 2 nodes × 8 GPUs = 16 ranks (adjust -n and --hostfile)
 #
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Matches Dockerfile-rccl-gin-anvil example; multi-node only (IB/GDA device required).
-echo "=== RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
-docker run --rm --shm-size 64G --network host \
-  --device /dev/dri --device /dev/kfd --device /dev/infiniband \
-  --ipc host --group-add video --cap-add SYS_PTRACE \
-  --security-opt seccomp=unconfined --privileged \
-  gin-anvil:latest \
-  mpirun -n 16 --hostfile /path/to/hostfile \
-    --allow-run-as-root -mca pml ob1 -mca btl ^openib \
-    -x NCCL_GIN_ENABLE=1 \
-    -x NCCL_GIN_TYPE=4 \
-    -x ROCSHMEM_BACKEND=ro \
-    -x ROCSHMEM_SDMA_ENABLED=1 \
-    -x ROCSHMEM_HEAP_SIZE=1073741824 \
-    -x NCCL_CUMEM_ENABLE=1 \
-    -x RCCL_ENABLE_INTRANET=1 \
-    -x NCCL_DMABUF_ENABLE=1 \
-    -x NCCL_MSCCL_ENABLE=0 \
-    -x HSA_NO_SCRATCH_RECLAIM=1 \
-    -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
-    /workspace/rccl-tests/alltoall_perf \
-    -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 5 -A 1 
+echo "=== RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) nnodes=${NNODES} PPN=${PPN} max_bytes=${MAX_BYTES} ==="
+docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
+  mpirun ${MPIRUN_BASE_HFILE} \
+  -x RCCL_ROCSHMEM_ENABLE=0 \
+  -x NCCL_GIN_ENABLE=1 \
+  -x NCCL_GIN_TYPE=5 \
+  -x NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=2 \
+  -x NCCL_DEBUG=VERSION \
+  -x NCCL_DEBUG_SUBSYS=INIT \
+  -x NCCL_CUMEM_ENABLE=1 \
+  -x RCCL_ENABLE_INTRANET=1 \
+  -x NCCL_DMABUF_ENABLE=1 \
+  -x HSA_NO_SCRATCH_RECLAIM=1 \
+  -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
+  /workspace/rccl-tests/alltoall_perf \
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 5 -A 1 
 fi
 
 set +x
