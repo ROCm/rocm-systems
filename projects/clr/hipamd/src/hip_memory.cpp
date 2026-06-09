@@ -3026,6 +3026,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
                                           /*read_write*/ true);
     }
     if (status != hipSuccess) {
+      if (failIdx != nullptr) *failIdx = i;
       return status;
     }
   }
@@ -3197,6 +3198,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* size
         sizeB = sizesB[idx];
         // HW requires count_a >= count_b
         if (sizeB == 0 || sizeB > sizes[idx]) {
+          if (failIdx != nullptr) *failIdx = idx;
           return hipErrorInvalidValue;
         }
       }
