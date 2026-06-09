@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/rdna3/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/execute_shared.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -293,8 +294,7 @@ SBitset0B32Sop1::SBitset0B32Sop1(const MachineInst *inst)
 }
 
 void SBitset0B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_bitset0_b32_sop1(*this, wf);
 }
 
 SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
@@ -314,8 +314,7 @@ SBitset0B64Sop1::SBitset0B64Sop1(const MachineInst *inst)
 }
 
 void SBitset0B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_bitset0_b64_sop1(*this, wf);
 }
 
 SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
@@ -335,8 +334,7 @@ SBitset1B32Sop1::SBitset1B32Sop1(const MachineInst *inst)
 }
 
 void SBitset1B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_bitset1_b32_sop1(*this, wf);
 }
 
 SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
@@ -356,8 +354,7 @@ SBitset1B64Sop1::SBitset1B64Sop1(const MachineInst *inst)
 }
 
 void SBitset1B64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_bitset1_b64_sop1(*this, wf);
 }
 
 SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
@@ -376,8 +373,7 @@ SBitreplicateB64B32Sop1::SBitreplicateB64B32Sop1(const MachineInst *inst)
 }
 
 void SBitreplicateB64B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  amdgpu::execute_s_bitreplicate_b64_b32_sop1(*this, wf);
 }
 
 SAbsI32Sop1::SAbsI32Sop1(const MachineInst *inst)
@@ -1046,8 +1042,15 @@ SMovrelsB32Sop1::SMovrelsB32Sop1(const MachineInst *inst)
 }
 
 void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint32_t index = wf.m0() & 0xFFu;
+  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
+  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
+  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
+  if (width_words == 2) {
+    sdst.write_scalar64(wf, indexed_src.read_scalar64(wf));
+  } else {
+    sdst.write_scalar(wf, indexed_src.read_scalar(wf));
+  }
 }
 
 SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
@@ -1066,8 +1069,15 @@ SMovrelsB64Sop1::SMovrelsB64Sop1(const MachineInst *inst)
 }
 
 void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint32_t index = wf.m0() & 0xFFu;
+  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
+  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
+  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
+  if (width_words == 2) {
+    sdst.write_scalar64(wf, indexed_src.read_scalar64(wf));
+  } else {
+    sdst.write_scalar(wf, indexed_src.read_scalar(wf));
+  }
 }
 
 SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
@@ -1086,8 +1096,15 @@ SMovreldB32Sop1::SMovreldB32Sop1(const MachineInst *inst)
 }
 
 void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint32_t index = wf.m0() & 0xFFu;
+  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
+  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
+  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
+  if (width_words == 2) {
+    indexed_dst.write_scalar64(wf, ssrc0.read_scalar64(wf));
+  } else {
+    indexed_dst.write_scalar(wf, ssrc0.read_scalar(wf));
+  }
 }
 
 SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
@@ -1106,8 +1123,15 @@ SMovreldB64Sop1::SMovreldB64Sop1(const MachineInst *inst)
 }
 
 void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint32_t index = wf.m0() & 0xFFu;
+  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
+  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
+  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
+  if (width_words == 2) {
+    indexed_dst.write_scalar64(wf, ssrc0.read_scalar64(wf));
+  } else {
+    indexed_dst.write_scalar(wf, ssrc0.read_scalar(wf));
+  }
 }
 
 SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
@@ -1126,8 +1150,13 @@ SMovrelsd2B32Sop1::SMovrelsd2B32Sop1(const MachineInst *inst)
 }
 
 void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint32_t src_index = wf.m0() & 0xFFu;
+  uint32_t dst_index = (wf.m0() >> 8) & 0xFFu;
+  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + src_index;
+  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + dst_index;
+  Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));
+  Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));
+  indexed_dst.write_scalar(wf, indexed_src.read_scalar(wf));
 }
 
 SGetpcB64Sop1::SGetpcB64Sop1(const MachineInst *inst)
@@ -1209,8 +1238,31 @@ SSendmsgRtnB32Sop1::SSendmsgRtnB32Sop1(const MachineInst *inst)
 }
 
 void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
+  uint64_t value = 0;
+  switch (msg) {
+  case 0x83: {
+    auto *engine = wf.cu().engine();
+    value = engine ? engine->global_time() : 0;
+    break;
+  }
+  case 0x80:
+  case 0x81:
+  case 0x82:
+  case 0x84:
+  case 0x85:
+  case 0x86:
+  case 0x87:
+  case 0x88:
+  case 0x98:
+  default:
+    value = 0;
+    break;
+  }
+  if (sdst.size_bits() == 64)
+    sdst.write_scalar64(wf, value);
+  else
+    sdst.write_scalar(wf, static_cast<uint32_t>(value));
 }
 
 SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
@@ -1229,8 +1281,31 @@ SSendmsgRtnB64Sop1::SSendmsgRtnB64Sop1(const MachineInst *inst)
 }
 
 void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf;
-  throw util::UnimplementedInst(mnemonic());
+  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
+  uint64_t value = 0;
+  switch (msg) {
+  case 0x83: {
+    auto *engine = wf.cu().engine();
+    value = engine ? engine->global_time() : 0;
+    break;
+  }
+  case 0x80:
+  case 0x81:
+  case 0x82:
+  case 0x84:
+  case 0x85:
+  case 0x86:
+  case 0x87:
+  case 0x88:
+  case 0x98:
+  default:
+    value = 0;
+    break;
+  }
+  if (sdst.size_bits() == 64)
+    sdst.write_scalar64(wf, value);
+  else
+    sdst.write_scalar(wf, static_cast<uint32_t>(value));
 }
 
 } // namespace rdna3

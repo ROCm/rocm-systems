@@ -24,8 +24,12 @@ permissions:
 
 jobs:
   test_component:
-    name: 'Test ${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }} of ${{ fromJSON(inputs.component).total_shards }})'
+    name: >-
+      Test ${{ fromJSON(inputs.component).job_name }}
+      (shard ${{ matrix.shard }} of ${{ fromJSON(inputs.component).total_shards }})
+      ${{ fromJSON(inputs.component).expect_failure == true && '(xfail)' || '' }}
     runs-on: ${{ inputs.test_runs_on }}
+    continue-on-error: ${{ fromJSON(inputs.component).expect_failure == true }}
     container:
       # If the component has specified an alternate image, honor that option.
       # Otherwise use the default image.
@@ -34,18 +38,9 @@ jobs:
             (fromJSON(inputs.component).container_image || inputs.default_container_image)
             || null
         }}
-      options: --ipc host
-        --group-add video
-        --device /dev/kfd
-        --device /dev/dri
-        --group-add 993
-        --group-add 992
-        --group-add 110
-        --ulimit memlock=-1:-1
-        --security-opt seccomp=unconfined
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
-        --user 0:0
-        ${{ fromJSON(inputs.component).container_options }}
+      # Container options are configured by TheRock's
+      # build_tools/github_actions/fetch_test_configurations.py.
+      options: ${{ fromJSON(inputs.component).container_options }}
     strategy:
       fail-fast: false
       matrix:
@@ -63,7 +58,6 @@ jobs:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
     steps:
       - name: "Fetch 'build_tools' from repository"
-        if: ${{ runner.os == 'Windows' }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
@@ -75,11 +69,16 @@ jobs:
         shell: powershell
         run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
 
+      - name: Pre-job cleanup GPU processes on Linux
+        if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
+
       - name: Checkout Repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 794702ebd137f1fdde4bf65c02eba5fe14a0676a # 2026-05-19 commit
+          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -121,3 +120,8 @@ jobs:
         if: ${{ always() && runner.os == 'Windows' }}
         shell: powershell
         run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
+
+      - name: Post-job cleanup GPU processes on Linux
+        if: ${{ always() && runner.os == 'Linux' }}
+        timeout-minutes: 5
+        run: bash ./build_tools/github_actions/cleanup_processes.sh

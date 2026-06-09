@@ -160,13 +160,15 @@ static inline void logAqlBarrierPacket(const hsa_queue_t* queue, uint16_t header
                                        const hsa_barrier_and_packet_t* pkt,
                                        uint64_t rptr, uint64_t wptr,
                                        const char* prefix = "") {
+  uint16_t pktType = extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
+  const char* typeStr = (pktType == HSA_PACKET_TYPE_BARRIER_OR) ? "Barrier-OR" : "Barrier-AND";
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
-          "SWq=0x%zx, HWq=0x%zx, id=%d,%s Barrier-AND Header = "
+          "SWq=0x%zx, HWq=0x%zx, id=%d,%s %s Header = "
           "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
           "dep_signal=[0x%zx, 0x%zx, 0x%zx, 0x%zx, 0x%zx], "
           "completion_signal=0x%zx, rptr=%lu, wptr=%lu",
-          queue, queue->base_address, queue->id, prefix, header,
-          extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
+          queue, queue->base_address, queue->id, prefix, typeStr, header,
+          pktType,
           extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
           extractAqlBits(header, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
                          HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
@@ -1529,8 +1531,16 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
              (thisChunk - firstCount) * kPacketSize);
     }
 
-    // Per-packet fixups: profiling signals and kernel-name printing.
-    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2)) {
+    // Attach signal to the last packet when requested (before per-packet logging).
+    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
+    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
+      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
+    }
+
+    // Per-packet fixups: profiling signals, kernel-name printing, and inline barrier logging.
+    if (timestamp_ != nullptr || IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+        IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) {
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
         const uint64_t slotIdx = (startIndex + i) & queueMask;
         auto* slot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
@@ -1551,9 +1561,15 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
               }
               Barriers().GetLastSignal()->flags_.isPacketDispatch_ = true;
             }
+          } else if (has_prepatched_signal &&
+                     pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH &&
+                     amd::activity_prof::IsEnabled(OP_ID_DISPATCH)) {
+            slot->reserved2 = timestamp_->command().profilingInfo().correlation_id_;
           }
         }
-        if (kernelNames != nullptr && i < kernelNames->size() &&
+        if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+             IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
+            kernelNames != nullptr && i < kernelNames->size() &&
             pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
                   (*kernelNames)[i]->c_str(), dev().index());
@@ -1578,14 +1594,29 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
                   slot->kernel_object, slot->kernarg_address,
                   slot->completion_signal, slot->reserved2,
                   Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx);
+        } else if ((IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2) ||
+                    IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)) &&
+                   (pktType == HSA_PACKET_TYPE_BARRIER_AND ||
+                    pktType == HSA_PACKET_TYPE_BARRIER_OR)) {
+          // Inline barriers placed in the batch by BuildSyncPlan never go
+          // through dispatchBarrierPacket, so log them here. Classify by
+          // patched fields: dep_signal set -> cross-dep barrier, else
+          // completion_signal set -> per-segment completion barrier.
+          const auto* bpkt = reinterpret_cast<const hsa_barrier_and_packet_t*>(slot);
+          bool has_dep = false;
+          for (int k = 0; k < 5 && !has_dep; ++k) {
+            if (bpkt->dep_signal[k].handle != 0) has_dep = true;
+          }
+          const char* tag = has_dep
+              ? " [Graph cross dep barrier]"
+              : (bpkt->completion_signal.handle != 0 ? " [Graph completion barrier]"
+                                                     : " [Graph batch barrier]");
+          ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2,
+                  "Graph ShaderName :%s, device id : %u", tag, dev().index());
+          logAqlBarrierPacket(gpu_queue_, hdr, bpkt,
+                              Hsa::queue_load_read_index_scacquire(gpu_queue_), slotIdx, tag);
         }
       }
-    }
-
-    auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-        queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
-    if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
-      lastSlotPtr->completion_signal = Barriers().ActiveSignal();
     }
 
     // Write valid headers and ring the doorbell for this chunk.
@@ -1955,18 +1986,14 @@ VirtualGPU::~VirtualGPU() {
   if (nullptr != schedulerQueue_) {
 #if defined(_WIN32)
     // Stop the monitor thread before destroying the queue
-    if (isSchedulerQueueThreadRunning()) {
-      schedulerQueueThreadRunning_.store(false, std::memory_order_relaxed);
-      {
-        std::lock_guard<std::mutex> lock(scheduler_mutex_);
-        scheduler_cv_.notify_one();
-      }
-      if (schedulerQueueThread_.joinable()) {
-        schedulerQueueThread_.join();
-      }
+    if (schedulerQueueThread_.joinable()) {
+      schedulerQueueThreadRunning_.store(false, std::memory_order_release);
+      scheduler_cv_.notify_one();
+      schedulerQueueThread_.join();
     }
 #endif  // _WIN32
     Hsa::queue_destroy(schedulerQueue_);
+    schedulerQueue_ = nullptr;
   }
 
   if (nullptr != virtualQueue_) {
@@ -3778,6 +3805,7 @@ void VirtualGPU::startSchedulerQueueThread() {
   schedulerQueueThreadRunning_.store(true, std::memory_order_release);
 
   schedulerQueueThread_ = std::thread([this]() {
+    uint64_t updated_write_index = 0;
     while (isSchedulerQueueThreadRunning()) {
 
       // Wait until scheduler events are added or thread termination
@@ -3792,12 +3820,12 @@ void VirtualGPU::startSchedulerQueueThread() {
       // Actively monitor the scheduler queue while any sync event is pending.
       bool has_active_events = true;
       while (has_active_events && isSchedulerQueueThreadRunning()) {
-        uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
         uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
 
-        if (write_index > read_index) {
+        if (write_index > updated_write_index) {
           // New packets in the scheduler queue, ringing the doorbell
           Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index - 1);
+          updated_write_index = write_index;
         } else {
           // Yield briefly before re-checking.
           amd::Os::yield();
@@ -4344,9 +4372,14 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
 
     if ((devKernel->workGroupInfo()->usedStackSize_ & 0x1) == 0x1) {
       dispatchPacket.private_segment_size =
-              std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
-      if (dispatchPacket.private_segment_size > 16 * Ki) {
-        dispatchPacket.private_segment_size = 16 * Ki;
+          std::max<uint64_t>(dev().StackSize(), dispatchPacket.private_segment_size);
+      const size_t maxStackSize = dev().MaxStackSize();
+      // we return an explicit error when we exceed the max stack size limit
+      if (dispatchPacket.private_segment_size > maxStackSize) {
+        LogPrintfError("Scratch size (%u) exceeds max allowed (%zu) for kernel : %s",
+                       dispatchPacket.private_segment_size, maxStackSize,
+                       gpuKernel.getDemangledName().c_str());
+        return false;
       }
     }
 
@@ -4547,13 +4580,13 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     hsa_signal_t ipc_s{0};
     if (vcmd.ipcCompletionSignal() != nullptr) {
       ipc_s.handle = static_cast<uint64_t>(
-          reinterpret_cast<uintptr_t>(vcmd.ipcCompletionSignal()->getGpuHandle()));
+          reinterpret_cast<uintptr_t>(vcmd.ipcCompletionSignal()->getHandle()));
     }
 
     if (vcmd.ipcDepSignal() != nullptr) {
       hsa_signal_t s;
       s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
-          vcmd.ipcDepSignal()->getGpuHandle()));
+          vcmd.ipcDepSignal()->getHandle()));
       WaitCompleteSignal(s);
     } else if (timestamp_ != nullptr || ipc_s.handle != 0) {
       // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
@@ -4595,6 +4628,21 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
+
+  // Register pre-patched HW event signals with the Timestamp for profiling.
+  // These signals were configured by ApplyHwEventPatches (isPacketDispatch_,
+  // done_ flags set there) but bypass ActiveSignal, so they must be added
+  // here so checkGpuTime → ExtractSignalTiming → addTimestamps picks them up.
+  if (timestamp_ != nullptr) {
+    for (const auto& [_, events] : vcmd.getHwEvents()) {
+      for (void* hw_event : events) {
+        auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+        if (ps != nullptr) {
+          timestamp_->AddProfilingSignal(ps);
+        }
+      }
+    }
+  }
 
   const Settings& settings = dev().settings();
   if (settings.barrier_value_packet_) {

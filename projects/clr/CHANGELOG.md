@@ -30,6 +30,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * New HIP APIs
     - `cooperative_groups::reduce()` allows calling reduce operators on `thread_block_tile` and `coalesced_threads`. The implementation is based on the `__reduce_*_sync` operations, so the macro `HIP_ENABLE_EXTRA_WARP_SYNC_TYPES` may be needed to unlock some optimizations.
+    - `hipLibraryGetGlobal` returns the device pointer and size of a `__device__` global defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetGlobal` / `cuLibraryGetGlobal`.
+    - `hipLibraryGetManaged` returns the host-accessible managed pointer and size of a `__managed__` variable defined in a `hipLibrary_t`. Mirrors CUDA's `cudaLibraryGetManaged` / `cuLibraryGetManaged`.
 * New device attribute `hipDeviceAttributeGPUDirectRDMAWithHipVMMSupported`, indicating support for GPU Direct RDMA when using HIP VMM. This attribute corresponds to CUDA’s `CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED`.
 
 ### Resolved issues
@@ -115,6 +117,16 @@ This approach reduces dispatch overhead and improves GPU utilization by overlapp
 * HIP runtime implemented a global SDMA engine allocator with per‑stream affinity to improve memory copy performance.
 * Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
 * Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
+
+## HIP 7.2.4 for ROCm 7.2.4
+
+### Resolved issues
+
+* Fixed H2D memory copy latency regression in CPX mode. HIP runtime synchronization behavior has been corrected on AMD Instinct MI300 Series GPUs in CPX mode, restoring latency to previous levels for inference workloads that run multiple HIP streams with concurrent memory copies.
+
+### Optimized
+
+* Reduced `hipGraphLaunch` latency for multi-list graphs. The HIP runtime’s graph dispatch mechanism has been optimized, reducing launch latency for workloads using `hipGraphLaunch` with multi-list graph topologies.
 
 ## HIP 7.2.1 for ROCm 7.2.1
 

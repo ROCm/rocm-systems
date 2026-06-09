@@ -42,6 +42,11 @@ testResult_t  AllGatherGetAlgoProtoChannels(ncclComm_t comm, size_t count, ncclD
   return testSuccess;
 }
 
+testResult_t  AllGatherGetSymkInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetSymkInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetSymkInfo(comm, ncclFuncAllGather , count, type , op, algo, proto, nchannels));
+  return testSuccess;
+}
 
 void AllGatherGetBw(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize * nranks) / 1.0E9 / sec;
@@ -68,7 +73,8 @@ struct testColl allGatherTest = {
   AllGatherInitData,
   AllGatherGetBw,
   AllGatherRunColl,
-  AllGatherGetAlgoProtoChannels
+  AllGatherGetAlgoProtoChannels,
+  AllGatherGetSymkInfo
 };
 
 void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

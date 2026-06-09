@@ -16,8 +16,8 @@ from . import benchmark_gfx9_base
 # Bench_gfx90a Class
 # =============================================================================
 class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
-    def __init__(self, device_ids: list) -> None:
-        super().__init__(device_ids)
+    def __init__(self, device_id: int, cache_sizes: dict) -> None:
+        super().__init__(device_id, cache_sizes)
 
         self.unsupported_data_types = [
             "MALL",
@@ -27,12 +27,6 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
             "MFMA-F8",
         ]
 
-        self.cache_kernel_selector = {
-            "L1": "Cache_bw<float, 16 * 1024, 256>",
-            "L2": "Cache_bw<float, 8 * 1024 * 1024, 256>",
-            "MALL": "",
-        }
-
         self.matrix_ops = {
             "F4": 0,
             "F6": 0,
@@ -40,12 +34,10 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
             "F8": 0,
             "F16": 16384,
             "F32": 4096,
-            "BF16": 8192,
+            "BF16": 16384,
             "I8": 16384,
             "F64": 2048,
         }
-
-        self.cache_sizes = {"L1": 16 * 1024, "L2": 8 * 1024 * 1024, "MALL": 0}
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source
@@ -89,12 +81,13 @@ class Bench_gfx90a(benchmark_gfx9_base.Bench_gfx9):
         extern "C" __global__ void mfma_bf16(int iter, float *dummy)
         {
             vec16<float> result = {0};
-            vec2<short> a;
+            vec4<short> a;
             a[1] = a[0]= threadIdx.x;
 
             for(int i = 0; i < iter; ++i)
             {
-                result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
+                result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(
+                    a, a, result, 0, 0, 0);
             }
 
             if (result[0] != 2*result[0])

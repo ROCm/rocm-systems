@@ -90,3 +90,49 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${rocattach-test-env}"
     PASS_REGULAR_EXPRESSION "verified: grandchild pid [0-9]+ loaded the tool library"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Test that attach fails gracefully when target process lacks ROCP_TOOL_ATTACH=1. Verifies
+# that rocattach returns an error status without crashing the target.
+add_executable(rocattach-without-env-test)
+target_sources(rocattach-without-env-test PRIVATE attach_without_env.cpp)
+target_link_libraries(
+    rocattach-without-env-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
+
+# Deliberately omit ROCP_TOOL_ATTACH=1 to test error handling
+set(rocattach-without-env-test-env
+    "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCATTACH_LOG_LEVEL=${LOG_LEVEL}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocattach-without-env-test-execute
+    TARGET rocattach-without-env-test
+    ARGS $<TARGET_FILE:attachment-test> attach
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    LABELS "attachment"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-without-env-test-env}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: attach failed gracefully without crashing target"
+    FAIL_REGULAR_EXPRESSION "Test FAILED|error: attach succeeded|unexpected attach status"
+    )
+
+rocprofiler_add_integration_execute_test(
+    rocattach-without-env-tree-test-execute
+    TARGET rocattach-without-env-test
+    ARGS $<TARGET_FILE:attachment-test> attach-tree
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    LABELS "attachment"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocattach-without-env-test-env}"
+    PASS_REGULAR_EXPRESSION
+        "Test PASSED: attach failed gracefully without crashing target"
+    FAIL_REGULAR_EXPRESSION "Test FAILED|error: attach succeeded|unexpected attach status"
+    )

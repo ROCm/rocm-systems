@@ -69,6 +69,7 @@ lib/
         dbt/generated/  Auto-generated legalization tables and encoding translation data tables
       vm/               Virtual machine layer
         amdgpu/         AMD GPU hardware model (CU, SE, XCD, caches, pipelines)
+        plugins/        Execution plugins (logging, race detection)
         risc_v/         RISC-V hart model
       kmd/linux/        KMD emulation: LD_PRELOAD interposer + simulated KFD driver
 lib/python/amdisa/      ISA code generation toolchain
@@ -77,8 +78,8 @@ schemas/                FlatBuffers schemas (simulation_config, checkpoint)
 configs/                JSON configurations (amdgpu_cdna4.json)
 tests/                  Google Test suite + scaling test
   kernels/              HIP device kernels for integration testing
-scripts/                Utility scripts (clang_format.sh, install-git-hooks.sh)
-  git-hooks/            Tracked git hook scripts (installed via install-git-hooks.sh)
+scripts/                Utility scripts
+
 ```
 
 ## Prerequisites
@@ -121,34 +122,25 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DRJ_SANITIZER=ubsan
 cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
 ```
 
-## Git hooks for developers
+## Formatting
 
-A pre-commit hook is provided to enforce that any staged `.cpp`/`.h` file
-under `experimental/rocjitsu` is clang-format-clean. The hook is a no-op
-for commits that do not touch that directory, so it is safe to install in
-the parent rocm-systems repo.
+rocjitsu uses [pre-commit](https://pre-commit.com/) for formatting
+(black, clang-format, gersemi). CI checks every PR automatically.
 
-Install once per clone:
-
-```bash
-./scripts/install-git-hooks.sh
-```
-
-This symlinks `scripts/git-hooks/pre-commit` into the enclosing repo's
-hooks directory. The installer refuses to overwrite an existing
-`pre-commit` hook; pass `--force` to replace it.
-
-If a commit is rejected, run the formatter, re-stage the affected files,
-and commit again:
+To run the same checks locally, install from the rocjitsu config
+(not the repo root):
 
 ```bash
-bash scripts/clang_format.sh
-git add <reformatted files>   # or `git add -u` if they are already tracked
-git commit
+cd emulation/rocjitsu
+pip install pre-commit
+pre-commit install -c .pre-commit-config.yaml
 ```
 
-The hook can be bypassed with `git commit --no-verify` (a built-in git
-escape hatch).
+To check all files:
+
+```bash
+pre-commit run -c emulation/rocjitsu/.pre-commit-config.yaml --all-files
+```
 
 ## Running tests
 
@@ -178,9 +170,8 @@ It intercepts `/dev/kfd` and the KFD sysfs topology, routing all KFD ioctls
 to the simulator.
 
 ```bash
-# Required environment variables
+# Required environment variable
 export RJ_CONFIG=configs/amdgpu_cdna4.json
-export RJ_SCHEMA=schemas/simulation_config.fbs
 
 # Run an HSA application
 LD_PRELOAD=build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
@@ -252,7 +243,7 @@ python -m amdisa --gen-all --gen-shared-execute \
     rdna3:path/to/amdgpu_isa_rdna3.xml \
     rdna3_5:path/to/amdgpu_isa_rdna3_5.xml \
     rdna4:path/to/amdgpu_isa_rdna4.xml
-bash scripts/clang_format.sh
+pre-commit run -c .pre-commit-config.yaml clang-format --all-files
 ```
 
 **Important:** Use `--multi` mode with all 9 ISAs to enable cross-ISA analysis and
@@ -262,10 +253,10 @@ shared templates for instructions that have identical semantics across multiple 
 Single-ISA mode (`--gen-all` without `--multi`) will generate inline execute bodies
 without shared templates, resulting in larger files with duplicated code.
 
-Hand-written files (`isa.h`, `insts.h`, `mfma_exec.h`, `addr_calc.h/.cpp`) are
+Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
 
-You can find the MR ISA in the artifacts directory.
+You can find the MR ISA in `rocm-systems/shared/machine-readable-isa/isa`.
 
 ### Regenerating DBT files
 
@@ -316,8 +307,7 @@ See `lib/python/amdisa/README.md` for details on the amdisa codegen pipeline.
 #include <rocjitsu/rocjitsu.h>
 
 rj_vm_t *vm = NULL;
-rj_vm_create("configs/amdgpu_cdna4.json",
-             "schemas/simulation_config.fbs", &vm);
+rj_vm_create("configs/amdgpu_cdna4.json", &vm);
 
 uint64_t ticks = 0;
 rj_vm_run(vm, &ticks);

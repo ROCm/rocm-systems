@@ -6,7 +6,8 @@
 ///
 /// Pre-allocates a contiguous buffer of N fixed-size blocks. Allocations
 /// pop from a free-list in O(1); deallocations push back in O(1). When
-/// the pool is exhausted, falls back to the global allocator.
+/// the pool is exhausted or the requested allocation is larger than a
+/// pool block, falls back to the global allocator.
 ///
 /// Intended for use as a class-specific operator new/delete override to
 /// eliminate malloc/free from hot paths. Thread-safety: NOT thread-safe.
@@ -35,28 +36,40 @@ public:
   ArenaAlloc() { init_free_list(); }
 
   /// @brief Allocate one block.  O(1) from free-list; falls back to heap.
-  void *allocate([[maybe_unused]] size_t size) {
-    assert(size <= BlockSize && "Allocation exceeds block size");
+  void *allocate(size_t size) {
+    if (size > BlockSize)
+      return ::operator new(size);
+
     if (free_head_) {
       void *ptr = free_head_;
       free_head_ = free_head_->next;
       return ptr;
     }
     // Pool exhausted — fall back to heap.
-    return ::operator new(BlockSize);
+    return ::operator new(size);
   }
 
   /// @brief Return a block to the free-list.  O(1).
-  /// Heap-allocated overflow blocks are also accepted — they become part
-  /// of the free-list and will be reused before more heap allocations.
+  /// Heap-allocated overflow or oversized blocks are returned to the global
+  /// allocator because they are not backed by this pool's fixed-size buffer.
   void deallocate(void *ptr) {
+    if (!owns(ptr)) {
+      ::operator delete(ptr);
+      return;
+    }
+
     auto *node = static_cast<FreeNode *>(ptr);
     node->next = free_head_;
     free_head_ = node;
   }
 
   /// @brief Check if a pointer was allocated from the pre-allocated buffer.
-  bool owns(const void *ptr) const { return ptr >= buffer_ && ptr < buffer_ + sizeof(buffer_); }
+  bool owns(const void *ptr) const {
+    auto addr = reinterpret_cast<std::uintptr_t>(ptr);
+    auto begin = reinterpret_cast<std::uintptr_t>(buffer_);
+    auto end = begin + sizeof(buffer_);
+    return addr >= begin && addr < end && ((addr - begin) % BlockSize) == 0;
+  }
 
   static constexpr size_t BLOCK_SIZE = BlockSize;
   static constexpr size_t NUM_BLOCKS = NumBlocks;

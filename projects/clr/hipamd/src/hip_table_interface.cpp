@@ -3139,6 +3139,18 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
                                                                  library);
   CATCH;
 }
+hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library,
+                               const char* name) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetGlobal_fn(dptr, bytes, library, name);
+  CATCH;
+}
+hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library,
+                                const char* name) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name);
+  CATCH;
+}
 hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev) {
   TRY;
