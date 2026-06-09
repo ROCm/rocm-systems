@@ -179,7 +179,8 @@ hipError_t ihipMemDiscardBatchAsync(void** dev_ptrs, size_t* sizes, size_t count
 
     // Batched memory object lookup with single lock acquisition
     std::vector<size_t> offsets;
-    std::vector<amd::Memory*> mem_objs = getMemoryObjectBatch(dev_ptrs, count, offsets);
+    std::vector<amd::Memory*> mem_objs =
+        getMemoryObjectBatch(hip::getCurrentDevice(), dev_ptrs, count, offsets);
 
     // Validate and prepare each operation
     for (size_t op_idx = 0; op_idx < count; op_idx++) {
