@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ import common
 import pandas as pd
 import pytest
 
+from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
     build_agent_to_gpu_map,
@@ -21,6 +23,7 @@ from utils.parser import (
     nullify_unevaluated_metric_values,
     search_pc_sampling_record,
 )
+from utils.utils_common import is_only_pc_sampling
 
 PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI300A_A1"
 
@@ -99,7 +102,7 @@ def _write_kernel_trace(
     return path
 
 
-def _write_stochastic_csv(
+def write_pc_sampling_csv(
     path: Path,
     rows: list[tuple],
 ) -> Path:
@@ -108,6 +111,27 @@ def _write_stochastic_csv(
         lines.append(f"{corr_id},{instruction},{comment}")
     path.write_text("\n".join(lines) + "\n")
     return path
+
+
+# ═══════════════════════════════════════════════════════════════
+# is_only_pc_sampling
+# ═══════════════════════════════════════════════════════════════
+
+
+@pytest.mark.parametrize(
+    "filter_blocks, expected",
+    [
+        ([], False),
+        (["21"], True),
+        (["pc_sampling"], True),
+        (["21", "pc_sampling"], True),
+        (["21", "2"], False),
+        (["2"], False),
+    ],
+)
+def test_is_only_pc_sampling(filter_blocks: list[str], expected: bool) -> None:
+    """True only when every requested block is PC sampling (21 / pc_sampling)."""
+    assert is_only_pc_sampling(filter_blocks) is expected
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -219,6 +243,155 @@ def test_search_pc_sampling_record_skips_none_fields() -> None:
     assert len(result) == 1
 
 
+def make_record_without_snapshot(
+    code_object_id: int,
+    offset: int,
+    inst_index: int,
+    dispatch_id: int | None,
+    wave_issued: bool,
+) -> dict:
+    """A record missing the ``snapshot`` key entirely."""
+    return {
+        "inst_index": inst_index,
+        "record": {
+            "pc": {
+                "code_object_id": code_object_id,
+                "code_object_offset": offset,
+            },
+            "dispatch_id": dispatch_id,
+            "wave_issued": wave_issued,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "records, expected",
+    [
+        pytest.param(
+            [
+                _make_record(1, 0x10, 0, dispatch_id=0, wave_issued=True),
+                _make_record(1, 0x10, 0, dispatch_id=1, wave_issued=True),
+            ],
+            {
+                "total": 2,
+                "issued": 2,
+                "stalled": 0,
+                "reasons": set(),
+                "dispatch_ids": [0, 1],
+            },
+            id="all_issued",
+        ),
+        pytest.param(
+            [
+                _make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=False,
+                    stall_reason=f"{PREFIX}WAITCNT",
+                ),
+                _make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=1,
+                    wave_issued=False,
+                    stall_reason=f"{PREFIX}ALU_DEPENDENCY",
+                ),
+            ],
+            {
+                "total": 2,
+                "issued": 0,
+                "stalled": 2,
+                "reasons": {"WAITCNT", "ALU_DEPENDENCY"},
+                "dispatch_ids": [0, 1],
+            },
+            id="all_stalled",
+        ),
+        pytest.param(
+            [
+                make_record_without_snapshot(
+                    1, 0x10, 0, dispatch_id=0, wave_issued=False
+                )
+            ],
+            {
+                "total": 1,
+                "issued": 0,
+                "stalled": 1,
+                "reasons": set(),
+                "dispatch_ids": [0],
+            },
+            id="missing_snapshot",
+        ),
+        pytest.param(
+            [
+                _make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=False,
+                    stall_reason="SHORT",
+                )
+            ],
+            {
+                "total": 1,
+                "issued": 0,
+                "stalled": 1,
+                "reasons": set(),
+                "dispatch_ids": [0],
+            },
+            id="short_stall_reason",
+        ),
+        pytest.param(
+            [
+                _make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=False,
+                    stall_reason=f"{PREFIX}NOT_A_REAL_KEY",
+                )
+            ],
+            {
+                "total": 1,
+                "issued": 0,
+                "stalled": 1,
+                "reasons": set(),
+                "dispatch_ids": [0],
+            },
+            id="unknown_stall_key",
+        ),
+        pytest.param(
+            [_make_record(1, 0x10, 0, dispatch_id=None, wave_issued=True)],
+            {
+                "total": 1,
+                "issued": 1,
+                "stalled": 0,
+                "reasons": set(),
+                "dispatch_ids": [],
+            },
+            id="missing_dispatch_id",
+        ),
+    ],
+)
+def test_search_pc_sampling_record_field_edges(
+    records: list[dict], expected: dict
+) -> None:
+    """Exercise snapshot/stall-reason/dispatch-id edge cases for a single group."""
+    result = search_pc_sampling_record(records)
+    assert result is not None
+    assert len(result) == 1
+    _, _, _, total, issued, stalled, reasons, dispatch_ids = result[0]
+    assert total == expected["total"]
+    assert issued == expected["issued"]
+    assert stalled == expected["stalled"]
+    assert {reason for reason, _ in reasons} == expected["reasons"]
+    assert dispatch_ids == expected["dispatch_ids"]
+
+
 # ═══════════════════════════════════════════════════════════════
 # load_pc_sampling_data_per_kernel
 # ═══════════════════════════════════════════════════════════════
@@ -277,14 +450,104 @@ def _setup_per_kernel_files(
     return json_path, kernel_trace
 
 
-def test_load_per_kernel_host_trap_offset_sort(
+@pytest.mark.parametrize(
+    "method, sorting_type",
+    [
+        ("host_trap", "offset"),
+        ("host_trap", "count"),
+        ("stochastic", "offset"),
+        ("stochastic", "count"),
+    ],
+)
+def test_load_per_kernel_schema_and_sort(
     tmp_path: Path,
+    method: str,
+    sorting_type: str,
 ) -> None:
-    """
-    Host-trap method returns offset-sorted rows without
-    stall columns, filtered to the requested kernel.
-    """
-    json_path, kt = _setup_per_kernel_files(tmp_path, method="host_trap")
+    """Column projection follows method; row order follows sorting_type."""
+    host_trap_cols = [
+        "source_line",
+        "instruction",
+        "code_object_id",
+        "offset",
+        "count",
+    ]
+    stochastic_cols = host_trap_cols + [
+        "count_issued",
+        "count_stalled",
+        "stall_reason",
+    ]
+    expected_columns = host_trap_cols if method == "host_trap" else stochastic_cols
+    json_path, kt = _setup_per_kernel_files(tmp_path, method=method)
+    df = load_pc_sampling_data_per_kernel(
+        method=method,
+        file_name=json_path,
+        csv_file_name=kt,
+        kernel_name="vecCopy",
+        sorting_type=sorting_type,
+    )
+    assert not df.empty
+    assert list(df.columns) == expected_columns
+    for _, row in df.iterrows():
+        assert row["code_object_id"] == 100
+    if sorting_type == "count":
+        counts = df["count"].tolist()
+        assert counts == sorted(counts, reverse=True)
+    else:
+        offsets = df["offset"].tolist()
+        assert offsets == sorted(offsets)
+
+
+def write_per_kernel_guard_files(
+    tmp_path: Path,
+    instructions: list | None,
+    comments: list | None,
+) -> tuple[Path, Path]:
+    """Per-kernel JSON + trace with caller-controlled instruction/comment tables."""
+    kt = tmp_path / "kt.csv"
+    _write_kernel_trace(kt, [(0, 100, "vecCopy"), (1, 100, "vecCopy")])
+    samples = [
+        _make_record(100, 0x10, 0, dispatch_id=0),
+        _make_record(100, 0x20, 1, dispatch_id=1),
+    ]
+    json_path = _write_json(
+        tmp_path / "r.json",
+        host_trap=samples,
+        instructions=instructions,
+        comments=comments,
+        kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
+    )
+    return json_path, kt
+
+
+@pytest.mark.parametrize(
+    "instructions, comments, instruction_none, source_line_none",
+    [
+        pytest.param(
+            ["v_mov"],
+            ["/s/a.cpp:1", "/s/a.cpp:2"],
+            "some",
+            "none",
+            id="instructions_short",
+        ),
+        pytest.param(
+            ["v_mov", "v_add"],
+            ["/s/a.cpp:1"],
+            "none",
+            "some",
+            id="comments_short",
+        ),
+    ],
+)
+def test_load_per_kernel_out_of_range_index_guards(
+    tmp_path: Path,
+    instructions: list | None,
+    comments: list | None,
+    instruction_none: str,
+    source_line_none: str,
+) -> None:
+    """An inst_index past the end of a string table yields None, not an error."""
+    json_path, kt = write_per_kernel_guard_files(tmp_path, instructions, comments)
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
         file_name=json_path,
@@ -293,24 +556,75 @@ def test_load_per_kernel_host_trap_offset_sort(
         sorting_type="offset",
     )
     assert not df.empty
-    expected_cols = [
-        "source_line",
-        "instruction",
-        "code_object_id",
-        "offset",
-        "count",
-    ]
-    assert list(df.columns) == expected_cols
-    assert "count_issued" not in df.columns
-    for _, row in df.iterrows():
-        assert row["code_object_id"] == 100
+    assert_none_kind(df["instruction"], instruction_none)
+    assert_none_kind(df["source_line"], source_line_none)
 
 
-def test_load_per_kernel_stochastic_count_sort(
+@pytest.mark.parametrize(
+    "instructions, comments",
+    [
+        pytest.param(None, ["/s/a.cpp:1", "/s/a.cpp:2"], id="empty_instructions"),
+        pytest.param(["v_mov", "v_add"], None, id="empty_comments"),
+    ],
+)
+def test_load_per_kernel_empty_string_table_exits(
+    tmp_path: Path,
+    instructions: list | None,
+    comments: list | None,
+) -> None:
+    """An empty instruction/comment table is treated as missing and exits."""
+    json_path, kt = write_per_kernel_guard_files(tmp_path, instructions, comments)
+    with pytest.raises(SystemExit):
+        load_pc_sampling_data_per_kernel(
+            method="host_trap",
+            file_name=json_path,
+            csv_file_name=kt,
+            kernel_name="vecCopy",
+            sorting_type="offset",
+        )
+
+
+def assert_none_kind(column: pd.Series, kind: str) -> None:
+    """Assert how many entries in *column* are None: all / some / none."""
+    if kind == "all":
+        assert column.isna().all()
+    elif kind == "some":
+        assert column.isna().any() and not column.isna().all()
+    else:
+        assert not column.isna().any()
+
+
+def test_load_per_kernel_multi_dispatch_groupby(
     tmp_path: Path,
 ) -> None:
-    """Stochastic method includes stall columns and sorts rows by descending count."""
-    json_path, kt = _setup_per_kernel_files(tmp_path, method="stochastic")
+    """Two dispatch IDs at one (code_object_id, offset) collapse to a summed row."""
+    kt = tmp_path / "kt.csv"
+    _write_kernel_trace(kt, [(0, 100, "vecCopy"), (1, 100, "vecCopy")])
+    samples = [
+        _make_record(
+            100,
+            0x10,
+            0,
+            dispatch_id=0,
+            wave_issued=False,
+            stall_reason=f"{PREFIX}WAITCNT",
+        ),
+        _make_record(
+            100,
+            0x10,
+            1,
+            dispatch_id=1,
+            wave_issued=False,
+            stall_reason=f"{PREFIX}ALU_DEPENDENCY",
+        ),
+    ]
+    json_path = _write_json(
+        tmp_path / "r.json",
+        stochastic=samples,
+        instructions=["v_mov", "v_add"],
+        comments=["/s/a.cpp:1", "/s/a.cpp:2"],
+        kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
+    )
     df = load_pc_sampling_data_per_kernel(
         method="stochastic",
         file_name=json_path,
@@ -318,20 +632,15 @@ def test_load_per_kernel_stochastic_count_sort(
         kernel_name="vecCopy",
         sorting_type="count",
     )
-    assert not df.empty
-    expected_cols = [
-        "source_line",
-        "instruction",
-        "code_object_id",
-        "offset",
-        "count",
-        "count_issued",
-        "count_stalled",
-        "stall_reason",
-    ]
-    assert list(df.columns) == expected_cols
-    counts = df["count"].tolist()
-    assert counts == sorted(counts, reverse=True)
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["count"] == 2
+    assert row["count_stalled"] == 2
+    assert row["count_issued"] == 0
+    assert {reason for reason, _ in row["stall_reason"]} == {
+        "WAITCNT",
+        "ALU_DEPENDENCY",
+    }
 
 
 def test_load_per_kernel_kernel_not_in_trace(
@@ -420,12 +729,14 @@ def test_load_pc_sampling_data_missing_kernel_trace(
     assert df.empty
 
 
-def test_load_pc_sampling_data_no_filter_stochastic_csv(
+@pytest.mark.parametrize("method", ["stochastic", "host_trap"])
+def test_load_pc_sampling_data_no_filter(
     tmp_path: Path,
+    method: str,
 ) -> None:
-    """Load grouped data from a stochastic CSV when no kernel filter is applied."""
-    _write_stochastic_csv(
-        tmp_path / "ps_file_pc_sampling_stochastic.csv",
+    """Load grouped data from the method-specific CSV when no kernel filter is set."""
+    write_pc_sampling_csv(
+        tmp_path / f"ps_file_pc_sampling_{method}.csv",
         [
             (0, "v_mov_b32 v0 v1", "/src/vcopy.cpp:42"),
             (0, "s_waitcnt vmcnt(0)", "/src/vcopy.cpp:43"),
@@ -455,7 +766,7 @@ def test_load_pc_sampling_data_multiple_kernels_error(
     """
     kt = tmp_path / "ps_file_kernel_trace.csv"
     kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n")
-    _write_stochastic_csv(
+    write_pc_sampling_csv(
         tmp_path / "ps_file_pc_sampling_stochastic.csv",
         [(0, "v_mov", "/src/v.cpp:1")],
     )
@@ -476,7 +787,7 @@ def test_load_pc_sampling_data_single_kernel_valid(
     """Return per-kernel data when exactly one valid kernel ID is filtered."""
     kt = tmp_path / "ps_file_kernel_trace.csv"
     kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n")
-    _write_stochastic_csv(
+    write_pc_sampling_csv(
         tmp_path / "ps_file_pc_sampling_stochastic.csv",
         [(0, "v_mov", "/src/v.cpp:1")],
     )
@@ -511,7 +822,7 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds(
     """
     kt = tmp_path / "ps_file_kernel_trace.csv"
     kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n")
-    _write_stochastic_csv(
+    write_pc_sampling_csv(
         tmp_path / "ps_file_pc_sampling_stochastic.csv",
         [(0, "v_mov", "/src/v.cpp:1")],
     )
@@ -706,6 +1017,99 @@ def test_build_agent_to_gpu_map_missing_file(
 
 
 # ═══════════════════════════════════════════════════════════════
+# calc_pc_sampling_data
+# ═══════════════════════════════════════════════════════════════
+
+
+def make_db_analysis(workload_path: str) -> db_analysis:
+    """Construct a db_analysis whose only populated state is _runs."""
+    instance = db_analysis.__new__(db_analysis)
+    instance._runs = {workload_path: None}
+    return instance
+
+
+def test_calc_pc_sampling_data_missing_file(
+    tmp_path: Path,
+) -> None:
+    """Workloads without ps_file_results.json are skipped, returning an empty map."""
+    instance = make_db_analysis(str(tmp_path))
+    assert instance.calc_pc_sampling_data() == {}
+
+
+@pytest.mark.parametrize("placement", ["stochastic", "host_trap", "mixed"])
+def test_calc_pc_sampling_data_aggregation(
+    tmp_path: Path,
+    placement: str,
+) -> None:
+    """Records group by (code_object_id, offset) with the documented schema."""
+    s0 = _make_record(100, 0x10, 0, dispatch_id=0, wave_issued=True)
+    s1 = _make_record(
+        100,
+        0x10,
+        0,
+        dispatch_id=1,
+        wave_issued=False,
+        stall_reason=f"{PREFIX}WAITCNT",
+    )
+    s2 = _make_record(101, 0x20, 1, dispatch_id=2, wave_issued=True)
+    if placement == "stochastic":
+        kwargs = {"stochastic": [s0, s1, s2]}
+    elif placement == "host_trap":
+        kwargs = {"host_trap": [s0, s1, s2]}
+    else:
+        kwargs = {"stochastic": [s0, s1], "host_trap": [s2]}
+    _write_json(
+        tmp_path / "ps_file_results.json",
+        instructions=["v_mov", "v_add"],
+        comments=["/s/a.cpp:1", "/s/a.cpp:2"],
+        kernel_symbols=[
+            {"code_object_id": 100, "formatted_kernel_name": "vecCopy"},
+            {"code_object_id": 101, "formatted_kernel_name": "vecAdd"},
+        ],
+        **kwargs,
+    )
+    instance = make_db_analysis(str(tmp_path))
+    result = instance.calc_pc_sampling_data()
+
+    expected_columns = [
+        "offset",
+        "count",
+        "count_issued",
+        "count_stalled",
+        "stall_reason",
+        "instruction",
+        "source_line",
+        "kernel_name",
+    ]
+    assert str(tmp_path) in result
+    df = result[str(tmp_path)]
+    assert list(df.columns) == expected_columns
+    assert len(df) == 2
+    row_copy = df[df["offset"] == 0x10].iloc[0]
+    assert row_copy["count"] == 2
+    assert row_copy["kernel_name"] == "vecCopy"
+    row_add = df[df["offset"] == 0x20].iloc[0]
+    assert row_add["count"] == 1
+    assert row_add["kernel_name"] == "vecAdd"
+
+
+def test_calc_pc_sampling_data_unmapped_kernel(
+    tmp_path: Path,
+) -> None:
+    """A code_object_id absent from kernel_symbols maps to a None kernel_name."""
+    _write_json(
+        tmp_path / "ps_file_results.json",
+        stochastic=[_make_record(999, 0x10, 0, dispatch_id=0, wave_issued=True)],
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
+    )
+    instance = make_db_analysis(str(tmp_path))
+    df = instance.calc_pc_sampling_data()[str(tmp_path)]
+    assert df.iloc[0]["kernel_name"] is None
+
+
+# ═══════════════════════════════════════════════════════════════
 # PC sampling analyze integration tests
 # ═══════════════════════════════════════════════════════════════
 
@@ -755,12 +1159,16 @@ def test_pc_sampling_analyze_kernel_filter(
     common.clean_output_dir(True, workload_dir)
 
 
-def test_pc_sampling_analyze_sorting_type_offset(
+@pytest.mark.parametrize("sorting_type", ["offset", "count"])
+def test_pc_sampling_analyze_sorting_type(
     binary_handler_analyze_rocprof_compute,
     capsys,
+    sorting_type,
 ) -> None:
-    """Run analyze with --pc-sampling-sorting-type offset and verify exit code 0."""
-    workload_dir = common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
+    """Run analyze with each --pc-sampling-sorting-type and verify exit code 0."""
+    workload_dir = common.setup_workload_dir(
+        PC_SAMPLING_WORKLOAD, param_id=sorting_type
+    )
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
@@ -768,7 +1176,7 @@ def test_pc_sampling_analyze_sorting_type_offset(
         "--block",
         "21",
         "--pc-sampling-sorting-type",
-        "offset",
+        sorting_type,
     ])
     assert code == 0
     captured = capsys.readouterr()
@@ -778,27 +1186,38 @@ def test_pc_sampling_analyze_sorting_type_offset(
     common.clean_output_dir(True, workload_dir)
 
 
-def test_pc_sampling_analyze_sorting_type_count(
+def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
-    capsys,
 ) -> None:
-    """Run analyze with --pc-sampling-sorting-type count and verify exit code 0."""
+    """Analyze in db mode produces a populated pcsampling table."""
     workload_dir = common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--block",
-        "21",
-        "--pc-sampling-sorting-type",
-        "count",
-    ])
-    assert code == 0
-    captured = capsys.readouterr()
-    assert "0.1 Top Kernels" in captured.out
-    assert "0.2 Dispatch List" in captured.out
-
-    common.clean_output_dir(True, workload_dir)
+    db_name = "pc_sampling_db_test"
+    db_path = Path(f"{db_name}.db")
+    try:
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "--block",
+            "21",
+            "--output-format",
+            "db",
+            "--output-name",
+            db_name,
+        ])
+        assert code == 0
+        assert db_path.is_file()
+        conn = sqlite3.connect(str(db_path))
+        try:
+            row_count = conn.execute(
+                "SELECT COUNT(*) FROM compute_pcsampling"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        assert row_count > 0
+    finally:
+        db_path.unlink(missing_ok=True)
+        common.clean_output_dir(True, workload_dir)
 
 
 def test_pc_sampling_analyze_list_stats(
