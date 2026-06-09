@@ -41,7 +41,7 @@ def gen_mfma(
 ) -> str:
     """Generate MFMA / SMFMAC matrix multiply-accumulate.
 
-    Uses the mfma_exec.h helpers which implement the exact GFX9 register
+    Uses the mma_exec.h helpers which implement the exact GFX9 register
     mapping formulas. The helpers handle cross-lane data movement, WAR
     hazard avoidance (buffered writes), and inline constant accumulator
     initialization without clobbering overlapping source operands.
@@ -52,11 +52,11 @@ def gen_mfma(
     import re
 
     m = re.match(
-        r'V_(?:S?MFMA[C]?|S?WMMA[C]?)_(F32|I32|F64|F16|BF16|BF8|FP8)_(\d+)X(\d+)X(\d+)'
+        r'V_(?:S?MFMA[C]?|S?WMMA[C]?)_(F32|I32|F64|F16|BF16|BF16F32|BF8|FP8)_(\d+)X(\d+)X(\d+)'
         r'(?:_\d+B)?_?(F32|XF32|F16|BF16|I8|IU8|IU4|F64|FP8|BF8'
         r'|BF8_BF8|BF8_FP8|FP8_BF8|FP8_FP8'
         r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8'
-        r'|F8_F6_F4|F8F6F4)?'
+        r'|F8_F6_F4|F8F6F4|F4)?'
         r'(?:_1K)?$',
         name,
     )
@@ -69,8 +69,11 @@ def gen_mfma(
         )
 
     result_type = m.group(1)  # F32, I32, F64
+    if result_type == 'BF16F32':
+        result_type = 'F32'
     M, N, K = int(m.group(2)), int(m.group(3)), int(m.group(4))
     input_type = m.group(5)  # F32, XF32, F16, BF16, I8, F64, etc.
+    is_swmmac = name.startswith('V_SWMMAC_')
 
     dst_bits = inst.operands[0].size if inst.operands else 0
     dst_regs = max(1, dst_bits // 32)
@@ -172,6 +175,7 @@ def gen_mfma(
         'BF16_BF8': 8,
         'F8_F6_F4': 8,
         'F8F6F4': 8,
+        'F4': 4,
     }
     in_bits = _INPUT_BITS.get(input_type, 32)
 
@@ -187,6 +191,7 @@ def gen_mfma(
         'BF8_BF8': 'amdgpu::extract_bf8',
         'F8_F6_F4': 'amdgpu::extract_fp8',
         'F8F6F4': 'amdgpu::extract_fp8',
+        'F4': 'amdgpu::extract_fp4',
     }
     _EXTRACT_B = {
         'F32': 'amdgpu::extract_f32',
@@ -199,57 +204,179 @@ def gen_mfma(
         'BF8_BF8': 'amdgpu::extract_bf8',
         'F8_F6_F4': 'amdgpu::extract_fp8',
         'F8F6F4': 'amdgpu::extract_fp8',
+        'F4': 'amdgpu::extract_fp4',
     }
 
     L = []
     L.append(f'  auto &cu = wf.cu();')
     L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
-    # acc_cd field exists in CDNA2/3/4 VOP3P_MFMA encoding (controls
-    # AccVGPR bank selection). CDNA1 and RDNA lack this field — default
-    # to 1 (always use AccVGPR bank, the CDNA1 behavior).
     arch = arch_name
-    has_acc_cd = arch in ('cdna2', 'cdna3', 'cdna4')
-    if has_acc_cd:
+    if arch == 'gfx1250':
         L.append(
-            f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
+            f'  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, {d}.opr_type_, '
+            f'{d}.encoding_value_, {d}.vgpr_msb_role());'
         )
+        L.append(
+            f'  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, {s0}.opr_type_, '
+            f'{s0}.encoding_value_, {s0}.vgpr_msb_role());'
+        )
+        L.append(
+            f'  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, {s1}.opr_type_, '
+            f'{s1}.encoding_value_, {s1}.vgpr_msb_role());'
+        )
+        if is_swmmac:
+            swmmac_index_entries = 32 if K >= 128 and in_bits <= 8 else 16
+            L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
+            L.append(f'  uint32_t s2 = dst;')
+            L.append(
+                f'  auto index_off = Isa::resolved_vgpr_offset(wf, {s2}.opr_type_, '
+                f'{s2}.encoding_value_, {s2}.vgpr_msb_role());'
+            )
+            L.append(f'  if (!index_off)')
+            L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            L.append(f'  uint32_t index_base = vb + *index_off;')
+            L.append(f'  uint32_t index_key = inst_.opsel & 0x1u;')
+        else:
+            L.append(f'  uint32_t const_acc;')
+            L.append(
+                f'  auto src2_off = Isa::resolved_vgpr_offset(wf, {s2}.opr_type_, '
+                f'{s2}.encoding_value_, {s2}.vgpr_msb_role());'
+            )
+            L.append(f'  uint32_t s2 = dst;')
+            L.append(f'  if (src2_off) {{')
+            L.append(f'    const_acc = amdgpu::ACC_FROM_VGPR;')
+            L.append(f'    s2 = vb + *src2_off;')
+            L.append(f'  }} else {{')
+            L.append(f'    const_acc = {s2}.read_scalar(wf);')
+            L.append(f'  }}')
     else:
-        L.append(f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);')
-    L.append(f'  uint32_t const_acc;')
-    L.append(f'  uint32_t s2 = amdgpu::resolve_acc(vb, dst,')
-    L.append(
-        f'      {s2}.encoding_value_, const_acc,'
-        f' [&] {{ return {s2}.read_scalar(wf); }});'
-    )
+        # acc_cd field exists in CDNA2/3/4 VOP3P_MFMA encoding (controls
+        # AccVGPR bank selection). CDNA1 and RDNA lack this field — default
+        # to 1 (always use AccVGPR bank, the CDNA1 behavior).
+        has_acc_cd = arch in ('cdna2', 'cdna3', 'cdna4')
+        if has_acc_cd:
+            L.append(
+                f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
+            )
+        else:
+            L.append(f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);')
+        L.append(f'  uint32_t const_acc;')
+        L.append(f'  uint32_t s2 = amdgpu::resolve_acc(vb, dst,')
+        L.append(
+            f'      {s2}.encoding_value_, const_acc,'
+            f' [&] {{ return {s2}.read_scalar(wf); }});'
+        )
 
     if result_type == 'F64':
         L.append(f'  amdgpu::exec_f64(cu, {M}, {N}, {K}, {B}, dst,')
-        L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
-        L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
+        if arch == 'gfx1250':
+            L.append(f'                 src0_base,')
+            L.append(f'                 src1_base,')
+        else:
+            L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
+            L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
         L.append(f'                 s2, const_acc);')
     elif result_type == 'I32':
-        L.append(f'  amdgpu::exec_i32_i8(cu, {M}, {N}, {K}, {B}, dst,')
-        L.append(f'                     amdgpu::src_base(vb, {s0}.encoding_value_),')
-        L.append(f'                     amdgpu::src_base(vb, {s1}.encoding_value_),')
-        L.append(f'                     s2, const_acc);')
+        if arch == 'gfx1250':
+            if input_type in ('IU4', 'IU8'):
+                suffix = '4' if input_type == 'IU4' else '8'
+                # LLVM's gfx1250 IU WMMA convention overloads neg_lo:
+                # bit set means signed extension, bit clear means unsigned.
+                L.append(
+                    f'  auto extract_a = (inst_.neg & 0x1u) ? amdgpu::extract_i{suffix}'
+                    f' : amdgpu::extract_u{suffix};'
+                )
+                L.append(
+                    f'  auto extract_b = (inst_.neg & 0x2u) ? amdgpu::extract_i{suffix}'
+                    f' : amdgpu::extract_u{suffix};'
+                )
+            else:
+                L.append(f'  auto extract_a = amdgpu::extract_i8;')
+                L.append(f'  auto extract_b = amdgpu::extract_i8;')
+            if is_swmmac:
+                L.append(
+                    f'  amdgpu::exec_swmmac_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                )
+            else:
+                L.append(f'  amdgpu::exec_wmma_i32(cu, {M}, {N}, {K}, {in_bits}, dst,')
+            L.append(f'                         src0_base,')
+            L.append(f'                         src1_base,')
+            if is_swmmac:
+                L.append(
+                    f'                         s2, index_base, {swmmac_index_entries}, index_key,'
+                    f' extract_a, extract_b, inst_.clamp, const_acc);'
+                )
+                return '\n'.join(L)
+        else:
+            L.append(f'  amdgpu::exec_i32_i8(cu, {M}, {N}, {K}, {B}, dst,')
+            L.append(
+                f'                     amdgpu::src_base(vb, {s0}.encoding_value_),'
+            )
+            L.append(
+                f'                     amdgpu::src_base(vb, {s1}.encoding_value_),'
+            )
+        if arch == 'gfx1250':
+            L.append(
+                f'                     s2, extract_a, extract_b, inst_.clamp, const_acc);'
+            )
+        else:
+            L.append(f'                     s2, const_acc);')
     else:
-        # F32, F16, BF16 result types all use exec_f32 (accumulate in f32,
-        # WMMA F16/BF16 results are truncated at writeback — handled by the
-        # register layout, not by separate exec functions).
+        # F32, F16, and BF16 matrix results accumulate in f32. gfx1250 WMMA
+        # uses a wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
+        if arch == 'gfx1250' and input_type in ('F8_F6_F4', 'F8F6F4'):
+            L.append(f'  uint32_t matrix_a_fmt = inst_.opsel;')
+            L.append(f'  uint32_t matrix_b_fmt = (inst_.pad_14 << 2) | inst_.opsel_hi;')
+            L.append(
+                f'  bool dispatched = amdgpu::dispatch_matrix_fmt_pair('
+                f'matrix_a_fmt, matrix_b_fmt,'
+            )
+            L.append(
+                f'      [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {{'
+            )
+            L.append(
+                f'        amdgpu::exec_wmma_f32_mixed(cu, {M}, {N}, {K}, a_bits, b_bits, dst,'
+            )
+            L.append(f'            src0_base,')
+            L.append(f'            src1_base,')
+            L.append(f'            s2, extract_a, extract_b, const_acc);')
+            L.append(f'      }});')
+            L.append(f'  if (!dispatched)')
+            L.append(f'    throw util::UnimplementedInst(mnemonic());')
+            return '\n'.join(L)
+
         ea = _EXTRACT_A.get(input_type, 'amdgpu::extract_f32')
         eb = _EXTRACT_B.get(input_type, 'amdgpu::extract_f32')
         # CDNA1-4 VOP3P_MFMA encoding has cbsz/abid/blgp fields for
         # A-matrix broadcast and B-matrix lane permutation. RDNA does
         # not have MFMA (only WMMA), so these fields don't exist.
-        has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
-        L.append(f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
-        L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
-        L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
-        if has_blgp:
-            L.append(f'                 s2, {ea}, {eb}, const_acc,')
-            L.append(f'                 inst_.cbsz, inst_.abid, inst_.blgp);')
+        if arch == 'gfx1250':
+            if result_type == 'F16':
+                exec_fn = 'exec_swmmac_f16' if is_swmmac else 'exec_wmma_f16'
+            elif result_type == 'BF16':
+                exec_fn = 'exec_swmmac_bf16' if is_swmmac else 'exec_wmma_bf16'
+            else:
+                exec_fn = 'exec_swmmac_f32' if is_swmmac else 'exec_wmma_f32'
+            L.append(f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,')
+            L.append(f'                    src0_base,')
+            L.append(f'                    src1_base,')
+            if is_swmmac:
+                L.append(
+                    f'                    s2, index_base, {swmmac_index_entries}, index_key, {ea}, {eb},'
+                )
+                L.append(f'                    const_acc);')
+            else:
+                L.append(f'                    s2, {ea}, {eb}, const_acc);')
         else:
-            L.append(f'                 s2, {ea}, {eb}, const_acc);')
+            has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+            L.append(f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
+            L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
+            L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
+            if has_blgp:
+                L.append(f'                 s2, {ea}, {eb}, const_acc,')
+                L.append(f'                 inst_.cbsz, inst_.abid, inst_.blgp);')
+            else:
+                L.append(f'                 s2, {ea}, {eb}, const_acc);')
 
         if input_type in ('F8_F6_F4', 'F8F6F4'):
             # Rewrite the MFMA call: if ABID[0]=1 (scaling enabled),

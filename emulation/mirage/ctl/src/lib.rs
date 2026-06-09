@@ -9,20 +9,30 @@
 //!
 //! All commands are documented in `docs/cli.md`.
 
+use std::io::IsTerminal;
 use std::io::Write;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use clap::{Args, Subcommand};
 use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
+use mirage_core::emulator::EmulatorDescription;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
-use mirage_core::profile::ProfileDef;
-use mirage_core::registry;
+use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
+
+/// Log directive that detached child processes (notably the per-session
+/// `mirage host`) should inherit, derived from the CLI's `-v`/`-vv`.
+///
+/// Set once by [`init_logging`] and applied explicitly to spawned hosts
+/// by [`spawn_host_for`] via the `MIRAGE_LOG` environment of the child
+/// `Command`, rather than mutating this process's own environment.
+static HOST_LOG_DIRECTIVE: OnceLock<String> = OnceLock::new();
 
 /// Initialize the global tracing subscriber. Honours `MIRAGE_LOG` if
 /// set, otherwise uses the level implied by `-v` / `-vv`.
@@ -32,6 +42,18 @@ pub fn init_logging(verbose: u8) {
         1 => "info",
         _ => "debug",
     };
+    // Record the chosen level so detached child processes can inherit
+    // it. Most importantly this reaches the detached per-session `mirage
+    // host`, which is re-exec'd from this binary without any `-v` flag
+    // and would otherwise default to `warn`, silently dropping all of
+    // its info/debug host events. `spawn_host_for` applies this directly
+    // to the child `Command`'s environment (only when the user hasn't
+    // set `MIRAGE_LOG` themselves), so a `-v`/`-vv` on the CLI is
+    // honoured by the host's own logger too, and host events land in the
+    // per-session `node/0/host.log` at the requested verbosity.
+    if verbose > 0 && std::env::var_os("MIRAGE_LOG").is_none() {
+        let _ = HOST_LOG_DIRECTIVE.set(level.to_string());
+    }
     let env = tracing_subscriber::EnvFilter::try_from_env("MIRAGE_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(level));
     let _ = tracing_subscriber::fmt()
@@ -40,20 +62,112 @@ pub fn init_logging(verbose: u8) {
         .try_init();
 }
 
+/// The full emulator registry: the generic pass-through
+/// ([`mirage_core::registry::noop`]) plus the emulator-specific
+/// backends, each of which is owned by its own crate. Assembled here
+/// because `mirage_ctl` is the lowest crate that depends on every
+/// emulator integration. Each entry reports its current install state
+/// and resolved runtime path, so building the registry probes the
+/// machine.
+pub fn registry() -> Vec<EmulatorDescription> {
+    use mirage_core::emulator::Emulator;
+    vec![
+        mirage_core::emulator::Noop::description(),
+        mirage_rocjitsu::Rocjitsu::description(),
+        mirage_hotswap::Hotswap::description(),
+    ]
+}
+
+/// Lookup an emulator by its canonical name in the full [`registry`].
+pub fn find_emulator(name: &str) -> Option<EmulatorDescription> {
+    registry().into_iter().find(|e| e.name == name)
+}
+
+/// The default emulator for new profiles: the first installed,
+/// non-noop entry, falling back to `noop`.
+pub fn default_emulator() -> EmulatorDescription {
+    let specs = registry();
+    mirage_core::registry::default_emulator(&specs).clone()
+}
+
+/// Render the emulator registry for the `mirage emulators` command:
+/// each backend with whether its runtime is installed and whether this
+/// host's hardware supports it. With `json` the full descriptions are
+/// emitted as-is; otherwise a compact table (or, with `long`, a
+/// detailed block including the support reason and runtime path).
+fn emulators_cmd(long: bool, json: bool) {
+    let specs = registry();
+    if json {
+        match serde_json::to_string_pretty(&specs) {
+            Ok(s) => println!("{s}"),
+            Err(e) => eprintln!("failed to serialize emulators: {e}"),
+        }
+        return;
+    }
+
+    let default_name = default_emulator().name;
+
+    if long {
+        for spec in &specs {
+            let default_marker = if spec.name == default_name {
+                " (default)"
+            } else {
+                ""
+            };
+            println!("{}{}", spec.name, default_marker);
+            println!("  {}", spec.description);
+            println!("  installed: {}", if spec.installed { "yes" } else { "no" });
+            println!(
+                "  supported: {}  ({})",
+                if spec.support.supported { "yes" } else { "no" },
+                spec.support.reason
+            );
+            if let Some(path) = &spec.path {
+                println!("  runtime:   {}", path.display());
+            }
+            println!();
+        }
+        return;
+    }
+
+    println!(
+        "{:<10} {:<10} {:<10} DESCRIPTION",
+        "NAME", "INSTALLED", "SUPPORTED"
+    );
+    for spec in &specs {
+        let name = if spec.name == default_name {
+            format!("{}*", spec.name)
+        } else {
+            spec.name.clone()
+        };
+        println!(
+            "{:<10} {:<10} {:<10} {}",
+            name,
+            if spec.installed { "yes" } else { "no" },
+            if spec.support.supported { "yes" } else { "no" },
+            spec.description
+        );
+    }
+    println!("\n* = default emulator for new profiles");
+}
+
 /// Best-effort: materialise all builtin state on disk — agents,
-/// topologies, and the rocjitsu runtime assets — writing only what's
-/// missing. Errors are logged, never fatal; the user can always force
-/// a full rewrite with `mirage state builtins`.
+/// topologies, profiles, and the rocjitsu runtime assets — writing only
+/// what's missing. Errors are logged, never fatal; the user can always
+/// force a full rewrite with `mirage state builtins`.
 ///
 /// Shared by the CLI ([`dispatch`]) and the daemon so both surfaces
 /// auto-unpack the builtins the first time they run, instead of
 /// requiring the user to invoke `mirage state builtins` by hand.
 pub fn ensure_builtins_present() {
-    if let Err(e) = mirage_core::agent::store::ensure_builtins(false) {
+    if let Err(e) = mirage_builtin::ensure_agents(false) {
         tracing::warn!("failed to preload builtin agents: {e:#}");
     }
-    if let Err(e) = mirage_core::topology::store::ensure_builtins(false) {
+    if let Err(e) = mirage_builtin::ensure_topologies(false) {
         tracing::warn!("failed to preload builtin topologies: {e:#}");
+    }
+    if let Err(e) = mirage_builtin::ensure_profiles(false) {
+        tracing::warn!("failed to preload builtin profiles: {e:#}");
     }
     if let Err(e) = mirage_rocjitsu::ensure_assets(false) {
         tracing::warn!("failed to extract rocjitsu assets: {e:#}");
@@ -70,30 +184,11 @@ pub fn ensure_builtins_present() {
 /// Shared by the CLI profile commands and the daemon's profile
 /// endpoint so both validate identically.
 pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
-    let emulator = def.emulator.emulator.as_str();
-    if registry::find(emulator).is_none() {
-        let known = registry::builtins()
-            .iter()
-            .map(|e| e.name)
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(format!("unknown emulator `{emulator}` (known: {known})"));
-    }
-    match emulator {
-        "rocjitsu" => {
-            // Make sure the runtime assets (the flatbuffer schema in
-            // particular) are present so this mirrors exactly what
-            // session start will do.
-            let _ = mirage_rocjitsu::ensure_assets(false);
-            // Building the kmd config resolves the topology + agent
-            // references and checks the schema is available; any error
-            // here is precisely what would otherwise surface at run
-            // time, so we report it now with the profile in hand.
-            mirage_rocjitsu::kmd_config(&def.emulator)
-                .map(|_| ())
-                .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
-        }
-        _ => Ok(()),
+    use mirage_core::emulator::{Emulator, EmulatorKind, Noop};
+    match def.emulator.emulator {
+        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::validate_profile(def),
+        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::validate_profile(def),
+        EmulatorKind::Noop => Noop::validate_profile(def),
     }
 }
 
@@ -117,6 +212,13 @@ pub enum CtlCmd {
     #[command(subcommand)]
     Agent(AgentCmd),
 
+    /// List emulator backends and their install / support status.
+    Emulators {
+        /// Show long form (description, runtime path, support reason).
+        #[arg(short = 'l', long)]
+        long: bool,
+    },
+
     /// Manage sessions.
     #[command(subcommand)]
     Session(SessionCmd),
@@ -135,7 +237,7 @@ pub enum CtlCmd {
     /// Re-attach to a running exec's streams.
     Attach(AttachArgs),
 
-    /// Show or follow an exec's stdout/stderr.
+    /// Show or follow an exec's stdout.
     Logs(LogsArgs),
 
     /// Print where mirage stores its state on this machine.
@@ -155,8 +257,15 @@ pub enum ProfileCmd {
     /// Show a profile as JSON.
     Show { name: String },
     /// Create a new profile.
+    ///
+    /// Any field not given as a flag is prompted for interactively when
+    /// stdin is a terminal; otherwise its default is used. This makes
+    /// `profile create <name>` an interactive UI while `profile create
+    /// <name> --emulator ... --agent ...` stays fully non-interactive
+    /// (e.g. in scripts and tests).
     Create {
-        name: String,
+        /// Profile name. Prompted for when omitted on a terminal.
+        name: Option<String>,
         /// Emulator name (e.g. `rocjitsu`, `noop`). Defaults to the
         /// first installed emulator (rocjitsu if present, otherwise
         /// noop).
@@ -164,25 +273,35 @@ pub enum ProfileCmd {
         emulator: Option<String>,
         /// Agent name from `<MIRAGE_CONFIG>/agent/` (e.g. `MI300X`,
         /// `MI350X`). Defaults to `MI350X`.
-        #[arg(long, default_value = "MI350X")]
-        agent: String,
-        /// Number of racks.
-        #[arg(long, default_value_t = 1)]
-        racks: u32,
+        #[arg(long)]
+        agent: Option<String>,
         /// Nodes per rack.
-        #[arg(long, default_value_t = 1)]
-        nodes_per_rack: u32,
+        #[arg(long)]
+        num_nodes: Option<u32>,
         /// GPUs per node.
-        #[arg(long, default_value_t = 1)]
-        gpus_per_node: u32,
+        #[arg(long)]
+        gpus_per_node: Option<u32>,
         /// Optional description.
         #[arg(long)]
         description: Option<String>,
-    },
-    /// Interactive wizard: prompts for every field.
-    Wizard {
-        /// Name for the new profile.
-        name: Option<String>,
+        /// Containerise the profile: run every node inside a container
+        /// built from this image. Enables `--mount`/`--provider`.
+        #[arg(long)]
+        image: Option<String>,
+        /// Bind mount applied to every node container, as
+        /// `HOST[:CONTAINER[:ro|rw]]`. May be repeated. Requires
+        /// `--image`.
+        #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
+        mounts: Vec<String>,
+        /// Container provider to use (`podman`, `docker`, or a path).
+        /// Autodetected (podman, then docker) when omitted. Requires
+        /// `--image`.
+        #[arg(long)]
+        provider: Option<String>,
+        /// Never prompt; use defaults for any unspecified field even on
+        /// a terminal.
+        #[arg(long)]
+        no_input: bool,
     },
     /// Import a profile from a JSON file.
     Import {
@@ -212,12 +331,9 @@ pub enum TopologyCmd {
         /// Agent name referenced by this topology.
         #[arg(long, default_value = "MI350X")]
         agent: String,
-        /// Number of racks.
-        #[arg(long, default_value_t = 1)]
-        racks: u32,
         /// Nodes per rack.
         #[arg(long, default_value_t = 1)]
-        nodes_per_rack: u32,
+        num_nodes: u32,
         /// GPUs per node.
         #[arg(long, default_value_t = 1)]
         gpus_per_node: u32,
@@ -267,8 +383,6 @@ pub enum SessionCmd {
     },
     /// Start a new session and its host process.
     Start(StartArgs),
-    /// Interactive wizard for starting a session.
-    Wizard,
     /// Stop a session and remove its state.
     Stop {
         id: SessionId,
@@ -282,9 +396,10 @@ pub enum SessionCmd {
 
 #[derive(Args, Debug)]
 pub struct StartArgs {
-    /// Profile to use (by name).
+    /// Profile to use (by name). Prompted for when omitted on a
+    /// terminal.
     #[arg(long)]
-    pub profile: String,
+    pub profile: Option<String>,
     /// Explicit session id; auto-generated if omitted.
     #[arg(long)]
     pub id: Option<SessionId>,
@@ -297,6 +412,21 @@ pub struct StartArgs {
     /// How long to wait for the host to report ready (seconds).
     #[arg(long, default_value_t = 10)]
     pub ready_timeout: u64,
+    /// Override/enable containerisation: run every node inside a
+    /// container built from this image.
+    #[arg(long)]
+    pub image: Option<String>,
+    /// Extra bind mount (`HOST[:CONTAINER[:ro|rw]]`). May be repeated.
+    #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
+    pub mounts: Vec<String>,
+    /// Container provider (`podman`, `docker`, or a path). Autodetected
+    /// when omitted.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Never prompt; require every field on the command line even on a
+    /// terminal.
+    #[arg(long)]
+    pub no_input: bool,
 }
 
 // ----- exec ------------------------------------------------------------------
@@ -389,6 +519,17 @@ pub struct RunArgs {
     /// `KEY=VALUE` form. May be repeated.
     #[arg(long = "env", value_name = "KEY=VALUE")]
     envs: Vec<String>,
+    /// Override/enable containerisation: run every node inside a
+    /// container built from this image.
+    #[arg(long)]
+    image: Option<String>,
+    /// Extra bind mount (`HOST[:CONTAINER[:ro|rw]]`). May be repeated.
+    #[arg(long = "mount", value_name = "HOST[:CONTAINER[:ro|rw]]")]
+    mounts: Vec<String>,
+    /// Container provider (`podman`, `docker`, or a path). Autodetected
+    /// when omitted.
+    #[arg(long)]
+    provider: Option<String>,
     /// The command and its arguments.
     #[arg(trailing_var_arg = true, required = true, allow_hyphen_values = true)]
     argv: Vec<String>,
@@ -409,12 +550,6 @@ pub struct LogsArgs {
     /// Follow output as it is appended.
     #[arg(short = 'f', long)]
     follow: bool,
-    /// Only show stderr.
-    #[arg(long)]
-    stderr: bool,
-    /// Only show stdout.
-    #[arg(long)]
-    stdout: bool,
 }
 
 // =============================================================================
@@ -438,6 +573,10 @@ pub async fn dispatch<C: MirageCtl + 'static>(
         CtlCmd::Profile(c) => profile_cmd(&*ctl, c, json),
         CtlCmd::Topology(c) => topology_cmd(&*ctl, c, json),
         CtlCmd::Agent(c) => agent_cmd(&*ctl, c, json),
+        CtlCmd::Emulators { long } => {
+            emulators_cmd(long, json);
+            Ok(ExitCode::from(0))
+        }
         CtlCmd::Session(c) => session_cmd(&*ctl, c, json).await,
         CtlCmd::Exec(c) => exec_cmd(ctl.clone(), c, json).await,
         CtlCmd::State(c) => state_cmd(ctl.clone(), c, json).await,
@@ -463,7 +602,7 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
                 if names.is_empty() {
                     eprintln!("(no profiles)");
                 }
-                println!("{:<24} {:<16} {}", "NAME", "EMULATOR", "DESCRIPTION");
+                println!("{:<24} {:<16} DESCRIPTION", "NAME", "EMULATOR");
                 for n in names {
                     match ctl.profile_get(&n) {
                         Ok(p) => println!(
@@ -489,49 +628,36 @@ fn profile_cmd(ctl: &dyn MirageCtl, cmd: ProfileCmd, json: bool) -> anyhow::Resu
             name,
             emulator,
             agent,
-            racks,
-            nodes_per_rack,
+            num_nodes,
             gpus_per_node,
             description,
+            image,
+            mounts,
+            provider,
+            no_input,
         } => {
-            // Resolve emulator: explicit > registry default.
-            let spec = match emulator.as_deref() {
-                Some(n) => match registry::find(n) {
-                    Some(s) => s,
-                    None => anyhow::bail!(
-                        "unknown emulator: {n}. Known: {}",
-                        registry::builtins()
-                            .iter()
-                            .map(|e| e.name)
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                },
-                None => registry::default_emulator(),
-            };
-            let topo = mirage_core::topology::TopologyDef {
-                racks,
-                nodes_per_rack,
+            let interactive = !no_input && std::io::stdin().is_terminal();
+            let p = build_profile_create(
+                name,
+                emulator,
+                agent,
+                num_nodes,
                 gpus_per_node,
-                agent: MaybeRef::Ref(agent),
-            };
-            let p = ProfileDef {
-                name: name.clone(),
                 description,
-                emulator: registry::make_def(spec, topo),
-            };
+                image,
+                mounts,
+                provider,
+                interactive,
+            )?;
             if let Err(e) = validate_profile(&p) {
-                anyhow::bail!("cannot create profile {name}: {e}");
+                anyhow::bail!("cannot create profile {}: {e}", p.name);
             }
             ctl.profile_put(&p)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&p)?);
             } else {
-                println!("created profile {name}");
+                println!("created profile {}", p.name);
             }
-        }
-        ProfileCmd::Wizard { name } => {
-            return profile_wizard(ctl, name, json);
         }
         ProfileCmd::Import { file } => {
             let bytes = if file == "-" {
@@ -577,13 +703,11 @@ fn topology_cmd(ctl: &dyn MirageCtl, cmd: TopologyCmd, json: bool) -> anyhow::Re
         TopologyCmd::Create {
             name,
             agent,
-            racks,
-            nodes_per_rack,
+            num_nodes,
             gpus_per_node,
         } => {
             let t = mirage_core::topology::TopologyDef {
-                racks,
-                nodes_per_rack,
+                num_nodes,
                 gpus_per_node,
                 agent: MaybeRef::Ref(agent),
             };
@@ -676,15 +800,37 @@ async fn session_cmd<C: MirageCtl>(
                 if ids.is_empty() {
                     eprintln!("(no sessions)");
                 }
-                println!("{:<32} {:<10} {}", "ID", "HEALTHY", "STATE");
+                println!("{:<32} {:<10} {:<12} CONTAINER", "ID", "HEALTHY", "STATE");
                 for id in ids {
-                    let h = ctl.session_health(&id).unwrap_or_default();
+                    let state = ctl.session_state(&id).ok();
+                    let h = state
+                        .as_ref()
+                        .map(|s| s.health.clone())
+                        .or_else(|| ctl.session_health(&id).ok())
+                        .unwrap_or_default();
+                    let container = match state.as_ref().and_then(|s| s.container.as_ref()) {
+                        Some(c) => format!(
+                            "{} {} ({} node{})",
+                            c.provider,
+                            c.image,
+                            c.nodes.len(),
+                            if c.nodes.len() == 1 { "" } else { "s" }
+                        ),
+                        None => "-".to_string(),
+                    };
                     println!(
-                        "{:<32} {:<10} {}",
+                        "{:<32} {:<10} {:<12} {}",
                         id,
                         h.healthy,
-                        h.state.unwrap_or_default()
+                        h.state.clone().unwrap_or_default(),
+                        container
                     );
+                    // Surface the detailed status/error message (image
+                    // pull progress, network/node bring-up, stall/crash
+                    // diagnostics) on an indented continuation line.
+                    if let Some(msg) = h.message.as_deref() {
+                        println!("{:>32}   {}", "", msg);
+                    }
                 }
             }
         }
@@ -695,13 +841,16 @@ async fn session_cmd<C: MirageCtl>(
         SessionCmd::Wait { id, timeout } => {
             let h = ctl.session_wait_ready(&id, Duration::from_secs(timeout))?;
             if !h.healthy {
-                eprintln!("session is unhealthy: {}", h.state.unwrap_or_default());
+                let state = h.state.clone().unwrap_or_default();
+                match h.message.as_deref() {
+                    Some(msg) => eprintln!("session is unhealthy ({state}): {msg}"),
+                    None => eprintln!("session is unhealthy: {state}"),
+                }
                 return Ok(ExitCode::from(2));
             }
             println!("{}", serde_json::to_string_pretty(&h)?);
         }
         SessionCmd::Start(args) => return session_start(ctl, args, json).await,
-        SessionCmd::Wizard => return session_wizard(ctl, json).await,
         SessionCmd::Stop { id, force } => {
             if !force && !confirm(&format!("stop session {id}?"))? {
                 return Ok(ExitCode::from(0));
@@ -717,26 +866,346 @@ async fn session_cmd<C: MirageCtl>(
     Ok(ExitCode::from(0))
 }
 
+/// Build a [`ContainerizedDef`] from CLI container flags.
+///
+/// Returns `None` when no container flags were given. `--mount` and
+/// `--provider` require `--image` (there is no base image to attach
+/// them to otherwise).
+fn build_containerize(
+    image: Option<String>,
+    mounts: &[String],
+    provider: Option<String>,
+) -> anyhow::Result<Option<ContainerizedDef>> {
+    match image {
+        Some(image) => Ok(Some(ContainerizedDef {
+            provider,
+            image,
+            mounts: parse_mounts(mounts)?,
+            devices: Vec::new(),
+            groups: Vec::new(),
+        })),
+        None => {
+            if !mounts.is_empty() || provider.is_some() {
+                anyhow::bail!("--mount/--provider require --image");
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// Build a [`ProfileDef`] for `profile create`.
+///
+/// Every field passed as a flag is used verbatim. When `interactive`
+/// is set, any field left unspecified is prompted for; otherwise the
+/// field's default is used. This keeps `profile create <name>` a
+/// friendly interactive UI on a terminal while remaining fully
+/// non-interactive (defaults) in scripts, pipes and tests.
+#[allow(clippy::too_many_arguments)]
+fn build_profile_create(
+    name: Option<String>,
+    emulator: Option<String>,
+    agent: Option<String>,
+    num_nodes: Option<u32>,
+    gpus_per_node: Option<u32>,
+    description: Option<String>,
+    image: Option<String>,
+    mounts: Vec<String>,
+    provider: Option<String>,
+    interactive: bool,
+) -> anyhow::Result<ProfileDef> {
+    use dialoguer::{Confirm, Input, Select};
+    let theme = dialoguer::theme::ColorfulTheme::default();
+
+    // ----- name -----
+    let name = match name {
+        Some(n) => n,
+        None if interactive => Input::with_theme(&theme)
+            .with_prompt("Profile name")
+            .validate_with(|s: &String| -> Result<(), &str> {
+                if s.trim().is_empty() {
+                    Err("name required")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact_text()?,
+        None => anyhow::bail!("a profile name is required"),
+    };
+
+    // ----- emulator -----
+    let spec = match emulator.as_deref() {
+        Some(n) => match find_emulator(n) {
+            Some(s) => s,
+            None => anyhow::bail!(
+                "unknown emulator: {n}. Known: {}",
+                registry()
+                    .into_iter()
+                    .map(|e| e.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        },
+        None if interactive => {
+            let specs = registry();
+            let default_name = default_emulator().name;
+            let default_idx = specs
+                .iter()
+                .position(|s| s.name == default_name)
+                .unwrap_or(0);
+            let labels: Vec<String> = specs
+                .iter()
+                .map(|s| {
+                    let installed = if s.installed {
+                        "[installed]"
+                    } else {
+                        "[not installed]"
+                    };
+                    let supported = if s.support.supported {
+                        ""
+                    } else {
+                        " [unsupported hardware]"
+                    };
+                    format!("{:<10} {installed}{supported}  {}", s.name, s.description)
+                })
+                .collect();
+            let pick = Select::with_theme(&theme)
+                .with_prompt("Emulator")
+                .items(&labels)
+                .default(default_idx)
+                .interact()?;
+            specs[pick].clone()
+        }
+        None => default_emulator(),
+    };
+
+    // ----- topology -----
+    let num_nodes = resolve_count(num_nodes, "Nodes per rack", interactive, &theme)?;
+    let gpus_per_node = resolve_count(gpus_per_node, "GPUs per node", interactive, &theme)?;
+
+    // ----- agent -----
+    let agent = match agent {
+        Some(a) => a,
+        None if interactive => {
+            let known = mirage_core::agent::store::list().unwrap_or_default();
+            if known.is_empty() {
+                "MI350X".to_string()
+            } else {
+                let default_idx = known.iter().position(|n| n == "MI350X").unwrap_or(0);
+                let pick = Select::with_theme(&theme)
+                    .with_prompt("Agent")
+                    .items(&known)
+                    .default(default_idx)
+                    .interact()?;
+                known[pick].clone()
+            }
+        }
+        None => "MI350X".to_string(),
+    };
+
+    // ----- description -----
+    let description = match description {
+        Some(d) => Some(d),
+        None if interactive => {
+            let d: String = Input::with_theme(&theme)
+                .with_prompt("Description (optional)")
+                .allow_empty(true)
+                .interact_text()?;
+            if d.is_empty() { None } else { Some(d) }
+        }
+        None => None,
+    };
+
+    // ----- containerisation -----
+    let containerize = if image.is_some() || !mounts.is_empty() || provider.is_some() {
+        // Any explicit container flag: build directly (errors if mounts
+        // or provider were given without an image).
+        build_containerize(image, &mounts, provider)?
+    } else if interactive
+        && Confirm::with_theme(&theme)
+            .with_prompt("Run each node inside a container?")
+            .default(false)
+            .interact()?
+    {
+        let img: String = Input::with_theme(&theme)
+            .with_prompt("Image")
+            .validate_with(|s: &String| -> Result<(), &str> {
+                if s.trim().is_empty() {
+                    Err("image required")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact_text()?;
+        let prov: String = Input::with_theme(&theme)
+            .with_prompt("Provider (blank to auto-detect)")
+            .allow_empty(true)
+            .interact_text()?;
+        let mut specs: Vec<String> = Vec::new();
+        while Confirm::with_theme(&theme)
+            .with_prompt("Add a bind mount?")
+            .default(false)
+            .interact()?
+        {
+            let m: String = Input::with_theme(&theme)
+                .with_prompt("Mount (HOST[:CONTAINER[:ro|rw]])")
+                .interact_text()?;
+            if !m.trim().is_empty() {
+                specs.push(m);
+            }
+        }
+        build_containerize(
+            Some(img),
+            &specs,
+            if prov.is_empty() { None } else { Some(prov) },
+        )?
+    } else {
+        None
+    };
+
+    let topo = mirage_core::topology::TopologyDef {
+        num_nodes,
+        gpus_per_node,
+        agent: MaybeRef::Ref(agent),
+    };
+    Ok(ProfileDef {
+        name,
+        description,
+        emulator: mirage_core::registry::make_def(&spec, topo),
+        containerize,
+    })
+}
+
+/// Resolve a topology count: explicit value, interactive prompt, or 1.
+fn resolve_count(
+    value: Option<u32>,
+    prompt: &str,
+    interactive: bool,
+    theme: &dialoguer::theme::ColorfulTheme,
+) -> anyhow::Result<u32> {
+    match value {
+        Some(v) => Ok(v),
+        None if interactive => Ok(dialoguer::Input::with_theme(theme)
+            .with_prompt(prompt)
+            .default(1)
+            .interact_text()?),
+        None => Ok(1),
+    }
+}
+
+/// Parse CLI `--mount` specs into [`FileMount`]s.
+fn parse_mounts(mounts: &[String]) -> anyhow::Result<Vec<FileMount>> {
+    mounts
+        .iter()
+        .map(|m| FileMount::parse(m).map_err(|e| anyhow::anyhow!(e)))
+        .collect()
+}
+
+/// Apply container override flags to a freshly-loaded profile.
+///
+/// When no container flags are present and the profile is referenced by
+/// name, returns a [`MaybeRef::Ref`] so the host resolves the profile
+/// itself (the common, cheap path). When flags are present, they enable
+/// or extend the profile's containerisation and the (now modified)
+/// profile is returned inline via [`MaybeRef::Owned`].
+fn apply_container_overrides(
+    profile: &mut ProfileDef,
+    image: Option<String>,
+    mounts: &[String],
+    provider: Option<String>,
+    profile_name: &str,
+) -> anyhow::Result<MaybeRef<ProfileDef>> {
+    if image.is_none() && mounts.is_empty() && provider.is_none() {
+        // No overrides: keep the cheap by-name reference.
+        return Ok(MaybeRef::Ref(profile_name.to_string()));
+    }
+    let parsed = parse_mounts(mounts)?;
+    match &mut profile.containerize {
+        Some(c) => {
+            if let Some(img) = image {
+                c.image = img;
+            }
+            if let Some(p) = provider {
+                c.provider = Some(p);
+            }
+            c.mounts.extend(parsed);
+        }
+        None => {
+            let image = image.ok_or_else(|| {
+                anyhow::anyhow!("--mount/--provider require a containerised profile or --image")
+            })?;
+            profile.containerize = Some(ContainerizedDef {
+                provider,
+                image,
+                mounts: parsed,
+                devices: Vec::new(),
+                groups: Vec::new(),
+            });
+        }
+    }
+    Ok(MaybeRef::Owned(profile.clone()))
+}
+
+/// Wait for a freshly-spawned session host to become ready, turning a
+/// terminal bring-up failure into a hard error.
+///
+/// `session_wait_ready` resolves as soon as the session is either
+/// healthy *or* terminal, so a failed host/container bring-up (a bad
+/// image, a node that won't start, a missing emulator asset, …) returns
+/// `Ok` carrying an *unhealthy, terminal* health rather than an error.
+/// Callers about to run a workload must treat that as fatal: otherwise
+/// they submit an exec that no (now-exited) host will ever process and
+/// the client blocks forever. This surfaces the detailed health message
+/// (image pull error, node bring-up failure, …) as an error instead.
+fn wait_ready_or_bail<C: MirageCtl>(
+    ctl: &C,
+    id: &SessionId,
+    timeout: Duration,
+) -> anyhow::Result<()> {
+    let h = ctl.session_wait_ready(id, timeout)?;
+    if !h.healthy {
+        let state = h.state.unwrap_or_else(|| "failed".to_string());
+        match h.message {
+            Some(msg) => anyhow::bail!("session failed to start ({state}): {msg}"),
+            None => anyhow::bail!("session failed to start ({state})"),
+        }
+    }
+    Ok(())
+}
+
 async fn session_start<C: MirageCtl>(
     ctl: &C,
     args: StartArgs,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
-    // Validate profile exists.
-    ctl.profile_get(&args.profile)?;
+    // Any field left off the command line is prompted for when stdin is
+    // a terminal (and `--no-input` wasn't given); otherwise its default
+    // is used. This makes `session start` an interactive UI while
+    // staying fully non-interactive in scripts, pipes and tests.
+    let interactive = !args.no_input && std::io::stdin().is_terminal();
+
+    let profile_name = resolve_start_profile(ctl, args.profile, interactive)?;
+    let id = resolve_start_id(args.id, interactive)?;
+    let workdir = resolve_start_workdir(args.workdir, interactive)?;
+    let ready_timeout = resolve_start_ready_timeout(args.ready_timeout, interactive)?;
+
+    // Validate profile exists and resolve it so container overrides can
+    // be applied.
+    let mut profile = ctl.profile_get(&profile_name)?;
+    let profile_ref = apply_container_overrides(
+        &mut profile,
+        args.image,
+        &args.mounts,
+        args.provider,
+        &profile_name,
+    )?;
     let def = ctl.session_create(CreateSessionRequest {
-        id: args.id,
-        profile: MaybeRef::Ref(args.profile.clone()),
-        workdir: args.workdir.unwrap_or_else(|| {
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or("/".to_string())
-        }),
-        container: None,
+        id,
+        profile: profile_ref,
+        workdir,
     })?;
     if !args.no_host {
         spawn_host_for(&def.id)?;
-        ctl.session_wait_ready(&def.id, Duration::from_secs(args.ready_timeout))?;
+        wait_ready_or_bail(ctl, &def.id, Duration::from_secs(ready_timeout))?;
     }
     if json {
         let s = ctl.session_state(&def.id)?;
@@ -745,6 +1214,86 @@ async fn session_start<C: MirageCtl>(
         println!("{}", def.id);
     }
     Ok(ExitCode::from(0))
+}
+
+/// Resolve the profile name for `session start`: the `--profile` flag, an
+/// interactive picker over the known profiles, or a hard error when no
+/// profile was given and we can't prompt.
+fn resolve_start_profile<C: MirageCtl>(
+    ctl: &C,
+    profile: Option<String>,
+    interactive: bool,
+) -> anyhow::Result<String> {
+    if let Some(p) = profile {
+        return Ok(p);
+    }
+    if !interactive {
+        anyhow::bail!("a profile is required (pass --profile NAME)");
+    }
+    let profiles = ctl.profile_list()?;
+    if profiles.is_empty() {
+        anyhow::bail!("no profiles found; run `mirage profile create` first");
+    }
+    let pick = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Profile")
+        .items(&profiles)
+        .default(0)
+        .interact()?;
+    Ok(profiles[pick].clone())
+}
+
+/// Resolve the session id: the `--id` flag, an interactive prompt (blank
+/// for auto), or `None` (auto-generated).
+fn resolve_start_id(
+    id: Option<SessionId>,
+    interactive: bool,
+) -> anyhow::Result<Option<SessionId>> {
+    if id.is_some() || !interactive {
+        return Ok(id);
+    }
+    let id_raw: String = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Session id (blank for auto)")
+        .allow_empty(true)
+        .interact_text()?;
+    if id_raw.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(SessionId::new(id_raw)?))
+    }
+}
+
+/// Resolve the working directory: the `--workdir` flag, an interactive
+/// prompt defaulting to the current directory, or the current directory.
+fn resolve_start_workdir(workdir: Option<String>, interactive: bool) -> anyhow::Result<String> {
+    let cwd = || {
+        std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "/".to_string())
+    };
+    match workdir {
+        Some(w) => Ok(w),
+        None if interactive => Ok(dialoguer::Input::with_theme(
+            &dialoguer::theme::ColorfulTheme::default(),
+        )
+        .with_prompt("Working directory")
+        .with_initial_text(cwd())
+        .interact_text()?),
+        None => Ok(cwd()),
+    }
+}
+
+/// Resolve the host ready timeout: prompts (defaulting to the current
+/// value) when interactive, otherwise uses the value as-is.
+fn resolve_start_ready_timeout(ready_timeout: u64, interactive: bool) -> anyhow::Result<u64> {
+    if !interactive {
+        return Ok(ready_timeout);
+    }
+    Ok(
+        dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+            .with_prompt("Host ready timeout (seconds)")
+            .default(ready_timeout)
+            .interact_text()?,
+    )
 }
 
 /// Look up an executable named `name` on `PATH`, returning the first hit.
@@ -778,10 +1327,10 @@ fn find_host_bin_for_session_spawn() -> anyhow::Result<std::path::PathBuf> {
             p.display()
         );
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if exe.is_file() {
-            return Ok(exe);
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && exe.is_file()
+    {
+        return Ok(exe);
     }
     if let Some(p) = which_on_path("mirage") {
         return Ok(p);
@@ -804,12 +1353,17 @@ pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
     // binary is used via `MIRAGE_BIN`.
     let bin = find_host_bin_for_session_spawn()?;
     let layout = mirage_core::paths::SessionLayout::for_id(id);
-    // ensure host.log file exists for stderr redirect
+    // The session host is node 0's host: redirect its stderr to
+    // `node/0/host.log`. Ensure the node directory exists first.
+    let node0 = layout.node(0);
+    std::fs::create_dir_all(&node0.root)?;
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(layout.host_log())?;
-    // spawn and detach via setsid()
+        .open(node0.host_log())?;
+    // spawn and detach into its own process group so terminal-generated
+    // signals (e.g. Ctrl-C in the foreground shell) are not delivered to
+    // the detached host.
     let mut cmd = std::process::Command::new(bin);
     cmd.arg("host")
         .arg("--session")
@@ -817,13 +1371,15 @@ pub fn spawn_host_for(id: &SessionId) -> anyhow::Result<()> {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::from(log));
-    use std::os::unix::process::CommandExt;
-    unsafe {
-        cmd.pre_exec(|| {
-            nix::unistd::setsid().ok();
-            Ok(())
-        });
+    // Propagate the CLI's chosen log level to the detached host so its
+    // events are logged at the requested verbosity. Only set when the
+    // user didn't already provide `MIRAGE_LOG` (in which case the host
+    // inherits it from our environment as usual).
+    if let Some(level) = HOST_LOG_DIRECTIVE.get() {
+        cmd.env("MIRAGE_LOG", level);
     }
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
     cmd.spawn().with_context(|| {
         format!(
             "failed to launch session host via `{}`",
@@ -849,7 +1405,7 @@ async fn exec_cmd<C: MirageCtl + 'static>(
                 if ids.is_empty() {
                     eprintln!("(no execs)");
                 }
-                println!("{:<14} {:<8} {:<8} {}", "EXEC", "STARTED", "ENDED", "EXIT");
+                println!("{:<14} {:<8} {:<8} EXIT", "EXEC", "STARTED", "ENDED");
                 for id in ids {
                     let r = ExecRef {
                         session: session.clone(),
@@ -1018,15 +1574,8 @@ async fn logs_cmd<C: MirageCtl>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<Exit
     if !a.follow {
         for n in &nodes {
             let nl = layout.node(*n);
-            if !a.stderr
-                && let Ok(b) = std::fs::read(nl.stdout())
-            {
+            if let Ok(b) = std::fs::read(nl.stdout()) {
                 let _ = std::io::stdout().write_all(&b);
-            }
-            if !a.stdout
-                && let Ok(b) = std::fs::read(nl.stderr())
-            {
-                let _ = std::io::stderr().write_all(&b);
             }
         }
         return Ok(ExitCode::from(0));
@@ -1045,19 +1594,38 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         Some(id) => (id, false),
         None => {
             // create transient session
-            ctl.profile_get(&a.profile)?;
+            let mut profile = ctl.profile_get(&a.profile)?;
+            let profile_ref = apply_container_overrides(
+                &mut profile,
+                a.image.clone(),
+                &a.mounts,
+                a.provider.clone(),
+                &a.profile,
+            )?;
+            tracing::info!(profile = %a.profile, "creating transient session");
             let def = ctl.session_create(CreateSessionRequest {
                 id: None,
-                profile: MaybeRef::Ref(a.profile.clone()),
+                profile: profile_ref,
                 workdir: a.workdir.clone().unwrap_or_else(|| {
                     std::env::current_dir()
                         .map(|p| p.display().to_string())
                         .unwrap_or("/".to_string())
                 }),
-                container: None,
             })?;
+            tracing::info!(session = %def.id, "session created; spawning host");
             spawn_host_for(&def.id)?;
-            ctl.session_wait_ready(&def.id, Duration::from_secs(10))?;
+            if let Err(e) =
+                wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(10))
+            {
+                // The transient session we just created never came up
+                // (e.g. a container image that couldn't be pulled or a
+                // node that wouldn't start). Tear it down so we don't
+                // leak a dead session, then surface the failure instead
+                // of submitting an exec no host will ever run.
+                let _ = ctl.session_destroy(&def.id);
+                return Err(e);
+            }
+            tracing::info!(session = %def.id, "session ready");
             (def.id, true)
         }
     };
@@ -1078,203 +1646,12 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
         keep: true,
     };
     let r = ctl.session_exec(&def)?;
+    tracing::info!(session = %sid, exec = %r.exec, "exec submitted; attaching");
     let code = follow_attach(ctl.as_ref(), &r).await?;
     if created && !a.keep_session {
         let _ = ctl.session_destroy(&sid);
     }
     Ok(code)
-}
-
-// ----- wizards ---------------------------------------------------------------
-
-/// Interactive `profile wizard` command.
-///
-/// Prompts the user for every field, defaulting to the registry's
-/// recommended emulator (rocjitsu if installed, else noop). The
-/// resulting profile is persisted via the standard `profile_put`
-/// path so it's indistinguishable from a non-wizard creation.
-fn profile_wizard(
-    ctl: &dyn MirageCtl,
-    suggested_name: Option<String>,
-    json: bool,
-) -> anyhow::Result<ExitCode> {
-    use dialoguer::{Confirm, Input, Select};
-
-    let theme = dialoguer::theme::ColorfulTheme::default();
-
-    let name: String = Input::with_theme(&theme)
-        .with_prompt("Profile name")
-        .with_initial_text(suggested_name.unwrap_or_default())
-        .validate_with(|s: &String| -> Result<(), &str> {
-            if s.trim().is_empty() {
-                Err("name required")
-            } else {
-                Ok(())
-            }
-        })
-        .interact_text()?;
-
-    let specs = registry::builtins();
-    let default_idx = specs
-        .iter()
-        .position(|s| s.name == registry::default_emulator().name)
-        .unwrap_or(0);
-    let labels: Vec<String> = specs
-        .iter()
-        .map(|s| {
-            let installed = if (s.installed)() {
-                "[installed]"
-            } else {
-                "[not installed]"
-            };
-            format!("{:<10} {installed}  {}", s.name, s.description)
-        })
-        .collect();
-    let pick = Select::with_theme(&theme)
-        .with_prompt("Emulator")
-        .items(&labels)
-        .default(default_idx)
-        .interact()?;
-    let spec = &specs[pick];
-
-    let nodes: u32 = Input::with_theme(&theme)
-        .with_prompt("Nodes per rack")
-        .default(1)
-        .interact_text()?;
-    let racks: u32 = Input::with_theme(&theme)
-        .with_prompt("Number of racks")
-        .default(1)
-        .interact_text()?;
-    let gpus_per_node: u32 = Input::with_theme(&theme)
-        .with_prompt("GPUs per node")
-        .default(1)
-        .interact_text()?;
-    let known_agents = mirage_core::agent::store::list().unwrap_or_default();
-    let agent: String = if known_agents.is_empty() {
-        "MI350X".to_string()
-    } else {
-        let default_idx = known_agents
-            .iter()
-            .position(|n| n == "MI350X")
-            .unwrap_or(0);
-        let pick = Select::with_theme(&theme)
-            .with_prompt("Agent")
-            .items(&known_agents)
-            .default(default_idx)
-            .interact()?;
-        known_agents[pick].clone()
-    };
-    let description: String = Input::with_theme(&theme)
-        .with_prompt("Description (optional)")
-        .allow_empty(true)
-        .interact_text()?;
-
-    let proceed = Confirm::with_theme(&theme)
-        .with_prompt(format!(
-            "Create profile {name} using {} ({racks} rack(s) x {nodes} node(s) x {gpus_per_node} GPU(s), agent={agent})?",
-            spec.name
-        ))
-        .default(true)
-        .interact()?;
-    if !proceed {
-        eprintln!("aborted");
-        return Ok(ExitCode::from(1));
-    }
-
-    let topo = mirage_core::topology::TopologyDef {
-        racks,
-        nodes_per_rack: nodes,
-        gpus_per_node,
-        agent: MaybeRef::Ref(agent),
-    };
-    let p = ProfileDef {
-        name: name.clone(),
-        description: if description.is_empty() {
-            None
-        } else {
-            Some(description)
-        },
-        emulator: registry::make_def(spec, topo),
-    };
-    if let Err(e) = validate_profile(&p) {
-        anyhow::bail!("cannot create profile {name}: {e}");
-    }
-    ctl.profile_put(&p)?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&p)?);
-    } else {
-        println!("created profile {name}");
-    }
-    Ok(ExitCode::from(0))
-}
-
-/// Interactive `session wizard` command.
-///
-/// Prompts for the profile (from `profile_list`), an optional id,
-/// the working directory, and a ready-timeout, then delegates to
-/// the standard `session_start` path so the host is spawned and the
-/// session becomes ready before the wizard returns.
-async fn session_wizard<C: MirageCtl>(ctl: &C, json: bool) -> anyhow::Result<ExitCode> {
-    use dialoguer::{Confirm, Input, Select};
-
-    let theme = dialoguer::theme::ColorfulTheme::default();
-
-    let profiles = ctl.profile_list()?;
-    if profiles.is_empty() {
-        anyhow::bail!("no profiles found; run `mirage profile wizard` first");
-    }
-    let pick = Select::with_theme(&theme)
-        .with_prompt("Profile")
-        .items(&profiles)
-        .default(0)
-        .interact()?;
-    let profile = profiles[pick].clone();
-
-    let id_raw: String = Input::with_theme(&theme)
-        .with_prompt("Session id (blank for auto)")
-        .allow_empty(true)
-        .interact_text()?;
-    let id = if id_raw.trim().is_empty() {
-        None
-    } else {
-        Some(SessionId::new(id_raw)?)
-    };
-
-    let workdir: String = Input::with_theme(&theme)
-        .with_prompt("Working directory")
-        .with_initial_text(
-            std::env::current_dir()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "/".into()),
-        )
-        .interact_text()?;
-
-    let ready_timeout: u64 = Input::with_theme(&theme)
-        .with_prompt("Host ready timeout (seconds)")
-        .default(10)
-        .interact_text()?;
-
-    let go = Confirm::with_theme(&theme)
-        .with_prompt(format!("Start session using profile {profile}?"))
-        .default(true)
-        .interact()?;
-    if !go {
-        eprintln!("aborted");
-        return Ok(ExitCode::from(1));
-    }
-
-    session_start(
-        ctl,
-        StartArgs {
-            profile,
-            id,
-            workdir: Some(workdir),
-            no_host: false,
-            ready_timeout,
-        },
-        json,
-    )
-    .await
 }
 
 // ----- state dispatch --------------------------------------------------------
@@ -1294,8 +1671,9 @@ async fn state_cmd<C: MirageCtl + 'static>(
 ) -> anyhow::Result<ExitCode> {
     match cmd {
         StateCmd::Builtins => {
-            let agents = mirage_core::agent::store::ensure_builtins(true)?;
-            let topologies = mirage_core::topology::store::ensure_builtins(true)?;
+            let agents = mirage_builtin::ensure_agents(true)?;
+            let topologies = mirage_builtin::ensure_topologies(true)?;
+            let profiles = mirage_builtin::ensure_profiles(true)?;
             let assets = mirage_rocjitsu::ensure_assets(true)?;
             if json {
                 let entries: Vec<_> = agents
@@ -1313,6 +1691,14 @@ async fn state_cmd<C: MirageCtl + 'static>(
                             "kind": "topology",
                             "name": n,
                             "path": mirage_core::paths::topology_path(n),
+                            "written": w,
+                        })
+                    }))
+                    .chain(profiles.iter().map(|(n, w)| {
+                        serde_json::json!({
+                            "kind": "profile",
+                            "name": n,
+                            "path": mirage_core::paths::profile_path(n),
                             "written": w,
                         })
                     }))
@@ -1337,6 +1723,11 @@ async fn state_cmd<C: MirageCtl + 'static>(
                     let p = mirage_core::paths::topology_path(name);
                     let tag = if *w { "wrote" } else { "kept" };
                     println!("{tag} topology  {} -> {}", name, p.display());
+                }
+                for (name, w) in &profiles {
+                    let p = mirage_core::paths::profile_path(name);
+                    let tag = if *w { "wrote" } else { "kept" };
+                    println!("{tag} profile   {} -> {}", name, p.display());
                 }
                 for (name, w) in &assets {
                     let p = rocjitsu_asset_path(name);

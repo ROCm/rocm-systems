@@ -2,21 +2,32 @@ name: new_CI_image
 run-name: Build the Docker image for hipFile CI
 
 env:
-  AIS_CI_IMAGE_NAME: ais_ci_${{ inputs.platform }}
-  AIS_DOCKER_REGISTRY: ghcr.io/${{ github.repository_owner }}/hipfile
+  AIS_INPUT_CI_IMAGE_NAME: ${{ inputs.ci_image_name }}
+  AIS_INPUT_CI_IMAGE_CACHE: ${{ inputs.ci_image_cache }}
+  AIS_INPUT_CI_IMAGE_NAME_NVIDIA: ${{ inputs.ci_image_name_nvidia }}
+  AIS_INPUT_CI_IMAGE_CACHE_NVIDIA: ${{ inputs.ci_image_cache_nvidia }}
   AIS_INPUT_ROCM_VERSION: ${{ inputs.rocm_version }}
+  AIS_INPUT_PLATFORM: ${{ inputs.platform }}
 
 on:
   workflow_call:
     inputs:
-      dockerfile_changed:
-        # While this seems like a smell to not make this check in this workflow,
-        # it allows us to skip the job entirely. This yields the benefit of
-        # letting downstream jobs start sooner and keeping the job result as
-        # 'skipped' if a new CI image is not needed.
-        description: Hint for if this workflow actually needs to run.
+      ci_image_name:
+        description: "Full CI image name & tag to build/push"
         required: true
-        type: boolean
+        type: string
+      ci_image_cache:
+        description: "Full CI cache image name & tag for Docker build cache"
+        required: true
+        type: string
+      ci_image_name_nvidia:
+        description: "Full CI image name & nvidia tag to build/push"
+        required: true
+        type: string
+      ci_image_cache_nvidia:
+        description: "Full CI cache image name & nvidia tag for Docker build cache"
+        required: true
+        type: string
       platform:
         required: true
         type: string
@@ -26,89 +37,21 @@ on:
         type: string
     outputs:
       ci_image:
-        description: |
-          The full name & tag of the CI image to use.
-          If a new CI image is produced, returns the new CI image name & tag.
-          Otherwise, returns the current CI image name & tag.
-        value: >-
-          ${{
-            jobs.build_AIS_image.result == 'skipped' && jobs.get_latest_AIS_image.outputs.new_ci_image ||
-            jobs.build_AIS_image.result == 'success' && jobs.build_AIS_image.outputs.new_ci_image ||
-            null
-          }}
+        description: "The full name & tag of the CI image to use."
+        value: ${{ inputs.ci_image_name }}
       ci_image_nvidia:
-        description: |
-          The full name & tag of the NVIDIA CI image to use.
-          Same as ci_image but with CUDA SDK and NVIDIA drivers installed.
-        value: >-
-          ${{
-            jobs.build_AIS_image.result == 'skipped' && jobs.get_latest_AIS_image.outputs.new_ci_image_nvidia ||
-            jobs.build_AIS_image.result == 'success' && jobs.build_AIS_image.outputs.new_ci_image_nvidia ||
-            null
-          }}
-      ci_image_build_satisfied:
-        description: |
-          Indicates if the CI image is in an acceptable state.
-          Set to 'true' if the CI image is unchanged, or if a new CI image was
-          built successfully. Otherwise 'false'.
-        value: >-
-          ${{
-            (
-              !inputs.dockerfile_changed &&
-              jobs.build_AIS_image.result == 'skipped'
-            ) ||
-            (
-              inputs.dockerfile_changed &&
-              jobs.build_AIS_image.result == 'success'
-            )
-          }}
+        description: "The full name & nvidia tag of the CI image to use."
+        value: ${{ inputs.ci_image_name_nvidia }}
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  # GitHub Actions does not have a built-in toLower() function which has made a lot of
-  # people sad. https://github.com/orgs/community/discussions/25768
-  get_latest_AIS_image:
-    if: ${{ ! inputs.dockerfile_changed }}
-    runs-on: [ubuntu-24.04]
-    outputs:
-      new_ci_image: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
-      new_ci_image_nvidia: ${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}
-    steps:
-      - name: Set default CI image
-        id: ci-image
-        run: |
-          AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}"
-          echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
-          AIS_CI_IMAGE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}-nvidia"
-          echo "AIS_CI_IMAGE_NVIDIA=$(printf '%s' "${AIS_CI_IMAGE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
-
   build_AIS_image:
-    if: ${{ inputs.dockerfile_changed }}
     runs-on: [ubuntu-24.04]
     container: docker:28.5
-    outputs:
-      new_ci_image: ${{ steps.ci-image.outputs.AIS_CI_IMAGE }}
-      new_ci_image_nvidia: ${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}
     steps:
-      - name: Set CI environment variables
-        run: |
-          echo "AIS_CI_IMAGE_TAG=$(echo "${GITHUB_REF}" | sed 's|[^a-zA-Z0-9]|-|g')-rocm${AIS_INPUT_ROCM_VERSION}" >> "${GITHUB_ENV}"
-
-      - name: Set target AIS CI Image
-        id: ci-image
-        run: |
-          AIS_CI_IMAGE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:${AIS_CI_IMAGE_TAG}"
-          echo "AIS_CI_IMAGE=$(printf '%s' "${AIS_CI_IMAGE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
-          AIS_CI_IMAGE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:${AIS_CI_IMAGE_TAG}-nvidia"
-          echo "AIS_CI_IMAGE_NVIDIA=$(printf '%s' "${AIS_CI_IMAGE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
-          AIS_CI_LATEST_CACHE="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}-cache"
-          echo "AIS_CI_LATEST_CACHE=$(printf '%s' "${AIS_CI_LATEST_CACHE}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
-          AIS_CI_LATEST_CACHE_NVIDIA="${AIS_DOCKER_REGISTRY}/${AIS_CI_IMAGE_NAME}:latest-rocm${AIS_INPUT_ROCM_VERSION}-nvidia-cache"
-          echo "AIS_CI_LATEST_CACHE_NVIDIA=$(printf '%s' "${AIS_CI_LATEST_CACHE_NVIDIA}" | tr '[:upper:]' '[:lower:]')" >> "${GITHUB_OUTPUT}"
-
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -134,25 +77,25 @@ jobs:
       - name: Build base image for AIS CI
         run: |
           docker buildx build \
-            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
             --target base \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
-            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
-            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_LATEST_CACHE }}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE}" \
             --push \
-            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE }}" \
+            -t "${AIS_INPUT_CI_IMAGE_NAME}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
 
       - name: Build NVIDIA image for AIS CI
         run: |
           docker buildx build \
-            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.${AIS_CI_IMAGE_NAME}" \
+            -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
             --target nvidia \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION=${AIS_INPUT_ROCM_VERSION} \
-            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
-            --cache-from=type=registry,ref="${{ steps.ci-image.outputs.AIS_CI_LATEST_CACHE_NVIDIA }}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_NAME_NVIDIA}" \
+            --cache-from=type=registry,ref="${AIS_INPUT_CI_IMAGE_CACHE_NVIDIA}" \
             --push \
-            -t "${{ steps.ci-image.outputs.AIS_CI_IMAGE_NVIDIA }}" \
+            -t "${AIS_INPUT_CI_IMAGE_NAME_NVIDIA}" \
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"

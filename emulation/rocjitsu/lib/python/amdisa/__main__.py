@@ -4,6 +4,7 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
+from pathlib import Path
 import sys
 import xml.etree.ElementTree as elem_tree
 
@@ -13,6 +14,7 @@ from amdisa import (
     CdnaProfile,
     CodegenConfig,
     CodeGenerator,
+    Gfx1250Profile,
     Parser,
     Rdna1Profile,
     Rdna2Profile,
@@ -47,15 +49,21 @@ _PROFILES = {
     'rdna3': Rdna3Profile,
     'rdna3.5': Rdna3_5Profile,
     'rdna4': Rdna4Profile,
+    'gfx1250': Gfx1250Profile,
 }
 
 
 def _detect_profile(isa_xml: str) -> str:
-    """Detect the ISA profile from the XML architecture name.
+    """Detect the ISA profile from the XML filename and architecture name.
 
     Parses only the architecture name element to determine the profile
     without loading the full spec.
     """
+    # TODO: Remove this filename override once the gfx1250 XML carries a
+    # finalized architecture name that can be detected through the normal path.
+    if 'gfx1250' in Path(isa_xml).stem:
+        return 'gfx1250'
+
     root = elem_tree.parse(isa_xml).getroot()
     isa_node = xs.get_node(root, xs.ISA)
     arch_node = xs.get_node(isa_node, xs.ARCH)
@@ -148,11 +156,16 @@ def _run_multi(args) -> None:
         generated = emit_legalization(dbt_output, results)
         for src, dst, entries in results:
             counts = leg_gen.summary(entries)
+            identity = counts['identity']
+            substitute = counts['substitute']
+            lower = counts['lower']
+            expand = counts['expand']
+            illegal = counts['illegal']
             print(
                 f'  {src} -> {dst}: {len(entries)} entries '
-                f'({counts['identity']} identity, {counts['substitute']} substitute, '
-                f'{counts['lower']} lower, {counts['expand']} expand, '
-                f'{counts['illegal']} illegal)',
+                f'({identity} identity, {substitute} substitute, '
+                f'{lower} lower, {expand} expand, '
+                f'{illegal} illegal)',
                 file=sys.stderr,
             )
         print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)

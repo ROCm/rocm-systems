@@ -5569,6 +5569,90 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_compute_partition_mem_alloc_mode
+
+Description: Get the compute partition memory allocation mode from the given GPU. Controls how HBM capacity is distributed across XCPs within each memory partition.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: String of the memory allocation mode (`"CAPPING"` or `"ALL"`)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition_mem_alloc_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - Unexpected data read from driver/sysfs
+
+Example:
+
+```python
+import amdsmi
+
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            mode = amdsmi.amdsmi_get_gpu_compute_partition_mem_alloc_mode(device)
+            print(mode)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_gpu_compute_partition_mem_alloc_mode
+
+Description: Set the compute partition memory allocation mode for the given GPU. Requires elevated privileges (sudo). Controls whether each XCP is capped to an even share of memory (`CAPPING`) or may use the full partition memory (`ALL`).
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `mode` an `AmdSmiComputePartitionMemAllocModeType` value (`CAPPING` or `ALL`)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition_mem_alloc_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
+- `AMDSMI_STATUS_PERMISSION` - Permission Denied (requires sudo)
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+                device, amdsmi.AmdSmiComputePartitionMemAllocModeType.CAPPING
+            )
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_set_gpu_compute_partition
 
 Description: Set the compute partition to the given GPU. This function does not allow any concurrent operations. Device must be idle and have no workloads when performing set partition operations.

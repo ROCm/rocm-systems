@@ -133,53 +133,88 @@ pub struct AgentTopologyDef {
 /// Mirrors `KfdDeviceInfo` in the rocjitsu flatbuffer schema.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct KfdDeviceInfo {
-    #[serde(default)] pub gpu_id: u32,
-    #[serde(default)] pub gfx_target_version: u32,
-    #[serde(default)] pub vendor_id: u32,
-    #[serde(default)] pub device_id: u32,
-    #[serde(default)] pub family_id: u32,
-    #[serde(default)] pub unique_id: u64,
-    #[serde(default)] pub marketing_name: String,
-    #[serde(default)] pub drm_render_minor: u32,
-    #[serde(default)] pub simd_count: u32,
-    #[serde(default)] pub max_waves_per_simd: u32,
-    #[serde(default)] pub num_shader_engines: u32,
-    #[serde(default)] pub num_shader_arrays_per_engine: u32,
-    #[serde(default)] pub num_cu_per_sh: u32,
-    #[serde(default)] pub simd_per_cu: u32,
-    #[serde(default)] pub wave_front_size: u32,
-    #[serde(default)] pub max_slots_scratch_cu: u32,
-    #[serde(default)] pub local_mem_size: u64,
-    #[serde(default)] pub lds_size_kb: u32,
-    #[serde(default)] pub mem_width: u32,
-    #[serde(default)] pub mem_clk_max: u32,
-    #[serde(default)] pub l1_size_kb: u32,
-    #[serde(default)] pub l1_line_size: u32,
-    #[serde(default)] pub l1_assoc: u32,
-    #[serde(default)] pub l2_size_kb: u32,
-    #[serde(default)] pub l2_line_size: u32,
-    #[serde(default)] pub l2_assoc: u32,
-    #[serde(default)] pub num_sdma_engines: u32,
-    #[serde(default)] pub num_sdma_xgmi_engines: u32,
-    #[serde(default)] pub num_cp_queues: u32,
-    #[serde(default)] pub max_engine_clk_fcompute: u32,
+    #[serde(default)]
+    pub gpu_id: u32,
+    #[serde(default)]
+    pub gfx_target_version: u32,
+    #[serde(default)]
+    pub vendor_id: u32,
+    #[serde(default)]
+    pub device_id: u32,
+    #[serde(default)]
+    pub family_id: u32,
+    #[serde(default)]
+    pub unique_id: u64,
+    #[serde(default)]
+    pub marketing_name: String,
+    #[serde(default)]
+    pub drm_render_minor: u32,
+    #[serde(default)]
+    pub simd_count: u32,
+    #[serde(default)]
+    pub max_waves_per_simd: u32,
+    #[serde(default)]
+    pub num_shader_engines: u32,
+    #[serde(default)]
+    pub num_shader_arrays_per_engine: u32,
+    #[serde(default)]
+    pub num_cu_per_sh: u32,
+    #[serde(default)]
+    pub simd_per_cu: u32,
+    #[serde(default)]
+    pub wave_front_size: u32,
+    #[serde(default)]
+    pub max_slots_scratch_cu: u32,
+    #[serde(default)]
+    pub local_mem_size: u64,
+    #[serde(default)]
+    pub lds_size_kb: u32,
+    #[serde(default)]
+    pub mem_width: u32,
+    #[serde(default)]
+    pub mem_clk_max: u32,
+    #[serde(default)]
+    pub l1_size_kb: u32,
+    #[serde(default)]
+    pub l1_line_size: u32,
+    #[serde(default)]
+    pub l1_assoc: u32,
+    #[serde(default)]
+    pub l2_size_kb: u32,
+    #[serde(default)]
+    pub l2_line_size: u32,
+    #[serde(default)]
+    pub l2_assoc: u32,
+    #[serde(default)]
+    pub num_sdma_engines: u32,
+    #[serde(default)]
+    pub num_sdma_xgmi_engines: u32,
+    #[serde(default)]
+    pub num_cp_queues: u32,
+    #[serde(default)]
+    pub max_engine_clk_fcompute: u32,
 }
 
 /// AMDGPU memory configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct GpuMemoryConfig {
-    #[serde(default)] pub size_mb: u32,
-    #[serde(default)] pub memory_side_cache_mb: u32,
+    #[serde(default)]
+    pub size_mb: u32,
+    #[serde(default)]
+    pub memory_side_cache_mb: u32,
 }
 
 /// AMDGPU top-level configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AmdgpuConfig {
-    #[serde(default)] pub num_xcds: u32,
-    #[serde(default)] pub num_iods: u32,
+    #[serde(default)]
+    pub num_xcds: u32,
+    #[serde(default)]
+    pub num_iods: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<GpuMemoryConfig>,
-    #[serde(default)] pub device: KfdDeviceInfo,
+    #[serde(default)]
+    pub device: KfdDeviceInfo,
 }
 
 /// Virtual machine hardware model. Mirrors `VirtualMachineConfig`
@@ -187,8 +222,10 @@ pub struct AmdgpuConfig {
 /// omitted: it's runtime workload configuration, not hardware.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct VirtualMachineConfig {
-    #[serde(default)] pub arch: String,
-    #[serde(default)] pub gpu: AmdgpuConfig,
+    #[serde(default)]
+    pub arch: String,
+    #[serde(default)]
+    pub gpu: AmdgpuConfig,
 }
 
 /// Top-level agent (single-device hardware) definition.
@@ -244,73 +281,5 @@ pub mod store {
         let p = crate::paths::agent_path(name);
         crate::state::write_json(&p, agent)?;
         Ok(p)
-    }
-
-    /// Write all builtin agents to disk.
-    ///
-    /// If `force` is true, existing files are overwritten. Otherwise
-    /// only missing agents are written. Embedded JSON is parsed as
-    /// an [`AgentDef`] and reserialized so the on-disk file contains
-    /// only fields mirage understands.
-    pub fn ensure_builtins(force: bool) -> Result<Vec<(String, bool)>> {
-        let mut report = Vec::new();
-        for (name, json) in crate::registry::builtin_agents() {
-            let p = crate::paths::agent_path(name);
-            if p.exists() && !force {
-                report.push((name.to_string(), false));
-                continue;
-            }
-            let agent: AgentDef = serde_json::from_str(json).map_err(|e| {
-                MirageError::Other(format!(
-                    "builtin agent {name}: parse embedded JSON as AgentDef: {e}"
-                ))
-            })?;
-            crate::state::write_json(&p, &agent)?;
-            report.push((name.to_string(), true));
-        }
-        Ok(report)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::store;
-
-    #[test]
-    fn ensure_builtins_writes_then_skips() {
-        let _g = crate::paths::test_env_lock();
-        let tmp = tempfile::tempdir().unwrap();
-        crate::paths::set_test_root(tmp.path());
-
-        let first = store::ensure_builtins(false).unwrap();
-        // Core ships no builtin agents; backends contribute them.
-        // We just check the call is idempotent and well-formed.
-        assert!(
-            first.iter().all(|(_, w)| *w),
-            "first run should write every builtin"
-        );
-
-        let names: Vec<_> = first.iter().map(|(n, _)| n.clone()).collect();
-        assert_eq!(store::list().unwrap(), {
-            let mut s = names.clone();
-            s.sort();
-            s
-        });
-
-        let second = store::ensure_builtins(false).unwrap();
-        assert!(
-            second.iter().all(|(_, w)| !*w),
-            "second run should not rewrite existing builtins"
-        );
-
-        let forced = store::ensure_builtins(true).unwrap();
-        assert!(
-            forced.iter().all(|(_, w)| *w),
-            "force should rewrite every builtin"
-        );
-
-        for name in &names {
-            assert!(store::get(name).is_ok(), "{name} should be readable");
-        }
     }
 }

@@ -65,6 +65,7 @@ hsaKmtPmcStopTrace;
 hsaKmtMapGraphicHandle;
 hsaKmtUnmapGraphicHandle;
 hsaKmtSetTrapHandler;
+hsaKmtSetSigbusDelay;
 hsaKmtGetTileConfig;
 hsaKmtQueryPointerInfo;
 hsaKmtSetMemoryUserData;

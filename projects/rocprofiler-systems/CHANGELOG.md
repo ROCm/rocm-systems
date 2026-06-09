@@ -54,6 +54,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Minimum required C++ standard raised from C++17 to C++20. timemory now builds
   against the `rocprofiler-systems-cppstd20` branch and spdlog was bumped to
   v1.17.0 (bundled fmt v12).
+- Supported environment variables for rank detection: removed MPI_RANK and
+  MPI_LOCALRANKID, added PMI_RANK and SLURM_PROCID.
 
 ### Resolved issues
 
@@ -72,6 +74,16 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fix cmake issue that caused the wrong version of `elfutils` to be linked when
   building for TheRock. The system version of `elfutils` was used, rather than
   the vendored version causing package install failures.
+- Fix documentation and internal config handling that referenced the non-existent
+  `ROCPROFSYS_USE_TRACE`. The Perfetto tracing backend is controlled by
+  `ROCPROFSYS_TRACE`; setting `ROCPROFSYS_USE_TRACE` had no effect.
+
+### Known issues
+
+- A push/pop trace count imbalance can occur for workloads that instrument runtime
+  internals such as OMPT. When pushes exceed pops, rocprof-sys completes
+  finalization, emits a warning, and omits any still-open trace regions from the
+  generated trace output.
 
 ## ROCm Systems Profiler 1.6.0 for ROCm 7.13.0
 

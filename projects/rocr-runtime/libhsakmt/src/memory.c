@@ -31,9 +31,10 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 
 #include <amdgpu.h>
-#include <amdgpu_drm.h>
+#include "hsakmt/drm/amdgpu_drm.h"
 #include <xf86drm.h>
 
 #include "fmm.h"
@@ -1098,4 +1099,31 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   	*fd = (HSAint32)renderFd;
   	*cpu_addr = (HSAuint64)args.out.addr_ptr;
   	return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetSigbusDelay(HSAuint32 NodeId, HSAuint32 DelayMs)
+{
+	CHECK_KFD_OPEN();
+
+	if (!hsakmt_fn_amdgpu_device_get_fd)
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	HsaAMDGPUDeviceHandle dev = NULL;
+	HSAKMT_STATUS s = hsakmt_fmm_get_amdgpu_device_handle(&hsakmt_primary_kfd_ctx,
+						      NodeId, &dev);
+	if (s != HSAKMT_STATUS_SUCCESS || dev == NULL)
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	int fd = hsakmt_fn_amdgpu_device_get_fd(dev);
+	if (fd < 0)
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	struct drm_amdgpu_proc_options args;
+	memset(&args, 0, sizeof(args));
+	args.op = AMDGPU_PROC_OPTIONS_OP_KFD_SIGBUS_DELAY;
+	args.kfd_sigbus_delay.value = DelayMs;
+	if (ioctl(fd, DRM_IOCTL_AMDGPU_PROC_OPTIONS, &args) != 0)
+		return HSAKMT_STATUS_NOT_SUPPORTED;
+
+	return HSAKMT_STATUS_SUCCESS;
 }
