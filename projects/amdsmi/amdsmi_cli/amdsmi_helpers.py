@@ -2446,6 +2446,10 @@ class AMDSMIHelpers:
                     cper_path_str = str(cper_path)
                     json_path_str = str(Path(cper_path).with_suffix(".json"))
                     try:
+                        # Convert list of integers to bytes if necessary
+                        if isinstance(raw_bytes, list):
+                            # Handle signed bytes (convert negative values to unsigned)
+                            raw_bytes = bytes(x & 0xFF for x in raw_bytes)
                         afids = self.cper_dump_afids(raw_bytes)
                     except Exception as e:
                         afids = []
@@ -2467,6 +2471,10 @@ class AMDSMIHelpers:
                 for cper_path, row in output_rows.items():
                     timestamp, gpu_id, severity, fname, raw_bytes = row
                     try:
+                        # Convert list of integers to bytes if necessary
+                        if isinstance(raw_bytes, list):
+                            # Handle signed bytes (convert negative values to unsigned)
+                            raw_bytes = bytes(x & 0xFF for x in raw_bytes)
                         afids = self.cper_dump_afids(raw_bytes)
                         afids_str = " ".join(map(str, afids))
                     except Exception as e:
