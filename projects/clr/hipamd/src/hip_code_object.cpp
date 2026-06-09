@@ -417,7 +417,9 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
           assert(err == hipSuccess);
           // The amd::Memory object is now released; drop the cached pointer so
           // ~Var() does not dereference the freed object (heap-use-after-free).
-          managedVar->ResetDeviceVarPtr(dev->deviceId());
+          if (err == hipSuccess) {
+            managedVar->ResetDeviceVarPtr(dev->deviceId());
+          }
         }
       }
       if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
