@@ -23,7 +23,6 @@
 #include "rocm_smi/rocm_smi_binary_parser.h"
 
 #include <dirent.h>
-#include <pthread.h>
 
 #include <cassert>
 #include <cinttypes>

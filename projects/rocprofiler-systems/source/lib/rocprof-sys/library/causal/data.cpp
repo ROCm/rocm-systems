@@ -69,7 +69,7 @@ auto speedup_dist      = []() {
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
     std::sort(_v.begin(), _v.end());
-    if(get_is_continuous_integration() && _v.back() > 100)
+    if(_v.back() > 100)
     {
         throw std::runtime_error(
             fmt::format("Error! last value is too large: {}", _v.back()));
@@ -617,7 +617,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 // if launched via rocprof-sys-causal, allow end-to-end runs that do not
                 // start experiments
                 auto _omni_causal_launcher =
-                    get_env<std::string>("ROCPROFSYS_LAUNCHER", "", false) ==
+                    get_env<std::string>("ROCPROFSYS_LAUNCHER", "") ==
                     "rocprof-sys-causal";
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))
@@ -803,9 +803,7 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             // unlikely this will be empty but just in case
             if(linfo.empty()) continue;
 
-            // debugging for continuous integration
-            if(ROCPROFSYS_UNLIKELY(config::get_is_continuous_integration() ||
-                                   config::get_debug()))
+            if(ROCPROFSYS_UNLIKELY(config::get_debug()))
             {
                 auto _location =
                     (_dl_info.location)

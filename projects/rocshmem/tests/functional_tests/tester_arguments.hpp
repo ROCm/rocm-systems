@@ -38,6 +38,7 @@ enum TeamSplitType {
   ROCSHMEM_TEST_TEAM_BLOCK,      // split parent into two halves
   ROCSHMEM_TEST_TEAM_ODDEVEN,    // odd-even splitting
   ROCSHMEM_TEST_TEAM_SHARED,     // predefined ROCSHMEM_TEAM_SHARED
+  ROCSHMEM_TEST_TEAM_SUBSET_PARENT, // split a subset parent team (not TEAM_WORLD)
 };
 
 enum UserBufType {
@@ -108,6 +109,7 @@ public:
   int loop = 10;
   int skip = 10;
   int loop_large = 10;
+  int batch = 0;
   bool verif = true;
   size_t large_message_size = 32768;
 

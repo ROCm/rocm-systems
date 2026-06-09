@@ -63,11 +63,10 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem) {
       HIP_CHECK(hipStreamDestroy(stream));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, nullptr, nullptr, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 
@@ -118,10 +117,9 @@ HIP_TEST_CASE(Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange) {
       HIP_CHECK(hipStreamDestroy(stream));
       HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }

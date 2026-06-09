@@ -172,6 +172,7 @@ from .amdsmi_interface import amdsmi_get_gpu_board_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_feature_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_block_features_enabled
 from .amdsmi_interface import amdsmi_get_gpu_cper_entries
+from .amdsmi_interface import amdsmi_get_afids_from_cper
 from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 
 # # Unsupported Functions In Virtual Environment
@@ -280,6 +281,8 @@ from .amdsmi_interface import amdsmi_get_link_topology_nearest
 # # Partition Functions
 from .amdsmi_interface import amdsmi_get_gpu_compute_partition
 from .amdsmi_interface import amdsmi_set_gpu_compute_partition
+from .amdsmi_interface import amdsmi_get_gpu_compute_partition_mem_alloc_mode
+from .amdsmi_interface import amdsmi_set_gpu_compute_partition_mem_alloc_mode
 from .amdsmi_interface import amdsmi_get_gpu_memory_partition
 from .amdsmi_interface import amdsmi_set_gpu_memory_partition
 from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_profile
@@ -328,6 +331,7 @@ from .amdsmi_interface import AmdSmiTemperatureMetric
 from .amdsmi_interface import AmdSmiVoltageMetric
 from .amdsmi_interface import AmdSmiVoltageType
 from .amdsmi_interface import AmdSmiComputePartitionType
+from .amdsmi_interface import AmdSmiComputePartitionMemAllocModeType
 from .amdsmi_interface import AmdSmiMemoryPartitionType
 from .amdsmi_interface import AmdSmiPowerProfilePresetMasks
 from .amdsmi_interface import AmdSmiGpuBlock

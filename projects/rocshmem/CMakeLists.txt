@@ -24,6 +24,9 @@
 
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
+# Set root directory for ROCm Systems shared files
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 ###############################################################################
 # AVOID IN SOURCE BUILD
 ###############################################################################
@@ -44,6 +47,7 @@ option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" ON)
 option(USE_IPC "Enable IPC support (using HIP)" OFF)
 option(USE_GDA "Enable GDA conduit" OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_HEAP_DEVICE_FINEGRAIN "Heap uses GPU memory in finegrain mode" ON)
@@ -63,6 +67,7 @@ option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_PYTHON_TESTS "Install rocshmem4py test assets (RO execution requires MPI launcher, Python, pip)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
+option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (gcc only)" OFF)
@@ -159,6 +164,7 @@ set(DEFAULT_GPUS
 
 if(${ROCM_MAJOR_VERSION} GREATER 6)
   list(APPEND DEFAULT_GPUS gfx950)
+  list(APPEND DEFAULT_GPUS gfx1250)
 endif()
 
 if($ENV{BUILD_LOCAL_GPU_TARGET_ONLY})
@@ -195,11 +201,29 @@ message(STATUS "Compiling for ${GPU_TARGETS}")
 if (NOT BUILD_TESTS_ONLY)
   add_library(${PROJECT_NAME})
   add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-  add_subdirectory(src)
 
   #############################################################################
   # PACKAGE DEPENDENCIES
   #############################################################################
+  # GDA Requires libnuma
+  if(USE_GDA)
+    find_path(NUMA_INCLUDE_DIR NAMES numa.h)
+    find_library(NUMA_LIBRARY NAMES numa)
+
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(NUMA DEFAULT_MSG NUMA_LIBRARY NUMA_INCLUDE_DIR)
+
+    # Usually you would have to add libnuma to target but we use dlopen
+
+    if (NOT NUMA_FOUND)
+      message(STATUS "libnuma not found. Unable to build GDA")
+      set(USE_GDA OFF)
+      set(GDA_IONIC OFF)
+      set(GDA_BNXT OFF)
+      set(GDA_MLX5 OFF)
+    endif()
+  endif()
+
   if (NOT USE_EXTERNAL_MPI STREQUAL "OFF")
     find_package(MPI)
   else()
@@ -222,6 +246,10 @@ if (NOT BUILD_TESTS_ONLY)
 
   find_package(hip REQUIRED PATHS /opt/rocm)
   find_package(hsa-runtime64 REQUIRED)
+
+  if (USE_SDMA)
+    find_package(hsakmt REQUIRED PATHS /opt/rocm)
+  endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -307,7 +335,7 @@ if (NOT BUILD_TESTS_ONLY)
     PRIVATE
       -Wall
       -Wextra
-      -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
+      -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
   )
 
   target_include_directories(
@@ -331,6 +359,7 @@ if (NOT BUILD_TESTS_ONLY)
       hsa-runtime64::hsa-runtime64
       -fgpu-rdc
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
+      $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
   )
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
@@ -395,6 +424,16 @@ endif (NOT BUILD_TESTS_ONLY)
 ###############################################################################
 # TEST SUBDIRECTORIES
 ###############################################################################
+if (NOT BUILD_TESTS_ONLY)
+  add_subdirectory(src)
+endif (NOT BUILD_TESTS_ONLY)
+
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+if(BUILD_CTESTS)
+    enable_testing()
+endif()
 add_subdirectory(tests)
 
 if (BUILD_EXAMPLES)

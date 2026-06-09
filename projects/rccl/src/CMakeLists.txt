@@ -9,6 +9,9 @@
 # super-repo root. Use PROJECT_SOURCE_DIR for RCCL-relative paths.
 set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 
+# net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
+add_subdirectory(transport/net_ib_cast)
+
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -19,10 +22,16 @@ set(SRC_FILES
   channel.cc
   collectives.cc
   commDump.cc
+  mem_manager.cc
   debug.cc
   dev_runtime.cc
+  dda_all_reduce_ipc.cu
+  device_buffer.cc
   enqueue.cc
   group.cc
+  ipc_gpu_barrier.cu
+  ipc_init.cu
+  ipc_mem_handler.cc
   init.cc
   init_nvtx.cc
   mnnvl.cc
@@ -54,10 +63,16 @@ set(SRC_FILES
   device/network/unpack/unpack_defs.h
   device/network/unpack/unpack.h
   device/symmetric/all_gather.cuh
+  device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh
+  device/symmetric/data_ops.cuh
+  device/symmetric/gin_scratch.h
+  device/symmetric/gin_scratch__funcs.h
+  device/symmetric/gin_scratch__types.h
   device/symmetric/kernel.cuh
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
+  device/symmetric/reduce_scatter_gin.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -74,7 +89,10 @@ set(SRC_FILES
   graph/xml.cc
   graph/xml.h
   include/alloc.h
+  include/mem_manager.h
   include/allocator.h
+  include/algorithms/CollCommon.h
+  include/algorithms/all_reduce/all_reduce_dda.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -83,34 +101,49 @@ set(SRC_FILES
   include/bitops.h
   include/bootstrap.h
   include/ce_coll.h
+  include/ce_fault_inject.h
   include/channel.h
   include/checks.h
   include/collectives.h
   include/coll_net.h
+  include/cudawrap.h
   include/comm.h
+  include/compiler.h
+  include/compiler/gcc.h
+  include/compiler/msvc.h
   include/core.h
   include/cpuset.h
 # include/cudawrap.h
+  include/dda_all_reduce_ipc.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
+  include/env.h
+  include/device_buffer.h
   include/enqueue.h
   include/gdrwrap.h
   include/git_version.h
   include/graph.h
   include/group.h
+  include/gin.h
+  include/gin/gin_host.h
+  include/gin/gin_host_proxy.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
   include/ibvwrap.h
   include/info.h
+  include/ipc_gpu_barrier.h
+  include/ipc_init.h
+  include/ipc_init_detail.h
+  include/ipc_mem_handler.h
   include/ipcsocket.h
+  include/mem_manager.h
   include/mnnvl.h
   include/nccl_common.h
   include/nccl_device.h
-  include/net_device.h
+  include/nccl_device/net_device.h
   include/net.h
-  include/net_ib_cast_inspect.h
   include/nvmlwrap.h
   include/nvtx.h
   include/nvtx_payload_schemas.h
@@ -149,8 +182,18 @@ set(SRC_FILES
   include/nccl_device/comm.h
   include/nccl_device/coop.h
   include/nccl_device/core.h
+  include/nccl_device/barrier.h
+  include/nccl_device/gin.h
+  include/nccl_device/gin_barrier.h
+  include/nccl_device/gin/gdaki/gin_gdaki.h
+  include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
+  include/nccl_device/gin/gin_device_api.h
+  include/nccl_device/gin/gin_device_common.h
+  include/nccl_device/gin/gin_device_host_common.h
+  include/nccl_device/gin/proxy/gin_proxy.h
+  include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   include/nccl_device/ll_a2a.h
-  include/nccl_device/mem_barrier.h
+  include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
   include/nccl_device/rccl_ptr.h
   include/nccl_device/utility.h
@@ -158,12 +201,25 @@ set(SRC_FILES
   include/nccl_device/impl/comm__types.h
   include/nccl_device/impl/core__funcs.h
   include/nccl_device/impl/core__types.h
+  include/nccl_device/impl/barrier__funcs.h
+  include/nccl_device/impl/barrier__types.h
+  include/nccl_device/impl/gin__funcs.h
+  include/nccl_device/impl/gin__types.h
+  include/nccl_device/impl/gin_barrier__funcs.h
+  include/nccl_device/impl/gin_barrier__types.h
   include/nccl_device/impl/ll_a2a__funcs.h
   include/nccl_device/impl/ll_a2a__types.h
-  include/nccl_device/impl/mem_barrier__funcs.h
-  include/nccl_device/impl/mem_barrier__types.h
+  include/nccl_device/impl/lsa_barrier__funcs.h
+  include/nccl_device/impl/lsa_barrier__types.h
   include/nccl_device/impl/ptr__funcs.h
   include/nccl_device/impl/ptr__types.h
+  include/nccl_device/impl/multimem__funcs.h
+  include/nccl_device/impl/reduce_copy__funcs.h
+  include/nccl_device/impl/reduce_copy__impl.h
+  include/nccl_device/impl/reduce_copy__types.h
+  include/nccl_device/impl/vector__funcs.h
+  include/nccl_device/impl/vector__types.h
+  include/nccl_device/reduce_copy.h
   include/npkit/npkit.h
   include/npkit/npkit_event.h
   include/npkit/npkit_struct.h
@@ -205,6 +261,8 @@ set(SRC_FILES
   include/plugin/nccl_net.h
   include/plugin/nccl_profiler.h
   include/plugin/nccl_tuner.h
+  include/plugin/nccl_env.h
+  include/plugin/env/env_v1.h
   include/plugin/plugin.h
   include/plugin/net/net_v6.h
   include/plugin/net/net_v7.h
@@ -221,10 +279,14 @@ set(SRC_FILES
   include/plugin/profiler/profiler_v3.h
   include/plugin/profiler/profiler_v4.h
   include/plugin/profiler/profiler_v5.h
+  include/plugin/profiler/profiler_v6.h
   include/plugin/tuner/tuner_v2.h
   include/plugin/tuner/tuner_v3.h
   include/plugin/tuner/tuner_v4.h
   include/plugin/tuner/tuner_v5.h
+  include/plugin/nccl_gin.h
+  include/plugin/gin/gin_v11.h
+  include/plugin/gin/gin_v12.h
   misc/alt_rsmi.cc
   misc/archinfo.cc
   misc/argcheck.cc
@@ -253,9 +315,21 @@ set(SRC_FILES
   misc/utils.cc
   misc/proxy_trace/proxy_trace.cc
   nccl_device/core.cc
+  nccl_device/gin_barrier.cc
+  nccl_device/gin_scratch.cc
   nccl_device/ll_a2a.cc
-  nccl_device/mem_barrier.cc
+  nccl_device/lsa_barrier.cc
+  os/linux.cc
+  include/os.h
+  rma/rma.cc
+  rma/rma_ce.cc
+  rma/rma_proxy.cc
+  include/rma/rma.h
+  include/rma/rma_ce.h
+  include/rma/rma_proxy.h
   plugin/net.cc
+  plugin/env.cc
+  plugin/env/env_v1.cc
   plugin/plugin_open.cc
   plugin/profiler.cc
   plugin/tuner.cc
@@ -270,11 +344,15 @@ set(SRC_FILES
   plugin/profiler/profiler_v3.cc
   plugin/profiler/profiler_v4.cc
   plugin/profiler/profiler_v5.cc
+  plugin/profiler/profiler_v6.cc
   plugin/tuner/tuner_v2.cc
   plugin/tuner/tuner_v3.cc
   plugin/tuner/tuner_v4.cc
   plugin/tuner/tuner_v5.cc
   plugin/tuner/csv_tuner.cc
+  plugin/gin.cc
+  plugin/gin/gin_v11.cc
+  plugin/gin/gin_v12.cc
   ras/client.cc
   ras/client_support.cc
   ras/collectives.cc
@@ -286,11 +364,15 @@ set(SRC_FILES
   register/register.cc
   register/sendrecv_reg.cc
   scheduler/symmetric_sched.cc
+  scheduler/allgatherv_sched.cc
   transport/coll_net.cc
   transport/generic.cc
   transport/net.cc
   transport/net_ib.cc
-  transport/net_ib_cast.cc
+  transport/net_ib_limits.h
+  transport/net_ib_cast/net_ib_cast_inspect.h
+  transport/net_ib_cast/net_ib_fault_inject.h
+  transport/net_ib/gin.h
   # net_ib_rocm.cc is generated by rocmIb.cmake directly into the hipify staging area
   # so it is not listed here - it's added to HIP_SOURCES separately below
   transport/net_socket.cc
@@ -298,6 +380,9 @@ set(SRC_FILES
   transport/p2p.cc
   transport/profiler.cc
   transport/shm.cc
+  gin/gin_host.cc
+  gin/gin_host_proxy.cc
+  transport/net_ib/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h
   include/latency_profiler/CollTraceFunc.h
@@ -321,11 +406,15 @@ if(USE_AMDSMI)
   )
 else()
   set(SMI_SOURCES
+    src/include/amdsmi_wrap.h
+    src/misc/amdsmi_wrap.cc
     src/include/rocm_smi_wrap.h
     src/misc/rocm_smi_wrap.cc
   )
 endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
+# NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
+list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
 
 # Hipify source files (copy of source generated into hipify directory)
 #==================================================================================================
@@ -384,6 +473,18 @@ foreach(SRC_FILE ${SRC_FILES})
 endforeach()
 
 set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
+# Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
+set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
+set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
+add_custom_command(
+  OUTPUT ${HIP_COMPAT_DST}
+  COMMAND ${CMAKE_COMMAND} -E copy ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
+  MAIN_DEPENDENCY ${HIP_COMPAT_SRC}
+  COMMENT "Copying hip_compat.h (no hipification)"
+)
+list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
+list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
+
 add_custom_command(
   OUTPUT ${NCCL_DEVICE_HEADER}
   COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
@@ -474,7 +575,8 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc)")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -508,10 +610,12 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src)                    # 
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device/network/unpack)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/mlx5)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
+target_include_directories(rccl PRIVATE ${NET_IB_CAST_INCLUDE_DIRS})
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
 target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
@@ -527,8 +631,24 @@ endif()
 if(COLLTRACE)
   target_compile_definitions(rccl PRIVATE ENABLE_COLLTRACE)
 endif()
+if(ENABLE_MSCCL_KERNEL)
+  message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
+  target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
+endif()
+if(ENABLE_MSCCLPP)
+  target_compile_definitions(rccl PRIVATE ENABLE_MSCCLPP)
+endif()
+
+if(NCCL_OS_LINUX)
+  target_compile_definitions(rccl PRIVATE NCCL_OS_LINUX)
+elseif(NCCL_OS_WINDOWS)
+  target_compile_definitions(rccl PRIVATE NCCL_OS_WINDOWS)
+endif()
 if(USE_AMDSMI)
   target_compile_definitions(rccl PRIVATE USE_AMDSMI)
+  if(AMDSMI_FABRIC_API)
+    target_compile_definitions(rccl PRIVATE AMDSMI_FABRIC_DIRECT)
+  endif()
 else()
   if(HAVE_ROCM_SMI64CONFIG)
     target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
@@ -711,7 +831,11 @@ else()
   message(STATUS "HIP_HOST_UNCACHED_MEMORY disabled")
 endif()
 if(HIP_FABRIC_API_FUNC AND HIP_FABRIC_HANDLE_TYPE)
+  # HIP_FABRIC_API is used as both a cmake variable (ON/OFF, for status messages below)
+  # and a compile definition (bare #define, for #ifdef guards in C++). The names are
+  # intentionally identical; the cmake variable is not queried by any downstream cmake logic.
   set(HIP_FABRIC_API ON)
+  target_compile_definitions(rccl PRIVATE HIP_FABRIC_API)
   message(STATUS "HIP Fabric API enabled (hipMemImportFromShareableHandle and hipMemFabricHandle_t found)")
 else()
   set(HIP_FABRIC_API OFF)
@@ -745,6 +869,10 @@ if(DEMANGLE_DIR)
 endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
+endif()
+if(CE_ENABLED)
+  target_compile_definitions(rccl PRIVATE CE_BATCH_ASYNC_SUPPORTED)
+  message(STATUS "CE_BATCH_ASYNC_SUPPORTED compile definition enabled")
 endif()
 
 ## Set RCCL compile options
@@ -937,10 +1065,31 @@ else()
 endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
-target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
+# Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
+# and is omitted from the exported rccl-targets export set. Without this,
+# a FetchContent-built fmt-header-only target leaks into rccl's link
+# interface and breaks install(EXPORT) for static builds.
+target_link_libraries(rccl PRIVATE $<BUILD_INTERFACE:fmt::fmt-header-only>)
 if(ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
+  # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
+  # The __hip_gpubin_handle_* symbols referenced by __hip_module_ctor in the
+  # librocshmem.a objects are only defined by the RDC device-link step.
+  # --hip-link tells amdclang++ to perform that step as part of the final
+  # librccl.so link; -fgpu-rdc marks the link as RDC-mode.  --offload-arch
+  # flags use RCCL's GPU_TARGETS (stripped of feature suffixes like :xnack-)
+  # so the device-link covers every arch RCCL is built for.
+  # RCCL's own device code (already embedded in device_build/common.o by the
+  # custom device-linker pipeline) is NOT compiled with -fgpu-rdc and is
+  # therefore unaffected by this device-link step.
+  set(_rocshmem_offload_arch_flags "")
+  foreach(_gpu_raw ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
+    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
+  endforeach()
+  list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
+  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 endif()
 
 ## Set RCCL link options
@@ -1009,6 +1158,10 @@ else()
 endif()
 if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
+endif()
+
+if(ENABLE_MSCCLPP)
+  include(${RCCL_SOURCE_DIR}/cmake/MSCCLPP.cmake)
 endif()
 
 ## Track linking time

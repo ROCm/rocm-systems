@@ -49,9 +49,11 @@ if(HIP_PLATFORM STREQUAL "amd")
   # Vulkan interop APIs currently undefined for Nvidia
   add_subdirectory(vulkan_interop)
   add_subdirectory(gl_interop) # Disabled on NVIDIA due to defect - EXSWHTEC-246
+  add_subdirectory(TDM)
 endif()
 add_subdirectory(synchronization)
 add_subdirectory(launchBounds)
 add_subdirectory(assertion)
 add_subdirectory(library)
 add_subdirectory(sanityTests)
+add_subdirectory(executionContext)
