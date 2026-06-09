@@ -228,7 +228,7 @@ def calc_unroll_and_pipeline_for_local_arch():
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
     if "gfx950" == gfx_name:
-      return (["1", "2"], ["0"])  # Disable pipelining for gfx950
+      return (["1", "2", "4", "8", "16", "32"], ["0"])  # Disable pipelining for gfx950
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
     elif "gfx1250" == gfx_name:

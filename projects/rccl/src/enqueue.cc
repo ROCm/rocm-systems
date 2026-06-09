@@ -1245,6 +1245,13 @@ static ncclResult_t addP2pToPlan(
   }
 
   nChannelsMax = std::max(nChannels[0], nChannels[1]);
+  // DEBUG AICOMRCCL-1137: log channel counts to verify zero-divisor hypothesis
+  INFO(NCCL_P2P, "addP2pToPlan rank=%d sendRank=%d recvRank=%d sendBytes=%zd recvBytes=%zd "
+       "nChannelsMin=%d nChannels[recv]=%d nChannels[send]=%d nChannelsMax=%d "
+       "p2pnChannels=%d p2pnChannelsPerPeer=%d",
+       comm->rank, sendRank, recvRank, sendBytes, recvBytes,
+       nChannelsMin, nChannels[0], nChannels[1], nChannelsMax,
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer);
   // Determine how many peers this plan will target concurrently. Make a
   // simplifying assumption that each task targets a different peer.
   // Each task is striped across 'nChannelsMax' of 'p2pnChannels' channels.

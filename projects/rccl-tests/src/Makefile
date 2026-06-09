@@ -142,6 +142,8 @@ ifeq ($(ENABLE_DEVICE_API), 1)
 HIPCUFLAGS += -DENABLE_DEVICE_API
 endif
 
+-include ../asan.mk
+
 LIBRARIES += rccl dl
 HIPLDFLAGS += $(LIBRARIES:%=-l%)
 
