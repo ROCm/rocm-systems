@@ -363,13 +363,6 @@ get_client_ctx()
     return context_id;
 }
 
-auto&
-get_kernel_rename_ctx()
-{
-    static rocprofiler_context_id_t context_id{0};
-    return context_id;
-}
-
 void
 set_contexts_active(const context_id_set_t& ctxs, const bool start)
 {
@@ -2754,8 +2747,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(counter_collection_ctx, "SPM counter collection");
     }
 
-    auto& rename_ctx            = get_kernel_rename_ctx();
-    auto  marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
+    auto rename_ctx            = rocprofiler_context_id_t{0};
+    auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
         ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
         ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
     };
@@ -3371,11 +3364,7 @@ tool_detach(void* /*tool_data*/)
 
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
     // then flush again to capture any final events (same pattern as tool_fini).
-    // The kernel rename context must also be stopped to prevent concurrent
-    // kernel_rename_callback calls from adding new strings to kernel_rename_map
-    // while generate_output builds the rocpd string table snapshot.
     flush();
-    rocprofiler_stop_context(get_kernel_rename_ctx());
     rocprofiler_stop_context(get_client_ctx());
     flush();
 
