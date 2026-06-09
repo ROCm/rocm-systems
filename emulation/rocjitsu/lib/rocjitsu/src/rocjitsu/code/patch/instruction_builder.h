@@ -176,7 +176,6 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 
 /// @brief Encode an s_endpgm instruction for the given target ISA.
 ///
-/// @param cycles  Number of additional stall cycles (0-based).
 /// @param arch    Target ISA architecture.
 /// @returns The encoded 32-bit instruction word.
 [[nodiscard]] inline constexpr uint32_t build_s_endpgm(rj_code_arch_t arch) {
