@@ -173,7 +173,7 @@ auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
 // Returns true if `path` is a .json file that lacks the top-level TIMEMORY_PROJECT_NAME
 // ("rocprofiler-systems") root object that timemory's cereal reader requires.
 bool
-config_json_missing_expected_root(const std::string& path)
+is_json_without_project_name_root(const std::string& path)
 {
     if(!path.ends_with(".json")) return false;
     std::ifstream ifs{ path };
@@ -1114,7 +1114,7 @@ configure_settings(bool _init)
         auto fitr = settings::format(itr, _config->get_tag());
 
         // Timemory's read() will silently drop JSON config files without proper root
-        if(config_json_missing_expected_root(fitr))
+        if(is_json_without_project_name_root(fitr))
         {
             LOG_CRITICAL("Config file '{}' is missing the expected '{}' root object and "
                          "cannot be loaded. If this is a hierarchical preset "
