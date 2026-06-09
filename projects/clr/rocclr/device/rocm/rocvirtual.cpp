@@ -1329,7 +1329,12 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   TrackQueueProgress(*packet, index);
 
   AqlPacket* aql_loc = &((AqlPacket*)(gpu_queue_->base_address))[index & queueMask];
-  *aql_loc = *packet;
+  // AQL protocol: write body first, skip the header dword — it is committed
+  // atomically by packet_store_release below.  A plain struct copy would
+  // non-atomically expose the source packet's valid header to the consumer.
+  memcpy(reinterpret_cast<uint8_t*>(aql_loc) + sizeof(uint32_t),
+         reinterpret_cast<const uint8_t*>(packet) + sizeof(uint32_t),
+         sizeof(*packet) - sizeof(uint32_t));
 
   metadata_preloader_.Set(packet, header, index & queueMask);
   if (header != 0) {
@@ -1736,7 +1741,10 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
   hsa_barrier_and_packet_t* aql_loc =
       &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
-  *aql_loc = barrier_packet_;
+  // AQL protocol: write body first, skip header — committed by packet_store_release.
+  memcpy(reinterpret_cast<uint8_t*>(aql_loc) + sizeof(uint32_t),
+         reinterpret_cast<const uint8_t*>(&barrier_packet_) + sizeof(uint32_t),
+         sizeof(barrier_packet_) - sizeof(uint32_t));
   metadata_preloader_.Set(&barrier_packet_, packetHeader, index & queueMask);
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
@@ -1821,7 +1829,10 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
-  *aql_loc = barrier_value_packet_;
+  // AQL protocol: write body first, skip header — committed by packet_store_release.
+  memcpy(reinterpret_cast<uint8_t*>(aql_loc) + sizeof(uint32_t),
+         reinterpret_cast<const uint8_t*>(&barrier_value_packet_) + sizeof(uint32_t),
+         sizeof(barrier_value_packet_) - sizeof(uint32_t));
   metadata_preloader_.Set(&barrier_value_packet_, packetHeader, index & queueMask);
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, rest);
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
