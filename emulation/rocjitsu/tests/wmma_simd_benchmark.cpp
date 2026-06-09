@@ -312,3 +312,32 @@ TEST(WmmaSimdBenchmark, SwmmacI32_16x16x32_i8) {
   };
   bench("v_swmmac_i32_16x16x32_i8", fx, run, double(M) * N * (K / 2), Cmp::IntExact);
 }
+
+// Dense WMMA, f32 output, f16 input, K=32 — the real gfx1250 shape, generic path.
+TEST(WmmaSimdBenchmark, F32_16x16x32_f16) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
+  fx.seed(S0_OFF, 16, bits, SmallGen(13));
+  fx.seed(S1_OFF, 16, bits, SmallGen(14));
+  auto run = [&] {
+    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
+                          amdgpu::extract_f16, /*const_acc=*/0);
+  };
+  bench("v_wmma_f32_16x16x32_f16", fx, run, double(M) * N * K, Cmp::F32Tol);
+}
+
+// Dedicated constexpr-dims + F16C specialization for the same shape.
+TEST(WmmaSimdBenchmark, F32_16x16x32_f16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 32, bits = 16;
+  fx.seed(S0_OFF, 16, bits, SmallGen(13));
+  fx.seed(S1_OFF, 16, bits, SmallGen(14));
+  auto run = [&] {
+    amdgpu::exec_wmma_f32_16x16x32_f16(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                       fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
+  };
+  bench("v_wmma_f32_16x16x32_f16 [specialized]", fx, run, double(M) * N * K, Cmp::F32Tol);
+}
