@@ -210,23 +210,6 @@ rocprofiler_systems_add_feature(ROCPROFSYS_ROCM_VERSION
 find_package(rocprofiler-sdk ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
 target_link_libraries(rocprofiler-systems-rocm INTERFACE rocprofiler-sdk::rocprofiler-sdk)
 
-if(DEFINED rocprofiler-sdk_VERSION)
-    rocprofiler_systems_target_compile_definitions(
-        rocprofiler-systems-rocm
-        INTERFACE
-            ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MAJOR=${rocprofiler-sdk_VERSION_MAJOR}
-            ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_MINOR=${rocprofiler-sdk_VERSION_MINOR}
-            ROCPROFSYS_ROCPROFILER_SDK_COMPILE_VERSION_PATCH=${rocprofiler-sdk_VERSION_PATCH}
-    )
-
-    message(
-        STATUS
-        "rocprofiler-sdk version: ${rocprofiler-sdk_VERSION_MAJOR}.${rocprofiler-sdk_VERSION_MINOR}.${rocprofiler-sdk_VERSION_PATCH}"
-    )
-else()
-    message(WARNING "rocprofiler-sdk version not found: ${rocprofiler-sdk_VERSION}")
-endif()
-
 # AMD SMI
 find_package(
     amd_smi
@@ -403,26 +386,6 @@ if(rocprofiler-sdk-rocpd_FOUND)
             rocprofiler-systems-rocm
             INTERFACE rocprofiler-sdk-rocpd::rocprofiler-sdk-rocpd
         )
-
-        if(DEFINED rocprofiler-sdk-rocpd_VERSION)
-            rocprofiler_systems_target_compile_definitions(
-                rocprofiler-systems-rocm
-                INTERFACE
-                    ROCPROFSYS_ROCPD_COMPILE_VERSION_MAJOR=${rocprofiler-sdk-rocpd_VERSION_MAJOR}
-                    ROCPROFSYS_ROCPD_COMPILE_VERSION_MINOR=${rocprofiler-sdk-rocpd_VERSION_MINOR}
-                    ROCPROFSYS_ROCPD_COMPILE_VERSION_PATCH=${rocprofiler-sdk-rocpd_VERSION_PATCH}
-            )
-
-            message(
-                STATUS
-                "rocprofiler-sdk-rocpd version: ${rocprofiler-sdk-rocpd_VERSION_MAJOR}.${rocprofiler-sdk-rocpd_VERSION_MINOR}.${rocprofiler-sdk-rocpd_VERSION_PATCH}"
-            )
-        else()
-            message(
-                WARNING
-                "rocprofiler-sdk-rocpd version not found: ${rocprofiler-sdk-rocpd_VERSION}"
-            )
-        endif()
 
         message(
             STATUS
