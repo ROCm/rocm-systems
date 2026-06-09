@@ -132,6 +132,13 @@ HIP_TEST_CASE(Unit_hipGreenCtxCreate_Negative) {
   SECTION("Invalid Device") {
     HIP_CHECK_ERROR(hipGreenCtxCreate(&green_ctx, desc, -1, 0), hipErrorInvalidDevice);
   }
+
+  // The descriptor is owned by the green context on a successful create and
+  // freed by hipExecutionCtxDestroy. Consume it here so it is not leaked, since
+  // the negative cases above never transfer ownership.
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
+  REQUIRE(green_ctx != nullptr);
+  HIP_CHECK(hipExecutionCtxDestroy(green_ctx));
 }
 
 /**
