@@ -181,6 +181,10 @@ public:
     queue_state         get_state() const;
     void                set_state(queue_state state);
 
+    void invoke_write_interceptor(const void*                           packets,
+                                  uint64_t                              pkt_count,
+                                  hsa_amd_queue_intercept_packet_writer writer) const;
+
     mutable std::mutex              cv_mutex        = {};
     mutable std::condition_variable cv_ready_signal = {};
     hsa_signal_t                    block_signal    = {.handle = 0};

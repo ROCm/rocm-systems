@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1093,6 +1094,11 @@ shutdown(hsa_executable_t executable)
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
 
     auto _unloaded = code_object::get_unloaded_code_objects(executable);
+
+    // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
+    // queue-interposition completion records first so pending dispatch records are delivered while
+    // that metadata is still valid.
+    ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
