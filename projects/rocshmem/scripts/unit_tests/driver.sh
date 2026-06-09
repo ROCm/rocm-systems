@@ -69,7 +69,7 @@ mpi_timeout=$((20 * 60)) # 20 minutes in seconds
 function run_mpirun {
     local np=$1
     local gtest_filter=$2
-    cmd_str="mpirun -np $np --timeout $mpi_timeout $binary_name --gtest_filter=$gtest_filter >> $log_file 2>&1"
+    cmd_str="ROCSHMEM_DEBUG_LEVEL=WARN mpirun -np $np --timeout $mpi_timeout $binary_name --gtest_filter=$gtest_filter >> $log_file 2>&1"
     echo $cmd_str
     eval $cmd_str
 
@@ -95,6 +95,7 @@ fi
 case $mode in
     all)
         test_with_two_pes="IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*"
+        test_with_two_pes+=":SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*"
         if [ $NUM_GPUS -ge 4 ]
         then
           run_mpirun 4 "-$test_with_two_pes"

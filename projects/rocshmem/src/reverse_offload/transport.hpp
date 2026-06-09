@@ -48,7 +48,7 @@ class Transport {
   virtual void createNewTeam(ROBackend *backend_handle, Team *parent_team,
                              const TeamInfo& team_info_wrt_parent,
                              const TeamInfo& team_info_wrt_world, int num_pes,
-                             int my_pe_in_new_team, MPI_Comm team_comm,
+                             int my_pe_in_new_team, MPI_Comm new_team_comm,
                              rocshmem_team_t *new_team) = 0;
 
   virtual void barrier(int wg_id, volatile char *status, bool blocking,

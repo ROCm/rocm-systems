@@ -109,6 +109,12 @@ process_t::process_t (amd_dbgapi_process_id_t process_id,
 
 process_t::~process_t ()
 {
+  /* Make sure to discard any cache before closing the driver.  The agent dtor
+     might otherwise try to write_back / discard the cache, but without a
+     process or a driver connection, this cannot work and would fail.  */
+  for (auto &&agent : range<agent_t> ())
+    agent.memory_cache ().discard (0, amd_dbgapi_size_t (-1), true);
+
   /* Destruct the os_driver before closing the notifier.  */
   m_os_driver.reset ();
   client_notifier ().close ();
@@ -337,11 +343,44 @@ process_t::xfer_segment_memory (const address_space_t &address_space,
                                 void *read, const void *write,
                                 size_t size) const
 {
+  /* Valid address spaces are either "global" or "global_swizzled".  */
   if (address_space.kind () == address_space_t::kind_t::global)
     return xfer_global_memory (segment_address, read, write, size);
-  else
+  else if (address_space.kind () != address_space_t::kind_t::global_swizzled)
     throw memory_access_error_t (address_space, segment_address,
                                  "address is not supported");
+
+  /* Read in chunks as we're dealing with a global _swizzled_ memory.  */
+  size_t xfer_bytes = 0;
+  std::byte *cur_read = nullptr;
+  const std::byte *cur_write = nullptr;
+  const auto &global_swizzled_address_space
+    = static_cast<const global_swizzled_address_space_t &> (address_space);
+
+  while (size > xfer_bytes)
+    {
+      auto [global_address, contiguous_bytes]
+        = global_swizzled_address_space.to_global (segment_address
+                                                   + xfer_bytes);
+      if (read != nullptr)
+        cur_read = static_cast<std::byte *> (read) + xfer_bytes;
+      if (write != nullptr)
+        cur_write = static_cast<const std::byte *> (write) + xfer_bytes;
+
+      size_t request_size = std::min (size - xfer_bytes, contiguous_bytes);
+      size_t xfer_size = xfer_global_memory (global_address, cur_read,
+                                             cur_write, request_size);
+
+      xfer_bytes += xfer_size;
+      if (xfer_size != request_size)
+        {
+          /* "global_address + xfer_size" may have reached the end of a
+             mapped global memory region.  */
+          break;
+        }
+    }
+
+  return xfer_bytes;
 }
 
 void
@@ -710,7 +749,8 @@ process_t::insert_watchpoint (const watchpoint_t &watchpoint)
   try
     {
       for (auto &&agent : range<agent_t> ())
-        agent.insert_watchpoint (watchpoint);
+        if (agent.supports_debugging ())
+          agent.insert_watchpoint (watchpoint);
     }
   catch (...)
     {
@@ -719,7 +759,9 @@ process_t::insert_watchpoint (const watchpoint_t &watchpoint)
          the watchpoint and forward the exception.  Note: Removing a watchpoint
          that is not inserted is a no-op.  */
       for (auto &&agent : range<agent_t> ())
-        agent.remove_watchpoint (watchpoint);
+        if (agent.supports_debugging ())
+          agent.remove_watchpoint (watchpoint);
+
       throw;
     }
 }
@@ -728,7 +770,8 @@ void
 process_t::remove_watchpoint (const watchpoint_t &watchpoint)
 {
   for (auto &&agent : range<agent_t> ())
-    agent.remove_watchpoint (watchpoint);
+    if (agent.supports_debugging ())
+      agent.remove_watchpoint (watchpoint);
 
   const bool last_watchpoint = count<watchpoint_t> () == 1;
   if (last_watchpoint)

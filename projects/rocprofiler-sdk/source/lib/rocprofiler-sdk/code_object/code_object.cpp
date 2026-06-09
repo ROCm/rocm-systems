@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -223,7 +224,7 @@ enum amd_kernel_code_property_t
 uint32_t
 arch_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
 {
-    if(name == "gfx90a" || name.find("gfx94") == 0)
+    if(name == "gfx90a" || name.find("gfx94") == 0 || name.find("gfx95") == 0)
         return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3,
                                  AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) +
                 1) *
@@ -243,7 +244,7 @@ accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
 {
     if(name == "gfx908")
         return arch_vgpr_count(name, kernel_code);
-    else if(name == "gfx90a" || name.find("gfx94") == 0)
+    else if(name == "gfx90a" || name.find("gfx94") == 0 || name.find("gfx95") == 0)
         return ((AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
                                   AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
                  1) *
@@ -1093,6 +1094,11 @@ shutdown(hsa_executable_t executable)
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
 
     auto _unloaded = code_object::get_unloaded_code_objects(executable);
+
+    // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
+    // queue-interposition completion records first so pending dispatch records are delivered while
+    // that metadata is still valid.
+    ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;

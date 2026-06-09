@@ -1,11 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import csv
 from pathlib import Path
 
+import common
+import pandas as pd
 import pytest
-import test_utils
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -17,35 +17,14 @@ config["METRIC_LOGGING"] = False
 
 
 def load_metrics(csv_file_path):
-    """
-    Reads the CSV file into a dictionary of dictionaries:
-        {
-            "Metric_1": {
-                    "Avg": value,
-                    "Min": value,
-                    "Max": value,
-                    "Unit": "unit"
-                },
-            "Metric_2": { ... },
-            ...
-        }
-    """
-    metrics_data = {}
-    with open(csv_file_path, newline="") as csvfile:
-        reader = csv.DictReader(csvfile)  # reads header from first line
-
-        for row in reader:
-            metric_name = row["Metric"].strip()
-            metrics_data[metric_name] = {
-                "Avg": float(row["Avg"]) if row["Avg"] else None,
-                "Min": float(row["Min"]) if row["Min"] else None,
-                "Max": float(row["Max"]) if row["Max"] else None,
-                "Unit": row["Unit"].strip() if row["Unit"] else None,
-            }
-    return metrics_data
+    """Read workload_metric.csv and return {metric_name: {value_name: value}}."""
+    df = pd.read_csv(csv_file_path)
+    return df.pivot(index="metric_name", columns="value_name", values="value").to_dict(
+        orient="index"
+    )
 
 
-soc = test_utils.gpu_soc()
+_, soc = common.gpu_soc()
 
 
 @pytest.mark.L1_cache
@@ -57,11 +36,13 @@ def test_L1_cache_counters(
 
     # set up two apps: sequential and random access
     app_names = ["vseq", "vrand"]
-    options = ["-b", "16"]
+    # Scope to the relevant metric section and multiplex counters across
+    # kernel iterations so the app runs only once.
+    options = ["-b", "16.3", "--iteration-multiplexing"]
 
     result = {}
     metrics = ["Read Req", "Write Req", "Cache Hit Rate"]
-    base = Path(test_utils.get_output_dir())
+    base = Path(common.get_output_dir())
 
     for app_name in app_names:
         workload_dir = f"{base}/{app_name}"
@@ -93,9 +74,7 @@ def test_L1_cache_counters(
         assert return_code == 0
 
         # 3. save results in local
-
-        # FIXME: customize file name to avoid hardcode
-        csv_path = workload_dir_output + "/16.3_vL1D_cache_access_metrics.csv"
+        csv_path = workload_dir_output + "/workload_metric.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:
@@ -104,9 +83,9 @@ def test_L1_cache_counters(
             result[app_name][metric] = data[metric]["Avg"]
 
         # 4. clean local output
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir_output)
-    test_utils.clean_output_dir(config["cleanup"], base)
+        common.clean_output_dir(config["cleanup"], workload_dir)
+        common.clean_output_dir(config["cleanup"], workload_dir_output)
+    common.clean_output_dir(config["cleanup"], base)
 
     # 5. check results are expected
 

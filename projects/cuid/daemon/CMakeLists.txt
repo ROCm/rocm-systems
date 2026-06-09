@@ -18,25 +18,29 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10)
 project(amdcuid_daemon)
 
 set(CMAKE_CXX_STANDARD 14)
 
-# Find OpenSSL
-find_package(OpenSSL REQUIRED)
+set(INC_DIR ${CMAKE_SOURCE_DIR}/lib)
+set(AMDCUID_DAEMON_EXECUTABLE amdcuid_daemon)
+set(SRC_LIST amdcuid_daemon.cc)
+
+find_package(Threads REQUIRED)
 
 # Add the tool executable
 add_executable(amdcuid_daemon amdcuid_daemon.cc)
 
-# Link against the CUID library
-target_link_libraries(amdcuid_daemon amdcuid_static OpenSSL::Crypto)
-
 # Include directories
-target_include_directories(amdcuid_daemon PRIVATE ${CMAKE_SOURCE_DIR}/lib)
+target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
 
-# Install the tool
-install(TARGETS amdcuid_daemon DESTINATION bin COMPONENT daemon)
+# Pass the resolved config install directory to the daemon at compile time so
+# the HMAC key and daemon configuration paths are always built from a concrete
+# location.
+target_compile_definitions(
+    ${AMDCUID_DAEMON_EXECUTABLE}
+    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
+)
 
 # Platform-specific config directory
 if(WIN32)
@@ -45,11 +49,20 @@ else()
     set(CONFIG_INSTALL_DIR "${CMAKE_INSTALL_SYSCONFDIR}")
 endif()
 
+# Install the daemon
 install(
-    FILES amdcuid_daemon.conf
-    DESTINATION ${CONFIG_INSTALL_DIR}
-    COMPONENT daemon
+    TARGETS ${AMDCUID_DAEMON_EXECUTABLE}
+    DESTINATION bin
+    COMPONENT ${DAEMON_COMPONENT}
 )
+
+set(DAEMON_CONFIG_FILE amdcuid_daemon.conf)
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/${DAEMON_CONFIG_FILE}
+    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}
+    COMPONENT ${DAEMON_COMPONENT}
+)
+
 # create hmac key file in same directory as config file with 600 permissions
 install(
     CODE
@@ -59,11 +72,18 @@ install(
         OUTPUT_VARIABLE HMAC_KEY
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    set(KEY_FILE \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CONFIG_INSTALL_DIR}/amdcuid.key\")
+    set(KEY_FILE \"\${CMAKE_INSTALL_SYSCONFDIR}/amdcuid.key\")
     file(WRITE \"\${KEY_FILE}\" \"\${HMAC_KEY}\")
     execute_process(COMMAND chmod 600 \"\${KEY_FILE}\")
 "
-    COMPONENT daemon
+    COMPONENT ${DAEMON_COMPONENT}
+)
+
+# Link against the CUID library
+target_link_libraries(
+    ${AMDCUID_DAEMON_EXECUTABLE}
+    amdcuid_static
+    Threads::Threads
 )
 
 # udev rules for Linux; TODO: need to figure out Windows service/driver registration for device event handling

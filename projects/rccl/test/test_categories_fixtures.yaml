@@ -1,0 +1,97 @@
+# rccl-UnitTestsFixtures — shared/ctest schema (ROCm 6.4+).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+#
+# Tiers:
+#   quick — smoke (curated patterns).
+#   standard — wildcards per suite.
+#   comprehensive / full — merge standard; override labels.
+
+test_categories:
+  quick:
+    description: "Smoke — curated BitOps / Comm / EnqueueCount / DeviceOp128 cases (fast, representative)."
+    test_patterns:
+      - "DIVUP.*"
+      - "ROUNDUP.*"
+      - "ALIGN_POWER.*"
+      - "ALIGN_SIZE.*"
+      - "u32fp8MaxValue.*"
+      - "u32fp8Decode.*"
+      - "u32fp8Encode.*"
+      - "u32fpEncode.*"
+      - "u32fpDecode.*"
+      - "getHash.*"
+      - "eatHash.*"
+      - "BitOpsTemplateAllIntTestsFixture.*"
+      - "BitOpsTemplateUnsignedTestsFixture.*"
+      - "CommTests.*"
+      - "EnqueueCountTests.*"
+      - "PackRoundtripTest.LdStVolatileGlobalPtr"
+      - "PackRoundtripTest.LdStRelaxedSysGlobal"
+      - "PackRoundtripTest.LdStAcquireReleaseSysGlobal"
+      - "PackRoundtripTest.L2_VolatileGlobalPtr_MultiElement"
+      - "PackRoundtripTest.CvtaFromGlobal"
+      - "PackRoundtripTest.ShmemCvtPtr"
+      - "PackRoundtripTest.LoadStoreShmem128"
+      - "PackRoundtripTest.LoadShmemMisaligned128_*"
+      - "PackRoundtripTest.LoadStorePack_*"
+      - "PackRoundtripTest.L2_StorePackBoundary"
+      - "PackRoundtripTest.Store16Load16Global_Direct"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "fixtures"
+    env_variables: &fixtures_env
+      - "NCCL_DEBUG=INFO"
+  standard: &fixtures_standard
+    description: "Broad regression — every suite in this binary (wildcard per suite), bounded timeouts."
+    test_patterns:
+      - "CommTests.*"
+      - "EnqueueCountTests.*"
+      - "BitOpsTemplateAllIntTestsFixture.*"
+      - "BitOpsTemplateUnsignedTestsFixture.*"
+      - "PackRoundtripTest.*"
+      - "DIVUP.*"
+      - "ROUNDUP.*"
+      - "ALIGN_POWER.*"
+      - "ALIGN_SIZE.*"
+      - "u32fp8MaxValue.*"
+      - "u32fp8Decode.*"
+      - "u32fp8Encode.*"
+      - "u32fpEncode.*"
+      - "u32fpDecode.*"
+      - "getHash.*"
+      - "eatHash.*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "fixtures"
+    env_variables: *fixtures_env
+  comprehensive:
+    <<: *fixtures_standard
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "fixtures"
+  full:
+    <<: *fixtures_standard
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "fixtures"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 1200
+    standard: 3600
+    comprehensive: 3600
+    full: 3600

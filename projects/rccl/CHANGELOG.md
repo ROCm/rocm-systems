@@ -12,6 +12,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Added
 * Added `RCCL_IB_P2P_DISABLE_CTS` to disable CTS offload for P2P connections on AINIC. Defaults to 1 (disabled). When `RCCL_CTS_OFFLOAD_ENABLED=1` is explicitly set, it overrides this flag and forces CTS on all connections including P2P.
 * Merged `RCCL_CTS_INLINE_DATA` into `RCCL_CTS_OFFLOAD_ENABLED`. CTS offload and CTS inline data are now controlled by a single tri-state variable: `-1` (default, auto-enable on AINIC), `0` (force disable), `1` (force enable for all connections).
+* Added Pythonic API bindings under `bindings/nccl4py/` (RCCL fork of NVIDIA `nccl4py` v0.2.0). Provides Python access to RCCL collectives via Cython bindings, an on-disk `cuda.core` HIP shim for ROCm hosts without `cuda-bindings` / `cuda-core`, and RCCL-only collective wrappers (`ncclAllReduceWithBias`, `ncclAllToAllv`).
 
 ### Changed
 * Compatibility with NCCL 2.28.3.
@@ -19,9 +20,12 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * MSCCL and NPKIT are deprecated and will be removed in a future release of RCCL.
 * Changed GPU Direct RDMA mode selection logic to prefer peermem over DMAbuf by default. `NCCL_DMABUF_ENABLE` now defaults to 1 (previously 0). When both peermem and DMAbuf are available, RCCL will use peermem. If peermem is unavailable, RCCL will automatically fall back to DMAbuf (if available and enabled). Setting `RCCL_FORCE_ENABLE_DMABUF=1` forces DMAbuf usage exclusively, skipping peermem even if available, and disables GPU Direct RDMA if DMAbuf is unavailable.
 * CTS offload is now controlled per-connection rather than globally, allowing P2P connections to fall back to standard RDMA writes while non-P2P traffic continues to use CTS.
+* The bootstrap AllGather now uses the bidirectional ring (N/2 steps) by default on the socket OOB path. `NCCL_BOOTSTRAP_BIDIR_ALLGATHER` now defaults to `1`; set it to `0` to fall back to the unidirectional ring. The net OOB path (`NCCL_OOB_NET_ENABLE`) and its bidirectional variant (`NCCL_BOOTSTRAP_BIDIR_NET`) remain off by default.
 
 ### Resolved Issues
 * Fixed MSCCLPP_ENABLE_CLIP CMake build flag, which was not being properly honored.
+* Fixed static build (`BUILD_SHARED_LIBS=OFF`) failing with `install(EXPORT "rccl-targets" ...)` error when `fmt` is fetched via `FetchContent`. The `fmt-header-only` target is now scoped to the build interface and excluded from RCCL's exported usage requirements.
+* Fixed proxy channel staging buffers ignoring the new GDR mode selection on HIP < 7.12 builds. The legacy `#else` branch in `sendProxyConnect` / `recvProxyConnect` now honors `resources->useDmaBuf`, so peermem-equipped hosts on older HIP no longer fall through to `hsa_amd_portable_export_dmabuf` when peermem was selected in `*ProxySetup`. Workaround for affected RCCL builds: `NCCL_DMABUF_ENABLE=0`.
 
 ## Unreleased - RCCL 2.27.7 for ROCm 7.2.0
 
