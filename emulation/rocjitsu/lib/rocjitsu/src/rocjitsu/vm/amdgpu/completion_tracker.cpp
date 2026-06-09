@@ -49,6 +49,7 @@ void CompletionTracker::drain_completions(std::vector<HwQueueState> &queues) {
       });
 
       flush_caches(entry.process_id);
+      plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       if (entry.completion_signal != 0) {
         fire_signal(entry);
       }

@@ -28,14 +28,15 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// @brief L2 cache component shared per Accelerator Complex Die (XCD).
 ///
 /// 128-byte lines, 2048 sets, 16-way set-associative = 4MB (default).
-/// Write-back to the backing store (HBM controller or memory-side cache)
-/// via the requester port.
+/// In functional mode, writes are kept visible through the backing store
+/// (HBM controller or memory-side cache) via the requester port.
 ///
 /// Mtype-aware behavior:
 ///   - UC: Bypass L2, forward directly to backing store.
 ///   - CC: Allocate in L2, MOESI coherence state tracking for CPU-GPU
 ///         shared memory. Write-through on CC stores.
-///   - RW/WB: Allocate in L2, write-back on eviction.
+///   - RW/WB: Allocate in L2, with functional-mode stores written through to
+///            the backing store so completed dispatches are globally visible.
 ///   - NT: Allocate in L2 (L1 is bypassed, but L2 still caches).
 ///
 /// Serves as the backing store for both L1 Scalar (K$) and L1 Vector (V$).
@@ -80,8 +81,8 @@ public:
 
   /// @brief Read a cache line worth of data (or partial line).
   ///
-  /// Used by L1 controllers to fetch on miss. Always checks L2 first,
-  /// then falls through to HBM on L2 miss.
+  /// Used by L1 controllers to fetch on miss. In functional mode this refetches
+  /// from backing memory to avoid stale clean lines across independent L2s.
   /// @param addr The starting address (line-aligned or not).
   /// @param dst Destination buffer.
   /// @param size Number of bytes to read.

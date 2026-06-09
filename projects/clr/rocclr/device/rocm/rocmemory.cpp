@@ -706,7 +706,7 @@ void Buffer::destroy() {
       if (memFlags & CL_MEM_USE_HOST_PTR) {
         // unlock svm host pointer from memory pool
         if (!dev().info().hmmSupported_) {
-          Hsa::memory_unlock(owner()->getSvmPtr());
+          dev().hostUnlock(owner()->getSvmPtr(), size());
         }
         // destroy system memory
         if (!(amd::Os::releaseMemory(deviceMemory_, size()))) {
@@ -749,7 +749,8 @@ void Buffer::destroy() {
 
     if (needUnlockHostMem) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-        if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
+        if (dev().agent_profile() != HSA_PROFILE_FULL)
+          dev().hostUnlock(owner()->getHostMem(), size());
       }
     }
   }
