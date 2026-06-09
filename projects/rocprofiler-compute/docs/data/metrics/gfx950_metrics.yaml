@@ -1045,13 +1045,13 @@ L2 - Fabric interface detailed metrics:
     rst: The total number of L2 requests to Infinity Fabric to read :ref:`uncached data <memory-type>` from any memory location, per :ref:`normalization unit <normalization-units>`. 64B requests for uncached data are counted as two 32B uncached data requests. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
   Read Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
+    rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Read Bandwidth - Infinity Fabric™:
-    rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
+    rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Read Bandwidth - HBM:
-    rst: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
+    rst: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write and Atomic (32B):
     rst: The total number of L2 requests to Infinity Fabric to write or atomically update 32B of data to any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
@@ -1063,22 +1063,22 @@ L2 - Fabric interface detailed metrics:
     rst: The total number of L2 requests to Infinity Fabric to write or atomically update 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
     unit: Req per Normalization Unit
   Write Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
+    rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write Bandwidth - Infinity Fabric™:
-    rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
+    rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Write Bandwidth - HBM:
-    rst: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
+    rst: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
+    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - Infinity Fabric™:
-    rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
+    rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic Bandwidth - HBM:
-    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
+    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration. See :ref:`l2-detailed-metrics` for more detail.
     unit: Gbps
   Atomic:
     rst: The total number of L2 requests to Infinity Fabric to atomically update 32B or 64B of data in any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail. Note that on current CDNA accelerators, such as the :ref:`MI2XX <mixxx-note>`, requests are only considered *atomic* by Infinity Fabric if they are targeted at non-write-cacheable memory, such as :ref:`fine-grained memory <memory-type>` allocations or :ref:`uncached memory <memory-type>` allocations on the MI2XX.
