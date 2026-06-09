@@ -25,8 +25,11 @@ Tool discovery and loading
 --------------------------
 
 These variables control how ROCprofiler-SDK locates and loads your tool library.
-At least one of the following mechanisms must place your library into the target
-process's address space *before* the first ROCm runtime call.
+At least one of the following mechanisms must be configured *before* the first
+ROCm runtime call so that registration can discover the tool. With
+``ROCP_TOOL_LIBRARIES`` the library is ``dlopen``\ed by the SDK during
+registration (triggered by the first ROCm runtime call); with ``LD_PRELOAD`` the
+library is mapped by the dynamic loader at process start.
 
 .. list-table::
     :header-rows: 1
@@ -38,10 +41,17 @@ process's address space *before* the first ROCm runtime call.
     * - ``ROCP_TOOL_LIBRARIES``
       - (unset)
       - Colon-separated list of absolute paths to shared libraries that export
-        ``rocprofiler_configure``. ROCprofiler-SDK ``dlopen``\ s each entry and
-        invokes its ``rocprofiler_configure`` symbol during registration. This is
-        the recommended way to load a custom tool that is not already in the
+        ``rocprofiler_configure``. ROCprofiler-SDK ``dlopen``\s each entry and
+        invokes its ``rocprofiler_configure`` symbol during registration. This
+        is the recommended way to load a custom tool that is not already in the
         process's link map.
+
+        .. warning::
+
+            The current parser splits on ``:`` but drops the token after the
+            **last** ``:`` separator. Until this is fixed, prefer a single path,
+            or append a trailing ``:`` (for example
+            ``/path/libA.so:/path/libB.so:``) to ensure every entry is loaded.
     * - ``LD_PRELOAD``
       - (unset)
       - Standard dynamic-loader mechanism. If your tool library is listed in
@@ -52,9 +62,14 @@ process's address space *before* the first ROCm runtime call.
 
 .. note::
 
-    ``ROCP_TOOL_LIBRARIES`` entries that do not exist on disk or do not export
-    ``rocprofiler_configure`` are skipped with a warning logged at
-    ``ROCPROFILER_LOG_LEVEL=warning`` or higher.
+    ``ROCP_TOOL_LIBRARIES`` failure modes differ:
+
+    * If an entry cannot be ``dlopen``\ed (for example, the file does not exist
+      or has unresolved dependencies), the SDK calls ``ROCP_FATAL`` and the
+      process terminates.
+    * If an entry is loaded but does not export ``rocprofiler_configure``, a
+      warning is logged and that library is simply not registered as a tool;
+      the process continues.
 
 Logging and diagnostics
 -----------------------
@@ -72,17 +87,12 @@ that is not being loaded, not being initialized, or not receiving callbacks.
     * - ``ROCPROFILER_LOG_LEVEL``
       - ``warning``
       - Severity threshold for SDK log output. Accepted values:
-        ``trace``, ``info``, ``warning``, ``error``, ``fatal``. Integer values
-        ``4``..``0`` are also accepted (``4``=trace, ``3``=info, ``2``=warning, ``1``=error, ``0``=fatal).
-    * - ``ROCPROFILER_LOG_DIR``
-      - (stderr)
-      - Directory to write log files into. When unset, log messages are written
-        to ``stderr``.
-    * - ``ROCPROFILER_vmodule``
-      - (unset)
-      - glog-style per-module verbose specification, for example
-        ``registration=2,agent=1``. Requires ``ROCPROFILER_LOG_LEVEL`` to be set
-        to a negative integer.
+
+        * Named levels: ``trace``, ``info``, ``warning``, ``error``, ``fatal``.
+        * Integer levels ``0``–``4`` mapping to the named levels above
+          (``0`` = ``fatal``, ``4`` = ``trace``).
+
+        Log messages are emitted to ``stderr``.
 
 Beta-feature opt-in
 -------------------
