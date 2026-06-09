@@ -577,18 +577,14 @@ static ncclResult_t rasClientRunInit(struct rasClient* client) {
 
   rasOutReset();
 
-  // Query HIP runtime/driver versions once and cache them in the file-scope
-  // cudaRuntimeVersion/cudaDriverVersion globals so both the TEXT banner and
-  // the JSON header (rasDumpCommsToJSON) report consistent, populated values.
-  // hipDriverGetVersion currently returns the same value as hipRuntimeGetVersion;
-  // when that limitation is fixed in HIP, no change is needed here.
+  // Get HIP version info once for all output formats.
   if (cudaRuntimeVersion == -1)
     CUDACHECKIGNORE(hipRuntimeGetVersion(&cudaRuntimeVersion));
   if (cudaDriverVersion == -1)
     CUDACHECKIGNORE(hipDriverGetVersion(&cudaDriverVersion));
 
-  // For structured formats (JSON), skip the initial text banner; the version
-  // information is included in the JSON header by rasDumpCommsToJSON.
+  // For structured formats (JSON), skip the initial text output.
+  // It will be included in the structured output later.
   if (client->outputFormat == RAS_OUTPUT_TEXT) {
     rasOutAppend("RCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
                  " compiled with ROCm " STR(ROCM_BUILD_INFO) "\n");

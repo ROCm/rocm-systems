@@ -208,6 +208,9 @@ if(BUILD_TESTS)
 
   # Create rccl-UnitTests binary
   add_executable(rccl-UnitTests ${TEST_SOURCE_FILES})
+  add_dependencies(rccl-UnitTests rcclras)
+  target_compile_definitions(rccl-UnitTests PRIVATE
+    RCCL_RAS_CLIENT_BIN="$<TARGET_FILE:rcclras>")
 
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.

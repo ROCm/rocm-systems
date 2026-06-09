@@ -8,17 +8,21 @@
 #include <hip/hip_runtime.h>
 
 #include <arpa/inet.h>
-#include <netdb.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <chrono>
-#include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+
+#ifndef RCCL_RAS_CLIENT_BIN
+#define RCCL_RAS_CLIENT_BIN "rcclras"
+#endif
 
 namespace RcclUnitTesting {
 
@@ -47,55 +51,51 @@ static int pickFreePort() {
   return port;
 }
 
-// Connects to the local RAS server and runs one STATUS query in the requested
-// format ("text" or "json"). Returns the entire response body, or an empty
-// string on connection/protocol failure. Uses getaddrinfo so it works whether
-// the RAS listener bound to IPv4 (127.0.0.1) or IPv6 (::1).
-static std::string queryRas(const std::string& format, const std::string& portStrIn) {
-  int sock = -1;
-  addrinfo hints{};
-  hints.ai_family   = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  const char* portStr = portStrIn.c_str();
+// Runs rcclras via fork+exec and captures stdout. Returns {stdout, exit_code}.
+static std::pair<std::string, int> runRcclras(const std::string& format,
+                                              const std::string& portStr) {
+  int pipefd[2];
+  if (pipe(pipefd) != 0) return {"", -1};
 
-  for (int attempt = 0; attempt < 20 && sock < 0; ++attempt) {
-    addrinfo* results = nullptr;
-    if (::getaddrinfo("localhost", portStr, &hints, &results) == 0) {
-      for (addrinfo* ai = results; ai != nullptr; ai = ai->ai_next) {
-        int s = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (s < 0) continue;
-        if (::connect(s, ai->ai_addr, ai->ai_addrlen) == 0) {
-          sock = s;
-          break;
-        }
-        ::close(s);
-      }
-      ::freeaddrinfo(results);
-    }
-    if (sock < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  const std::vector<std::string> argStrings = {
+      RCCL_RAS_CLIENT_BIN, "-f", format, "-p", portStr, "-h", "localhost"};
+  std::vector<std::vector<char>> argBufs;
+  std::vector<char*> argv;
+  argBufs.reserve(argStrings.size());
+  argv.reserve(argStrings.size() + 1);
+  for (const auto& arg : argStrings) {
+    argBufs.emplace_back(arg.begin(), arg.end());
+    argBufs.back().push_back('\0');
+    argv.push_back(argBufs.back().data());
   }
-  if (sock < 0) return {};
+  argv.push_back(nullptr);
 
-  if (format != "text") {
-    std::string setFmt = "SET FORMAT " + format + "\n";
-    ::send(sock, setFmt.c_str(), setFmt.size(), 0);
-    char ack[16] = {};
-    ssize_t n = ::recv(sock, ack, sizeof(ack) - 1, 0);
-    if (n <= 0 || std::string(ack, n).find("OK") == std::string::npos) {
-      ::close(sock);
-      return {};
-    }
+  const pid_t pid = fork();
+  if (pid < 0) {
+    ::close(pipefd[0]);
+    ::close(pipefd[1]);
+    return {"", -1};
+  }
+  if (pid == 0) {
+    ::close(pipefd[0]);
+    if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(127);
+    ::close(pipefd[1]);
+    ::close(STDERR_FILENO);
+    execv(RCCL_RAS_CLIENT_BIN, argv.data());
+    _exit(127);
   }
 
-  const char* status = "STATUS\n";
-  ::send(sock, status, ::strlen(status), 0);
-
-  std::string body;
+  ::close(pipefd[1]);
+  std::string output;
   char buf[4096];
   ssize_t n;
-  while ((n = ::recv(sock, buf, sizeof(buf), 0)) > 0) body.append(buf, n);
-  ::close(sock);
-  return body;
+  while ((n = ::read(pipefd[0], buf, sizeof(buf))) > 0) output.append(buf, n);
+  ::close(pipefd[0]);
+
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0) return {output, -1};
+  if (!WIFEXITED(status)) return {output, -1};
+  return {output, WEXITSTATUS(status)};
 }
 
 // Verifies the RAS subsystem supports JSON output and that switching to JSON
@@ -128,9 +128,21 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
         // Give the RAS listener a brief moment to come up after init.
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
-        std::string textBody = queryRas("text", portStr);
-        std::string jsonBody = queryRas("json", portStr);
+        std::string textBody;
+        std::string jsonBody;
+        int textRc = -1;
+        int jsonRc = -1;
+        for (int attempt = 0; attempt < 20; ++attempt) {
+          std::tie(textBody, textRc) = runRcclras("text", portStr);
+          std::tie(jsonBody, jsonRc) = runRcclras("json", portStr);
+          if (textRc == 0 && jsonRc == 0 && !textBody.empty() && !jsonBody.empty()) {
+            break;
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
 
+        ASSERT_EQ(textRc, 0) << "rcclras -f text failed";
+        ASSERT_EQ(jsonRc, 0) << "rcclras -f json failed";
         ASSERT_FALSE(textBody.empty()) << "RAS returned no text response";
         ASSERT_FALSE(jsonBody.empty())
             << "RAS did not respond to 'SET FORMAT json' -- JSON support missing";
