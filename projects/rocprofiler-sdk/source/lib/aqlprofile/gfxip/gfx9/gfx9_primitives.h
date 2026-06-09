@@ -78,7 +78,6 @@ public:
     static const uint32_t MC_PERFCOUNTER_RSLT_CNTL__CLEAR_ALL_MASK_PRM  = 0x02000000L;
 
     static constexpr Register SPI_SQG_EVENT_CTL_ADDR{};
-    static constexpr Register SPI_CONFIG_CNTL_ADDR = REG_32B_ADDR(GC, 0, regSPI_CONFIG_CNTL);
     static constexpr Register SQ_PERFCOUNTER_CTRL_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_PERFCOUNTER_CTRL);
     static constexpr Register SQ_PERFCOUNTER_CTRL2_ADDR{};
@@ -798,14 +797,7 @@ public:
 
     static uint32_t sqtt_buffer0_size_value(uint32_t size_val) { return 0; }
 
-    static uint32_t spi_sqg_event_ctl(bool enableSqgEvents)
-    {
-        uint32_t spi_sqg_event_ctl{0};
-        spi_sqg_event_ctl =
-            SET_REG_FIELD_BITS(SPI_CONFIG_CNTL, ENABLE_SQG_TOP_EVENTS, enableSqgEvents) |
-            SET_REG_FIELD_BITS(SPI_CONFIG_CNTL, ENABLE_SQG_BOP_EVENTS, enableSqgEvents);
-        return spi_sqg_event_ctl;
-    }
+    static uint32_t spi_sqg_event_ctl(bool enableSqgEvents) { return 0; }
 
     static uint32_t sqtt_zero_size_value() { return 0; }
 
