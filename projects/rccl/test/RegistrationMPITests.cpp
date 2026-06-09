@@ -70,6 +70,11 @@ public:
         return hasPattern("IPC reuse buffer");
     }
 
+    bool hasNumSegments(int n) const
+    {
+        return hasPattern("numSegments " + std::to_string(n));
+    }
+
     bool hasNETRegistration() const
     {
         return hasPattern("NET register userbuff") ||
@@ -176,6 +181,18 @@ protected:
     {
         const char* graphReg = getenv("NCCL_GRAPH_REGISTER");
         return (graphReg && std::string(graphReg) == "1");
+    }
+
+    bool isCuMemEnabled()
+    {
+        const char* cuMem = getenv("NCCL_CUMEM_ENABLE");
+        return (cuMem && std::string(cuMem) == "1");
+    }
+
+    bool isMultiSegmentRegisterEnabled()
+    {
+        const char* mseg = getenv("NCCL_MULTI_SEGMENT_REGISTER");
+        return (!mseg || std::string(mseg) != "0");
     }
 
     bool isPerRankLoggingEnabled() { return MPIHelpers::isPerRankLoggingEnabled(); }
@@ -506,6 +523,266 @@ TEST_F(UBR_SendRecv, RingPattern_MultiNode)
     bool verified = verifyBufferData<T>(recvInfo.buffer, count,
         [expected](size_t) { return expected; });
     ASSERT_TRUE(verified);
+}
+
+// ============================================================================
+// Multi-Segment Registration Tests
+// ============================================================================
+
+/**
+ * @brief Tests for buffer registration when the user buffer spans multiple
+ *        underlying physical allocations ("multi-segment" buffers).
+ *
+ * A multi-segment buffer is built by mapping N separate physical handles
+ * (hipMemCreate) contiguously into a single reserved virtual address range
+ * (hipMemAddressReserve + hipMemMap). cuMemGetAddressRange() on the head of
+ * such a buffer returns only the first segment, so ipcRegisterBuffer() in
+ * src/transport/p2p.cc detects the cross-boundary case via:
+ *
+ *     if (baseAddr + baseSize < userbuff + buffSize) multiSegment = true;
+ *
+ * and dispatches to ipcHandleMultiSegmentRegistration() when both
+ * ncclCuMemEnable() and NCCL_MULTI_SEGMENT_REGISTER (default 1) are true.
+ *
+ * The IPC multi-segment branch is gated on ROCM_VERSION >= 70000 in p2p.cc,
+ * so this suite is compiled in only on that path. It needs only 2 same-node
+ * ranks (the IPC peer path is what we want to exercise).
+ */
+class UBR_MultiSegment : public RegistrationTestBase
+{
+protected:
+    using T = RegTestConfig::DefaultType;
+
+    struct MultiSegmentBuffer
+    {
+        hipDeviceptr_t                                vaBase      = 0;
+        size_t                                        segmentSize = 0;
+        size_t                                        totalSize   = 0;
+        std::vector<hipMemGenericAllocationHandle_t>  handles;
+    };
+
+    void createMultiSegmentBuffer(int dev,
+                                  size_t requestedSegmentSize,
+                                  int numSegments,
+                                  MultiSegmentBuffer& buf)
+    {
+        buf = MultiSegmentBuffer{};
+
+        hipMemAllocationProp prop = {};
+        prop.type                = hipMemAllocationTypePinned;
+        prop.location.type       = hipMemLocationTypeDevice;
+        prop.location.id         = dev;
+        prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+
+        size_t granularity = 0;
+        HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+
+        const size_t segSize   = ((requestedSegmentSize + granularity - 1) / granularity) * granularity;
+        const size_t totalSize = segSize * numSegments;
+
+        hipDeviceptr_t vaBase = 0;
+        HIP_CHECK(hipMemAddressReserve(&vaBase, totalSize, granularity, 0, 0));
+
+        std::vector<hipMemGenericAllocationHandle_t> handles(numSegments, 0);
+        char* vaBaseBytes = static_cast<char*>(vaBase);
+        for (int i = 0; i < numSegments; i++) {
+            HIP_CHECK(hipMemCreate(&handles[i], segSize, &prop, 0));
+            HIP_CHECK(hipMemMap(vaBaseBytes + i * segSize, segSize, 0, handles[i], 0));
+        }
+
+        hipMemAccessDesc accessDesc = {};
+        accessDesc.location.type    = hipMemLocationTypeDevice;
+        accessDesc.location.id      = dev;
+        accessDesc.flags            = hipMemAccessFlagsProtReadWrite;
+        HIP_CHECK(hipMemSetAccess(vaBase, totalSize, &accessDesc, 1));
+
+        buf.vaBase      = vaBase;
+        buf.segmentSize = segSize;
+        buf.totalSize   = totalSize;
+        buf.handles     = std::move(handles);
+    }
+
+    void releaseMultiSegmentBuffer(MultiSegmentBuffer& buf)
+    {
+        if (buf.totalSize == 0) return;
+        HIP_EXPECT(hipMemUnmap(buf.vaBase, buf.totalSize));
+        for (auto h : buf.handles) {
+            if (h != 0) HIP_EXPECT(hipMemRelease(h));
+        }
+        HIP_EXPECT(hipMemAddressFree(buf.vaBase, buf.totalSize));
+        buf.vaBase      = 0;
+        buf.segmentSize = 0;
+        buf.totalSize   = 0;
+        buf.handles.clear();
+    }
+};
+
+/**
+ * @brief Out-of-place AllReduce on a buffer that spans multiple VMM segments.
+ *
+ * Exercises the multi-segment IPC registration branch on Ring AllReduce.
+ *
+ * Layout (N = kSegmentsPerHalf, total 2 * N physical segments allocated):
+ *   Total reserved VA = 2 * N * kSegmentSize
+ *   sendbuff = [0,                  N * kSegmentSize)  covers first N segments
+ *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
+ *
+ * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
+ *   "IPC registering buffer ... numSegments 4"
+ */
+TEST_F(UBR_MultiSegment, AllReduce_SpansMultipleSegments)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled()) << "NCCL_MULTI_SEGMENT_REGISTER must be set to 1";
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kSegmentSize     = 32 * 1024 * 1024;
+    constexpr int    kNumSegments     = 8;
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments));
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(
+        createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+    if (buf.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    }
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+
+    const size_t halfSize = buf.totalSize / 2;
+    ASSERT_EQ(halfSize % sizeof(T), 0u);
+    char*  base    = reinterpret_cast<char*>(buf.vaBase);
+    void*  sendBuf = base;
+    void*  recvBuf = base + halfSize;
+    size_t count   = halfSize / sizeof(T);
+
+    void* regHandle = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+    auto regCleanup = makeScopeGuard([&]() {
+        if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+    });
+    ASSERT_MPI_NE(regHandle, nullptr);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    ncclResult_t result = ncclAllReduce(sendBuf, recvBuf, count,
+                                        getNcclDataType<T>(), ncclSum,
+                                        getActiveCommunicator(), getActiveStream());
+    ASSERT_MPI_EQ(ncclSuccess, result);
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    REGLogChecker checker = getLogChecker();
+    TEST_INFO("SpansMultipleSegments: %s (log size: %zu bytes)",
+              checker.getSummary().c_str(), checker.getContentLength());
+    ASSERT_TRUE(checker.hasNumSegments(kNumSegments / 2))
+        << "Expected 'numSegments " << (kNumSegments / 2)
+        << "' in log - the multi-segment IPC registration branch did not fire";
+}
+
+/**
+ * @brief Register once, AllReduce twice - exercises the IPC reuse fast path.
+ *
+ * After the first collective on a registered multi-segment buffer,
+ * a subsequent collective on the same buffer must hit that cache entry and skip IPC registration.
+ * entirely - logging "IPC reuse buffer" instead of "IPC registering buffer".
+ *
+ * The AllReduce_SpansMultipleSegments_SingleNode sweep issues a single
+ * collective per iteration on a fresh buffer, so it never reaches the reuse
+ * branch. This test asserts both:
+ *   - the first call performs initial IPC registration  (hasIPCRegistration)
+ *   - a subsequent call hits the cached entry           (hasIPCReuse)
+ */
+TEST_F(UBR_MultiSegment, AllReduce_RegisterOnceUseTwice)
+{
+    if (!validateTestPrerequisites(/*min_processes=*/2)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+    ASSERT_TRUE(isCuMemEnabled())
+        << "NCCL_CUMEM_ENABLE must be set to 1 (gates the multi-segment IPC branch in p2p.cc:1071)";
+    ASSERT_TRUE(isMultiSegmentRegisterEnabled())
+        << "NCCL_MULTI_SEGMENT_REGISTER must not be 0 (gates the multi-segment IPC branch in p2p.cc:1071)";
+    ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+
+    int dev = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+
+    constexpr size_t kRequestedSegmentSize = 128 * 1024 * 1024;
+    constexpr int    kNumSegments          = 4;
+
+    MultiSegmentBuffer buf;
+    ASSERT_NO_FATAL_FAILURE(
+        createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
+    if (buf.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    }
+    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+
+    const size_t halfSize = buf.totalSize / 2;
+    ASSERT_EQ(halfSize % sizeof(T), 0u);
+    char*  base    = reinterpret_cast<char*>(buf.vaBase);
+    void*  sendBuf = base;
+    void*  recvBuf = base + halfSize;
+    size_t count   = halfSize / sizeof(T);
+
+    void* regHandle = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+    auto regCleanup = makeScopeGuard([&]() {
+        if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+    });
+    ASSERT_MPI_NE(regHandle, nullptr);
+
+    int rank   = 0;
+    int nRanks = 0;
+    ncclCommUserRank(getActiveCommunicator(), &rank);
+    ncclCommCount(getActiveCommunicator(), &nRanks);
+
+    initSendBuffer<T>(sendBuf, count, rank);
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllReduce(sendBuf, recvBuf, count,
+                                getNcclDataType<T>(), ncclSum,
+                                getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, halfSize));
+
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclAllReduce(sendBuf, recvBuf, count,
+                                getNcclDataType<T>(), ncclSum,
+                                getActiveCommunicator(), getActiveStream()));
+    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+
+    REGLogChecker checker = getLogChecker();
+    TEST_INFO("RegisterOnceUseTwice: %s (log size: %zu bytes)",
+              checker.getSummary().c_str(), checker.getContentLength());
+    ASSERT_TRUE(checker.hasIPCRegistration())
+        << "Expected initial 'IPC registering buffer' log entry from the first AllReduce";
+    ASSERT_TRUE(checker.hasIPCReuse())
+        << "Expected 'IPC reuse buffer' log entry from the second AllReduce - "
+           "the cache lookup at p2p.cc:1047 was not hit";
 }
 
 // ============================================================================
