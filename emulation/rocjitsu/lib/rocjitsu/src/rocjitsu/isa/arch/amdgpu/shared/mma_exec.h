@@ -1415,6 +1415,101 @@ void exec_wmma_f16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
       [](float val) { return util::f32_to_f16(val); }, const_acc);
 }
 
+/// Fast path for the f16-output WMMA shapes (v_wmma_f16_*_f16). Like the f32-out
+/// f16 specialization for the input convert + matmul, but the result is packed
+/// to 16 bits (2 per dst word) and written through the WMMA 16-bit output map.
+/// Falls back to generic exec_wmma_f16 without AVX-512 / under force-scalar.
+template <uint32_t M, uint32_t N, uint32_t K>
+inline void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                               uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+  constexpr uint32_t in_bits = 16;
+  static_assert(N % 16 == 0, "specialized f16 WMMA assumes N is a multiple of the zmm width");
+  auto fallback = [&]() {
+    exec_wmma_f16(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
+                  const_acc);
+  };
+  if constexpr (!util::has_stdx_simd) {
+    fallback();
+    return;
+  } else {
+    if (util::force_scalar() || util::native<float>::size() != 16) {
+      fallback();
+      return;
+    }
+    require_wmma_wave32(cu);
+    constexpr uint32_t W = 16;
+    const uint32_t wf = cu.wf_size();
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    alignas(64) float A_buf[M * K];
+    alignas(64) float B_buf[K * N];
+    alignas(64) float C_buf[M * N];
+    alignas(64) float A_f32[M * K];
+    alignas(64) float B_f32[N * K];
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K);
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K);
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_16(M, N, row, col);
+        uint32_t raw = c_words[out.reg * wf + out.lane];
+        C_buf[row * N + col] =
+            (const_acc != ACC_FROM_VGPR)
+                ? std::bit_cast<float>(const_acc)
+                : util::f16_to_f32(static_cast<uint16_t>((raw >> (out.sub_element * 16)) & 0xFFFF));
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = wmma_input_loc(M, K, row, k, in_bits);
+        A_buf[row * K + k] = A_f32[(al.vgpr_offset * wf + al.lane) * 2 + al.sub_element];
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = wmma_input_loc(N, K, col, k, in_bits);
+        B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t c0 = 0; c0 < N; c0 += W) {
+        util::native<float> c_row;
+        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        for (uint32_t k = 0; k < K; ++k) {
+          util::native<float> a_bcast(A_buf[row * K + k]);
+          util::native<float> b_row;
+          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+          c_row = util::stdx::fma(a_bcast, b_row, c_row);
+        }
+        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+      }
+    // Pack f32 results to f16, two per dst word (the WMMA 16-bit output map).
+    constexpr uint32_t DST_REGS = ((M * N) / WMMA_WAVE32 + 1) / 2;
+    alignas(64) uint32_t words[DST_REGS * WMMA_WAVE32] = {};
+    alignas(64) uint8_t masks[DST_REGS * WMMA_WAVE32] = {};
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_16(M, N, row, col);
+        uint32_t idx = out.reg * WMMA_WAVE32 + out.lane;
+        uint32_t shift = out.sub_element * 16;
+        uint16_t v = util::f32_to_f16(C_buf[row * N + col]);
+        words[idx] = (words[idx] & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(v) << shift);
+        masks[idx] |= 1u << out.sub_element;
+      }
+    for (uint32_t reg = 0; reg < DST_REGS; ++reg)
+      for (uint32_t lane = 0; lane < WMMA_WAVE32; ++lane) {
+        uint32_t idx = reg * WMMA_WAVE32 + lane;
+        uint32_t word = words[idx];
+        if (masks[idx] != 0x3u) {
+          uint32_t old = d_words[reg * wf + lane];
+          if ((masks[idx] & 0x1u) == 0)
+            word = (word & 0xFFFF0000u) | (old & 0x0000FFFFu);
+          if ((masks[idx] & 0x2u) == 0)
+            word = (word & 0x0000FFFFu) | (old & 0xFFFF0000u);
+        }
+        d_words[reg * wf + lane] = word;
+      }
+  }
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
                      uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,

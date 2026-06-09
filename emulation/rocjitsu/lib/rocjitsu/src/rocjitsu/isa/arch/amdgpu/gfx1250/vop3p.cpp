@@ -4176,8 +4176,7 @@ void VWmmaF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = src2.read_scalar(wf);
   }
-  amdgpu::exec_wmma_f16(cu, 16, 16, 32, 16, dst, src0_base, src1_base, s2, amdgpu::extract_f16,
-                        amdgpu::extract_f16, const_acc);
+  amdgpu::exec_wmma_f16_spec<16, 16, 32>(cu, dst, src0_base, src1_base, s2, const_acc);
 }
 
 VWmmaF3216x16x32Bf16Vop3p::VWmmaF3216x16x32Bf16Vop3p(const MachineInst *inst)
