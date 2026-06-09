@@ -937,6 +937,19 @@ SIMD_VOP2_FMA_F64: dict[str, str] = {
 }
 
 
+# template_name -> cpp_bin_op (over native<double>, no modifiers). VOP2 f64
+# binary forms: scalar bodies read src0/vsrc1 as read_lane64, no abs/neg/omod/
+# clamp. add/mul are bit-exact; max_num/min_num use util::stdx::fmax/fmin (scalar
+# is std::fmax/std::fmin) with the same accepted NaN-payload / signed-zero-tie
+# carve-out as the f64 vop3 forms in SIMD_VOP3_BINARY_FP64.
+SIMD_VOP2_BINARY_FP64: dict[str, str] = {
+    'v_add_f64_vop2': '[](auto a, auto b) { return a + b; }',
+    'v_mul_f64_vop2': '[](auto a, auto b) { return a * b; }',
+    'v_max_num_f64_vop2': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
+    'v_min_num_f64_vop2': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+}
+
+
 # --- 64-bit-lane VOP1 unary (f64 math + v_mov_b64) -------------------------
 #
 # Maps template_name -> (lane_cpp_type, unary functor). Read/written as
@@ -2446,6 +2459,9 @@ def simd_probe_line(template_name: str) -> str | None:
     specf64 = SIMD_VOP2_FMA_F64.get(template_name)
     if specf64 is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP2_FMA_F64({specf64});'
+    spec2binf64 = SIMD_VOP2_BINARY_FP64.get(template_name)
+    if spec2binf64 is not None:
+        return f'  ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64({spec2binf64});'
     spec1f64 = SIMD_VOP1_UNARY_F64.get(template_name)
     if spec1f64 is not None:
         lane_t, cpp_op = spec1f64

@@ -604,6 +604,47 @@ template <typename T, typename Inst, typename FmaOp>
   return false;
 }
 
+/// 64-bit-lane VOP2 binary SIMD fast path (v_add_f64 / v_mul_f64 /
+/// v_max_num_f64 / v_min_num_f64). VOP2 has no abs/neg/omod/clamp fields and
+/// reads its second source as `vsrc1` (not `src1`); otherwise identical to the
+/// f64 FMA vop2 path minus the dst-accumulate operand. add/mul are bit-exact;
+/// fmax/fmin carry the accepted NaN-payload / signed-zero-tie carve-out (same as
+/// the f64 vop3 binary path and every other min/max).
+template <typename Inst, typename BinOp>
+  requires(util::has_stdx_simd)
+[[nodiscard]] inline bool try_execute_binary_vop2_f64_simd(Inst &inst, Wavefront &wf,
+                                                           BinOp bin_op) {
+  if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.vsrc1.simd_capable() ||
+      !inst.vdst.simd_capable())
+    return false;
+  using T = double;
+  constexpr std::size_t W = util::native_width64;
+  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
+  const uint64_t exec = wf.exec();
+  const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
+  const ConstVgprStoragePair64 rs1 = simd_src_reg64(inst.vsrc1, wf);
+  const VgprStoragePair64 rd64 = simd_dst_reg64(inst.vdst, wf);
+  const auto a_bcast =
+      rs0.lo ? util::native<T>{} : util::broadcast64<T>(inst.src0.read_scalar64(wf));
+  const auto b_bcast =
+      rs1.lo ? util::native<T>{} : util::broadcast64<T>(inst.vsrc1.read_scalar64(wf));
+  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
+    const uint64_t chunk = (exec >> base) & chunk_full;
+    if (chunk == 0)
+      continue;
+    const auto a = simd_load64_or<T>(rs0, base, a_bcast);
+    const auto b = simd_load64_or<T>(rs1, base, b_bcast);
+    write_simd64_at<T>(rd64, inst.vdst, wf, base, bin_op(a, b), chunk);
+  }
+  return true;
+}
+
+/// Unconstrained fallback for the f64 vop2 binary path.
+template <typename Inst, typename BinOp>
+[[nodiscard]] inline bool try_execute_binary_vop2_f64_simd(Inst &, Wavefront &, BinOp) {
+  return false;
+}
+
 /// 64-bit-lane VOP1 unary SIMD fast path. The 64-bit counterpart of
 /// try_execute_unary_vop1_simd: reads src0 as `native<T>` through the split
 /// lo/hi VGPR-pair path (read_simd64), applies `un_op` (`native<T> ->
@@ -2992,6 +3033,13 @@ template <typename Inst>
 /// commas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP2_FMA_F64(...)                                                        \
   if (::rocjitsu::amdgpu::try_execute_ternary_vop2_f64_simd<double>(inst, wf, __VA_ARGS__))        \
+  return
+
+/// 64-bit-lane VOP2 binary counterpart (v_add/mul/max_num/min_num_f64). Lane
+/// type fixed to double, read/written through the split lo/hi VGPR-pair path
+/// (vsrc1 as the second source). Variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP2_BINARY_FP64(...)                                                    \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_f64_simd(inst, wf, __VA_ARGS__))                 \
   return
 
 /// 64-bit-lane VOP1 unary counterpart. `T` is the 64-bit lane type (`double`
