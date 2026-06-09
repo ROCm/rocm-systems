@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#ifdef ENABLE_ROCSHMEM
+#ifdef ENABLE_ROCSHMEM_GIN
 
 /**
  * Built-in GIN plugin for rocshmem.
@@ -172,4 +172,4 @@ ncclGin_t ncclGinRocshmem = {
   .finalize        = ginRocshmemFinalize,
 };
 
-#endif // ENABLE_ROCSHMEM
+#endif // ENABLE_ROCSHMEM_GIN

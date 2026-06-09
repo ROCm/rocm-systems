@@ -17,6 +17,7 @@
 #include "comm.h"
 #include "nccl_device/gin/rocshmem/gin_rocshmem_device_host_common_gda.h"
 #include "plugin/nccl_net.h"
+#include <gda/gin_qp_factory.hpp>
 
 struct ginRocshmemGdaListenCtx {
   int dev;
@@ -29,7 +30,7 @@ struct ginRocshmemGdaCollCtx {
 
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   *ctx = nullptr;
-  return ncclSuccess;
+  return (rocshmem_gin_probe_devices() > 0) ? ncclSuccess : ncclInternalError;
 }
 
 static ncclResult_t ginRocshmemGdaDevices(int* ndev) {

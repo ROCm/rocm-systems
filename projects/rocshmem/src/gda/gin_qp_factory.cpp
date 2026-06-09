@@ -1329,3 +1329,66 @@ int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set) {
   if (!qp_set) return -1;
   return qp_set->provider;
 }
+
+static bool gin_validate_device(int provider, struct ibv_device_attr *dev_attr) {
+#if defined(GDA_BNXT)
+  if (provider == GDAProvider::BNXT) {
+    const uint32_t supported_bnxt_part_ids[] = { 0x1760 /* BCM57608 */ };
+    const char min_fw_ver[] = "233.2.104.0";
+
+    bool part_ok = false;
+    for (auto pid : supported_bnxt_part_ids) {
+      if (dev_attr->vendor_part_id == pid) { part_ok = true; break; }
+    }
+    if (!part_ok) {
+      LOG_WARN("GIN probe: unsupported BNXT part_id=0x%x", dev_attr->vendor_part_id);
+      return false;
+    }
+    if (strverscmp(min_fw_ver, dev_attr->fw_ver) > 0) {
+      LOG_WARN("GIN probe: BNXT firmware %s below minimum %s", dev_attr->fw_ver, min_fw_ver);
+      return false;
+    }
+  }
+#endif
+  return true;
+}
+
+int rocshmem_gin_probe_devices(void) {
+  if (!ibv.is_initialized) return 0;
+
+  int ndev = 0;
+  struct ibv_device **dev_list = ibv.get_device_list(&ndev);
+  if (!dev_list || ndev == 0) return 0;
+
+  int count = 0;
+  for (int d = 0; d < ndev; d++) {
+    struct ibv_context *ctx = ibv.open_device(dev_list[d]);
+    if (!ctx) continue;
+
+    struct ibv_device_attr dev_attr;
+    if (ibv.query_device(ctx, &dev_attr) != 0) {
+      ibv.close_device(ctx);
+      continue;
+    }
+
+    int provider = gin_detect_provider(&dev_attr);
+    if (provider < 0 || !gin_validate_device(provider, &dev_attr)) {
+      ibv.close_device(ctx);
+      continue;
+    }
+
+    for (int port = 1; port <= dev_attr.phys_port_cnt; port++) {
+      struct ibv_port_attr port_attr;
+      if (ibv.query_port(ctx, port, &port_attr) == 0 &&
+          port_attr.state == IBV_PORT_ACTIVE) {
+        count++;
+        break;
+      }
+    }
+    ibv.close_device(ctx);
+  }
+
+  ibv.free_device_list(dev_list);
+  return count;
+}
+

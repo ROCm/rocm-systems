@@ -130,6 +130,17 @@ void rocshmem_gin_dereg_mr(void* mr);
  */
 int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set);
 
+/**
+ * @brief Probe for usable IB devices with active ports and recognized vendor IDs.
+ *
+ * Lightweight check — opens devices, checks vendor ID and port state, closes immediately.
+ * Reuses gin_qp_factory's existing vendor detection (BNXT/IONIC/MLX5).
+ *
+ * @return Number of usable devices (0 if none found).
+ */
+int rocshmem_gin_probe_devices(void);
+
+
 #ifdef __cplusplus
 }
 #endif

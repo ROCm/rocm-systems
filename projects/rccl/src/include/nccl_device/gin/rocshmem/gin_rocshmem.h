@@ -127,7 +127,7 @@ struct ncclGinApi_ResetSignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
 template <>
 struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_API> {
   template <typename Coop>
-  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order ord) {
+  NCCL_DEVICE_INLINE static void call(ncclGinCtx ctx, Coop coop, cuda::memory_order ord, uint32_t* abortFlag) {
     rocshmem::rocshmem_quiet();
   }
 };
