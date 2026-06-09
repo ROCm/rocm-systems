@@ -389,3 +389,45 @@ TEST(MfmaSimdBenchmark, F64_16x16x4_f64) {
   };
   bench("v_mfma_f64_16x16x4_f64", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }
+
+// f32-input MFMA shapes (no F16C convert; specialization gain is the
+// addressing-unroll + raw vgpr_data + no-heap, not a convert).
+TEST(MfmaSimdBenchmark, F32_32x32x2_f32_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 2, B = 1, bits = 32;
+  fx.seed(S0_OFF, 16, bits, SmallGen(31));
+  fx.seed(S1_OFF, 16, bits, SmallGen(32));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f32_spec<32, 32, 2, 1>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                                 fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_32x32x2_f32 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_16x16x4_f32_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 4, B = 1, bits = 32;
+  fx.seed(S0_OFF, 16, bits, SmallGen(33));
+  fx.seed(S1_OFF, 16, bits, SmallGen(34));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f32_spec<16, 16, 4, 1>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                                 fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_16x16x4_f32 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_32x32x1x2_f32_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 1, B = 2, bits = 32;
+  fx.seed(S0_OFF, 16, bits, SmallGen(35));
+  fx.seed(S1_OFF, 16, bits, SmallGen(36));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                                 fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_32x32x1_f32 (B=2) [specialized]", fx, run, double(M) * N * K * B,
+        /*is_int=*/false);
+}

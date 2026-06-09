@@ -1039,6 +1039,73 @@ inline void exec_wmma_f32_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
   }
 }
 
+/// Fast path for the f32-input WMMA shapes (v_wmma_f32_*_f32). f32 inputs, so no
+/// F16C convert — the hoist reads each operand word straight through vgpr_data.
+/// Compile-time M/N/K fully unroll the matmul, looped over N in zmm-width chunks
+/// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
+/// under force-scalar.
+template <uint32_t M, uint32_t N, uint32_t K>
+inline void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
+                                   uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+  constexpr uint32_t in_bits = 32;
+  static_assert(N % 16 == 0, "specialized f32 WMMA assumes N is a multiple of the zmm width");
+  if constexpr (!util::has_stdx_simd) {
+    exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
+                  const_acc);
+    return;
+  } else {
+    if (util::force_scalar() || util::native<float>::size() != 16) {
+      exec_wmma_f32(cu, M, N, K, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
+                    const_acc);
+      return;
+    }
+    require_wmma_wave32(cu);
+    constexpr uint32_t W = 16;
+    const uint32_t wf = cu.wf_size();
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    alignas(64) float A_buf[M * K];
+    alignas(64) float B_buf[K * N];
+    alignas(64) float C_buf[M * N];
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                   ? std::bit_cast<float>(const_acc)
+                                   : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t k = 0; k < K; ++k) {
+        auto al = wmma_input_loc(M, K, row, k, in_bits);
+        A_buf[row * K + k] = std::bit_cast<float>(a_words[al.vgpr_offset * wf + al.lane]);
+      }
+    for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto bl = wmma_input_loc(N, K, col, k, in_bits);
+        B_buf[k * N + col] = std::bit_cast<float>(b_words[bl.vgpr_offset * wf + bl.lane]);
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t c0 = 0; c0 < N; c0 += W) {
+        util::native<float> c_row;
+        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        for (uint32_t k = 0; k < K; ++k) {
+          util::native<float> a_bcast(A_buf[row * K + k]);
+          util::native<float> b_row;
+          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+          c_row = util::stdx::fma(a_bcast, b_row, c_row);
+        }
+        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+      }
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = wmma_output_loc_32(M, N, row, col);
+        d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(C_buf[row * N + col]);
+      }
+  }
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_swmmac_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
                            uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0, uint32_t s1,
@@ -2354,6 +2421,87 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
 ///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
 ///   - cbsz/blgp lane permutation is non-default
 ///   - RJ_FORCE_SCALAR is set
+/// Fast path for the f32-input MFMA shapes (v_mfma_f32_*_f32). Like the f16
+/// specialization but the inputs are already f32, so there is no F16C convert —
+/// the hoist reads each operand word straight through vgpr_data. BATCH covers
+/// the batched shapes (e.g. 32x32x1x2). Compile-time M/N/K/BATCH fully unroll
+/// the matmul; it loops over N in zmm-width chunks (N must be a multiple of 16,
+/// so the 4x4 shape stays on the generic path). Falls back to the generic
+/// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
+inline void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
+                                   uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
+                                   uint32_t abid, uint32_t blgp) {
+  constexpr uint32_t in_bits = 32;
+  static_assert(N % 16 == 0, "specialized f32 MFMA assumes N is a multiple of the zmm width");
+  if constexpr (!util::has_stdx_simd) {
+    exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32, amdgpu::extract_f32,
+             const_acc, cbsz, abid, blgp);
+    return;
+  } else {
+    if (util::force_scalar() || cbsz != 0 || blgp != 0 || util::native<float>::size() != 16) {
+      exec_f32(cu, M, N, K, BATCH, in_bits, dst, s0, s1, s2, amdgpu::extract_f32,
+               amdgpu::extract_f32, const_acc, cbsz, abid, blgp);
+      return;
+    }
+    constexpr uint32_t W = 16;
+    const uint32_t wf = cu.wf_size();
+    const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
+    const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
+    const uint32_t *c_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s2));
+    uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
+    alignas(64) float A_buf[M * K];
+    alignas(64) float B_buf[K * N];
+    alignas(64) float C_buf[M * N];
+    bool has_nan_or_inf = false;
+    for (uint32_t b = 0; b < BATCH; ++b) {
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          C_buf[row * N + col] = (const_acc != ACC_FROM_VGPR)
+                                     ? std::bit_cast<float>(const_acc)
+                                     : std::bit_cast<float>(c_words[out.reg * wf + out.lane]);
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t k = 0; k < K; ++k) {
+          auto al = input_loc(M, K, BATCH, row, k, b, in_bits);
+          A_buf[row * K + k] = std::bit_cast<float>(a_words[al.vgpr_offset * wf + al.lane]);
+        }
+      for (uint32_t k = 0; k < K; ++k)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto bl = input_loc(N, K, BATCH, col, k, b, in_bits);
+          B_buf[k * N + col] = std::bit_cast<float>(b_words[bl.vgpr_offset * wf + bl.lane]);
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t c0 = 0; c0 < N; c0 += W) {
+          util::native<float> c_row;
+          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          for (uint32_t k = 0; k < K; ++k) {
+            util::native<float> a_bcast(A_buf[row * K + k]);
+            util::native<float> b_row;
+            b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+            c_row = util::stdx::fma(a_bcast, b_row, c_row);
+          }
+          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        }
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = output_loc_32(M, N, row, col, b);
+          float fv = C_buf[row * N + col];
+          d_words[out.reg * wf + out.lane] = std::bit_cast<uint32_t>(fv);
+          if (std::isnan(fv) || std::isinf(fv))
+            has_nan_or_inf = true;
+        }
+    }
+    if (has_nan_or_inf) {
+      util::Logger::vm([&](auto &os) {
+        os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} {}x{}x{}_f32", dst,
+                          s0, s1, s2, M, N, K);
+      });
+    }
+  }
+}
+
 template <uint32_t M, uint32_t N, uint32_t K>
 inline void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
                                    uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
