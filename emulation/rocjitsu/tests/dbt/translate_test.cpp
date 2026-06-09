@@ -1547,8 +1547,19 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_pk_f16_f32_sequence() {
   };
 }
 
+std::vector<ExpectedCdna3Inst> expected_cdna3_cvt_pk_bf16_f32_sequence() {
+  return {
+      expect_vop3(272), // v_lshrrev_b32 16, high source into scratch.
+      expect_vop3(462), // v_alignbit_b32 packs source halves.
+      expect_sopp(2),   // s_branch back to original fallthrough.
+  };
+}
+
 std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence() {
   std::vector<ExpectedCdna3Inst> expected = {
+      expect_sop1(1),   // s_mov_b64 save EXEC.
+      expect_sop1(0),   // s_mov_b32 exec_lo, all lanes.
+      expect_sop1(0),   // s_mov_b32 exec_hi, all lanes.
       expect_ds(118),   // ds_read_b64
       expect_sopp(12),  // s_waitcnt lgkmcnt(0)
       expect_vop3(652), // v_mbcnt_lo_u32_b32
@@ -1567,23 +1578,13 @@ std::vector<ExpectedCdna3Inst> expected_cdna3_ds_read_b64_tr_b16_sequence() {
       expect_sopp(12),  // s_waitcnt lgkmcnt(0)
       expect_vop3(493), // v_perm_b32
       expect_vop3(308), // v_add_u32
+      expect_ds(63),    expect_ds(63), expect_sopp(12), expect_vop3(493), expect_vop3(308),
+      expect_ds(63),    expect_ds(63), expect_sopp(12), expect_vop3(493), expect_vop3(308),
       expect_ds(63),    expect_ds(63), expect_sopp(12), expect_vop3(493),
+      expect_sop1(1), // s_mov_b64 restore EXEC.
   };
-
   auto first_pack = expected_cdna3_raw_b16_pack_sequence();
   expected.insert(expected.end(), first_pack.begin(), first_pack.end());
-  expected.insert(expected.end(), {
-                                      expect_vop3(308),
-                                      expect_ds(63),
-                                      expect_ds(63),
-                                      expect_sopp(12),
-                                      expect_vop3(493),
-                                      expect_vop3(308),
-                                      expect_ds(63),
-                                      expect_ds(63),
-                                      expect_sopp(12),
-                                      expect_vop3(493),
-                                  });
   auto second_pack = expected_cdna3_raw_b16_pack_sequence();
   expected.insert(expected.end(), second_pack.begin(), second_pack.end());
   expected.push_back(expect_sopp(2));
@@ -1638,7 +1639,17 @@ std::array<uint32_t, 2> make_cdna4_cvt_pk_f16_f32_words() {
   return encode_two_word_inst(inst);
 }
 
-std::array<uint32_t, 2> make_cdna4_permlane32_swap_b32_words(uint16_t encoding_id) {
+std::array<uint32_t, 2> make_cdna4_cvt_pk_bf16_f32_words() {
+  rocjitsu::cdna4::Vop3MachineInst inst{};
+  inst.encoding = 0x34;
+  inst.op = 616;
+  inst.vdst = 0;
+  inst.src0 = 256 + 1;
+  inst.src1 = 256 + 2;
+  return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_permlane_swap_b32_words(uint16_t encoding_id, uint16_t opcode) {
   rocjitsu::cdna4::Vop1MachineInst inst{};
   // The legalization table's VOP1 encoding ids (0xfc..0xff) are the generated
   // primary-decode ids, not the raw 7-bit VOP1 selector.  Primary decode looks
@@ -1646,10 +1657,18 @@ std::array<uint32_t, 2> make_cdna4_permlane32_swap_b32_words(uint16_t encoding_i
   // VDST[7:6] in bits 24:23.  Keep the real VOP1 selector at 0x3f and vary
   // VDST's high bits to exercise each generated semantic rule.
   inst.encoding = 0x3f;
-  inst.op = 90;
+  inst.op = opcode;
   inst.vdst = static_cast<uint8_t>((encoding_id - 0xFCu) << 6);
   inst.src0 = 256 + 1;
   return encode_two_word_inst(inst);
+}
+
+std::array<uint32_t, 2> make_cdna4_permlane16_swap_b32_words(uint16_t encoding_id) {
+  return make_cdna4_permlane_swap_b32_words(encoding_id, 89);
+}
+
+std::array<uint32_t, 2> make_cdna4_permlane32_swap_b32_words(uint16_t encoding_id) {
+  return make_cdna4_permlane_swap_b32_words(encoding_id, 90);
 }
 
 std::array<uint32_t, 2> make_cdna4_mfma_words(uint8_t opcode, uint8_t vdst, uint16_t src0,
@@ -1717,6 +1736,16 @@ std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
        expected_cdna3_bitop3_sequence(false)},
       {"VCvtPkF16F32", 0x1A4, 615, make_cdna4_cvt_pk_f16_f32_words(),
        expected_cdna3_cvt_pk_f16_f32_sequence()},
+      {"VCvtPkBf16F32", 0x1A4, 616, make_cdna4_cvt_pk_bf16_f32_words(),
+       expected_cdna3_cvt_pk_bf16_f32_sequence()},
+      {"VPermlane16SwapB32E32", 0xFC, 89, make_cdna4_permlane16_swap_b32_words(0xFC),
+       expected_cdna3_permlane32_swap_sequence()},
+      {"VPermlane16SwapB32E32Hi1", 0xFD, 89, make_cdna4_permlane16_swap_b32_words(0xFD),
+       expected_cdna3_permlane32_swap_sequence()},
+      {"VPermlane16SwapB32E32Hi2", 0xFE, 89, make_cdna4_permlane16_swap_b32_words(0xFE),
+       expected_cdna3_permlane32_swap_sequence()},
+      {"VPermlane16SwapB32E32Hi3", 0xFF, 89, make_cdna4_permlane16_swap_b32_words(0xFF),
+       expected_cdna3_permlane32_swap_sequence()},
       {"VPermlane32SwapB32E32", 0xFC, 90, make_cdna4_permlane32_swap_b32_words(0xFC),
        expected_cdna3_permlane32_swap_sequence()},
       {"VPermlane32SwapB32E32Hi1", 0xFD, 90, make_cdna4_permlane32_swap_b32_words(0xFD),

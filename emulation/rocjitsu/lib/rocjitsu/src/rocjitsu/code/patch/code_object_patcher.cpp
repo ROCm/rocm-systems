@@ -186,6 +186,28 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
              : 0;
 }
 
+void raise_msgpack_resource_count(std::vector<uint8_t> &image, std::string_view key,
+                                  uint32_t count) {
+  if (count > 127)
+    return;
+
+  const auto *needle = reinterpret_cast<const uint8_t *>(key.data());
+  for (size_t i = 0; i + key.size() < image.size(); ++i) {
+    if (std::memcmp(image.data() + i, needle, key.size()) != 0)
+      continue;
+
+    const size_t value_offset = i + key.size();
+    const uint8_t value = image[value_offset];
+    if (value <= 0x7f) {
+      if (value < count)
+        image[value_offset] = static_cast<uint8_t>(count);
+    } else if (value == 0xcc && value_offset + 1 < image.size() &&
+               image[value_offset + 1] < count) {
+      image[value_offset + 1] = static_cast<uint8_t>(count);
+    }
+  }
+}
+
 [[nodiscard]] bool image_contains_range(size_t image_size, uint64_t file_offset, uint64_t size) {
   const uint64_t limit = static_cast<uint64_t>(image_size);
   return file_offset <= limit && size <= limit - file_offset;
@@ -634,6 +656,8 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
                   translation.target_user_sgpr_count);
   AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
                   translation.target_private_size != 0 ? 1 : 0);
+  raise_msgpack_resource_count(image_, ".vgpr_count", translation.target_vgpr_count);
+  raise_msgpack_resource_count(image_, ".sgpr_count", translation.target_sgpr_count);
 
   if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
                              translation.target_entry_text_offset))

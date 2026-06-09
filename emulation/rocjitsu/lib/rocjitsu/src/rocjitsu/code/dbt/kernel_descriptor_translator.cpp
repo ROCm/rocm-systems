@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <functional>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -135,6 +136,18 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
   default:
     return 0;
   }
+}
+
+[[nodiscard]] uint32_t arch_max_descriptor_sgpr_allocation(rj_code_arch_t arch) {
+  // CdnaIsaBase::MAX_SGPRS_PER_WF is the ordinary allocatable SGPR range used
+  // by liveness and semantic scratch selection. Kernel descriptors encode the
+  // rounded wavefront allocation, which also covers architecturally reserved
+  // SGPRs such as VCC. A kernel using s100 plus VCC can therefore legally
+  // encode a 112-SGPR allocation even though no lowering rule may allocate
+  // ordinary scratch SGPRs up there.
+  if (is_cdna_arch(arch))
+    return 112;
+  return arch_max_sgprs(arch);
 }
 
 [[nodiscard]] uint32_t arch_max_vgprs(rj_code_arch_t arch) {
@@ -500,6 +513,29 @@ void append_descriptor_error(KdTranslation &result, std::string message) {
   result.supported = false;
 }
 
+[[nodiscard]] std::string hex_u64(uint64_t value) {
+  std::ostringstream os;
+  os << std::hex << value;
+  return os.str();
+}
+
+void append_descriptor_resource_error(KdTranslation &result, std::string message,
+                                      uint32_t required_vgprs, uint32_t required_vgpr_allocation,
+                                      uint32_t max_host_vgprs,
+                                      const KernelDescriptorTranslationOptions &options) {
+  message += " (descriptor_offset=0x" + hex_u64(result.descriptor_file_offset) +
+             ", entry_text_offset=0x" + hex_u64(result.entry_text_offset) +
+             ", guest_vgprs=" + std::to_string(result.guest_vgpr_count) +
+             ", minimum_vgprs=" + std::to_string(options.minimum_vgprs) +
+             ", required_vgprs=" + std::to_string(required_vgprs) +
+             ", accvgpr_base=" + std::to_string(result.accvgpr_base) +
+             ", target_accvgpr_base=" + std::to_string(result.target_accvgpr_base) +
+             ", target_agprs=" + std::to_string(result.target_agpr_count) +
+             ", required_allocation=" + std::to_string(required_vgpr_allocation) +
+             ", max_vgprs=" + std::to_string(max_host_vgprs) + ")";
+  append_descriptor_error(result, std::move(message));
+}
+
 [[nodiscard]] uint32_t clamp_granulated(uint32_t value, uint32_t max_value, KdTranslation &result,
                                         const char *field_name) {
   if (value <= max_value)
@@ -563,18 +599,18 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       AMDHSA_BITS_GET(src.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   result.guest_vgpr_allocation_count =
       granulated_count_to_registers(guest_vgpr_granulated, guest_vgpr_granularity);
+  result.guest_vgpr_count = result.guest_vgpr_allocation_count;
   if (arch_has_accvgpr(guest_arch) && result.accvgpr_base != 0 &&
       result.guest_vgpr_allocation_count > result.accvgpr_base) {
-    // CDNA encodes a unified VGPR allocation endpoint while ACCUM_OFFSET
-    // carves the trailing AccVGPR window out of that allocation. Liveness and
-    // semantic scratch allocation need the ordinary VGPR floor, not the unified
-    // endpoint, or they will unnecessarily force new scratch above the
-    // accumulator window and move ACCUM_OFFSET. That descriptor growth changed
-    // dynamic Triton matmul results on gfx942 because the translated MFMA/DS
-    // transpose sequence depends on the original ordinary/accumulator split.
+    // CDNA descriptors encode one unified VGPR allocation. ACCUM_OFFSET splits
+    // that allocation into the ordinary VGPR prefix and the AccVGPR window.
+    // Without this split, gfx950 kernels that reserve a full accumulator bank
+    // look like they require 512 ordinary VGPRs and are incorrectly rejected.
+    // It also prevents liveness from forcing scratch above the accumulator
+    // window when ordinary dead registers can be reused safely.
+    result.guest_vgpr_count = result.accvgpr_base;
     result.guest_agpr_count = result.guest_vgpr_allocation_count - result.accvgpr_base;
   }
-  result.guest_vgpr_count = result.guest_vgpr_allocation_count - result.guest_agpr_count;
 
   // Start from the guest's ordinary VGPR count. Keep the descriptor allocation
   // count separate for target reporting and descriptor encoding. CDNA
@@ -602,7 +638,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   required_vgprs = std::max(required_vgprs, options.minimum_vgprs);
   if (arch_has_accvgpr(guest_arch) && arch_has_accvgpr(host_arch) &&
       uses_gfx90a_accum_offset(host_arch) && result.accvgpr_base != 0) {
-    if (result.target_agpr_count != 0 && options.minimum_vgprs > result.accvgpr_base) {
+    if (options.minimum_vgprs > result.accvgpr_base) {
       result.target_accvgpr_base = util::align_up(options.minimum_vgprs, 4u);
       if (result.target_accvgpr_base > 256) {
         append_descriptor_error(result,
@@ -621,10 +657,28 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.host_vgpr_allocation_count = required_vgpr_allocation;
   result.target_vgpr_count = required_vgprs;
   result.target_vgpr_allocation_count = required_vgpr_allocation;
-  if (arch_max_vgprs(host_arch) != 0 && required_vgpr_allocation > arch_max_vgprs(host_arch)) {
-    append_descriptor_error(result,
-                            "required VGPR allocation exceeds target limit; spill tiers are "
-                            "not implemented for this descriptor");
+  const uint32_t max_host_vgprs = arch_max_vgprs(host_arch);
+  if (max_host_vgprs != 0 && required_vgprs > max_host_vgprs) {
+    append_descriptor_resource_error(
+        result,
+        "required ordinary VGPR count exceeds target limit; spill tiers are not implemented for "
+        "this descriptor",
+        required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
+  }
+  if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
+    if (max_host_vgprs != 0 && result.target_agpr_count > max_host_vgprs) {
+      append_descriptor_resource_error(
+          result,
+          "required AccVGPR count exceeds target limit; spill tiers are not implemented for this "
+          "descriptor",
+          required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
+    }
+  } else if (max_host_vgprs != 0 && required_vgpr_allocation > max_host_vgprs) {
+    append_descriptor_resource_error(
+        result,
+        "required VGPR allocation exceeds target limit; spill tiers are not implemented for this "
+        "descriptor",
+        required_vgprs, required_vgpr_allocation, max_host_vgprs, options);
   }
 
   result.target_vgpr_granulated = clamp_granulated(
@@ -641,7 +695,8 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.guest_sgpr_count = granulated_count_to_registers(guest_sgpr_granulated, 8);
   result.host_sgpr_count = std::max(result.guest_sgpr_count, options.minimum_sgprs);
   result.target_sgpr_count = result.host_sgpr_count;
-  if (arch_max_sgprs(host_arch) != 0 && result.host_sgpr_count > arch_max_sgprs(host_arch)) {
+  if (arch_max_descriptor_sgpr_allocation(host_arch) != 0 &&
+      result.host_sgpr_count > arch_max_descriptor_sgpr_allocation(host_arch)) {
     append_descriptor_error(result, "required SGPR count exceeds target limit; spill tiers are not "
                                     "implemented for this descriptor");
   }

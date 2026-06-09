@@ -357,10 +357,9 @@ TEST(KernelDescriptorTranslator, CdnaAccVgprExpansionGrowsUnifiedVgprAllocationF
         });
     ASSERT_NE(translated, translations.end());
     EXPECT_EQ(translated->accvgpr_base, 64u);
-    // CDNA COMPUTE_PGM_RSRC1 is the ordinary VGPR floor used for scratch
-    // safety. The AccVGPR window starts at ACCUM_OFFSET, but it is not
-    // subtracted from the ordinary guest count.
-    EXPECT_EQ(translated->guest_vgpr_count, 128u);
+    // CDNA descriptors encode one unified VGPR allocation. ACCUM_OFFSET splits
+    // that allocation into the ordinary VGPR prefix and the AccVGPR window.
+    EXPECT_EQ(translated->guest_vgpr_count, 64u);
     EXPECT_EQ(translated->guest_agpr_count, 64u);
     EXPECT_EQ(translated->target_vgpr_count, 128u);
     EXPECT_EQ(translated->target_vgpr_allocation_count, 128u);
@@ -409,6 +408,93 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch)
       reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
   EXPECT_EQ(AMDHSA_BITS_GET(patched_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
             31u);
+}
+
+TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgprs) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(fixture.valid);
+
+  auto *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc1 = 0;
+  kd->compute_pgm_rsrc3 = 0;
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 11);
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 23);
+
+  rocjitsu::KernelDescriptorTranslationOptions options;
+  options.minimum_vgprs = 104;
+  const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
+                                                         ROCJITSU_CODE_ARCH_CDNA3, options);
+  const auto translated =
+      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
+        return translation.descriptor_file_offset == fixture.kd_file_off;
+      });
+  ASSERT_NE(translated, translations.end());
+  EXPECT_EQ(translated->accvgpr_base, 96u);
+  EXPECT_EQ(translated->target_accvgpr_base, 104u);
+  EXPECT_EQ(translated->target_vgpr_count, 104u);
+  EXPECT_EQ(translated->target_agpr_count, 0u);
+
+  rocjitsu::AmdGpuCodeObject mutated(fixture.image.data(), fixture.image.size());
+  ASSERT_TRUE(mutated.is_valid());
+  rocjitsu::CodeObjectPatcher patcher(mutated);
+  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA3));
+
+  const auto patched_image = patcher.emit();
+  const auto *patched_kd =
+      reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
+  EXPECT_EQ(AMDHSA_BITS_GET(patched_kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            25u);
+}
+
+TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAllocation) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(fixture.valid);
+
+  auto *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc1 = 0;
+  kd->compute_pgm_rsrc3 = 0;
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 63);
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+
+  const auto translations =
+      translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translated =
+      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
+        return translation.descriptor_file_offset == fixture.kd_file_off;
+      });
+  ASSERT_NE(translated, translations.end());
+  EXPECT_TRUE(translated->supported);
+  EXPECT_EQ(translated->target_vgpr_count, 256u);
+  EXPECT_EQ(translated->target_agpr_count, 256u);
+  EXPECT_EQ(translated->target_vgpr_allocation_count, 512u);
+  EXPECT_EQ(translated->target_vgpr_granulated, 63u);
+}
+
+TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRounding) {
+  using namespace rocr::llvm::amdhsa;
+
+  auto fixture = mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(fixture.valid);
+
+  auto *kd = mutable_kernel_descriptor(fixture);
+  kd->compute_pgm_rsrc1 = 0;
+  AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 13);
+
+  const auto translations =
+      translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+  const auto translated =
+      std::find_if(translations.begin(), translations.end(), [&fixture](const auto &translation) {
+        return translation.descriptor_file_offset == fixture.kd_file_off;
+      });
+  ASSERT_NE(translated, translations.end());
+  EXPECT_TRUE(translated->supported);
+  EXPECT_EQ(translated->guest_sgpr_count, 112u);
+  EXPECT_EQ(translated->target_sgpr_count, 112u);
+  EXPECT_EQ(translated->target_sgpr_granulated, 13u);
 }
 
 TEST(KernelDescriptorTranslator, RdnaWave64UsesAmdhsaDescriptorVgprEncoding) {
