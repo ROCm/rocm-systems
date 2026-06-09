@@ -868,28 +868,6 @@ def shmem_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
 
 
 # ----------------------------------------------------------------------------
-# CTest generator functions
-# ----------------------------------------------------------------------------
-
-
-def _cmake_escape(s: str) -> str:
-    """Escape a string for use inside CMake double-quoted arguments."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _ctest_item_ctest_identity(item: pytest.Item) -> tuple[str, str, str]:
-    """Return ``(original_nodeid, item name, CTest nodeid fragment)`` for CMake generation."""
-    test_id = item.stash.get(_original_nodeid_key, item.nodeid)
-    test_name = item.name
-    if "::" in test_id:
-        file_part, _, rest = test_id.partition("::")
-        test_nodeid = f"{Path(file_part).name}::{rest}"
-    else:
-        test_nodeid = Path(test_id).name
-    return test_id, test_name, test_nodeid
-
-
-# ----------------------------------------------------------------------------
 # Test-category (tier) label injection from test_categories.yaml
 # ----------------------------------------------------------------------------
 # Single source of truth for tier policy is tests/test_categories.yaml.
@@ -1031,6 +1009,28 @@ def _resolve_arch_exclude_labels(test_name: str) -> set[str]:
         if any(p.search(test_name) for p in patterns):
             matched.add(label)
     return matched
+
+
+# ----------------------------------------------------------------------------
+# CTest generator functions
+# ----------------------------------------------------------------------------
+
+
+def _cmake_escape(s: str) -> str:
+    """Escape a string for use inside CMake double-quoted arguments."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _ctest_item_ctest_identity(item: pytest.Item) -> tuple[str, str, str]:
+    """Return ``(original_nodeid, item name, CTest nodeid fragment)`` for CMake generation."""
+    test_id = item.stash.get(_original_nodeid_key, item.nodeid)
+    test_name = item.name
+    if "::" in test_id:
+        file_part, _, rest = test_id.partition("::")
+        test_nodeid = f"{Path(file_part).name}::{rest}"
+    else:
+        test_nodeid = Path(test_id).name
+    return test_id, test_name, test_nodeid
 
 
 def _emit_ctest_header_block() -> list[str]:
