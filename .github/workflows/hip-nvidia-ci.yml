@@ -1,3 +1,7 @@
+# NVIDIA build is separate from theRock CI due to multiple issues:
+# 1. We do not want to publish any CUDA based artifacts.
+# 2. CLR builds are parallel to the rest of the monorepo: we neither consume anything upstream, nor impact any downstream projects.
+# Hence, the check is independent from the rest of the CI
 name: HIP NVIDIA CI
 
 on:
