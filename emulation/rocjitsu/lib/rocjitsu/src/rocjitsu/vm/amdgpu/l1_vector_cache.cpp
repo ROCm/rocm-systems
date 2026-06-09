@@ -38,11 +38,11 @@ void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
 void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                                bool non_temporal, uint32_t vmid) {
   Mtype inst_mtype = mtype;
-  Mtype effective = mtype;
-  if (memory_)
-    effective = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
 
   util::Logger::cp([&](auto &os) {
+    Mtype effective = inst_mtype;
+    if (memory_)
+      effective = effective_mtype(inst_mtype, memory_->pte_mtype(addr, vmid));
     static thread_local uint64_t mtype_counts[5] = {};
     static thread_local uint64_t total = 0;
     ++mtype_counts[static_cast<int>(effective)];
@@ -87,11 +87,11 @@ void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype
 void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                 bool non_temporal, uint32_t vmid) {
   Mtype inst_mtype = mtype;
-  Mtype effective = mtype;
-  if (memory_)
-    effective = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
 
   util::Logger::vm([&](auto &os) {
+    Mtype effective = inst_mtype;
+    if (memory_)
+      effective = effective_mtype(inst_mtype, memory_->pte_mtype(addr, vmid));
     if (addr >= 0x4d00c00000ULL && addr < 0x4d00c00100ULL) {
       uint32_t val = 0;
       if (size >= 4)

@@ -203,7 +203,8 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
   auto key = wg_key(dispatch_id, wg_id);
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
-    plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
+    if (plugin_hooks_enabled_)
+      plugin_group_->onAmdgpuWorkgroupCompleted(dispatch_id, wg_id);
     active_wgs_.erase(it);
     if (cp_)
       cp_->notify_wg_complete(dispatch_id, wg_id);
@@ -256,7 +257,8 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
-  plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
+  if (plugin_hooks_enabled_)
+    plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
   if (inst->data()->tag() == GLOBAL_MEM && shared_aperture_base_ != 0) {
     auto &d = *inst->data_as<VectorMemState>();
@@ -326,7 +328,8 @@ void ComputeUnitCore::update_wf_states() {
       for (auto &w2 : wfs_)
         if (w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() == WfState::BARRIER)
           barrier_wfs.push_back(w2.get());
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
+      if (plugin_hooks_enabled_)
+        plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(barrier_wfs));
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
@@ -388,7 +391,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
     }
   }
 
-  plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
+  if (plugin_hooks_enabled_)
+    plugin_group_->onAmdgpuBeforeExecuteInstruction(active->pc, *inst, *active);
 
   {
     auto mn = std::string_view(inst->mnemonic());
@@ -407,7 +411,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   execute_instruction(inst, *active);
-  plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+  if (plugin_hooks_enabled_)
+    plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
