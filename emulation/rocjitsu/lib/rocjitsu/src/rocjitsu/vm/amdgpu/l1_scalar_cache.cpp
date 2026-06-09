@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace rocjitsu {
@@ -36,30 +37,42 @@ void L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid) {
 void L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid) {
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
-    Mtype mtype = Mtype::RW;
-    if (memory_)
-      mtype = memory_->pte_mtype(ea, vmid);
-
     uint8_t buf[4];
     std::memcpy(buf, &src[i], 4);
+    uint32_t copied = 0;
+    while (copied < sizeof(buf)) {
+      const uint64_t chunk_addr = ea + copied;
+      const uint32_t line_offset = CacheStore::line_offset(chunk_addr);
+      const uint32_t chunk =
+          std::min<uint32_t>(sizeof(buf) - copied, CacheStore::LINE_SIZE - line_offset);
 
-    if (mtype == Mtype::UC) {
-      l2_->write(ea, buf, 4, Mtype::UC, vmid);
-      continue;
+      Mtype mtype = Mtype::RW;
+      if (memory_)
+        mtype = memory_->pte_mtype(chunk_addr, vmid);
+
+      if (mtype == Mtype::UC) {
+        l2_->write(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
+        copied += chunk;
+        continue;
+      }
+
+      if (mtype == Mtype::CC) {
+        cache_.invalidate(chunk_addr);
+        l2_->write(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+        copied += chunk;
+        continue;
+      }
+
+      ensure_line(chunk_addr, vmid); // read-allocate on miss
+
+      simdojo::CacheTag *tag = nullptr;
+      cache_.lookup(chunk_addr, &tag);
+      assert(tag != nullptr && "ensure_line must guarantee hit");
+
+      cache_.write_line(chunk_addr, buf + copied, line_offset, chunk);
+      tag->dirty = true;
+      copied += chunk;
     }
-
-    if (mtype == Mtype::CC) {
-      cache_.invalidate(ea);
-      l2_->write(ea, buf, 4, Mtype::CC, vmid);
-      continue;
-    }
-
-    ensure_line(ea, vmid);
-    simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag);
-    assert(tag != nullptr && "ensure_line must guarantee hit");
-    cache_.write_line(ea, buf, CacheStore::line_offset(ea), 4);
-    tag->dirty = true;
   }
 }
 
@@ -73,29 +86,54 @@ void L1ScalarCache::writeback_all(uint32_t vmid) {
 void L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid) {
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
+    uint8_t buf[4]{};
+    uint32_t copied = 0;
+    while (copied < sizeof(buf)) {
+      const uint64_t chunk_addr = ea + copied;
+      const uint32_t line_offset = CacheStore::line_offset(chunk_addr);
+      const uint32_t chunk =
+          std::min<uint32_t>(sizeof(buf) - copied, CacheStore::LINE_SIZE - line_offset);
+
+      Mtype mtype = Mtype::RW;
+      if (memory_)
+        mtype = memory_->pte_mtype(chunk_addr, vmid);
+
+      if (mtype == Mtype::UC) {
+        l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
+      } else if (mtype == Mtype::CC) {
+        cache_.invalidate(chunk_addr);
+        l2_->read(chunk_addr, buf + copied, chunk, Mtype::CC, vmid);
+      } else {
+        ensure_line(chunk_addr, vmid);
+        cache_.read_line(chunk_addr, buf + copied, line_offset, chunk);
+      }
+      copied += chunk;
+    }
+    std::memcpy(&dst[i], buf, 4);
+  }
+}
+
+void L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid) {
+  uint32_t copied = 0;
+  while (copied < num_bytes) {
+    uint64_t ea = addr + copied;
+    uint32_t line_offset = CacheStore::line_offset(ea);
+    uint32_t chunk = std::min(num_bytes - copied, CacheStore::LINE_SIZE - line_offset);
+
     Mtype mtype = Mtype::RW;
     if (memory_)
       mtype = memory_->pte_mtype(ea, vmid);
 
     if (mtype == Mtype::UC) {
-      uint8_t buf[4]{};
-      l2_->read(ea, buf, 4, Mtype::UC, vmid);
-      std::memcpy(&dst[i], buf, 4);
-      continue;
-    }
-
-    if (mtype == Mtype::CC) {
+      l2_->read(ea, dst + copied, chunk, Mtype::UC, vmid);
+    } else if (mtype == Mtype::CC) {
       cache_.invalidate(ea);
-      uint8_t buf[4]{};
-      l2_->read(ea, buf, 4, Mtype::CC, vmid);
-      std::memcpy(&dst[i], buf, 4);
-      continue;
+      l2_->read(ea, dst + copied, chunk, Mtype::CC, vmid);
+    } else {
+      ensure_line(ea, vmid);
+      cache_.read_line(ea, dst + copied, line_offset, chunk);
     }
-
-    ensure_line(ea, vmid);
-    uint8_t buf[4]{};
-    cache_.read_line(ea, buf, CacheStore::line_offset(ea), 4);
-    std::memcpy(&dst[i], buf, 4);
+    copied += chunk;
   }
 }
 

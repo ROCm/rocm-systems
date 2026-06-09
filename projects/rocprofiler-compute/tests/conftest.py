@@ -61,7 +61,8 @@ class ProfileModeImportGuard:
         "amdsmi",  # AMD System Management Interface
         "hip",  # HIP runtime Python bindings
         "rocprofv3",  # rocprofv3 python modules such as avail
-        "rocprofv3_avail_module",  # Alternative avail module for backward compatibility
+        "rocprofv3_avail_module",  # Alternative avail module for
+        # backward compatibility
     ])
 
     def __enter__(self):
@@ -182,42 +183,31 @@ def pytest_addoption(parser):
         "--coverage-seed",
         type=int,
         default=random.randrange(2**32),
-        help=(
-            "RNG seed for test_torch_trace_coverage operator sampling "
-            "(default: a fresh random 32-bit seed per pytest invocation)"
-        ),
+        help="RNG seed for test_torch_trace_coverage sampling.",
     )
     parser.addoption(
         "--coverage-n",
         type=int,
         default=100,
-        help=(
-            "ATen operator sample budget for test_torch_trace_coverage. "
-            "Structural entries are always included; this budget caps "
-            "only the random ATen sample (default: 100)."
-        ),
+        help="Random ATen sample budget (default 100).",
     )
 
 
-@pytest.fixture
-def require_torch_gpu():
-    """Skip the test when PyTorch or a CUDA-capable GPU is unavailable."""
+def require_torch(*, gpu: bool = False) -> None:
+    """Skip when PyTorch (or, with gpu=True, GPU) is unavailable."""
     if importlib.util.find_spec("torch") is None:
         pytest.skip("PyTorch is not installed")
-    import torch
-
-    if not torch.cuda.is_available():
+    try:
+        import torch
+    except Exception as e:
+        pytest.skip(f"PyTorch import failed: {type(e).__name__}: {e}")
+    if gpu and not torch.cuda.is_available():
         pytest.skip("torch.cuda.is_available() is False")
 
 
 @pytest.fixture(autouse=True)
 def skip_monkeypatch_with_binary(request):
-    """Auto-skip tests using monkeypatch when --call-binary is used.
-
-    Tests that use monkeypatch to patch Python functions/classes/modules
-    cannot work with --call-binary mode because the binary runs in a separate
-    process where Python patches don't apply.
-    """
+    """Skip monkeypatch tests under --call-binary (patches don't cross processes)."""
     if (
         request.config.getoption("--call-binary")
         and "monkeypatch" in request.fixturenames

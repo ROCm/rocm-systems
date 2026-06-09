@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <bit>
 #include <cassert>
 #include <cstring>
@@ -31,45 +32,64 @@ void L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid) {
   cache_.fill_line(addr, line_buf);
 }
 
+// Per-line CC invalidation is sufficient: the CP serializes dispatch N's cache
+// management before dispatch N+1 begins execution, so no blanket invalidation
+// at dispatch boundaries is needed.
 void L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                                bool non_temporal, uint32_t vmid) {
   Mtype inst_mtype = mtype;
+  Mtype effective = mtype;
   if (memory_)
-    mtype = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
+    effective = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
 
   util::Logger::cp([&](auto &os) {
     static thread_local uint64_t mtype_counts[5] = {};
     static thread_local uint64_t total = 0;
-    ++mtype_counts[static_cast<int>(mtype)];
+    ++mtype_counts[static_cast<int>(effective)];
     ++total;
     if ((total & (total - 1)) == 0 && total >= 1024) {
       os << std::format("L1V_READ_MTYPE_STATS total={} UC={} CC={} RW={} WB={} NT={} "
                         "last: addr={:#x} inst={} eff={} vmid={}",
                         total, mtype_counts[0], mtype_counts[1], mtype_counts[2], mtype_counts[3],
                         mtype_counts[4], addr, static_cast<int>(inst_mtype),
-                        static_cast<int>(mtype), vmid);
+                        static_cast<int>(effective), vmid);
     }
   });
 
-  if (mtype == Mtype::UC || non_temporal) {
-    l2_->read(addr, dst, size, mtype, vmid);
-    return;
-  }
+  uint32_t copied = 0;
+  while (copied < size) {
+    const uint64_t ea = addr + copied;
+    const uint32_t line_offset = CacheStore::line_offset(ea);
+    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    Mtype chunk_mtype = inst_mtype;
+    if (memory_)
+      chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
 
-  if (mtype == Mtype::CC) {
-    cache_.invalidate(addr);
-    l2_->read(addr, dst, size, mtype, vmid);
-    return;
-  }
+    if (chunk_mtype == Mtype::UC || non_temporal) {
+      l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      copied += chunk;
+      continue;
+    }
 
-  ensure_line(addr, vmid);
-  cache_.read_line(addr, dst, CacheStore::line_offset(addr), size);
+    if (chunk_mtype == Mtype::CC) {
+      cache_.invalidate(ea);
+      l2_->read(ea, dst + copied, chunk, chunk_mtype, vmid);
+      copied += chunk;
+      continue;
+    }
+
+    ensure_line(ea, vmid);
+    cache_.read_line(ea, dst + copied, line_offset, chunk);
+    copied += chunk;
+  }
 }
 
 void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                 bool non_temporal, uint32_t vmid) {
+  Mtype inst_mtype = mtype;
+  Mtype effective = mtype;
   if (memory_)
-    mtype = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
+    effective = effective_mtype(mtype, memory_->pte_mtype(addr, vmid));
 
   util::Logger::vm([&](auto &os) {
     if (addr >= 0x4d00c00000ULL && addr < 0x4d00c00100ULL) {
@@ -83,26 +103,44 @@ void L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, uint32_t size
       static thread_local uint32_t tw = 0;
       if (++tw <= 20)
         os << std::format("L1_WRITE @{:#x} size={} val={:#x} mtype={}", addr, size, val,
-                          static_cast<int>(mtype));
+                          static_cast<int>(effective));
     }
   });
-  if (mtype == Mtype::UC || non_temporal) {
-    l2_->write(addr, src, size, mtype, vmid);
-    return;
+
+  uint32_t copied = 0;
+  while (copied < size) {
+    const uint64_t ea = addr + copied;
+    const uint32_t line_offset = CacheStore::line_offset(ea);
+    const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
+    Mtype chunk_mtype = inst_mtype;
+    if (memory_)
+      chunk_mtype = effective_mtype(inst_mtype, memory_->pte_mtype(ea, vmid));
+
+    if (chunk_mtype == Mtype::UC || non_temporal) {
+      l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+      copied += chunk;
+      continue;
+    }
+
+    ensure_line(ea, vmid);
+    cache_.write_line(ea, src + copied, line_offset, chunk);
+
+    // Write through to L2 for all cacheable stores. This ensures partial writes
+    // from different CUs sharing the same L2 are properly merged at byte
+    // granularity via L2::write(), rather than full-line replacement via
+    // writeback_line() during L1 eviction/flush.
+    l2_->write(ea, src + copied, chunk, chunk_mtype, vmid);
+
+    simdojo::CacheTag *tag = nullptr;
+    cache_.lookup(ea, &tag);
+    assert(tag != nullptr && "ensure_line must guarantee hit");
+
+    // L1 line stays clean since L2 has the authoritative copy.
+    tag->coherence = (chunk_mtype == Mtype::CC) ? simdojo::CoherenceState::SHARED
+                                                : simdojo::CoherenceState::EXCLUSIVE;
+    tag->dirty = false;
+    copied += chunk;
   }
-
-  ensure_line(addr, vmid);
-  cache_.write_line(addr, src, CacheStore::line_offset(addr), size);
-
-  l2_->write(addr, src, size, mtype, vmid);
-
-  simdojo::CacheTag *tag = nullptr;
-  cache_.lookup(addr, &tag);
-  assert(tag != nullptr && "ensure_line must guarantee hit");
-
-  tag->coherence =
-      (mtype == Mtype::CC) ? simdojo::CoherenceState::SHARED : simdojo::CoherenceState::EXCLUSIVE;
-  tag->dirty = false;
 }
 
 void L1VectorCache::load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,

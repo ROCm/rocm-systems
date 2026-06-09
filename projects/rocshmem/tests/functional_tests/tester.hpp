@@ -81,7 +81,7 @@
   X(TeamCtxPut,                36)  \
   X(TeamCtxPutNBI,             37)  \
   X(TeamCtxInfra,              38)  \
-  X(PutNBIMR,                  39)  \
+  /* 39: PutNBIMR removed, use PutNBI with -b instead */ \
   X(AMO_Set,                   40)  \
   X(AMO_Swap,                  41)  \
   X(AMO_FetchAnd,              42)  \
@@ -202,6 +202,7 @@ class Tester {
   size_t num_msgs = 0;
   size_t num_timed_msgs = 0;
   int num_loops = 0;
+  int batch_size = 0;
   int size_factor = 1;
   int bw_factor = 1;
   int rtt_factor = 1;
