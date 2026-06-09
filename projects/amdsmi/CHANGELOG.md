@@ -75,6 +75,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Also removed the incorrect "in MHz" note from the `current` field, which is a frequency index, not a frequency value.
   - Updated the Python API reference to state the unit is Hz.
 
+- **Fixed fabric telemetry APIs returning the wrong status on non-IFoE systems**.  
+  - `amdsmi_alloc_fabric_telemetry()`, `amdsmi_get_fabric_telemetry_data()`, and `amdsmi_free_fabric_telemetry()` now return `AMDSMI_STATUS_NOT_SUPPORTED` on systems without fabric hardware, consistent with `amdsmi_get_gpu_fabric_info()`.
+
 ## amd_smi_lib for ROCm 7.13.0
 
 ### Added
