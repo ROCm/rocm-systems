@@ -630,7 +630,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_Memcpy) {
   Bh = reinterpret_cast<int*>(malloc(sizeBytes));
   HIP_CHECK(hipMalloc(&Bd, sizeBytes));
 
-  const size_t offset = isQuickLevel() ? 32 : OFFSET;
+  const size_t offset = isQuickLevel() ? 8 : OFFSET;
   REQUIRE(LEN > offset);
   if (mem_type) {
     for (size_t i = 0; i < offset; i++) {

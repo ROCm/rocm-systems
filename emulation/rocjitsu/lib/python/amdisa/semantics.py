@@ -37,6 +37,7 @@ class InstructionSemantics:
             (e.g. ``scc0``, ``vccnz``, ``execz``).
         elem_size: Element size in bytes for memory instructions.
         num_elems: Number of elements for memory instructions.
+        transpose_kind: Cross-lane transpose kind for transpose-load instructions.
         sign_extend: True if the load result should be sign-extended.
     """
 
@@ -48,6 +49,7 @@ class InstructionSemantics:
     branch_condition: str | None = None
     elem_size: int | None = None
     num_elems: int | None = None
+    transpose_kind: int = 0
     sign_extend: bool = False
     d16_hi: bool = False
     d16_lo: bool = False
@@ -289,6 +291,8 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'endpgm')
     if name == 'S_WAITCNT':
         return InstructionSemantics(name, 'waitcnt')
+    if name == 'S_SET_VGPR_MSB':
+        return InstructionSemantics(name, 'set_vgpr_msb')
     # RDNA3/3.5 named per-counter wait instructions (GFX11 — these coexist with
     # S_WAITCNT; each waits on a single counter via its immediate operand).
     _NAMED_WAIT = {
@@ -309,6 +313,8 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         'S_WAIT_EXPCNT',
         'S_WAIT_SAMPLECNT',
         'S_WAIT_BVHCNT',
+        'S_WAIT_TENSORCNT',
+        'S_WAIT_ASYNCCNT',
         'S_WAIT_LOADCNT_DSCNT',
         'S_WAIT_STORECNT_DSCNT',
     }
@@ -341,34 +347,44 @@ _SOP1_SPECIAL = {
     'S_BITSET0': ('scalar_unary', 'bitset0'),
     'S_BITSET1': ('scalar_unary', 'bitset1'),
     'S_GETPC': ('scalar_getpc', None),
+    'S_GET_PC': ('scalar_getpc', None),
     'S_SETPC': ('scalar_setpc', None),
+    'S_SET_PC': ('scalar_setpc', None),
     'S_SWAPPC': ('scalar_swappc', None),
+    'S_SWAP_PC': ('scalar_swappc', None),
+    'S_ADD_PC': ('scalar_addpc', None),
+    'S_GET_SHADER_CYCLES': ('scalar_shader_cycles', None),
     'S_RFE': ('true_nop', None),
     'S_RFE_RESTORE': ('true_nop', None),
-    'S_MOVRELD': ('nop', None),
-    'S_MOVRELS': ('nop', None),
+    'S_MOVRELD': ('scalar_movrel', 'dst'),
+    'S_MOVRELS': ('scalar_movrel', 'src'),
+    'S_MOVRELSD_2': ('scalar_movrel', 'srcdst2'),
     'S_ABS': ('scalar_unary', 'abs'),
     'S_SEXT_I32_I8': None,  # handled specially below
     'S_SEXT_I32_I16': None,
     'S_QUADMASK': ('scalar_unary', 'quadmask'),
     'S_SET_GPR_IDX_ON': ('true_nop', None),
     'S_SET_GPR_IDX_IDX': ('true_nop', None),
-    'S_BITREPLICATE': ('nop', None),
+    'S_BITREPLICATE': ('scalar_bitreplicate', None),
     'S_CBRANCH_JOIN': ('true_nop', None),
-    'S_BITREPL_B64_B32': ('nop', None),
+    'S_BITREPL_B64_B32': ('scalar_bitreplicate', None),
     # RDNA4-exclusive SOP1 instructions:
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
     'S_CLZ_I32_U32': ('scalar_unary', 'clz'),
     'S_CLZ_I32_U64': ('scalar_unary', 'clz64', 'u64'),
     'S_CLS_I32': ('scalar_unary', 'cls'),
     'S_CLS_I32_I64': ('scalar_unary', 'cls64', 'i64'),
-    'S_MOVRELSD2': ('nop', None),
-    'S_MOVRELSD2_B32': ('nop', None),
-    'S_MOVRELSD_2': ('nop', None),
-    'S_MOVRELSD_2_B32': ('nop', None),
-    'S_SENDMSG_RTN': ('nop', None),
+    'S_MOVRELSD2': ('scalar_movrel', 'srcdst2'),
+    'S_MOVRELSD2_B32': ('scalar_movrel', 'srcdst2'),
+    'S_MOVRELSD_2': ('scalar_movrel', 'srcdst2'),
+    'S_MOVRELSD_2_B32': ('scalar_movrel', 'srcdst2'),
+    'S_SENDMSG_RTN': ('scalar_sendmsg_rtn', None),
     'S_BARRIER_SIGNAL': ('true_nop', None),
     'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', None),
+    'S_GET_BARRIER_STATE': ('scalar_barrier_state', None, 'b32'),
+    'S_BARRIER_INIT': ('true_nop', None),
+    'S_BARRIER_JOIN': ('true_nop', None),
+    'S_WAKEUP_BARRIER': ('true_nop', None),
     'S_ALLOC_VGPR': ('true_nop', None),
     'S_SLEEP_VAR': ('true_nop', None),
     'S_CEIL': ('scalar_unary', 'ceil'),
@@ -468,7 +484,13 @@ def _derive_sop1(name: str) -> InstructionSemantics | None:
 # Map mnemonic stem (after stripping dtype) to operation name.
 _SOP2_OP_MAP = {
     'S_ADD': 'add',
+    'S_ADD_CO': 'add',
+    'S_ADD_CO_CI': 'addc',
+    'S_ADD_NC': 'add',
     'S_SUB': 'sub',
+    'S_SUB_CO': 'sub',
+    'S_SUB_CO_CI': 'subb',
+    'S_SUB_NC': 'sub',
     'S_ADDC': 'addc',
     'S_SUBB': 'subb',
     'S_MIN': 'min',
@@ -483,7 +505,9 @@ _SOP2_OP_MAP = {
     'S_NOR': 'nor',
     'S_XNOR': 'xnor',
     'S_ANDN2': 'andn2',
+    'S_AND_NOT1': 'andn2',
     'S_ORN2': 'orn2',
+    'S_OR_NOT1': 'orn2',
     'S_LSHL': 'shl',
     'S_LSHR': 'shr',
     'S_ASHR': 'ashr',
@@ -494,6 +518,9 @@ _SOP2_OP_MAP = {
     'S_LSHL2_ADD': 'lshl2_add',
     'S_LSHL3_ADD': 'lshl3_add',
     'S_LSHL4_ADD': 'lshl4_add',
+    'S_FMAAK': 'fma',
+    'S_FMAMK': 'fma',
+    'S_FMAC': 'fmac',
     'S_PACK_LL_B32_B16': None,
     'S_PACK_LH_B32_B16': None,
     'S_PACK_HH_B32_B16': None,
@@ -520,11 +547,45 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'scalar_binop', operation='pack_hh', data_type='b32', sets_scc='none'
         )
+    if name == 'S_PACK_HL_B32_B16':
+        return InstructionSemantics(
+            name, 'scalar_binop', operation='pack_hl', data_type='b32', sets_scc='none'
+        )
+
+    if name == 'S_CVT_PK_RTZ_F16_F32':
+        return InstructionSemantics(
+            name,
+            'scalar_cvt_pkrtz_f16_f32',
+            operation='cvt_pkrtz_f16_f32',
+            data_type='f32',
+            sets_scc='none',
+        )
 
     stem, dtype = _split_dtype(name)
+    if stem in ('S_MIN_NUM', 'S_MAX_NUM', 'S_MINIMUM', 'S_MAXIMUM'):
+        op_map = {
+            'S_MIN_NUM': 'min_num',
+            'S_MAX_NUM': 'max_num',
+            'S_MINIMUM': 'minimum',
+            'S_MAXIMUM': 'maximum',
+        }
+        return InstructionSemantics(
+            name,
+            'scalar_binop',
+            operation=op_map[stem],
+            data_type=dtype,
+            sets_scc='none',
+        )
     op = _SOP2_OP_MAP.get(stem)
     if op is not None and dtype is not None:
-        scc = _scalar_binop_scc(op, dtype)
+        if stem == 'S_ADD_CO':
+            scc = 'carry'
+        elif stem == 'S_SUB_CO':
+            scc = 'borrow'
+        elif stem in ('S_ADD_NC', 'S_SUB_NC'):
+            scc = 'none'
+        else:
+            scc = _scalar_binop_scc(op, dtype)
         return InstructionSemantics(
             name, 'scalar_binop', operation=op, data_type=dtype, sets_scc=scc
         )
@@ -543,7 +604,7 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
         )
 
     # S_CMP_<op>_<dtype>
-    m = re.match(r'S_CMP_(\w+?)_(I32|U32|I64|U64)$', name)
+    m = re.match(r'S_CMP_(\w+?)_(I32|U32|I64|U64|F16|F32|F64)$', name)
     if m:
         cmp_name, dt_raw = m.group(1), m.group(2)
         op = _CMP_OP_MAP.get(cmp_name)
@@ -557,15 +618,19 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
 
 def _derive_sopk(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOPK (Scalar with 16-bit Immediate) instruction."""
+    if name == 'S_VERSION':
+        return InstructionSemantics(name, 'true_nop')
     if name == 'S_MOVK_I32':
         return InstructionSemantics(name, 'scalar_movk')
     if name == 'S_CMOVK_I32':
         return InstructionSemantics(name, 'scalar_cmovk')
     if name == 'S_ADDK_I32':
         return InstructionSemantics(name, 'scalar_addk')
+    if name == 'S_ADDK_CO_I32':
+        return InstructionSemantics(name, 'scalar_addk')
     if name == 'S_MULK_I32':
         return InstructionSemantics(name, 'scalar_mulk')
-    if name == 'S_CALL_B64':
+    if name in ('S_CALL_B64', 'S_CALL_I64'):
         return InstructionSemantics(name, 'scalar_call')
 
     # S_CMPK_<op>_<dtype>
@@ -603,9 +668,8 @@ _VOP1_OP_MAP = {
     'V_CVT_F32_BF16': ('vector_unary', 'cvt_f32_bf16'),
     'V_CVT_PK_F32_FP8': ('nop', None),  # TODO: needs dual-VGPR write
     'V_CVT_PK_F32_BF8': ('nop', None),  # TODO: needs dual-VGPR write
-    'V_CVT_OFF_F32_I4': ('nop', None),
-    'V_CVT_NORM_I16': ('nop', None),
-    'V_CVT_NORM_U16': ('nop', None),
+    'V_CVT_NORM_I16': ('vector_unary', 'cvt_norm_i16_f16'),
+    'V_CVT_NORM_U16': ('vector_unary', 'cvt_norm_u16_f16'),
     'V_SWAP': ('vector_swap', None),
     'V_NOT': ('vector_unary', 'not'),
     'V_BFREV': ('vector_unary', 'bfrev'),
@@ -624,6 +688,7 @@ _VOP1_OP_MAP = {
     'V_SQRT': ('vector_unary', 'sqrt'),
     'V_SIN': ('vector_unary', 'sin'),
     'V_COS': ('vector_unary', 'cos'),
+    'V_TANH': ('vector_unary', 'tanh'),
     'V_LOG': ('vector_unary', 'log2'),
     'V_LOG_LEGACY': ('vector_unary', 'log2'),
     'V_EXP': ('vector_unary', 'exp2'),
@@ -656,9 +721,9 @@ _VOP1_OP_MAP = {
     'V_CLS_I32': ('vector_unary', 'ffbh_i32'),
     # Pipeline / system (nop in simulation):
     'V_PIPEFLUSH': ('true_nop', None),
-    # Relative addressing (nop — wave-level register indexing):
-    'V_MOVRELD': ('nop', None),
-    'V_MOVRELS': ('nop', None),
+    # Relative addressing through M0.
+    'V_MOVRELD': ('vector_movrel', 'dst'),
+    'V_MOVRELS': ('vector_movrel', 'src'),
     'V_MOVRELSD': ('nop', None),
     'V_MOVRELSD2': ('nop', None),
     'V_MOVRELSD2_B32': ('nop', None),
@@ -671,6 +736,43 @@ _VOP1_OP_MAP = {
 
 def _derive_vop1(name: str) -> InstructionSemantics | None:
     """Derive semantics for a VOP1 (Vector ALU One-operand) instruction."""
+    bf16_transcendentals = {
+        'V_RCP_BF16': 'rcp',
+        'V_SQRT_BF16': 'sqrt',
+        'V_RSQ_BF16': 'rsq',
+        'V_LOG_BF16': 'log2',
+        'V_EXP_BF16': 'exp2',
+        'V_SIN_BF16': 'sin',
+        'V_COS_BF16': 'cos',
+        'V_TANH_BF16': 'tanh',
+    }
+    if name in bf16_transcendentals:
+        return InstructionSemantics(
+            name, 'vector_unary', operation=bf16_transcendentals[name], data_type='bf16'
+        )
+    packed_fp8_bf8_conversions = {
+        'V_CVT_PK_F32_FP8': 'f32_fp8',
+        'V_CVT_PK_F32_BF8': 'f32_bf8',
+        'V_CVT_PK_F16_FP8': 'f16_fp8',
+        'V_CVT_PK_F16_BF8': 'f16_bf8',
+    }
+    if name in packed_fp8_bf8_conversions:
+        return InstructionSemantics(
+            name, 'vector_cvt_pk', operation=packed_fp8_bf8_conversions[name]
+        )
+    if name == 'V_CVT_OFF_F32_I4':
+        return InstructionSemantics(
+            name, 'vector_unary', operation='cvt_off_f32_i4', data_type='f32'
+        )
+    if name == 'V_CVT_F16_FP8':
+        return InstructionSemantics(
+            name, 'vector_unary', operation='cvt_f16_fp8', data_type='f16'
+        )
+    if name == 'V_CVT_F16_BF8':
+        return InstructionSemantics(
+            name, 'vector_unary', operation='cvt_f16_bf8', data_type='f16'
+        )
+
     # Stem-first: check each table key against the name to handle compound
     # suffixes like V_FREXP_EXP_I32_F32 → (V_FREXP_EXP_I32, F32).
     stem, dtype, entry = None, None, None
@@ -975,9 +1077,9 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'vector_mad_32_16', data_type='i32')
 
     # Widening multiply-add: D.u64 = S0.u32 * S1.u32 + S2.u64
-    if name == 'V_MAD_U64_U32':
+    if name in ('V_MAD_U64_U32', 'V_MAD_NC_U64_U32'):
         return InstructionSemantics(name, 'vector_mad_64_32', data_type='u64')
-    if name == 'V_MAD_I64_I32':
+    if name in ('V_MAD_I64_I32', 'V_MAD_NC_I64_I32'):
         return InstructionSemantics(name, 'vector_mad_64_32', data_type='i64')
 
     # Pack/convert instructions
@@ -1030,8 +1132,14 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name in ('V_BITOP3_B32', 'V_BITOP3_B16'):
         dt = 'b16' if name.endswith('B16') else 'b32'
         return InstructionSemantics(name, 'vector_bitop3', data_type=dt)
-    if name in ('V_ASHR_PK_I8_I32', 'V_ASHR_PK_U8_I32'):
-        return InstructionSemantics(name, 'nop')  # TODO: packed shift-right
+    if name == 'V_ASHR_PK_I8_I32':
+        return InstructionSemantics(
+            name, 'vector_ternary', operation='ashr_pk_i8_i32', data_type='b32'
+        )
+    if name == 'V_ASHR_PK_U8_I32':
+        return InstructionSemantics(
+            name, 'vector_ternary', operation='ashr_pk_u8_i32', data_type='b32'
+        )
     # V_PK_MINIMUM3/MAXIMUM3 are VOP3P, handled in _derive_vop3p.
 
     # ── Additional VOP3 ternary instructions ───────────────────────────
@@ -1063,6 +1171,14 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
                     name, 'vector_ternary', operation=op, data_type=dt
                 )
 
+    for prefix, op in (('V_ADD_MAX', 'add_max'), ('V_ADD_MIN', 'add_min')):
+        for suffix in ('_I32', '_U32'):
+            if name == f'{prefix}{suffix}':
+                _, dt = _split_dtype(name)
+                return InstructionSemantics(
+                    name, 'vector_ternary', operation=op, data_type=dt
+                )
+
     # MIN3/MAX3/MED3 F16 and NUM variants
     if name == 'V_MINIMUM3_F16':
         return InstructionSemantics(
@@ -1083,7 +1199,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # IEEE 754-2019 binary min/max (VOP3 forms)
     if name.startswith('V_MINIMUM_') or name.startswith('V_MAXIMUM_'):
         _, dt = _split_dtype(name)
-        op = 'fmin' if 'MINIMUM' in name else 'fmax'
+        op = 'minimum' if 'MINIMUM' in name else 'maximum'
         return InstructionSemantics(name, 'vector_binop', operation=op, data_type=dt)
 
     # Dot product with F16/BF16 output
@@ -1127,10 +1243,63 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         sem.semantic_class = 'vector_pack_b32_f16'
         return sem
 
-    # FP8/BF8 pack/convert (non-scaled, CDNA3/4)
+    packed_fp8_bf8_outputs = {
+        'V_CVT_PK_FP8_F32': 'fp8_f32',
+        'V_CVT_PK_BF8_F32': 'bf8_f32',
+        'V_CVT_PK_FP8_F16': 'fp8_f16',
+        'V_CVT_PK_BF8_F16': 'bf8_f16',
+    }
+    if name in packed_fp8_bf8_outputs:
+        return InstructionSemantics(
+            name, 'vector_cvt_pk', operation=packed_fp8_bf8_outputs[name]
+        )
+
+    scaled_unpack_conversions = {
+        'V_CVT_SCALE_PK8_F16_FP4': 'unpack_pk8_f16_fp4',
+        'V_CVT_SCALE_PK8_BF16_FP4': 'unpack_pk8_bf16_fp4',
+        'V_CVT_SCALE_PK8_F32_FP4': 'unpack_pk8_f32_fp4',
+        'V_CVT_SCALE_PK8_F16_FP8': 'unpack_pk8_f16_fp8',
+        'V_CVT_SCALE_PK8_BF16_FP8': 'unpack_pk8_bf16_fp8',
+        'V_CVT_SCALE_PK8_F32_FP8': 'unpack_pk8_f32_fp8',
+        'V_CVT_SCALE_PK8_F16_BF8': 'unpack_pk8_f16_bf8',
+        'V_CVT_SCALE_PK8_BF16_BF8': 'unpack_pk8_bf16_bf8',
+        'V_CVT_SCALE_PK8_F32_BF8': 'unpack_pk8_f32_bf8',
+        'V_CVT_SCALE_PK16_F16_FP6': 'unpack_pk16_f16_fp6',
+        'V_CVT_SCALE_PK16_BF16_FP6': 'unpack_pk16_bf16_fp6',
+        'V_CVT_SCALE_PK16_F32_FP6': 'unpack_pk16_f32_fp6',
+        'V_CVT_SCALE_PK16_F16_BF6': 'unpack_pk16_f16_bf6',
+        'V_CVT_SCALE_PK16_BF16_BF6': 'unpack_pk16_bf16_bf6',
+        'V_CVT_SCALE_PK16_F32_BF6': 'unpack_pk16_f32_bf6',
+    }
+    if name in scaled_unpack_conversions:
+        return InstructionSemantics(
+            name, 'vector_cvt_scale', operation=scaled_unpack_conversions[name]
+        )
+
+    scaled_pack_conversions = {
+        'V_CVT_SCALEF32_PK8_FP4_F32': 'pack_pk8_fp4_f32',
+        'V_CVT_SCALEF32_PK8_FP4_F16': 'pack_pk8_fp4_f16',
+        'V_CVT_SCALEF32_PK8_FP4_BF16': 'pack_pk8_fp4_bf16',
+        'V_CVT_SCALEF32_PK8_FP8_F32': 'pack_pk8_fp8_f32',
+        'V_CVT_SCALEF32_PK8_FP8_F16': 'pack_pk8_fp8_f16',
+        'V_CVT_SCALEF32_PK8_FP8_BF16': 'pack_pk8_fp8_bf16',
+        'V_CVT_SCALEF32_PK8_BF8_F32': 'pack_pk8_bf8_f32',
+        'V_CVT_SCALEF32_PK8_BF8_F16': 'pack_pk8_bf8_f16',
+        'V_CVT_SCALEF32_PK8_BF8_BF16': 'pack_pk8_bf8_bf16',
+        'V_CVT_SCALEF32_PK16_FP6_F32': 'pack_pk16_fp6_f32',
+        'V_CVT_SCALEF32_PK16_FP6_F16': 'pack_pk16_fp6_f16',
+        'V_CVT_SCALEF32_PK16_FP6_BF16': 'pack_pk16_fp6_bf16',
+        'V_CVT_SCALEF32_PK16_BF6_F32': 'pack_pk16_bf6_f32',
+        'V_CVT_SCALEF32_PK16_BF6_F16': 'pack_pk16_bf6_f16',
+        'V_CVT_SCALEF32_PK16_BF6_BF16': 'pack_pk16_bf6_bf16',
+    }
+    if name in scaled_pack_conversions:
+        return InstructionSemantics(
+            name, 'vector_cvt_scale', operation=scaled_pack_conversions[name]
+        )
+
+    # FP8/BF8 stochastic-round pack/convert (non-scaled, CDNA3/4)
     _FP8_PATTERNS = (
-        'V_CVT_PK_FP8_F32',
-        'V_CVT_PK_BF8_F32',
         'V_CVT_SR_FP8_F32',
         'V_CVT_SR_BF8_F32',
         'V_CVT_PKNORM_I16_F16',
@@ -1139,7 +1308,8 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name in _FP8_PATTERNS:
         return InstructionSemantics(name, 'nop')
 
-    # CDNA4 scaled FP8/BF8/FP6/FP4 conversions
+    # Scaled FP8/BF8/FP6/FP4 conversions not covered by the exact gfx1250
+    # mappings above still need per-encoding validation.
     if 'CVT_SCALEF32' in name.upper():
         return InstructionSemantics(
             name, 'nop'
@@ -1237,6 +1407,17 @@ _VOP3P_PK16_MAP = {
     'V_PK_MINIMUM_F16': ('pk_binop', 'min', 'f16'),
     'V_PK_MAXIMUM_F16': ('pk_binop', 'max', 'f16'),
     'V_PK_FMAC_F16': ('pk_ternary', 'fmac', 'f16'),
+    'V_PK_FMA_BF16': ('pk_ternary', 'fma', 'bf16'),
+    'V_PK_ADD_BF16': ('pk_binop', 'add', 'bf16'),
+    'V_PK_MUL_BF16': ('pk_binop', 'mul', 'bf16'),
+    'V_PK_MIN_NUM_BF16': ('pk_binop', 'min', 'bf16'),
+    'V_PK_MAX_NUM_BF16': ('pk_binop', 'max', 'bf16'),
+    'V_PK_MAX3_I16': ('pk_ternary', 'max3', 'i16'),
+    'V_PK_MAX3_U16': ('pk_ternary', 'max3', 'u16'),
+    'V_PK_MIN3_I16': ('pk_ternary', 'min3', 'i16'),
+    'V_PK_MIN3_U16': ('pk_ternary', 'min3', 'u16'),
+    'V_PK_MIN3_NUM_F16': ('pk_ternary', 'min3', 'f16'),
+    'V_PK_MAX3_NUM_F16': ('pk_ternary', 'max3', 'f16'),
 }
 
 
@@ -1315,9 +1496,9 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     if name == 'V_DOT2_F32_BF16':
         return InstructionSemantics(name, 'dot2_f32_f16')  # BF16 uses same dot2 pattern
     if name == 'V_DOT4_I32_IU8':
-        return InstructionSemantics(name, 'dot4_i32_i8')  # IU8 = signed/unsigned mixed
+        return InstructionSemantics(name, 'dot4_i32_iu8')
     if name == 'V_DOT8_I32_IU4':
-        return InstructionSemantics(name, 'dot8_i32_i4')  # IU4 = signed/unsigned mixed
+        return InstructionSemantics(name, 'dot8_i32_iu4')
 
     # FMA_MIX variants (RDNA3/4 renamed from MAD_MIX)
     if name == 'V_FMA_MIX_F32':
@@ -1326,6 +1507,12 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'mad_mixlo_f16')
     if name == 'V_FMA_MIXHI_F16':
         return InstructionSemantics(name, 'mad_mixhi_f16')
+    if name == 'V_FMA_MIX_F32_BF16':
+        return InstructionSemantics(name, 'mad_mix_f32_bf16')
+    if name == 'V_FMA_MIXLO_BF16':
+        return InstructionSemantics(name, 'mad_mixlo_bf16')
+    if name == 'V_FMA_MIXHI_BF16':
+        return InstructionSemantics(name, 'mad_mixhi_bf16')
 
     # MFMA / SMFMAC - all map to 'mfma' semantic class
     if name.startswith('V_MFMA_') or name.startswith('V_SMFMAC_'):
@@ -1335,10 +1522,10 @@ def _derive_vop3p(name: str) -> InstructionSemantics | None:
     import re
 
     m = re.match(
-        r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|I32|FP8|BF8)_'
-        r'(\d+)X(\d+)X(\d+)_?(F16|BF16|IU8|IU4|FP8|BF8'
+        r'V_(?:S?WMMA[C]?)_(F32|F16|BF16|BF16F32|I32|FP8|BF8)_'
+        r'(\d+)X(\d+)X(\d+)_?(F32|F16|BF16|IU8|IU4|FP8|BF8'
         r'|FP8_FP8|FP8_BF8|BF8_FP8|BF8_BF8'
-        r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8)?$',
+        r'|F16_FP8|F16_BF8|BF16_FP8|BF16_BF8|F8F6F4|F4)?$',
         name,
     )
     if m:
@@ -1362,15 +1549,33 @@ _SMEM_DWORD_MAP = {
     # RDNA4 (GFX12) byte-width naming:
     'B32': 1,
     'B64': 2,
+    'B96': 3,
     'B128': 4,
     'B256': 8,
     'B512': 16,
+}
+
+_SMEM_NARROW_LOAD_MAP = {
+    'I8': (1, True),
+    'U8': (1, False),
+    'I16': (2, True),
+    'U16': (2, False),
 }
 
 
 def _derive_smem(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SMEM (Scalar Memory) instruction."""
     upper = name.upper()
+    if upper in (
+        'S_PREFETCH_INST',
+        'S_PREFETCH_INST_PC_REL',
+        'S_PREFETCH_DATA',
+        'S_PREFETCH_DATA_PC_REL',
+        'S_BUFFER_PREFETCH_DATA',
+        'S_ATC_PROBE',
+        'S_ATC_PROBE_BUFFER',
+    ):
+        return InstructionSemantics(name, 'true_nop')
     # Cache invalidation / writeback instructions.
     if upper in ('S_DCACHE_INV', 'S_DCACHE_INV_VOL'):
         return InstructionSemantics(name, 'dcache_inv')
@@ -1389,6 +1594,16 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
+    if not is_store:
+        for suffix, (elem_size, sign_extend) in _SMEM_NARROW_LOAD_MAP.items():
+            if upper.endswith(f'_{suffix}'):
+                return InstructionSemantics(
+                    name,
+                    'smem_load',
+                    elem_size=elem_size,
+                    num_elems=1,
+                    sign_extend=sign_extend,
+                )
     for suffix, ndw in _SMEM_DWORD_MAP.items():
         if upper.endswith(suffix):
             cls = 'smem_store' if is_store else 'smem_load'
@@ -1447,6 +1662,30 @@ _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
     'D16_HI_B8': (1, 1, False),
 }
 
+
+_TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
+    # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
+    # elem_size/num_elems describe the raw VGPR result size in dwords.
+    'B64_TR_B4': ('b4', 4, 2, 1),
+    'B96_TR_B6': ('b6', 4, 3, 2),
+    'B64_TR_B8': ('b8', 4, 2, 3),
+    'B64_TR_B16': ('b16', 4, 2, 4),
+    'TR4_B64': ('b4', 4, 2, 1),
+    'TR6_B96': ('b6', 4, 3, 2),
+    'TR8_B64': ('b8', 4, 2, 3),
+    'TR16_B128': ('b16', 4, 4, 4),
+    'TR_B64': ('b8', 4, 2, 3),
+    'TR_B128': ('b16', 4, 4, 4),
+}
+
+
+def _derive_transpose_load_info(upper: str) -> tuple[str, int, int, int] | None:
+    for suffix, info in _TRANSPOSE_LOAD_MAP.items():
+        if upper.endswith(suffix):
+            return info
+    return None
+
+
 _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     # op_suffix -> (operation, data_dwords for store_data)
     # Integer atomics.
@@ -1501,6 +1740,14 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
 def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
+    if upper == 'GLOBAL_INV':
+        return InstructionSemantics(name, 'gl1_inv')
+    if upper == 'GLOBAL_WB':
+        return InstructionSemantics(name, 'true_nop')
+    if upper == 'GLOBAL_WBINV':
+        return InstructionSemantics(name, 'gl1_wbinv')
+    if upper in ('FLAT_PREFETCH_B8', 'GLOBAL_PREFETCH_B8'):
+        return InstructionSemantics(name, 'true_nop')
     if '_ATOMIC_' in upper:
         # Extract the operation suffix after _ATOMIC_.
         # Strip _X2 (64-bit variant) and type suffixes (_B32, _U32, _I32, etc.).
@@ -1545,6 +1792,54 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
         # FP atomics and other unrecognized patterns.
         return InstructionSemantics(name, 'flat_atomic')
 
+    for prefix in ('GLOBAL_LOAD_ASYNC_TO_LDS_', 'CLUSTER_LOAD_ASYNC_TO_LDS_'):
+        if upper.startswith(prefix):
+            info = _FLAT_DATA_MAP.get(upper[len(prefix) :])
+            if info:
+                esz, ne, _ = info
+                return InstructionSemantics(
+                    name, 'global_load_async_to_lds', elem_size=esz, num_elems=ne
+                )
+
+    if upper.startswith('GLOBAL_STORE_ASYNC_FROM_LDS_'):
+        info = _FLAT_DATA_MAP.get(upper[len('GLOBAL_STORE_ASYNC_FROM_LDS_') :])
+        if info:
+            esz, ne, _ = info
+            return InstructionSemantics(
+                name, 'global_store_async_from_lds', elem_size=esz, num_elems=ne
+            )
+
+    if upper.startswith('CLUSTER_LOAD_'):
+        info = _FLAT_DATA_MAP.get(upper[len('CLUSTER_LOAD_') :])
+        if info:
+            esz, ne, se = info
+            return InstructionSemantics(
+                name, 'flat_load', elem_size=esz, num_elems=ne, sign_extend=se
+            )
+
+    if upper == 'GLOBAL_LOAD_ADDTID_B32':
+        return InstructionSemantics(
+            name, 'global_load_addtid', elem_size=4, num_elems=1
+        )
+    if upper == 'GLOBAL_STORE_ADDTID_B32':
+        return InstructionSemantics(
+            name, 'global_store_addtid', elem_size=4, num_elems=1
+        )
+
+    if upper in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK'):
+        return InstructionSemantics(name, 'flat_load', elem_size=4, num_elems=32)
+    if upper in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK'):
+        return InstructionSemantics(name, 'flat_store', elem_size=4, num_elems=32)
+
+    for prefix in ('FLAT_LOAD_MONITOR_', 'GLOBAL_LOAD_MONITOR_'):
+        if upper.startswith(prefix):
+            info = _FLAT_DATA_MAP.get(upper[len(prefix) :])
+            if info:
+                esz, ne, se = info
+                return InstructionSemantics(
+                    name, 'flat_load', elem_size=esz, num_elems=ne, sign_extend=se
+                )
+
     is_store = '_STORE_' in upper
     # Strip prefix: FLAT_LOAD_, FLAT_STORE_, GLOBAL_LOAD_, SCRATCH_LOAD_, etc.
     for prefix in (
@@ -1557,6 +1852,17 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
     ):
         if upper.startswith(prefix):
             suffix = upper[len(prefix) :]
+            if prefix == 'GLOBAL_LOAD_':
+                transpose_info = _derive_transpose_load_info(upper)
+                if transpose_info:
+                    _, esz, ne, transpose_kind = transpose_info
+                    return InstructionSemantics(
+                        name,
+                        'flat_load',
+                        elem_size=esz,
+                        num_elems=ne,
+                        transpose_kind=transpose_kind,
+                    )
             info = _FLAT_DATA_MAP.get(suffix)
             if info:
                 esz, ne, se = info
@@ -1733,6 +2039,38 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     is_write = ('_WRITE_' in upper or 'DS_STORE_' in upper) and not is_write2
     is_read = ('_READ_' in upper or 'DS_LOAD_' in upper) and not is_read2
     is_st64 = 'ST64' in upper or 'STRIDE64' in upper
+    if upper == 'DS_APPEND':
+        return InstructionSemantics(
+            name, 'ds_append_consume', operation='append', elem_size=4, num_elems=1
+        )
+    if upper == 'DS_CONSUME':
+        return InstructionSemantics(
+            name, 'ds_append_consume', operation='consume', elem_size=4, num_elems=1
+        )
+    if upper in ('DS_MSKOR_B32', 'DS_MSKOR_RTN_B32'):
+        return InstructionSemantics(
+            name, 'ds_mskor', operation='mskor', elem_size=4, num_elems=2
+        )
+    if upper in ('DS_MSKOR_B64', 'DS_MSKOR_RTN_B64'):
+        return InstructionSemantics(
+            name, 'ds_mskor', operation='mskor', elem_size=8, num_elems=4
+        )
+    if upper == 'DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64':
+        return InstructionSemantics(
+            name,
+            'ds_barrier_arrive',
+            operation='async_barrier_arrive',
+            elem_size=8,
+            num_elems=0,
+        )
+    if upper == 'DS_ATOMIC_BARRIER_ARRIVE_RTN_B64':
+        return InstructionSemantics(
+            name,
+            'ds_barrier_arrive',
+            operation='barrier_arrive',
+            elem_size=8,
+            num_elems=2,
+        )
     if is_write2:
         esz = 8 if 'B64' in upper else 4
         return InstructionSemantics(
@@ -1762,25 +2100,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                     d16_hi='D16_HI' in suffix,
                 )
         return InstructionSemantics(name, 'ds_write', elem_size=4, num_elems=1)
-    # Transpose read instructions (CDNA4): cross-lane data shuffling.
-    if '_TR_' in upper and is_read:
-        # ds_read_b64_tr_b16 → 64-bit result, 16-bit elements (4x FP16)
-        # ds_read_b64_tr_b8  → 64-bit result, 8-bit elements (8x INT8)
-        # ds_read_b64_tr_b4  → 64-bit result, 4-bit elements (16x INT4)
-        # ds_read_b96_tr_b6  → 96-bit result, 6-bit elements
-        if 'B64_TR_B16' in upper:
+    if is_read:
+        transpose_info = _derive_transpose_load_info(upper)
+        if transpose_info:
+            kind, esz, ne, transpose_kind = transpose_info
             return InstructionSemantics(
-                name, 'ds_read_tr_b16', elem_size=2, num_elems=4
+                name,
+                f'ds_read_tr_{kind}',
+                elem_size=esz,
+                num_elems=ne,
+                transpose_kind=transpose_kind,
             )
-        if 'B64_TR_B8' in upper:
-            return InstructionSemantics(name, 'ds_read_tr_b8', elem_size=1, num_elems=8)
-        if 'B64_TR_B4' in upper:
-            return InstructionSemantics(name, 'ds_read_tr_b4', elem_size=1, num_elems=8)
-        if 'B96_TR_B6' in upper:
-            return InstructionSemantics(
-                name, 'ds_read_tr_b6', elem_size=1, num_elems=12
-            )
-        return InstructionSemantics(name, 'nop')
     # ADDTID instructions: address = thread_id * M0_stride + offset.
     if 'ADDTID' in upper:
         if is_write:
@@ -1929,7 +2259,7 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                 name, 'ds_atomic', operation=op, elem_size=esz, num_elems=dw
             )
     # ── Lane permutation / swizzle ──────────────────────────────────────
-    if upper in ('DS_PERMUTE_B32', 'DS_BPERMUTE_B32'):
+    if upper in ('DS_PERMUTE_B32', 'DS_BPERMUTE_B32', 'DS_BPERMUTE_FI_B32'):
         return InstructionSemantics(name, 'ds_permute')
     if upper == 'DS_SWIZZLE_B32':
         return InstructionSemantics(name, 'ds_swizzle')
@@ -1942,15 +2272,12 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     # for compute simulation.
     if upper.startswith('DS_GWS_'):
         return InstructionSemantics(name, 'nop')
-    # GDS append/consume counters — GDS not simulated.
-    if upper in ('DS_CONSUME', 'DS_APPEND'):
-        return InstructionSemantics(name, 'nop')
     # GDS ordered count.
     if upper == 'DS_ORDERED_COUNT':
         return InstructionSemantics(name, 'nop')
     # Explicit DS no-op.
     if upper == 'DS_NOP':
-        return InstructionSemantics(name, 'nop')
+        return InstructionSemantics(name, 'true_nop')
     # Fallback for unrecognized DS atomics.
     if (
         '_ADD' in upper
@@ -1978,6 +2305,10 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
 def _derive_mimg(name: str) -> InstructionSemantics | None:
     """Derive semantics for an MIMG (Memory Image) instruction."""
     upper = name.upper()
+    if upper.startswith('TENSOR_LOAD_TO_LDS'):
+        return InstructionSemantics(name, 'tensor_load_to_lds')
+    if upper.startswith('TENSOR_STORE_FROM_LDS'):
+        return InstructionSemantics(name, 'tensor_store_from_lds')
     if upper.startswith('IMAGE_STORE'):
         return InstructionSemantics(name, 'image_store')
     if upper.startswith('IMAGE_LOAD'):

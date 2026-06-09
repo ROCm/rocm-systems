@@ -5,7 +5,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/mfma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
 
@@ -103,6 +103,31 @@ struct VmFixture {
     return addr;
   }
 };
+
+struct AmdExtKernelDispatchPacketForTest {
+  uint16_t header = 0;
+  uint8_t amd_format = 0;
+  uint8_t setup = 0;
+  uint16_t workgroup_size_x = 0;
+  uint16_t workgroup_size_y = 0;
+  uint16_t workgroup_size_z = 0;
+  uint16_t reserved0 = 0;
+  uint32_t cluster_count_x = 0;
+  uint16_t cluster_count_y = 0;
+  uint16_t cluster_count_z = 0;
+  uint8_t cluster_size_x = 0;
+  uint8_t cluster_size_y = 0;
+  uint8_t cluster_size_z = 0;
+  uint8_t perf_hint = 0;
+  uint32_t private_segment_size = 0;
+  uint32_t group_segment_size = 0;
+  uint64_t kernel_object = 0;
+  void *kernarg_address = nullptr;
+  hsa_signal_t dep_signal{};
+  hsa_signal_t completion_signal{};
+};
+
+static_assert(sizeof(AmdExtKernelDispatchPacketForTest) == 64);
 
 void step_until_halted(simdojo::SimulationEngine &engine,
                        std::initializer_list<amdgpu::ComputeUnitCore *> cus,
@@ -319,6 +344,37 @@ TEST_P(IsaTest, DispatchAndCapacity) {
 
   // Both slots were used (wavefronts have now halted and been retired).
   EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+}
+
+TEST_P(IsaTest, VendorSpecificExtKernelDispatch) {
+  VmFixture f(arch(), 1, 8);
+
+  const uint32_t code[] = {SOPP_S_NOP, SOPP_S_ENDPGM};
+  uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+
+  AmdExtKernelDispatchPacketForTest ext{};
+  ext.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+  ext.amd_format = 3; // HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH.
+  ext.setup = 1;
+  ext.workgroup_size_x = 64;
+  ext.workgroup_size_y = 1;
+  ext.workgroup_size_z = 1;
+  ext.cluster_count_x = 2;
+  ext.cluster_count_y = 1;
+  ext.cluster_count_z = 1;
+  ext.cluster_size_x = 2;
+  ext.cluster_size_y = 1;
+  ext.cluster_size_z = 1;
+  ext.kernel_object = ko;
+
+  hsa_kernel_dispatch_packet_t raw{};
+  std::memcpy(&raw, &ext, sizeof(ext));
+  test::AqlQueue queue(f.mem(), f.cp());
+  queue.submit(raw);
+  f.engine->run();
+
+  EXPECT_EQ(f.cp()->dispatched_count(), 1u);
+  EXPECT_GE(f.cu()->num_wfs(), 1u);
 }
 
 TEST_P(IsaTest, DispatchCreatesWavefronts) {

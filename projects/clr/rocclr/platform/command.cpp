@@ -63,6 +63,11 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
+  // When an external owner (e.g. the graph signal pool) reclaims the signals,
+  // do not destroy them here.
+  if (!owns_hw_events_) {
+    return;
+  }
   // Release all retained HW events per device
   for (auto& device_events_pair : hw_events_) {
     Device* dev = device_events_pair.first;
