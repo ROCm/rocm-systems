@@ -473,10 +473,11 @@ class RocProfCompute_Base:
                 duration = self.profile(fname, options, total_runs)
                 total_profiling_time += duration
 
-        # PC sampling data is only collected when block "21" is specified
-        if not "21" in args.filter_blocks:
+        # PC sampling data is only collected when --pc-sampling is set
+        # (sanitize() injects "21" into filter_blocks when --pc-sampling is set).
+        if "21" not in args.filter_blocks:
             console_warning(
-                "PC sampling data collection skipped as block 21 is not specified."
+                "PC sampling data collection skipped as --pc-sampling is not specified."
             )
             return
 

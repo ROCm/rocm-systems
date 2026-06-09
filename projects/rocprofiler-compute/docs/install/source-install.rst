@@ -86,6 +86,12 @@ follows.
     * - ``SKIP_NATIVE_TOOL_BUILD``
       - Should be ON to skip building the native profiling tool. When enabled, the native tool will be compiled at runtime instead of build time. This is useful when ROCprofiler-SDK is not available during build time.
 
+    * - ``ENABLE_SANITIZER``
+      - Builds with sanitizer instrumentation for development.
+        One of ``OFF`` (default), ``ASAN``, ``HOST_ASAN``, or ``TSAN``. See
+        :ref:`sanitizer builds <source-install-sanitizers>`. Cannot be combined with
+        ``STANDALONEBINARY=ON``.
+
 .. _core-install-steps:
 
 .. _source-install:
@@ -147,6 +153,53 @@ Install from source
 
          $ ls $INSTALL_DIR
          modulefiles  {{ config.version }}  python-libs
+
+.. _source-install-sanitizers:
+
+Sanitizer builds
+----------------
+
+For development, you can build with sanitizer instrumentation. This is opt-in and
+off by default; set ``ENABLE_SANITIZER`` at configure time to one of the following.
+
+.. list-table::
+    :header-rows: 1
+
+    * - Value
+      - Instrumentation
+
+    * - ``OFF`` (default)
+      - No sanitizer instrumentation.
+
+    * - ``ASAN``
+      - AddressSanitizer on both host and device code.
+
+    * - ``HOST_ASAN``
+      - AddressSanitizer on host code only; GPU targets are left unchanged.
+
+    * - ``TSAN``
+      - ThreadSanitizer for data-race detection.
+
+Add ``-DENABLE_SANITIZER=`` to the configure step. For example, to build with
+AddressSanitizer.
+
+.. datatemplate:nodata::
+
+   .. code-block:: shell
+
+      cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/{{ config.version }} \
+              -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
+              -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles/rocprofiler-compute \
+              -DENABLE_SANITIZER=ASAN ..
+
+.. note::
+
+   ``ENABLE_SANITIZER`` cannot be combined with ``STANDALONEBINARY=ON``.
+
+   For device-side instrumentation with ``ASAN`` or ``TSAN`` on ``gfx942`` or
+   ``gfx950``, pass ``-DGPU_TARGETS=...`` so the targets are rewritten to
+   ``:xnack+``. If ``GPU_TARGETS`` is unset, device-side instrumentation is
+   skipped.
 
 .. _core-install-modulefiles:
 
