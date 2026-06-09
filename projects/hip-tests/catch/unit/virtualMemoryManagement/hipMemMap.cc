@@ -1159,6 +1159,8 @@ HIP_TEST_CASE(Unit_hipMemMap_ConcurrentDisjointMapsNoDeadlock) {
       d.flags = hipMemAccessFlagsProtReadWrite;
       (void)hipMemSetAccess(p, size_mem, &d, 1);
       if (hipMemUnmap(p, size_mem) != hipSuccess) {
+        (void)hipMemAddressFree(p, size_mem);
+        (void)hipMemRelease(h);
         failed = true;
         return;
       }
