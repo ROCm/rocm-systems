@@ -26,101 +26,7 @@ import sys
 import pytest
 
 
-def test_agent_info(agent_info_input_data):
-    assert len(agent_info_input_data) > 0, "No agent information captured"
-
-    gpu_count = 0
-
-    for row in agent_info_input_data:
-        agent_type = row["Agent_Type"]
-        assert agent_type in ("CPU", "GPU")
-
-        if agent_type == "CPU":
-            assert int(row["Cpu_Cores_Count"]) > 0
-            assert int(row["Simd_Count"]) == 0
-            assert int(row["Max_Waves_Per_Simd"]) == 0
-        else:
-            gpu_count += 1
-            assert int(row["Cpu_Cores_Count"]) == 0
-            assert int(row["Simd_Count"]) > 0
-            assert int(row["Max_Waves_Per_Simd"]) > 0
-
-    assert gpu_count > 0, "No GPU agents found"
-
-
-def test_attachment_kernel_trace(kernel_input_data):
-    assert len(kernel_input_data) > 0, "No kernel dispatches captured during attachment"
-
-    simple_kernel_found = False
-    kernel_threads = set()
-
-    for row in kernel_input_data:
-        assert row["Kind"] == "KERNEL_DISPATCH"
-        assert int(row["Queue_Id"]) > 0
-        assert int(row["Correlation_Id"]) > 0
-        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
-
-        if "simple_kernel" in row["Kernel_Name"]:
-            simple_kernel_found = True
-            assert int(row["Kernel_Id"]) > 0
-            assert int(row["Workgroup_Size_X"]) == 256
-            assert int(row["Workgroup_Size_Y"]) == 1
-            assert int(row["Workgroup_Size_Z"]) == 1
-            assert int(row["Grid_Size_X"]) >= 1
-            assert int(row["Grid_Size_Y"]) >= 1
-            assert int(row["Grid_Size_Z"]) >= 1
-            kernel_threads.add(int(row["Thread_Id"]))
-
-    assert simple_kernel_found, "Expected 'simple_kernel' not found in kernel dispatches"
-    assert (
-        len(kernel_threads) == 8
-    ), f"Expected 8 unique threads, got {len(kernel_threads)}"
-
-
-def test_attachment_memory_copy_trace(memory_copy_input_data):
-    assert len(memory_copy_input_data) > 0, "No memory copy operations captured"
-
-    host_to_device_count = 0
-    device_to_host_count = 0
-
-    for row in memory_copy_input_data:
-        assert row["Kind"] == "MEMORY_COPY"
-        assert int(row["Correlation_Id"]) > 0
-        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
-
-        direction = row["Direction"]
-        if "HOST_TO_DEVICE" in direction or "H2D" in direction:
-            host_to_device_count += 1
-        elif "DEVICE_TO_HOST" in direction or "D2H" in direction:
-            device_to_host_count += 1
-
-    assert host_to_device_count > 0, "No host-to-device memory copies captured"
-    assert device_to_host_count > 0, "No device-to-host memory copies captured"
-
-
-def test_attachment_hsa_api_trace(hsa_input_data):
-    assert len(hsa_input_data) > 0, "No HSA API calls captured during attachment"
-
-    valid_domains = (
-        "HSA_CORE_API",
-        "HSA_AMD_EXT_API",
-        "HSA_IMAGE_EXT_API",
-        "HSA_FINALIZE_EXT_API",
-    )
-    functions = []
-    for row in hsa_input_data:
-        assert row["Domain"] in valid_domains, f"Unexpected HSA domain: {row['Domain']}"
-        assert int(row["Process_Id"]) > 0
-        assert int(row["Thread_Id"]) > 0
-        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
-        functions.append(row["Function"])
-
-    assert any(
-        "memory" in f.lower() for f in functions
-    ), "No memory-related HSA functions captured"
-
-
-def test_agent_info_json(json_data):
+def test_agent_info(json_data):
     data = json_data["rocprofiler-sdk-tool"]
 
     gpu_count = 0
@@ -140,7 +46,7 @@ def test_agent_info_json(json_data):
     assert gpu_count > 0, "No GPU agents found"
 
 
-def test_kernel_dispatch(json_data):
+def test_kernel_trace(json_data):
     data = json_data["rocprofiler-sdk-tool"]
 
     def get_kind_name(kind_id):
@@ -182,7 +88,7 @@ def test_kernel_dispatch(json_data):
     ), f"Expected 8 unique threads, got {len(kernel_threads)}"
 
 
-def test_memory_copy(json_data):
+def test_memory_copy_trace(json_data):
     data = json_data["rocprofiler-sdk-tool"]
 
     def get_kind_name(kind_id):
@@ -222,7 +128,7 @@ def test_memory_copy(json_data):
     assert device_to_host_count > 0, "No device-to-host memory copies captured"
 
 
-def test_hsa_api(json_data):
+def test_hsa_api_trace(json_data):
     data = json_data["rocprofiler-sdk-tool"]
 
     def get_kind_name(kind_id):

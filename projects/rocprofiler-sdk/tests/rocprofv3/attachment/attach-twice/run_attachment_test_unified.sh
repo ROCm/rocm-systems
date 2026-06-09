@@ -52,7 +52,7 @@ OUTPUT_FILENAME=${5:-out}
 export ROCP_TOOL_ATTACH=1
 
 OUTPUT_SUBDIR="attachment-output"
-OUTPUT_FORMAT="csv json rocpd"
+OUTPUT_FORMAT="json rocpd"
 
 # Clean up any existing output
 rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
@@ -121,13 +121,12 @@ echo "Checking for generated output files..."
 ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
 
 # Check if expected output files were created
-# For CSV format, check if at least one CSV file was generated
-CSV_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "*.csv" | wc -l)
-if [ $CSV_COUNT -eq 0 ]; then
-    echo "Error: No CSV files were generated after first attachment"
+JSON_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "*.json" | wc -l)
+if [ $JSON_COUNT -eq 0 ]; then
+    echo "Error: No JSON files were generated after first attachment"
     exit 1
 else
-    echo "Found $CSV_COUNT CSV file(s)"
+    echo "Found $JSON_COUNT JSON file(s)"
 fi
 
 # Verify the process's output files exist
@@ -190,13 +189,12 @@ echo "Checking for generated output files..."
 ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/
 
 # Check if expected output files were created
-# For CSV format, check if at least one CSV file was generated
-CSV_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "*.csv" | wc -l)
-if [ $CSV_COUNT -eq 0 ]; then
-    echo "Error: No CSV files were generated after second attachment"
+JSON_COUNT=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "*.json" | wc -l)
+if [ $JSON_COUNT -eq 0 ]; then
+    echo "Error: No JSON files were generated after second attachment"
     exit 1
 else
-    echo "Found $CSV_COUNT CSV file(s)"
+    echo "Found $JSON_COUNT JSON file(s)"
 fi
 
 # Locate the process's output files. With default naming the files are under a
@@ -213,7 +211,7 @@ APP_OUTPUT_DIR=$(dirname "$APP_JSON")
 
 # Rename output files to well-known names so CMakeLists.txt can reference them
 # without knowing the hostname or PID at configure time.
-for src in "${APP_OUTPUT_DIR}/${APP_PID}"_*.csv "${APP_OUTPUT_DIR}/${APP_PID}"_*.json "${APP_OUTPUT_DIR}/${APP_PID}"_*.db; do
+for src in "${APP_OUTPUT_DIR}/${APP_PID}"_*.json "${APP_OUTPUT_DIR}/${APP_PID}"_*.db; do
     [ -f "$src" ] || continue
     dst_name=$(basename "$src" | sed "s/^${APP_PID}_/${OUTPUT_FILENAME}_/")
     cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"

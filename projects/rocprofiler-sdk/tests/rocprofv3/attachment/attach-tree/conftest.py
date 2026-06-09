@@ -22,7 +22,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import csv
 import json
 import pytest
 import os
@@ -32,61 +31,14 @@ from rocprofiler_sdk.pytest_utils import collapse_dict_list
 
 
 def pytest_addoption(parser):
-    parser.addoption("--kernel-input", action="store", help="Kernel trace CSV input")
-    parser.addoption(
-        "--memory-copy-input", action="store", help="Memory copy trace CSV input"
-    )
-    parser.addoption("--hsa-input", action="store", help="HSA API trace CSV input")
-    parser.addoption("--agent-input", action="store", help="Agent info CSV input")
     parser.addoption("--json-input", action="store", help="Path to JSON output file")
     parser.addoption("--skip-if", action="store", help="Skip test if file exists")
-
-
-def get_csv_data(file_path):
-    with open(file_path, "r") as inp:
-        return [row for row in csv.DictReader(inp)]
 
 
 def _skip_if(request):
     skip_file = request.config.getoption("--skip-if")
     if skip_file and os.path.exists(skip_file):
         pytest.skip("Attach tests unavailable due to insufficient ptrace permissions")
-
-
-@pytest.fixture
-def kernel_input_data(request):
-    _skip_if(request)
-    filename = request.config.getoption("--kernel-input")
-    if not filename:
-        pytest.skip("--kernel-input not provided")
-    return get_csv_data(filename)
-
-
-@pytest.fixture
-def memory_copy_input_data(request):
-    _skip_if(request)
-    filename = request.config.getoption("--memory-copy-input")
-    if not filename:
-        pytest.skip("--memory-copy-input not provided")
-    return get_csv_data(filename)
-
-
-@pytest.fixture
-def hsa_input_data(request):
-    _skip_if(request)
-    filename = request.config.getoption("--hsa-input")
-    if not filename:
-        pytest.skip("--hsa-input not provided")
-    return get_csv_data(filename)
-
-
-@pytest.fixture
-def agent_info_input_data(request):
-    _skip_if(request)
-    filename = request.config.getoption("--agent-input")
-    if not filename:
-        pytest.skip("--agent-input not provided")
-    return get_csv_data(filename)
 
 
 @pytest.fixture

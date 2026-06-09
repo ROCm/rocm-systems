@@ -57,15 +57,5 @@ rocprofiler_add_integration_validate_test(
     DISABLED ${IS_DISABLED}
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-tree
-    ARGS --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_kernel_trace.csv
-         --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_hsa_api_trace.csv
-         --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
-         --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
-         --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --skip-if
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
+         --skip-if ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)
