@@ -143,6 +143,26 @@ TEST(MfmaSimdExact, Bf16Spec_AllShapes) {
   spec(amdgpu::exec_f32_mfma_bf16_spec<16, 16, 16>, "spec_bf16_16x16x16");
 }
 
+// --- specialized fp8/bf8 kernels (constexpr dims + LUT bulk convert), all four
+// A/B format pairs on both dense shapes. The trial modes drive NaN, Inf (bf8),
+// denorm, and max-finite f8 codes through both paths. ---
+TEST(MfmaSimdExact, F8Spec_AllShapes) {
+  SKIP_IF_NO_SIMD();
+  auto spec = [](auto fn, Fmt fmt, const char *label) {
+    run_case(label, fmt, Fmt::F32, [fn](MfmaFixture &fx, uint32_t const_acc) {
+      fn(*fx.cu, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC, const_acc, 0, 0, 0);
+    });
+  };
+  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, true>, Fmt::FP8, "spec_fp8_fp8_16x16x32");
+  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, true, false>, Fmt::FP8, "spec_fp8_bf8_16x16x32");
+  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, false, true>, Fmt::BF8, "spec_bf8_fp8_16x16x32");
+  spec(amdgpu::exec_f32_mfma_f8_spec<16, 16, 32, false, false>, Fmt::BF8, "spec_bf8_bf8_16x16x32");
+  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, true, true>, Fmt::FP8, "spec_fp8_fp8_32x32x16");
+  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, true, false>, Fmt::FP8, "spec_fp8_bf8_32x32x16");
+  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, false, true>, Fmt::BF8, "spec_bf8_fp8_32x32x16");
+  spec(amdgpu::exec_f32_mfma_f8_spec<32, 32, 16, false, false>, Fmt::BF8, "spec_bf8_bf8_32x32x16");
+}
+
 // --- specialized f32 kernels ---
 TEST(MfmaSimdExact, F32Spec_AllShapes) {
   SKIP_IF_NO_SIMD();

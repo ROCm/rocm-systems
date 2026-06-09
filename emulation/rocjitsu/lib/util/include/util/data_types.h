@@ -4,6 +4,7 @@
 #ifndef UTIL_DATA_TYPES_H_
 #define UTIL_DATA_TYPES_H_
 
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -516,8 +517,52 @@ inline uint8_t f32_to_bf8_e5m2_sr(float val, uint32_t seed) {
   return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
 }
 
-// ---- Generalized SR + OCP MX helpers (used by gfx1250 WMMA) ----
+namespace detail {
 
+/// 256-entry fp8/bf8 -> f32 tables filled from the scalar converters, so every
+/// entry (including the NaN payloads) is bit-exact with the per-element path
+/// by construction.
+inline const float *fp8_e4m3_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = fp8_e4m3_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+inline const float *bf8_e5m2_lut() {
+  static const auto lut = [] {
+    std::array<float, 256> t{};
+    for (uint32_t i = 0; i < 256; ++i)
+      t[i] = bf8_e5m2_to_f32(static_cast<uint8_t>(i));
+    return t;
+  }();
+  return lut.data();
+}
+
+} // namespace detail
+
+/// @brief Convert `n` contiguous E4M3 FP8 bytes to float via the lookup table.
+///
+/// Bit-exact with fp8_e4m3_to_f32 for every code. The scalar gather loop is
+/// enough to amortize the per-element converter cost on the MFMA/WMMA bulk
+/// hoists (no vector path needed; works on every target).
+inline void fp8_e4m3_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::fp8_e4m3_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+/// @brief Convert `n` contiguous E5M2 BF8 bytes to float via the lookup table.
+inline void bf8_e5m2_to_f32_block(const uint8_t *src, float *dst, size_t n) {
+  const float *lut = detail::bf8_e5m2_lut();
+  for (size_t i = 0; i < n; ++i)
+    dst[i] = lut[src[i]];
+}
+
+// ---- Generalized SR + OCP MX helpers (used by gfx1250 WMMA) ----
 inline uint32_t f32_to_binary_float_sr(float val, uint32_t seed, uint32_t exp_bits,
                                        uint32_t mant_bits, int32_t bias, int32_t max_exp,
                                        int32_t min_exp, uint32_t nan_code, uint32_t inf_code) {
