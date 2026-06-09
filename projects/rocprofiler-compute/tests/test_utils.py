@@ -6804,3 +6804,54 @@ def test_reconfigure_stdio_utf8_end_to_end_makes_non_ascii_print_safe():
     wrapper.write("│ box │\n")  # would raise UnicodeEncodeError under ascii/strict
     wrapper.flush()
     assert raw.getvalue() == "│ box │\n".encode("utf-8")
+
+
+def cache_entry(props, size, level, shared, instances):
+    return {
+        "cache_properties": props,
+        "cache_size": size,
+        "cache_level": level,
+        "max_num_cu_shared": shared,
+        "num_cache_instance": instances,
+    }
+
+
+# MI210 is a harvested part: the vL1D instance count (112) exceeds the active
+# CU count (104), so matching instances to num_cu used to drop the L1 entry.
+mi210_cache = {
+    "cache": [
+        cache_entry(["DATA_CACHE", "SIMD_CACHE"], 16, 1, 1, 112),
+        cache_entry(["INST_CACHE", "SIMD_CACHE"], 32, 1, 2, 48),
+        cache_entry(["INST_CACHE", "SIMD_CACHE"], 32, 1, 1, 8),
+        cache_entry(["DATA_CACHE", "SIMD_CACHE"], 16, 1, 2, 48),
+        cache_entry(["DATA_CACHE", "SIMD_CACHE"], 8192, 2, 104, 1),
+    ]
+}
+
+# MI300X has two per-CU level-1 data caches; the vL1D is the one with the
+# most instances (304), not the smaller 16-instance cache.
+mi300x_cache = {
+    "cache": [
+        cache_entry(["DATA_CACHE", "SIMD_CACHE"], 32, 1, 1, 304),
+        cache_entry(["INST_CACHE", "SIMD_CACHE"], 64, 1, 2, 144),
+        cache_entry(["INST_CACHE", "SIMD_CACHE"], 64, 1, 1, 16),
+        cache_entry(["DATA_CACHE", "SIMD_CACHE"], 16, 1, 2, 144),
+        cache_entry(["DATA_CACHE", "SIMD_CACHE"], 16, 1, 1, 16),
+    ]
+}
+
+
+@pytest.mark.parametrize(
+    "num_cu, cache_info, expected_l1",
+    [
+        (104, mi210_cache, 16 * 1024),
+        (304, mi300x_cache, 32 * 1024),
+    ],
+)
+def test_set_cache_sizes_picks_vl1d(num_cu, cache_info, expected_l1):
+    """vL1D is the level-1 data cache with the most instances, even when that
+    count differs from the active CU count (harvested parts)."""
+    from utils.specs import set_cache_sizes
+
+    sizes = set_cache_sizes(num_cu, cache_info, num_dies=1)
+    assert sizes["L1"] == expected_l1
