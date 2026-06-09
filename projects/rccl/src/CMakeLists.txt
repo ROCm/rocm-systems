@@ -1158,15 +1158,19 @@ if(BUILD_SHARED_LIBS AND RCCL_HIP_FATBIN_AT_TAIL)
   set_property(TARGET rccl APPEND PROPERTY LINK_DEPENDS "${_rccl_fatbin_script}")
   message(STATUS "RCCL: .hip_fatbin will be placed at end of librccl.so (${_rccl_fatbin_script})")
 
-  # Informational post-build check: verify .hip_fatbin really is the last
-  # alloc PROGBITS section.  Never fails the build (a future toolchain may
-  # legitimately add a new tail section); just prints a WARNING to the log
-  # if the layout regresses so it's easy to spot in CI output.
+  # Post-build safety check: parse the ELF section table and confirm the
+  # host sections (everything except the inert .hip_fatbin spacer) fit within
+  # a 2 GiB window, which is the exact condition for small-code-model host
+  # relocations (PC32/PLT32/GOTPCRELX/32S) to stay in range.  Fails the build
+  # if the window exceeds 2 GiB -- e.g. if the linker silently ignored the
+  # tail-placement script -- so the regression is caught here rather than as
+  # a confusing relocation overflow once the fatbin grows.  Skips cleanly on
+  # non-x86-64 hosts.
   add_custom_command(TARGET rccl POST_BUILD
     COMMAND ${Python3_EXECUTABLE}
             ${PROJECT_SOURCE_DIR}/cmake/scripts/check_hip_fatbin_tail.py
             $<TARGET_FILE:rccl>
-    COMMENT "Verifying .hip_fatbin is at the tail of librccl.so"
+    COMMENT "Verifying host sections stay within 2 GiB of each other in librccl.so"
     VERBATIM
   )
 endif()

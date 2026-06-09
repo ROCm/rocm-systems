@@ -435,15 +435,21 @@ check_exit_code "$?"
 if [[ "${time_trace}" == true || "${use_ninja}" == true ]]; then
     if ! hash ninja &>/dev/null ; then
         if [[ "${time_trace}" == true ]]; then
+            # Ninja is mandatory for --time-trace (the trace post-processing
+            # consumes Ninja's .ninja_log), so this is a hard error.
             echo "ninja could not be found (required for --time-trace)"
-        else
-            echo "ninja could not be found (required for --ninja)"
+            echo "Use \"${time_trace_ninja_msg}\" to install ninja"
+            exit 1
         fi
-        echo "Use \"${time_trace_ninja_msg}\" to install ninja"
-        exit 1
+        # --ninja is only a build-speed opt-in, so degrade gracefully to Make
+        # rather than aborting when ninja is unavailable.
+        echo "WARNING: ninja could not be found; falling back to the Make generator for --ninja"
+        echo "         Use \"${time_trace_ninja_msg}\" to install ninja"
+        build_system="make"
+    else
+        build_system="ninja"
+        enable_ninja="-GNinja"
     fi
-    build_system="ninja"
-    enable_ninja="-GNinja"
 else
     build_system="make"
 fi
