@@ -101,6 +101,9 @@ struct BinaryTranslatorOptions {
   /// investigating register clobbers caused by overly optimistic liveness.
   std::optional<uint16_t> debug_min_free_vgpr;
 
+  /// @brief Replace instructions at or after this source offset with s_endpgm.
+  std::optional<uint64_t> debug_stop_before_offset;
+
   /// @brief Keep scanning instructions after recoverable translation failures.
   ///
   /// @details This is a diagnostics-only mode. The translator preserves the

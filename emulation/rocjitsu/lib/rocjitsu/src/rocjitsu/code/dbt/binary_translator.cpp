@@ -60,6 +60,25 @@ struct BranchFixup {
   uint64_t target_inst_offset = 0;   ///< New .text offset of the branch instruction.
 };
 
+struct IndirectCallFixup {
+  uint64_t source_getpc_offset = 0;
+  uint64_t source_add_lo_offset = 0;
+  uint64_t source_add_hi_offset = 0;
+  uint64_t source_call_offset = 0;
+  uint64_t source_target_offset = 0;
+  uint16_t source_call_sreg = 0;
+  uint64_t target_getpc_offset = 0;
+  uint64_t target_add_lo_offset = 0;
+  uint64_t target_add_hi_offset = 0;
+  int32_t add_lo_literal_adjust = 0;
+  bool add_hi_has_literal = true;
+};
+
+struct DirectCallReturn {
+  uint64_t source_call_offset = 0;
+  uint16_t return_sreg = 0;
+};
+
 /// @brief Physical output layout for one translated kernel.
 ///
 /// @details Blocks are emitted in original .text order. This is intentional: it
@@ -77,6 +96,8 @@ struct KernelTextLayout {
   uint64_t cave_end = 0;                  ///< One-past-end of local cave.
   std::vector<BlockPlacement> blocks;     ///< Kernel-local block placements.
   std::vector<BranchFixup> branch_fixups; ///< Explicit branch patches.
+  std::vector<IndirectCallFixup> indirect_call_fixups;
+  std::vector<DirectCallReturn> direct_call_returns;
 };
 
 namespace {
@@ -245,6 +266,278 @@ void append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count, rj_code
   return std::nullopt;
 }
 
+[[nodiscard]] std::optional<uint16_t> s_getpc_sdst(const Instruction &inst, uint32_t word) {
+  if (inst.size() != sizeof(uint32_t))
+    return std::nullopt;
+  if ((word >> 23) != kSop1EncodingPrefix)
+    return std::nullopt;
+  // CDNA SOP1 opcode: s_getpc_b64 = 0x1c.
+  if (((word >> 8) & 0xffu) != 0x1cu)
+    return std::nullopt;
+  return static_cast<uint16_t>((word >> 16) & 0x7fu);
+}
+
+[[nodiscard]] bool sop2_literal_to_sreg(const Instruction &inst, uint32_t word,
+                                        uint32_t literal_word, uint32_t opcode, uint16_t sdst,
+                                        uint16_t ssrc0, uint32_t &literal) {
+  if (inst.size() != 2 * sizeof(uint32_t))
+    return false;
+  if ((word >> 30) != kSop2EncodingPrefix)
+    return false;
+  if (((word >> 23) & 0x7fu) != opcode)
+    return false;
+  if (((word >> 16) & 0x7fu) != sdst)
+    return false;
+  if (((word >> 8) & 0xffu) != 255u)
+    return false;
+  if ((word & 0xffu) != ssrc0)
+    return false;
+  literal = literal_word;
+  return true;
+}
+
+[[nodiscard]] bool sop2_literal_inline_to_sreg(const Instruction &inst, uint32_t word,
+                                               uint32_t literal_word, uint32_t opcode,
+                                               uint16_t sdst, uint16_t inline_src1,
+                                               uint32_t &literal) {
+  if (inst.size() != 2 * sizeof(uint32_t))
+    return false;
+  if ((word >> 30) != kSop2EncodingPrefix)
+    return false;
+  if (((word >> 23) & 0x7fu) != opcode)
+    return false;
+  if (((word >> 16) & 0x7fu) != sdst)
+    return false;
+  if (((word >> 8) & 0xffu) != inline_src1)
+    return false;
+  if ((word & 0xffu) != 255u)
+    return false;
+  literal = literal_word;
+  return true;
+}
+
+[[nodiscard]] bool sop2_sreg_inline_to_sreg(const Instruction &inst, uint32_t word, uint32_t opcode,
+                                            uint16_t sdst, uint16_t ssrc0, uint16_t inline_src1) {
+  if (inst.size() != sizeof(uint32_t))
+    return false;
+  if ((word >> 30) != kSop2EncodingPrefix)
+    return false;
+  if (((word >> 23) & 0x7fu) != opcode)
+    return false;
+  if (((word >> 16) & 0x7fu) != sdst)
+    return false;
+  if (((word >> 8) & 0xffu) != inline_src1)
+    return false;
+  return (word & 0xffu) == ssrc0;
+}
+
+[[nodiscard]] std::optional<uint16_t> s_swappc_ssrc0(const Instruction &inst, uint32_t word) {
+  if (inst.size() != sizeof(uint32_t))
+    return std::nullopt;
+  if ((word >> 23) != kSop1EncodingPrefix)
+    return std::nullopt;
+  // CDNA SOP1 opcode: s_swappc_b64 = 0x1e.
+  if (((word >> 8) & 0xffu) != 0x1eu)
+    return std::nullopt;
+  return static_cast<uint16_t>(word & 0xffu);
+}
+
+[[nodiscard]] bool s_swappc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
+  auto actual = s_swappc_ssrc0(inst, word);
+  return actual && *actual == ssrc0;
+}
+
+[[nodiscard]] std::optional<uint16_t> s_setpc_ssrc0(const Instruction &inst, uint32_t word) {
+  if (inst.size() != sizeof(uint32_t))
+    return std::nullopt;
+  if ((word >> 23) != kSop1EncodingPrefix)
+    return std::nullopt;
+  // CDNA SOP1 opcode: s_setpc_b64 = 0x1d.
+  if (((word >> 8) & 0xffu) != 0x1du)
+    return std::nullopt;
+  return static_cast<uint16_t>(word & 0xffu);
+}
+
+[[nodiscard]] bool s_setpc_from_sreg(const Instruction &inst, uint32_t word, uint16_t ssrc0) {
+  auto actual = s_setpc_ssrc0(inst, word);
+  return actual && *actual == ssrc0;
+}
+
+[[nodiscard]] std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
+  if (inst.size() != sizeof(uint32_t))
+    return std::nullopt;
+  if (std::string_view(inst.mnemonic()) != "s_call_b64")
+    return std::nullopt;
+  return static_cast<uint16_t>((word >> 16) & 0x7fu);
+}
+
+[[nodiscard]] std::vector<IndirectCallFixup>
+recover_static_indirect_call_targets(std::span<const Instruction *const> insts,
+                                     std::span<const uint64_t> offsets,
+                                     std::span<const uint8_t> text) {
+  std::vector<IndirectCallFixup> fixups;
+  for (size_t i = 0; i + 3 < insts.size(); ++i) {
+    auto sdst = s_getpc_sdst(*insts[i], text_word_at(text, offsets[i]));
+    if (!sdst || *sdst >= 127)
+      continue;
+
+    uint32_t lo = 0;
+    uint32_t hi = 0;
+    uint64_t add_lo_offset = offsets[i + 1];
+    uint64_t add_hi_offset = offsets[i + 2];
+    int32_t add_lo_literal_adjust = 0;
+    bool add_hi_has_literal = true;
+    bool matched_static_target = false;
+    constexpr uint16_t kInlineInt0 = 128;
+    // CDNA SOP2 opcodes: s_add_u32 = 0, s_addc_u32 = 4.
+    if (sop2_literal_to_sreg(*insts[i + 1], text_word_at(text, offsets[i + 1]),
+                             text_word_at(text, offsets[i + 1] + sizeof(uint32_t)), 0, *sdst, *sdst,
+                             lo)) {
+      if (sop2_literal_to_sreg(*insts[i + 2], text_word_at(text, offsets[i + 2]),
+                               text_word_at(text, offsets[i + 2] + sizeof(uint32_t)), 4,
+                               static_cast<uint16_t>(*sdst + 1), static_cast<uint16_t>(*sdst + 1),
+                               hi)) {
+        matched_static_target = true;
+      } else if (sop2_sreg_inline_to_sreg(*insts[i + 2], text_word_at(text, offsets[i + 2]), 4,
+                                          static_cast<uint16_t>(*sdst + 1),
+                                          static_cast<uint16_t>(*sdst + 1), kInlineInt0)) {
+        hi = 0;
+        add_hi_has_literal = false;
+        matched_static_target = true;
+      }
+    }
+    if (!matched_static_target && i + 4 < insts.size()) {
+      // Tensile emits static skips as:
+      //   s_getpc_b64 s[pc:pc+1]
+      //   s_add_i32 temp, literal, 4
+      //   s_add_u32 pc, pc, temp
+      //   s_addc_u32 pc+1, pc+1, 0
+      //   s_setpc_b64 s[pc:pc+1]
+      //
+      // The literal is one instruction earlier than the low add into the PC
+      // register and must be patched to delta - 4.
+      uint32_t temp_literal = 0;
+      constexpr uint16_t kInlineInt4 = 132;
+      const auto temp_sdst =
+          static_cast<uint16_t>((text_word_at(text, offsets[i + 1]) >> 16) & 0x7fu);
+      if (!sop2_literal_inline_to_sreg(*insts[i + 1], text_word_at(text, offsets[i + 1]),
+                                       text_word_at(text, offsets[i + 1] + sizeof(uint32_t)), 2,
+                                       temp_sdst, kInlineInt4, temp_literal))
+        continue;
+      if (!sop2_sreg_inline_to_sreg(*insts[i + 2], text_word_at(text, offsets[i + 2]), 0, *sdst,
+                                    *sdst, temp_sdst))
+        continue;
+      if (!sop2_sreg_inline_to_sreg(*insts[i + 3], text_word_at(text, offsets[i + 3]), 4,
+                                    static_cast<uint16_t>(*sdst + 1),
+                                    static_cast<uint16_t>(*sdst + 1), kInlineInt0))
+        continue;
+
+      lo = temp_literal + 4u;
+      hi = 0;
+      add_lo_offset = offsets[i + 1];
+      add_hi_offset = offsets[i + 3];
+      add_lo_literal_adjust = -4;
+      add_hi_has_literal = false;
+      matched_static_target = true;
+    }
+    if (!matched_static_target) {
+      continue;
+    }
+
+    std::vector<size_t> call_indices;
+    for (size_t j = i + 3; j < insts.size(); ++j) {
+      const uint32_t word = text_word_at(text, offsets[j]);
+      if (s_swappc_from_sreg(*insts[j], word, *sdst) || s_setpc_from_sreg(*insts[j], word, *sdst)) {
+        call_indices.push_back(j);
+      }
+    }
+    if (call_indices.empty())
+      continue;
+
+    const int64_t addend = static_cast<int64_t>((static_cast<uint64_t>(hi) << 32) | lo);
+    const int64_t base = static_cast<int64_t>(offsets[i] + insts[i]->size());
+    const int64_t target = base + addend;
+    if (target < 0 || static_cast<uint64_t>(target) >= text.size())
+      continue;
+
+    for (size_t call_index : call_indices) {
+      fixups.push_back({.source_getpc_offset = offsets[i],
+                        .source_add_lo_offset = add_lo_offset,
+                        .source_add_hi_offset = add_hi_offset,
+                        .source_call_offset = offsets[call_index],
+                        .source_target_offset = static_cast<uint64_t>(target),
+                        .source_call_sreg = *sdst,
+                        .add_lo_literal_adjust = add_lo_literal_adjust,
+                        .add_hi_has_literal = add_hi_has_literal});
+    }
+  }
+  return fixups;
+}
+
+[[nodiscard]] std::vector<IndirectCallFixup>
+recover_static_indirect_call_targets(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                     std::span<const uint8_t> text) {
+  std::vector<std::pair<uint64_t, const Instruction *>> source_order;
+  for (const auto &block : blocks) {
+    if (!block)
+      continue;
+    uint64_t offset = block->start_offset();
+    for (const Instruction &inst : block->instructions()) {
+      source_order.emplace_back(offset, &inst);
+      offset += inst.size();
+    }
+  }
+  std::ranges::sort(source_order, {}, &std::pair<uint64_t, const Instruction *>::first);
+
+  std::vector<const Instruction *> insts;
+  std::vector<uint64_t> offsets;
+  insts.reserve(source_order.size());
+  offsets.reserve(source_order.size());
+  for (const auto &[offset, inst] : source_order) {
+    offsets.push_back(offset);
+    insts.push_back(inst);
+  }
+
+  return recover_static_indirect_call_targets(
+      std::span<const Instruction *const>(insts.data(), insts.size()), offsets, text);
+}
+
+[[nodiscard]] std::optional<IndirectCallFixup>
+recover_carried_indirect_call_target(const KernelTextLayout &layout, const Instruction &inst,
+                                     uint32_t word, uint64_t source_call_offset) {
+  auto ssrc0 = s_swappc_ssrc0(inst, word);
+  if (!ssrc0)
+    ssrc0 = s_setpc_ssrc0(inst, word);
+  if (!ssrc0)
+    return std::nullopt;
+
+  const IndirectCallFixup *latest = nullptr;
+  for (const IndirectCallFixup &fixup : layout.indirect_call_fixups) {
+    if (fixup.source_call_sreg != *ssrc0 || fixup.source_call_offset >= source_call_offset)
+      continue;
+    if (latest == nullptr || fixup.source_call_offset > latest->source_call_offset)
+      latest = &fixup;
+  }
+  if (!latest)
+    return std::nullopt;
+
+  IndirectCallFixup carried = *latest;
+  carried.source_call_offset = source_call_offset;
+  return carried;
+}
+
+[[nodiscard]] bool recovered_direct_call_return(const KernelTextLayout &layout,
+                                                const Instruction &inst, uint32_t word,
+                                                uint64_t source_offset) {
+  auto ssrc0 = s_setpc_ssrc0(inst, word);
+  if (!ssrc0)
+    return false;
+
+  return std::ranges::any_of(layout.direct_call_returns, [&](const DirectCallReturn &call) {
+    return call.return_sreg == *ssrc0 && call.source_call_offset < source_offset;
+  });
+}
+
 [[nodiscard]] bool words_changed(std::span<const uint32_t> before,
                                  std::span<const uint32_t> after) {
   if (before.size() != after.size())
@@ -295,7 +588,8 @@ struct KernelTranslationScope {
 
 [[nodiscard]] std::vector<BasicBlock *>
 reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, BasicBlock &entry,
-                        const std::unordered_set<uint64_t> &kernel_entries) {
+                        const std::unordered_set<uint64_t> &kernel_entries,
+                        std::span<const IndirectCallFixup> recovered_indirect_targets) {
   std::unordered_set<const BasicBlock *> reachable;
   std::vector<BasicBlock *> stack{&entry};
 
@@ -304,6 +598,19 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
     stack.pop_back();
     if (block == nullptr || !reachable.insert(block).second)
       continue;
+
+    for (const IndirectCallFixup &fixup : recovered_indirect_targets) {
+      if (fixup.source_getpc_offset < block->start_offset() ||
+          fixup.source_getpc_offset >= block->end_offset())
+        continue;
+      BasicBlock *target = block_for_offset(blocks, fixup.source_target_offset);
+      if (target == nullptr)
+        continue;
+      if (target->start_offset() != entry.start_offset() &&
+          kernel_entries.contains(target->start_offset()))
+        continue;
+      stack.push_back(target);
+    }
 
     for (BasicBlock *succ : block->successors()) {
       if (succ == nullptr)
@@ -326,7 +633,8 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, 
 
 [[nodiscard]] std::vector<KernelTranslationScope>
 kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                          std::span<KdTranslation> kernels) {
+                          std::span<KdTranslation> kernels,
+                          std::span<const IndirectCallFixup> recovered_indirect_targets) {
   std::vector<KernelTranslationScope> scopes;
   const auto entries = kernel_entry_offsets(kernels);
   if (entries.empty())
@@ -351,7 +659,9 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
     if (entry == nullptr)
       continue;
 
-    scopes.push_back({kernel, entry, reachable_kernel_blocks(blocks, *entry, entry_set)});
+    scopes.push_back(
+        {kernel, entry,
+         reachable_kernel_blocks(blocks, *entry, entry_set, recovered_indirect_targets)});
   }
   return scopes;
 }
@@ -386,6 +696,8 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   };
   auto text = patcher.text_bytes();
   if (text.empty()) {
+    append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                 "code object does not expose a non-empty .text section for translation");
     return leave_unchanged();
   }
 
@@ -434,7 +746,9 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   // Phase 2: build a CFG over .text and reduce each descriptor root to the
   // source blocks that this kernel owns in the initial relocation strategy.
   auto blocks = BasicBlock::build(obj, *decoder, entry_offsets);
-  auto scopes = kernel_translation_scopes(blocks, descriptor_translations);
+  auto recovered_indirect_targets = recover_static_indirect_call_targets(blocks, text);
+  auto scopes =
+      kernel_translation_scopes(blocks, descriptor_translations, recovered_indirect_targets);
 
   if (scopes.size() != entry_offsets.size()) {
     append_error(result.diagnostics, DiagnosticKind::KernelDescriptor,
@@ -474,24 +788,6 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
     copy_original_instruction(inst, offset, target_offset);
     return true;
   };
-
-  // Phase 3: fail shared reachable text up front. The plan deliberately keeps
-  // duplication/removal of public references out of this first implementation.
-  std::unordered_set<const BasicBlock *> translated_blocks;
-  for (const KernelTranslationScope &scope : scopes) {
-    if (scope.blocks.empty())
-      continue;
-    for (BasicBlock *block : scope.blocks) {
-      if (block == nullptr)
-        continue;
-      if (!translated_blocks.insert(block).second) {
-        append_error(result.diagnostics, DiagnosticKind::Legalization,
-                     "basic block is reachable from multiple kernel entries; shared kernel text "
-                     "translation is not implemented");
-        return leave_unchanged();
-      }
-    }
-  }
 
   for (const KernelTranslationScope &scope : scopes) {
     if (scope.blocks.empty())
@@ -591,21 +887,90 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
         scope.translation->target_vgpr_count, scope.translation->target_agpr_count,
         scope.translation->target_accvgpr_base, scope.translation->target_sgpr_count);
     LivenessAnalysisOptions liveness_options;
+    // Keep generated DBT temporaries outside the guest kernel's declared VGPR
+    // footprint. Some CDNA kernels have descriptor-reserved or otherwise hidden
+    // state at the first register after the highest explicit operand, and
+    // liveness cannot see those implicit uses.
+    liveness_options.min_free_vgpr = static_cast<uint16_t>(
+        std::min<uint32_t>(kernel_context.num_vgprs + 1u, std::numeric_limits<uint16_t>::max()));
     if (options_.debug_min_free_vgpr)
-      liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
+      liveness_options.min_free_vgpr =
+          std::max(liveness_options.min_free_vgpr, *options_.debug_min_free_vgpr);
     LivenessAnalysis liveness(KernelBlockScope(scope.blocks), liveness_options);
 
     // Phase 5: translate each relocated body instruction. Oversized semantic
     // expansions branch into this kernel's private cave immediately after the body.
+    auto write_debug_stop = [&](const Instruction &inst, uint64_t source_offset,
+                                uint64_t relocated_offset) {
+      std::vector<uint32_t> stop_words(inst.size() / sizeof(uint32_t), build_s_nop(0, host_arch_));
+      stop_words[0] = pack_sopp(1, 0);
+      std::memcpy(translated_text.data() + relocated_offset, stop_words.data(), inst.size());
+      if (trace_callback_) {
+        const auto source_words = raw_words_for_inst(inst);
+        trace_callback_({.source_offset = source_offset,
+                         .source_size = static_cast<uint32_t>(inst.size()),
+                         .source_words = source_words,
+                         .legalization = nullptr,
+                         .copied_original = false,
+                         .semantic_lowering = false,
+                         .changed = true,
+                         .emitted_in_cave = false,
+                         .target_offset = relocated_offset,
+                         .target_words = stop_words});
+      }
+    };
+
     for (const BlockPlacement &placement : layout.blocks) {
       BasicBlock *block = placement.block;
+      for (IndirectCallFixup fixup : recovered_indirect_targets) {
+        if (fixup.source_getpc_offset < block->start_offset() ||
+            fixup.source_getpc_offset >= block->end_offset())
+          continue;
+        auto getpc_target = target_for_source_offset(layout, fixup.source_getpc_offset);
+        auto add_lo_target = target_for_source_offset(layout, fixup.source_add_lo_offset);
+        auto add_hi_target = target_for_source_offset(layout, fixup.source_add_hi_offset);
+        if (getpc_target && add_lo_target && add_hi_target) {
+          fixup.target_getpc_offset = *getpc_target;
+          fixup.target_add_lo_offset = *add_lo_target;
+          fixup.target_add_hi_offset = *add_hi_target;
+          layout.indirect_call_fixups.push_back(fixup);
+        }
+      }
+
       uint64_t offset = block->start_offset();
       uint64_t target_offset = placement.target_start;
       for (auto it = block->instructions().begin(); it != block->instructions().end(); ++it) {
         const auto &inst = *it;
         const uint32_t inst_size = inst.size();
 
-        if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
+        if (options_.debug_stop_before_offset && offset >= *options_.debug_stop_before_offset) {
+          write_debug_stop(inst, offset, target_offset);
+          offset += inst_size;
+          target_offset += inst_size;
+          continue;
+        }
+
+        const bool recovered_indirect_call =
+            std::ranges::any_of(layout.indirect_call_fixups, [&](const IndirectCallFixup &fixup) {
+              return fixup.source_call_offset == offset;
+            });
+        if (!recovered_indirect_call) {
+          auto carried = recover_carried_indirect_call_target(layout, inst,
+                                                              text_word_at(text, offset), offset);
+          if (carried)
+            layout.indirect_call_fixups.push_back(*carried);
+        }
+        const bool has_recovered_indirect_call =
+            std::ranges::any_of(layout.indirect_call_fixups, [&](const IndirectCallFixup &fixup) {
+              return fixup.source_call_offset == offset;
+            });
+        const uint32_t word = text_word_at(text, offset);
+        const bool recovered_indirect_return =
+            s_setpc_from_sreg(inst, word, 30) ||
+            recovered_direct_call_return(layout, inst, word, offset);
+        const auto direct_branch_delta = inst.branch_offset_bytes();
+        if ((inst.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
+            !has_recovered_indirect_call && !recovered_indirect_return && !direct_branch_delta) {
           append_error(result.diagnostics, DiagnosticKind::Legalization,
                        "indirect branch or call target recovery is not implemented for relocated "
                        "kernel text",
@@ -618,12 +983,16 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
           return leave_unchanged();
         }
 
-        if (auto branch_delta = inst.branch_offset_bytes()) {
+        if (direct_branch_delta) {
+          if (auto sdst = s_call_sdst(inst, word))
+            layout.direct_call_returns.push_back(
+                {.source_call_offset = offset, .return_sreg = *sdst});
+
           // Record direct branches while emitting the body, but patch only after
           // every block has a final target placement. This keeps fallthrough
           // implicit and limits fixups to explicit PC-relative edges.
           const int64_t source_target =
-              static_cast<int64_t>(offset + inst_size) + static_cast<int64_t>(*branch_delta);
+              static_cast<int64_t>(offset + inst_size) + static_cast<int64_t>(*direct_branch_delta);
           if (source_target < 0) {
             append_error(result.diagnostics, DiagnosticKind::Legalization,
                          "direct branch target is outside the source .text range", offset,
@@ -779,6 +1148,37 @@ TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
       }
       std::memcpy(translated_text.data() + fixup.target_inst_offset, words.data(),
                   fixup.inst->size());
+    }
+
+    for (const IndirectCallFixup &fixup : layout.indirect_call_fixups) {
+      auto target_target = target_for_source_offset(layout, fixup.source_target_offset);
+      if (!target_target) {
+        append_error(result.diagnostics, DiagnosticKind::Legalization,
+                     "recovered indirect call target is not present in the kernel-local relocated "
+                     "body",
+                     fixup.source_call_offset, "s_swappc_b64");
+        return leave_unchanged();
+      }
+
+      const int64_t base = static_cast<int64_t>(fixup.target_getpc_offset + sizeof(uint32_t));
+      const int64_t delta = static_cast<int64_t>(*target_target) - base;
+      const auto delta_bits = static_cast<uint64_t>(delta);
+      const uint32_t lo =
+          static_cast<uint32_t>(delta_bits + static_cast<uint64_t>(fixup.add_lo_literal_adjust));
+      const uint32_t hi = static_cast<uint32_t>(delta_bits >> 32);
+
+      std::memcpy(translated_text.data() + fixup.target_add_lo_offset + sizeof(uint32_t), &lo,
+                  sizeof(lo));
+      if (fixup.add_hi_has_literal) {
+        std::memcpy(translated_text.data() + fixup.target_add_hi_offset + sizeof(uint32_t), &hi,
+                    sizeof(hi));
+      } else if (hi != 0) {
+        append_error(result.diagnostics, DiagnosticKind::ResourceLimit,
+                     "recovered indirect branch high PC delta requires a literal addc patch, but "
+                     "the source used inline zero",
+                     fixup.source_call_offset, "s_setpc_b64");
+        return leave_unchanged();
+      }
     }
 
     if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)

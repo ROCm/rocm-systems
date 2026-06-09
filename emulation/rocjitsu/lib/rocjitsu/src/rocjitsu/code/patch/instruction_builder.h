@@ -122,12 +122,12 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 /// @brief Patch an emitted direct PC-relative branch instruction in-place.
 ///
 /// @details @p words points into the translated output buffer. @p delta_bytes is
-/// relative to the instruction's branch base. For AMDGPU SOPP direct branches,
-/// the base is the next instruction and the immediate is a signed dword offset.
-/// The function handles unconditional and conditional SOPP direct branches by
-/// replacing bits [15:0] of word 0. It returns false when @p inst is not a
-/// decoded direct branch, the buffer is empty, or the delta is not representable
-/// by SOPP's signed 16-bit dword immediate.
+/// relative to the instruction's branch base. For AMDGPU SOPP direct branches
+/// and SOPK `s_call_b64`, the base is the next instruction and the immediate is
+/// a signed dword offset. The function replaces bits [15:0] of word 0. It
+/// returns false when @p inst has no decoded PC-relative branch offset, the
+/// buffer is empty, or the delta is not representable by a signed 16-bit dword
+/// immediate.
 [[nodiscard]] bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
                                              int64_t delta_bytes, rj_code_arch_t arch);
 
