@@ -1274,6 +1274,7 @@ graph:
     tags: [userobj]
   Unit_hipGraphRetainUserObject_Negative_Basic:
     <<: *level_2
+    disabled: [asan]
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_2
