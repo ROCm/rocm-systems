@@ -113,7 +113,7 @@ struct CallLocal
 };
 
 // Cut the standalone trace at the dispatch whose 1-based count equals this.
-constexpr uint64_t TARGET_DISPATCH_ID = 20000;
+constexpr uint64_t TARGET_DISPATCH_ID = 20001;
 
 std::atomic<uint64_t> dispatch_counter{0};
 std::atomic<bool>     cut_captured{false};
@@ -167,10 +167,14 @@ event_callback(rocprofiler_thread_trace_decoder_record_type_t type,
         for(uint64_t i = 0; i < n; ++i)
         {
             const auto& ev = events[i];
+
+            if (!(ev.flags & ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE)) continue;
+
             if(cl->cut_target_in_call && !cl->cut_ready && ev.me_id == cl->target_me &&
                ev.pipe_id == cl->target_pipe && ev.byte_offset > cl->cut_offset_begin)
             {
                 if(ev.type == ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH ||
+                   ev.type == ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS ||
                    cl->pf_count_after_target != 0)
                 {
                     if(++cl->pf_count_after_target == 2)
