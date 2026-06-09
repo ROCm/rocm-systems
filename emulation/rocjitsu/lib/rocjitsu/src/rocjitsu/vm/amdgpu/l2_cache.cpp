@@ -17,7 +17,7 @@ void L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo:
                            uint32_t vmid) {
   if (backing_memory_) {
     if (op == simdojo::MessageOp::WRITE) {
-      static uint64_t wb_count = 0;
+      thread_local uint64_t wb_count = 0;
       if (++wb_count <= 3)
         util::Logger::vm("L2 writeback(backing) #", wb_count, " addr=0x", std::hex, addr,
                          " size=", std::dec, size);

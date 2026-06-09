@@ -139,6 +139,11 @@ public:
 
   mutable std::shared_mutex page_table_mutex_;
   PageTable page_table_;
+
+  /// @brief Page table version counter, bumped (release) on every map/unmap.
+  /// @details GpuMemory keeps per-thread TLB-like translation caches keyed by
+  ///          this generation; a mismatch on load (acquire) invalidates the
+  ///          cached entry and forces a fresh page-table walk.
   std::atomic<uint64_t> page_table_generation_{1};
 
   // -- Per-process state --
