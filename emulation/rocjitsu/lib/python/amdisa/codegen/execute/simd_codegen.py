@@ -1738,6 +1738,57 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         ' return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |'
         ' (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }',
     ),
+    # Normalized f32 pack-converts. src read as raw f32 (bit_cast), scale by K,
+    # clamp, isnan->0, truncate, pack 16|16. Helpers in util/simd.h.
+    # QUIRK: only the no-underscore v_cvt_pknorm_i16_f32 uses the true i16 lambda
+    # (K=32767, signed). EVERY OTHER spelling/width — including the
+    # underscore-spelled v_cvt_pk_norm_i16_f32 and the _f16 forms (which also read
+    # src as raw f32, not f16) — uses the u16 lambda (K=65535, [0,65535]). This
+    # mirrors the generated scalar bodies verbatim (a codegen quirk; do not fix).
+    'v_cvt_pknorm_i16_f32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' using U = util::native<uint32_t>;'
+        ' auto lo = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::cvt_pknorm_i16_f32_simd(std::bit_cast<util::native<float>>(b));'
+        ' return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |'
+        ' (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }',
+    ),
+    'v_cvt_pk_norm_i16_f32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));'
+        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
+    ),
+    'v_cvt_pk_norm_i16_f16_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));'
+        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
+    ),
+    'v_cvt_pknorm_u16_f32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));'
+        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
+    ),
+    'v_cvt_pk_norm_u16_f32_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));'
+        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
+    ),
+    'v_cvt_pk_norm_u16_f16_vop3': (
+        'uint32_t',
+        '[](auto a, auto b) {'
+        ' auto lo = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(a));'
+        ' auto hi = util::cvt_pknorm_u16_f32_simd(std::bit_cast<util::native<float>>(b));'
+        ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
+    ),
     'v_add_i32_vop3': ('uint32_t', '[](auto a, auto b) { return a + b; }'),
     'v_sub_i32_vop3': ('uint32_t', '[](auto a, auto b) { return a - b; }'),
     'v_add_nc_i32_vop3': ('uint32_t', '[](auto a, auto b) { return a + b; }'),

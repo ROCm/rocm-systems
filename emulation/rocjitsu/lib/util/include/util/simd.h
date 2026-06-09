@@ -645,6 +645,28 @@ inline native<float> cube_tc_f32_simd(native<float> x, native<float> y, native<f
   return r;
 }
 
+/// Normalized f32->int16 / ->uint16 pack-convert lanes (back v_cvt_pk[_]norm_*).
+/// Scalar: `isnan(f) ? 0 : static_cast<intN>(clamp(f * K, lo, hi))`. The NaN->0
+/// blend is done in the FLOAT domain (so the mask type matches) before the int
+/// truncation, avoiding any float-mask -> int-mask conversion. Clamp keeps the
+/// value in range so static_simd_cast (truncate-toward-zero) matches the scalar
+/// cast; the caller masks &0xFFFF when packing. i16: K=32767, clamp
+/// [-32768,32767]; u16: K=65535, clamp [0,65535].
+inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
+  native<float> p = f * native<float>(32767.0f);
+  stdx::where(p < native<float>(-32768.0f), p) = native<float>(-32768.0f);
+  stdx::where(p > native<float>(32767.0f), p) = native<float>(32767.0f);
+  stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
+  return stdx::static_simd_cast<native<int32_t>>(p);
+}
+inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
+  native<float> p = f * native<float>(65535.0f);
+  stdx::where(p < native<float>(0.0f), p) = native<float>(0.0f);
+  stdx::where(p > native<float>(65535.0f), p) = native<float>(65535.0f);
+  stdx::where(stdx::isnan(f), p) = native<float>(0.0f);
+  return stdx::static_simd_cast<native<uint32_t>>(p);
+}
+
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
 /// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
 /// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
