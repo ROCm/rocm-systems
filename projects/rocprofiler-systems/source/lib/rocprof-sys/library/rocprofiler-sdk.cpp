@@ -2713,6 +2713,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     if(!_counter_events.empty())
     {
+        // Resolve counter names to counter IDs per agent
         for(const auto& itr : _data->gpu_agents)
         {
             const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
@@ -2720,6 +2721,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
                 _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
         }
 
+        // --- Dispatch-mode kernel counters ---
         ROCPROFILER_CALL(rocprofiler_create_context(&_data->counter_ctx));
 
         auto _operations = std::array<rocprofiler_tracing_operation_t, 1>{
@@ -2734,6 +2736,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             _data->counter_ctx, dispatch_counting_service_callback, _data,
             counter_record_callback, _data));
     }
+
+#if ROCPROFILER_VERSION >= 600
+    const auto gpu_perf_counters_setting = get_gpu_perf_counters();
+    if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
+    {
+        pmc::register_gpu_perf_counter_source(
+            get_agent_manager_instance().get_agents_by_type(agent_type::GPU));
+    }
+#endif
 
     for(const auto& itr : _data->get_buffers())
     {
@@ -2754,7 +2765,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     gpu::add_device_metadata();
 
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
     {
         LOG_DEBUG("Setting PMC sampler state to active...");
         pmc::set_state(State::Active);
@@ -2789,8 +2800,6 @@ finalize_sdk_common()
 
     flush();
     stop();
-
-    if(config::get_use_process_sampling() && config::get_use_amd_smi()) pmc::shutdown();
 
     if(get_counter_storage())
     {
@@ -2833,7 +2842,6 @@ tool_fini(void* callback_data)
 void
 flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
 {
-    // Get current timestamp if not provided
     if(timestamp == 0)
     {
         ROCPROFILER_CALL(rocprofiler_get_timestamp(&timestamp));
@@ -3103,7 +3111,7 @@ extern "C"
             _first = false;
         }
 
-        if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
+        if(!rocprofsys::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
         if(!tim::settings::enabled()) return nullptr;
 
         if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;

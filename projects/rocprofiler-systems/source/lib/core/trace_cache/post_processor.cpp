@@ -4,12 +4,14 @@
 #include "core/trace_cache/post_processor.hpp"
 
 #include "core/agent_manager.hpp"
+#include "core/config.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
 #include "core/trace_cache/rocpd_processor.hpp"
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
+#include "core/trace_cache/unified_memory_processor.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
@@ -68,6 +70,15 @@ configure_processors(const std::shared_ptr<sample_processor_t>&       _coordinat
             _config->_ppid, _registry);
         _coordinator->add_handler(*storage.perfetto_processor);
     }
+
+    if(_formats.is_unified_memory_enabled())
+    {
+        storage.unified_memory_processor = std::make_shared<unified_memory_processor_t>(
+            _config->_agent_manager, _config->_pid, output_file_sink_view{ _registry });
+        _coordinator->add_handler(*storage.unified_memory_processor);
+        LOG_DEBUG("Unified memory processor enabled for PID {}", _config->_pid);
+    }
+
     return storage;
 }
 
@@ -134,7 +145,7 @@ post_processor::run_sequential(
         const auto _filename =
             utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid);
         auto _progress_cb = m_tracker.begin(
-            fmt::format("Generating Perfetto proto file for process [{}]", cfg->_pid),
+            fmt::format("Generating trace-cache output for process [{}]", cfg->_pid),
             file_size_or_zero(_filename));
         process_buffered_storage(cfg, _filename, formats, m_registry, _progress_cb);
     }

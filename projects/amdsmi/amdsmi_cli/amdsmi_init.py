@@ -26,6 +26,7 @@ import logging
 import signal
 import sys
 import os
+import threading
 
 from pathlib import Path
 
@@ -105,10 +106,18 @@ def amdsmi_cli_init():
         err: AmdSmiLibraryException if not successful in initializing any drivers
     """
     init_flag = 0
+    cpu_init_disabled = os.environ.get("AMDSMI_DISABLE_CPU_INIT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     if check_amdgpu_driver():
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
         logging.debug("amdgpu driver's initstate is live")
-    if check_amd_hsmp_driver() and hasattr(
+    if cpu_init_disabled:
+        logging.debug("CPU/ESMI init disabled via AMDSMI_DISABLE_CPU_INIT")
+    elif check_amd_hsmp_driver() and hasattr(
         amdsmi_interface.amdsmi_wrapper, "amdsmi_get_cpu_handles"
     ):
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_CPUS
@@ -117,12 +126,31 @@ def amdsmi_cli_init():
         logging.debug("ionic driver's initstate is live")
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_NICS
 
-    try:
-        amdsmi_interface.amdsmi_init(init_flag)
-    except (
-        amdsmi_interface.AmdSmiLibraryException,
-        amdsmi_interface.AmdSmiParameterException,
-    ) as e:
+    _INIT_TIMEOUT_SEC = 60
+    init_result = {"exception": None}
+
+    def _run_init():
+        try:
+            amdsmi_interface.amdsmi_init(init_flag)
+        except Exception as e:
+            init_result["exception"] = e
+
+    init_thread = threading.Thread(target=_run_init, daemon=True)
+    init_thread.start()
+    init_thread.join(timeout=_INIT_TIMEOUT_SEC)
+
+    if init_thread.is_alive():
+        logging.error(
+            "amdsmi_init() timed out after %ds. The GPU driver may be unresponsive.",
+            _INIT_TIMEOUT_SEC,
+        )
+        sys.exit(2)
+
+    if isinstance(
+        init_result["exception"],
+        (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException),
+    ):
+        e = init_result["exception"]
         # parameter exception thrown if init_flag is 0, but err_code will be set to 0 in that case, so must check if init_flag is 0 too
         if (
             e.err_code
@@ -138,6 +166,8 @@ def amdsmi_cli_init():
             sys.exit(-1)
         else:
             raise e
+    elif init_result["exception"] is not None:
+        raise init_result["exception"]
 
     logging.debug(
         f"AMDSMI initialized with at least one driver successfully | init flag: {init_flag}"

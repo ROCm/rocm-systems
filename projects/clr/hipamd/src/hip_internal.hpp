@@ -13,6 +13,7 @@
 #include "rocclr/utils/debug.hpp"
 #include "hip_graph_capture.hpp"
 
+#include <unordered_map>
 #include <unordered_set>
 #include <thread>
 #include <stack>
@@ -53,6 +54,11 @@ typedef struct hipArray {
 
 namespace hip{
 extern std::once_flag g_ihipInitialized;
+
+  struct ResourceMeta {
+    uint32_t familyId;
+    uint32_t startCU;
+  };
 enum MemcpyType {
   hipHostToHost,      //!< Memcpy from host to host
   hipWriteBuffer,     //!< Memcpy from host to device
@@ -298,6 +304,7 @@ namespace hip {
   class Device;
   class MemoryPool;
   class Event;
+  class ExecutionCtx;
   class Stream : public amd::HostQueue {
   public:
     enum Priority : int { High = -1, Normal = 0, Low = 1 };
@@ -475,7 +482,7 @@ namespace hip {
 
   /// HIP Device class
   class Device : public amd::ReferenceCountedObject {
-  public:
+   public:
     Device(amd::Context* ctx, int devId)
         : context_(ctx),
           deviceId_(devId),
@@ -541,7 +548,8 @@ namespace hip {
     MemoryPool* GetDefaultManagedMemoryPool() const { return default_managed_mem_pool_; }
     void AddMemoryPool(MemoryPool* pool);
     void RemoveMemoryPool(MemoryPool* pool);
-    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr);
+    bool FreeMemory(amd::Memory* memory, Stream* stream, Event* event = nullptr,
+                    bool skip_event = false);
     void ReleaseFreedMemory();
     void RemoveStreamFromPools(Stream* stream);
     void AddSafeStream(Stream* event_stream, Stream* wait_stream);
@@ -555,6 +563,15 @@ namespace hip {
     ObjectRegistry<hipGraphicsResource_t>& mappedGraphics() {
       return mappedGraphicsResources_;
     }
+
+    // --- Execution context management ---
+    
+    ExecutionCtx* getPrimaryExecCtx() const { return primaryExecCtx_; }
+    void setPrimaryExecCtx(ExecutionCtx* ctx) { primaryExecCtx_ = ctx; }
+    std::recursive_mutex& getLock() { return lock_; }
+
+    void registerResource(uint32_t resId, uint32_t familyId, uint32_t startCU);
+    const ResourceMeta* lookupResource(uint32_t resId);
 
   private:
     /// Destroy all streams on this device (called by Reset)
@@ -581,6 +598,12 @@ namespace hip {
     // ----- Graphics resource tracking -----
     ObjectRegistry<hipGraphicsResource_t> registeredGraphicsResources_;
     ObjectRegistry<hipGraphicsResource_t> mappedGraphicsResources_;
+
+    // ----- Execution context state -----
+    ExecutionCtx* primaryExecCtx_ = nullptr;      //!< Primary execution context
+    std::unordered_map<uint32_t, ResourceMeta> resourceFamilyMap_;
+    std::mutex resourceFamilyMapLock_;
+
   };
 
   /// Per-thread state aggregator for HIP runtime (one instance per thread via thread_local).
@@ -631,18 +654,30 @@ namespace hip {
   extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
-  extern amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size = 0);
-  extern std::vector<amd::Memory*> getMemoryObjectBatch(void* const* ptrs, size_t count,
+  extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
+                                       size_t size = 0);
+  extern std::vector<amd::Memory*> getMemoryObjectBatch(hip::Device* device, void* const* ptrs,
+                                                         size_t count,
                                                          std::vector<size_t>& offsets);
-  extern void getMemoryObjectBatchPairs(void* const* srcs, void* const* dsts, size_t count,
+  extern void getMemoryObjectBatchPairs(hip::Device* device, void* const* srcs, void* const* dsts,
+                                         size_t count,
                                          std::vector<amd::Memory*>& src_memories,
                                          std::vector<amd::Memory*>& dst_memories,
                                          std::vector<size_t>& src_offsets,
                                          std::vector<size_t>& dst_offsets);
-  extern void getMemoryObjectPairs(const void* src, const void* dst,
+  extern void getMemoryObjectPairs(hip::Device* device, const void* src, const void* dst,
                                     amd::Memory*& src_memory, amd::Memory*& dst_memory,
                                     size_t& src_offset, size_t& dst_offset);
-  extern amd::Memory* getMemoryObjectWithOffset(const void* ptr, const size_t size = 0);
+  extern amd::Memory* getMemoryObjectWithOffset(hip::Device* device, const void* ptr,
+                                                 const size_t size = 0);
+
+  /// Convenience wrapper for use in Command::submit() bodies (graph and non-graph) where
+  /// hoisting hip::getCurrentDevice() across worker-thread state is unsafe. Re-fetches TLS
+  /// each call. Do NOT use from API entry points — use the explicit-device getMemoryObject.
+  inline amd::Memory* getMemoryObjectForCurrentDevice(const void* ptr, size_t& offset,
+                                                       size_t size = 0) {
+    return getMemoryObject(getCurrentDevice(), ptr, offset, size);
+  }
   extern void getStreamPerThread(hipStream_t& stream);
   extern hipStream_t getPerThreadDefaultStream();
   extern hipError_t ihipUnbindTexture(textureReference* texRef);
@@ -658,6 +693,36 @@ namespace hip {
                         hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true);
   hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream = nullptr,
                           bool isAsync = false);
+
+  extern hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj,
+                                                size_t sizeBytes, size_t offset, bool read_write);
+
+  inline hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                                         amd::Memory* srcMemory, size_t sizeBytes,
+                                         size_t dstOffset, size_t srcOffset) {
+    hipError_t status =
+        ihipMemcpy_validate_memory(device, srcMemory, sizeBytes, srcOffset, /*read_write*/ false);
+    if (status != hipSuccess) return status;
+    status =
+        ihipMemcpy_validate_memory(device, dstMemory, sizeBytes, dstOffset, /*read_write*/ true);
+    if (status != hipSuccess) return status;
+    return hipSuccess;
+  }
+
+  // Two-size variant used by the batch memcpy path: indirect copies place a
+  // sizeof(void*) pointer-holder on one side and the real data buffer on the other,
+  // so src and dst must be validated against independent region sizes.
+  inline hipError_t ihipMemcpy_validate(amd::Device& device, amd::Memory* dstMemory,
+                                         amd::Memory* srcMemory, size_t srcSizeBytes,
+                                         size_t dstSizeBytes, size_t dstOffset, size_t srcOffset) {
+    hipError_t status = ihipMemcpy_validate_memory(device, srcMemory, srcSizeBytes, srcOffset,
+                                                    /*read_write*/ false);
+    if (status != hipSuccess) return status;
+    status = ihipMemcpy_validate_memory(device, dstMemory, dstSizeBytes, dstOffset,
+                                         /*read_write*/ true);
+    if (status != hipSuccess) return status;
+    return hipSuccess;
+  }
 
   constexpr bool kMarkerDisableFlush = true;  //!< Avoids command batch flush in ROCclr
 

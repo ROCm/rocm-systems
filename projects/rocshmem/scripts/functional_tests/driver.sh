@@ -1,3 +1,4 @@
+#!/bin/bash
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -21,8 +22,6 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ###############################################################################
-
-#!/bin/bash
 if true || tty -s; then
   PRETTY_FAILED="\033[1;31mFAILED\033[0m"
   PRETTY_PASSED="\033[1;32mPASSED\033[0m"
@@ -72,7 +71,7 @@ declare -A TEST_NUMBERS=(
   ["teamctxput"]="36"
   ["teamctxputnbi"]="37"
   ["teamctxinfra"]="38"
-  ["putnbimr"]="39"
+  # 39: putnbimr removed, use putnbi with -b instead
   ["amo_set"]="40"
   ["amo_swap"]="41"
   ["amo_fetchand"]="42"
@@ -131,6 +130,27 @@ declare -A TEST_NUMBERS=(
   ["teamctxsharedinfra"]="95"
   ["quiet_on_stream"]="96"
   ["sync_all_on_stream"]="97"
+  ["teamctxsubsetparentinfra"]="98"
+  ["fence_putwavesignal"]="99"
+  ["fence_putlargesmall"]="100"
+  ["fence_fanout"]="101"
+  ["fence_putwavenbichunks"]="102"
+  ["tile_put_contiguous"]="103"
+  ["tile_put_rowmajor"]="104"
+  ["tile_put_colmajor"]="105"
+  ["tile_put_arbitrary"]="106"
+  ["tile_put_wave_contiguous"]="107"
+  ["tile_put_wg_contiguous"]="108"
+  ["tile_get_contiguous"]="109"
+  ["tile_get_wg_contiguous"]="110"
+  ["tile_put_1d"]="111"
+  ["tile_get_1d"]="112"
+  ["tile_get_wave_contiguous"]="113"
+  ["tile_get_rowmajor"]="114"
+  ["tile_get_colmajor"]="115"
+  ["tile_get_arbitrary"]="116"
+  ["reduce_on_stream"]="117"
+  ["host_ctx_create"]="118"
 )
 
 ExecTest() {
@@ -191,7 +211,8 @@ ExecTest() {
         -mca osc "${OMPI_MCA_osc:-ucx}"
         -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-        -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+        -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
+        ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
         ${TIMEOUT:+--timeout "$TIMEOUT"}
@@ -200,7 +221,7 @@ ExecTest() {
       )
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} )
+  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -308,27 +329,25 @@ TestRMAPut() {
   ExecTest  "waveputnbi"       2       16           128       8
 
   ################################ User Buffer Tests ################################
-  if [[ $TEST != gda* ]]; then # AIROCSHMEM-383
-    export LOCALBUFTYPE=host
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=host
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=device
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=device
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=fine
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=fine
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=uncached
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
+  export LOCALBUFTYPE=uncached
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 
-    export LOCALBUFTYPE=managed
-    ExecTest  "putnbi"           2       32           128       512
-    unset LOCALBUFTYPE
-  fi
+  export LOCALBUFTYPE=managed
+  ExecTest  "putnbi"           2       32           128       512
+  unset LOCALBUFTYPE
 }
 
 TestRMAGet() {
@@ -386,9 +405,8 @@ TestRMAGet() {
   else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
 
   ################################ User Buffer Tests ################################
-  # AIROCSHMEM-383 for GDA
   # AIROCSHMEM-120 for RO
-  if [[ $TEST != gda* && $TEST != ro* ]]; then
+  if [[ $TEST != ro* ]]; then
     export LOCALBUFTYPE=host
     ExecTest  "getnbi"           2       32           128       512
     unset LOCALBUFTYPE
@@ -560,6 +578,11 @@ TestOnStream() {
   ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
+  export ROCSHMEM_MAX_NUM_CONTEXTS=1024
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  ExecTest  "reduce_on_stream"       2  1           64        1048576
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
 TestOther() {
@@ -612,17 +635,70 @@ TestOther() {
   ExecTest  "teamctxoddeveninfra" 5       1            1
   ExecTest  "teamctxsharedinfra"  2       1            1
   ExecTest  "teamctxsharedinfra"  5       1            1
+  ExecTest  "teamctxsubsetparentinfra" 4  1            1
+  ExecTest  "teamctxsubsetparentinfra" 5  1            1
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  ExecTest  "host_ctx_create"          2       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
   ExecTest  "shmemptr"         2       16           128       8
+
+  ########################### Fence ordering tests #############################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-418: fence tests not supported on RO
+  ExecTest  "fence_putwavesignal"    2       1     64        1048576
+  ExecTest  "fence_putwavesignal"    2       8     256       1048576
+  ExecTest  "fence_putwavesignal"    2       32    1024      65536
+  ExecTest  "fence_putlargesmall"    2       1     64        4096
+  ExecTest  "fence_putlargesmall"    2       8     256       65536
+  ExecTest  "fence_fanout"           2       1     64        1048576
+  ExecTest  "fence_fanout"           4       4     256       65536
+  ExecTest  "fence_fanout"           8       8     256       65536
+  ExecTest  "fence_putwavenbichunks" 2       1     64        1048576
+  ExecTest  "fence_putwavenbichunks" 2       8     256       65536
+  else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
+}
+
+TestTiles() {
+  ##############################################################################
+  #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+
+  # Detect wavefront size based on GPU architecture
+  # gfx1100 and gfx1201 have wavefront size 32, most others have 64
+  WAVE_SIZE=64
+  if command -v rocminfo >/dev/null 2>&1; then
+    if rocminfo | grep -qE "Name:.*(gfx1100|gfx1201)"; then
+      WAVE_SIZE=32
+    fi
+  fi
+
+  ExecTest  "tile_put_contiguous"       2       1            1
+  ExecTest  "tile_put_rowmajor"         2       1            1
+  ExecTest  "tile_put_colmajor"         2       1            1
+  ExecTest  "tile_put_arbitrary"        2       1            1
+  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE
+  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_contiguous"       2       1            1
+  ExecTest  "tile_get_rowmajor"         2       1            1
+  ExecTest  "tile_get_colmajor"         2       1            1
+  ExecTest  "tile_get_arbitrary"        2       1            1
+  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_1d"               2       1            1
+  ExecTest  "tile_get_1d"               2       1            1
+  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
 }
 
 TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
+  # Batch rotation allocates volume*batch*2 = 20 GiB; use 22 GiB to leave headroom
+  ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((22*1024*1024*1024))}
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
@@ -655,6 +731,7 @@ TestHeatMapColl() {
   ExecTest  "alltoall"         32      1            256        v1073741824
   ExecTest  "alltoall"         64      1            256        v1073741824
 }
+
 
 ValidateInput() {
   INPUT_COUNT=$1
@@ -745,16 +822,32 @@ RerunFailedTests() {
   echo ""
 }
 
-APP=$1
-TEST=$2
-LOG_DIR=$3
-HOSTFILE=$4
+# Parse optional flags before positional arguments
+ARTIFACT_DIR=""
+_POSITIONAL=()
+for _arg in "$@"; do
+  if [[ "$_arg" == --artifact-dir=* ]]; then
+    ARTIFACT_DIR="${_arg#--artifact-dir=}"
+  elif [[ "$_ARG_NEXT_IS_ARTIFACT_DIR" == "1" ]]; then
+    ARTIFACT_DIR="$_arg"
+    _ARG_NEXT_IS_ARTIFACT_DIR=0
+  elif [[ "$_arg" == "--artifact-dir" ]]; then
+    _ARG_NEXT_IS_ARTIFACT_DIR=1
+  else
+    _POSITIONAL+=("$_arg")
+  fi
+done
+
+APP=${_POSITIONAL[0]:-}
+TEST=${_POSITIONAL[1]:-}
+LOG_DIR=${_POSITIONAL[2]:-}
+HOSTFILE=${_POSITIONAL[3]:-}
 
 DRIVER_RETURN_STATUS=0
 FAILED_TESTS=()  # Array to store failed test parameters
 RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry (can be overridden via env var)
 
-ValidateInput $#
+ValidateInput ${#_POSITIONAL[@]}
 ValidateLogDir $LOG_DIR
 
 # Print build info and environment variables before running tests
@@ -786,6 +879,10 @@ case $TEST in
     TestColl
     TestOther
     TestOnStream
+    # Tile tests are only supported on IPC backend
+    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+      TestTiles
+    fi
     ;;
   *"rma")
     TestRMA
@@ -810,6 +907,9 @@ case $TEST in
     ;;
   *"other")
     TestOther
+    ;;
+  *"tiles")
+    TestTiles
     ;;
   *)
     #######################################################################################
@@ -864,4 +964,73 @@ else
   fi
 fi
 echo "========================================================================"
+
+# Generate performance artifact if requested
+# --artifact-dir works for any test suite but is most useful with heatmap suites.
+# For a single build (no baseline), perf_compare.py is called via run_perf_compare.sh
+# using --skip-build; the caller must supply --baseline-dir and --branch-dir via the
+# PERF_BASELINE_DIR and PERF_BRANCH_DIR environment variables if a comparison is wanted.
+# When only ARTIFACT_DIR is set (no PERF_BASELINE_DIR), per-test plots are still generated.
+if [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -eq 0 ]]; then
+  case "$TEST" in
+    heatmap|heatmaprma|heatmapcoll)
+      echo ""
+      echo "========================================================================"
+      echo "Generating performance artifact -> $ARTIFACT_DIR"
+      echo "========================================================================"
+      SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+      RUN_COMPARE="$SCRIPT_DIR/run_perf_compare.sh"
+
+      mkdir -p "$ARTIFACT_DIR"
+
+      if [[ -n "${PERF_BASELINE_DIR:-}" && -n "${PERF_BRANCH_DIR:-}" ]]; then
+        # Full comparison: caller supplied pre-built baseline and branch directories
+        bash "$RUN_COMPARE" \
+          --skip-build \
+          --suite "$TEST" \
+          --iterations 1 \
+          --baseline-dir "$PERF_BASELINE_DIR" \
+          --branch-dir   "$PERF_BRANCH_DIR" \
+          --outdir "$ARTIFACT_DIR"
+        echo ""
+        echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_summary.png"
+        echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_summary.txt"
+        echo "CI ARTIFACT: $ARTIFACT_DIR/heatmap_data.csv"
+        echo "CI ARTIFACT: $ARTIFACT_DIR/per_test/"
+      else
+        # Single-build: generate per-test latency plots only (no baseline to compare against)
+        COMPARE="$SCRIPT_DIR/perf_compare.py"
+        VENV_DIR="$SCRIPT_DIR/.perf-venv"
+        # Self-healing: recreate venv if dependencies are missing
+        if [[ -d "$VENV_DIR" ]] && \
+           ! "$VENV_DIR/bin/python3" -c "import matplotlib, numpy, pandas, seaborn" &>/dev/null; then
+          rm -rf "$VENV_DIR"
+        fi
+        if [[ ! -d "$VENV_DIR" ]]; then
+          if python3 -m ensurepip --version &>/dev/null; then
+            python3 -m venv "$VENV_DIR" || { VENV_DIR=""; }
+          else
+            python3 -m venv --system-site-packages --without-pip "$VENV_DIR" || { VENV_DIR=""; }
+          fi
+          [[ -x "$VENV_DIR/bin/python3" ]] && \
+            "$VENV_DIR/bin/python3" -m pip install --quiet matplotlib numpy pandas seaborn || true
+        fi
+        PYTHON="${VENV_DIR:+$VENV_DIR/bin/}python3"
+        # Use the single run log dir as both baseline and variant so per-test plots are produced.
+        # The heatmap will show 0% (identical), which is expected for a single-build run.
+        "$PYTHON" "$COMPARE" \
+          --baseline "$LOG_DIR" \
+          --variants "current:$LOG_DIR" \
+          --outdir "$ARTIFACT_DIR" || true
+        echo ""
+        echo "CI ARTIFACT: $ARTIFACT_DIR/per_test/"
+        echo "NOTE: Set PERF_BASELINE_DIR and PERF_BRANCH_DIR for a full heatmap comparison"
+      fi
+      ;;
+  esac
+elif [[ -n "$ARTIFACT_DIR" && $EXIT_STATUS -ne 0 ]]; then
+  echo ""
+  echo "WARNING: Skipping artifact generation due to test failures" >&2
+fi
+
 exit $EXIT_STATUS

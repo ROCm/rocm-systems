@@ -87,6 +87,24 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_QUEUE_FAULT_MESSAGE");
     enable_queue_fault_message_ = (var == "0") ? false : true;
 
+    // RAS poison-consumption SIGBUS opt-in (forwarded to the amdgpu KFD driver
+    // via DRM_IOCTL_AMDGPU_PROC_OPTIONS).  Lets the registered system-event
+    // handler observe the poison-consumed event before (or instead of) the
+    // process being killed by SIGBUS.
+    //   unset / empty       - do not call ioctl, kernel default (immediate SIGBUS)
+    //   "off" / "disable"   - suppress SIGBUS entirely (UINT32_MAX)
+    //   numeric value (ms)  - safety timeout: deliver SIGBUS after N ms if the
+    //                         app does not handle the error in time
+    var = os::GetEnvVar("HSA_SIGBUS_DELAY_MS");
+    poison_sigbus_delay_set_ = !var.empty();
+    if (!poison_sigbus_delay_set_) {
+      poison_sigbus_delay_ms_ = 0;
+    } else if (var == "off" || var == "disable" || var == "disabled") {
+      poison_sigbus_delay_ms_ = UINT32_MAX;
+    } else {
+      poison_sigbus_delay_ms_ = static_cast<uint32_t>(strtoul(var.c_str(), nullptr, 0));
+    }
+
     var = os::GetEnvVar("HSA_ENABLE_INTERRUPT");
     enable_interrupt_ = (var == "0") ? false : true;
 
@@ -302,6 +320,9 @@ class Flag {
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
 
+    var = os::GetEnvVar("HSA_ENABLE_SDMA_FASTPATH_DEBUG");
+    enable_sdma_fastpath_debug_ = (var == "1") ? true : false;
+
     var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
     enable_core_dump_progress_ = (var == "1");
 
@@ -342,6 +363,10 @@ class Flag {
   bool enable_vm_fault_message() const { return enable_vm_fault_message_; }
 
   bool enable_queue_fault_message() const { return enable_queue_fault_message_; }
+
+  bool poison_sigbus_delay_set() const { return poison_sigbus_delay_set_; }
+
+  uint32_t poison_sigbus_delay_ms() const { return poison_sigbus_delay_ms_; }
 
   bool enable_interrupt() const { return enable_interrupt_; }
 
@@ -460,6 +485,8 @@ class Flag {
 
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
 
+  bool enable_sdma_fastpath_debug() const { return enable_sdma_fastpath_debug_; }
+
   bool enable_dtif() const { return enable_dtif_; }
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
@@ -516,6 +543,8 @@ class Flag {
   bool running_valgrind_;
   bool sdma_wait_idle_;
   bool enable_queue_fault_message_;
+  bool poison_sigbus_delay_set_ = false;
+  uint32_t poison_sigbus_delay_ms_ = 0;
   bool report_tool_load_failures_;
   bool report_tool_register_failures_ = false;
   bool disable_tool_register_ = false;
@@ -587,6 +616,8 @@ class Flag {
 
   // Map GPU index post RVD to its default cu mask.
   std::map<uint32_t, std::vector<uint32_t>> cu_mask_;
+
+  bool enable_sdma_fastpath_debug_;
 
   void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
 

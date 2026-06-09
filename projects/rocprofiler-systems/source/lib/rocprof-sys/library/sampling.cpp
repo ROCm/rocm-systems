@@ -50,7 +50,6 @@
 #include <timemory/units.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
@@ -1807,15 +1806,19 @@ struct sampling_initialization
 void
 postfork_parent_reinit()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_parent_reinit();
+    }
 }
 
 void
 postfork_child_cleanup()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_child_cleanup();
+    }
 }
 
 void

@@ -49,6 +49,84 @@
 
 namespace amd {
 
+namespace {
+struct ThreadAffinityState {
+  std::vector<uint64_t> runtime_set_affinity_mask;
+  bool runtime_set_affinity_mask_valid = false;
+  uint32_t runtime_set_affinity_node = static_cast<uint32_t>(-1);
+  std::vector<uint64_t> original_affinity_mask;
+  bool original_affinity_mask_valid = false;
+};
+
+ThreadAffinityState*& GetThreadAffinityStatePtr() {
+  thread_local ThreadAffinityState* state = nullptr;
+  return state;
+}
+
+ThreadAffinityState& GetThreadAffinityState() {
+  // Runtime teardown can run after non-trivial TLS destructors at process exit.
+  // Keep only a trivial TLS pointer so affinity reset never observes destroyed vector storage.
+  ThreadAffinityState*& state = GetThreadAffinityStatePtr();
+  if (state == nullptr) {
+    state = new ThreadAffinityState();
+  }
+  return *state;
+}
+
+void ReleaseThreadAffinityState() {
+  ThreadAffinityState*& state = GetThreadAffinityStatePtr();
+  delete state;
+  state = nullptr;
+}
+
+bool GetCurrentThreadAffinity(std::vector<uint64_t>* affinity) {
+  const uint32_t size = CPU_ALLOC_SIZE(amd::Os::processorCount());
+  affinity->assign((size + sizeof(uint64_t) - 1) / sizeof(uint64_t), 0);
+  if (syscall(__NR_sched_getaffinity, 0, size, affinity->data()) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_sched_getaffinity, size=%u) failed", size);
+    return false;
+  }
+  return true;
+}
+
+bool SetCurrentThreadAffinity(const std::vector<uint64_t>& affinity) {
+  const uint32_t size = static_cast<uint32_t>(affinity.size() * sizeof(uint64_t));
+  if (syscall(__NR_sched_setaffinity, 0, size, affinity.data()) < 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_RESOURCE,
+            "syscall(__NR_sched_setaffinity, size=%u) failed", size);
+    return false;
+  }
+  return true;
+}
+
+bool IsCpuSet(const std::vector<uint64_t>& affinity, uint32_t cpu) {
+  const uint32_t index = cpu / numa::kBitsPerUInt64;
+  return index < affinity.size() && ((affinity[index] >> (cpu % numa::kBitsPerUInt64)) & 1);
+}
+
+bool IsUnrestrictedAffinity(const std::vector<uint64_t>& affinity) {
+  for (uint32_t cpu = 0; cpu < static_cast<uint32_t>(amd::Os::processorCount()); ++cpu) {
+    if (!IsCpuSet(affinity, cpu)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsSameAffinity(const std::vector<uint64_t>& lhs, const std::vector<uint64_t>& rhs) {
+  const size_t size = std::max(lhs.size(), rhs.size());
+  for (size_t i = 0; i < size; ++i) {
+    const uint64_t l = (i < lhs.size()) ? lhs[i] : 0;
+    const uint64_t r = (i < rhs.size()) ? rhs[i] : 0;
+    if (l != r) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
 // Crash signal handling
 static const int kCrashSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
 static constexpr size_t kNumCrashSignals = sizeof(kCrashSignals) / sizeof(kCrashSignals[0]);
@@ -371,36 +449,6 @@ bool Os::isThreadAlive(const Thread& thread) {
   return ::pthread_kill((pthread_t)thread.handle(), 0) == 0;
 }
 
-static size_t tlsSize = 0;
-
-// Try to guess the size of TLS (plus some frames)
-void* guessTlsSizeThread(void* param) {
-  address stackBase;
-  address currentFrame;
-  size_t stackSize;
-  Os::currentStackInfo(&stackBase, &stackSize);
-  currentFrame = reinterpret_cast<address>(&stackSize);
-  tlsSize = stackBase - currentFrame;
-  // align up to page boundary
-  tlsSize = alignUp(tlsSize, amd::Os::pageSize());
-  return NULL;
-}
-
-static void guessTlsSize(void) {
-  int retval;
-  pthread_t handle;
-  pthread_attr_t threadAttr;
-
-  ::pthread_attr_init(&threadAttr);
-  retval = ::pthread_create(&handle, &threadAttr, guessTlsSizeThread, NULL);
-  if (retval == 0) {
-    pthread_join(handle, NULL);
-  } else {
-    fatal("pthread_create() failed with default stack size");
-  }
-  ::pthread_attr_destroy(&threadAttr);
-}
-
 const void* Os::createOsThread(amd::Thread* thread) {
   pthread_attr_t threadAttr;
   ::pthread_attr_init(&threadAttr);
@@ -411,20 +459,25 @@ const void* Os::createOsThread(amd::Thread* thread) {
       fatal("pthread_attr_getguardsize() failed");
     }
 
-    static std::once_flag initOnce;
-    std::call_once(initOnce, guessTlsSize);
-    ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize + tlsSize);
+    if (0 != ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize)) {
+      fatal("pthread_attr_setstacksize() failed");
+    }
   }
 
   // We never plan the use join, so free the resources now.
-  ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);
+  if (0 != ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED)) {
+    fatal("pthread_attr_setdetachstate() failed");
+  }
 
   pthread_t handle = 0;
   if (0 != ::pthread_create(&handle, &threadAttr, (void* (*)(void*)) & Thread::entry, thread)) {
     thread->setState(Thread::FAILED);
+    guarantee(false, "pthread_create() failed");
   }
 
-  ::pthread_attr_destroy(&threadAttr);
+  if (0 != ::pthread_attr_destroy(&threadAttr)) {
+    fatal("pthread_attr_destroy() failed");
+  };
   return reinterpret_cast<const void*>(handle);
 }
 
@@ -771,6 +824,10 @@ bool Os::CloseFileHandle(FileDesc fdesc) {
   return true;
 }
 
+amd::Os::FileDesc Os::DupFileHandle(FileDesc fdesc) {
+  return dup(fdesc);
+}
+
 bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
   if ((fd_ptr == nullptr) || (sz_ptr == nullptr)) {
     return false;
@@ -1091,6 +1148,76 @@ bool NumaNode::SchedSetAffinity() {
   return true;
 }
 
+// ================================================================================================
+bool NumaNode::SchedSetAffinityIfAllowed() {
+  ThreadAffinityState* affinity_state = GetThreadAffinityStatePtr();
+  const bool had_affinity_state = (affinity_state != nullptr);
+  if (affinity_state != nullptr && affinity_state->runtime_set_affinity_mask_valid &&
+      affinity_state->runtime_set_affinity_node == node_index_) {
+    return true;
+  }
+
+  std::vector<uint64_t> current_affinity;
+  if (!GetCurrentThreadAffinity(&current_affinity)) {
+    return false;
+  }
+
+  const bool current_mask_is_runtime_set =
+      affinity_state != nullptr && affinity_state->runtime_set_affinity_mask_valid &&
+      IsSameAffinity(current_affinity, affinity_state->runtime_set_affinity_mask);
+  if (!current_mask_is_runtime_set && !IsUnrestrictedAffinity(current_affinity)) {
+    // Respect application, launcher, or cpuset affinity masks.
+    return false;
+  }
+
+  affinity_state = &GetThreadAffinityState();
+  if (!affinity_state->original_affinity_mask_valid) {
+    affinity_state->original_affinity_mask = current_affinity;
+    affinity_state->original_affinity_mask_valid = true;
+  }
+
+  if (!SchedSetAffinity()) {
+    if (!had_affinity_state) {
+      ReleaseThreadAffinityState();
+    }
+    return false;
+  }
+
+  affinity_state->runtime_set_affinity_mask_valid =
+      GetCurrentThreadAffinity(&affinity_state->runtime_set_affinity_mask);
+  if (affinity_state->runtime_set_affinity_mask_valid) {
+    affinity_state->runtime_set_affinity_node = node_index_;
+  } else {
+    SetCurrentThreadAffinity(affinity_state->original_affinity_mask);
+    ReleaseThreadAffinityState();
+    return false;
+  }
+  return true;
+}
+
+// ================================================================================================
+bool resetThreadAffinity() {
+  ThreadAffinityState* affinity_state = GetThreadAffinityStatePtr();
+  if (affinity_state == nullptr || !affinity_state->runtime_set_affinity_mask_valid ||
+      !affinity_state->original_affinity_mask_valid) {
+    return false;
+  }
+
+  std::vector<uint64_t> current_affinity;
+  if (!GetCurrentThreadAffinity(&current_affinity)) {
+    return false;
+  }
+
+  if (!IsSameAffinity(current_affinity, affinity_state->runtime_set_affinity_mask)) {
+    // The application changed affinity after ROCclr. Leave it intact.
+    ReleaseThreadAffinityState();
+    return false;
+  }
+
+  const bool restored = SetCurrentThreadAffinity(affinity_state->original_affinity_mask);
+  ReleaseThreadAffinityState();
+  return restored;
+}
 }  // namespace numa
 
 }  // namespace amd

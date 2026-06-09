@@ -8,17 +8,15 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/rocDecode-prerequisites.rst
-    title: Prerequisites
-  - file: install/rocDecode-clone-project.rst
-    title: Cloning the project
+  - file: install/rocDecode-install.rst
+    title: Install rocDecode
   - file: install/rocDecode-build-and-install.rst
-    title: Installing from source code
+    title: Build from source
 
 - caption: Conceptual
   entries:
-  - file: conceptual/video-decoding-pipeline.rst
-    title: Video decoding pipeline
+  - file: conceptual/rocDecode-decoding-pipelines.rst
+    title: Decoding pipeline
   - file: conceptual/rocDecode-memory-types.rst
     title: Surface memory locations
 

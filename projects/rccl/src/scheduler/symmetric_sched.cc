@@ -1,40 +1,53 @@
 /*************************************************************************
- * Copyright (c) 2015-2025, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_SYMMETRIC_SCHED_H_
 #define NCCL_SYMMETRIC_SCHED_H_
 
 #include "scheduler.h"
 
+extern int64_t ncclParamSingleProcMemRegEnable();
+
+NCCL_PARAM(SymNoWinEnable, "SYM_NOWIN_ENABLE", 0);
+
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task, struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue, struct ncclTaskColl** remainTasksHead) {
   ncclResult_t ret = ncclSuccess;
   int fnOpTySymCount = 0;
-  struct ncclTaskColl* tasksSymByFnOpTy[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes];
-  int fnOpTySymIndices[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes];
+  struct ncclTaskColl* tasksSymByFnOpTy[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes * ncclNumSymRegTypes];
+  int fnOpTySymIndices[ncclNumFuncs * ncclNumDevRedOps * ncclNumTypes * ncclNumSymRegTypes];
   struct ncclKernelPlanner* planner = &comm->planner;
   struct ncclTaskColl* remainTasksTail = nullptr;
+  bool foundSymm = false;
 
   memset(tasksSymByFnOpTy, 0, sizeof(tasksSymByFnOpTy));
   *remainTasksHead = nullptr;
+  if (task) {
+    NCCLCHECK(ncclDevrInitOnce(comm));
+  }
   while (task != nullptr) {
-    int index = ((int)task->func*ncclNumDevRedOps + (int)task->opDev.op)*ncclNumTypes + (int)task->datatype;
+    int index;
     struct ncclTaskColl* next = task->next;
-    NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
-    NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
     bool symAvailable = ncclSymkAvailable(comm, task->func, task->opDev.op, task->datatype, task->count);
 
-    if (task->sendWin && task->recvWin && (task->sendWin->winFlags & task->recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && symAvailable) {
+    if (symAvailable) {
+      NCCLCHECK(ncclDevrFindWindow(comm, task->sendbuff, &task->sendWin));
+      NCCLCHECK(ncclDevrFindWindow(comm, task->recvbuff, &task->recvWin));
+      NCCLCHECK(ncclGetSymRegType(task->sendWin, task->recvWin, &task->winRegType));
+
+      index = (((int)task->func * ncclNumDevRedOps + (int)task->opDev.op) * ncclNumTypes + (int)task->datatype) * ncclNumSymRegTypes + (int)task->winRegType;
       if (tasksSymByFnOpTy[index] == nullptr) fnOpTySymIndices[fnOpTySymCount++] = index;
       task->next = tasksSymByFnOpTy[index];
       tasksSymByFnOpTy[index] = task;
       planner->nTasksColl--;
+      foundSymm = true;
     } else {
       if (*remainTasksHead) {
         remainTasksTail->next = task;
-       remainTasksTail = task;
+        remainTasksTail = task;
       } else {
         *remainTasksHead = remainTasksTail = task;
       }
@@ -42,6 +55,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     task = next;
   }
   if (remainTasksTail) remainTasksTail->next = nullptr;
+  if (!foundSymm) goto exit;
 
   // make sure kernel args space can hold at least a single work
   assert(comm->workArgsBytes >= ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, 1));
@@ -58,6 +72,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       size_t countTotal = 0, countMax = 0;
       struct ncclTaskColl* headTask = task;
       size_t cellCount = NCCL_SYM_KERNEL_CELL_SIZE / ncclTypeSize(headTask->datatype);
+      bool forced = false;
       // For now we assume higher kernel id means a kernel for larger data size
       while (task != nullptr) {
         size_t count;
@@ -72,17 +87,62 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         task = task->next;
       }
       NCCLCHECK(ncclSymkPickKernel(comm, headTask->func, headTask->opDev.op, headTask->datatype,
-                                   countTotal, countMax, nWorks,
-                                   &estTimeUs, &kernelId, &nChannels, &nWarps));
-      if (kernelId == ncclSymkKernelId_Count) {
-        char const* name = ncclGetEnv("NCCL_SYM_KERNEL");
-        WARN("Error: no symmetric kernel available for function %s.%s%s",
-             ncclFuncToString(headTask->func), (name ? " NCCL_SYM_KERNEL was set to " : ""), (name ? name: ""));
-        ret = (name ? ncclInvalidUsage : ncclInternalError);
-        goto fail;
-      }
-      // set all symmetric tasks to the same kernel
+                                   countTotal, countMax, nWorks, headTask->winRegType,
+                                   &estTimeUs, &kernelId, &nChannels, &nWarps, &forced));
       task = headTask;
+      bool isLLKernel = (1 << kernelId) & ncclSymkLLKernelMask();
+      bool isOneThreadMultiGpus = comm->intraRanks > 1 && !ncclParamSingleProcMemRegEnable();
+      bool needFallback = false;
+
+      // Fallback logic for symmetric LL kernels:
+      // - If both src and dst are registered, we don't fall back if a symmetric kernel is available.
+      // - Otherwise, we have to fall back to a legacy kernel if running the selected symmetric LL kernel is
+      //   not possible (if the buffers are not registered and we manage multiple GPUs).
+      // - If the user forced a symmetric kernel via NCCL_SYM_KERNEL or requested preference for using
+      //   symmetric kernels even without symmetric buffers via NCCL_SYM_NOWIN_ENABLE, we respect that.
+      // - Otherwise, we query the legacy cost model and if it selects a non-LL proto, we pick that.
+      if (headTask->winRegType == ncclSymSendRegRecvReg) {
+        needFallback = false;
+      } else if (isLLKernel) {
+        needFallback = isOneThreadMultiGpus && headTask->winRegType == ncclSymSendNonregRecvNonreg;
+        if (!needFallback && !forced) {
+          needFallback = !ncclParamSymNoWinEnable() && headTask->winRegType == ncclSymSendNonregRecvNonreg;
+          if (!needFallback) {
+            // First query legacy tuning
+            int collNetSupport = 0;
+            int nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(headTask->opDev.op, headTask->datatype) || headTask->func == ncclFuncAllGather);
+            NCCLCHECK(ncclGetCollNetSupport(comm, headTask, &collNetSupport));
+            NCCLCHECK(ncclGetAlgoInfo(comm, headTask, collNetSupport, nvlsSupport, 1));
+            needFallback = (headTask->protocol != NCCL_PROTO_LL);
+          }
+        }
+      }
+
+      if (kernelId == ncclSymkKernelId_Count || needFallback) {
+        // cannot find appropriate symmetric kernel for the tasks
+        // fallback to legacy kernels
+        while (task != nullptr) {
+          struct ncclTaskColl* next = task->next;
+          int isSymLast = task->isSymLast;
+          if (*remainTasksHead) {
+            remainTasksTail->next = task;
+            remainTasksTail = task;
+          } else {
+            *remainTasksHead = remainTasksTail = task;
+          }
+          planner->nTasksColl++;
+          task = next;
+          if (isSymLast) break;
+        }
+        continue;
+      }
+
+      // initialize symmetric objects for LL kernels
+      if (isLLKernel && headTask->winRegType == ncclSymSendNonregRecvNonreg) {
+        NCCLCHECK(ncclSymkInitOnce(comm));
+      }
+
+      // set all symmetric tasks to the same kernel
       while (task != nullptr) {
         struct ncclTaskColl* next = task->next;
         int isSymLast = task->isSymLast;
@@ -98,8 +158,6 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
 
 exit:
   return ret;
-fail:
-  goto exit;
 }
 
 ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue, struct ncclKernelPlan* plan) {
@@ -129,7 +187,11 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
   plan->threadPerBlock = headTask->nWarps * WARP_SIZE;
 #endif
   plan->hasProxyOps = false;
-  plan->kernelFn = ncclSymkGetKernelPtr((ncclSymkKernelId)headTask->devFuncId, headTask->opDev.op, headTask->datatype);
+  ncclSymkKernelId kernelId = (ncclSymkKernelId)headTask->devFuncId;
+  int kernelIndex = ncclSymkGetKernelIndex(kernelId, headTask->opDev.op, headTask->datatype);
+  plan->kernelFn = ncclSymkKernelList[kernelIndex];
+  int maxDynamicSmem = ncclSymkKernelMaxDynamicSmem[kernelIndex];
+  plan->kernelDynSmem = (1 & ncclSymkDynamicSmemKernelMask()>>(int)kernelId) ? maxDynamicSmem : 0;
   task = headTask;
   while (task != nullptr && task->devFuncId == devFuncId) {
     workCount++;
@@ -147,6 +209,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
   workRangePtr = argsBuf->getWorkRange();
   workBufPtr = argsBuf->getWorks(nMaxChannels);
   argsBuf->nMaxChannels = nMaxChannels;
+  argsBuf->maxDynamicSmem = maxDynamicSmem;
 
   while (!ncclIntruQueueEmpty(symTaskQueue)) {
     struct ncclSymkDevWork devWork = {};

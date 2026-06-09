@@ -27,6 +27,7 @@ build
 third_party
 Testing
 tmp
+.cache
 
 # python
 .venv
@@ -40,3 +41,4 @@ __pycache__
 .claude
 
 CMakePresets.json
+.cache/

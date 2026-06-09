@@ -11,6 +11,13 @@
 #include "common_cast.h"
 #include "connect_cast.h"
 
+#define NCCL_IB_UD_GRH_SIZE (40)
+
+struct RecoveryQpnEntry {
+  uint32_t qpIndex;
+  uint32_t newQpn;
+};
+
 enum ncclIbResiliencyDevState {
   // The device is operating normally.
   ncclIbResiliencyDevStateOk = 0,
@@ -41,6 +48,16 @@ struct ncclIbResiliencyDev {
   struct ibv_mr* probingResultMr;
   // CQ to get CQEs for recovery protocol messages.
   struct ibv_cq* portRecoveryCq;
+  // GRH buffer and MR for UD recovery QP receives (UD prepends GRH).
+  // Sized to hold GRH + max QPN payload for AINIC destroy+recreate recovery.
+  uint8_t portRecoveryGrhBuf[NCCL_IB_UD_GRH_SIZE + NCCL_IB_MAX_QPS * sizeof(struct RecoveryQpnEntry)];
+  struct ibv_mr* portRecoveryGrhMr;
+  // Number of times this device completed recovery (Recovered → Ok).
+  // Monotonically increasing; used by tests to verify recovery without
+  // depending on devState timing.
+  int recoveryCount;
+  // MR for QPN send buffer, registered against this device's PD.
+  struct ibv_mr* portRecoveryQpnMr;
 };
 
 struct ncclIbResiliency {
@@ -72,12 +89,24 @@ struct ncclIbResiliency {
   // module.
   int outstandingRequests;
 
-  // QPs used for recovery protocol messages.
+  // QPs used for recovery protocol messages (UD — connectionless, survives link failures).
   struct ncclIbQp portRecoveryQps[NCCL_IB_MAX_DEVS_PER_NIC];
+  struct ibv_ah* portRecoveryAh[NCCL_IB_MAX_DEVS_PER_NIC];
+  uint32_t portRecoveryRemoteQpn[NCCL_IB_MAX_DEVS_PER_NIC];
   int nPortRecoveryQps;
 
   // Number of outstanding devices that are currently undergoing recovery.
   int outstandingRecovery;
+
+  // Counter for selective retransmits (IbCastResiliencyRepostRequest calls).
+  int repostCount;
+
+  // QPN exchange send buffer for AINIC destroy+recreate recovery.
+  // Used to send local QPN data as ACK payload. MR is per-device (in ncclIbResiliencyDev).
+  // Shared across devices — safe because the recovery thread processes contexts
+  // serially (one device at a time). If concurrent device recovery is ever added,
+  // this buffer must be moved to per-device or per-recovery-context.
+  uint8_t portRecoveryQpnBuf[NCCL_IB_MAX_QPS * sizeof(struct RecoveryQpnEntry)];
 };
 
 enum ncclIbResiliencyRequestSendState {

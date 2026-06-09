@@ -761,8 +761,7 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
         setFlag(HSA_EXTENSION_IMAGES);
       }
 
-      if (os::LibHandle lib = os::LoadLib(kAqlProfileLib)) {
-        os::CloseLib(lib);
+      if (aqlprofile_lib_ != nullptr) {
         setFlag(HSA_EXTENSION_AMD_AQLPROFILE);
       }
 
@@ -1633,7 +1632,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
       return errCleanup(bo);
     }
     status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
-                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_NONE));
+                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_RW));
     if (status != HSAKMT_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
@@ -2372,6 +2371,7 @@ Runtime::Runtime()
       ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
+  aqlprofile_lib_ = nullptr;
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
@@ -2431,6 +2431,9 @@ hsa_status_t Runtime::Load() {
 
   loader_.reset(amd::hsa::loader::Loader::Create(&loader_context_));
 
+  // Probe aqlprofile availability once and cache the result
+  aqlprofile_lib_ = os::LoadLib(kAqlProfileLib);
+
   // Load extensions
   LoadExtensions();
 
@@ -2475,6 +2478,16 @@ void Runtime::Unload() {
 
   UnloadTools();
   UnloadExtensions();
+
+  // Close the aqlprofile probe handle. Skip the dlclose when
+  // running under Valgrind due to a Valgrind bug, see below:
+  // http://valgrind.org/docs/manual/faq.html#faq.unhelpful
+  if (aqlprofile_lib_ != nullptr) {
+    if (!flag_.running_valgrind()) {
+      os::CloseLib(aqlprofile_lib_);
+    }
+    aqlprofile_lib_ = nullptr;
+  }
 
   amd::hsa::loader::Loader::Destroy(loader_.get());
   loader_.reset();
@@ -3675,8 +3688,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
   if (flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER) {
-    size_t requested = size + alignment - rocr::os::PageSize();
-    auto mem = rocr::os::ReserveMemory(addr, requested, alignment, rocr::os::MEM_PROT_RW);
+    auto mem = rocr::os::ReserveMemory(addr, size, alignment, rocr::os::MEM_PROT_RW);
     if (mem == nullptr)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
