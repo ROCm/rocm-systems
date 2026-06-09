@@ -99,10 +99,6 @@ using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_id_map_t =
     std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
 
-using agent_spm_counter_config_map_t =
-    std::unordered_map<rocprofiler_agent_id_t,
-                       std::optional<rocprofiler_counter_config_id_t>>;
-
 using backtrace_operation_map_t =
     std::unordered_map<rocprofiler_callback_tracing_kind_t,
                        std::unordered_set<rocprofiler_tracing_operation_t>>;
@@ -144,7 +140,6 @@ struct client_data
     agent_counter_id_map_t                    agent_events              = {};
     agent_counter_info_map_t                  agent_counter_info        = {};
     agent_counter_profile_map_t               agent_counter_profiles    = {};
-    agent_spm_counter_config_map_t            agent_spm_counter_configs = {};
     common::synchronized<code_object_vec_t>   code_object_records       = {};
     common::synchronized<kernel_symbol_vec_t> kernel_symbol_records     = {};
     buffer_name_info_t                        buffered_tracing_info     = {};
