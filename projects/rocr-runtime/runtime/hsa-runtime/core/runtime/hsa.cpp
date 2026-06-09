@@ -2300,9 +2300,14 @@ hsa_status_t hsa_executable_load_code_object(
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
   CodeObjectReaderImpl reader;
-  reader.SetMemory(code_object_p, amd::elf::ElfSize(code_object_p));
+  size_t code_object_size = amd::elf::ElfSize(code_object_p, 0);
+  if (code_object_size == 0) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  reader.SetMemory(code_object_p, code_object_size);
 
-  return exec->LoadCodeObject(agent, code_object, options, reader.GetUri());
+  return exec->LoadCodeObject(agent, code_object, code_object_size, options,
+                              reader.GetUri());
   CATCH;
 }
 
@@ -2328,7 +2333,8 @@ hsa_status_t hsa_executable_load_program_code_object(
   hsa_code_object_t code_object =
       {reinterpret_cast<uint64_t>(reader->GetCodeObjectMemory())};
   return exec->LoadCodeObject(
-      {0}, code_object, options, reader->GetUri(), loaded_code_object);
+      {0}, code_object, reader->GetCodeObjectSize(), options,
+      reader->GetUri(), loaded_code_object);
   CATCH;
 }
 

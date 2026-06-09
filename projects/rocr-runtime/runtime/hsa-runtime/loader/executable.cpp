@@ -1297,7 +1297,12 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   }
   std::vector<char> buffer;
   if (substituteFileName.empty()) {
-   if (!code->InitAsHandle(code_object)) {
+    if (code_object_size != 0) {
+      if (!code->InitAsBuffer(reinterpret_cast<const void*>(code_object.handle),
+                              code_object_size)) {
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+    } else if (!code->InitAsHandle(code_object)) {
       return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
     }
   } else {
