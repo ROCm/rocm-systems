@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=rccl-device-api
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --gpus-per-node=8
+#SBATCH --ntasks=8
+#SBATCH --partition=interactive
+#SBATCH --exclusive
 #SBATCH --time=02:00:00
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
