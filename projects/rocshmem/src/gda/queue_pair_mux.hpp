@@ -53,8 +53,8 @@ template <> struct QueuePairTraits<QueuePairMux> {
   enum class OpCode {
     RDMA_WRITE,
     RDMA_READ,
-    ATOMIC_FA,
     ATOMIC_CS,
+    ATOMIC_FA,
   };
 };
 
