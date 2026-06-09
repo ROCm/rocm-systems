@@ -12,6 +12,9 @@
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
@@ -30,6 +33,7 @@
 #include <linux/memfd.h>
 #include <mutex>
 #include <signal.h>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
@@ -41,6 +45,9 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
+
+extern "C" rocjitsu::ExecutionPlugin *createKernelLoggingPlugin();
+extern "C" rocjitsu::ExecutionPlugin *createRaceDetectorPlugin();
 
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedDriver;
@@ -329,6 +336,46 @@ public:
         in_construction = false;
         return nullptr;
       }
+
+      // Set up execution plugins based on environment variables.
+      if (rj_vm_->soc) {
+        std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
+        if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
+          pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
+        else
+          pg = std::make_shared<rocjitsu::ExecutionPluginGroup>();
+
+        std::string sinks_str = "stderr";
+        if (const char *s = std::getenv("RJ_SINKS"))
+          sinks_str = s;
+        {
+          std::istringstream ss(sinks_str);
+          std::string token;
+          while (std::getline(ss, token, ',')) {
+            if (token == "stderr")
+              pg->add_sink(&rocjitsu::StderrSink::instance());
+            else if (token == "stdout")
+              pg->add_sink(&rocjitsu::StdoutSink::instance());
+            else if (token == "file") {
+              const char *dir = std::getenv("RJ_SINK_DIR");
+              if (dir)
+                pg->set_sink_dir(dir);
+            }
+          }
+        }
+
+        if (const char *rj_log = std::getenv("RJ_LOG"); rj_log && std::string(rj_log) == "1") {
+          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createKernelLoggingPlugin()));
+          fprintf(stderr, "[rocjitsu] Logging enabled (RJ_LOG)\n");
+        }
+
+        if (const char *race = std::getenv("RJ_RACE"); race && std::string(race) == "1") {
+          pg->add(std::unique_ptr<rocjitsu::ExecutionPlugin>(createRaceDetectorPlugin()));
+          fprintf(stderr, "[rocjitsu] Race detection enabled (RJ_RACE)\n");
+        }
+        rj_vm_->soc->set_plugin_group(pg);
+      }
+
       std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
       in_construction = false;
     }
