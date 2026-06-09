@@ -45,6 +45,6 @@ target_sources(
 )
 endif()
 
-add_subdirectory(mlx5)
-add_subdirectory(bnxt)
 add_subdirectory(ionic)
+add_subdirectory(bnxt)
+add_subdirectory(mlx5)
