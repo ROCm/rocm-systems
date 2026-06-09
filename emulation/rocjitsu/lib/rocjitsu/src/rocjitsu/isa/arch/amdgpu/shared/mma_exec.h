@@ -2361,10 +2361,12 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
 ///   - host native_simd<float> is not 16 lanes (i.e. no AVX-512)
 ///   - cbsz/blgp lane permutation is non-default
 ///   - RJ_FORCE_SCALAR is set
-inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                       uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
-                                       uint32_t abid, uint32_t blgp) {
-  constexpr uint32_t M = 16, N = 16, K = 32, B = 1, in_bits = 16;
+template <uint32_t M, uint32_t N, uint32_t K>
+inline void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
+                                   uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
+                                   uint32_t abid, uint32_t blgp) {
+  constexpr uint32_t B = 1, in_bits = 16;
+  static_assert(N % 16 == 0, "specialized f16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
     exec_f32(cu, M, N, K, B, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
              const_acc, cbsz, abid, blgp);
@@ -2375,6 +2377,7 @@ inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
                const_acc, cbsz, abid, blgp);
       return;
     }
+    constexpr uint32_t W = 16; // guaranteed by the native<float>::size()==16 guard above
     const uint32_t wf = cu.wf_size();
     const uint32_t *a_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s0));
     const uint32_t *b_words = reinterpret_cast<const uint32_t *>(cu.vgpr_data(s1));
@@ -2382,16 +2385,14 @@ inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
     alignas(64) float A_buf[M * K]; // A[row][k]
     alignas(64) float B_buf[K * N]; // B[k][col]
     alignas(64) float C_buf[M * N]; // C[row][col]
-    // The A/B inputs each occupy 4 VGPRs x wf lanes = 2*4*wf packed f16. Bulk
-    // convert the whole region to f32 once with F16C (one vector op per 16
-    // halves) instead of 1024 branchy scalar f16_to_f32 calls, then the hoist
-    // below is a pure f32 index-shuffle (f16 j of word w sub s -> flat j=w*2+s).
-    constexpr uint32_t NUM_IN_REGS = 4;
-    const uint32_t n_halves = 2 * NUM_IN_REGS * wf;
-    alignas(64) float A_f32[2 * NUM_IN_REGS * 64];
-    alignas(64) float B_f32[2 * NUM_IN_REGS * 64];
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, n_halves);
-    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, n_halves);
+    // A/B occupy M*K and N*K packed f16 over their VGPRs. Bulk-convert each whole
+    // region to f32 once with F16C (one vector op per 16 halves) instead of
+    // branchy per-element f16_to_f32, then the hoist is a pure f32 index-shuffle
+    // (f16 of word w lane l sub s -> flat (w*wf+l)*2+s).
+    alignas(64) float A_f32[M * K];
+    alignas(64) float B_f32[N * K];
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(a_words), A_f32, M * K);
+    util::f16_to_f32_block(reinterpret_cast<const uint16_t *>(b_words), B_f32, N * K);
     for (uint32_t row = 0; row < M; ++row)
       for (uint32_t col = 0; col < N; ++col) {
         auto out = output_loc_32(M, N, row, col, 0);
@@ -2409,18 +2410,19 @@ inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
         auto bl = input_loc(N, K, B, col, k, 0, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
       }
-    // Dense 16x32 * 32x16 -> 16x16 matmul, 16-lane stdx FMA per row.
-    for (uint32_t row = 0; row < M; ++row) {
-      util::native<float> c_row;
-      c_row.copy_from(&C_buf[row * N], util::stdx::vector_aligned);
-      for (uint32_t k = 0; k < K; ++k) {
-        util::native<float> a_bcast(A_buf[row * K + k]);
-        util::native<float> b_row;
-        b_row.copy_from(&B_buf[k * N], util::stdx::vector_aligned);
-        c_row = util::stdx::fma(a_bcast, b_row, c_row);
+    // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+    for (uint32_t row = 0; row < M; ++row)
+      for (uint32_t c0 = 0; c0 < N; c0 += W) {
+        util::native<float> c_row;
+        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+        for (uint32_t k = 0; k < K; ++k) {
+          util::native<float> a_bcast(A_buf[row * K + k]);
+          util::native<float> b_row;
+          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+          c_row = util::stdx::fma(a_bcast, b_row, c_row);
+        }
+        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
       }
-      c_row.copy_to(&C_buf[row * N], util::stdx::vector_aligned);
-    }
     // Scatter directly back to VGPRs (no Result staging vector).
     uint32_t *d_words = reinterpret_cast<uint32_t *>(cu.vgpr_data(dst));
     bool has_nan_or_inf = false;
@@ -2434,8 +2436,8 @@ inline void exec_f32_mfma_16x16x32_f16(amdgpu::ComputeUnitCore &cu, uint32_t dst
       }
     if (has_nan_or_inf) {
       util::Logger::vm([&](auto &os) {
-        os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} 16x16x32_f16", dst,
-                          s0, s1, s2);
+        os << std::format("MFMA_NAN_DETECTED (simd) dst=v{} s0=v{} s1=v{} s2=v{} {}x{}x{}_f16", dst,
+                          s0, s1, s2, M, N, K);
       });
     }
   }

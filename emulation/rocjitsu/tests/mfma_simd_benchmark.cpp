@@ -247,11 +247,51 @@ TEST(MfmaSimdBenchmark, F32_16x16x32_f16_Specialized) {
   fx.seed(S0_OFF, /*regs=*/8, bits, SmallGen(1));
   fx.seed(S1_OFF, /*regs=*/8, bits, SmallGen(2));
   auto run = [&] {
-    amdgpu::exec_f32_mfma_16x16x32_f16(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
-                                       fx.vbase + S1_OFF, 0, /*const_acc=*/0, /*cbsz=*/0,
-                                       /*abid=*/0, /*blgp=*/0);
+    amdgpu::exec_f32_mfma_f16_spec<16, 16, 32>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                               fx.vbase + S1_OFF, 0, /*const_acc=*/0, /*cbsz=*/0,
+                                               /*abid=*/0, /*blgp=*/0);
   };
   bench("v_mfma_f32_16x16x32_f16 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+// Remaining cdna4 f16 MFMA shapes, now also specialized.
+TEST(MfmaSimdBenchmark, F32_32x32x8_f16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 8, B = 1, bits = 16;
+  fx.seed(S0_OFF, 8, bits, SmallGen(21));
+  fx.seed(S1_OFF, 8, bits, SmallGen(22));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f16_spec<32, 32, 8>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                              fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_32x32x8_f16 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_16x16x16_f16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 16, N = 16, K = 16, B = 1, bits = 16;
+  fx.seed(S0_OFF, 8, bits, SmallGen(23));
+  fx.seed(S1_OFF, 8, bits, SmallGen(24));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f16_spec<16, 16, 16>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                               fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_16x16x16_f16 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
+}
+
+TEST(MfmaSimdBenchmark, F32_32x32x16_f16_Specialized) {
+  SKIP_IF_NO_SIMD();
+  BenchFixture fx;
+  constexpr uint32_t M = 32, N = 32, K = 16, B = 1, bits = 16;
+  fx.seed(S0_OFF, 8, bits, SmallGen(25));
+  fx.seed(S1_OFF, 8, bits, SmallGen(26));
+  auto run = [&] {
+    amdgpu::exec_f32_mfma_f16_spec<32, 32, 16>(*fx.cu, fx.vbase + DST_OFF, fx.vbase + S0_OFF,
+                                               fx.vbase + S1_OFF, 0, 0, 0, 0, 0);
+  };
+  bench("v_mfma_f32_32x32x16_f16 [specialized]", fx, run, double(M) * N * K * B, /*is_int=*/false);
 }
 
 // v_mfma_f32_32x32x16_f16: N=32 == two AVX-512 f32 lane groups.
