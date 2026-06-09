@@ -10,6 +10,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Profiler plugin needs to be verified.
 
 ### Added
+* Added hierarchical AllGather algorithm for MI350 multi-node workloads. Hierarchical AllGather is enabled by default for 8 or more nodes. The message size threshold is 64MB on 8 nodes and 128MB for more than 8 nodes. Set `RCCL_HIERARCHICAL_ALLGATHER=0` to disable
 * Added `RCCL_IB_P2P_DISABLE_CTS` to disable CTS offload for P2P connections on AINIC. Defaults to 1 (disabled). When `RCCL_CTS_OFFLOAD_ENABLED=1` is explicitly set, it overrides this flag and forces CTS on all connections including P2P.
 * Merged `RCCL_CTS_INLINE_DATA` into `RCCL_CTS_OFFLOAD_ENABLED`. CTS offload and CTS inline data are now controlled by a single tri-state variable: `-1` (default, auto-enable on AINIC), `0` (force disable), `1` (force enable for all connections).
 * Added Pythonic API bindings under `bindings/nccl4py/` (RCCL fork of NVIDIA `nccl4py` v0.2.0). Provides Python access to RCCL collectives via Cython bindings, an on-disk `cuda.core` HIP shim for ROCm hosts without `cuda-bindings` / `cuda-core`, and RCCL-only collective wrappers (`ncclAllReduceWithBias`, `ncclAllToAllv`).
