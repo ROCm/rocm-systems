@@ -52,8 +52,10 @@ struct clock_identifier
 
 struct spec
 {
-    double delay    = 0.0;
-    double duration = 0.0;
+    double           delay    = 0.0;
+    double           duration = 0.0;
+    std::uint64_t    repeat   = 1;
+    clock_identifier clock_id = {};
 };
 
 const std::set<clock_identifier>&

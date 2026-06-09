@@ -61,6 +61,13 @@ public:
     [[nodiscard]] bool is_active_excluding(
         std::string_view name, scope event_scope = scope::global) const noexcept;
 
+    /// True iff a trigger with @p name has registered a vote for @p event_scope.
+    /// Used by late-initializing subscribers that need to distinguish "the
+    /// trigger has not been attached yet" from "the trigger is attached and
+    /// currently active".
+    [[nodiscard]] bool has_trigger(std::string_view name,
+                                   scope event_scope = scope::global) const noexcept;
+
 private:
     static constexpr std::size_t SCOPE_COUNT = static_cast<std::size_t>(scope::COUNT_);
 

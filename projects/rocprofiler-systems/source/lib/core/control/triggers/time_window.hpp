@@ -8,17 +8,27 @@
 #include "core/control/trigger.hpp"
 
 #include <chrono>
+#include <cstdint>
+#include <limits>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace rocprofsys::control::triggers
 {
 /// Time-windowed pause/resume trigger driven by an injected clock.
 ///
 /// Lifecycle votes:
-///   delay > 0  -> initial vote paused; publishes active when delay elapses
-///   duration>0 -> publishes paused (terminal) when duration elapses
-///   delay=0, duration=0 -> abstain (degenerate config; thread does nothing)
+///   first delay > 0  -> initial vote paused; publishes active when delay elapses
+///   duration > 0     -> publishes paused when the active window elapses
+///   duration == 0    -> active window remains open until shutdown
+///
+/// A trigger owns a sequential schedule. Each entry waits `delay`, opens
+/// collection, then closes it after `duration`; `repeat` repeats that entry
+/// before advancing to the next entry. This preserves TRACE_PERIODS semantics
+/// with one trigger/vote, avoiding conflicting votes from multiple time-window
+/// triggers in the same scope.
 ///
 /// Templated on Clock so production wires `clocks::steady` and tests wire
 /// `clocks::manual`. Methods on the Clock parameter are duck-typed against
@@ -31,13 +41,20 @@ public:
     {
         clock_duration delay{};
         clock_duration duration{};
+        std::uint64_t  repeat{ 1 };
     };
 
-    time_window(session& sess, Clock& clk, config cfg,
-                scope event_scope = scope::global) noexcept
+    using schedule_type = std::vector<config>;
+
+    time_window(session& sess, Clock& clk, config cfg, scope event_scope = scope::global)
+    : time_window{ sess, clk, schedule_type{ cfg }, event_scope }
+    {}
+
+    time_window(session& sess, Clock& clk, schedule_type cfgs,
+                scope event_scope = scope::global)
     : m_session{ sess }
     , m_clock{ clk }
-    , m_config{ cfg }
+    , m_schedule{ std::move(cfgs) }
     , m_scope{ event_scope }
     {}
 
@@ -55,14 +72,17 @@ public:
 
     [[nodiscard]] vote initial_vote() const noexcept override
     {
-        if(m_config.delay > clock_duration::zero()) return vote::paused;
-        if(m_config.duration > clock_duration::zero()) return vote::active;
+        if(const auto* cfg = first_window_config())
+        {
+            if(cfg->delay > clock_duration::zero()) return vote::paused;
+            return vote::active;
+        }
         return vote::abstain;
     }
 
     [[nodiscard]] scope event_scope() const noexcept override { return m_scope; }
 
-    /// Spawn the worker thread that advances the window through delay and
+    /// Spawn the worker thread that advances the schedule through delay and
     /// duration phases. Idempotent: a second call is a no-op.
     void start()
     {
@@ -81,35 +101,63 @@ public:
     }
 
 private:
-    session&    m_session;
-    Clock&      m_clock;
-    config      m_config;
-    scope       m_scope;
-    std::thread m_thread;
+    session&      m_session;
+    Clock&        m_clock;
+    schedule_type m_schedule;
+    scope         m_scope;
+    std::thread   m_thread;
+
+    [[nodiscard]] static bool has_window(const config& cfg) noexcept
+    {
+        return cfg.delay > clock_duration::zero() ||
+               cfg.duration > clock_duration::zero();
+    }
+
+    [[nodiscard]] const config* first_window_config() const noexcept
+    {
+        for(const auto& cfg : m_schedule)
+        {
+            if(has_window(cfg)) return &cfg;
+        }
+        return nullptr;
+    }
 
     [[nodiscard]] bool has_window() const noexcept
     {
-        return m_config.delay > clock_duration::zero() ||
-               m_config.duration > clock_duration::zero();
+        return first_window_config() != nullptr;
     }
 
     void worker()
     {
-        const auto t0           = m_clock.now();
-        const bool has_delay    = m_config.delay > clock_duration::zero();
-        const bool has_duration = m_config.duration > clock_duration::zero();
+        auto current = m_clock.now();
 
-        if(has_delay)
+        for(const auto& cfg : m_schedule)
         {
-            if(!m_clock.sleep_until(t0 + m_config.delay)) return;  // interrupted
-            m_session.publish(*this, vote::active);
-        }
+            if(!has_window(cfg)) continue;
 
-        if(has_duration)
-        {
-            const auto end = t0 + m_config.delay + m_config.duration;
-            if(!m_clock.sleep_until(end)) return;    // interrupted
-            m_session.publish(*this, vote::paused);  // terminal
+            const auto repeats = (cfg.repeat == 0)
+                                     ? std::numeric_limits<std::uint64_t>::max()
+                                     : cfg.repeat;
+
+            for(std::uint64_t rep = 0; rep < repeats; ++rep)
+            {
+                if(cfg.delay > clock_duration::zero())
+                {
+                    current += cfg.delay;
+                    if(!m_clock.sleep_until(current)) return;  // interrupted
+                }
+
+                m_session.publish(*this, vote::active);
+
+                if(cfg.duration == clock_duration::zero())
+                {
+                    return;  // open-ended collection window
+                }
+
+                current += cfg.duration;
+                if(!m_clock.sleep_until(current)) return;  // interrupted
+                m_session.publish(*this, vote::paused);
+            }
         }
     }
 };

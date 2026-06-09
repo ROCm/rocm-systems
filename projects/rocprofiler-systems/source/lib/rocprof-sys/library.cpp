@@ -483,11 +483,17 @@ build_time_windows(control::session& session)
 {
     if(auto _trace_specs = constraint::get_trace_specs(); !_trace_specs.empty())
     {
-        const auto& _spec = _trace_specs.front();
-        g_trace_window    = std::make_unique<trace_window_t>(
-            session, g_trace_window_clock,
-            trace_window_t::config{ seconds_to_ns(_spec.delay),
-                                    seconds_to_ns(_spec.duration) });
+        auto _schedule = trace_window_t::schedule_type{};
+        _schedule.reserve(_trace_specs.size());
+        for(const auto& _spec : _trace_specs)
+        {
+            _schedule.push_back(trace_window_t::config{ seconds_to_ns(_spec.delay),
+                                                        seconds_to_ns(_spec.duration),
+                                                        _spec.repeat });
+        }
+
+        g_trace_window = std::make_unique<trace_window_t>(session, g_trace_window_clock,
+                                                          std::move(_schedule));
 
         // Safety-net subscriber for category-traited recording paths
         // (timemory storage, perfetto trace_events from callbacks not

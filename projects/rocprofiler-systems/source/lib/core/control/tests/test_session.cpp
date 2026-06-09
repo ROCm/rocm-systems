@@ -73,6 +73,21 @@ make_logged_subscriber(call_log& log, std::string name,
     s.on_resume = [&log, name]() { log.record(name + ":resume"); };
     return s;
 }
+
+template <typename Clock>
+bool
+wait_with_advance(call_log& log, Clock& clk, std::size_t expected_size,
+                  rocprofsys::control::clock_duration step)
+{
+    using namespace std::chrono_literals;
+    for(int i = 0; i < 200; ++i)
+    {
+        if(log.snapshot().size() >= expected_size) return true;
+        clk.advance(step);
+        std::this_thread::sleep_for(2ms);
+    }
+    return false;
+}
 }  // namespace
 
 class session_test : public ::testing::Test
@@ -195,6 +210,21 @@ TEST_F(session_test, is_active_excluding_ignores_named_trigger)
     EXPECT_FALSE(s.is_active_excluding("trig_b", scope::global));
 }
 
+TEST_F(session_test, has_trigger_reports_registered_trigger_by_name_and_scope)
+{
+    mock_trigger global_t{ "time_window", scope::global, vote::paused };
+    mock_trigger sampling_t{ "time_window", scope::sampling_only, vote::active };
+
+    EXPECT_FALSE(s.has_trigger("time_window", scope::global));
+    s.attach(global_t);
+
+    EXPECT_TRUE(s.has_trigger("time_window", scope::global));
+    EXPECT_FALSE(s.has_trigger("time_window", scope::sampling_only));
+
+    s.attach(sampling_t);
+    EXPECT_TRUE(s.has_trigger("time_window", scope::sampling_only));
+}
+
 TEST_F(session_test, shutdown_resets_state)
 {
     mock_trigger t{ "global_paused", scope::global, vote::paused };
@@ -254,26 +284,98 @@ TEST_F(session_test, time_window_with_manual_clock_drives_full_cycle)
     tw.start();
 
     // The worker captures its t0 from clk.now() asynchronously after start().
-    // We don't know exactly when, so advance virtual time in chunks while
-    // polling — each advance() does cv.notify_all() which wakes any
-    // sleep_until that has captured a now-satisfied deadline.
-    auto wait_with_advance = [&](std::size_t expected_size, clock_duration_t step) {
-        for(int i = 0; i < 200; ++i)
-        {
-            if(log.snapshot().size() >= expected_size) return true;
-            clk.advance(step);
-            std::this_thread::sleep_for(2ms);
-        }
-        return false;
-    };
-
-    ASSERT_TRUE(wait_with_advance(2u, delay)) << "worker did not publish active";
+    // We do not know exactly when, so advance virtual time in chunks while
+    // polling. Each advance() wakes any sleep_until that has captured a
+    // now-satisfied deadline.
+    ASSERT_TRUE(wait_with_advance(log, clk, 2u, delay))
+        << "worker did not publish active";
     EXPECT_EQ(log.snapshot()[1], "sub:resume");
     EXPECT_TRUE(s.is_active(scope::global));
 
-    ASSERT_TRUE(wait_with_advance(3u, dur)) << "worker did not publish terminal pause";
+    ASSERT_TRUE(wait_with_advance(log, clk, 3u, dur))
+        << "worker did not publish terminal pause";
     EXPECT_EQ(log.snapshot()[2], "sub:pause");
     EXPECT_FALSE(s.is_active(scope::global));
 
     // Worker thread is joined by ~time_window; no explicit stop needed.
+}
+
+TEST_F(session_test, time_window_repeats_and_advances_multiple_periods)
+{
+    using clock_t          = rocprofsys::control::clocks::manual;
+    using time_window_t    = rocprofsys::control::triggers::time_window<clock_t>;
+    using clock_duration_t = rocprofsys::control::clock_duration;
+
+    clock_t clk{};
+    s.subscribe(make_logged_subscriber(log, "sub"));
+
+    constexpr auto delay_a = clock_duration_t{ 100'000'000 };
+    constexpr auto dur_a   = clock_duration_t{ 200'000'000 };
+    constexpr auto delay_b = clock_duration_t{ 50'000'000 };
+    constexpr auto dur_b   = clock_duration_t{ 100'000'000 };
+
+    time_window_t tw{ s, clk,
+                      time_window_t::schedule_type{
+                          time_window_t::config{ delay_a, dur_a, 2 },
+                          time_window_t::config{ delay_b, dur_b, 1 },
+                      } };
+    s.attach(tw);
+    s.force_initial_pause();
+
+    ASSERT_EQ(log.snapshot().size(), 1u);
+    EXPECT_EQ(log.snapshot()[0], "sub:pause");
+
+    tw.start();
+
+    ASSERT_TRUE(wait_with_advance(log, clk, 2u, delay_a));
+    ASSERT_TRUE(wait_with_advance(log, clk, 3u, dur_a));
+    ASSERT_TRUE(wait_with_advance(log, clk, 4u, delay_a));
+    ASSERT_TRUE(wait_with_advance(log, clk, 5u, dur_a));
+    ASSERT_TRUE(wait_with_advance(log, clk, 6u, delay_b));
+    ASSERT_TRUE(wait_with_advance(log, clk, 7u, dur_b));
+
+    const auto events = log.snapshot();
+    ASSERT_EQ(events.size(), 7u);
+    EXPECT_EQ(events[0], "sub:pause");
+    EXPECT_EQ(events[1], "sub:resume");
+    EXPECT_EQ(events[2], "sub:pause");
+    EXPECT_EQ(events[3], "sub:resume");
+    EXPECT_EQ(events[4], "sub:pause");
+    EXPECT_EQ(events[5], "sub:resume");
+    EXPECT_EQ(events[6], "sub:pause");
+    EXPECT_FALSE(s.is_active(scope::global));
+}
+
+TEST_F(session_test, subscriber_added_after_delay_elapsed_observes_active_window)
+{
+    using clock_t          = rocprofsys::control::clocks::manual;
+    using time_window_t    = rocprofsys::control::triggers::time_window<clock_t>;
+    using clock_duration_t = rocprofsys::control::clock_duration;
+
+    clock_t clk{};
+
+    constexpr auto delay = clock_duration_t{ 100'000'000 };
+    constexpr auto dur   = clock_duration_t{ 200'000'000 };
+    time_window_t  tw{ s, clk, time_window_t::config{ delay, dur } };
+    s.attach(tw);
+    tw.start();
+
+    call_log early_log{};
+    s.subscribe(make_logged_subscriber(early_log, "early"));
+    s.force_initial_pause();
+    ASSERT_EQ(early_log.snapshot().size(), 1u);
+
+    ASSERT_TRUE(wait_with_advance(early_log, clk, 2u, delay));
+    EXPECT_TRUE(s.is_active(scope::global));
+
+    call_log late_log{};
+    s.subscribe(make_logged_subscriber(late_log, "late"));
+    s.force_initial_pause();
+    EXPECT_TRUE(late_log.snapshot().empty())
+        << "late subscriber should not be paused after delay elapsed";
+
+    ASSERT_TRUE(wait_with_advance(early_log, clk, 3u, dur));
+    const auto late_events = late_log.snapshot();
+    ASSERT_EQ(late_events.size(), 1u);
+    EXPECT_EQ(late_events[0], "late:pause");
 }

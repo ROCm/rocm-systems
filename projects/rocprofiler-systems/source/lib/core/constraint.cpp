@@ -154,18 +154,20 @@ get_trace_specs()
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
         auto _duration_v =
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
+        auto _clock_v = find_clock_identifier(
+            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
+                .value_or("CLOCK_REALTIME"));
 
         if(_delay_v > 0.0 || _duration_v > 0.0)
         {
-            _v.push_back(spec{ _delay_v, _duration_v });
+            _v.push_back(spec{ _delay_v, _duration_v, 1, _clock_v });
         }
     }
 
     // Each ROCPROFSYS_TRACE_PERIODS sub-string has the grammar:
     //   delay[:duration[:repeat[:clock_id]]]
-    // Only delay/duration are honored downstream; repeat and clock_id are
-    // still parsed for input validation but not applied (multi-window
-    // support is captured as a follow-up — see HANDOFF.md).
+    // The control trigger consumes delay/duration/repeat. The clock id is
+    // retained in the spec for validation and future clock-specific scheduling.
     if(auto _periods_v =
            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
                .value_or("");
@@ -175,17 +177,19 @@ get_trace_specs()
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
         const auto _default_dur =
             config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
+        const auto _default_clock = find_clock_identifier(
+            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
+                .value_or("CLOCK_REALTIME"));
 
         for(const auto& _entry : rocprofsys::common::delimit(_periods_v, " ;\t\n"))
         {
             const auto _parts = rocprofsys::common::delimit(_entry, ":");
-            spec       _s{ _default_delay, _default_dur };
+            spec       _s{ _default_delay, _default_dur, 1, _default_clock };
             if(!_parts.empty()) _s.delay = utility::convert<double>(_parts.at(0));
             if(_parts.size() > 1) _s.duration = utility::convert<double>(_parts.at(1));
-            // _parts.at(2) (repeat) and _parts.at(3) (clock_id) parsed and
-            // validated but discarded; spec carries only delay/duration.
-            if(_parts.size() > 2) (void) utility::convert<std::uint64_t>(_parts.at(2));
-            if(_parts.size() > 3) (void) find_clock_identifier(_parts.at(3));
+            if(_parts.size() > 2)
+                _s.repeat = utility::convert<std::uint64_t>(_parts.at(2));
+            if(_parts.size() > 3) _s.clock_id = find_clock_identifier(_parts.at(3));
             _v.push_back(_s);
         }
     }

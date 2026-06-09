@@ -144,6 +144,16 @@ session::is_active_excluding(std::string_view name, scope event_scope) const noe
 }
 
 bool
+session::has_trigger(std::string_view name, scope event_scope) const noexcept
+{
+    std::scoped_lock const lk{ m_votes_mutex };
+    return std::any_of(m_votes.begin(), m_votes.end(),
+                       [name, event_scope](const vote_entry& entry) {
+                           return entry.event_scope == event_scope && entry.name == name;
+                       });
+}
+
+bool
 session::subscriber_should_be_paused(const subscriber& sub) const noexcept
 {
     return std::any_of(sub.scopes.begin(), sub.scopes.end(),
