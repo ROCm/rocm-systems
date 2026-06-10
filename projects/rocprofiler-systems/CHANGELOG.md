@@ -38,8 +38,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   There new options allow the user to query more information about available
   ROCm domains (used in `ROCPROFSYS_ROCM_DOMAINS`) and their operations.
 - `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the binary sleeps for the given duration after attach instead of waiting for `ENTER` on stdin.
-- Infinite mode for the `transpose` example: passing `0` for `NUM_ITERATION` loops indefinitely until SIGTERM/SIGINT is received, useful as a long-lived target for attach/detach scenarios.
-- Pytest coverage for the `rocprof-sys-attach` (rocattach) codepath in `tests/pytest/test_rocattach.py`, parametrized over 1, 2, and 3 attach sessions against a single transpose target.
 
 ### Changed
 

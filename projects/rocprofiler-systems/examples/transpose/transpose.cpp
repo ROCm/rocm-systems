@@ -116,7 +116,7 @@ handle_stop_signal(int /*signum*/) noexcept
 }  // namespace
 
 void
-run(int rank, int tid, hipStream_t stream, int /*argc*/, char** /*argv*/)
+run(int rank, int tid, hipStream_t stream)
 {
     unsigned int M = 4960 * 2;
     unsigned int N = 4960 * 2;
@@ -280,8 +280,8 @@ main(int argc, char** argv)
             for(size_t i = 0; i < nthreads; ++i)
                 HIP_API_CALL(hipStreamCreate(&_streams.at(i)));
             for(size_t i = 1; i < nthreads; ++i)
-                _threads.emplace_back(run, rank, i, _streams.at(i), argc, argv);
-            run(rank, 0, _streams.at(0), argc, argv);
+                _threads.emplace_back(run, rank, i, _streams.at(i));
+            run(rank, 0, _streams.at(0));
             for(auto& itr : _threads)
                 itr.join();
             for(size_t i = 0; i < nthreads; ++i)
