@@ -43,7 +43,7 @@
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
-#include "library/components/ucx_gotcha.hpp"
+#include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/kokkosp.hpp"
@@ -447,6 +447,7 @@ void
 register_subsystem_subscribers(control::session& session)
 {
     using shmem_t = component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>;
+    using ucx_t   = component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>;
 
     session.subscribe({ &rocprofiler_sdk::pause, &rocprofiler_sdk::resume, "rocm" });
     session.subscribe({ &sampling::pause,
@@ -455,8 +456,7 @@ register_subsystem_subscribers(control::session& session)
                         { control::scope::global, control::scope::sampling_only } });
     session.subscribe(
         { &component::mpi_gotcha::pause, &component::mpi_gotcha::resume, "mpi" });
-    session.subscribe(
-        { &component::ucx_gotcha::pause, &component::ucx_gotcha::resume, "ucx" });
+    session.subscribe({ &ucx_t::pause, &ucx_t::resume, "ucx" });
     session.subscribe({ &shmem_t::pause, &shmem_t::resume, "shmem" });
     session.subscribe(
         { &component::vaapi_gotcha::pause, &component::vaapi_gotcha::resume, "vaapi" });
@@ -808,7 +808,7 @@ rocprofsys_init_tooling_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Setting up UCX traces...\n");
-        component::ucx_gotcha::start();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::start();
     }
 
     if(get_use_shmem())
@@ -1113,7 +1113,7 @@ rocprofsys_finalize_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Shutting down UCX tracing...\n");
-        component::ucx_gotcha::shutdown();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::shutdown();
     }
 
     if(get_use_shmem())
@@ -1373,14 +1373,13 @@ rocprofsys_finalize_hidden(void)
                                              get_perfetto_output_filename()));
     }
 
-    if(_push_count > _pop_count &&
-       !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false))
+    if(_push_count > _pop_count)
     {
-        throw std::runtime_error(fmt::format(
-            "rocprofsys_push_trace was called more times than "
-            "rocprofsys_pop_trace. The inverse is fine but the current state "
-            "means not every measurement was ended :: pushed: {} vs. popped: {}",
-            _push_count, _pop_count));
+        LOG_WARNING("rocprofsys_push_trace was called more times than "
+                    "rocprofsys_pop_trace. This is not fatal, but trace output will "
+                    "not include regions that were still open during finalization :: "
+                    "pushed: {} vs. popped: {}.",
+                    _push_count, _pop_count);
     }
 
     // debug::close_file();
