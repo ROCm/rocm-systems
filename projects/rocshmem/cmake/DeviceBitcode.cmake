@@ -85,8 +85,10 @@ set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architecture
 # used by downstream cmake (CMakeDeviceBitcodeTester) to pass the correct -mattr
 # to llc, which embeds the feature suffix in the HSACO amdhsa.target metadata
 # string that HIP checks when loading the module.
+# Only query rocminfo when there are architectures to look up — avoids
+# an unnecessary subprocess (and potential driver noise) on GPU-less hosts.
 find_program(_ROCMINFO rocminfo PATHS ${ROCM_PATH}/bin NO_DEFAULT_PATH QUIET)
-if(_ROCMINFO)
+if(_ROCMINFO AND _BITCODE_DEFAULT_ARCHS)
   set(_rocminfo_tmpfile "${CMAKE_BINARY_DIR}/CMakeFiles/rocminfo_out.txt")
   execute_process(
     COMMAND ${_ROCMINFO}

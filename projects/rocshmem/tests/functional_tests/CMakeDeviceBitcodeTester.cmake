@@ -25,9 +25,9 @@ endif()
 
 # LLVM_CLANG and LLVM_LINK are already set by DeviceBitcode.cmake.
 # Search for additional tools needed for HSACO generation.
-find_program(LLVM_LLC llc PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
-find_program(LLVM_LLD ld.lld PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
-find_program(LLVM_OPT opt PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_LLC llc PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_LLD ld.lld PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_OPT opt PATHS ${ROCM_PATH}/llvm/bin ${THEROCK_TOOLCHAIN_ROOT}/lib/llvm/bin NO_DEFAULT_PATH QUIET)
 
 if(NOT LLVM_LLC OR NOT LLVM_LLD OR NOT LLVM_OPT)
   message(WARNING "device_bitcode_tester: llc/ld.lld/opt not found (ROCM_PATH=${ROCM_PATH}). "
@@ -80,7 +80,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   # Kernel: plain -O3 (only amdgpu_kernel entries, no library DCE concern).
   set(_TESTER_KERNEL_FLAGS ${BITCODE_COMPILE_FLAGS_BASE})
 
-  # Compile the kernel and each device source at -O0 into tester-private BCs.
+  # Compile the kernel and each device source into tester-private BCs.
   set(_TESTER_BCS "")
 
   add_custom_command(
