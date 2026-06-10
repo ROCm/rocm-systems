@@ -245,6 +245,7 @@ struct ncclProxyConnector {
   int tpRank;
   int tpLocalRank;
   int sameProcess;
+  int connId; // Server-issued integer handle, used as the wire identifier on subsequent proxy RPCs.
   struct ncclProxyConnection* connection;
   ncclResult_t (*proxyProgress)(struct ncclProxyState* proxyState, struct ncclProxyArgs*); // Copied from transport if necessary
   ncclResult_t (*proxyGinProgress)(struct ncclProxyState* proxyState);

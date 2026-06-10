@@ -280,14 +280,6 @@ libhsakmt expects a memfd-backed page at the KFD mmap offset
 the event is pending. `close()` sets all slots to 1 to unblock any polling
 threads during shutdown.
 
-### Known limitations (P1)
-
-- `WAIT_EVENTS` always returns via timeout (100ms cap). The CP does not yet
-  fire an interrupt to drive `set_event_ioctl`. Signal completion is detected
-  by ROCR via direct memory polling of the signal value instead.
-- `AVAILABLE_MEMORY` ioctl returns uninitialized output.
-- `wait_events` ignores specific event IDs — wakes on any event.
-
 ---
 
 ## C API (`rj_vm.h`)
@@ -309,6 +301,20 @@ convenience wrapper that releases the last reference and tears down the VM.
 | `rj_vm_run()` | Run to completion via driver open/close |
 | `rj_vm_save_checkpoint()` | Serialize VM state to FlatBuffer |
 | `rj_vm_restore_checkpoint()` | Restore VM from checkpoint file |
+
+### Example
+
+```c
+#include <rocjitsu/rocjitsu.h>
+
+rj_vm_t *vm = NULL;
+rj_vm_create("configs/amdgpu_cdna4.json", &vm);
+
+uint64_t ticks = 0;
+rj_vm_run(vm, &ticks);
+
+rj_vm_destroy(vm);
+```
 
 Internal C++ code (tests, GUI) accesses the `SoC` directly via the
 config loader (`config::load_config()` / `config::load_config_from_string()`).
