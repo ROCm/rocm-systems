@@ -826,7 +826,6 @@ class Graph {
                                                    dev_info.virtualMemAllocGranularityRecommended_);
     if (ptr == nullptr) {
       LogError("Failed to reserve Virtual Address");
-      return nullptr;
     }
 
     // Set Access to read write for all devices.
@@ -3046,16 +3045,13 @@ class GraphMemAllocNode final : public GraphNode {
       hip::Stream* stream = launch_stream;
       if (stream == nullptr) {
         auto device_id = phys ? phys->getUserData().deviceId : 0;
-        // wait=false: skip WaitActiveStreams — not needed since GPU is already done
-        // when called from the async events loop callback (DecrementRefCount), and
-        // waiting deadlocks if called from the async events loop thread.
-        stream = g_devices[device_id]->NullStream(false);
+        stream = g_devices[device_id]->NullStream();
       }
       auto cmd = new amd::VirtualMapCommand(
           *stream, amd::Command::EventWaitList{},
           node_params_.dptr, sub_obj->getSize(), nullptr);
       cmd->enqueue();
-      if (!AMD_DIRECT_DISPATCH) {
+      if (launch_stream == nullptr) {
         cmd->awaitCompletion();
       }
       cmd->release();
