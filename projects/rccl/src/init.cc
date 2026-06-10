@@ -76,7 +76,9 @@
 #include "latency_profiler/CollTraceFunc.h"
 #include "dda_all_reduce_ipc.h"
 #include "ipc_init.h"
+#if defined(__x86_64__) || defined(__i386__)
 #include  <cpuid.h>
+#endif
 
 #ifndef STR2
   #define STR2(v) #v
@@ -281,6 +283,7 @@ static ncclResult_t ncclInit() {
     }
     INFO(NCCL_INIT, "Kernel version: %s", verStr);
     if (strstr(verStr, "cray") == NULL) {
+#if defined(__x86_64__) || defined(__i386__)
       unsigned int eax, ebx, ecx, edx;
       if (!__get_cpuid(1, &eax, &ebx, &ecx, &edx))
         ecx = 0; // cpuid not supported
@@ -298,6 +301,7 @@ static ncclResult_t ncclInit() {
         if (strstr(strValue, "iommu=pt") == NULL)
           WARN("Missing \"iommu=pt\" from kernel command line which can lead to system instablity or hang!");
       }
+#endif
 #ifndef HIP_UNCACHED_MEMORY
       char *env = getenv("HSA_FORCE_FINE_GRAIN_PCIE");
       if (env == NULL || strcmp(env, "1") != 0)
