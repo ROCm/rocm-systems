@@ -12,8 +12,8 @@ PPN=${2}
 NP=$(( ${NNODES} * ${PPN} ))
 MSG_SIZE=${3}
 BUILD_FLAG=${4:-false}
-TARGET_GPU_ARCH=${5:-gfx942}
-# TARGET_GPU_ARCH=${5:-gfx950}
+TARGET_GPU_ARCH=${5:-gfx950}
+# TARGET_GPU_ARCH=${5:-gfx942}
 
 DOCKERFILE="Dockerfile-rccl-gin-anvil"
 DOCKER_IMAGE="gin-anvil:latest"
@@ -25,9 +25,16 @@ DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/k
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
 HFILE="my_hostfile"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
-MPIRUN_BASE_HFILE="-n ${NP} --hostfile ${HFILE} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
+MPIRUN_BASE_HFILE="-n ${NP} --hostfile /workspace/${HFILE} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
 
-scontrol show hostnames "$SLURM_JOB_NODELIST" | awk '{print $1 " slots="'${PPN}'}' > my_hosts
+if [ -x scontrol ]; then
+    scontrol show hostnames "$SLURM_JOB_NODELIST" | awk '{print $1 " slots='${PPN}'"}' > ${HFILE}
+else
+    echo "$(hostname) slots=${PPN}" > ${HFILE}
+fi
+
+# Mount hostfile so mpirun sees current nodes without rebuilding the image.
+DOCKER_GPU="${DOCKER_GPU} -v $(pwd)/${HFILE}:/workspace/${HFILE}:ro"
 
 # --- build
 if ${BUILD_FLAG}; then

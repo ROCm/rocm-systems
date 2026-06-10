@@ -60,7 +60,7 @@ static RocshmemTestPolicy rocshmemTestPolicy() {
     return none;
   }
 
-  // GIN proxy and other RCCL GIN tests: librccl owns rocSHMEM init/finalize.
+    // GIN proxy and other RCCL GIN tests: librccl owns rocSHMEM init/finalize.
   const char* ginEnable = getenv("NCCL_GIN_ENABLE");
   if (ginEnable && ginEnable[0] == '1') return none;
 
