@@ -30,14 +30,17 @@ static __device__ __forceinline__ T ldcs(GMemTag, T *p) {
     uint4 u32v4[(sizeof(T)+16-1)/16];
   };
 #if defined(__HIP_PLATFORM_AMD__)
-  // HIP has no __ldcs(); use clang non-temporal loads (16B as two 8B; HIP uint4 is a struct).
-  switch (alignof(T)) {
-  case 1: for (int i=0; i < sizeof(T)/1; i++) u8[i] = __builtin_nontemporal_load((uint8_t*)p + i); break;
-  case 2: for (int i=0; i < sizeof(T)/2; i++) u16[i] = __builtin_nontemporal_load((uint16_t*)p + i); break;
-  case 4: for (int i=0; i < sizeof(T)/4; i++) u32[i] = __builtin_nontemporal_load((uint32_t*)p + i); break;
-  case 8: for (int i=0; i < sizeof(T)/8; i++) u64[i] = __builtin_nontemporal_load((uint64_t*)p + i); break;
-  case 16: for (int i=0; i < sizeof(T)/8; i++) u64[i] = __builtin_nontemporal_load((uint64_t*)p + i); break;
-  default: __builtin_unreachable();
+  // HIP has no __ldcs(); use clang non-temporal loads, dispatched on alignof(T).
+  if constexpr (alignof(T) == 1) {
+    for (int i=0; i < sizeof(T)/1; i++) u8[i] = __builtin_nontemporal_load((uint8_t*)p + i);
+  } else if constexpr (alignof(T) == 2) {
+    for (int i=0; i < sizeof(T)/2; i++) u16[i] = __builtin_nontemporal_load((uint16_t*)p + i);
+  } else if constexpr (alignof(T) == 4) {
+    for (int i=0; i < sizeof(T)/4; i++) u32[i] = __builtin_nontemporal_load((uint32_t*)p + i);
+  } else if constexpr (alignof(T) == 8 || alignof(T) == 16) {
+    for (int i=0; i < sizeof(T)/8; i++) u64[i] = __builtin_nontemporal_load((uint64_t*)p + i);
+  } else {
+    __builtin_unreachable();
   }
 #else
   switch (alignof(T)) {
@@ -75,14 +78,17 @@ static __device__ __forceinline__ void stcs(GMemTag, T *p, T val) {
   };
   x = val;
 #if defined(__HIP_PLATFORM_AMD__)
-  // HIP has no __stcs(); use clang non-temporal stores, arg order (value, ptr) (16B as two 8B).
-  switch (alignof(T)) {
-  case 1: for (int i=0; i < sizeof(T)/1; i++) __builtin_nontemporal_store(u8[i], (uint8_t*)p + i); break;
-  case 2: for (int i=0; i < sizeof(T)/2; i++) __builtin_nontemporal_store(u16[i], (uint16_t*)p + i); break;
-  case 4: for (int i=0; i < sizeof(T)/4; i++) __builtin_nontemporal_store(u32[i], (uint32_t*)p + i); break;
-  case 8: for (int i=0; i < sizeof(T)/8; i++) __builtin_nontemporal_store(u64[i], (uint64_t*)p + i); break;
-  case 16: for (int i=0; i < sizeof(T)/8; i++) __builtin_nontemporal_store(u64[i], (uint64_t*)p + i); break;
-  default: __builtin_unreachable();
+  // HIP has no __stcs(); use clang non-temporal stores (value, ptr), dispatched on alignof(T).
+  if constexpr (alignof(T) == 1) {
+    for (int i=0; i < sizeof(T)/1; i++) __builtin_nontemporal_store(u8[i], (uint8_t*)p + i);
+  } else if constexpr (alignof(T) == 2) {
+    for (int i=0; i < sizeof(T)/2; i++) __builtin_nontemporal_store(u16[i], (uint16_t*)p + i);
+  } else if constexpr (alignof(T) == 4) {
+    for (int i=0; i < sizeof(T)/4; i++) __builtin_nontemporal_store(u32[i], (uint32_t*)p + i);
+  } else if constexpr (alignof(T) == 8 || alignof(T) == 16) {
+    for (int i=0; i < sizeof(T)/8; i++) __builtin_nontemporal_store(u64[i], (uint64_t*)p + i);
+  } else {
+    __builtin_unreachable();
   }
 #else
   switch (alignof(T)) {
