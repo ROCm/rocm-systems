@@ -253,12 +253,16 @@ if(BUILD_TESTS)
       TransportTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/NetDevsPolicyP2pNetTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
     add_executable(rccl-UnitTestsFixturesDebug ${TEST_FIXTURE_DEBUG_SOURCE_FILES})
+
+    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
+      "RCCL_TEST_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}\"")
   endif()
 
   # rccl-UnitTestsAltRsmi: Compiles alt_rsmi.cc directly (not via librccl.so) with
