@@ -2582,7 +2582,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
-  NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+  if (!job->parent && comm->nNodes == 1 && comm->nRanks == 8) {
+  	NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+  }
   // update communicator state
   comm->initState = ncclSuccess;
 

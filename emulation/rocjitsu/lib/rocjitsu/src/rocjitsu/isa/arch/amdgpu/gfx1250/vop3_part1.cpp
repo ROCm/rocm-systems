@@ -2799,9 +2799,11 @@ void VCvtPkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw = src0.read_lane(wf, lane);
-    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = 0u & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
     uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
     uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
     vdst.write_lane64(wf, lane,
@@ -2838,9 +2840,11 @@ void VCvtPkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw = src0.read_lane(wf, lane);
-    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = 0u & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
     uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
     uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
     vdst.write_lane64(wf, lane,
@@ -2971,9 +2975,11 @@ void VCvtPkF16Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw = src0.read_lane(wf, lane);
-    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = 0u & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
     uint32_t lo_bits = util::f32_to_f16(lo);
     uint32_t hi_bits = util::f32_to_f16(hi);
     vdst.write_lane(wf, lane, lo_bits | (hi_bits << 16));
@@ -3009,9 +3015,11 @@ void VCvtPkF16Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw = src0.read_lane(wf, lane);
-    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
+    uint32_t packed = src0.read_lane(wf, lane);
+    bool src_hi = 0u & 1;
+    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
+    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFFu));
+    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
     uint32_t lo_bits = util::f32_to_f16(lo);
     uint32_t hi_bits = util::f32_to_f16(hi);
     vdst.write_lane(wf, lane, lo_bits | (hi_bits << 16));
