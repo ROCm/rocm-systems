@@ -68,7 +68,6 @@
 #define NUM_SYM_BUF 2
 #endif
 
-
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
 #include "dda_all_reduce_ipc.h"
@@ -171,7 +170,6 @@ static void getEnvCtaPolicyOnce(){
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 ncclResult_t commReclaim(ncclComm_t comm);
 
-
 #ifdef ENABLE_ROCSHMEM
 RCCL_PARAM(RocshmemThreshold, "ROCSHMEM_THRESHOLD", (size_t)(262144));
 RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
@@ -198,7 +196,6 @@ ncclResult_t initGdrCopy() {
   }
   return ncclSuccess;
 }
-
 
 // [RCCL] Upstream NCCL 2.29 moved the CPU stack-size handling into
 // ncclOsInitialize() (see src/os/linux.cc); we delegate to that here so the
@@ -363,7 +360,6 @@ extern int64_t ncclParamLaunchOrderImplicit();
 
 #undef NCCL_NO_OPTIMIZE
 
-
 static ncclResult_t ncclDestructorFnFree(struct ncclDestructor* dtor) {
   free(dtor->obj);
   return ncclSuccess;
@@ -487,7 +483,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
     }
   }
 
-
   free(comm->peerInfo);
   if (comm->topo)
     ncclTopoFree(comm->topo);
@@ -593,7 +588,6 @@ NCCL_PARAM(GdrCopyFifoEnable, "GDRCOPY_FIFO_ENABLE", 1);
 NCCL_PARAM(WorkFifoBytes, "WORK_FIFO_BYTES", NCCL_WORK_FIFO_BYTES_DEFAULT);
 NCCL_PARAM(WorkArgsBytes, "WORK_ARGS_BYTES", INT64_MAX);
 enum ncclLaunchMode ncclParamLaunchMode;
-
 
 // Detect DMA-BUF support
 static ncclResult_t dmaBufSupported(struct ncclComm* comm) {
@@ -906,7 +900,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
       NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.channels[c].ring.userRanks, comm->channels[c].ring.userRanks, nRanks, deviceStream), ret, fail);
     }
   }
-
 
 #ifdef ENABLE_FAULT_INJECTION
   tmpCommAndChans.comm.faults = comm->faults;
@@ -2707,7 +2700,6 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
     comm->config.CTAPolicy &= ~NCCL_CTA_POLICY_EFFICIENCY;
   }
 
-
   // read non-config env settings
   comm->checkMode = ncclCheckModeDefault;
   if (ncclParamCheckPointers() == 1) { // @deprecated: use NCCL_CHECK_MODE instead
@@ -3217,7 +3209,6 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
     NCCLCHECK(ncclTunerPluginUnload(comm));
   }
   NCCLCHECK(commFree(comm));
-
 
   return ncclSuccess;
 }

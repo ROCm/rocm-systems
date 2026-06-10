@@ -41,10 +41,6 @@ namespace {
     int workNthreads;
     bool isNetOffload = work->isOneRPN && work->netRegUsed;
 
-
-
-
-
     T *inputBuf = (T*)work->sendbuff;
     T *outputBuf = (T*)work->recvbuff;
     workNthreads = isNetOffload ? WARP_SIZE : nthreads;
@@ -55,7 +51,6 @@ namespace {
       // coverity[callee_ptr_arith:FALSE]
       Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0>
         prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work);
-
 
       for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
         offset = gridOffset + elemOffset;

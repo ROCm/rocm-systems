@@ -9,7 +9,6 @@
 #include "collectives.h"
 #include "primitives.h"
 
-
 namespace {
   template<typename T, typename RedOp, typename Proto, int RCCLMetadata>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
@@ -42,15 +41,11 @@ namespace {
     int nelem;
     int chunk;
 
-
-
-
     // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
     // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
     // coverity[callee_ptr_arith:FALSE]
     Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0, false, RCCLMetadata, Pipeline, USE_ACC> prims
       (tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex, work->connIndex, work);
-
 
     for (ssize_t elemOffset = 0; elemOffset < channelCount; elemOffset += loopCount) {
       ssize_t remCount = channelCount - elemOffset;
@@ -68,12 +63,9 @@ namespace {
       offset = gridOffset + elemOffset + chunkOffset;
       nelem = (int)min(chunkCount, remCount - chunkOffset);
 
-
       prims.directSend(offset, offset, nelem);
 
-
       // k-2 steps: reduce and copy to next GPU
-
 
       for (int j = 2; j < nranks; ++j) {
         chunk = modRanks(ringIx + nranks - j);
@@ -83,7 +75,6 @@ namespace {
         prims.directRecvReduceDirectSend(offset, offset, nelem);
       }
 
-
       // step k-1: reduce this buffer and data, which will produce the final
       // result that we store in this data and push to the next GPU
       chunk = ringIx + 0;
@@ -91,10 +82,7 @@ namespace {
       offset = gridOffset + elemOffset + chunkOffset;
       nelem = (int)min(chunkCount, remCount - chunkOffset);
 
-
       prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*postOp=*/true);
-
-
 
       // k-2 steps: copy to next GPU
       for (int j = 1; j < nranks - 1; ++j) {
@@ -105,8 +93,6 @@ namespace {
         prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
 
-
-
       // Make final copy from buffer to dest.
       chunk = modRanks(ringIx + 1);
       chunkOffset = chunk * chunkCount;
@@ -115,9 +101,7 @@ namespace {
 
       prims.directRecv(offset, nelem);
 
-
     }
-
 
   }
 
@@ -136,15 +120,9 @@ namespace {
     size_t offset;
     int nelem;
 
-
-
-
-
     { // Reduce : max number of recv is 3, max number of send is 1 (binary tree + local)
       Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC> prims
         (tid, nthreads, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
-
-
 
       if (tree->up == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
@@ -168,14 +146,11 @@ namespace {
         }
       }
 
-
     }
 
     { // Broadcast : max number of recv is 1, max number of send is 3 (binary tree + local)
       Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC> prims
         (tid, nthreads, &tree->up, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
-
-
 
       if (tree->up == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
@@ -199,9 +174,7 @@ namespace {
         }
       }
 
-
     }
-
 
   }
 
@@ -229,23 +202,16 @@ namespace {
       nthreadsSplit = (nthreads*7/(10*WARP_SIZE))*WARP_SIZE;
     }
 
-
-
-
-
     if (tree->up == -1) {
       // Reduce and broadcast. Max number of recv is 2, max number of send is 2
       Primitives<T, RedOp, FanSymmetric<NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
         prims(tid, nthreads, tree->down, tree->down, work->sendbuff, work->recvbuff, work->redOpArg, 0, 0, 0, work);
-
-
 
       for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
         offset = gridOffset + elemOffset;
         nelem = min(chunkCount, channelCount - elemOffset);
         prims.directRecvReduceCopyDirectSend(offset, offset, nelem, /*doPost=*/true);
       }
-
 
     }
     else if (tid < nthreadsSplit) {
@@ -263,8 +229,6 @@ namespace {
       Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DEV_ARITY, 1>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
         prims(tid, nthreadsSplit, tree->down, &tree->up, work->sendbuff, work->recvbuff, work->redOpArg, 0*Proto::MaxGroupWidth, 0, 0, work);
 
-
-
       if (tree->down[0] == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
           offset = gridOffset + elemOffset;
@@ -280,7 +244,6 @@ namespace {
         }
       }
 
-
     }
     else {
       // Broadcast down. Max number of recv is 1, max number of send is 3 (binary tree + local)
@@ -290,8 +253,6 @@ namespace {
       Primitives<T, RedOp, FanAsymmetric<1, NCCL_MAX_DEV_ARITY>, /*Direct=*/1, Proto, 0, false, 0, Pipeline, USE_ACC>
         prims(tid-nthreadsSplit, nthreads-nthreadsSplit, &tree->up, tree->down, work->sendbuff, work->recvbuff,
             work->redOpArg, 1*Proto::MaxGroupWidth, 0, 0, work);
-
-
 
       if (tree->down[0] == -1) {
         for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
@@ -308,9 +269,7 @@ namespace {
         }
       }
 
-
     }
-
 
   }
 }

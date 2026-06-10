@@ -6,7 +6,6 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-
 #include "rccl_metadata.h"
 #include "network/unpack/unpack.h"
 #include <cassert>
@@ -65,7 +64,6 @@ class Primitives<
   uint64_t barrier_next_pat = 0;
   int repeat;
   bool skip_fence = 0;
-
 
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -293,20 +291,15 @@ class Primitives<
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send && Dst && ncclShmem.groups[group].srcs[0] != ncclShmem.groups[group].dsts[1]) {
 
-
-
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, MaxSend, /*PreOpSrcs*/0>
               (tid, nworkers, /*redArg*/0, /*postOp*/false,
               1, ncclShmem.groups[group].srcs,
               fan.nsend(), ncclShmem.groups[group].dsts+1,
               workSize);
 
-
-
           }
         } else if (DirectSend && !DirectRecv && SrcBuf != Input && ncclShmem.groups[group].dsts[Dst] == nullptr) {
           // For broadcast in CollNet to do empty send
-
 
           reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs*/0>
             (tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp,
@@ -314,10 +307,7 @@ class Primitives<
             Dst, ncclShmem.groups[group].dsts,
             workSize);
 
-
-
         } else if (ncclShmem.groups[group].srcs[0] && ncclShmem.groups[group].dsts[0]) {
-
 
           constexpr int PreOpSrcs = SrcBuf != Input ? 0 :
                                     DirectRecv*MaxRecv == NCCL_MAX_DIRECT_ARITY ? (1+NCCL_MAX_DIRECT_ARITY) : 1;
@@ -339,8 +329,6 @@ class Primitives<
                 Send * fan.nsend() + Dst, ncclShmem.groups[group].dsts,
                 workSize, ncclShmem.groups[group].acc);
           }
-
-
 
         } else {
           // we will come here when calling prims.directSend with net peer,

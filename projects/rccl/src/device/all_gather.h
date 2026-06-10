@@ -37,9 +37,6 @@ namespace {
     int nelem;
     int rankDest;
 
-
-
-
     int workNthreads;
     T *inputBuf = (T*)work->sendbuff;
     T *outputBuf = (T*)work->recvbuff;
@@ -70,14 +67,11 @@ namespace {
         rankDest = ringRanks[0];
         offset = dataOffset + rankDest * count;
 
-
         if ((inputBuf + dataOffset == outputBuf + offset) || isNetOffload) { // In place or onePPN
           prims.directSend(dataOffset, offset, nelem);
         } else {
           prims.directCopySend(dataOffset, offset, nelem);
         }
-
-
 
         // k-2 steps: copy to next GPU
         for (int j = 1; j < nranks - 1; ++j) {
@@ -86,16 +80,12 @@ namespace {
           prims.directRecvCopyDirectSend(offset, offset, nelem);
         }
 
-
         // Make final copy from buffer to dest.
         rankDest = ringRanks[1];
         offset = dataOffset + rankDest * count;
 
         // Final wait/copy.
         prims.directRecv(offset, nelem);
-
-
-
 
       }
     } else if (inputBuf != outputBuf + ringRanks[0] * count) {
