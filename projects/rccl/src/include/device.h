@@ -29,9 +29,6 @@
 #endif
 #include "nccl_tuner.h"
 #include "bitops.h"
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit_struct.h"
-#endif
 #include <algorithm>
 #include <stdint.h>
 #include <sys/types.h>
@@ -612,10 +609,6 @@ struct ncclKernelComm {
   struct ncclDevProfiler* workStarted/*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted/*[MAXCHANNELS]*/;
 
-#if defined(ENABLE_NPKIT)
-  NpKitEventCollectContext* npKitEventCollectContexts;
-  uint64_t* cpuTimestamp;
-#endif
 
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;

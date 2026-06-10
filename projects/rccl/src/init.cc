@@ -22,9 +22,6 @@
 #include "argcheck.h"
 #include "device.h"
 #include "collectives.h"
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit.h"
-#endif
 #include "tuner.h"
 #include "ras.h"
 #include "profiler.h"
@@ -910,13 +907,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
     }
   }
 
-#if defined(ENABLE_NPKIT)
-  WARN("NPKIT is deprecated, please use Profiler Plugin instead!");
-  // Init NPKit
-  NCCLCHECK(NpKit::Init(comm->rank));
-  tmpCommAndChans.comm.npKitEventCollectContexts = NpKit::GetGpuEventCollectContexts();
-  tmpCommAndChans.comm.cpuTimestamp = NpKit::GetCpuTimestamp();
-#endif
 
 #ifdef ENABLE_FAULT_INJECTION
   tmpCommAndChans.comm.faults = comm->faults;
@@ -1413,13 +1403,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       ret = ncclInternalError;
       goto fail;
     }
-    #if defined(ENABLE_NPKIT)
-    if (intraProcRanks != 1) {
-      WARN("NPKit currently does not support more than 1 device per process");
-      ret = ncclInternalError;
-      goto fail;
-    }
-    #endif
     struct ncclComm* comm0 = comm->peerInfo[intraProcRank0].comm;
     assert(intraProcRank==0 ? comm==comm0 : true);
     comm->intraComm0 = comm0;
@@ -3235,22 +3218,6 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
   }
   NCCLCHECK(commFree(comm));
 
-#if defined(ENABLE_NPKIT)
-  // Dump NPKit events and shutdown
-  const char* npkitDumpDir = getenv("NPKIT_DUMP_DIR");
-  if (npkitDumpDir == nullptr) {
-    npkitDumpDir = "./npkit_dump";
-    INFO(NCCL_INIT, "NPKIT_DUMP_DIR is not set, using default directory: %s", npkitDumpDir);
-  }
-  struct stat st;
-  if (stat(npkitDumpDir, &st) != 0) {
-    if (mkdir(npkitDumpDir, 0755) != 0) {
-      WARN("Failed to create NPKIT_DUMP_DIR directory: %s", npkitDumpDir);
-    }
-  }
-  NCCLCHECK(NpKit::Dump(npkitDumpDir));
-  NCCLCHECK(NpKit::Shutdown());
-#endif
 
   return ncclSuccess;
 }
