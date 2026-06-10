@@ -9,9 +9,11 @@
 # super-repo root. Use PROJECT_SOURCE_DIR for RCCL-relative paths.
 set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 
-# net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
-add_subdirectory(transport/net_ib_cast)
-
+# [NCCL src/CMakeLists.txt L1-18] Source files (LIBSRCFILES). NCCL lists only the top-level
+# src/*.cc here and pulls per-subdir files in via add_subdirectory; RCCL inlines the full file
+# tree. NCCL's conditional appends -- init_nvtx.cc (L20-23, NVTX) and enhcompat.cc (L25-28,
+# static cudart) -- have no separate RCCL block: init_nvtx.cc is listed unconditionally below
+# and enhcompat.cc does not exist in RCCL.
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -413,9 +415,46 @@ set(SRC_FILES
   misc/latency_profiler/CollTraceUtils.cc
 )
 
+# [NCCL src/CMakeLists.txt L25-28] UNMAPPED -- NCCL-only. RCCL has no enhcompat.cc and never
+# builds against static cudart. Verbatim NCCL block kept for merge reference:
+# | # Add compatibility shim if using static cudart
+# | if(CUDARTLIB STREQUAL "cudart_static")
+# |     list(APPEND LIBSRCFILES enhcompat.cc)
+# | endif()
+# (NCCL L20-23, the NVTX conditional append of init_nvtx.cc, IS mapped: RCCL lists init_nvtx.cc
+#  unconditionally in SRC_FILES -- see the L1-18 marker above.)
+
 # Prepend src/ to all source files for proper paths from root
 list(TRANSFORM SRC_FILES PREPEND "src/")
 
+# [NCCL src/CMakeLists.txt L30-35] UNMAPPED in this file -- implemented in the RCCL top-level
+# projects/rccl/CMakeLists.txt (RCCL configures rccl.h/nccl.h from src/nccl.h.in; there is no
+# RCCL nccl.pc.in pkg-config). Verbatim NCCL block kept for merge reference:
+# | # Configure pkg-config file
+# | configure_file(
+# |     ${CMAKE_CURRENT_SOURCE_DIR}/nccl.pc.in
+# |     ${CMAKE_BINARY_DIR}/lib/pkgconfig/nccl.pc
+# |     @ONLY
+# | )
+
+# [NCCL src/CMakeLists.txt L37-49] add_subdirectory(...): NCCL collects sources from many
+# subdirs (transport, misc, register, graph, plugin, device, nccl_device, ras, scheduler,
+# os, gin, rma). RCCL inlines those source lists into SRC_FILES (above) and only keeps the
+# RCCL-specific net_ib_cast subdirectory here, placed right before the append block to mirror
+# NCCL's source-list -> add_subdirectory -> append ordering.
+# net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
+add_subdirectory(transport/net_ib_cast)
+
+# [NCCL src/CMakeLists.txt L51-53] UNMAPPED -- NCCL-only. RCCL does not set a macro-prefix map.
+# Verbatim NCCL block kept for merge reference:
+# | if(NCCL_OS_LINUX)
+# |     add_compile_options(-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=)
+# | endif()
+
+# [NCCL src/CMakeLists.txt L55-69] Append the subdirectory-collected source lists to the master
+# list. RCCL's equivalent is appending SMI_SOURCES and NET_IB_CAST_SOURCES below (the rest of
+# RCCL's sources are already inlined in SRC_FILES). NCCL's -fmacro-prefix-map block (L51-53)
+# has no RCCL equivalent here.
 # Conditional source files based on build options
 #==================================================================================================
 if(USE_AMDSMI)
@@ -491,6 +530,10 @@ foreach(SRC_FILE ${SRC_FILES})
   endif()
 endforeach()
 
+# [NCCL src/CMakeLists.txt L104-122] Copy public device headers into the build tree and build
+# the nccl_header aggregate target (then add_dependencies(nccl/nccl_device nccl_header)). RCCL
+# copies the hipified nccl_device headers via copy_nccl_device_headers and wires it as an rccl
+# dependency (see add_dependencies at the add_library block below).
 set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/rccl/nccl_device.h")
 # Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
 set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
@@ -615,6 +658,9 @@ if(ENABLE_DEVICE_LINKER)
   message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp)")
 endif()
 
+# [NCCL src/CMakeLists.txt L132-142] Generate git version (NCCL: generate_git_version.py ->
+# nccl_git_version.h). RCCL generates git_version.cpp via the update_git_version target.
+# NCCL's git-version override cache vars (L144-152) have no RCCL equivalent.
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
 # Create initial empty file at configure time
@@ -631,6 +677,25 @@ add_custom_target(update_git_version
 
 list(APPEND HIP_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 
+# [NCCL src/CMakeLists.txt L144-152] UNMAPPED -- NCCL-only. RCCL has no git branch/commit override
+# cache vars. (NCCL emits these as target_compile_definitions after its target exists; placed here
+# next to the git-version block to preserve NCCL's git-version -> overrides adjacency.) Verbatim
+# NCCL block kept for merge reference:
+# | # Git version overrides (set via cmake -DNCCL_GIT_BRANCH=xxx -DNCCL_GIT_COMMIT_HASH=yyy)
+# | set(NCCL_GIT_BRANCH "" CACHE STRING "Override git branch name")
+# | set(NCCL_GIT_COMMIT_HASH "" CACHE STRING "Override git commit hash")
+# | if(NCCL_GIT_BRANCH)
+# |     target_compile_definitions(nccl PRIVATE NCCL_GIT_BRANCH="${NCCL_GIT_BRANCH}")
+# | endif()
+# | if(NCCL_GIT_COMMIT_HASH)
+# |     target_compile_definitions(nccl PRIVATE NCCL_GIT_COMMIT_HASH="${NCCL_GIT_COMMIT_HASH}")
+# | endif()
+
+# [NCCL src/CMakeLists.txt L71-75, L121-122] Create the library target and attach sources
+# (NCCL: add_library(nccl SHARED) + target_sources + $<TARGET_OBJECTS:nccl_device>), then
+# add_dependencies(... nccl_header). RCCL passes HIP_SOURCES directly and depends on its
+# hipify/header/symlink prep targets. NCCL builds shared + static as two targets; RCCL builds
+# a single rccl target toggled by BUILD_SHARED_LIBS (see static-lib block near the end).
 # Set up RCCL library
 #==================================================================================================
 ## Set RCCL source files
@@ -640,6 +705,8 @@ add_library(rccl ${HIP_SOURCES})
 ## Ensure git version is updated before building rccl
 add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks)
 
+# [NCCL src/CMakeLists.txt L77-90] Include directories (target_include_directories). RCCL adds
+# the hipify/ tree and ROCm/SMI paths instead of the CUDA toolkit paths.
 ## Set RCCL include directories
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src)                    # for hipified headers
@@ -665,6 +732,32 @@ if(ROCTX_ENABLE)
   target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
 endif()
 
+# [NCCL src/CMakeLists.txt L92-102] UNMAPPED in this file -- implemented in the RCCL top-level
+# projects/rccl/CMakeLists.txt (configure_file src/nccl.h.in -> rccl.h / nccl.h). The generated
+# header dir is added to the include paths above. Verbatim NCCL block kept for merge reference:
+# | add_custom_command(
+# |     OUTPUT ${CMAKE_BINARY_DIR}/include/nccl.h
+# |     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/include
+# |     COMMAND sed -e "s/\\\$$\\{nccl:Major\\}/${NCCL_MAJOR}/g"
+# |                 -e "s/\\\$$\\{nccl:Minor\\}/${NCCL_MINOR}/g"
+# |                 -e "s/\\\$$\\{nccl:Patch\\}/${NCCL_PATCH}/g"
+# |                 -e "s/\\\$$\\{nccl:Suffix\\}/${NCCL_SUFFIX}/g"
+# |                 -e "s/\\\$$\\{nccl:Version\\}/${NCCL_VERSION_CODE}/g"
+# |                 ${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in > ${CMAKE_BINARY_DIR}/include/nccl.h
+# |     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in
+# | )
+
+# [NCCL src/CMakeLists.txt L124-130] Library VERSION / SOVERSION / OUTPUT_NAME. NCCL uses
+# set_target_properties; RCCL uses rocm_set_soversion. NCCL sets this right after include dirs
+# (before flags/links); RCCL historically set it just before the static-lib block -- moved up
+# here to match NCCL ordering. (NCCL's output-directory block L176-179 is documented separately
+# near the link/RAS section below.)
+## Setup librccl.so version
+rocm_set_soversion(rccl "1.0")
+
+# [NCCL src/CMakeLists.txt -- no direct equivalent] RCCL-specific compile definitions. The
+# closest NCCL blocks are "Set CUDA specific flags" (L154-160, target properties) and the git
+# version overrides (L144-152); NCCL has no comparable feature-flag definitions here.
 ## Set RCCL compile definitions
 if(NCCL_OS_LINUX)
   target_compile_definitions(rccl PRIVATE NCCL_OS_LINUX)
@@ -812,6 +905,9 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
+# [NCCL src/CMakeLists.txt L154-160] "Set CUDA specific flags" -- NCCL enables separable
+# compilation / device-symbol resolution via target properties. RCCL's analog is relocatable
+# device code: -fgpu-rdc (or the device-linker host-only path).
 if(ENABLE_DEVICE_LINKER)
   target_compile_definitions(rccl PRIVATE RCCL_DEVICE_LINKER)
   target_compile_options(rccl PRIVATE --offload-host-only)
@@ -952,6 +1048,10 @@ if(ENABLE_DEVICE_LINKER)
   target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
 endif()
 
+# [NCCL src/CMakeLists.txt L162-169] Link libraries (Threads, dl, CUDA::cudart, EXTRA_LIBS).
+# RCCL links Threads/dl plus ROCm/SMI/hip libs and its optional deps (bfd, roctx, rocshmem,
+# device-linker objects, fmt). NCCL's version-script block (L171-174, libnccl.map) and output-
+# directory block (L176-179) have no RCCL equivalent in this file.
 ## Set RCCL linked libraries
 if (HAVE_BFD)
   target_link_libraries(rccl PRIVATE bfd)
@@ -1014,6 +1114,22 @@ if(ENABLE_ROCSHMEM)
   list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
   target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
 endif()
+
+# [NCCL src/CMakeLists.txt L171-174] UNMAPPED -- NCCL-only. RCCL has no libnccl.map version script;
+# symbol visibility is controlled via -fvisibility flags in the compile-options section above.
+# Verbatim NCCL block kept for merge reference:
+# | # Add version script for symbol visibility control
+# | target_link_options(nccl PRIVATE
+# |     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/libnccl.map"
+# | )
+
+# [NCCL src/CMakeLists.txt L176-179] UNMAPPED -- NCCL-only. RCCL does not set an explicit library
+# output directory; rocm-cmake places librccl in the default build location. Verbatim NCCL block
+# kept for merge reference:
+# | # Set output directories for nccl shared library
+# | set_target_properties(nccl PROPERTIES
+# |     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+# | )
 
 ## Set RCCL link options
 ## Find out available memory
@@ -1086,9 +1202,31 @@ endif()
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
-## Setup librccl.so version
-rocm_set_soversion(rccl "1.0")
+# [NCCL src/CMakeLists.txt L181-205] RAS client executable (NCCL target: ncclras; RCCL: rcclras).
+# Build RCCL RAS client executable
+#==================================================================================================
+message("Building rccl RAS client executable")
 
+add_executable(rcclras "${HIPIFY_DIR}/src/ras/client.cc")
+
+target_include_directories(rcclras PRIVATE ${PROJECT_BINARY_DIR}/include)
+target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src)
+target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src/include)
+
+target_link_libraries(rcclras PRIVATE hip::host)
+target_link_libraries(rcclras PRIVATE dl)
+
+if(BUILD_SHARED_LIBS)
+  target_link_libraries(rcclras PRIVATE rccl hip::device)
+else()
+  add_dependencies(rcclras rccl)
+  target_link_libraries(rcclras PRIVATE dl rt -lrccl -L${CMAKE_CURRENT_BINARY_DIR} -lamdhip64 -L${ROCM_PATH}/lib)
+endif()
+
+# [NCCL src/CMakeLists.txt L207-258] Static library. NCCL builds a separate nccl_static STATIC
+# target (own includes/deps/properties). RCCL instead reuses the single rccl target and, when
+# BUILD_SHARED_LIBS is OFF, overrides the archive-create rule to emit a static lib with -fgpu-rdc.
+# NOTE: NCCL orders ras (L181-205) before static (L207-258); this block was moved below ras to match.
 if(NOT BUILD_SHARED_LIBS)
   # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
   # You also need to invoke amdclang++ again to trigger GPU code generation.
@@ -1120,25 +1258,31 @@ if(NOT BUILD_SHARED_LIBS)
   set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_CXX_COMPILER> ${flags_str} -o <TARGET> <OBJECTS>")
 endif()
 
-# Build RCCL RAS client executable
-#==================================================================================================
-message("Building rccl RAS client executable")
-
-add_executable(rcclras "${HIPIFY_DIR}/src/ras/client.cc")
-
-target_include_directories(rcclras PRIVATE ${PROJECT_BINARY_DIR}/include)
-target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src)
-target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src/include)
-
-target_link_libraries(rcclras PRIVATE hip::host)
-target_link_libraries(rcclras PRIVATE dl)
-
-if(BUILD_SHARED_LIBS)
-  target_link_libraries(rcclras PRIVATE rccl hip::device)
-else()
-  add_dependencies(rcclras rccl)
-  target_link_libraries(rcclras PRIVATE dl rt -lrccl -L${CMAKE_CURRENT_BINARY_DIR} -lamdhip64 -L${ROCM_PATH}/lib)
-endif()
-
+# [NCCL src/CMakeLists.txt L260-281] UNMAPPED in this file -- RCCL performs installation in the
+# top-level projects/rccl/CMakeLists.txt (rocm_install_targets / rocm_install). Verbatim NCCL
+# block kept for merge reference:
+# | ###################### Install targets / headers / pkg-config ############################
+# | install(TARGETS nccl nccl_static
+# |   EXPORT NCCLTargets
+# |   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+# |   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+# |   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+# | )
+# |
+# | # Install tools, but do not export them as linkable imported targets.
+# | install(TARGETS ncclras
+# |   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+# | )
+# |
+# | # Install generated + copied public headers from the build tree.
+# | install(DIRECTORY "${CMAKE_BINARY_DIR}/include/"
+# |   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+# | )
+# |
+# | # Install pkg-config metadata generated during configure.
+# | install(FILES "${CMAKE_BINARY_DIR}/lib/pkgconfig/nccl.pc"
+# |   DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+# | )
+# The RCCL-only line below just exports HIPIFY_DIR so the parent-scope install rules find the headers.
 # Export HIPIFY_DIR to parent scope for use in install rules
 set(HIPIFY_DIR ${HIPIFY_DIR} PARENT_SCOPE)
