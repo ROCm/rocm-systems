@@ -26,6 +26,9 @@ set(SRC_FILES
   debug.cc
   dev_runtime.cc
   dda_all_reduce_ipc.cu
+  dda_reduce_scatter_ipc.cu
+  dda_all_gather_ipc.cu
+  dda_alltoall_ipc.cu
   device_buffer.cc
   enqueue.cc
   group.cc
@@ -93,6 +96,9 @@ set(SRC_FILES
   include/allocator.h
   include/algorithms/CollCommon.h
   include/algorithms/all_reduce/all_reduce_dda.h
+  include/algorithms/reduce_scatter/reduce_scatter_dda.h
+  include/algorithms/all_gather/all_gather_dda.h
+  include/algorithms/alltoall/alltoall_dda.h
   include/alt_rsmi.h
   include/archinfo.h
   include/api_trace.h
@@ -115,6 +121,9 @@ set(SRC_FILES
   include/cpuset.h
 # include/cudawrap.h
   include/dda_all_reduce_ipc.h
+  include/dda_reduce_scatter_ipc.h
+  include/dda_all_gather_ipc.h
+  include/dda_alltoall_ipc.h
   include/debug.h
   include/dev_runtime.h
   include/device.h
@@ -547,7 +556,7 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
@@ -599,7 +608,10 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp)")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
+  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp)")
 endif()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
@@ -653,17 +665,6 @@ if(ROCTX_ENABLE)
 endif()
 
 ## Set RCCL compile definitions
-if(COLLTRACE)
-  target_compile_definitions(rccl PRIVATE ENABLE_COLLTRACE)
-endif()
-if(ENABLE_MSCCL_KERNEL)
-  message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
-  target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
-endif()
-if(ENABLE_MSCCLPP)
-  target_compile_definitions(rccl PRIVATE ENABLE_MSCCLPP)
-endif()
-
 if(NCCL_OS_LINUX)
   target_compile_definitions(rccl PRIVATE NCCL_OS_LINUX)
 elseif(NCCL_OS_WINDOWS)
@@ -704,7 +705,7 @@ if (ENABLE_ROCSHMEM)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
-  # Moved to where MSCCL target_links
+  # Moved to where rocSHMEM target_links
   ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
@@ -815,9 +816,6 @@ if(ENABLE_NPKIT)
   target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
 endif()
 
-if(PROFILE)
-  target_compile_definitions(rccl PRIVATE ENABLE_PROFILING)
-endif()
 if(ROCTX_ENABLE)
   target_compile_definitions(rccl PRIVATE ROCTX_ENABLE)
 else()
@@ -1183,10 +1181,6 @@ else()
 endif()
 if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
-endif()
-
-if(ENABLE_MSCCLPP)
-  include(${RCCL_SOURCE_DIR}/cmake/MSCCLPP.cmake)
 endif()
 
 ## Track linking time
