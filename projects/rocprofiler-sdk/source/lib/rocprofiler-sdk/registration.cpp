@@ -1533,6 +1533,7 @@ rocprofiler_set_api_table(const char* name,
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         rocprofiler::pc_sampling::code_object::initialize(rocattach_api);
 #endif
+        rocprofiler::thread_trace::code_object::initialize(rocattach_api);
     }
     else
     {
