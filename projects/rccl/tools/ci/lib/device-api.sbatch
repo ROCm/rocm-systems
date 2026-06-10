@@ -40,7 +40,15 @@ cd "${workdir}"
 
 ci_dir="${workdir}/projects/rccl/tools/ci"
 amdgpu_targets="${RCCL_AMDGPU_TARGETS:-gfx950}"
-build_jobs="${RCCL_BUILD_JOBS:-$(nproc)}"
+
+# Cap parallelism: this node reports nproc=384, and -j384 OOM/thrashes RCCL's
+# heavy C++ compile. Default to <=32; export so build-ompi.sh inherits it too.
+if [[ -z "${RCCL_BUILD_JOBS:-}" ]]; then
+  nproc_count="$(nproc)"
+  RCCL_BUILD_JOBS=$(( nproc_count < 32 ? nproc_count : 32 ))
+fi
+export RCCL_BUILD_JOBS
+build_jobs="${RCCL_BUILD_JOBS}"
 rccl_tests_repo="${RCCL_TESTS_REPO:-https://github.com/ROCm/rccl-tests.git}"
 rccl_tests_ref="${RCCL_TESTS_REF:-develop}"
 

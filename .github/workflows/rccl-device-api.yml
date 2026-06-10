@@ -51,7 +51,7 @@ jobs:
   device-api:
     name: Build + run RCCL device-API benchmarks (1 node x 8 GPU)
     runs-on: ruby-linux-slurm-scale-runner
-    timeout-minutes: 180
+    timeout-minutes: 240
     defaults:
       run:
         shell: bash
