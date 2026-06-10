@@ -104,6 +104,12 @@ _LITERAL_ENCODING_OPERANDS = {
 }
 
 
+@dataclass
+class _SourceImplUnit:
+    file_stem: str | None
+    impls: list[object]
+
+
 class _SemanticEmitter:
     """Entry point for execute() body generation.
 
@@ -4293,6 +4299,7 @@ class CodeGenerator:
         for enc in self.isa_spec.inst_encodings:
             inst_classes = []
             class_func_impls = []
+            source_impl_units: list[_SourceImplUnit] = []
             # Collect instructions from this encoding plus any child
             # alt encodings that contribute to this file.
             all_insts = list(enc.insts)
@@ -5093,9 +5100,9 @@ class CodeGenerator:
                         )
 
                     inst_classes.append(s)
-                    class_func_impls.append(class_ctor_impl)
+                    inst_impls = [class_ctor_impl]
                     if gfx1250_f8f6f4_shape is not None:
-                        class_func_impls.append(
+                        inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
                                 f'  out += " matrix_a_fmt:";\n'
@@ -5106,7 +5113,7 @@ class CodeGenerator:
                             )
                         )
                     elif gfx1250_swmmac_has_modifiers:
-                        class_func_impls.append(
+                        inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
                                 f'  if (inst_.opsel & 0x1)\n'
@@ -5123,7 +5130,7 @@ class CodeGenerator:
                         and inst_sem.semantic_class in ('branch', 'cbranch')
                         and label_operand
                     ):
-                        class_func_impls.append(
+                        inst_impls.append(
                             cgen.Line(
                                 f'std::optional<int64_t> '
                                 f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
@@ -5134,7 +5141,16 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    class_func_impls.append(exec_impl)
+                    inst_impls.append(exec_impl)
+                    class_func_impls.extend(inst_impls)
+                    source_impl_units.append(
+                        _SourceImplUnit(
+                            profile.source_split_file_stem(
+                                enc.enc_name, inst.name, inst_sem
+                            ),
+                            inst_impls,
+                        )
+                    )
 
                 # Build include lists for .cpp files
                 cpp_includes = [
@@ -5279,34 +5295,32 @@ class CodeGenerator:
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
-                if self.shared_plan is not None:
-                    from amdisa.codegen.execute.simd_codegen import (
-                        simd_probe_arch_portable as _simd_probe_arch_portable,
+                # Portable SIMD probes can delegate even outside --multi mode,
+                # so this cannot be gated solely on shared_plan.
+                from amdisa.codegen.execute.simd_codegen import (
+                    simd_probe_arch_portable as _simd_probe_arch_portable,
+                )
+
+                enc_key = enc.enc_name.lower().replace('enc_', '')
+
+                def _delegates_to_shared(i: Instruction) -> bool:
+                    if not self.semantics or i.name not in self.semantics.instructions:
+                        return False
+                    return self._can_share_execute(
+                        i.mnemonic, i, enc.enc_name
+                    ) or _simd_probe_arch_portable(
+                        f'{i.mnemonic}_{enc_key}',
+                        self.isa_spec.profile.vop3p_opsel_fields,
                     )
 
-                    enc_key = enc.enc_name.lower().replace('enc_', '')
-
-                    def _delegates_to_shared(i: Instruction) -> bool:
-                        if (
-                            not self.semantics
-                            or i.name not in self.semantics.instructions
-                        ):
-                            return False
-                        return self._can_share_execute(
-                            i.mnemonic, i, enc.enc_name
-                        ) or _simd_probe_arch_portable(
-                            f'{i.mnemonic}_{enc_key}',
-                            self.isa_spec.profile.vop3p_opsel_fields,
+                has_shared = any(_delegates_to_shared(i) for i in all_insts)
+                if has_shared:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
+                            False,
                         )
-
-                    has_shared = any(_delegates_to_shared(i) for i in all_insts)
-                    if has_shared:
-                        cpp_includes.append(
-                            (
-                                'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
-                                False,
-                            )
-                        )
+                    )
 
                 # Build per-ISA header includes.
                 h_includes = [
@@ -5411,6 +5425,7 @@ class CodeGenerator:
                     f'{enc.fmt_enc_name.lower()}',
                     cpp_includes,
                     class_func_impls,
+                    source_impl_units,
                 )
 
         # Generate the umbrella insts.h header that includes all per-
@@ -5451,24 +5466,26 @@ class CodeGenerator:
         base_name: str,
         cpp_includes: list[tuple[str, bool]],
         class_func_impls: list[object],
+        source_impl_units: list[_SourceImplUnit] | None = None,
     ) -> None:
         """Write implementation files for one encoding, splitting when needed.
 
         Some generated encodings, notably gfx1250 VOP3/VOPC, are large enough
         to trip the repository's added-file size hook. Profiles can set a byte
-        limit in ``source_split_max_bytes``; this emits ``<base>_partN.cpp``
-        chunks under that limit and removes stale split/unsplit files when the
-        split decision changes.
+        limit in ``source_split_max_bytes``. Profiles can also supply logical
+        file stems for instructions; this emits ``<base>_<stem>.cpp`` chunks
+        that keep related instructions together while removing stale
+        split/unsplit files when the split decision changes.
         """
         max_bytes = self.isa_spec.profile.source_split_max_bytes.get(enc_name.upper())
-        if not max_bytes:
-            import os
+        import os
 
-            arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
+        arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
+        if not max_bytes:
             if os.path.isdir(arch_dir):
-                for filename in os.listdir(arch_dir):
-                    if re.fullmatch(rf'{re.escape(base_name)}_part\d+\.cpp', filename):
-                        os.remove(os.path.join(arch_dir, filename))
+                self._remove_generated_source_split_files(
+                    arch_dir, base_name, source_impl_units
+                )
             CppFile(
                 base_name,
                 self.out_path,
@@ -5480,33 +5497,50 @@ class CodeGenerator:
             ).gen_code()
             return
 
-        import os
-
-        arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
         if os.path.isdir(arch_dir):
-            for filename in os.listdir(arch_dir):
-                if re.fullmatch(rf'{re.escape(base_name)}_part\d+\.cpp', filename):
-                    os.remove(os.path.join(arch_dir, filename))
+            self._remove_generated_source_split_files(
+                arch_dir, base_name, source_impl_units
+            )
+
+        use_logical_split = bool(
+            source_impl_units and any(u.file_stem for u in source_impl_units)
+        )
 
         chunks: list[list[object]] = []
-        current_chunk: list[object] = []
-        current_size = 0
+        chunk_file_names: list[str] = []
 
         # CppFile adds a short prologue, include block, and namespace wrapper.
         # Leave margin under the profile limit so formatting and include growth
         # do not push a chunk over the added-file size hook.
         chunk_overhead = 16 * 1024
-        for impl in class_func_impls:
-            impl_size = len(f'{impl}\n\n'.encode())
-            if current_chunk and current_size + impl_size + chunk_overhead > max_bytes:
-                chunks.append(current_chunk)
-                current_chunk = []
-                current_size = 0
-            current_chunk.append(impl)
-            current_size += impl_size
+        if use_logical_split:
+            logical_chunks = self._build_logical_source_chunks(
+                base_name,
+                class_func_impls,
+                source_impl_units or [],
+                max_bytes,
+                chunk_overhead,
+            )
+            for file_name, chunk in logical_chunks:
+                chunk_file_names.append(file_name)
+                chunks.append(chunk)
+        else:
+            current_chunk: list[object] = []
+            current_size = 0
+            for impl in class_func_impls:
+                impl_size = len(f'{impl}\n\n'.encode())
+                if (
+                    current_chunk
+                    and current_size + impl_size + chunk_overhead > max_bytes
+                ):
+                    chunks.append(current_chunk)
+                    current_chunk = []
+                    current_size = 0
+                current_chunk.append(impl)
+                current_size += impl_size
 
-        if current_chunk:
-            chunks.append(current_chunk)
+            if current_chunk:
+                chunks.append(current_chunk)
 
         if len(chunks) > 1:
             unsplit_file = os.path.join(arch_dir, f'{base_name}.cpp')
@@ -5514,7 +5548,12 @@ class CodeGenerator:
                 os.remove(unsplit_file)
 
         for idx, chunk in enumerate(chunks):
-            file_name = base_name if len(chunks) == 1 else f'{base_name}_part{idx + 1}'
+            if len(chunks) == 1:
+                file_name = base_name
+            elif chunk_file_names:
+                file_name = chunk_file_names[idx]
+            else:
+                file_name = f'{base_name}_part{idx + 1}'
             CppFile(
                 file_name,
                 self.out_path,
@@ -5524,6 +5563,144 @@ class CodeGenerator:
                 chunk,
                 self.isa_spec.arch_name,
             ).gen_code()
+
+    @staticmethod
+    def _sanitize_source_split_file_stem(stem: str | None) -> str:
+        clean = re.sub(r'[^a-z0-9]+', '_', (stem or 'misc').lower()).strip('_')
+        return clean or 'misc'
+
+    @staticmethod
+    def _source_impl_size(impls: list[object]) -> int:
+        return sum(len(f'{impl}\n\n'.encode()) for impl in impls)
+
+    def _chunk_source_impl_units(
+        self,
+        units: list[_SourceImplUnit],
+        max_bytes: int,
+        chunk_overhead: int,
+    ) -> list[list[_SourceImplUnit]]:
+        chunks: list[list[_SourceImplUnit]] = []
+        current_chunk: list[_SourceImplUnit] = []
+        current_size = 0
+        for unit in units:
+            unit_size = self._source_impl_size(unit.impls)
+            if current_chunk and current_size + unit_size + chunk_overhead > max_bytes:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_size = 0
+            current_chunk.append(unit)
+            current_size += unit_size
+        if current_chunk:
+            chunks.append(current_chunk)
+        return chunks
+
+    def _build_logical_source_chunks(
+        self,
+        base_name: str,
+        class_func_impls: list[object],
+        source_impl_units: list[_SourceImplUnit],
+        max_bytes: int,
+        chunk_overhead: int,
+    ) -> list[tuple[str, list[object]]]:
+        """Return deterministic logical source chunks for a split encoding."""
+        grouped_units: dict[str, list[_SourceImplUnit]] = {}
+        unit_impl_ids = {id(impl) for unit in source_impl_units for impl in unit.impls}
+        extra_impls = [
+            impl for impl in class_func_impls if id(impl) not in unit_impl_ids
+        ]
+
+        logical_chunks: list[tuple[str, list[object]]] = []
+        if extra_impls:
+            extra_units = [_SourceImplUnit('support', [impl]) for impl in extra_impls]
+            self._append_logical_source_chunks(
+                logical_chunks,
+                base_name,
+                'support',
+                extra_units,
+                max_bytes,
+                chunk_overhead,
+            )
+
+        for unit in source_impl_units:
+            stem = self._sanitize_source_split_file_stem(unit.file_stem)
+            grouped_units.setdefault(stem, []).append(unit)
+
+        for stem, units in grouped_units.items():
+            self._append_logical_source_chunks(
+                logical_chunks, base_name, stem, units, max_bytes, chunk_overhead
+            )
+
+        self._assert_unique_source_file_names(
+            file_name for file_name, _ in logical_chunks
+        )
+        return logical_chunks
+
+    def _append_logical_source_chunks(
+        self,
+        logical_chunks: list[tuple[str, list[object]]],
+        base_name: str,
+        stem: str,
+        units: list[_SourceImplUnit],
+        max_bytes: int,
+        chunk_overhead: int,
+    ) -> None:
+        unit_chunks = self._chunk_source_impl_units(units, max_bytes, chunk_overhead)
+        for idx, unit_chunk in enumerate(unit_chunks):
+            chunk_stem = stem if len(unit_chunks) == 1 else f'{stem}_{idx + 1}'
+            logical_chunks.append(
+                (
+                    f'{base_name}_{chunk_stem}',
+                    [impl for chunk_unit in unit_chunk for impl in chunk_unit.impls],
+                )
+            )
+
+    @classmethod
+    def _is_generated_source_split_file(
+        cls,
+        base_name: str,
+        filename: str,
+        source_impl_units: list[_SourceImplUnit] | None,
+    ) -> bool:
+        if re.fullmatch(rf'{re.escape(base_name)}_part\d+\.cpp', filename):
+            return True
+
+        has_logical_stems = any(unit.file_stem for unit in source_impl_units or [])
+        stems = {
+            cls._sanitize_source_split_file_stem(unit.file_stem)
+            for unit in source_impl_units or []
+            if unit.file_stem or has_logical_stems
+        }
+        return any(
+            re.fullmatch(
+                rf'{re.escape(base_name)}_{re.escape(stem)}(?:_\d+)?\.cpp', filename
+            )
+            for stem in stems
+        )
+
+    @classmethod
+    def _remove_generated_source_split_files(
+        cls,
+        arch_dir: str,
+        base_name: str,
+        source_impl_units: list[_SourceImplUnit] | None,
+    ) -> None:
+        import os
+
+        for filename in os.listdir(arch_dir):
+            if cls._is_generated_source_split_file(
+                base_name, filename, source_impl_units
+            ):
+                os.remove(os.path.join(arch_dir, filename))
+
+    @staticmethod
+    def _assert_unique_source_file_names(file_names) -> None:
+        seen: set[str] = set()
+        for file_name in file_names:
+            if file_name in seen:
+                raise AssertionError(
+                    f'duplicate generated source file name: {file_name}'
+                )
+            seen.add(file_name)
 
     def _write_shared_inst_files(
         self,
