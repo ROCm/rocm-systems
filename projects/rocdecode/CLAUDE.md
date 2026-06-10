@@ -168,12 +168,11 @@ The Windows backend (`src/rocdecode/pal/`) uses AMD PAL (Platform Abstraction Li
 
 ### Build (Windows)
 
-PAL is pulled from the drivers tree. `UVD_INCLUDE_DIR` points to the directory containing `drv_uvd_if.h` (the UVD firmware codec structures).
+PAL is pulled from the drivers tree. UVD headers (`drv_uvd_if.h`) are bundled in the PAL include directory.
 
 ```cmd
 mkdir build && cd build
 cmake -DPAL_ROOT=c:\github\drivers-amd-main\drivers\build\native\Debug\x64\pal\package ^
-      -DUVD_INCLUDE_DIR=c:\github\drivers-amd-main\drivers\uvdfwlib\uvdfw_inc\ ^
       -DCMAKE_BUILD_TYPE=Debug ..
 cmake --build . --config Debug
 cmake --install . --config Debug
