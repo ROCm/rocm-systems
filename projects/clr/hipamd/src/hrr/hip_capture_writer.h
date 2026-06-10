@@ -21,8 +21,24 @@ bool open(const char* output_dir);
 // Returns true if open() has been called successfully.
 bool is_open();
 
-// Flush events.bin and write manifest.json. Safe to call multiple times.
+// Flush events.bin, append the clean-shutdown trailer (hrr_eof_record), fsync,
+// and write manifest.json with "complete": true. Safe to call multiple times
+// (the trailer is written only once). Call on normal shutdown.
 void flush(const char* output_dir);
+
+// Force any buffered events to disk and fsync. Bounds how much capture data a
+// crash can lose. Cheap relative to capture; called periodically by the writer
+// itself and may be called by the host. Thread-safe.
+void checkpoint();
+
+// Best-effort, async-signal-safe finalize for use from a fatal-signal handler.
+// Flushes the in-memory event buffer with raw write()+fsync (only when the
+// writer lock can be taken without blocking, so no torn record is emitted) and
+// writes a minimal manifest.json with "complete": false using raw open/write.
+// It deliberately does NOT append the clean trailer — the trailer's absence is
+// how the reader detects a crash-truncated archive. Never allocates, never uses
+// stdio. Safe to call from SIGSEGV/SIGABRT/etc.
+void emergency_finalize();
 
 // Close and free resources.
 void close();

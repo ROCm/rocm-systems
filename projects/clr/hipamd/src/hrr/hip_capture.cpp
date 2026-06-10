@@ -51,10 +51,13 @@
 
 #include <atomic>
 #include <climits>
+#include <csignal>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
+
+static std::once_flag g_hrr_atexit_once;
 
 
 // GetHipDispatchTable / GetHipCompilerDispatchTable
@@ -1029,12 +1032,94 @@ struct HrrEarlyInstall {
 } g_hrr_early_install;
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Crash-time finalize — chained fatal-signal handlers.
+//
+// The archive is normally finalized from std::atexit(hip_capture_shutdown). If
+// the recorded process dies on a fatal signal (e.g. a GPU memory fault aborts
+// the host, or a host SIGSEGV), atexit never runs. These handlers best-effort
+// flush events.bin and write a crash manifest, then CHAIN to the previously
+// installed handler so ROCr still emits its GPU coredump (gpucore.<pid>) and the
+// kernel still produces the host core. They do NOT write the clean trailer — its
+// absence is exactly how the reader detects a crash-truncated archive.
+//
+// POSIX only; on Windows the writer's periodic checkpoint still bounds loss.
+// ---------------------------------------------------------------------------
+#ifndef _WIN32
+namespace {
+
+constexpr int    kHrrFatalSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE, SIGTERM, SIGINT};
+constexpr size_t kHrrNumSignals     = sizeof(kHrrFatalSignals) / sizeof(kHrrFatalSignals[0]);
+
+struct sigaction g_hrr_prev_sa[kHrrNumSignals];
+std::atomic_flag g_hrr_in_handler = ATOMIC_FLAG_INIT;
+// Dedicated stack so a SIGSEGV from stack overflow can still run the handler.
+char             g_hrr_altstack_mem[65536];
+
+void hrr_fatal_signal_handler(int signo, siginfo_t* info, void* uctx) {
+  // Only the first thread into the handler finalizes the archive.
+  if (!g_hrr_in_handler.test_and_set(std::memory_order_acq_rel)) {
+    hrr_cap::writer::emergency_finalize();
+  }
+
+  // Chain to the handler that was installed before us (e.g. ROCr's GPU-coredump
+  // handler), so that behavior is preserved.
+  int idx = -1;
+  for (size_t i = 0; i < kHrrNumSignals; i++)
+    if (kHrrFatalSignals[i] == signo) { idx = static_cast<int>(i); break; }
+
+  if (idx >= 0) {
+    const struct sigaction& prev = g_hrr_prev_sa[idx];
+    if ((prev.sa_flags & SA_SIGINFO) && prev.sa_sigaction &&
+        prev.sa_sigaction != hrr_fatal_signal_handler) {
+      prev.sa_sigaction(signo, info, uctx);
+      return;
+    }
+    if (prev.sa_handler == SIG_IGN) return;
+    if (prev.sa_handler && prev.sa_handler != SIG_DFL &&
+        prev.sa_handler != reinterpret_cast<void (*)(int)>(hrr_fatal_signal_handler)) {
+      prev.sa_handler(signo);
+      return;
+    }
+  }
+
+  // No (usable) previous handler: restore the default disposition and re-raise
+  // so the kernel terminates the process with a core dump for `signo`.
+  signal(signo, SIG_DFL);
+  raise(signo);
+}
+
+void hrr_install_signal_handlers() {
+  stack_t ss{};
+  ss.ss_sp    = g_hrr_altstack_mem;
+  ss.ss_size  = sizeof(g_hrr_altstack_mem);
+  ss.ss_flags = 0;
+  sigaltstack(&ss, nullptr);
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = hrr_fatal_signal_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK | SA_RESTART;
+  for (size_t i = 0; i < kHrrNumSignals; i++)
+    sigaction(kHrrFatalSignals[i], &sa, &g_hrr_prev_sa[i]);
+}
+
+}  // namespace
+#endif  // !_WIN32
+
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;
   if (!g_installed) return;  // early install failed (table not installed)
 
   // Open the events writer now — Flag::init() has run so output_dir is valid.
   if (!hrr_cap::writer::open(hip_capture_output_dir())) return;
+
+#ifndef _WIN32
+  // Install AFTER the runtime is up so we chain on top of ROCr's signal handlers
+  // (ours runs first, flushes the archive, then forwards to ROCr for gpucore).
+  hrr_install_signal_handlers();
+#endif
 
   // Install compiler dispatch shims now — hip::init() has completed so
   // the compiler dispatch table is fully populated.
@@ -1044,7 +1129,12 @@ void hip_capture_init() {
   // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
   hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
 
-  std::atexit(hip_capture_shutdown);
+  std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
+}
+
+extern "C" void hipHrrCaptureFlush() {
+  if (!hip_capture_enabled() || !hrr_cap::writer::is_open()) return;
+  hrr_cap::writer::flush(hip_capture_output_dir());
 }
 
 void hip_capture_shutdown() {

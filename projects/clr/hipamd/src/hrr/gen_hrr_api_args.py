@@ -130,6 +130,22 @@ MANUAL_CAPTURE_APIS: Set[str] = {
 # Alias for backward compat within the file (some helpers used MANUAL_APIS)
 MANUAL_APIS = MANUAL_CAPTURE_APIS
 
+# Kernel launches recorded as variable-length binary (hip_capture.cpp
+# serialize_kernel_launch), NOT as sizeof(hrr_args_hipModuleLaunchKernel).
+VARIABLE_LENGTH_KERNEL_LAUNCH_APIS: Set[str] = {
+    "hipModuleLaunchKernel",
+    "hipExtModuleLaunchKernel",
+    "hipLaunchKernel",
+    "hipLaunchByPtr",
+}
+
+# Minimum bytes for a valid variable-length kernel launch payload:
+#   header + stream(8) + name_len(2) + co_hash(16) + grid/block/shared(28) + counts(4)
+# (kernel name and per-arg data may add more; spin with 0 args is 94 bytes total).
+_VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR = (
+    "static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u)"
+)
+
 # APIs that are pass-through even for the manual path
 # (hipModuleGetFunction: function handles identified by name at launch time)
 PASSTHROUGH_ONLY: Set[str] = {
@@ -1125,6 +1141,27 @@ typedef struct {
 static_assert(sizeof(hrr_event_header) == 32, "hrr_event_header must be 32 bytes");
 #endif
 
+/* ---- Clean-shutdown trailer ----
+ * Written once at the end of events.bin by the capture writer ONLY on a clean
+ * shutdown (writer::flush). Its ABSENCE tells the reader the capture was
+ * interrupted (e.g. the recorded process crashed) and the trailing record may
+ * be torn — the reader then recovers all complete records instead of failing.
+ * event_type uses a sentinel (HRR_EOF_MARKER) far outside the hrr_api_id_t
+ * range, so playback dispatch and name lookup treat it as unknown/no-op if it
+ * is ever fed to them. */
+#define HRR_EOF_MARKER ((uint16_t)0xFFFFu)     /* hrr_event_header.event_type sentinel */
+#define HRR_EOF_MAGIC  ((uint32_t)0x464F4548u) /* "HEOF" trailer payload magic         */
+
+typedef struct {
+    hrr_event_header hdr;   /* event_type = HRR_EOF_MARKER, payload_length = sizeof(hrr_eof_record) */
+    uint64_t total_events;  /* count of real events written before this trailer */
+    uint32_t eof_magic;     /* HRR_EOF_MAGIC                                     */
+} hrr_eof_record;
+
+#ifdef __cplusplus
+static_assert(sizeof(hrr_eof_record) == 44, "hrr_eof_record must be 44 bytes");
+#endif
+
 """
 
 _FOOTER = """
@@ -1929,7 +1966,13 @@ def generate_dispatch_table(entries: List[ApiEntry]) -> str:
     lines.append("const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {")
     for idx, e in enumerate(entries):
         enum_name = "HRR_API_" + e.name.lstrip('_').upper()
-        lines.append(f"    static_cast<uint32_t>(sizeof(hrr_args_{e.name})),  // [{idx}] {enum_name}")
+        if e.name in VARIABLE_LENGTH_KERNEL_LAUNCH_APIS:
+            min_expr = _VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR
+            note = "variable-length kernel launch"
+        else:
+            min_expr = f"static_cast<uint32_t>(sizeof(hrr_args_{e.name}))"
+            note = enum_name
+        lines.append(f"    {min_expr},  // [{idx}] {note}")
     lines.append("};")
     lines.append("")
     lines.append("// ============================================================")

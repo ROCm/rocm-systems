@@ -52,3 +52,21 @@ find_package(Threads REQUIRED)
 target_link_libraries(hrr-playback PRIVATE hrr_reader amdhip64 Threads::Threads)
 
 install(TARGETS hrr-playback RUNTIME DESTINATION bin)
+
+# ---------------------------------------------------------------------------
+# hrr-recovery-test — GPU-free unit test for crash-truncation recovery.
+# EXCLUDE_FROM_ALL so it never builds during the normal bake (which builds only
+# the amdhip64 / hrr-playback targets). Build explicitly: `ninja hrr-recovery-test`.
+# ---------------------------------------------------------------------------
+add_executable(hrr-recovery-test EXCLUDE_FROM_ALL hrr_recovery_test.cpp)
+set_target_properties(hrr-recovery-test PROPERTIES CXX_STANDARD ${HRR_CXX_STANDARD} CXX_STANDARD_REQUIRED ON)
+target_include_directories(hrr-recovery-test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${HRR_DIR}
+  ${HIP_COMMON_INCLUDE_DIR}
+  ${PROJECT_BINARY_DIR}/include
+)
+target_compile_definitions(hrr-recovery-test PRIVATE
+  $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
+)
+target_link_libraries(hrr-recovery-test PRIVATE hrr_reader)

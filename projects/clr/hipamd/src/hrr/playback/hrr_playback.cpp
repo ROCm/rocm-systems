@@ -59,6 +59,12 @@
 static void print_info(const hrr::Archive& archive, bool show_events) {
   printf("HRR Archive: %s\n", archive.path.c_str());
   printf("========================================\n");
+  printf("Complete:     %s\n",
+         archive.complete ? "yes (clean shutdown)"
+                          : (archive.truncated
+                               ? "NO (crash-truncated; trailing torn record discarded)"
+                               : "NO (no shutdown trailer; capture likely crashed)"));
+  printf("Recovered:    %zu events\n", archive.event_count);
   printf("Events:       %zu\n", archive.event_count);
   printf("Kernels:      %zu\n", archive.kernel_count);
   printf("Blobs:        %zu\n", archive.blob_count);
@@ -579,12 +585,99 @@ static bool run_pass(PlaybackContext& ctx,
 // main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// --repair mode: rewrite a crash-truncated archive into a clean one.
+//
+// Loads the archive with the tolerant reader (recovering all complete records),
+// then rewrites events.bin trimmed to the last complete record, appends the
+// clean-shutdown trailer, and writes a complete manifest.json. After repair the
+// archive looks exactly like one produced by a normal process exit. Replay
+// works on truncated archives without repair too; this just "blesses" them.
+// ---------------------------------------------------------------------------
+
+static bool write_u(FILE* f, const void* p, size_t n) {
+  return fwrite(p, 1, n, f) == n;
+}
+
+static int repair_archive(const hrr::Archive& archive) {
+  std::string events_path = archive.path + "/events.bin";
+  std::string tmp_path    = events_path + ".repair.tmp";
+
+  if (archive.complete) {
+    printf("[HRR] Archive already complete (%zu events); nothing to repair\n",
+           archive.event_count);
+    return 0;
+  }
+
+  FILE* out = fopen(tmp_path.c_str(), "wb");
+  if (!out) {
+    fprintf(stderr, "[HRR] repair: cannot open %s for writing\n", tmp_path.c_str());
+    return 1;
+  }
+
+  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+  bool ok = write_u(out, &fh, sizeof(fh));
+
+  uint64_t max_seq = 0;
+  for (const auto& ev : archive.events) {
+    if (!ok) break;
+    ok = write_u(out, ev.raw_payload.data(), ev.raw_payload.size());
+    if (ev.header().sequence_id > max_seq) max_seq = ev.header().sequence_id;
+  }
+
+  // Clean-shutdown trailer (mirrors hip_capture_writer flush()).
+  if (ok) {
+    hrr_eof_record rec;
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.event_type     = HRR_EOF_MARKER;
+    rec.hdr.sequence_id    = max_seq + 1;
+    rec.hdr.payload_length = static_cast<uint16_t>(sizeof(rec));
+    rec.total_events       = archive.events.size();
+    rec.eof_magic          = HRR_EOF_MAGIC;
+    ok = write_u(out, &rec, sizeof(rec));
+  }
+  fflush(out);
+  fclose(out);
+
+  if (!ok) {
+    fprintf(stderr, "[HRR] repair: write failed; leaving original untouched\n");
+    remove(tmp_path.c_str());
+    return 1;
+  }
+
+  if (rename(tmp_path.c_str(), events_path.c_str()) != 0) {
+    fprintf(stderr, "[HRR] repair: cannot replace %s\n", events_path.c_str());
+    remove(tmp_path.c_str());
+    return 1;
+  }
+
+  std::string manifest_path = archive.path + "/manifest.json";
+  FILE* mf = fopen(manifest_path.c_str(), "w");
+  if (mf) {
+    fprintf(mf,
+            "{\n"
+            "  \"version\": 1,\n"
+            "  \"capture_mode\": \"in-tree\",\n"
+            "  \"complete\": true,\n"
+            "  \"event_count\": %zu,\n"
+            "  \"blob_count\": %zu\n"
+            "}\n",
+            archive.events.size(), archive.blob_count);
+    fclose(mf);
+  }
+
+  printf("[HRR] Repaired archive: %zu events kept, clean trailer + manifest written\n",
+         archive.events.size());
+  return 0;
+}
+
 static void print_usage(const char* argv0) {
   fprintf(stderr,
     "Usage: %s <capture.hrr> [options]\n"
     "\n"
     "Options:\n"
     "  --info                Print archive summary and exit (no GPU required)\n"
+    "  --repair              Rewrite a crash-truncated archive as a clean one and exit\n"
     "  --events              With --info: also print the full event log\n"
     "  --verbose             Print each event as it is processed\n"
     "  --skip-device-sync    Skip device/stream synchronize events\n"
@@ -610,9 +703,11 @@ int main(int argc, char** argv) {
   bool single_thread = true;   // default: single-threaded for safety; use --multi-thread to opt in
   bool show_info     = false;
   bool show_events   = false;
+  bool do_repair     = false;
 
   for (int i = 1; i < argc; i++) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
+    else if (!strcmp(argv[i], "--repair"))            do_repair              = true;
     else if (!strcmp(argv[i], "--events"))            show_events            = true;
     else if (!strcmp(argv[i], "--verbose"))           ctx.verbose            = true;
     else if (!strcmp(argv[i], "--skip-device-sync"))  ctx.skip_device_sync   = true;
@@ -639,6 +734,11 @@ int main(int argc, char** argv) {
   if (show_info) {
     print_info(archive, show_events);
     return 0;
+  }
+
+  // --repair: rewrite a crash-truncated archive as a clean one and exit
+  if (do_repair) {
+    return repair_archive(archive);
   }
 
   ctx.archive_dir = archive_path;

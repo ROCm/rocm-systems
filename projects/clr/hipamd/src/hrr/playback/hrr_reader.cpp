@@ -184,28 +184,55 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
   archive.version = fh.version;
 
-  // Read events sequentially
-  bool read_error = false;
+  // Read events sequentially.
+  //
+  // Crash resilience: events.bin is an append-only log of self-delimiting
+  // records, so a partial write can only ever be the LAST record. A torn header
+  // or payload at the tail is therefore treated as a recovery point — we keep
+  // every complete record already parsed and mark the archive truncated, rather
+  // than discarding the whole capture. The clean-shutdown trailer
+  // (hrr_eof_record) explicitly marks a whole archive.
+  bool truncated = false;
+  bool complete  = false;
+  const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
     // Read the header first to get payload_length, then read the rest into
     // raw_payload as one contiguous block: header(32) + fields.
-    uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
     ev.raw_payload.resize(hdr_size);
-    if (fread(ev.raw_payload.data(), hdr_size, 1, f) != 1) break;  // clean EOF
+    size_t got = fread(ev.raw_payload.data(), 1, hdr_size, f);
+    if (got == 0) break;  // clean EOF at a record boundary
+    if (got < hdr_size) {
+      fprintf(stderr,
+              "[HRR] Truncated event header (%zu/%u bytes) at tail — recovered %zu events\n",
+              got, hdr_size, archive.events.size());
+      truncated = true; break;
+    }
 
-    uint16_t total = ev.header().payload_length;
+    const uint16_t etype = ev.header().event_type;
+    const uint16_t total = ev.header().payload_length;
+
+    // Clean-shutdown trailer: capture exited normally. It is always the last
+    // record, so stop here and do not add it to the replay event list.
+    if (etype == HRR_EOF_MARKER) {
+      complete = true;
+      break;
+    }
+
     if (total < hdr_size) {
-      fprintf(stderr, "[HRR] Corrupt event: payload_length %u < header size %u\n",
-              total, hdr_size);
-      read_error = true; break;
+      fprintf(stderr,
+              "[HRR] Torn trailing record (payload_length %u < %u) — recovered %zu events\n",
+              total, hdr_size, archive.events.size());
+      truncated = true; break;
     }
     if (total > hdr_size) {
       ev.raw_payload.resize(total);
       uint16_t pl_size = total - hdr_size;
       if (fread(ev.raw_payload.data() + hdr_size, 1, pl_size, f) != pl_size) {
-        fprintf(stderr, "[HRR] Truncated event payload (expected %u bytes)\n", pl_size);
-        read_error = true; break;
+        fprintf(stderr,
+                "[HRR] Truncated event payload (expected %u bytes) at tail — recovered %zu events\n",
+                pl_size, archive.events.size());
+        truncated = true; break;
       }
     }
 
@@ -429,7 +456,15 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   fclose(f);
-  if (read_error) return false;
+
+  archive.complete  = complete;
+  archive.truncated = truncated;
+  if (!complete) {
+    fprintf(stderr,
+            "[HRR] Archive has no clean-shutdown trailer (capture likely crashed); "
+            "recovered %zu events%s\n",
+            archive.events.size(), truncated ? ", trailing torn record discarded" : "");
+  }
 
   // Sort events by sequence_id to restore causal ordering across threads.
   // Multi-threaded captures write events from different threads in file-arrival

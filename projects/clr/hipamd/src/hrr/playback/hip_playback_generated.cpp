@@ -4861,11 +4861,11 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipIpcOpenMemHandle)),  // [216] HRR_API_HIPIPCOPENMEMHANDLE
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRef)),  // [217] HRR_API_HIPKERNELNAMEREF
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelNameRefByPtr)),  // [218] HRR_API_HIPKERNELNAMEREFBYPTR
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchByPtr)),  // [219] HRR_API_HIPLAUNCHBYPTR
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [219] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernel)),  // [220] HRR_API_HIPLAUNCHCOOPERATIVEKERNEL
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchCooperativeKernelMultiDevice)),  // [221] HRR_API_HIPLAUNCHCOOPERATIVEKERNELMULTIDEVICE
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc)),  // [222] HRR_API_HIPLAUNCHHOSTFUNC
-    static_cast<uint32_t>(sizeof(hrr_args_hipLaunchKernel)),  // [223] HRR_API_HIPLAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [223] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipMalloc)),  // [224] HRR_API_HIPMALLOC
     static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3D)),  // [225] HRR_API_HIPMALLOC3D
     static_cast<uint32_t>(sizeof(hrr_args_hipMalloc3DArray)),  // [226] HRR_API_HIPMALLOC3DARRAY
@@ -4963,7 +4963,7 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleGetTexRef)),  // [318] HRR_API_HIPMODULEGETTEXREF
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernel)),  // [319] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNEL
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchCooperativeKernelMultiDevice)),  // [320] HRR_API_HIPMODULELAUNCHCOOPERATIVEKERNELMULTIDEVICE
-    static_cast<uint32_t>(sizeof(hrr_args_hipModuleLaunchKernel)),  // [321] HRR_API_HIPMODULELAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [321] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoad)),  // [322] HRR_API_HIPMODULELOAD
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadData)),  // [323] HRR_API_HIPMODULELOADDATA
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleLoadDataEx)),  // [324] HRR_API_HIPMODULELOADDATAEX
@@ -5091,7 +5091,7 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipStreamGetCaptureInfo_v2_spt)),  // [446] HRR_API_HIPSTREAMGETCAPTUREINFO_V2_SPT
     static_cast<uint32_t>(sizeof(hrr_args_hipLaunchHostFunc_spt)),  // [447] HRR_API_HIPLAUNCHHOSTFUNC_SPT
     static_cast<uint32_t>(sizeof(hrr_args_hipCreateChannelDesc)),  // [448] HRR_API_HIPCREATECHANNELDESC
-    static_cast<uint32_t>(sizeof(hrr_args_hipExtModuleLaunchKernel)),  // [449] HRR_API_HIPEXTMODULELAUNCHKERNEL
+    static_cast<uint32_t>(sizeof(hrr_event_header) + 8u + 2u + 16u + 12u + 12u + 4u + 2u + 2u),  // [449] variable-length kernel launch
     static_cast<uint32_t>(sizeof(hrr_args_hipHccModuleLaunchKernel)),  // [450] HRR_API_HIPHCCMODULELAUNCHKERNEL
     static_cast<uint32_t>(sizeof(hrr_args_hipGetStreamDeviceId)),  // [451] HRR_API_HIPGETSTREAMDEVICEID
     static_cast<uint32_t>(sizeof(hrr_args_hipDrvGraphAddMemsetNode)),  // [452] HRR_API_HIPDRVGRAPHADDMEMSETNODE

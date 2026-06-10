@@ -56,3 +56,7 @@ void hip_capture_init();
 
 // Called at atexit — uninstalls shims and flushes the archive to disk
 void hip_capture_shutdown();
+
+// Explicit flush for multi-process hosts (e.g. vLLM server shutdown hooks).
+// Appends the clean trailer and manifest without uninstalling capture shims.
+extern "C" void hipHrrCaptureFlush();

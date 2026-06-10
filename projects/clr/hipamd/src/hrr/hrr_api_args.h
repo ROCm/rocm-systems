@@ -80,6 +80,27 @@ typedef struct {
 static_assert(sizeof(hrr_event_header) == 32, "hrr_event_header must be 32 bytes");
 #endif
 
+/* ---- Clean-shutdown trailer ----
+ * Written once at the end of events.bin by the capture writer ONLY on a clean
+ * shutdown (writer::flush). Its ABSENCE tells the reader the capture was
+ * interrupted (e.g. the recorded process crashed) and the trailing record may
+ * be torn — the reader then recovers all complete records instead of failing.
+ * event_type uses a sentinel (HRR_EOF_MARKER) far outside the hrr_api_id_t
+ * range, so playback dispatch and name lookup treat it as unknown/no-op if it
+ * is ever fed to them. */
+#define HRR_EOF_MARKER ((uint16_t)0xFFFFu)     /* hrr_event_header.event_type sentinel */
+#define HRR_EOF_MAGIC  ((uint32_t)0x464F4548u) /* "HEOF" trailer payload magic         */
+
+typedef struct {
+    hrr_event_header hdr;   /* event_type = HRR_EOF_MARKER, payload_length = sizeof(hrr_eof_record) */
+    uint64_t total_events;  /* count of real events written before this trailer */
+    uint32_t eof_magic;     /* HRR_EOF_MAGIC                                     */
+} hrr_eof_record;
+
+#ifdef __cplusplus
+static_assert(sizeof(hrr_eof_record) == 44, "hrr_eof_record must be 44 bytes");
+#endif
+
 
 /* ---- Compiler dispatch stubs ---- */
 

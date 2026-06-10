@@ -66,10 +66,43 @@ followed by a retry with a smaller allocation) will not replay faithfully —
 the retry branch produces a different allocation layout than the successful original.
 This is a known limitation with no current workaround.
 
+### Crash Resilience (capture durability)
+
+`events.bin` is written through a raw file descriptor with a small app-managed
+buffer (not buffered stdio). Two mechanisms keep an archive usable even if the
+recorded process dies before its `atexit` finalizer runs (e.g. a GPU memory
+fault aborts the host, or a host SIGSEGV):
+
+- **Periodic checkpoints.** The writer flushes the buffer and `fsync`s every
+  `kCheckpointEvents` (4096) events, bounding how much a crash can lose.
+- **Chained fatal-signal handlers.** `hip_capture_init` installs `sigaction`
+  handlers (SIGSEGV/SIGABRT/SIGBUS/SIGILL/SIGFPE/SIGTERM/SIGINT) on an alternate
+  stack. On a fatal signal the handler `writer::emergency_finalize()`s — an
+  async-signal-safe `write()`+`fsync` of the event buffer plus a minimal
+  `manifest.json` (`complete:false`) via raw `open/write` — then **chains** to
+  the previously installed handler so ROCr still emits `gpucore.<pid>` and the
+  kernel still produces the host core dump. It deliberately does **not** write
+  the clean trailer.
+- **Clean-shutdown trailer.** A normal `writer::flush` appends an
+  `hrr_eof_record` (event_type `HRR_EOF_MARKER`, payload carries the final event
+  count + `HRR_EOF_MAGIC`) and writes `manifest.json` with `complete:true`. The
+  trailer's **absence** is how the reader detects a crash-truncated archive.
+
+Blobs and code objects were already crash-safe (written to a temp file then
+atomically renamed), so a crash never leaves a partial final blob.
+
+On the read side, `load_archive` is append-only-aware: a torn record can only be
+the last one, so a partial header/payload at the tail is a recovery point — all
+complete records are kept and `Archive::truncated` is set, rather than failing
+the whole load. `Archive::complete` reflects whether the trailer was found.
+`hrr-playback --info` reports both; `hrr-playback --repair` rewrites a truncated
+archive (trimmed to the last complete record, trailer + manifest added) into a
+clean one.
+
 ### Archive Format (v3)
 ```
 capture.hrr/
-  events.bin         hrr_file_header(8) + [EventHeader(32) + payload]*
+  events.bin         hrr_file_header(8) + [EventHeader(32) + payload]* + [hrr_eof_record(44)]
   blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
   code_objects/      .hsaco ELFs (unused in current fat-binary path)
 ```
@@ -248,6 +281,12 @@ HRR_VERSION = 3
               ret            i32   hipError_t return value
               params         per hrr_args_* struct fields
               [extra fields] blob_hash_lo/hi, co_hash_lo/hi, module_id
+
+          OPTIONAL trailer (clean shutdown only) hrr_eof_record (44 bytes):
+            hdr            32    event_type = HRR_EOF_MARKER (0xFFFF)
+            total_events   u64   real events written before the trailer
+            eof_magic      u32   HRR_EOF_MAGIC ("HEOF")
+          Absent => capture was interrupted (crash); reader recovers the tail.
 ```
 
 ### `hrr_args_*` Struct Layout Rules
@@ -438,6 +477,8 @@ only when the variable is set (non-default) and non-empty.
 ```
 hrr-playback <capture.hrr> [options]
   --info                Print archive summary and exit (no GPU required)
+                        (reports Complete: yes/NO and Recovered: <n> events)
+  --repair              Rewrite a crash-truncated archive as a clean one and exit
   --events              With --info: also print the full event log
   --verbose             Print each event as it is processed
   --skip-device-sync    Skip hipDeviceSynchronize / hipStreamSynchronize events
