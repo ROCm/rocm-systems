@@ -11,7 +11,13 @@
 #define NCCL_TESTS_VERSION "2.17.9"
 
 #include "rccl/rccl.h"
-#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+// nccl_device.h provides the device-API public types referenced below
+// (ncclCommProperties_t, full ncclDevCommRequirements, NCCL_GIN_TYPE_NONE, ...).
+// As of NCCL 2.29 these types are referenced unconditionally by the test engine
+// signature and per-collective DevCommRequirements helpers, so the include must
+// not require -DENABLE_DEVICE_API on 2.29+.
+#if (defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)) \
+    || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
 #endif
 #include <stdio.h>
@@ -108,6 +114,7 @@ struct testColl {
   testResult_t (*runColl)(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
       size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int implIndex, void* bias);
   testResult_t (*getAlgoProtoChannels)(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels);
+  testResult_t (*getSymkInfo)(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op, int* algo, int* proto, int* nchannels);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -452,10 +459,13 @@ typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t
                                           int* algo, int* protocol, int* maxChannels);
 typedef ncclResult_t (*rcclTestsGetAlgoName_t)(int algo, const char** algoName);
 typedef ncclResult_t (*rcclTestsGetProtocolName_t)(int protocol, const char** protocolName);
+typedef ncclResult_t (*rcclTestsGetSymkInfo_t)(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, ncclRedOp_t op,
+    int* algo, int* protocol, int* maxChannels);
 
 extern rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo;
 extern rcclTestsGetProtocolName_t rcclTestsGetProtocolName;
 extern rcclTestsGetAlgoName_t rcclTestsGetAlgoName;
+extern rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo;
 
 // Network counter collector (self-contained, see collector.h for full API)
 #include "collector.h"

@@ -1,5 +1,6 @@
 /*************************************************************************
  * Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+ * Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -7,15 +8,20 @@
 #ifndef _NCCL_DEVICE_UTILITY_H_
 #define _NCCL_DEVICE_UTILITY_H_
 
-#if __CUDACC__
-  #define NCCL_DEVICE_INLINE __device__ __forceinline__
-  #define NCCL_HOST_DEVICE_INLINE __host__ __device__ __forceinline__
-#else
-  #ifndef __host__
-    #define __host__
-  #endif
-  #define NCCL_DEVICE_INLINE
-  #define NCCL_HOST_DEVICE_INLINE inline __attribute__((always_inline))
+#include "hip_compat.h"
+
+// compiler specific check for __CUDACC__
+// We define NCCL_CHECK_CUDACC as a textual alias of __CUDACC__ (not a
+// "snapshot" 0/1 value) so each `#if NCCL_CHECK_CUDACC` re-evaluates
+// __CUDACC__ at the point of use. This matters for the AMD path because
+// some host-API headers (e.g. nccl_device/lsa_barrier.h) do
+// `#undef __CUDACC__` followed by `#define __CUDACC__ 0` (which hipify
+// rewrites to __HIPCC__) to hide device-side declarations from host TUs.
+// With a snapshot value, NCCL_CHECK_CUDACC and __CUDACC__ would diverge
+// after that point and we'd compile references to types that were never
+// declared in this TU.
+#ifndef NCCL_CHECK_CUDACC
+    #define NCCL_CHECK_CUDACC __CUDACC__
 #endif
 
 #if __cplusplus
@@ -24,11 +30,17 @@
 #define NCCL_EXTERN_C
 #endif
 
+#ifdef __clang_llvm_bitcode_lib__
+  #define NCCL_IR_EXTERN_C extern "C"
+#else
+  #define NCCL_IR_EXTERN_C
+#endif
+
 #include <stdint.h>
 #include <stdbool.h>
 
-#if __CUDACC__
-#if __HIP_PLATFORM_AMD__
+#if NCCL_CHECK_CUDACC
+#if defined(__HIP_PLATFORM_AMD__)
 #include <atomic>
 #else
 #include <cuda/atomic>
@@ -39,10 +51,52 @@
 namespace nccl {
 namespace utility {
 
+#if NCCL_CHECK_CUDACC
+// cuda/atomic header file is included so we can use atomic_ref to load the abortFlag
+static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
+  const uint32_t maxSteps = 10000;
+  if (++steps < maxSteps) {
+    return false;
+  } else {
+    steps = 0;
+    return abortFlag != nullptr && cuda::atomic_ref<uint32_t>{*abortFlag}.load(cuda::memory_order_relaxed) != 0;
+  }
+}
+#else
+static NCCL_DEVICE_INLINE bool testAbort(uint32_t* abortFlag, uint32_t& steps) {
+  const uint32_t maxSteps = 10000;
+  if (++steps < maxSteps) {
+    return false;
+  } else {
+    volatile uint32_t *ptr = (volatile uint32_t*)abortFlag;
+    steps = 0;
+    return ptr != nullptr && *ptr != 0;
+  }
+}
+#endif
+
 template<typename T>
 NCCL_HOST_DEVICE_INLINE T&& declval() noexcept {
   static_assert(sizeof(T)!=sizeof(T), "You can't evaluate declval.");
 }
+
+template <typename>
+struct always_false {
+  static constexpr bool value = false;
+};
+
+template<typename T, T value_>
+struct ValueAsType { static constexpr T value = value_; };
+
+// Returns the value zero but the compiler cannot prove that it is zero so it
+// is useful to inhibit compiler optimizations.
+#if NCCL_CHECK_CUDACC
+template<typename=void>
+NCCL_DEVICE_INLINE int opaqueZero() {
+  __device__ static int zero = 0;
+  return __ldg(&zero);
+}
+#endif
 
 template<typename X, typename Y, typename Z = decltype(X()+Y())>
 NCCL_HOST_DEVICE_INLINE constexpr Z divUp(X x, Y y) {
@@ -102,6 +156,17 @@ NCCL_HOST_DEVICE_INLINE constexpr bool isPow2(Int x) {
   return (x & (x-1)) == 0;
 }
 
+template<typename Uint>
+NCCL_HOST_DEVICE_INLINE bool rollingLessEq(Uint a, Uint b, int nBits = 8*sizeof(Uint)) {
+  static_assert(Uint(0) < Uint(-1), "Uint must be unsigned.");
+  Uint m = Uint(-1) >> (8*sizeof(Uint) - nBits);
+  return ((b-a) & m) <= m>>1;
+}
+template<typename Uint>
+NCCL_HOST_DEVICE_INLINE bool rollingLessThan(Uint a, Uint b, int nBits = 8*sizeof(Uint)) {
+  return !rollingLessEq(b, a, nBits);
+}
+
 // Produce the reciprocal of x for use in idivByRcp
 NCCL_HOST_DEVICE_INLINE constexpr uint32_t idivRcp32(uint32_t x) {
   return uint32_t(-1)/x + isPow2(x);
@@ -111,15 +176,15 @@ NCCL_HOST_DEVICE_INLINE constexpr uint64_t idivRcp64(uint64_t x) {
 }
 
 NCCL_HOST_DEVICE_INLINE uint32_t mul32hi(uint32_t a, uint32_t b) {
-#if __CUDA_ARCH__
-  return __umulhi(a, b);
+#if NCCL_DEVICE_ARCH
+  return nccl_umulhi(a, b);
 #else
   return uint64_t(a)*b >> 32;
 #endif
 }
 NCCL_HOST_DEVICE_INLINE uint64_t mul64hi(uint64_t a, uint64_t b) {
-#if __CUDA_ARCH__
-  return __umul64hi(a, b);
+#if NCCL_DEVICE_ARCH
+  return nccl_umul64hi(a, b);
 #else
   return (uint64_t)(((unsigned __int128)a)*b >> 64);
 #endif
@@ -183,7 +248,7 @@ NCCL_HOST_DEVICE_INLINE uint32_t imodFast64(uint64_t x, uint64_t y, uint64_t yrc
   return r;
 }
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 // Precomputed integer reciprocoals for denominator values 1..64 inclusive.
 // Pass these to idivFast64() for fast division on the GPU.
 NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
@@ -210,35 +275,14 @@ NCCL_DEVICE_INLINE uint64_t idivRcp64_upto64(int x) {
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_DEVICE_COMPILE
 NCCL_DEVICE_INLINE uint32_t idivRcp32_upto64(int x) {
   return idivRcp64_upto64(x)>>32;
 }
 #endif
 
-#if __CUDACC__
-NCCL_DEVICE_INLINE void fenceAcquireGpu() {
-  static __device__ int dummy;
-  int tmp;
-#if __HIP_PLATFORM_AMD__
-  tmp = __atomic_load_n(&dummy, __ATOMIC_ACQUIRE);
-  __threadfence();
-#else
-  asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
-#endif
-  dummy = tmp;
-}
-NCCL_DEVICE_INLINE void fenceReleaseGpu() {
-#if __HIP_PLATFORM_AMD__
-  __threadfence();
-#else
-  cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
-#endif
-}
-#endif
-
-#if __CUDACC__
-#if __HIP_PLATFORM_AMD__
+#if NCCL_CHECK_CUDACC
+#if defined(__HIP_PLATFORM_AMD__)
 NCCL_HOST_DEVICE_INLINE constexpr std::memory_order acquireOrderOf(std::memory_order ord) {
   return ord == std::memory_order_release ? std::memory_order_relaxed :
          ord == std::memory_order_acq_rel ? std::memory_order_acquire :
@@ -260,6 +304,28 @@ NCCL_HOST_DEVICE_INLINE constexpr int toAtomicBuiltinOrder(std::memory_order ord
     default: return __ATOMIC_SEQ_CST;
   }
 }
+
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
+  return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
+         ord == cuda::memory_order_acq_rel ? cuda::memory_order_acquire :
+         ord;
+}
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory_order ord) {
+  return ord == cuda::memory_order_acquire ? cuda::memory_order_relaxed :
+         ord == cuda::memory_order_acq_rel ? cuda::memory_order_release :
+         ord;
+}
+
+NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order toCudaOrder(std::memory_order ord) {
+  switch (ord) {
+    case std::memory_order_relaxed: return cuda::memory_order_relaxed;
+    case std::memory_order_acquire: return cuda::memory_order_acquire;
+    case std::memory_order_release: return cuda::memory_order_release;
+    case std::memory_order_acq_rel: return cuda::memory_order_acq_rel;
+    case std::memory_order_seq_cst: return cuda::memory_order_seq_cst;
+    default: return cuda::memory_order_seq_cst;
+  }
+}
 #else
 NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order acquireOrderOf(cuda::memory_order ord) {
   return ord == cuda::memory_order_release ? cuda::memory_order_relaxed :
@@ -274,42 +340,97 @@ NCCL_HOST_DEVICE_INLINE constexpr cuda::memory_order releaseOrderOf(cuda::memory
 #endif
 #endif
 
-#if __CUDACC__
-NCCL_DEVICE_INLINE int lane() {
-  int ret;
-  asm("mov.u32 %0, %%laneid;" : "=r"(ret));
-  return ret;
+#if NCCL_CHECK_CUDACC
+NCCL_DEVICE_INLINE void fenceAcquireGpu() {
+  static __device__ int dummy;
+  int tmp;
+#if defined(__HIP_PLATFORM_AMD__)
+  tmp = __atomic_load_n(&dummy, __ATOMIC_ACQUIRE);
+  __threadfence();
+#else
+  asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
+#endif
+  dummy = tmp;
 }
-NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
-  unsigned int ret;
-  asm("mov.u32 %0, %%lanemask_lt;" : "=r"(ret));
-  return ret;
+NCCL_DEVICE_INLINE void fenceReleaseGpu() {
+#if defined(__HIP_PLATFORM_AMD__)
+  __threadfence();
+#else
+  cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_device);
+#endif
 }
 #endif
 
-#if __CUDACC__
+#if NCCL_CHECK_CUDACC
+template<typename T>
+NCCL_DEVICE_INLINE T atomicLoad(T* ptr, cuda::memory_order ord, cuda::thread_scope scope) {
+  switch (scope) {
+  case cuda::thread_scope_thread:
+    return cuda::atomic_ref<T, cuda::thread_scope_thread>{*ptr}.load(ord);
+  case cuda::thread_scope_block:
+    return cuda::atomic_ref<T, cuda::thread_scope_block>{*ptr}.load(ord);
+  case cuda::thread_scope_device:
+    return cuda::atomic_ref<T, cuda::thread_scope_device>{*ptr}.load(ord);
+  case cuda::thread_scope_system:
+    return cuda::atomic_ref<T, cuda::thread_scope_system>{*ptr}.load(ord);
+  default: __builtin_unreachable();
+  }
+}
+#endif
+
+#if NCCL_CHECK_CUDACC
+template<typename T>
+NCCL_DEVICE_INLINE void atomicStore(T* ptr, T val, cuda::memory_order ord, cuda::thread_scope scope) {
+  switch (scope) {
+  case cuda::thread_scope_thread:
+    cuda::atomic_ref<T, cuda::thread_scope_thread>{*ptr}.store(val, ord);
+    break;
+  case cuda::thread_scope_block:
+    cuda::atomic_ref<T, cuda::thread_scope_block>{*ptr}.store(val, ord);
+    break;
+  case cuda::thread_scope_device:
+    cuda::atomic_ref<T, cuda::thread_scope_device>{*ptr}.store(val, ord);
+    break;
+  case cuda::thread_scope_system:
+    cuda::atomic_ref<T, cuda::thread_scope_system>{*ptr}.store(val, ord);
+    break;
+  default: __builtin_unreachable();
+  }
+}
+#endif
+
+#if NCCL_DEVICE_COMPILE
+NCCL_DEVICE_INLINE int lane() {
+  return nccl_lane_id();
+}
+NCCL_DEVICE_INLINE unsigned int lanemask_lt() {
+  return nccl_lanemask_lt();
+}
+#endif
+
+#if NCCL_DEVICE_COMPILE
 // Load anything, but cache like its constant memory.
 template<typename T>
 NCCL_DEVICE_INLINE T loadConst(T const *p) {
   if (alignof(T) == 1) {
     union { uint8_t part[sizeof(T)]; T ret; };
-    for (int i=0; i < (int)sizeof(T); i++) part[i] = __ldg((uint8_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T); i++) part[i] = nccl_ldg((uint8_t const*)p + i);
     return ret;
   } else if (alignof(T) == 2) {
     union { uint16_t part[sizeof(T)/2]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/2; i++) part[i] = __ldg((uint16_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/2; i++) part[i] = nccl_ldg((uint16_t const*)p + i);
     return ret;
   } else if (alignof(T) == 4) {
     union { uint32_t part[sizeof(T)/4]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/4; i++) part[i] = __ldg((uint32_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/4; i++) part[i] = nccl_ldg((uint32_t const*)p + i);
     return ret;
   } else if (alignof(T) == 8) {
     union { uint64_t part[sizeof(T)/8]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/8; i++) part[i] = __ldg((uint64_t const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/8; i++) part[i] = nccl_ldg((uint64_t const*)p + i);
     return ret;
   } else { // alignof(T) >= 16
     union { ulonglong2 part[sizeof(T)/16]; T ret; };
-    for (int i=0; i < (int)sizeof(T)/16; i++) part[i] = __ldg((ulonglong2 const*)p + i);
+    for (int i=0; i < (int)sizeof(T)/16; i++) part[i] = nccl_ldg((ulonglong2 const*)p + i);
     return ret;
   }
 }
@@ -338,6 +459,9 @@ template<typename H, typename ...T>
 struct Present<H, T...> {
   H h;
   Present<T...> t;
+
+  NCCL_HOST_DEVICE_INLINE Present(H h, Present<T...> t): h(static_cast<H>(h)), t(t) {}
+  NCCL_HOST_DEVICE_INLINE Present(Present const& that): h(static_cast<H>(that.h)), t(that.t) {}
 
   NCCL_HOST_DEVICE_INLINE H get(IntSeq<0>) {
     return static_cast<H>(h);
@@ -368,7 +492,7 @@ struct Optional {
   NCCL_HOST_DEVICE_INLINE constexpr Optional(Absent): present(false) {}
 
   // Helper constructor
-  template<int ...i, typename ...Arg>
+  template<typename ...Arg, int ...i>
   NCCL_HOST_DEVICE_INLINE Optional(Present<Arg...> args, IntSeq<i...>):
     present(true),
     thing{args.get(IntSeq<i>())...} {
@@ -376,7 +500,7 @@ struct Optional {
   // Construct with present thing:
   template<typename ...Arg>
   NCCL_HOST_DEVICE_INLINE Optional(Present<Arg...> args):
-    Optional(args, IntSeqUpTo<sizeof...(Arg), 0>::Type()) {
+    Optional(args, typename IntSeqUpTo<sizeof...(Arg), 0>::Type()) {
   }
 
   NCCL_HOST_DEVICE_INLINE ~Optional() {

@@ -1022,7 +1022,8 @@ write_rocpd(
     const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<tool_counter_record_t>&                                 counter_collection_gen)
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<tool_spm_counter_record_t>& /** spm_collection_gen*/)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1109,9 +1110,16 @@ write_rocpd(
                          itr.demangled_kernel_name,
                          itr.truncated_kernel_name);
 
+    // Create a local copy of the rename map to use for this output run instead of using
+    // get_kernel_name(), which may access a modified version of the map
+    auto _rename_strings = std::unordered_map<uint64_t, std::string_view>{};
     for(const auto& itr : tool_metadata.kernel_rename_map.get())
     {
-        add_string_entry(_metadata, itr.first);
+        if(!itr.first.empty())
+        {
+            add_string_entry(_metadata, itr.first);
+            _rename_strings.emplace(itr.second, itr.first);
+        }
     }
 
     for(const auto& itr : tool_metadata.get_code_objects())
@@ -1476,10 +1484,9 @@ write_rocpd(
             // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
             // to use kernel rename option after data has already been collected, so the kernel
             // rename data needs to be stored in generated db.
+            auto _rename_it = _rename_strings.find(corr_id.external.value);
             auto region_name =
-                (corr_id.external.value > 0 && (enable_duplicate_check || kernel_id > 0))
-                    ? tool_metadata.get_kernel_name(kernel_id, true, corr_id.external.value)
-                    : std::string_view{};
+                (_rename_it != _rename_strings.end()) ? _rename_it->second : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
 

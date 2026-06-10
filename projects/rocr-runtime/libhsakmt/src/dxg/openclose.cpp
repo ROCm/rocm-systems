@@ -27,6 +27,7 @@
 #include <cstring>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <cinttypes>
 #include <cstdint>
 #if defined(__linux__)
 #include <sys/mman.h>
@@ -446,7 +447,7 @@ bool hsakmtRuntime::InitHandleApertureSpace() {
 
             j++;
         }
-        pr_debug("handle aperture start %lx, size %lx\n", handle_aperture_start_, handle_aperture_size_);
+        pr_debug("handle aperture start %" PRIx64 ", size %" PRIx64 "\n", handle_aperture_start_, handle_aperture_size_);
         return true;
     }
 

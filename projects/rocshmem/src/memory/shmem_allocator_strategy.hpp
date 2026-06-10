@@ -73,6 +73,17 @@ class ShmemAllocatorStrategy {
   __device__ virtual void alloc(char** ptr, size_t request_size) = 0;
 
   /**
+   * @brief Allocates aligned memory from the symmetric heap
+   *
+   * @param[in, out] ptr           Address of raw pointer (&pointer_to_char)
+   * @param[in]      alignment     Required pointer alignment in bytes
+   *                               (power of 2). Values <= the default heap
+   *                               alignment are equivalent to ::alloc.
+   * @param[in]      request_size  Size in bytes of memory allocation
+   */
+  virtual void align(char** ptr, size_t alignment, size_t request_size) = 0;
+
+  /**
    * @brief Frees memory from the symmetric heap
    *
    * @param[in] Raw pointer to symmetric heap memory

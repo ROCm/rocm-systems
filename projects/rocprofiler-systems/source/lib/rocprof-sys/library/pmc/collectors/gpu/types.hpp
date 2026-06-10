@@ -50,6 +50,8 @@ constexpr size_t MAX_NUM_XGMI_LINKS = 8;
  *   - xgmi = 12
  *   - pcie = 13
  *   - sdma_usage = 14
+ *   - gfx_clock = 15
+ *   - mem_clock = 16
  */
 union enabled_metrics
 {
@@ -70,6 +72,8 @@ union enabled_metrics
         std::uint32_t xgmi                 : 1;
         std::uint32_t pcie                 : 1;
         std::uint32_t sdma_usage           : 1;
+        std::uint32_t gfx_clock            : 1;  // current_gfxclk (MHz)
+        std::uint32_t mem_clock            : 1;  // current_uclk (MHz)
     } bits;
     std::uint32_t value = 0;
 };
@@ -136,7 +140,33 @@ struct metrics
     } pcie;
 
     std::uint32_t sdma_usage = 0;  // SDMA utilization percentage (0-100)
+
+    std::uint32_t gfx_clock_mhz = 0;  // current_gfxclk (MHz)
+    std::uint32_t mem_clock_mhz = 0;  // current_uclk (MHz)
 };
+
+// Socket power: prefer the instantaneous "current" reading, falling back to the
+// time-averaged reading only when current is unavailable.
+[[nodiscard]] inline bool
+has_current_socket_power(const enabled_metrics& enabled)
+{
+    return enabled.bits.current_socket_power != 0;
+}
+
+[[nodiscard]] inline double
+select_socket_power(const enabled_metrics& enabled, const metrics& values)
+{
+    return has_current_socket_power(enabled)
+               ? static_cast<double>(values.current_socket_power)
+               : static_cast<double>(values.average_socket_power);
+}
+
+// Display label for the socket-power track, matching select_socket_power().
+[[nodiscard]] inline const char*
+socket_power_track_label(const enabled_metrics& enabled)
+{
+    return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
+}
 
 template <typename T>
 [[nodiscard]] constexpr bool

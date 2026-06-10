@@ -21,7 +21,6 @@
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
 #include <timemory/utility/delimit.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
