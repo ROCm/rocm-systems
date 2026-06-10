@@ -91,7 +91,10 @@ if(BUILD_TESTING)
     function(_basics_add_test name)
         add_test(
             NAME basics_${name}
-            COMMAND $<TARGET_FILE:${name}> ${ARGN}
+            COMMAND
+                bash -c
+                "'$<TARGET_FILE:${name}>' \"$@\"; rc=$?; ls -la '${BASICS_TEST_DIR}'; exit $rc"
+                _ ${ARGN}
             WORKING_DIRECTORY ${BASICS_TEST_DIR}
         )
         set_tests_properties(basics_${name} PROPERTIES
@@ -115,8 +118,9 @@ if(BUILD_TESTING)
         add_test(
             NAME basics_various-mem-rw_${mode_name}
             COMMAND
-                $<TARGET_FILE:various-mem-rw> ${BASICS_INPUT}
-                out_vmrw_${mode_name}.bin ${mode_num}
+                bash -c
+                "'$<TARGET_FILE:various-mem-rw>' \"$@\"; rc=$?; ls -la '${BASICS_TEST_DIR}'; exit $rc"
+                _ ${BASICS_INPUT} out_vmrw_${mode_name}.bin ${mode_num}
             WORKING_DIRECTORY ${BASICS_TEST_DIR}
         )
         set_tests_properties(basics_various-mem-rw_${mode_name} PROPERTIES
