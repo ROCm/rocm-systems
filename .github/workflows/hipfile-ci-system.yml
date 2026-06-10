@@ -177,7 +177,7 @@ jobs:
           docker cp \
             ${GITHUB_WORKSPACE}/hipfile-build-dir/. \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile"
-      - name: Run hipFile system tests for the AMD platform (amdclang++)
+      - name: Run hipFile system tests for the AMD platform
         run: |
           docker exec \
             -t \
@@ -186,7 +186,7 @@ jobs:
             /bin/bash -c '
               ctest -V -L "system" --parallel
             '
-      - name: Stress tests for hipFile targeting the AMD platform (amdclang++)
+      - name: Stress tests for hipFile targeting the AMD platform
         run: |
           docker exec \
             -t \
