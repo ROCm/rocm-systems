@@ -41,7 +41,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: (TO_INT(TCC_REQ[::_1]) / $denom)
+          expr: TO_INT(TCC_REQ[::_1]) / $denom
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
@@ -114,8 +114,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if (TCC_EA0_ATOMIC[::_1]
-            != 0) else 0)
+          expr: TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1] if TCC_EA0_ATOMIC[::_1] != 0 else 0
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box
@@ -164,7 +163,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: (TO_INT(TCC_BUBBLE[::_1]) / $denom)
+          expr: TO_INT(TCC_BUBBLE[::_1]) / $denom
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_box

@@ -16,32 +16,32 @@ Panel Config:
         VALU FLOPs:
           value: None
           unit: GFLOP/s
-          peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
           pct_of_peak: false
         MFMA FLOPs (BF16):
           value: None
           unit: GFLOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 512) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 512 / 1000
           pct_of_peak: false
         MFMA FLOPs (F16):
           value: None
           unit: GFLOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 1024 / 1000
           pct_of_peak: false
         MFMA FLOPs (F32):
           value: None
           unit: GFLOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 256 / 1000
           pct_of_peak: false
         MFMA FLOPs (F64):
           value: None
           unit: GFLOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 256 / 1000
           pct_of_peak: false
         MFMA IOPs (Int8):
           value: None
           unit: GIOP/s
-          peak: ((($max_sclk * $cu_per_gpu) * 1024) / 1000)
+          peak: $max_sclk * $cu_per_gpu * 1024 / 1000
           pct_of_peak: false
         Active CUs (deprecated):
           value: $numActiveCUs
@@ -86,13 +86,13 @@ Panel Config:
         Wavefront Occupancy:
           value: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Wavefronts
-          peak: ($max_waves_per_cu * $cu_per_gpu)
+          peak: $max_waves_per_cu * $cu_per_gpu
           pct_of_peak: true
           coll_level: SQ_LEVEL_WAVES
         Theoretical LDS Bandwidth:
           value: SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu)) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
-          peak: (($max_sclk * $cu_per_gpu) * 0.128)
+          peak: $max_sclk * $cu_per_gpu * 0.128
           pct_of_peak: true
         LDS Bank Conflicts/Access:
           value: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
@@ -100,14 +100,14 @@ Panel Config:
           peak: 32
           pct_of_peak: true
         vL1D Cache Hit Rate:
-          value: 100 - 100 * SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
           unit: Percent
           peak: 100
           pct_of_peak: false
         vL1D Cache BW:
           value: 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
-          peak: ((($max_sclk / 1000) * 64) * $cu_per_gpu)
+          peak: $max_sclk / 1000 * 64 * $cu_per_gpu
           pct_of_peak: true
         L2 Cache Hit Rate:
           value: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
@@ -117,7 +117,7 @@ Panel Config:
         L2 Cache BW:
           value: 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
-          peak: ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan))
+          peak: $max_sclk / 1000 * 64 * TO_INT($total_l2_chan)
           pct_of_peak: true
         L2-Fabric Read BW:
           value: SUM(TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
@@ -147,7 +147,7 @@ Panel Config:
         sL1D Cache BW:
           value: 64 * SUM(SQC_DCACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
-          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
+          peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         L1I Hit Rate:
           value: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
@@ -157,7 +157,7 @@ Panel Config:
         L1I BW:
           value: 64 * SUM(SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
-          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
+          peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
           pct_of_peak: true
         L1I Fetch Latency:
           value: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)

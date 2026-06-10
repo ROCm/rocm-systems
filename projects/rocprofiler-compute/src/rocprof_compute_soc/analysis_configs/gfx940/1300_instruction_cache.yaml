@@ -35,33 +35,33 @@ Panel Config:
       metric:
         Req:
           avg: SUM(SQC_ICACHE_REQ) / SUM($denom)
-          min: MIN((SQC_ICACHE_REQ / $denom))
-          max: MAX((SQC_ICACHE_REQ / $denom))
+          min: MIN(SQC_ICACHE_REQ / $denom)
+          max: MAX(SQC_ICACHE_REQ / $denom)
           unit: (Requests + $normUnit)
         Hits:
           avg: SUM(SQC_ICACHE_HITS) / SUM($denom)
-          min: MIN((SQC_ICACHE_HITS / $denom))
-          max: MAX((SQC_ICACHE_HITS / $denom))
+          min: MIN(SQC_ICACHE_HITS / $denom)
+          max: MAX(SQC_ICACHE_HITS / $denom)
           unit: (Requests + $normUnit)
         Misses - Non Duplicated:
           avg: SUM(SQC_ICACHE_MISSES) / SUM($denom)
-          min: MIN((SQC_ICACHE_MISSES / $denom))
-          max: MAX((SQC_ICACHE_MISSES / $denom))
+          min: MIN(SQC_ICACHE_MISSES / $denom)
+          max: MAX(SQC_ICACHE_MISSES / $denom)
           unit: (Requests + $normUnit)
         Misses - Duplicated:
           avg: SUM(SQC_ICACHE_MISSES_DUPLICATE) / SUM($denom)
-          min: MIN((SQC_ICACHE_MISSES_DUPLICATE / $denom))
-          max: MAX((SQC_ICACHE_MISSES_DUPLICATE / $denom))
+          min: MIN(SQC_ICACHE_MISSES_DUPLICATE / $denom)
+          max: MAX(SQC_ICACHE_MISSES_DUPLICATE / $denom)
           unit: (Requests + $normUnit)
         Cache Hit Rate:
           avg: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
-          min: 100 * MIN(SQC_ICACHE_HITS / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES) + SQC_ICACHE_MISSES_DUPLICATE))
-          max: 100 * MAX(SQC_ICACHE_HITS / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES) + SQC_ICACHE_MISSES_DUPLICATE))
+          min: 100 * MIN(SQC_ICACHE_HITS / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE))
+          max: 100 * MAX(SQC_ICACHE_HITS / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE))
           unit: Percent
         Instruction Fetch Latency:
           avg: SUM(SQ_IFETCH_LEVEL_ACCUM) / SUM(SQ_IFETCH)
-          min: MIN((SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH))
-          max: MAX((SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH))
+          min: MIN(SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH)
+          max: MAX(SQ_IFETCH_LEVEL_ACCUM / SQ_IFETCH)
           unit: Cycles
   - metric_table:
       id: 1303

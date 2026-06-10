@@ -27,14 +27,14 @@ Panel Config:
           max: 100 * MAX($GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
           unit: Percent
         Scheduler-Pipe Utilization:
-          avg: 100 * SUM((SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY)) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu)
+          avg: 100 * SUM(SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu)
           min: 100 * MIN((SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
           max: 100 * MAX((SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
           unit: Percent
         Scheduler-Pipe Wave Utilization:
           avg: 100 * SUM(SPI_CSC_WAVE_CNT_BUSY) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu)
-          min: 100 * MIN((SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
-          max: 100 * MAX((SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+          min: 100 * MIN(SPI_CSC_WAVE_CNT_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+          max: 100 * MAX(SPI_CSC_WAVE_CNT_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
           unit: Percent
         Workgroup Manager Utilization:
           avg: 100 * SUM($GRBM_SPI_BUSY_PER_XCD) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
@@ -95,7 +95,7 @@ Panel Config:
           max: 100 * MAX(SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
           unit: Percent
         Scheduler-Pipe FIFO Full Rate:
-          avg: 100 * SUM((SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL)) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
+          avg: 100 * SUM(SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
           min: 100 * MIN((SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
           max: 100 * MAX((SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu))
           unit: Percent

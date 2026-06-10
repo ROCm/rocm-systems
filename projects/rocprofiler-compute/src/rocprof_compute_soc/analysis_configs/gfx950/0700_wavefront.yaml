@@ -74,9 +74,9 @@ Panel Config:
         unit: Unit
       metric:
         Kernel Time:
-          avg: AVG((End_Timestamp - Start_Timestamp))
-          min: MIN((End_Timestamp - Start_Timestamp))
-          max: MAX((End_Timestamp - Start_Timestamp))
+          avg: AVG(End_Timestamp - Start_Timestamp)
+          min: MIN(End_Timestamp - Start_Timestamp)
+          max: MAX(End_Timestamp - Start_Timestamp)
           unit: Nanoseconds
         Kernel Time (Cycles):
           avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
@@ -85,8 +85,8 @@ Panel Config:
           unit: Cycles
         Instructions per wavefront:
           avg: SUM(SQ_INSTS) / SUM(SQ_WAVES)
-          min: MIN((SQ_INSTS / SQ_WAVES))
-          max: MAX((SQ_INSTS / SQ_WAVES))
+          min: MIN(SQ_INSTS / SQ_WAVES)
+          max: MAX(SQ_INSTS / SQ_WAVES)
           unit: Instructions per Wavefront
         Wave Cycles:
           avg: 4 * SUM(SQ_WAVE_CYCLES) / SUM($denom)
@@ -110,8 +110,8 @@ Panel Config:
           unit: (Cycles + $normUnit)
         Wavefront Occupancy:
           avg: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
-          min: MIN((SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD))
-          max: MAX((SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD))
+          min: MIN(SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD)
+          max: MAX(SQ_LEVEL_WAVES_ACCUM / $GRBM_GUI_ACTIVE_PER_XCD)
           unit: Wavefronts
   metrics_description:
     Grid Size: The total number of work-items (or, threads) launched as a part of
