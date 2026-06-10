@@ -4,7 +4,7 @@
 #pragma once
 
 #include "queries/insert/table_insert_query.hpp"
-#include "spdlog/fmt/bundled/core.h"
+#include <fmt/core.h>
 
 #include <cstddef>
 #include <cstdint>

@@ -54,8 +54,8 @@ prefork_setup()
     if(get_state() < State::Active && !config::settings_are_configured())
         rocprofsys_init_library_hidden();
 
-    tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
-    tim::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
+    rocprofsys::set_env("ROCPROFSYS_PRELOAD", "0", 1);
+    rocprofsys::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
     rocprofsys_reset_preload_hidden();
     LOG_INFO("fork() called on PID {} (rank: {}), TID {}", process::get_id(), dmp::rank(),
              threading::get_id());
@@ -104,6 +104,17 @@ void
 postfork_child()
 {
     if(postfork_child_lock) return;
+
+    // Reset the fork-safe logger lock FIRST, before any logging path in the
+    // child.  The console/sink spinlock may have been inherited held by a
+    // thread that did not survive fork(); any LOG_* call below (or in the
+    // postfork_child_cleanup chain) would otherwise spin forever trying to
+    // acquire it.  Doing this here, rather than relying on the logger's own
+    // atfork child handler, is order-robust: glibc runs atfork child
+    // handlers LIFO, and this gotcha registers its handler after the logger
+    // registers its, so the gotcha handler runs first - before the logger's
+    // reset would.  See logger_t::reset_after_fork.
+    logger_t::reset_after_fork();
 
     if(!is_child_process())
     {

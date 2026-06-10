@@ -1,6 +1,6 @@
 # RCCL Tests
 
-These tests check both the performance and the correctness of RCCL operations. They can be compiled against [RCCL](https://github.com/ROCm/rccl).
+These tests check both the performance and the correctness of RCCL operations. They can be compiled against [RCCL](https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl).
 
 ## Build
 

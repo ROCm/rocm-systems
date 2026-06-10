@@ -100,6 +100,22 @@ struct amdgpu_baseboard_temp_metrics_v1_0 {
   uint32_t system_temp[AMDGPU_SYSTEM_MAX_TEMP_ENTRIES];
 };
 
+struct gpu_metrics_attr {
+  uint64_t encoded_attr;
+};
+
+struct amdgpu_gpuboard_temp_metrics_v1_1 {
+  struct metrics_table_header_t common_header;
+  uint32_t attr_count;
+  struct gpu_metrics_attr metrics_attrs[];
+};
+
+struct amdgpu_baseboard_temp_metrics_v1_1 {
+  struct metrics_table_header_t common_header;
+  uint32_t attr_count;
+  struct gpu_metrics_attr metrics_attrs[];
+};
+
 rsmi_status_t read_gpuboard_temp_metrics(const char* filename,
                                          amdgpu_gpuboard_temp_metrics_v1_0& metrics);
 rsmi_status_t read_baseboard_temp_metrics(const char* filename,
@@ -110,5 +126,13 @@ rsmi_status_t get_baseboard_temp_value(const amdgpu_baseboard_temp_metrics_v1_0&
 
 rsmi_status_t get_gpuboard_temp_value(const amdgpu_gpuboard_temp_metrics_v1_0& metrics,
                                       rsmi_temperature_type_t temperature_type, int64_t* value);
+
+rsmi_status_t get_gpuboard_temp_value_dynamic(const char* filename,
+                                              rsmi_temperature_type_t temperature_type,
+                                              int64_t* value);
+
+rsmi_status_t get_baseboard_temp_value_dynamic(const char* filename,
+                                               rsmi_temperature_type_t temperature_type,
+                                               int64_t* value);
 }  // namespace amd::smi
 #endif  // ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_BOARD_TEMP_H_
