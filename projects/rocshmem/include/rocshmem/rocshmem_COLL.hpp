@@ -468,17 +468,17 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_fcollect_wg(
 /**
  * @name SHMEM_REDUCE_SCATTER
  * @brief Perform a reduce-scatter between PEs in the team. Each PE contributes
- * nelems * n_pes elements from source; after reduction across all PEs,
- * PE i receives the nelems elements corresponding to block i.
+ * nreduce * n_pes elements from source; after reduction across all PEs,
+ * PE i receives the nreduce elements corresponding to block i.
  *
  * This function must be called as a work-group collective.
  *
  * @param[in] team         The team participating in the collective.
- * @param[in] dest         Destination address (nelems elements). Must be an
+ * @param[in] dest         Destination address (nreduce elements). Must be an
  *                         address on the symmetric heap.
- * @param[in] source       Source address (nelems * n_pes elements). Must be
+ * @param[in] source       Source address (nreduce * n_pes elements). Must be
  *                         an address on the symmetric heap.
- * @param[in] nelems      Number of elements each PE receives.
+ * @param[in] nreduce      Number of elements each PE receives.
  *
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */
