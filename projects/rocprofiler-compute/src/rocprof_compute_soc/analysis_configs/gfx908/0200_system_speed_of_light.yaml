@@ -49,12 +49,12 @@ Panel Config:
           peak: $cu_per_gpu
           pct_of_peak: true
         SALU Utilization:
-          value: SUM(100 * SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
           peak: 100
           pct_of_peak: false
         VALU Utilization:
-          value: SUM(100 * SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
           peak: 100
           pct_of_peak: false
@@ -100,22 +100,22 @@ Panel Config:
           peak: 32
           pct_of_peak: true
         vL1D Cache Hit Rate:
-          value: 100 - SUM(100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+          value: 100 - 100 * SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
           unit: Percent
           peak: 100
           pct_of_peak: false
         vL1D Cache BW:
-          value: SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+          value: 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: ((($max_sclk / 1000) * 64) * $cu_per_gpu)
           pct_of_peak: true
         L2 Cache Hit Rate:
-          value: SUM(100 * TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
+          value: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
           unit: Percent
           peak: 100
           pct_of_peak: false
         L2 Cache BW:
-          value: SUM(TCC_REQ_sum * 64) / SUM(End_Timestamp - Start_Timestamp)
+          value: 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan))
           pct_of_peak: true
@@ -140,22 +140,22 @@ Panel Config:
           peak: None
           pct_of_peak: false
         sL1D Cache Hit Rate:
-          value: SUM(100 * SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
+          value: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
           unit: Percent
           peak: 100
           pct_of_peak: false
         sL1D Cache BW:
-          value: SUM(64 * SQC_DCACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
+          value: 64 * SUM(SQC_DCACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
           pct_of_peak: true
         L1I Hit Rate:
-          value: SUM(100 * SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
+          value: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
           unit: Percent
           peak: 100
           pct_of_peak: false
         L1I BW:
-          value: SUM(64 * SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
+          value: 64 * SUM(SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
           pct_of_peak: true
@@ -166,7 +166,7 @@ Panel Config:
           pct_of_peak: false
           coll_level: SQ_IFETCH_LEVEL
         CU Utilization:
-          value: SUM(100 * SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          value: 100 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
           peak: 100
           pct_of_peak: false

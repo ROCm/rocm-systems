@@ -12,13 +12,13 @@ Panel Config:
         unit: Unit
       metric:
         Bandwidth Utilization:
-          value: SUM(SQC_DCACHE_REQ * 100000) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
+          value: 100000 * SUM(SQC_DCACHE_REQ) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
           unit: Percent
         Cache Hit Rate:
-          value: SUM(SQC_DCACHE_HITS * 100) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE)
+          value: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE)
           unit: Percent
         sL1D-L2 BW Utilization:
-          value: SUM((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 100000) / SUM(2 * $max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
+          value: 100000 * SUM((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))
           unit: Percent
       comparable: false
       cli_style: simple_bar
@@ -54,9 +54,9 @@ Panel Config:
           max: MAX((SQC_DCACHE_MISSES_DUPLICATE / $denom))
           unit: (Requests + $normUnit)
         Cache Hit Rate:
-          avg: SUM(100 * SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE)
-          min: MIN(100 * SQC_DCACHE_HITS / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
-          max: MAX(100 * SQC_DCACHE_HITS / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
+          avg: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE)
+          min: 100 * MIN(SQC_DCACHE_HITS / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
+          max: 100 * MAX(SQC_DCACHE_HITS / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
           unit: Percent
         Read Req (Total):
           avg: SUM(SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2 + SQC_DCACHE_REQ_READ_4 + SQC_DCACHE_REQ_READ_8 + SQC_DCACHE_REQ_READ_16) / SUM($denom)
@@ -106,11 +106,9 @@ Panel Config:
         unit: Unit
       metric:
         sL1D-L2 BW:
-          avg: SUM((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-            * 64)) / (End_Timestamp - Start_Timestamp)))
-          max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-            * 64)) / (End_Timestamp - Start_Timestamp)))
+          avg: 64 * SUM((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)) / SUM(End_Timestamp - Start_Timestamp)
+          min: 64 * MIN((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) / (End_Timestamp - Start_Timestamp))
+          max: 64 * MAX((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Read Req:
           avg: SUM(SQC_TC_DATA_READ_REQ) / SUM($denom)

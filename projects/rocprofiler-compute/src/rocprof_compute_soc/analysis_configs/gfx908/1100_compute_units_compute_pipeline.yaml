@@ -37,14 +37,14 @@ Panel Config:
             / SQ_ACTIVE_INST_ANY))
           unit: Instructions per Cycle
         SALU Utilization:
-          avg: SUM(100 * SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          max: MAX((((100 * SQ_ACTIVE_INST_SCA) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN((SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu)
+          max: 100 * MAX((SQ_ACTIVE_INST_SCA / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu)
           unit: Percent
         VALU Utilization:
-          avg: SUM(100 * SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
-          min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-          max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+          avg: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          min: 100 * MIN((SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu)
+          max: 100 * MAX((SQ_ACTIVE_INST_VALU / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu)
           unit: Percent
         VALU Active Threads:
           avg: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)

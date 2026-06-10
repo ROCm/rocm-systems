@@ -15,10 +15,10 @@ Panel Config:
           value: (SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM(SQ_BUSY_CYCLES)) * 100
           unit: Percent
         L1 Cache - TA coalesce rate:
-          value: (SUM(4 * TA_BUFFER_WAVEFRONTS_sum) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)) * 100
+          value: (4 * SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)) * 100
           unit: Percent
         L1 Cache - VL1 coalesce efficiency:
-          value: (SUM(TA_TOTAL_WAVEFRONTS_sum * 64) / SUM(TCP_TOTAL_ACCESSES_sum * 4)) * 100
+          value: (64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum))) * 100
           unit: Percent
         L1 Cache - TA addr stalled by TCP:
           value: (SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / SUM(TA_TA_BUSY_sum)) * 100
@@ -815,35 +815,34 @@ Panel Config:
         unit: Unit
       metric:
         EA to HBM read BW:
-          value: ((SUM(TCC_EA0_RDREQ_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to HBM write BW:
-          value: ((SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to HBM atomic BW:
-          value: ((SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to HBM total BW:
-          value: ((SUM((TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_WRREQ_WRITE_DRAM_32B_sum
-            + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM((TCC_EA0_RDREQ_DRAM_32B_sum + TCC_EA0_WRREQ_WRITE_DRAM_32B_sum + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum))) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to GMI read BW:
-          value: ((SUM(TCC_EA0_RDREQ_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_RDREQ_GMI_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to GMI write BW:
-          value: ((SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to GMI atomic BW:
-          value: ((SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to IO read BW:
-          value: ((SUM(TCC_EA0_RDREQ_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_RDREQ_IO_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to IO write BW:
-          value: ((SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA to IO atomic BW:
-          value: ((SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32)) / (SUM(End_Timestamp - Start_Timestamp)))
+          value: ((32 * SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum)) / (SUM(End_Timestamp - Start_Timestamp)))
           unit: GB/s
         EA read average latency:
           value: SUM(TCC_EA0_RDREQ_LEVEL_sum) / SUM(TCC_EA0_RDREQ_sum)
