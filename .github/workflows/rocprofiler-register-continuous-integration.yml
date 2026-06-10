@@ -86,6 +86,7 @@ jobs:
       PACKAGING_INSTALL_PREFIX: /opt/rocm
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       PATH: /usr/bin:$PATH
+      SUBMODULE_PATHS: "projects/rocprofiler-register"
 
     steps:
     - name: Install Latest Nightly ROCm
@@ -107,8 +108,13 @@ jobs:
     - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprofiler-register
-        submodules: true
+        submodules: false
         set-safe-directory: true
+
+    - name: Init/Update submodules
+      run: |
+        git config --global --add safe.directory '*'
+        git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Install Packages
       timeout-minutes: 25

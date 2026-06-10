@@ -8,11 +8,21 @@ wavefront dispatches, memory instructions, register reads, barriers, etc.
 
 | Plugin | Location | Description |
 |---|---|---|
-| `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. |
-| `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MFMA usage. |
+| `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
+| `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 
 The race detector plugin contains both the core detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
+
+### Kernel Logging Plugin
+
+The logging plugin records kernel dispatch metadata and detects MMA
+(matrix multiply-accumulate) instruction usage:
+
+- **Kernel dispatches**: entry PC, grid dimensions, workgroup dimensions,
+  register counts, and kernel name (when available from the code object).
+- **MMA detection**: reports the first MFMA or WMMA instruction seen in
+  each dispatch.
 
 ## Enabling plugins
 
@@ -80,7 +90,7 @@ Multiple plugins can be active simultaneously via `ExecutionPluginGroup`.
 
 ## Adding a new plugin
 
-1. Implement `ExecutionPlugin` in a new `.cpp`/`.h` pair in this directory.
+1. Implement `ExecutionPlugin` in a new `.cpp`/`.h` pair under `vm/plugins/`.
 2. Add the source to `CMakeLists.txt`.
 3. Register the plugin in `simulated_driver.cpp` (gated by an environment variable).
 4. Use `sink().write()` for all output — never write to stderr directly.
