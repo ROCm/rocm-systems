@@ -39,9 +39,9 @@ template<typename T>
 struct TileMover{
   gfx1250_TDM_GROUP0 group0;
   gfx1250_TDM_GROUP1 group1;
-  TileMover(){
+  __device__ TileMover(){
     constexpr int log2DataSize = __builtin_ctzll(sizeof(T));
-    static_assert(log2DataSize <= 2, "Datatype must be 1, 2, or 4 bytes in width"); // TODO(breslow): Replace with C++ concepts when we migrate to C++20
+    static_assert(log2DataSize <= 3, "Datatype must be 1, 2, 4, or 8 bytes in width"); // TODO(breslow): Replace with C++ concepts when we migrate to C++20
     group1.dataSize(log2DataSize);
   }
 
@@ -59,8 +59,9 @@ struct TileMover{
     __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{}, __hip_uint32x4{}, __hip_uint32x8{}, 0);
   }
 
+  template<int WAIT_CNT = 0> // Needs to be a template parameter because the count is baked into the hardware instruction
   __device__ void waitTile(){
-    __builtin_amdgcn_s_wait_tensorcnt(0);
+    __builtin_amdgcn_s_wait_tensorcnt(WAIT_CNT);
   }
 };
 
