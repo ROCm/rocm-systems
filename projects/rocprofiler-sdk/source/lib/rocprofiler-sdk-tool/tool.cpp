@@ -2301,8 +2301,7 @@ attach_session_file_path(pid_t target_pid)
     return fmt::format("/tmp/rocprofv3_attach_{}.session", target_pid);
 }
 
-// Reject symlinks and non-regular files before fstream open (best-effort; fstream has no
-// O_NOFOLLOW).
+// Reject symlinks and non-regular files before fstream open
 bool
 is_attach_session_path_safe(const fs::path& path)
 {
@@ -2333,8 +2332,8 @@ set_attach_session_file_permissions(const fs::path& path)
     fs::permissions(path, attach_session_file_perms, fs::perm_options::replace, ec);
     if(ec)
     {
-        ROCP_WARNING << "Failed to set attach session file permissions on " << path << " :: "
-                     << ec.message();
+        ROCP_WARNING << "Failed to set attach session file permissions on " << path
+                     << " :: " << ec.message();
     }
 }
 
@@ -2454,8 +2453,8 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     assign_attach_output_session_suffix();
 
-    pid_t target_pid = get_attach_target_pid(); //The target process we're attaching to
-    pid_t tool_pid   = getpid(); //The rocprofv3 tool process
+    pid_t target_pid = get_attach_target_pid();  // The target process we're attaching to
+    pid_t tool_pid   = getpid();                 // The rocprofv3 tool process
     ROCP_INFO << "Attach mode: Setting process_id to target PID " << target_pid
               << " (tool PID: " << tool_pid << ")";
     tool_metadata->set_process_id(target_pid, 0);  // Set target as main process
