@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 #include "rocjpeg_parser.h"
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 
@@ -258,7 +259,6 @@ bool RocJpegStreamParser::ParseSOF() {
         // CSS_411 and CSS_UNKNOWN already returned false above, so only indices 0-3,5 are reachable.
         static const char* css_names[] = { "4:4:4", "4:4:0", "4:2:2", "4:2:0", "4:1:1", "4:0:0" };
         int css_idx = static_cast<int>(jpeg_stream_parameters_.chroma_subsampling);
-        DebugLog(g_rocjpeg_logger, "  Chroma subsampling: " + ROCJPEG_STR(css_names[css_idx]));
         uint32_t sof_offset = static_cast<uint32_t>(sof_header - stream_start_) - 2;
         uint16_t frame_length = swap_bytes(sof_header);
         uint8_t precision = sof_header[2];
@@ -274,23 +274,25 @@ bool RocJpegStreamParser::ParseSOF() {
             << "\n  Number of Lines = " << height
             << "\n  Samples per Line = " << width
             << "\n  Image Size = " << width << " x " << height
+            << "\n  Chroma subsampling: " << css_names[css_idx]
             << "\n  Raw Image Orientation = " << (width >= height ? "Landscape" : "Portrait")
             << "\n  Number of Img components = " << static_cast<int>(num_comp);
+        static const char* comp_labels[] = { "Lum: Y", "Chrom: Cb", "Chrom: Cr" };
+        uint8_t max_h = jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor;
+        uint8_t max_v = jpeg_stream_parameters_.picture_parameter_buffer.components[0].v_sampling_factor;
         for (int i = 0; i < num_comp; i++) {
             auto& c = jpeg_stream_parameters_.picture_parameter_buffer.components[i];
             uint8_t samp_fac_byte = (c.h_sampling_factor << 4) | c.v_sampling_factor;
-            std::string quant_label;
-            if (c.quantiser_table_selector == 0) quant_label = "Lum: Y";
-            else if (c.quantiser_table_selector == 1) quant_label = "Chrom: Cb";
-            else if (c.quantiser_table_selector == 2) quant_label = "Chrom: Cr";
-            else quant_label = "Unknown";
+            uint8_t subsamp_h = (c.h_sampling_factor > 0) ? max_h / c.h_sampling_factor : 0;
+            uint8_t subsamp_v = (c.v_sampling_factor > 0) ? max_v / c.v_sampling_factor : 0;
+            const char* comp_label = (i < 3) ? comp_labels[i] : "Unknown";
             oss << "\n    Component[" << std::dec << (i + 1) << "]: "
                 << "ID=0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c.component_id)
                 << ", Samp Fac=0x" << std::setw(2) << static_cast<int>(samp_fac_byte)
-                << " (Subsamp " << std::dec << static_cast<int>(c.h_sampling_factor)
-                << " x " << static_cast<int>(c.v_sampling_factor) << ")"
+                << " (Subsamp " << std::dec << static_cast<int>(subsamp_h)
+                << " x " << static_cast<int>(subsamp_v) << ")"
                 << ", Quant Tbl Sel=0x" << std::hex << std::setw(2) << static_cast<int>(c.quantiser_table_selector)
-                << " (" << quant_label << ")";
+                << " (" << comp_label << ")";
         }
         DebugLog(g_rocjpeg_logger, oss.str());
     }
@@ -315,11 +317,19 @@ bool RocJpegStreamParser::ParseDQT() {
     }
 
     uint16_t table_length = swap_bytes(stream_);
+    if (table_length < 2 || stream_ + table_length > stream_end_) {
+        ErrorLog(g_rocjpeg_logger, "Invalid DQT marker length!");
+        return false;
+    }
     dqt_block_end = stream_ + table_length;
     uint32_t dqt_offset = static_cast<uint32_t>(stream_ - stream_start_) - 2;
     stream_ += 2;
 
     while (stream_ < dqt_block_end) {
+        if (stream_ + 1 + 64 > dqt_block_end) {
+            ErrorLog(g_rocjpeg_logger, "Truncated JPEG: DQT segment too small to contain a complete quantization table!");
+            return false;
+        }
         quantization_table_index = *stream_++;
         if (quantization_table_index >> 4) {
             ErrorLog(g_rocjpeg_logger,"16 bits quantization table is not supported!");
@@ -336,15 +346,43 @@ bool RocJpegStreamParser::ParseDQT() {
         if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogDebug) {
             int tbl_id = quantization_table_index & 0x0F;
             const uint8_t *tbl = jpeg_stream_parameters_.quantization_matrix_buffer.quantiser_table[tbl_id];
-            // Compute mean quantization value and approximate JPEG quality using the IJG formula:
-            //   scale = 5000/Q (Q<50) or 200-2Q (Q>=50), so inversely:
-            //   Q = (200 - mean) / 2  when mean < 100  (high quality, Q > 50)
-            //   Q = 5000 / mean       when mean >= 100 (low quality, Q <= 50)
+            // Standard IJG reference quantization tables (quality=50 baseline).
+            // scaling = mean(100 * actual[i] / ref[i])
+            static const uint8_t k_std_luma[64] = {
+                16, 11, 10, 16, 24, 40, 51, 61,
+                12, 12, 14, 19, 26, 58, 60, 55,
+                14, 13, 16, 24, 40, 57, 69, 56,
+                14, 17, 22, 29, 51, 87, 80, 62,
+                18, 22, 37, 56, 68,109,103, 77,
+                24, 35, 55, 64, 81,104,113, 92,
+                49, 64, 78, 87,103,121,120,101,
+                72, 92, 95, 98,112,100,103, 99
+            };
+            static const uint8_t k_std_chroma[64] = {
+                17, 18, 24, 47, 99, 99, 99, 99,
+                18, 21, 26, 66, 99, 99, 99, 99,
+                24, 26, 56, 99, 99, 99, 99, 99,
+                47, 66, 99, 99, 99, 99, 99, 99,
+                99, 99, 99, 99, 99, 99, 99, 99,
+                99, 99, 99, 99, 99, 99, 99, 99,
+                99, 99, 99, 99, 99, 99, 99, 99,
+                99, 99, 99, 99, 99, 99, 99, 99
+            };
+            const uint8_t *ref = (tbl_id == 0) ? k_std_luma : k_std_chroma;
             double sum = 0.0;
-            for (int k = 0; k < 64; k++) sum += tbl[k];
+            for (int k = 0; k < 64; k++) sum += 100.0 * tbl[k] / ref[k];
             double scaling = sum / 64.0;
+            double var_sum = 0.0;
+            for (int k = 0; k < 64; k++) {
+                double d = 100.0 * tbl[k] / ref[k] - scaling;
+                var_sum += d * d;
+            }
+            double variance = var_sum / 64.0;
+            // Quality: all-1s table is the minimum possible (Q=100); otherwise use IJG inverse formula.
+            bool all_min = true;
+            for (int k = 0; k < 64; k++) { if (tbl[k] != 1) { all_min = false; break; } }
             double quality;
-            if (scaling <= 1.0) quality = 100.0;
+            if (all_min) quality = 100.0;
             else if (scaling < 100.0) quality = std::max(0.0, (200.0 - scaling) / 2.0);
             else quality = std::max(0.0, 5000.0 / scaling);
 
@@ -366,7 +404,7 @@ bool RocJpegStreamParser::ParseDQT() {
             }
             oss << std::fixed << std::setprecision(2)
                 << "\n    Approx quality factor = " << quality
-                << " (mean quantization value = " << scaling << ")";
+                << " (scaling=" << scaling << " variance=" << variance << ")";
             DebugLog(g_rocjpeg_logger, oss.str());
         }
 
@@ -394,7 +432,12 @@ bool RocJpegStreamParser::ParseDHT() {
     }
 
     const uint8_t *dht_header = stream_;
-    length = swap_bytes(stream_) - 2;
+    uint16_t segment_length = swap_bytes(stream_);
+    if (segment_length < 2 || stream_ + segment_length > stream_end_) {
+        ErrorLog(g_rocjpeg_logger, "Invalid DHT marker length!");
+        return false;
+    }
+    length = static_cast<int32_t>(segment_length) - 2;
     stream_ += 2;
 
     while (length > 0) {
