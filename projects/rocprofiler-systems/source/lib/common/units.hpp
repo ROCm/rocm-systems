@@ -18,10 +18,6 @@ inline constexpr std::int64_t kilobyte = 1000 * byte;
 inline constexpr std::int64_t megabyte = 1000 * kilobyte;
 inline constexpr std::int64_t gigabyte = 1000 * megabyte;
 
-inline constexpr std::int64_t KB = kilobyte;
-inline constexpr std::int64_t MB = megabyte;
-inline constexpr std::int64_t GB = gigabyte;
-
 inline constexpr std::int64_t nanowatt = 1;
 inline constexpr std::int64_t watt     = 1000 * 1000 * 1000 * nanowatt;
 
