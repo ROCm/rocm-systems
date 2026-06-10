@@ -1733,7 +1733,9 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     setFenceDirty(false);
   }
 
-  while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
+  while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask) {
+    amd::Os::yield();
+  }
   hsa_barrier_and_packet_t* aql_loc =
       &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
   *aql_loc = barrier_packet_;
@@ -1818,7 +1820,9 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   TrackQueueProgress(barrier_value_packet_, index);
 
-  while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask);
+  while ((index - Hsa::queue_load_read_index_scacquire(gpu_queue_)) >= queueMask) {
+    amd::Os::yield();
+  }
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
   *aql_loc = barrier_value_packet_;
