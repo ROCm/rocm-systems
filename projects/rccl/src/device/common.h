@@ -663,15 +663,10 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       // assert((tid-localWarpId*WARP_SIZE) >= 0 && (tid-localWarpId*WARP_SIZE) < WARP_SIZE);
       copyToShmem16(tid-localWarpId*WARP_SIZE, dst, src, bytes);
     }
-  } else {  // If warpComm is disabled, all warps use the same channel as the block
+  } else {  // warpComm disabled: skip per-warp channel copy; readers fall back to ncclShmem.channel
     if(laneId == 0) {
       ncclShmem.warpChannelId[localWarpId] = ncclShmem.channelId;
     }
-    // Use all threads in the warp to copy the channel data in parallel
-    void* dst = &ncclShmem.warpChannel[localWarpId];
-    void* src = &ncclShmem.channel;
-    int bytes = sizeof(ncclDevChannel);
-    copyToShmem16(laneId, dst, src, bytes);
   }
   __syncthreads();
 #endif

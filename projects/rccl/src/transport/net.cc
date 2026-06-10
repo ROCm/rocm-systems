@@ -837,6 +837,10 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int 
       WARN("PXN should not use host buffers for data");
       return ncclInternalError;
   }
+  if ((unsigned)tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("sharedNetBuffersInit: tpLocalRank %d out of range [0,%d)", tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
   struct ncclProxyProgressState* progressState = &proxyState->progressState;
   if (progressState->localPeers == NULL) {
     NCCLCHECK(ncclCalloc(&progressState->localPeers, proxyState->tpLocalnRanks));
@@ -891,6 +895,10 @@ static ncclResult_t sharedBuffersGet(struct ncclProxyState* proxyState, int chan
 }
 
 static ncclResult_t sharedNetBuffersDestroy(struct ncclProxyState* proxyState, int tpLocalRank, int type, struct ncclProxyConnection* connection) {
+  if ((unsigned)tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("sharedNetBuffersDestroy: tpLocalRank %d out of range [0,%d)", tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
   if (proxyState->progressState.localPeers == NULL) NCCLCHECK(ncclInternalError);
   struct ncclProxyPeer* peer = proxyState->progressState.localPeers[tpLocalRank];
   if (peer == NULL) NCCLCHECK(ncclInternalError);
@@ -930,6 +938,10 @@ static ncclResult_t proxySharedInit(struct ncclProxyConnection* connection, stru
 static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   struct setupReq* req = (struct setupReq*) reqBuff;
   if (reqSize != sizeof(struct setupReq)) return ncclInternalError;
+  if ((unsigned)req->tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("sendProxySetup: tpLocalRank %d out of range [0,%d)", req->tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
 
   struct sendNetResources* resources;
   NCCLCHECK(ncclCalloc(&resources, 1));
@@ -980,6 +992,10 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
 static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   struct setupReq* req = (struct setupReq*) reqBuff;
   if (reqSize != sizeof(struct setupReq)) return ncclInternalError;
+  if ((unsigned)req->tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("recvProxySetup: tpLocalRank %d out of range [0,%d)", req->tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
 
   struct recvNetResources* resources;
   NCCLCHECK(ncclCalloc(&resources, 1));
