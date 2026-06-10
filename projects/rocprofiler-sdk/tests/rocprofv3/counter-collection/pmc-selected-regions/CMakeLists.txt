@@ -41,8 +41,8 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-counter-collection-pmc-selected-regions
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES --selected-regions -d
-        ${CMAKE_CURRENT_BINARY_DIR}/pmc-sel-reg-out -o out --output-format json --log-level
-        info -- $<TARGET_FILE:roctx-pause-resume>
+        ${CMAKE_CURRENT_BINARY_DIR}/pmc-sel-reg-out -o out --output-format json
+        --log-level info -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
     TIMEOUT 120
     LABELS "integration-tests;pause-resume;counter-collection;selected-regions"
@@ -54,8 +54,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/pmc-sel-reg-out/out_results.json
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/pmc-sel-reg-out/out_results.json
     TIMEOUT 120
     LABELS "integration-tests;pause-resume;counter-collection;selected-regions"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-pmc-selected-regions

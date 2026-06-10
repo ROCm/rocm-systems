@@ -51,9 +51,7 @@ def test_counter_collection_only_inside_selected_regions(json_data):
         assert dispatch_data["queue_id"]["handle"] > 0
 
         kernel_name = get_kernel_name(dispatch_data["kernel_id"])
-        assert (
-            target_kernel_regex.search(kernel_name) is not None
-        ), (
+        assert target_kernel_regex.search(kernel_name) is not None, (
             f"counter record for kernel '{kernel_name}' is outside the resume window "
             f"(expected match for '{target_kernel_regex.pattern}')"
         )
