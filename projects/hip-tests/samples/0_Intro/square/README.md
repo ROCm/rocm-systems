@@ -1,5 +1,7 @@
 # Square.md
 
+ROCM_PATH is the path where ROCM is installed. default path is /opt/rocm.
+
 Simple test below is an example, shows how to use hipify-perl to port CUDA code to HIP:
 
 - Add hip/bin path to the PATH
@@ -21,9 +23,8 @@ $ cd ~/hip/samples/0_Intro/square
   make
 
 $ Building without cmake
-/opt/rocm/hip/bin/hipify-perl square.cu > square.cpp
-/opt/rocm/hip/bin/hipcc  square.cpp -o square.out
-/opt/rocm/hip/bin/hipcc -use-staticlib  square.cpp -o square.out.static
+<ROCM_PATH>/hip/bin/hipify-perl square.cu > square.cpp
+<ROCM_PATH>/llvm/bin/amdclang++ -x hip --offload-arch=native square.cpp -o square.out
 ```
 - Execute file
 ```
