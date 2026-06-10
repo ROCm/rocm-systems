@@ -3,7 +3,8 @@
 
 import argparse
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import common
 import pytest
@@ -18,9 +19,14 @@ from utils.utils_exceptions import (
 )
 
 
-def _make_sanitize_args(remaining, torch_trace=False):
-    """Build a minimal argparse.Namespace for sanitize() unit tests."""
-    return argparse.Namespace(
+def _make_sanitize_args(remaining, torch_trace=False, **overrides):
+    """Build a minimal argparse.Namespace for profiler_base unit tests.
+
+    Defaults satisfy sanitize(); pass **overrides to set or replace fields the
+    run_profiling() tests need (e.g. output_directory, no_native_tool, kernel,
+    or a pre-joined string ``remaining``).
+    """
+    defaults = dict(
         filter_blocks=[],
         set_selected=None,
         roof_only=False,
@@ -33,7 +39,10 @@ def _make_sanitize_args(remaining, torch_trace=False):
         remaining=["--"] + remaining,
         torch_trace=torch_trace,
         dispatch=None,
+        kernel=None,
     )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
 
 
 def _setup_test_files(tmp_path, remaining, setup):
@@ -397,3 +406,135 @@ def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
+
+
+# ---------------------------------------------------------------------------
+# run_profiling(): PC sampling gating / increment / delegation
+# ---------------------------------------------------------------------------
+def _make_run_profiling_profiler(tmp_path, filter_blocks, perfmon_files=0):
+    """Build a RocProfCompute_Base ready to drive run_profiling() in isolation.
+
+    Uses the rocprofv3 profiler mode so the native-tool path resolves to None
+    without touching the filesystem, and seeds `perfmon_files` empty pmc_perf
+    yaml files so total_runs reflects the counter-collection pass count.
+    """
+    if perfmon_files:
+        perfmon_dir = Path(tmp_path) / "perfmon"
+        perfmon_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(perfmon_files):
+            (perfmon_dir / f"pmc_perf_{i}.yaml").write_text("")
+
+    args = _make_sanitize_args(
+        ["./app"],
+        filter_blocks=filter_blocks,
+        output_directory=str(tmp_path),
+        no_native_tool=True,
+    )
+    # run_profiling() consumes remaining as the already-joined command string.
+    args.remaining = "-- ./app"
+    soc = SimpleNamespace(_mspec=SimpleNamespace(gpu_model="MI300"))
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofv3", soc=soc)
+    profiler._filter_blocks = filter_blocks
+    return profiler
+
+
+@pytest.mark.parametrize(
+    "filter_blocks, perfmon_files, is_requested, ranks, "
+    "expect_run, expect_skip_warning, expect_multirank_warning",
+    [
+        # A requested PC sampling block delegates to PCSamplingProfile.run()
+        # and suppresses the skip warning.
+        pytest.param(
+            ["pc_sampling"],
+            0,
+            True,
+            (None, None),
+            True,
+            False,
+            False,
+            id="delegates_when_requested",
+        ),
+        # No PC sampling block requested -> skip warning, run() never called.
+        pytest.param(
+            ["2"],
+            1,
+            False,
+            (None, None),
+            False,
+            True,
+            False,
+            id="skips_when_not_requested",
+        ),
+        # Requested PC sampling adds a workload run, so 1 counter pass + 1 PC
+        # sampling pass = 2 runs with >=2 ranks -> multi-rank warning.
+        pytest.param(
+            ["21", "2"],
+            1,
+            True,
+            ("0", 2),
+            True,
+            False,
+            True,
+            id="multirank_warns_with_pc_sampling",
+        ),
+        # Not requested -> only the single counter pass -> no multi-rank warning.
+        pytest.param(
+            ["2"],
+            1,
+            False,
+            ("0", 2),
+            False,
+            True,
+            False,
+            id="multirank_silent_without_pc_sampling",
+        ),
+    ],
+)
+def test_run_profiling_pc_sampling_gating(
+    tmp_path,
+    monkeypatch,
+    filter_blocks,
+    perfmon_files,
+    is_requested,
+    ranks,
+    expect_run,
+    expect_skip_warning,
+    expect_multirank_warning,
+):
+    """run_profiling() delegates to PCSamplingProfile.run() only when a PC
+    sampling block is requested, emits the skip warning otherwise, and counts a
+    requested PC sampling pass as an extra workload run for the multi-rank
+    warning."""
+    profiler = _make_run_profiling_profiler(
+        tmp_path, filter_blocks, perfmon_files=perfmon_files
+    )
+    base = "rocprof_compute_profile.profiler_base"
+
+    mock_pc_cls = Mock()
+    instance = mock_pc_cls.return_value
+    instance.is_requested.return_value = is_requested
+    mock_warning = Mock()
+
+    monkeypatch.setattr(f"{base}.PCSamplingProfile", mock_pc_cls)
+    monkeypatch.setattr(f"{base}.print_status", Mock())
+    common.patch_console(
+        monkeypatch, base, "log", "debug", "warning", warning=mock_warning
+    )
+    monkeypatch.setattr(f"{base}.get_job_rank_and_size", Mock(return_value=ranks))
+    monkeypatch.setattr(RocProfCompute_Base, "profile", Mock(return_value=0.0))
+
+    profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+
+    assert instance.run.called is expect_run
+
+    skip_warned = any(
+        "PC sampling data collection skipped" in str(call)
+        for call in mock_warning.call_args_list
+    )
+    assert skip_warned is expect_skip_warning
+
+    multirank_warned = any(
+        "Multi-rank application detected" in str(call)
+        for call in mock_warning.call_args_list
+    )
+    assert multirank_warned is expect_multirank_warning
