@@ -33,8 +33,13 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+  // Skip DDA if:
+  // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
+  // - multi-node runs
+  // - not using 1 process per GPU
+  // - MNNVL (fabric-based P2P)
   if (comm->nRanks != kDdaNranks || comm->nNodes != 1 ||
-      comm->bootstrap == nullptr) {
+      comm->bootstrap == nullptr || comm->directMode || comm->MNNVL) {
     return ncclSuccess;
   }
 

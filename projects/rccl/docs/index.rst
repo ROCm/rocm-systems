@@ -13,7 +13,7 @@ that provides multi-GPU and multi-node collective communication primitives
 optimized for AMD GPUs. It uses PCIe and xGMI high-speed interconnects.
 To learn more, see :doc:`what-is-rccl`
 
-The RCCL public repository is located at `<https://github.com/ROCm/rccl>`_.
+The RCCL public repository is located within the rocm-systems repo at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -34,8 +34,8 @@ The RCCL public repository is located at `<https://github.com/ROCm/rccl>`_.
 
   .. grid-item-card:: Examples
 
-    * `RCCL Tuner plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/tuner/example>`_
-    * `NCCL Net plugin examples <https://github.com/ROCm/rccl/tree/develop/plugins/net/example>`_
+    * `RCCL Tuner plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/tuner/example>`_
+    * `NCCL Net plugin examples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rccl/plugins/net/example>`_
 
   .. grid-item-card:: API reference
 

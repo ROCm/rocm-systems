@@ -50,7 +50,7 @@ template <> hipError_t HandleException<hipError_t>() {
 }  // namespace hip
 
 #define TRY try {
-#define CATCH } catch(...) { HIP_RETURN(hip::HandleException<hipError_t>()); }
+#define CATCH } catch(...) { return hip::HandleException<hipError_t>(); }
 #define CATCHRET(RETURN_TYPE) } catch(...) { return hip::HandleException<RETURN_TYPE>(); }
 
 extern "C" hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,

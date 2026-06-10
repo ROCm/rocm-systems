@@ -78,18 +78,16 @@ option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on 
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
 option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
-option(COLLTRACE                               "Collective Trace Option"                       ON)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
-option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
+option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
-option(PROFILE                                 "Enable profiling"                              OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
@@ -149,8 +147,6 @@ endif()
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
-# ROCM NetIB patch
-include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)

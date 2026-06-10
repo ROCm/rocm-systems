@@ -250,6 +250,14 @@ static void rcclDetectIBNics() {
   int _NicsRate[rcclIBNicTypeMax]{};
   int totalNnics = 0;
 
+  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware */
+  const char* envNet = ncclGetEnv("NCCL_NET");
+  if (envNet && strcasecmp(envNet, "ROCM-IB") == 0) {
+    INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC mode forced by NCCL_NET=ROCM-IB");
+    rcclPrimaryNicInfo.type = rcclIBNicTypeAINIC;
+    return;
+  }
+
   /* respect user preference for AINIC */
   if (rcclParamAinicRoce() == 1) {
     INFO(NCCL_NET|NCCL_INIT, "RCCL: AINIC detection: enforced by user settings");
@@ -824,6 +832,10 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int 
       WARN("PXN should not use host buffers for data");
       return ncclInternalError;
   }
+  if ((unsigned)tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("sharedNetBuffersInit: tpLocalRank %d out of range [0,%d)", tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
   struct ncclProxyProgressState* progressState = &proxyState->progressState;
   if (progressState->localPeers == NULL) {
     NCCLCHECK(ncclCalloc(&progressState->localPeers, proxyState->tpLocalnRanks));
@@ -878,6 +890,10 @@ static ncclResult_t sharedBuffersGet(struct ncclProxyState* proxyState, int chan
 }
 
 static ncclResult_t sharedNetBuffersDestroy(struct ncclProxyState* proxyState, int tpLocalRank, int type, struct ncclProxyConnection* connection) {
+  if ((unsigned)tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("sharedNetBuffersDestroy: tpLocalRank %d out of range [0,%d)", tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
   if (proxyState->progressState.localPeers == NULL) NCCLCHECK(ncclInternalError);
   struct ncclProxyPeer* peer = proxyState->progressState.localPeers[tpLocalRank];
   if (peer == NULL) NCCLCHECK(ncclInternalError);
@@ -917,6 +933,10 @@ static ncclResult_t proxySharedInit(struct ncclProxyConnection* connection, stru
 static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   struct setupReq* req = (struct setupReq*) reqBuff;
   if (reqSize != sizeof(struct setupReq)) return ncclInternalError;
+  if ((unsigned)req->tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("sendProxySetup: tpLocalRank %d out of range [0,%d)", req->tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
 
   struct sendNetResources* resources;
   NCCLCHECK(ncclCalloc(&resources, 1));
@@ -966,6 +986,10 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
 static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
   struct setupReq* req = (struct setupReq*) reqBuff;
   if (reqSize != sizeof(struct setupReq)) return ncclInternalError;
+  if ((unsigned)req->tpLocalRank >= (unsigned)proxyState->tpLocalnRanks) {
+    WARN("recvProxySetup: tpLocalRank %d out of range [0,%d)", req->tpLocalRank, proxyState->tpLocalnRanks);
+    return ncclInvalidArgument;
+  }
 
   struct recvNetResources* resources;
   NCCLCHECK(ncclCalloc(&resources, 1));
@@ -1052,9 +1076,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (proxyState->ncclNet == &rocmNetIb) {
-    NCCLCHECK(rcclRocmNetP2pPolicy(req->handle, resources->isP2p));
-  } else if (proxyState->ncclNet == &netIbCast) {
+  if (proxyState->ncclNet == &netIbCast) {
     NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
   }
 #endif
@@ -1248,7 +1270,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 #else
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd, &offset));
@@ -1462,7 +1484,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
 #else
       /* DMA-BUF support */
       int type = NCCL_NET_MAP_DEV_MEM(map, buffs[p]) ? NCCL_PTR_CUDA : NCCL_PTR_HOST;
-      if (type == NCCL_PTR_CUDA && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
+      if (type == NCCL_PTR_CUDA && resources->useDmaBuf && proxyState->dmaBufSupport && pfn_hsa_amd_portable_export_dmabuf) {
         int dmabuf_fd;
         uint64_t offset;
         HSACHECK(hsa_amd_portable_export_dmabuf((const void*)resources->buffers[p], resources->buffSizes[p], &dmabuf_fd, &offset));

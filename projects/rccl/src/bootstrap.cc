@@ -148,11 +148,13 @@ static inline bool bootstrapNetEnabledEffective(int nranks) {
 // overhead must be amortised over enough ranks. Defaults are documented above.
 //
 // Exposed (non-static) so test/BootstrapBidirTests.cpp can verify the env-var contract.
-// The visibility("hidden") attribute keeps the symbol off librccl.so's exported
-// dynsym table even in BUILD_TESTS=ON Debug builds (which globally relax visibility
-// to let tests link against internal helpers). Defense-in-depth on top of the
-// production -fvisibility=hidden flag — see src/CMakeLists.txt visibility block.
-__attribute__((visibility("hidden")))
+// Visibility follows the global -fvisibility flag (see src/CMakeLists.txt): production
+// and Release/non-Debug test builds compile with -fvisibility=hidden, so the symbol
+// stays off librccl.so's exported dynsym table. The BUILD_TESTS + Debug configuration
+// switches to -fvisibility=default precisely so rccl-UnitTestsFixturesDebug can link
+// against internal helpers like this one — do NOT pin an explicit visibility("hidden")
+// here, as the attribute overrides the command-line flag and breaks that link step
+// (ld.lld: undefined hidden symbol: bootstrapBidirEnabled).
 bool bootstrapBidirEnabled(int nranks, int kind) {
   if (nranks < 3) return false;
   bool netOn = bootstrapNetEnabledEffective(nranks);

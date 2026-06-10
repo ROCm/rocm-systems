@@ -78,8 +78,8 @@ def get_thread_limit() -> int:
 )
 @pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
-    REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
-    RUNTIME_ARGS = ["-e", "-v", "1", "-i", "1024", "--label", "return", "args"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
+    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "-i", "1024", "--label", "return", "args"]
 
     @pytest.mark.timeout(480)
     def test(self, mode, thread_count, thread_limit_env):
@@ -88,8 +88,8 @@ class TestThreadLimit(RocprofsysTest):
             "thread-limit",
             env=thread_limit_env,
             run_args=["35", "2", str(thread_count)],
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
         )
         thread_limit = get_thread_limit()
         pass_value = thread_count

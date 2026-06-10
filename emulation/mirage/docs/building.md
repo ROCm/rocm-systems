@@ -193,7 +193,7 @@ signal → stop) through the public CLI and HTTP surfaces.
   them or set `NODE`/`NPM`.
 - **`command not found: <cmd>` from `mirage run`** — the program you asked
   mirage to run doesn't exist on `PATH` inside the session; the exec ends
-  with exit code 127 and the message is shown on its stderr.
+  with exit code 127 and the message is shown on its stdout.
 - **rocjitsu reported as not installed** — build rocjitsu (Option B) and
   rebuild mirage with `ROCJITSU_ROOT` set, or run
   `mirage state builtins` to extract any embedded assets.
