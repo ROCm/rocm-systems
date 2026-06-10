@@ -558,6 +558,16 @@ add_test(
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+add_executable(rj_co_smoke_test tools/rj_co_smoke_test.cpp)
+target_link_libraries(rj_co_smoke_test PRIVATE GTest::gtest)
+rj_configure_target(rj_co_smoke_test TEST)
+add_dependencies(rj_co_smoke_test rj_co)
+add_test(
+    NAME "RjCo.Smoke"
+    COMMAND rj_co_smoke_test $<TARGET_FILE:rj_co>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
 # --- Scaling test (standalone executable) ---
 
 add_executable(scaling_test scaling_test.cpp)

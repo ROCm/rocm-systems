@@ -43,6 +43,10 @@ add_executable(rj_waitcheck waitcheck_main.cpp)
 target_link_libraries(rj_waitcheck PRIVATE rocjitsu_tooling)
 rj_configure_target(rj_waitcheck TOOL)
 
+add_executable(rj_co code_object_tool_main.cpp)
+target_link_libraries(rj_co PRIVATE rocjitsu_tooling)
+rj_configure_target(rj_co TOOL)
+
 add_custom_target(
     rj_waitcheck_gfx950_tensile_e2e
     COMMAND
