@@ -738,26 +738,26 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle /*processor_
 
 amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle,
                             uint32_t /*sensor_ind*/, int64_t *speed) {
-    if (speed == nullptr) return AMDSMI_STATUS_INVAL;
     auto *device = reinterpret_cast<Device *>(processor_handle);
     if (device == nullptr) return AMDSMI_STATUS_INVAL;
     GpuMetricsInfo m{};
     auto code = device->QueryGpuMetricsInfo(&m);
     if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
     if (m.current_fan_speed == UINT32_MAX) return AMDSMI_STATUS_NOT_SUPPORTED;
+    if (speed == nullptr) return AMDSMI_STATUS_INVAL;
     *speed = static_cast<int64_t>(m.current_fan_speed);
     return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handle,
                                         uint32_t /*sensor_ind*/, int64_t *speed) {
-    if (speed == nullptr) return AMDSMI_STATUS_INVAL;
     auto *device = reinterpret_cast<Device *>(processor_handle);
     if (device == nullptr) return AMDSMI_STATUS_INVAL;
     GpuMetricsInfo m{};
     auto code = device->QueryGpuMetricsInfo(&m);
     if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
     if (m.current_fan_speed_percent == UINT32_MAX) return AMDSMI_STATUS_NOT_SUPPORTED;
+    if (speed == nullptr) return AMDSMI_STATUS_INVAL;
     // amdsmi fan speed is expressed as a PWM value 0-255 (percentage * 255 / 100)
     *speed = static_cast<int64_t>(m.current_fan_speed_percent) * 255 / 100;
     return AMDSMI_STATUS_SUCCESS;
@@ -1665,16 +1665,18 @@ amdsmi_status_t  amdsmi_get_gpu_od_volt_curve_regions(
 amdsmi_status_t  amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_handle,
                             amdsmi_voltage_type_t sensor_type,
                             amdsmi_voltage_metric_t metric, int64_t *voltage) {
-    // Check support first so nullptr path returns NOT_SUPPORTED consistently
-    if (metric != AMDSMI_VOLT_CURRENT) return AMDSMI_STATUS_NOT_SUPPORTED;
-    if (sensor_type != AMDSMI_VOLT_TYPE_VDDGFX) return AMDSMI_STATUS_NOT_SUPPORTED;
-    if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
     auto *device = reinterpret_cast<Device *>(processor_handle);
     if (device == nullptr) return AMDSMI_STATUS_INVAL;
+    // Check supported argument combinations and device capability before
+    // validating the output pointer so unsupported requests keep returning
+    // NOT_SUPPORTED, even when callers probe with a nullptr output buffer.
+    if (metric != AMDSMI_VOLT_CURRENT) return AMDSMI_STATUS_NOT_SUPPORTED;
+    if (sensor_type != AMDSMI_VOLT_TYPE_VDDGFX) return AMDSMI_STATUS_NOT_SUPPORTED;
     GpuMetricsInfo m{};
     auto code = device->QueryGpuMetricsInfo(&m);
     if (code != ErrorCode::Success) return translateCodeToSmiStatus(code);
     if (m.voltage_gfx == UINT32_MAX) return AMDSMI_STATUS_NOT_SUPPORTED;
+    if (voltage == nullptr) return AMDSMI_STATUS_INVAL;
     *voltage = static_cast<int64_t>(m.voltage_gfx);
     return AMDSMI_STATUS_SUCCESS;
 }
