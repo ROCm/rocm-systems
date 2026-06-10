@@ -4696,9 +4696,13 @@ class CodeGenerator:
                     _size_overrides = self.isa_spec.profile.inst_size_overrides
                     if inst.name in _size_overrides:
                         ctor_body_parts.append(f'size_ = {_size_overrides[inst.name]};')
-                        private_members.append(cgen.Statement('uint32_t x2_dw1_ = 0'))
-                        init_list_parts.append('x2_dw1_(inst[-1])')
-                        init_list = ', '.join(init_list_parts)
+                        ctor_body_parts.append(
+                            'raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};'
+                            'raw_encoding_ = raw_words_.data();'
+                        )
+                        private_members.append(
+                            cgen.Statement('std::array<uint32_t, 4> raw_words_{}')
+                        )
 
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (
@@ -5225,11 +5229,18 @@ class CodeGenerator:
                         False,
                     ),
                 ]
+                _has_size_overrides = any(
+                    i.name in self.isa_spec.profile.inst_size_overrides
+                    for i in all_insts
+                )
+                if _has_size_overrides:
+                    h_includes.append(('array', True))
                 if (
                     self._supports_gfx1250_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    h_includes.append(('array', True))
+                    if not _has_size_overrides:
+                        h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
                         cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_class())

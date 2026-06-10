@@ -423,10 +423,10 @@ def gen_mfma(
                 L.append(f'                                     }});')
                 L.append(f'  }} else {{')
                 L.append(
-                    f'    uint32_t sa_base = amdgpu::src_base(vb, x2_dw1_ & 0x1FFu);'
+                    f'    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);'
                 )
                 L.append(
-                    f'    uint32_t sb_base = amdgpu::src_base(vb, (x2_dw1_ >> 9) & 0x1FFu);'
+                    f'    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);'
                 )
                 L.append(f'    amdgpu::dispatch_matrix_fmt_pair(')
                 L.append(
