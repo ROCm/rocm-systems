@@ -1174,21 +1174,26 @@ def test_pc_sampling_analyze_sorting_type(
 
 def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
+    monkeypatch,
 ) -> None:
     """Analyze in db mode produces a populated pcsampling table."""
-    workload_dir = common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
-    db_path = Path(workload_dir) / "pc_sampling_db_test.db"
+    workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
+    db_name = "pc_sampling_db_test"
+    db_path = workload_dir / f"{db_name}.db"
+    # --output-name rejects path separators, so run from inside the workload
+    # dir to keep the db there; clean_output_dir then removes it with the dir.
+    monkeypatch.chdir(workload_dir)
     try:
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
-            workload_dir,
+            str(workload_dir),
             "--block",
             "21",
             "--output-format",
             "db",
             "--output-name",
-            str(db_path.with_suffix("")),
+            db_name,
         ])
         assert code == 0
         assert db_path.is_file()
@@ -1201,7 +1206,7 @@ def test_pc_sampling_analyze_db_output(
             conn.close()
         assert row_count > 0
     finally:
-        common.clean_output_dir(True, workload_dir)
+        common.clean_output_dir(True, str(workload_dir))
 
 
 def test_pc_sampling_analyze_list_stats(
