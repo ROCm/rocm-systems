@@ -219,6 +219,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       device/TestOp128.cpp
+      device/TestTDM.cpp
       device/GinDeviceTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
