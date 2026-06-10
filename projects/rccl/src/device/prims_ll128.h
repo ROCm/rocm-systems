@@ -496,7 +496,9 @@ public:
     flagThread((tid % (NCCL_LL128_LINEELEMS/2)) == (NCCL_LL128_LINEELEMS/2 - 1)),
     group(group), threadsPerBlock(blockDim.x){
 #ifdef ENABLE_WARP_SPEED
-    auto *channel = &ncclShmem.warpChannel[warpInBlock];
+    auto *channel = ncclShmem.warpComm
+        ? &ncclShmem.warpChannel[warpInBlock]
+        : &ncclShmem.channel;
 #else
     auto *channel = &ncclShmem.channel;
 #endif
