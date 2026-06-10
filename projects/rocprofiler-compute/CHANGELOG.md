@@ -32,6 +32,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed `num_hbm_channels` to `num_memory_channels` in machine specifications to unify memory channel reporting across GPU families.
 
+* Improved vL1D Cache Hit and vL1D Cache Hit Rate metric equations to more accurately reflect vL1 cache behavior on MI300/MI350.
+
 ### Removed
 
 * Removed the multi-node analysis options ``--nodes``, ``--list-nodes`` (analyze mode) and the experimental ``--spatial-multiplexing`` option (profile and analyze modes). These features did not work as expected and will be redesigned in a future release.
