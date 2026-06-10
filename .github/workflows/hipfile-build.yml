@@ -98,7 +98,7 @@ jobs:
         run: |
           echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
           echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo ${AIS_INPUT_CXX_COMPILER} | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
+          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         # We should expect that there are multiple instances of this job with different cxx_compilers.
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.

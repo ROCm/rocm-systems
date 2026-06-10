@@ -38,7 +38,7 @@ jobs:
       - name: Set early AIS CI environment variables
         run: |
           echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo ${AIS_INPUT_CXX_COMPILER} | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
+          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         run: |
           echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}" >> "${GITHUB_ENV}"
