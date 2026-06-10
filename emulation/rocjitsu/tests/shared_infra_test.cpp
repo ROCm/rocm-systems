@@ -338,14 +338,14 @@ TEST(ScratchAddrCalcTest, FlatScratchUsesWavefrontBase) {
   // Set EXEC so only lane 0 is active.
   wf->set_exec(1ULL);
 
-  // Build a FlatMachineInst with seg=1 (SCRATCH), saddr=0x7F (no SADDR),
-  // offset=0x10.
-  cdna4::FlatMachineInst inst{};
+  // Build a FlatScratchMachineInst with seg=1 (SCRATCH), sve=1 (VADDR enabled),
+  // saddr=0x7F (no SADDR), offset=0x10.
+  cdna4::FlatScratchMachineInst inst{};
   inst.seg = 1;       // SCRATCH
+  inst.sve = 1;       // VADDR enabled
   inst.saddr = 0x7F;  // No SADDR
   inst.addr = 0;      // VGPR index 0
-  inst.offset = 0x10; // 12-bit immediate offset
-  inst.pad_12 = 0;
+  inst.offset = 0x10; // 13-bit signed offset
 
   amdgpu::VectorMemState d(amdgpu::GLOBAL_MEM);
   amdgpu::addr_calc::flat_calculate_addresses(inst, *wf, d);

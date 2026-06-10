@@ -40,7 +40,7 @@
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
-#include "library/components/ucx_gotcha.hpp"
+#include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/kokkosp.hpp"
@@ -674,7 +674,7 @@ rocprofsys_init_tooling_hidden(void)
                 rocprofiler_sdk::pause();
                 sampling::pause();
                 component::mpi_gotcha::pause();
-                component::ucx_gotcha::pause();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
                 component::vaapi_gotcha::pause();
                 ::rocprofsys::pthread_gotcha::pause();
@@ -688,7 +688,7 @@ rocprofsys_init_tooling_hidden(void)
                 rocprofiler_sdk::resume();
                 sampling::resume();
                 component::mpi_gotcha::resume();
-                component::ucx_gotcha::resume();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
                 component::vaapi_gotcha::resume();
                 ::rocprofsys::pthread_gotcha::resume();
@@ -717,7 +717,7 @@ rocprofsys_init_tooling_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Setting up UCX traces...\n");
-        component::ucx_gotcha::start();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::start();
     }
 
     if(get_use_shmem())
@@ -1022,7 +1022,7 @@ rocprofsys_finalize_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Shutting down UCX tracing...\n");
-        component::ucx_gotcha::shutdown();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::shutdown();
     }
 
     if(get_use_shmem())
