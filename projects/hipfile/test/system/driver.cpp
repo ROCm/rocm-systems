@@ -163,6 +163,28 @@ TEST_F(DriverInit, hipFileDriverCloseDeregisteresHandle)
     ASSERT_EQ(hipFileHandleRegister(&handle, &descr), HIPFILE_SUCCESS);
 }
 
+TEST_F(DriverInit, hipFileDriverCloseClearsBatchContexts)
+{
+    hipFileBatchHandle_t handle{};
+
+    ASSERT_EQ(hipFileDriverOpen(), HIPFILE_SUCCESS);
+    ASSERT_EQ(hipFileUseCount(), 1);
+    ASSERT_EQ(hipFileBatchIOSetUp(&handle, 1), HIPFILE_SUCCESS);
+    ASSERT_NE(handle, nullptr);
+
+    ASSERT_EQ(hipFileDriverClose(), HIPFILE_SUCCESS);
+    ASSERT_EQ(hipFileUseCount(), 0);
+
+    hipFileIOEvents_t event{};
+    unsigned          nr{1};
+#ifdef __HIP_PLATFORM_NVIDIA__
+    auto constexpr expected_error = hipFileInternalError;
+#else
+    auto constexpr expected_error = hipFileInvalidValue;
+#endif
+    ASSERT_EQ(hipFileBatchIOGetStatus(handle, 0, &nr, &event, nullptr), HipFileOpError(expected_error));
+}
+
 TEST_F(DriverInit, hipFileReadAsync)
 {
     ASSERT_EQ(hipFileReadAsync(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr),
@@ -232,9 +254,7 @@ TEST_F(DriverNoInit, hipFileBatchIOGetStatus)
     hipFileBatchHandle_t handle{};
     hipFileIOEvents_t    event{};
     unsigned             nr{1};
-    struct timespec      ts {
-        0, 0
-    };
+    struct timespec      ts{0, 0};
 
 #ifdef __HIP_PLATFORM_AMD__
     ASSERT_EQ(hipFileBatchIOGetStatus(handle, 0, &nr, &event, &ts), HipFileOpError(hipFileInvalidValue));
