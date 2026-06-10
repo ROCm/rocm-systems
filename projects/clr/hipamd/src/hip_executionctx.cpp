@@ -269,8 +269,8 @@ hipError_t ExecutionCtx::deviceGetDevResource(int device, hipDevResource* resour
 
   hipDeviceProp_t prop{};
   HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
-  uint32_t cuCount = static_cast<uint32_t>(prop.multiProcessorCount);
   uint32_t alignment = getSmAlignment(device);
+  uint32_t cuCount = static_cast<uint32_t>(prop.multiProcessorCount) * alignment;
 
   resource->sm.smCount = cuCount;
   resource->sm.minSmPartitionSize = alignment;
@@ -727,6 +727,7 @@ hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource
         resource->sm.smCount = cnt;
       }
       uint32_t alignment = ExecutionCtx::getSmAlignment(stream->DeviceId());
+      resource->sm.smCount *= alignment;
       resource->sm.smCoscheduledAlignment = alignment;
       resource->sm.minSmPartitionSize = alignment;
       resource->sm.flags = 0;

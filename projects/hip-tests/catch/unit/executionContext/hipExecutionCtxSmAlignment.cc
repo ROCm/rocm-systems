@@ -52,7 +52,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource) {
     REQUIRE((alignment >= 1));
 #endif
     REQUIRE(resource.sm.minSmPartitionSize == alignment);
-    REQUIRE(resource.sm.smCount == static_cast<unsigned int>(prop.multiProcessorCount));
+    REQUIRE(resource.sm.smCount == static_cast<unsigned int>(prop.multiProcessorCount) * alignment);
   }
 }
 

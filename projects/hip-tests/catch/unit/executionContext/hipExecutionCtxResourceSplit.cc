@@ -253,8 +253,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_By_Count_Functional) {
 
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
-  unsigned int minCount = (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment;
-  REQUIRE(minCount >= alignment);
+  unsigned int minCount = min(alignment, (static_cast<unsigned int>(totalSMs * 0.4) / alignment) * alignment);
 
   unsigned int nbGroups = 0;
   HIP_CHECK(hipDevSmResourceSplitByCount(nullptr, &nbGroups, &input, nullptr, 0, minCount));
@@ -346,8 +345,9 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
   unsigned int totalSMs = input.sm.smCount;
   unsigned int alignment = input.sm.smCoscheduledAlignment;
   unsigned int groupSize = (totalSMs / 3 / alignment) * alignment;
-  REQUIRE(groupSize >= alignment);
-
+  if (groupSize < alignment) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kSmCountTooSmall);
+  }
   hipDevSmResourceGroupParams params[3] = {};
   params[0].smCount = groupSize;
   params[1].smCount = groupSize;

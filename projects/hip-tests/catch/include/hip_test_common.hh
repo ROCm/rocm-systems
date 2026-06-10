@@ -517,6 +517,8 @@ inline bool isKernelArgPrefetchSupported() {
  * Use these instead of duplicating slightly different wording for the same condition.
  */
 namespace SkipReason {
+inline constexpr char const kSmCountTooSmall[] =
+    "sm count is too small for this test.";
 inline constexpr char const kPeerAccessUnavailable[] =
     "peer access is not available between devices.";
 inline constexpr char const kFewerThanTwoGpus[] =
