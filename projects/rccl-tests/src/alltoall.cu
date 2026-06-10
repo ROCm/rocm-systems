@@ -259,12 +259,14 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   int tid = threadIdx.x + blockIdx.x * blockDim.x;
   int nthreads = blockDim.x * gridDim.x;
 
-  /* send to all peers via GIN */
+  /* send to all peers via GIN, rotating start peer to avoid hotspots */
   const size_t size = count * sizeof(T);
-  for (int r=tid; r<devComm.nRanks; r+=nthreads) {
-    gin.put(ncclTeamWorld(devComm), r,
+  for (int i = tid; i < devComm.nRanks; i += nthreads) {
+    int peer = 1 + devComm.rank + i;
+    if (peer >= devComm.nRanks) peer -= devComm.nRanks;
+    gin.put(ncclTeamWorld(devComm), peer,
         recvwin, recvoffset + devComm.rank * size,
-        sendwin, sendoffset + r * size,
+        sendwin, sendoffset + peer * size,
         size, ncclGin_SignalInc{signalIndex});
   }
 
