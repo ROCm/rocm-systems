@@ -56,7 +56,6 @@ env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
-  ROCM_VERSION: "7.2.0"
 
 jobs:
   prepare_matrix:
@@ -133,37 +132,25 @@ jobs:
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Install amdgpu and dependencies
+      # TODO: Add rocjpeg and rocdecode
+      - name: Install dependencies
         shell: bash
         run: |
-          ROCM_MAJOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $1}')
-          ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
-          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-          wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
-          apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
-          apt install -y amd-smi-lib libdw-dev rocjpeg-test rocdecode-test rccl-dev
-          echo "✅ amdgpu and ROCm dependencies Installed!"
+          apt install -y libdw-dev pkg-config
+          echo "✅ ROCm dependencies Installed!"
 
       - name: Install MPI
         run: |
           apt install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
-      # TODO: Remove this and replace with TheRock tarball when runtime error is fixed
-      - name: Install ROCm
-        if: false
-        run: |
-          apt install -y rocm-dev
-          echo "✅ ROCm Installation Complete!"
-
-      # TODO: Enable this step and remove the above step once runtime error is fixed
       - name: Install Latest Nightly ROCm
-        if: true
         run: |
           set -e
+          mkdir ${{ env.ROCM_PATH }}
           TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
