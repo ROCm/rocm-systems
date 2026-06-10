@@ -25,23 +25,8 @@
 
 #include <linux/if_ether.h>
 #include <linux/ioctl.h>
-#include <linux/types.h>
-#include <linux/version.h>
-
-/* <linux/time_types.h> only exists in kernel headers >= 5.1 (Aug 2019).
- * Provide a portable shim for older targets (e.g. Debian 10 / kernel 4.19),
- * matching the kernel definition exactly. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
 #include <linux/time_types.h>
-#else
-#ifndef __kernel_timespec_defined
-#define __kernel_timespec_defined
-struct __kernel_timespec {
-  __kernel_long_t tv_sec;
-  long long tv_nsec;
-};
-#endif
-#endif
+#include <linux/types.h>
 
 #define CFG_LABEL_SIZE 32
 #define CFG_PCI_ADDR_MAX_LEN 32
