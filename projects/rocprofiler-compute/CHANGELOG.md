@@ -13,7 +13,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
-* Added GPU support of GPU metrics for gfx1150 and gfx1152 hardware.
+* Added support for GPU metrics on gfx1150 and gfx1152 hardware.
 
 ### Changed
 
