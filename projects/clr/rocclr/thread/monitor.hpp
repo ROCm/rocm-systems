@@ -18,11 +18,16 @@
 
 namespace amd {
 
-class Monitor {
+class alignas(64) Monitor {
  public:
   explicit Monitor() {
-    waits_.store(0);                               // 0 waiting thread initially
-    notifyState_.store(notifyState::notNotified);  // initially not notified
+    // Relaxed: the Monitor is still under construction and cannot be observed by
+    // another thread yet, so no ordering is required. seq_cst (the default)
+    // would emit a locked xchg per store, which shows up in hot construction
+    // paths (e.g. amd::Event has two Monitors built per object).
+    waits_.store(0, std::memory_order_relaxed);  // 0 waiting thread initially
+    notifyState_.store(notifyState::notNotified,
+                       std::memory_order_relaxed);  // initially not notified
   }
 
   //! Try to acquire the lock, return true if successful, false if failed.
@@ -148,15 +153,36 @@ class Monitor {
 #endif
 
  private:
-  std::mutex mutex_;
-
   enum class notifyState : uint32_t { notNotified = 0, oneNotified = 1, allNotified = 2 };
-  std::condition_variable cv_;  //!< The condition variable for sync on the mutex
-  std::atomic<int> waits_;
+
+  // The members are split across separate cache lines to avoid false sharing.
+  // mutex_ is written on every lock()/unlock(); the spin atomics (waits_ and
+  // notifyState_) are read in the spin loop of wait() and written by notify*();
+  // cv_ is only touched on the slow path. Keeping the three groups on distinct
+  // cache lines stops the spin loop from being invalidated by lock/unlock or
+  // condition-variable traffic. alignas(64) on the class also rounds sizeof up
+  // to a whole number of cache lines, so adjacent Monitors never share a line.
+
+  //! Cache line 0: the mutex (hot, written on every lock/unlock).
+  alignas(64) std::mutex mutex_;
+
+  //! Cache line 1: the spin-wait state plus the read-only spin tunables.
+  alignas(64) std::atomic<int> waits_;
   std::atomic<notifyState> notifyState_;
   const int maxCount_{55};  //!< Max count of spins in wait()
   const int maxReadSpinIter_{50};
+
+  //! Cache line 2: the condition variable (cold, slow path only).
+  alignas(64) std::condition_variable cv_;
 };
+
+static_assert(alignof(Monitor) == 64,
+              "Monitor must be aligned to a 64-byte cache line so that adjacent "
+              "Monitors never share a line (false sharing).");
+static_assert(sizeof(Monitor) % 64 == 0,
+              "Monitor must occupy a whole number of cache lines so that its hot "
+              "members never straddle a line and a following object can never "
+              "share its trailing line (false sharing).");
 
 class ScopedLock : StackObject {
  public:

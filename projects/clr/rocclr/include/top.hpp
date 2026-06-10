@@ -153,7 +153,9 @@ class MemoryPoolObject {
 /*! \brief For all reference counted objects.
  */
 class ReferenceCountedObject {
-  std::atomic<uint> referenceCount_;
+  // Isolate the reference count on its own cache line
+  alignas(64) std::atomic<uint> referenceCount_;
+  char referenceCountPadding_[64 - sizeof(std::atomic<uint>)];
 
  protected:
   virtual ~ReferenceCountedObject() {}
@@ -162,8 +164,10 @@ class ReferenceCountedObject {
  public:
   ReferenceCountedObject() : referenceCount_(1) {}
 
-  void* operator new(size_t size) { return ::operator new(size); }
-  void operator delete(void* p) { return ::operator delete(p); }
+  // The type is over-aligned (referenceCount_ sits on its own cache line), so
+  // allocations must use the aligned new/delete to honor that alignment.
+  void* operator new(size_t size) { return ::operator new(size, std::align_val_t(64)); }
+  void operator delete(void* p) { return ::operator delete(p, std::align_val_t(64)); }
   void* operator new(size_t size, size_t extSize) {
     return ReferenceCountedObject::operator new(size + extSize);
   };

@@ -30,7 +30,9 @@ Event::Event(HostQueue& queue, bool profilingEnabled)
       device_(&queue.device()),
       profilingInfo_(profilingEnabled) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
-  notified_.clear();
+  // Relaxed: the event is still under construction and not yet shared, so the
+  // default seq_cst clear() (a locked xchg) is unnecessary overhead.
+  notified_.clear(std::memory_order_relaxed);
 }
 
 // ================================================================================================
@@ -41,7 +43,9 @@ Event::Event()
       notify_event_(nullptr),
       device_(nullptr) {
   event_entry_scope_.store(Device::kCacheStateInvalid, std::memory_order_relaxed);
-  notified_.clear();
+  // Relaxed: the event is still under construction and not yet shared, so the
+  // default seq_cst clear() (a locked xchg) is unnecessary overhead.
+  notified_.clear(std::memory_order_relaxed);
 }
 
 // ================================================================================================
@@ -334,7 +338,9 @@ void Command::operator delete(void* ptr) {
   if (DEBUG_CLR_SYSMEM_POOL) {
     command_pool_->Free(ptr);
   } else {
-    ::operator delete(ptr);
+    // Command is over-aligned (ReferenceCountedObject isolates referenceCount_
+    // on its own cache line), so use the aligned delete.
+    ::operator delete(ptr, std::align_val_t(alignof(Command)));
   }
 }
 
@@ -343,7 +349,9 @@ void* Command::operator new(size_t size) {
   if (DEBUG_CLR_SYSMEM_POOL) {
     return command_pool_->Alloc(size);
   } else {
-    return ::operator new(size);
+    // Command is over-aligned (ReferenceCountedObject isolates referenceCount_
+    // on its own cache line), so use the aligned new.
+    return ::operator new(size, std::align_val_t(alignof(Command)));
   }
 }
 
