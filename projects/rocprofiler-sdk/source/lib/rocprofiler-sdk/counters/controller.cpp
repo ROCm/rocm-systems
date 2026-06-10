@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -32,6 +33,8 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
+
+#include <mutex>
 
 namespace rocprofiler
 {
@@ -166,6 +169,24 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
         ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
+
+        // On platforms without the KFD profiler interface (e.g. WSL, which has no
+        // /dev/kfd), the hardware counter blocks cannot be armed via
+        // AMDKFD_IOC_PROFILER. Dispatch profiling still runs and emits one row per
+        // counter per dispatch, but every Counter_Value reads back zero. Warn once so
+        // the all-zero output is not mistaken for a configuration bug.
+        if(!counters::counter_collection_has_device_lock())
+        {
+            static std::once_flag warned_once{};
+            std::call_once(warned_once, []() {
+                ROCP_WARNING
+                    << "Hardware performance counter collection is not supported on this "
+                       "platform: the KFD profiler interface (AMDKFD_IOC_PROFILER) is "
+                       "unavailable, so counter blocks cannot be armed. Dispatch profiling will "
+                       "run but all Counter_Value entries will be zero. This is expected under "
+                       "WSL/DXG where /dev/kfd is not exposed.";
+            });
+        }
     }
 
     auto& cb = *ctx.dispatch_counter_collection->callbacks.emplace_back(

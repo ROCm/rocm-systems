@@ -22,11 +22,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
 import sys
 import pytest
 import numpy as np
 import pandas as pd
 import re
+
+# WSL/DXG does not expose /dev/kfd, so the KFD profiler interface cannot arm the
+# hardware counter blocks and every Counter_Value reads back 0. (gfx115x additionally
+# has known AQLProfile counter-reporting bugs.) Only assert non-zero counter values
+# when the platform can actually collect them.
+HW_COUNTERS_SUPPORTED = os.path.exists("/dev/kfd")
 
 kernel_list = sorted(
     ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
@@ -66,7 +73,8 @@ def test_validate_counter_collection_pmc1_extra_counters(input_data: pd.DataFram
 
     assert len(df["Counter_Value"]) > 0
     assert df["Counter_Name"].str.contains("TEST_YAML_LOAD").all()
-    assert (df["Counter_Value"].astype(int).values > 0).all()
+    if HW_COUNTERS_SUPPORTED:
+        assert (df["Counter_Value"].astype(int).values > 0).all()
 
     di_list = df["Dispatch_Id"].astype(int).values.tolist()
     di_uniq = sorted(df["Dispatch_Id"].unique().tolist())

@@ -83,11 +83,11 @@ set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPEN
 #
 # optional libhsakmt-windows (librocdxg) topology shim for WSL
 #
-# Off by default and has no effect on normal builds. When enabled, the WSL
-# platform agent fetches real KFD-equivalent topology through the librocdxg
-# shim (hsaKmtOpenKFD + hsaKmtAcquireSystemProperties + hsaKmtGetNodeProperties)
-# instead of the hardcoded fallback. Requires a built librocdxg shared library
-# and the hsakmt headers from rocr-runtime/libhsakmt.
+# Off by default and has no effect on normal builds. When enabled, the WSL platform agent
+# fetches real KFD-equivalent topology through the librocdxg shim (hsaKmtOpenKFD +
+# hsaKmtAcquireSystemProperties + hsaKmtGetNodeProperties) instead of the hardcoded
+# fallback. Requires a built librocdxg shared library and the hsakmt headers from
+# rocr-runtime/libhsakmt.
 #
 # ----------------------------------------------------------------------------------------#
 
@@ -118,7 +118,8 @@ if(ROCPROFILER_USE_LIBHSAKMT_WINDOWS)
     target_include_directories(rocprofiler-sdk-object-library
                                PRIVATE ${ROCPROFILER_LIBHSAKMT_WINDOWS_ROOT}/include)
     message(
-        STATUS "[rocprofiler-sdk] libhsakmt-windows shim: ${ROCPROFILER_LIBROCDXG_LIBRARY}")
+        STATUS
+            "[rocprofiler-sdk] libhsakmt-windows shim: ${ROCPROFILER_LIBROCDXG_LIBRARY}")
 endif()
 
 # ----------------------------------------------------------------------------------------#

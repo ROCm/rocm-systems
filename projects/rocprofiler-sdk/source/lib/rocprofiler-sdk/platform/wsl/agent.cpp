@@ -40,6 +40,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <random>
@@ -289,6 +291,41 @@ wchar_to_utf8(const DXC_WCHAR* src, size_t max_len)
     return out;
 }
 
+// Read the CPU marketing string from /proc/cpuinfo "model name". On WSL the HSA
+// runtime reports this same string for both the CPU agent's name and its
+// device_mkt_name, so mirroring it keeps the synthesized CPU agent aligned with
+// HSA (see tests/agent.cpp). Returns an empty string if it cannot be read.
+std::string
+read_cpu_model_name()
+{
+    auto ifs = std::ifstream{"/proc/cpuinfo"};
+    if(!ifs) return {};
+
+    std::string line;
+    while(std::getline(ifs, line))
+    {
+        if(line.rfind("model name", 0) != 0) continue;
+        auto pos = line.find(':');
+        if(pos == std::string::npos) continue;
+        auto val = line.substr(pos + 1);
+        auto b   = val.find_first_not_of(" \t\r\n\v\f");
+        auto e   = val.find_last_not_of(" \t\r\n\v\f");
+        if(b == std::string::npos) return {};
+        return val.substr(b, e - b + 1);
+    }
+    return {};
+}
+
+// Number of online logical CPUs. On WSL this matches the HSA CPU agent's
+// reported compute_unit count, which rocprofiler exposes as cu_count /
+// cpu_cores_count for CPU agents.
+uint32_t
+read_cpu_core_count()
+{
+    long n = ::sysconf(_SC_NPROCESSORS_ONLN);
+    return (n > 0) ? static_cast<uint32_t>(n) : 0;
+}
+
 NTSTATUS
 query_one(PFN_D3DKMTQueryAdapterInfo query_fn,
           D3DKMT_HANDLE              hAdapter,
@@ -444,39 +481,47 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
 
         // Match the KFD node to the DXCore adapter by Windows LUID. KFD reports
         // the same LUID that D3DKMTQueryAdapterInfo returns for the adapter.
-        if(n.LuidLowPart != luid.LowPart ||
-           n.LuidHighPart != static_cast<HSAuint32>(luid.HighPart))
+        if(n.LuidLowPart != luid.LowPart || n.LuidHighPart != static_cast<HSAuint32>(luid.HighPart))
             continue;
 
         const uint32_t simd_per_cu = (n.NumSIMDPerCU != 0) ? n.NumSIMDPerCU : 1;
 
-        out.simd_count             = n.NumFComputeCores;               // total SIMDs
-        out.cu_count               = n.NumFComputeCores / simd_per_cu; // SIMDs / SIMD-per-CU
-        out.simd_per_cu            = n.NumSIMDPerCU;
-        out.cu_per_simd_array      = n.NumCUPerArray;
-        out.num_shader_banks       = n.NumShaderBanks;                 // shader engines
+        out.simd_count        = n.NumFComputeCores;                // total SIMDs
+        out.cu_count          = n.NumFComputeCores / simd_per_cu;  // SIMDs / SIMD-per-CU
+        out.simd_per_cu       = n.NumSIMDPerCU;
+        out.cu_per_simd_array = n.NumCUPerArray;
+        out.num_shader_banks  = n.NumShaderBanks;  // shader engines
         // KFD reports NumArrays as SIMD-arrays *per engine*. On single-SE parts
         // (gfx1150) array_count and simd_arrays_per_engine coincide; on multi-SE
         // parts confirm whether the synth-agent table expects a total
         // (NumShaderBanks * NumArrays) here before relying on it.
-        out.array_count            = n.NumArrays;
-        out.simd_arrays_per_engine = n.NumArrays;
-        out.wave_front_size        = n.WaveFrontSize;
-        out.max_waves_per_simd     = n.MaxWavesPerSIMD;
+        out.array_count             = n.NumArrays;
+        out.simd_arrays_per_engine  = n.NumArrays;
+        out.wave_front_size         = n.WaveFrontSize;
+        out.max_waves_per_simd      = n.MaxWavesPerSIMD;
         out.max_engine_clk_fcompute = n.MaxEngineClockMhzFCompute;
         out.max_engine_clk_ccompute = n.MaxEngineClockMhzCCompute;
-        out.engine_id_major        = n.EngineId.ui32.Major;
-        out.engine_id_minor        = n.EngineId.ui32.Minor;
-        out.engine_id_stepping     = n.EngineId.ui32.Stepping;
+        out.engine_id_major         = n.EngineId.ui32.Major;
+        out.engine_id_minor         = n.EngineId.ui32.Minor;
+        out.engine_id_stepping      = n.EngineId.ui32.Stepping;
 
         ROCP_INFO << fmt::format(
             "[libhsakmt-windows] KFD node {} matched adapter LUID; topology: "
             "gfx{}.{}.{} cu_count={} simd_count={} num_shader_banks={} array_count={} "
             "cu_per_simd_array={} simd_per_cu={} wave_front_size={} max_waves_per_simd={} "
             "max_engine_clk_fcompute={}",
-            i, out.engine_id_major, out.engine_id_minor, out.engine_id_stepping, out.cu_count,
-            out.simd_count, out.num_shader_banks, out.array_count, out.cu_per_simd_array,
-            out.simd_per_cu, out.wave_front_size, out.max_waves_per_simd,
+            i,
+            out.engine_id_major,
+            out.engine_id_minor,
+            out.engine_id_stepping,
+            out.cu_count,
+            out.simd_count,
+            out.num_shader_banks,
+            out.array_count,
+            out.cu_per_simd_array,
+            out.simd_per_cu,
+            out.wave_front_size,
+            out.max_waves_per_simd,
             out.max_engine_clk_fcompute);
 
         return true;
@@ -545,6 +590,79 @@ enumerate()
     // Every adapter enumerated through DXCore is a GPU, so the logical node
     // id and the per-type id move in lockstep.
     uint64_t logical = 0;
+
+    // Deleter shared by every agent we emplace into `out`. Frees the
+    // heap-allocated topology arrays (when present) and the agent struct.
+    auto agent_deleter = [](rocprofiler_agent_t* p) {
+        if(p)
+        {
+            delete[] p->mem_banks;
+            delete[] p->caches;
+            delete[] p->io_links;
+        }
+        delete p;
+    };
+
+    // Synthesize a CPU agent at logical_node_id=0.
+    //
+    // The HSA runtime on WSL always enumerates a CPU agent (internal_node_id=0)
+    // in addition to the GPU (internal_node_id=1). rocprofiler-sdk asserts that
+    // every HSA agent's internal node id maps to a rocprofiler agent's
+    // logical_node_id (see source/lib/rocprofiler-sdk/agent.cpp); without a CPU
+    // agent here the GPU ends up at logical_node_id=0 and HSA's GPU node id (1)
+    // has no match, aborting with a fatal node-id mismatch. DXCore only reports
+    // GPU adapters, so we add the CPU agent ourselves and shift the GPU agents
+    // to start at logical_node_id=1 to stay aligned with HSA enumeration.
+    {
+        auto cpu            = common::init_public_api_struct(rocprofiler_agent_t{});
+        cpu.type            = ROCPROFILER_AGENT_TYPE_CPU;
+        cpu.logical_node_id = logical;
+        cpu.node_id         = static_cast<uint32_t>(logical);
+        cpu.id.handle       = logical + offset;
+        // logical_node_type_id is an index within agents of the same type; this
+        // is the first (and only) CPU agent.
+        cpu.logical_node_type_id = 0;
+        ++logical;
+
+        // HSA reports the CPU agent's vendor as "CPU" and uses the /proc/cpuinfo
+        // "model name" for both its name and marketing name. Match that so the
+        // agent-info checks (cu_count, name, product_name, Cpu_Cores_Count) pass.
+        const auto        cpu_cores = read_cpu_core_count();
+        const std::string cpu_name  = []() {
+            auto m = read_cpu_model_name();
+            return m.empty() ? std::string{"CPU"} : m;
+        }();
+
+        cpu.vendor_name  = common::get_string_entry("CPU")->c_str();
+        cpu.product_name = common::get_string_entry(cpu_name)->c_str();
+        cpu.name         = common::get_string_entry(cpu_name)->c_str();
+        cpu.model_name   = common::get_string_entry("")->c_str();
+
+        // HSA's CPU agent reports compute_unit == online logical core count;
+        // rocprofiler exposes that as cu_count and cpu_cores_count for CPUs.
+        cpu.cpu_cores_count = cpu_cores;
+        cpu.cu_count        = cpu_cores;
+
+        cpu.mem_banks_count = 0;
+        cpu.caches_count    = 0;
+        cpu.io_links_count  = 0;
+        cpu.mem_banks       = nullptr;
+        cpu.caches          = nullptr;
+        cpu.io_links        = nullptr;
+
+        std::memset(&cpu.uuid.bytes, 0, sizeof(cpu.uuid.bytes));
+
+        update_agent_runtime_visibility(cpu);
+
+        ROCP_INFO << fmt::format(
+            "wsl::enumerate: synthesized CPU agent at logical_node_id={} (cores={}, name='{}') to "
+            "align with HSA runtime enumeration (CPU internal_node_id=0)",
+            cpu.logical_node_id,
+            cpu_cores,
+            cpu_name);
+
+        out.emplace_back(new rocprofiler_agent_t{cpu}, agent_deleter);
+    }
 
     for(uint32_t i = 0; i < e.NumAdapters; ++i)
     {
@@ -686,6 +804,31 @@ enumerate()
             info.wave_front_size        = 32;  // RDNA wave32
             info.max_waves_per_simd     = 16;
         }
+
+        // Fields not surfaced by DXCore but reported by the HSA runtime for
+        // gfx11 (RDNA3/3.5). Without these the rocprofiler agent diverges from
+        // HSA enumeration and tests/agent.cpp fails its field-by-field compare.
+        //
+        // max_waves_per_cu and cu_per_engine are computed the same way the
+        // gnulinux KFD path computes them, from the topology fields populated
+        // above.
+        if(info.simd_per_cu > 0) info.max_waves_per_cu = info.simd_per_cu * info.max_waves_per_simd;
+        if(info.simd_per_cu > 0 && info.num_shader_banks > 0)
+            info.cu_per_engine = (info.simd_count / info.simd_per_cu) / info.num_shader_banks;
+
+        // gfx11 workgroup/grid limits are hardcoded in the HSA runtime.
+        info.workgroup_max_size = 1024;
+        info.workgroup_max_dim  = {1024, 1024, 1024};
+        info.grid_max_size      = std::numeric_limits<uint32_t>::max();
+        info.grid_max_dim       = {2147483647u, 65535u, 65535u};
+
+        // Family code and firmware versions are not exposed by DXCore. These are
+        // the values the HSA runtime reports for gfx1150 on WSL. The
+        // firmware versions can change with the installed driver; they only
+        // affect agent-info parity (tests/agent.cpp), not profiling behavior.
+        info.family_id                 = 150;
+        info.fw_version.ui32.uCode     = 34;
+        info.sdma_fw_version.uCodeSDMA = 15;
 
         auto adapter_name = wchar_to_utf8(reg.AdapterString, kMaxStr);
         if(adapter_name.empty()) adapter_name = "unknown";

@@ -22,11 +22,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
 import sys
 import pytest
 import numpy as np
 import pandas as pd
 import re
+
+# WSL/DXG does not expose /dev/kfd, so the KFD profiler interface cannot arm the
+# hardware counter blocks and every Counter_Value reads back 0. (gfx115x additionally
+# has known AQLProfile counter-reporting bugs.) Only assert non-zero counter values
+# when the platform can actually collect them.
+HW_COUNTERS_SUPPORTED = os.path.exists("/dev/kfd")
 
 
 def unique(lst):
@@ -61,7 +68,8 @@ def validate_csv(df, kernel_list, counter_name):
 
     assert len(df["Counter_Value"]) > 0
     assert df["Counter_Name"].str.contains(counter_name).all()
-    assert (df["Counter_Value"].astype(int).values > 0).all()
+    if HW_COUNTERS_SUPPORTED:
+        assert (df["Counter_Value"].astype(int).values > 0).all()
 
 
 def validate_json(json_data, counter_name, check_dispatch):

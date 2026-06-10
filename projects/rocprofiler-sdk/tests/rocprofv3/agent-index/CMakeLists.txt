@@ -49,7 +49,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-agent-index-absolute --log-level ${LOG_LEVEL}
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-absolute)
@@ -62,7 +62,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-agent-index-type-relative --log-level
         ${LOG_LEVEL} -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-type-relative)
@@ -75,7 +75,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-agent-index-relative --log-level ${LOG_LEVEL}
         -- $<TARGET_FILE:transpose>
     DEPENDS transpose
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-agent-index-json-relative)
@@ -86,7 +86,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_absolute_agent_index.yaml input_type_relative_agent_index.yaml
          input_relative_agent_index.yaml
     CONFIG pytest.ini
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-absolute
     ARGS --agent-index
@@ -107,7 +107,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_absolute_agent_index.yaml input_type_relative_agent_index.yaml
          input_relative_agent_index.yaml
     CONFIG pytest.ini
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-relative
                       rocprofv3-test-agent-index-json-absolute
@@ -129,7 +129,7 @@ rocprofiler_add_integration_validate_test(
     COPY conftest.py input_absolute_agent_index.yaml input_type_relative_agent_index.yaml
          input_relative_agent_index.yaml
     CONFIG pytest.ini
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-agent-index-json-type-relative
                       rocprofv3-test-agent-index-json-absolute

@@ -23,19 +23,17 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
     set(IS_DISABLED ON)
 endif()
 
-# Hardware-counter enumeration and pmc-check do NOT depend on PC sampling
-# support; on RDNA targets that inherit gfx11 in basic_counters.xml (e.g.
-# gfx1150 on WSL2), SQ_WAVES / GRBM_COUNT / GL2C_HIT enumerate cleanly via
-# rocprofv3-avail. Only disable when the counters literally cannot be queried
-# (gfx906, memcheck).
+# Hardware-counter enumeration and pmc-check do NOT depend on PC sampling support; on RDNA
+# targets that inherit gfx11 in basic_counters.xml (e.g. gfx1150 on WSL2), SQ_WAVES /
+# GRBM_COUNT / GL2C_HIT enumerate cleanly via rocprofv3-avail. Only disable when the
+# counters literally cannot be queried (gfx906, memcheck).
 set(IS_HW_COUNTERS_DISABLED OFF)
-if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"
-   OR ROCPROFILER_MEMCHECK)
+if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$" OR ROCPROFILER_MEMCHECK)
     set(IS_HW_COUNTERS_DISABLED ON)
 endif()
 
-# PC sampling is not available on navi2/3/4 (gfx10/11/12), gfx906, under
-# memcheck, or when arch info is missing (e.g. WSL synth-agent path).
+# PC sampling is not available on navi2/3/4 (gfx10/11/12), gfx906, under memcheck, or when
+# arch info is missing (e.g. WSL synth-agent path).
 set(IS_PC_SAMPLING_DISABLED OFF)
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
    OR "${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$"

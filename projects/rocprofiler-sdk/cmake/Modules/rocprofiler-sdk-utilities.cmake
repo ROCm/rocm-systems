@@ -32,11 +32,16 @@ function(rocprofiler_sdk_get_gfx_architectures _VAR)
             string(REGEX MATCHALL "gfx([0-9A-Fa-f]+)" rocminfo_GFXINFO "${rocminfo_OUT}")
             list(REMOVE_DUPLICATES rocminfo_GFXINFO)
             # Fallback for environments where rocminfo enumerates no GPU agent at
-            # configure time (WSL, containers without /dev/kfd, cross-compile);
-            # use the GPU_TARGETS CMake variable if it was set explicitly.
-            if("${rocminfo_GFXINFO}" STREQUAL "" AND DEFINED GPU_TARGETS AND NOT "${GPU_TARGETS}" STREQUAL "")
+            # configure time (WSL, containers without /dev/kfd, cross-compile); use the
+            # GPU_TARGETS CMake variable if it was set explicitly.
+            if("${rocminfo_GFXINFO}" STREQUAL ""
+               AND DEFINED GPU_TARGETS
+               AND NOT "${GPU_TARGETS}" STREQUAL "")
                 set(rocminfo_GFXINFO "${GPU_TARGETS}")
-                message(STATUS "${ARG_PREFIX}rocminfo returned no GPU; using GPU_TARGETS=${GPU_TARGETS}")
+                message(
+                    STATUS
+                        "${ARG_PREFIX}rocminfo returned no GPU; using GPU_TARGETS=${GPU_TARGETS}"
+                    )
             endif()
             set(${_VAR}
                 "${rocminfo_GFXINFO}"

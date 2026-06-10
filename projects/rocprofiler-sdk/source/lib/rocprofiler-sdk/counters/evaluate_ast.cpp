@@ -285,9 +285,13 @@ load_asts()
         // and topology comes from KFD-equivalent properties.
         {
             static constexpr const char* kTopoNames[] = {
-                "array_count",       "simd_count",     "wave_front_size",
-                "simd_arrays_per_engine", "cu_per_simd_array",
-                "simd_per_cu",       "max_waves_per_simd",
+                "array_count",
+                "simd_count",
+                "wave_front_size",
+                "simd_arrays_per_engine",
+                "cu_per_simd_array",
+                "simd_per_cu",
+                "max_waves_per_simd",
             };
             uint64_t synth_metric_id = 0xFFFF0000ULL;
             for(const char* tn : kTopoNames)
@@ -295,8 +299,13 @@ load_asts()
                 if(by_name.find(tn) == by_name.end())
                 {
                     by_name.emplace(tn,
-                                    Metric(gfx, tn, std::string{}, std::string{},
-                                           std::string{}, std::string{}, std::string{},
+                                    Metric(gfx,
+                                           tn,
+                                           std::string{},
+                                           std::string{},
+                                           std::string{},
+                                           std::string{},
+                                           std::string{},
                                            synth_metric_id++));
                 }
             }
