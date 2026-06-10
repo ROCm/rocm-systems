@@ -48,6 +48,9 @@ std::vector<uint32_t>
 get_ids();
 
 void
+restore_table(hsa_amd_tool_table_t* _orig, uint64_t lib_instance);
+
+void
 copy_table(hsa_amd_tool_table_t* _orig, uint64_t lib_instance);
 
 void

@@ -1188,9 +1188,15 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 
             rocprofiler::registration::client_initialize(_client);
         }
-        return ROCPROFILER_STATUS_SUCCESS;
-        // auto status = rocprofiler::registration::late::invoke_register_propagation();
-        // return status;
+
+        auto status = rocprofiler::registration::late::invoke_register_propagation();
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_CI_LOG(WARNING) << "Failed to invoke rocprofiler-register propagation during "
+                                    "anytime initialization.";
+        }
+
+        return status;
     }
 
     // init status may be -1 (currently initializing) or 1 (already initialized).
@@ -1213,10 +1219,10 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     auto status = rocprofiler::registration::late::invoke_register_propagation();
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
-        ROCP_WARNING << "Failed to invoke rocprofiler-register propagation. "
-                     << "This is normal if runtimes have not initialized yet, or if "
-                     << "rocprofiler-register is not loaded. Runtimes that initialize "
-                     << "after this call will be automatically profiled.";
+        ROCP_CI_LOG(WARNING)
+            << "Failed to invoke rocprofiler-register propagation. This is normal if runtimes have "
+               "not initialized yet, or if rocprofiler-register is not loaded. Runtimes that "
+               "initialize after this call will be automatically profiled.";
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -1297,6 +1303,24 @@ rocprofiler_set_api_table(const char* name,
 
         auto* hip_runtime_api_table = static_cast<HipDispatchTable*>(*tables);
 
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::hip::restore_table(hip_runtime_api_table, lib_instance);
+
         // any internal modifications to the HipDispatchTable need to be done before we make the
         // copy or else those modifications will be lost when HIP API tracing is enabled
         // because the HIP API tracing invokes the function pointers from the copy below
@@ -1328,6 +1352,24 @@ rocprofiler_set_api_table(const char* name,
                                       << name << ", not " << num_tables;
 
         auto* hip_compiler_api_table = static_cast<HipCompilerDispatchTable*>(*tables);
+
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::hip::restore_table(hip_compiler_api_table, lib_instance);
 
         // any internal modifications to the HipCompilerDispatchTable need to be done before we make
         // the copy or else those modifications will be lost when HIP API tracing is enabled because
@@ -1363,6 +1405,32 @@ rocprofiler_set_api_table(const char* name,
         auto hsa_api_table_size = hsa_api_table->version.minor_id;
         auto runtime_pc_sampling_table =
             (offsetof(::HsaApiTable, pc_sampling_ext_) < hsa_api_table_size);
+#endif
+
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::hsa::restore_table(hsa_api_table->core_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->image_ext_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->finalizer_ext_, lib_instance);
+        rocprofiler::hsa::restore_table(hsa_api_table->tools_, lib_instance);
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        if(runtime_pc_sampling_table)
+            rocprofiler::hsa::restore_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
 
         // store a reference of the HsaApiTable implementations for invoking these functions

@@ -760,11 +760,7 @@ memory_allocation_save(Tp* _orig, uint64_t _tbl_instance, std::integral_constant
         // table with copy function
         auto& _allocate_func = get_next_dispatch<TableIdx, OpIdx>();
 
-        ROCP_FATAL_IF(_allocate_func && _tbl_instance == 0)
-            << _meta.name << " has non-null function pointer " << _allocate_func
-            << " despite this being the first instance of the library being copies";
-
-        if(!_allocate_func)
+        if(_tbl_instance == 0 && _orig_func != _allocate_func)
         {
             ROCP_TRACE << "copying table entry for " << _meta.name;
             _allocate_func = _orig_func;
@@ -776,6 +772,7 @@ memory_allocation_save(Tp* _orig, uint64_t _tbl_instance, std::integral_constant
         }
     }
 }
+
 template <size_t TableIdx,
           typename LookupT = internal_table,
           typename Tp,

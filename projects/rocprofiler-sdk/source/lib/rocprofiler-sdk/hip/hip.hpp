@@ -106,10 +106,17 @@ iterate_args(uint32_t                                       id,
              rocprofiler_buffer_tracing_operation_args_cb_t callback,
              void*                                          user_data);
 
+// restores the dispatch table functions to point directly to the implementation
+template <typename TableT>
+void
+restore_table(TableT* _orig, uint64_t _tbl_instance);
+
+// makes a copy of the dispatch table functions which point directly to the implementation
 template <typename TableT>
 void
 copy_table(TableT* _orig, uint64_t _tbl_instance);
 
+// installs the wrapper functions for API tracing
 template <typename TableT>
 void
 update_table(TableT* _orig);

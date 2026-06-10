@@ -43,6 +43,9 @@ get_ids();
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
 void
+restore_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
+
+void
 copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
 
 void
