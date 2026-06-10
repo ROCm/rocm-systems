@@ -17,6 +17,26 @@ on:
       sanity_check_only_for_family:
         type: boolean
         default: false
+  workflow_dispatch:
+    inputs:
+      projects_to_test:
+        type: string
+        default: "hip-tests"
+      amdgpu_families:
+        type: string
+        default: "gfx94X-dcgpu"
+      test_runs_on:
+        type: string
+        default: "linux-gfx942-1gpu-ossci-rocm"
+      platform:
+        type: string
+        default: "linux"
+      artifact_run_id:
+        type: string
+        default: ""
+      sanity_check_only_for_family:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
