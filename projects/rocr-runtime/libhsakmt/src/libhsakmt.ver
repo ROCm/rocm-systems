@@ -104,6 +104,7 @@ hsaKmtMemoryVaUnmap;
 hsaKmtMemHandleFree;
 hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
+hsaKmtSetSigbusDelay;
 local: *;
 };
 

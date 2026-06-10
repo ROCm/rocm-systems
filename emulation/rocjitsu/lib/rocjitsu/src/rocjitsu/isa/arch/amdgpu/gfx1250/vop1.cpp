@@ -3359,26 +3359,7 @@ void VMovB16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    {
-      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>((
-          ((inst_.src0 >= 256 && inst_.src0 <= 511) ? ((inst_.src0 - 256) & 0x80u) : 0u) != 0
-              ? (((inst_.src0 >= 256 && inst_.src0 <= 511)
-                      ? wf.cu().read_vgpr(wf.vgpr_alloc().base + ((inst_.src0 - 256) & 0x7fu), lane)
-                      : src0.read_lane(wf, lane)) >>
-                 16)
-              : ((inst_.src0 >= 256 && inst_.src0 <= 511)
-                     ? wf.cu().read_vgpr(wf.vgpr_alloc().base + ((inst_.src0 - 256) & 0x7fu), lane)
-                     : src0.read_lane(wf, lane)))));
-      uint32_t old_dst = wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane);
-      uint32_t merged = ((inst_.vdst & 0x80u) != 0) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
-                                                    : ((old_dst & 0xffff0000u) | src_half);
-      wf.cu().write_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane, merged);
-    }
-  }
+  amdgpu::execute_v_mov_b16_vop1(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {
@@ -3498,12 +3479,7 @@ void VMovB64Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (dpp_src0_)
     src0.set_delegate(dpp_src0_.get());
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane64(wf, lane, static_cast<uint64_t>(src0.read_lane64(wf, lane)));
-  }
+  amdgpu::execute_v_mov_b64_vop1(*this, wf);
   if (inst_.src0 == amdgpu::SRC_DPP) {
     uint64_t dpp_write_mask = 0;
     for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {

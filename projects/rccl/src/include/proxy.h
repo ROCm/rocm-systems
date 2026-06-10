@@ -440,6 +440,17 @@ struct ncclProxyConnection {
   struct ncclIntruQueue<struct proxyMemHandle, &proxyMemHandle::next> proxyMemHandleQueue;
 };
 
+#define NCCL_PROXY_CONN_POOL_SIZE_POW2 7
+#define NCCL_PROXY_CONN_POOL_SIZE      (1 << NCCL_PROXY_CONN_POOL_SIZE_POW2)
+#define NCCL_PROXY_CONN_POOL_MASK      (NCCL_PROXY_CONN_POOL_SIZE - 1)
+struct ncclProxyConnectionPool {
+  struct ncclProxyConnection** pools;
+  int banks;
+  int offset;
+};
+ncclResult_t ncclProxyGetConnection(struct ncclProxyConnectionPool* pool, int id, struct ncclProxyConnection** conn);
+ncclResult_t ncclProxyNewConnection(struct ncclProxyConnectionPool* pool, int* id);
+
 typedef ncclResult_t (*threadFunc_t)(struct ncclProxyArgs*);
 
 enum proxyMode {
