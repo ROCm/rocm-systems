@@ -11,7 +11,9 @@ binary (`IRDeviceTest.*`), so it integrates with `--gtest_filter`, the RCCL
 | File | Purpose |
 |------|---------|
 | `IR_test.cpp` | GoogleTest source — GPU kernels + `TEST_F(IRDeviceTest, …)` cases |
-| `run_IR_test.sh` | Build-and-run wrapper (links GTest) with preflight checks and env knobs |
+
+The build (`hipcc` at `-O0`, with the bitcode routed to the AMDGPU device-side
+LTO link) and the run are driven by the pytest harness in `test/ir-device/`.
 
 ## APIs tested
 
@@ -41,33 +43,37 @@ binary (`IRDeviceTest.*`), so it integrates with `--gtest_filter`, the RCCL
 
 ## Running
 
+The test is built and run through the pytest harness, which compiles
+`IR_test.cpp` once (auto-emitting `librccl_device.bc` if it is missing) and then
+runs the GoogleTest cases, skipping cleanly when prerequisites are absent:
+
 ```bash
-# From the repo root or any directory:
-cd bindings/ir/test
+cd test/ir-device
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
 
-# Basic — uses defaults (arch=gfx950, all GPUs, build/release):
-bash run_IR_test.sh
-
-# Typical invocation on a gfx942 machine, single GPU:
-ARCH=gfx942 GPU=0 bash run_IR_test.sh
-
-# Custom build directory and bitcode:
-BUILD=/path/to/rccl/build ARCH=gfx942 GPU=0 bash run_IR_test.sh
+# Typical invocation on a gfx942 machine:
+ARCH=gfx942 pytest -v
 ```
 
 ### Environment variables
 
+The harness reads these (see `test/ir-device/tests/conftest.py`):
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ARCH` | `gfx950` | `--offload-arch` passed to `hipcc` and expected bitcode target |
+| `ARCH` | `gfx942` | `--offload-arch` passed to `hipcc` and expected bitcode target |
 | `ROCM_PATH` | `/opt/rocm` | ROCm installation root |
-| `BUILD` | `<repo>/build/release` | RCCL CMake build directory |
-| `BC` | `$BUILD/lib/librccl_device.bc` | Path to the bitcode library |
-| `GTEST_ROOT` | `$BUILD/gtest` | GoogleTest install prefix (`include/` + `lib{,64}/libgtest.a`) |
-| `GPU` | *(unset — all GPUs)* | `HIP_VISIBLE_DEVICES` value (e.g. `0`) |
-| `OUTDIR` | `/tmp/ir_test` | Directory for the compiled test binary and `.ll` dump |
-| `BUILD_ONLY` | `0` | `1` = compile the test and exit (used by the pytest harness) |
-| `RUN_ARGS` | *(empty)* | Extra args for the binary, e.g. `--gtest_filter=IRDeviceTest.B6_CoopSync` |
+| `RCCL_BUILD` | `<repo>/build/release` | RCCL CMake build directory |
+| `GTEST_ROOT` | `$RCCL_BUILD/gtest` | GoogleTest install prefix (`include/` + `lib{,64}/libgtest.a`) |
+| `IR_OUTDIR` | `<workdir>/ir_test_build` | Directory for the compiled test binary |
+
+To run the compiled binary directly (after a pytest run leaves it under
+`IR_OUTDIR`), invoke it with a `--gtest_filter`, e.g.:
+
+```bash
+ir_test_build/IR_test.exe --gtest_filter=IRDeviceTest.B6_CoopSync
+```
 
 ## Expected output
 
@@ -87,7 +93,4 @@ Standard GoogleTest output, e.g.:
 ```
 
 Exit code `0` = all run cases passed (skips do not fail); `1` = at least one
-failure; `2` = preflight error (missing bitcode, headers, GTest, etc.).
-
-The script also writes a human-readable LLVM IR dump of the bitcode to
-`$OUTDIR/librccl_device.ll` for offline inspection.
+failure.

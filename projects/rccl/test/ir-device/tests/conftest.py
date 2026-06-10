@@ -52,13 +52,34 @@ GTEST_ROOT = os.environ.get("GTEST_ROOT", os.path.join(RCCL_BUILD, "gtest"))
 IR_OUTDIR = os.environ.get("IR_OUTDIR", os.path.join(WORKDIR, "ir_test_build"))
 
 IR_DIR = os.path.join(RCCL_DIR, "bindings", "ir")
-RUN_SCRIPT = os.path.join(IR_DIR, "test", "run_IR_test.sh")
+IR_TEST_SRC = os.path.join(IR_DIR, "test", "IR_test.cpp")
 BITCODE = os.path.join(RCCL_BUILD, "lib", "librccl_device.bc")
 HIPIFY_INC = os.path.join(RCCL_BUILD, "hipify", "src", "include")
+GENERATED_INC = os.path.join(RCCL_BUILD, "include")
+HIPCC = os.path.join(ROCM_PATH, "bin", "hipcc")
 TEST_EXE = os.path.join(IR_OUTDIR, "IR_test.exe")
 
 LOGDIR = os.path.join(WORKDIR, "logs")
 os.makedirs(LOGDIR, exist_ok=True)
+
+
+def _find_gtest_libdir():
+    """Return the dir holding libgtest.{a,so} under GTEST_ROOT, or None.
+
+    Mirrors the RCCL CMake gtest install layout (lib or lib64) and Debian
+    multiarch installs (lib/<triple>-linux-gnu).
+    """
+    candidates = [
+        os.path.join(GTEST_ROOT, "lib"),
+        os.path.join(GTEST_ROOT, "lib64"),
+    ]
+    candidates += glob.glob(os.path.join(GTEST_ROOT, "lib", "*-linux-gnu"))
+    for d in candidates:
+        if os.path.isfile(os.path.join(d, "libgtest.a")) or os.path.isfile(
+            os.path.join(d, "libgtest.so")
+        ):
+            return d
+    return None
 
 
 def _missing_prerequisite():
@@ -69,21 +90,20 @@ def _missing_prerequisite():
     gate is the hipify staging dir, which a prior RCCL CMake build produces
     and which is needed both to emit the bitcode and to compile the test.
     """
-    if not os.path.isfile(RUN_SCRIPT):
-        return f"run_IR_test.sh not found at {RUN_SCRIPT}"
+    if not os.path.isfile(IR_TEST_SRC):
+        return f"IR_test.cpp not found at {IR_TEST_SRC}"
+    if not os.path.isfile(HIPCC):
+        return f"hipcc not found at {HIPCC} (set ROCM_PATH)"
     if not os.path.isdir(HIPIFY_INC):
         return (
             f"hipify staging dir not found at {HIPIFY_INC} "
             "(build RCCL once so the staged nccl_device headers exist)"
         )
     gtest_inc = os.path.join(GTEST_ROOT, "include")
-    lib_globs = (
-        os.path.join(GTEST_ROOT, "lib", "libgtest.*"),
-        os.path.join(GTEST_ROOT, "lib64", "libgtest.*"),
-        os.path.join(GTEST_ROOT, "lib", "*-linux-gnu", "libgtest.*"),
-    )
-    has_lib = any(glob.glob(p) for p in lib_globs)
-    if not os.path.isfile(os.path.join(gtest_inc, "gtest", "gtest.h")) or not has_lib:
+    if (
+        not os.path.isfile(os.path.join(gtest_inc, "gtest", "gtest.h"))
+        or _find_gtest_libdir() is None
+    ):
         return f"GoogleTest not found under GTEST_ROOT={GTEST_ROOT}"
     if not os.path.isdir("/dev/dri") and not os.path.exists("/dev/kfd"):
         return "no AMD GPU device nodes (/dev/kfd, /dev/dri) present"
@@ -120,6 +140,51 @@ def _build_bitcode():
     return build_log
 
 
+def _build_test_binary():
+    """Compile IR_test.cpp into a GoogleTest binary linked against the bitcode.
+
+    Ports the hipcc invocation that previously lived in run_IR_test.sh:
+
+      * -Xoffload-linker <bc>   routes librccl_device.bc into the AMDGPU
+        device-side LTO link.
+      * -plugin-opt=-amdgpu-internalize-symbols=false keeps the exported
+        device thunks from being re-internalized by AMDGPU LTO.
+      * -O0 is deliberate: a ROCm 7.x AMDGPU codegen bug breaks the indirect
+        (vtable) dispatch this test exercises at -O1/-O2 (hang or error 700).
+        This is a correctness test, not a benchmark, so -O0 is fine.
+
+    Returns the build log path; raises on failure.
+    """
+    os.makedirs(IR_OUTDIR, exist_ok=True)
+    gtest_inc = os.path.join(GTEST_ROOT, "include")
+    gtest_libdir = _find_gtest_libdir()
+    args = [
+        HIPCC,
+        f"--offload-arch={ARCH}", "-O0",
+        "-D__HIP_PLATFORM_AMD__=1",
+        f"-I{HIPIFY_INC}",
+        f"-I{os.path.join(HIPIFY_INC, 'nccl_device')}",
+        f"-I{GENERATED_INC}",
+        f"-I{gtest_inc}",
+        IR_TEST_SRC,
+        "-Xoffload-linker", BITCODE,
+        "-Xoffload-linker", "-plugin-opt=-amdgpu-internalize-symbols=false",
+        f"-L{gtest_libdir}", "-lgtest_main", "-lgtest", "-lpthread",
+        "-o", TEST_EXE,
+    ]
+    build_log = os.path.join(LOGDIR, "ir_test_build.log")
+    with open(build_log, "w") as log:
+        log.write("$ " + " ".join(args) + "\n\n")
+        log.flush()
+        proc = subprocess.run(
+            args, env=os.environ.copy(), stdout=log,
+            stderr=subprocess.STDOUT, universal_newlines=True,
+        )
+    assert proc.returncode == 0, f"Failed to compile IR_test (see {build_log})"
+    assert os.path.isfile(TEST_EXE), f"Test binary not produced at {TEST_EXE}"
+    return build_log
+
+
 @pytest.fixture(scope="session")
 def ir_test_binary():
     """Build the bitcode if needed, then compile IR_test.cpp against it once.
@@ -141,33 +206,10 @@ def ir_test_binary():
         bc_log = _build_bitcode()
         logger.info("librccl_device.bc BUILT at %s (log: %s)", BITCODE, bc_log)
 
-    os.makedirs(IR_OUTDIR, exist_ok=True)
-    env = os.environ.copy()
-    env.update(
-        {
-            "ARCH": ARCH,
-            "ROCM_PATH": ROCM_PATH,
-            "BUILD": RCCL_BUILD,
-            "BC": BITCODE,
-            "GTEST_ROOT": GTEST_ROOT,
-            "OUTDIR": IR_OUTDIR,
-            "BUILD_ONLY": "1",
-        }
-    )
-
-    build_log = os.path.join(LOGDIR, "ir_test_build.log")
-    with open(build_log, "w") as log:
-        proc = subprocess.run(
-            ["bash", RUN_SCRIPT],
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-    assert proc.returncode == 0, (
-        f"Failed to build IR_test (see {build_log})"
-    )
-    assert os.path.isfile(TEST_EXE), f"Test binary not produced at {TEST_EXE}"
+    logger.info(
+        "Compiling IR_test.cpp -> %s (hipcc -O0, arch=%s)...", TEST_EXE, ARCH)
+    test_log = _build_test_binary()
+    logger.info("IR_test binary BUILT at %s (log: %s)", TEST_EXE, test_log)
     return TEST_EXE
 
 
