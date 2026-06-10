@@ -102,24 +102,6 @@ runs:
           echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
         fi
 
-    - name: Install hipFILE runtime dependencies
-      if: ${{ inputs.enable-hipfile-build == 'true' }}
-      shell: bash
-      run: |
-        if command -v apt-get >/dev/null 2>&1; then
-          apt-get update
-          apt-get install -y libtbb-dev
-        elif command -v dnf >/dev/null 2>&1; then
-          dnf install -y tbb-devel
-        elif command -v yum >/dev/null 2>&1; then
-          yum install -y tbb-devel
-        elif command -v zypper >/dev/null 2>&1; then
-          zypper --non-interactive install tbb-devel
-        else
-          echo "No supported package manager found for installing TBB"
-          exit 1
-        fi
-
     - name: Checkout hipFILE tracing dependency branches
       if: ${{ inputs.enable-hipfile-build == 'true' }}
       shell: bash

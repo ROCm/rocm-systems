@@ -420,6 +420,14 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           git config --global --add safe.directory '*'
+          if command -v dnf >/dev/null 2>&1; then
+            dnf install -y epel-release || true
+            dnf install -y tbb tbb-devel || dnf install -y onetbb-devel || \
+              echo "TBB development package unavailable; hipFILE will fetch oneTBB during configure"
+          elif command -v zypper >/dev/null 2>&1; then
+            zypper --non-interactive install tbb-devel || \
+              echo "TBB development package unavailable; hipFILE will fetch oneTBB during configure"
+          fi
           python3 -m venv ${{ env.PYTHON_VENV_PATH }}
           source ${{ env.PYTHON_VENV_ACTIVATE }}
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
