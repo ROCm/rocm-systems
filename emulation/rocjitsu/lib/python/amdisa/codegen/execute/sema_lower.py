@@ -247,13 +247,7 @@ def _writes_vcc(node: SemaNode) -> bool:
 
 def _vcc_init_expr(ctx: LoweringContext) -> str:
     """Return the C++ expression to initialize the vcc local variable."""
-    if ctx.vcc_dst:
-        return 'wf.vcc()'
-    if ctx.operand_map:
-        dst = ctx.operand_map.dst(0)
-        if dst:
-            return f'{dst.name}.read_scalar64(wf)'
-    return 'wf.vcc()'
+    return '0'
 
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:

@@ -4696,6 +4696,13 @@ class CodeGenerator:
                     _size_overrides = self.isa_spec.profile.inst_size_overrides
                     if inst.name in _size_overrides:
                         ctor_body_parts.append(f'size_ = {_size_overrides[inst.name]};')
+                        ctor_body_parts.append(
+                            'raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};'
+                            'raw_encoding_ = raw_words_.data();'
+                        )
+                        private_members.append(
+                            cgen.Statement('std::array<uint32_t, 4> raw_words_{}')
+                        )
 
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (
@@ -5222,11 +5229,18 @@ class CodeGenerator:
                         False,
                     ),
                 ]
+                _has_size_overrides = any(
+                    i.name in self.isa_spec.profile.inst_size_overrides
+                    for i in all_insts
+                )
+                if _has_size_overrides:
+                    h_includes.append(('array', True))
                 if (
                     self._supports_gfx1250_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    h_includes.append(('array', True))
+                    if not _has_size_overrides:
+                        h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
                         cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_class())
@@ -5572,7 +5586,7 @@ class CodeGenerator:
 
     @staticmethod
     def _gen_narrow_cvt_header_REMOVED_PLACEHOLDER(out_path: str) -> None:
-        pass
+        return
         content_UNUSED = f"""\
 // REMOVED — narrow FP conversions now live in util/data_types.h
 
@@ -6909,6 +6923,37 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         decode_table_entries = []
         sub_decode_table_entries = []
         decode_funcs_found = set()
+        _custom_decode_bodies: dict[str, object] = {}
+        _vop3px2_opcode = self.isa_spec.profile.vop3px2_prefix_opcode
+        if _vop3px2_opcode is not None:
+            _ie_names = {
+                inst.name for ie in self.isa_spec.inst_encodings for inst in ie.insts
+            }
+            _vop3px2_active = any(
+                n in _ie_names for n in self.isa_spec.profile.inst_size_overrides
+            )
+            if _vop3px2_active:
+                for _dte in self.isa_spec.primary_decode_table:
+                    if (
+                        _dte is not None
+                        and not _dte.is_primary
+                        and _dte.sub_decode_funcs is not None
+                        and _dte.sub_decode_table
+                        and 'vop3p' in _dte.sub_decode_table
+                    ):
+                        _pfx = 'decodeVop3pX2Prefix'
+                        _dte.sub_decode_funcs[_vop3px2_opcode] = _pfx
+                        _custom_decode_bodies[_pfx] = cgen.Block(
+                            [
+                                cgen.Statement(
+                                    f'auto op = *reinterpret_cast<const {_dte.enc.fmt_enc_name}::OpEncoding *>(opcode + 2)'
+                                ),
+                                cgen.Statement(
+                                    f'return {_dte.sub_decode_table}[op.op](opcode + 2)'
+                                ),
+                            ]
+                        )
+                        break
         for dte in self.isa_spec.primary_decode_table:
             if dte is not None:
                 decode_table_entries.append(f'&Decoder::{dte.decode_func},')
@@ -6980,6 +7025,17 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                         ],
                                     )
                                 )
+                                _fn_body = (
+                                    _custom_decode_bodies[fn]
+                                    if fn in _custom_decode_bodies
+                                    else cgen.Block(
+                                        [
+                                            cgen.Statement(
+                                                f'return std::make_unique<{class_name}>(opcode)'
+                                            )
+                                        ]
+                                    )
+                                )
                                 decode_table_funcs.append(
                                     cgen.FunctionBody(
                                         cgen.FunctionDeclaration(
@@ -6994,13 +7050,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                 )
                                             ],
                                         ),
-                                        cgen.Block(
-                                            [
-                                                cgen.Statement(
-                                                    f'return std::make_unique<{class_name}>(opcode)'
-                                                )
-                                            ]
-                                        ),
+                                        _fn_body,
                                     )
                                 )
                             sub_decode_table_entry_str.append(f'&Decoder::{fn},')
