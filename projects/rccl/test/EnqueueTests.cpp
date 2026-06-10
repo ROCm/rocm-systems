@@ -470,4 +470,52 @@ TEST_F(EnqueueTests, ncclEnqueueCheck_InvalidBuffers)
     );
 }
 
+TEST_F(EnqueueTests, ncclInitKernelsForDevice_NoStickyErrorAfterCall)
+{
+    RUN_ISOLATED_TEST(
+        "ncclInitKernelsForDevice_NoStickyErrorAfterCall",
+        []()
+        {
+            (void)hipGetLastError();
+
+            size_t       maxStackSize = 0;
+            ncclResult_t result = ncclInitKernelsForDevice(906, 65536, &maxStackSize);
+            EXPECT_EQ(result, ncclSuccess);
+
+            hipError_t lastErr = hipGetLastError();
+            EXPECT_EQ(lastErr, hipSuccess)
+                << "ncclInitKernelsForDevice leaked a sticky HIP error: "
+                << hipGetErrorString(lastErr);
+        }
+    );
+}
+
+TEST_F(EnqueueTests, HipFuncGetAttributes_StickyErrorRequiresDrain)
+{
+    RUN_ISOLATED_TEST(
+        "HipFuncGetAttributes_StickyErrorRequiresDrain",
+        []()
+        {
+            (void)hipGetLastError();
+
+            hipFuncAttributes attr = {0};
+            hipError_t err = hipFuncGetAttributes(&attr, (const void*)0xDEADBEEF);
+            EXPECT_NE(err, hipSuccess)
+                << "Expected hipFuncGetAttributes to fail on a bogus pointer";
+
+            hipError_t sticky = hipPeekAtLastError();
+            EXPECT_NE(sticky, hipSuccess)
+                << "Error should be sticky before drain";
+
+            hipError_t drained = hipGetLastError();
+            EXPECT_NE(drained, hipSuccess)
+                << "hipGetLastError should return the sticky error";
+
+            hipError_t clean = hipGetLastError();
+            EXPECT_EQ(clean, hipSuccess)
+                << "hipGetLastError should have cleared the sticky error";
+        }
+    );
+}
+
 } // namespace RcclUnitTesting
