@@ -36,9 +36,11 @@ _PROFILER_INTERNAL_RE = re.compile(
     r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
 )
 
+ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
 
-def _is_live_attach(
-    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+
+def is_live_attach(
+    profiler_options: ProfilerOptions,
 ) -> bool:
     """Return True if the profiler options indicate a live-attach (pid) mode."""
     return (isinstance(profiler_options, list) and "--pid" in profiler_options) or (
@@ -61,7 +63,7 @@ def _classify_output_line(line: str) -> None:
 
 def run_prof(
     fnames: Union[list[str], str],
-    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
+    profiler_options: ProfilerOptions,
     workload_dir: str,
     loglevel: int,
     format_rocprof_output: str,
@@ -156,12 +158,12 @@ def run_prof(
         env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
         console_debug(f"rocprof sdk env vars: {env_delta}")
 
-        if _is_live_attach(profiler_options):
+        if is_live_attach(profiler_options):
             perform_attach_detach(new_env, options)
         else:
             if app_cmd is None:
                 console_error(
-                    "APP_CMD, the workload's execuatble must be provided "
+                    "APP_CMD, the workload's executable must be provided "
                     "when not in live attach mode"
                 )
 
@@ -196,7 +198,7 @@ def run_prof(
     if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
-    if (not _is_live_attach(profiler_options)) and (not success):
+    if (not is_live_attach(profiler_options)) and (not success):
         for line in output.splitlines():
             stripped = line.strip()
             if stripped:
@@ -400,114 +402,6 @@ def run_prof(
         csv_ops.write_csv_from_dicts(str(csv_path), rows)
     else:
         console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
-
-
-def pc_sampling_prof(
-    profiler_options: Union[list[str], dict[str, Union[str, list[str]]]],
-    method: str,
-    interval: int,
-    workload_dir: str,
-) -> None:
-    """
-    Run rocprof with pc sampling. Current support v3 only.
-    """
-    # Todo:
-    #   - precheck with rocprofv3 –-list-avail
-
-    unit = "time" if method == "host_trap" else "cycles"
-
-    if get_rocprof_cmd() == "rocprofiler-sdk":
-        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
-        options.update({
-            # no counter collection for pc sampling
-            "ROCPROF_COUNTER_COLLECTION": "0",
-            "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": "csv,json",
-            "ROCPROF_OUTPUT_PATH": workload_dir,
-            "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
-            "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
-            "ROCPROF_PC_SAMPLING_UNIT": unit,
-            "ROCPROF_PC_SAMPLING_INTERVAL": str(interval),
-            "ROCPROF_PC_SAMPLING_METHOD": method,
-        })
-        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
-        new_env = os.environ.copy()
-        for key, value in options.items():
-            new_env[key] = value
-        # Log only the os.environ delta to avoid leaking secrets in shared logs.
-        env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
-        console_debug(f"pc sampling rocprof sdk env vars: {env_delta}")
-
-        if _is_live_attach(profiler_options):
-            perform_attach_detach(new_env, options)
-        else:
-            if app_cmd is None:
-                console_error(
-                    "APP_CMD, the workload's executable must be provided "
-                    "when not in live attach mode"
-                )
-
-            console_debug(f"pc sampling rocprof sdk user provided command: {app_cmd}")
-            success, output = capture_subprocess_output(
-                app_cmd, new_env=new_env, profileMode=True
-            )
-            if not success:
-                console_error("PC sampling failed.")
-    else:
-        profiler_options_list = cast(list[str], profiler_options)
-
-        options = [
-            "--kernel-trace",
-            "--pc-sampling-beta-enabled",
-            "--pc-sampling-method",
-            method,
-            "--pc-sampling-unit",
-            unit,
-            "--output-format",
-            "csv",
-            "json",
-            "--pc-sampling-interval",
-            str(interval),
-            "-d",
-            workload_dir,
-            "-o",
-            "ps_file",  # TODO: sync up with the name from source in 2100_.yaml
-        ]
-
-        if _is_live_attach(profiler_options):
-            try:
-                pid_idx = profiler_options_list.index("--pid")
-                options += ["--pid", profiler_options_list[pid_idx + 1]]
-                if "--attach-duration-msec" in profiler_options_list:
-                    dur_idx = profiler_options_list.index("--attach-duration-msec")
-                    options += [
-                        "--attach-duration-msec",
-                        profiler_options_list[dur_idx + 1],
-                    ]
-            except (ValueError, IndexError):
-                console_error(
-                    "--pid or --attach-duration-msec option not found in "
-                    "profiler arguments for live attach mode"
-                )
-        else:
-            try:
-                app_cmd_with_separator = profiler_options_list[
-                    profiler_options_list.index("--") :
-                ]
-                options += app_cmd_with_separator
-            except ValueError:
-                console_error(
-                    "APP_CMD, the workload's executable must be provided "
-                    "when not in live attach mode"
-                )
-
-        console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
-        # profile the app
-        success, output = capture_subprocess_output(
-            [get_rocprof_cmd()] + options, new_env=os.environ.copy(), profileMode=True
-        )
-        if not success:
-            console_error("PC sampling failed.")
 
 
 @demarcate

@@ -11,6 +11,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import (
     console_debug,
@@ -31,7 +32,7 @@ from utils.utils_exceptions import (
     NoScriptInCommandError,
     PythonScriptNotFoundError,
 )
-from utils.utils_profile import gen_sysinfo, pc_sampling_prof, run_prof
+from utils.utils_profile import gen_sysinfo, run_prof
 from vendored import yaml
 
 
@@ -368,6 +369,12 @@ class RocProfCompute_Base:
         else:
             console_log("Filtered sections: All")
 
+        pc_sampling = PCSamplingProfile(
+            args=args,
+            profiler=self.__profiler,
+            workload_dir=args.output_directory,
+        )
+
         # Run profiling on each input file
         input_files = sorted(
             Path(args.output_directory).glob("perfmon/pmc_perf_*.yaml")
@@ -392,7 +399,7 @@ class RocProfCompute_Base:
 
         # Compute total workload runs including PC sampling for warning check
         total_workload_runs = total_runs
-        if any(block in ["21", "pc_sampling"] for block in args.filter_blocks):
+        if pc_sampling.is_requested():
             total_workload_runs += 1
 
         # Warn about multi-rank profiling when multiple workload runs are needed
@@ -473,51 +480,14 @@ class RocProfCompute_Base:
                 duration = self.profile(fname, options, total_runs)
                 total_profiling_time += duration
 
-        # PC sampling data is only collected when --pc-sampling is set
-        # (sanitize() injects "21" into filter_blocks when --pc-sampling is set).
-        if "21" not in args.filter_blocks:
+        if not pc_sampling.is_requested():
             console_warning(
                 "PC sampling data collection skipped as --pc-sampling is not specified."
             )
             return
 
-        total_runs = len(
-            list(Path(args.output_directory).glob("perfmon/pmc_perf_*.yaml"))
-        )
-
-        console_log(f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
-
-        start_time = time.time()
         # No native tool for pc sampling
-        options = self.get_profiler_options()
-
-        if (
-            is_only_pc_sampling(args.filter_blocks)
-            and self.__profiler == "rocprofiler-sdk"
-            and (rocprof_output_path := getattr(options, "ROCPROF_OUTPUT_PATH", None))
-            is not None
-        ):
-            rocprof_output_path = Path(rocprof_output_path)
-            if rocprof_output_path.exists():
-                shutil.rmtree(rocprof_output_path, ignore_errors=True)
-                console_debug(
-                    f"Removed existing ROCProf output path: {rocprof_output_path}"
-                )
-
-        pc_sampling_prof(
-            profiler_options=options,
-            method=args.pc_sampling_method,
-            interval=args.pc_sampling_interval,
-            workload_dir=args.output_directory,
-        )
-        end_time = time.time()
-
-        duration = end_time - start_time
-        console_debug(
-            "profiling",
-            f"The time of pc sampling profiling is {int(duration / 60)} m "
-            f"{duration % 60} sec",
-        )
+        pc_sampling.run(self.get_profiler_options(), total_runs)
 
     def __get_native_tool_path(self, args: argparse.Namespace) -> str | None:
         try:
