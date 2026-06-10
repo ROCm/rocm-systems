@@ -1469,7 +1469,8 @@ main(int argc, char** argv)
 
     verbprintf(1, "Getting and filtering the object modules...\n");
     auto app_modules      = get_modules(&filtered_objects);
-    auto filtered_modules = filter_modules(app_modules);
+    auto filtered_modules = filter_modules(app_modules.get());
+    app_modules.reset();
     process_modules(filtered_modules);
 
     verbprintf(1, "Getting available procedures from the modules...\n");
@@ -1482,8 +1483,7 @@ main(int argc, char** argv)
     {
         verbprintf(
             0, "Warning! No functions detected! Fetching from the image directly...\n");
-        // If no functions are found, go through the image
-        app_functions = app_image->getProcedures(include_uninstr);
+        app_functions.reset(app_image->getProcedures(include_uninstr));
     }
 
     std::unordered_set<object_t*>    objects   = {};
@@ -1551,6 +1551,10 @@ main(int argc, char** argv)
     {
         verbprintf(0, "Warning! No functions in application...\n");
     }
+
+    // The procedure pointers have been copied into the objects/modules/functions
+    // sets and module_function entries
+    app_functions.reset();
 
     if(debug_print || verbose_level > 2)
     {

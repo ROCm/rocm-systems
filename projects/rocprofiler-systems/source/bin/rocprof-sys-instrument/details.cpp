@@ -1054,7 +1054,7 @@ filter_modules(std::vector<module_t*>* app_modules)
 //  already been filtered by the respective filter functions
 //
 
-std::vector<module_t*>*
+std::unique_ptr<std::vector<module_t*>>
 get_modules(std::vector<object_t*>* app_objects)
 {
     if(!app_objects || app_objects->empty()) return nullptr;
@@ -1064,7 +1064,7 @@ get_modules(std::vector<object_t*>* app_objects)
     _wc.start();
     _pr.start();
 
-    auto* modlist = new std::vector<module_t*>{};
+    auto modlist = std::make_unique<std::vector<module_t*>>();
 
     // BPatch_object exposes modules() as an out-param API, not a getter
     auto _scratch = std::vector<module_t*>{};
@@ -1085,16 +1085,12 @@ get_modules(std::vector<object_t*>* app_objects)
                app_objects->size(), modlist->size(), _wc.get(),
                _wc.display_unit().c_str(), _pr.get(), _pr.display_unit().c_str());
 
-    if(modlist->empty())
-    {
-        delete modlist;
-        return nullptr;
-    }
+    if(modlist->empty()) return nullptr;
 
     return modlist;
 }
 
-std::vector<procedure_t*>*
+std::unique_ptr<std::vector<procedure_t*>>
 get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable)
 {
     if(!app_modules || app_modules->empty())
@@ -1108,7 +1104,7 @@ get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentabl
     _wc.start();
     _pr.start();
 
-    auto* proclist = new std::vector<procedure_t*>{};
+    auto proclist = std::make_unique<std::vector<procedure_t*>>();
 
     for(auto* mod : *app_modules)
     {

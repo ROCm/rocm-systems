@@ -370,10 +370,10 @@ filter_objects(std::vector<object_t*>* app_objects);
 std::vector<module_t*>
 filter_modules(std::vector<module_t*>* app_modules);
 
-std::vector<module_t*>*
+std::unique_ptr<std::vector<module_t*>>
 get_modules(std::vector<object_t*>* app_objects);
 
-std::vector<procedure_t*>*
+std::unique_ptr<std::vector<procedure_t*>>
 get_procedures(std::vector<module_t*>* app_modules, bool include_uninstrumentable);
 
 namespace std
