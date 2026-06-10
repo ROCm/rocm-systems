@@ -83,6 +83,8 @@ void PalDpb::Clear() {
     for (uint32_t i = 0; i < slot_count_; ++i) {
         slots_[i].image.Reset();
         slots_[i].image_memory.Reset();
+        slots_[i].target_image.Reset();
+        slots_[i].target_image_memory.Reset();
         slots_[i].fence.Reset();
         slots_[i].occupied = false;
         slots_[i].poc = -1;
@@ -474,25 +476,33 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         }
     }
 
+    // Map rocDecode codec + bit depth to a PAL decode type once; reused below for both
+    // the video decoder object and the decoder-heap size query.
+    Pal::VideoDecodeType decode_type;
+    switch (codec_) {
+        case rocDecVideoCodec_HEVC:
+            decode_type = (bit_depth_ == 10) ? Pal::VideoDecodeType::Hevc10Bit : Pal::VideoDecodeType::Hevc;
+            break;
+        case rocDecVideoCodec_AVC:
+            decode_type = Pal::VideoDecodeType::H264;
+            break;
+        case rocDecVideoCodec_VP9:
+            decode_type = (bit_depth_ == 10) ? Pal::VideoDecodeType::Vp910Bit : Pal::VideoDecodeType::Vp9;
+            break;
+        case rocDecVideoCodec_AV1:
+            decode_type = Pal::VideoDecodeType::Av1;
+            break;
+        default:
+            CriticalLog(g_rocdec_logger, "PAL: Unsupported codec type");
+            return ROCDEC_NOT_SUPPORTED;
+    }
+
     // Create video decoder object
     InfoLog(g_rocdec_logger, "PAL: Creating video decoder...");
     {
         Pal::VideoDecoderCreateInfo vd_ci = {};
         vd_ci.engineType = eng;
-
-        // Map rocDecode codec to PAL decode type
-        if (codec_ == rocDecVideoCodec_HEVC) {
-            vd_ci.decodeType = (bit_depth_ == 10) ? Pal::VideoDecodeType::Hevc10Bit : Pal::VideoDecodeType::Hevc;
-        } else if (codec_ == rocDecVideoCodec_AVC) {
-            vd_ci.decodeType = Pal::VideoDecodeType::H264;
-        } else if (codec_ == rocDecVideoCodec_VP9) {
-            vd_ci.decodeType = (bit_depth_ == 10) ? Pal::VideoDecodeType::Vp910Bit : Pal::VideoDecodeType::Vp9;
-        } else if (codec_ == rocDecVideoCodec_AV1) {
-            vd_ci.decodeType = Pal::VideoDecodeType::Av1;  // AV1 has single decode type
-        } else {
-            CriticalLog(g_rocdec_logger, "PAL: Unsupported codec type");
-            return ROCDEC_NOT_SUPPORTED;
-        }
+        vd_ci.decodeType = decode_type;
 
         size_t sz = device_->GetVideoDecoderSize(vd_ci, &res);
         if (Util::IsErrorResult(res)) {
@@ -515,16 +525,40 @@ rocDecStatus PalVideoDecoder::Initialize(rocDecVideoCodec codec_type,
         InfoLog(g_rocdec_logger, "PAL: Video decoder created successfully");
     }
 
-    // Allocate decoder heap (VCN internal memory - 2 MB)
+    // Allocate decoder heap (VCN internal memory — size queried from PAL based on codec/resolution/DPB count)
     InfoLog(g_rocdec_logger, "PAL: Allocating decoder heap...");
     {
+        Pal::VideoDecoderGpuMemInfo heap_mem_info = {};
+        heap_mem_info.engineType = eng;
+        heap_mem_info.decodeType = decode_type;
+        heap_mem_info.decodeExtent.width  = max_coded_width_;
+        heap_mem_info.decodeExtent.height = max_coded_height_;
+        heap_mem_info.maxDpbFrames = max_dpb_slots_;
+        heap_mem_info.frameRate = 30.0f;
+        heap_mem_info.bitRate   = 0;
+
+        Pal::GpuMemoryRequirements heap_mem_reqs = {};
+        res = device_->GetVideoDecoderGpuMemorySize(heap_mem_info, &heap_mem_reqs);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetVideoDecoderGpuMemorySize failed with result ") + ROCDEC_TOSTR((int)res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
         Pal::GpuMemoryCreateInfo heap_ci = {};
-        heap_ci.size = 2 * 1024 * 1024;  // 2 MB for decoder heap
-        heap_ci.alignment = 4096;
+        // Use PAL-reported size; fall back to a generous 32MB if the query returns 0.
+        heap_ci.size = (heap_mem_reqs.size > 0) ? heap_mem_reqs.size : (32ULL * 1024 * 1024);
+        heap_ci.alignment = (heap_mem_reqs.alignment > 0) ? heap_mem_reqs.alignment : 4096;
         heap_ci.vaRange = Pal::VaRange::Default;
         heap_ci.priority = Pal::GpuMemPriority::Normal;
-        heap_ci.heapCount = 1;
-        heap_ci.heaps[0] = Pal::GpuHeapLocal;  // Local heap for VCN
+        if (heap_mem_reqs.heapCount > 0) {
+            heap_ci.heapCount = heap_mem_reqs.heapCount;
+            for (uint32_t h = 0; h < heap_mem_reqs.heapCount && h < Pal::GpuHeapCount; h++) {
+                heap_ci.heaps[h] = heap_mem_reqs.heaps[h];
+            }
+        } else {
+            heap_ci.heapCount = 1;
+            heap_ci.heaps[0] = Pal::GpuHeapLocal;  // fallback: local heap for VCN
+        }
 
         size_t heap_obj_size = device_->GetGpuMemorySize(heap_ci, &res);
         if (Util::IsErrorResult(res)) {
@@ -570,7 +604,10 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
                                                     PalDpbSlot& slot) {
     Pal::Result res;
 
-    // Create image
+    // --- Tiled DPB surface (VCN reconstruction + reference reads) ---
+    // VCN hardcodes the DPB swizzle to SW_256B_S on VCN4 (vcn3DecodeCmdBuffer.cpp).
+    // Creating this surface Optimal + videoDecoder usage lets addrlib pick the matching
+    // video-decode tiled mode. It is never touched by CPU/HIP, so no sharing flags.
     Pal::ImageCreateInfo ici = {};
     ici.imageType = Pal::ImageType::Tex2d;
     ici.swizzledFormat.format = pal_format_;
@@ -579,7 +616,11 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
     ici.swizzledFormat.swizzle.b = Pal::ChannelSwizzle::Z;
     ici.swizzledFormat.swizzle.a = Pal::ChannelSwizzle::W;
     ici.extent.width = width;
-    ici.extent.height = height;
+    // Round luma height up to a multiple of 16. The interop consumer (RocVideoDecoder's
+    // GetSurfaceStrideInternal) assumes vstride = align(height, 16) for both NV12 and P016,
+    // which fixes the chroma-plane offset and the total surface size so a flat DtoH copy of
+    // the decoded surface stays within the exported allocation.
+    ici.extent.height = (height + 15) & ~15u;
     ici.extent.depth = 1;
     ici.mipLevels = 1;
     ici.arraySize = 1;
@@ -587,9 +628,8 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 961
     ici.fragments = 1;
 #endif
-    ici.tiling = Pal::ImageTiling::Linear;
-    // TODO: PAL version mismatch - videoDecodeTarget not found
-    // ici.usageFlags.videoDecodeTarget = 1;
+    ici.tiling = Pal::ImageTiling::Optimal;
+    ici.usageFlags.videoDecoder = 1;
 
     size_t img_size = device_->GetImageSize(ici, &res);
     if (Util::IsErrorResult(res)) {
@@ -616,18 +656,18 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
     Pal::GpuMemoryCreateInfo mem_ci = {};
     mem_ci.size = mem_reqs.size;
     mem_ci.alignment = mem_reqs.alignment;
-    // GpuHeapInvisible: pure VRAM with no CPU aperture — optimal for VCN decode targets.
-    // interprocess=1: required for KMT handle export (ExportExternalHandle) for HIP interop.
-    // GpuHeapLocal (CPU-visible VRAM) + interprocess=1 is ErrorInvalidFlags on Windows PAL;
-    // GpuHeapInvisible has no CPU mapping so the KMD can issue a KMT handle without issue.
-    mem_ci.flags.interprocess = 1;
+    // Tiled DPB: only VCN touches it (reconstruction + reference reads), never CPU/HIP,
+    // so no sharing flags. GpuHeapInvisible fails AddGpuMemoryReferences(-9) on this WDDM
+    // setup (no device-wide residency), so use a GART heap — proven to work with residency.
+    // Tiling is an image-layout property and is independent of which heap backs the bytes.
+    mem_ci.flags.interprocess = 0;
     mem_ci.flags.shareable = 0;
     mem_ci.heapCount = 1;
-    mem_ci.heaps[0] = Pal::GpuHeapInvisible;
+    mem_ci.heaps[0] = Pal::GpuHeapGartCacheable;
 
     size_t gpu_mem_size = device_->GetGpuMemorySize(mem_ci, &res);
     if (Util::IsErrorResult(res)) {
-        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetGpuMemorySize (decode surface) failed result=") + ROCDEC_TOSTR((int)res));
+        CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetGpuMemorySize (DPB surface) failed result=") + ROCDEC_TOSTR((int)res));
         return ROCDEC_RUNTIME_ERROR;
     }
 
@@ -659,6 +699,77 @@ rocDecStatus PalVideoDecoder::AllocateDecodedFrame(uint32_t width, uint32_t heig
         if (Util::IsErrorResult(add_res)) {
             CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: AddGpuMemoryReferences (DPB slot) failed with result ") +
                         ROCDEC_TOSTR((int)add_res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+    }
+
+    // --- Linear decode-target surface (clean display copy, exported to HIP) ---
+    // VCN writes a linear copy of the reconstructed frame here. It must be CPU-aperture
+    // backed (GartCacheable) and interprocess=1 so a WDDM KMT handle can be exported.
+    {
+        Pal::ImageCreateInfo tici = ici;          // same format/extent/usage as the DPB
+        tici.tiling = Pal::ImageTiling::Linear;
+
+        size_t timg_size = device_->GetImageSize(tici, &res);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, "PAL: GetImageSize (target) failed");
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        void* timg_mem = malloc(timg_size);
+        Pal::IImage* timg = nullptr;
+        res = device_->CreateImage(tici, timg_mem, &timg);
+        if (Util::IsErrorResult(res) || !timg) {
+            free(timg_mem);
+            CriticalLog(g_rocdec_logger, "PAL: CreateImage (target) failed");
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        *slot.target_image.PtrAddr() = timg;
+        *slot.target_image.MemAddr() = timg_mem;
+
+        Pal::GpuMemoryRequirements tmem_reqs = {};
+        timg->GetGpuMemoryRequirements(&tmem_reqs);
+
+        Pal::GpuMemoryCreateInfo tmem_ci = {};
+        tmem_ci.size = tmem_reqs.size;
+        tmem_ci.alignment = tmem_reqs.alignment;
+        // GartCacheable is the only WDDM heap that supports interprocess=1 KMT export.
+        tmem_ci.flags.interprocess = 1;
+        tmem_ci.flags.shareable = 0;
+        tmem_ci.heapCount = 1;
+        tmem_ci.heaps[0] = Pal::GpuHeapGartCacheable;
+
+        size_t tgpu_mem_size = device_->GetGpuMemorySize(tmem_ci, &res);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: GetGpuMemorySize (target) failed result=") + ROCDEC_TOSTR((int)res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        void* tgpu_mem_obj = malloc(tgpu_mem_size);
+        Pal::IGpuMemory* tgpu_mem = nullptr;
+        res = device_->CreateGpuMemory(tmem_ci, tgpu_mem_obj, &tgpu_mem);
+        if (Util::IsErrorResult(res) || !tgpu_mem) {
+            free(tgpu_mem_obj);
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: CreateGpuMemory (target) failed result=") + ROCDEC_TOSTR((int)res));
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        *slot.target_image_memory.PtrAddr() = tgpu_mem;
+        *slot.target_image_memory.MemAddr() = tgpu_mem_obj;
+
+        res = timg->BindGpuMemory(tgpu_mem, 0);
+        if (Util::IsErrorResult(res)) {
+            CriticalLog(g_rocdec_logger, "PAL: BindGpuMemory (target) failed");
+            return ROCDEC_RUNTIME_ERROR;
+        }
+
+        Pal::GpuMemoryRef tmem_ref = {};
+        tmem_ref.pGpuMemory = tgpu_mem;
+        Pal::Result tadd_res = device_->AddGpuMemoryReferences(1, &tmem_ref, nullptr, 0);
+        if (Util::IsErrorResult(tadd_res)) {
+            CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: AddGpuMemoryReferences (target) failed with result ") +
+                        ROCDEC_TOSTR((int)tadd_res));
             return ROCDEC_RUNTIME_ERROR;
         }
     }
@@ -952,7 +1063,7 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
     // Get current DPB slot for output
     InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: Getting DPB slot for curr_pic_idx=") + ROCDEC_TOSTR(params->curr_pic_idx));
     PalDpbSlot* output_slot = dpb_.GetSlot(params->curr_pic_idx);
-    if (!output_slot || !output_slot->image.Get()) {
+    if (!output_slot || !output_slot->image.Get() || !output_slot->target_image.Get()) {
         CriticalLog(g_rocdec_logger, "PAL: Invalid output slot");
         return ROCDEC_INVALID_PARAMETER;
     }
@@ -976,8 +1087,9 @@ rocDecStatus PalVideoDecoder::DecodeHEVC(RocdecPicParams* params) {
     decode_info.bitstreamBufferSize = params->bitstream_data_len;
     decode_info.bitstreamBufferOffset = 0;
 
-    // Decode target (output image)
-    decode_info.pDecodeTargetBuffer = output_slot->image.Get();
+    // Decode target = linear display copy (exported to HIP). DPB curr/refs below use the
+    // tiled output_slot->image, which VCN reconstructs into and reads references from.
+    decode_info.pDecodeTargetBuffer = output_slot->target_image.Get();
     decode_info.decodeTargetArraySlice = output_slot->image_index;
 
     // Codec info
@@ -1320,8 +1432,8 @@ void PalVideoDecoder::Destroy() {
 
     // Unregister GPU memory from WDDM VidMm residency tracking before releasing
     {
-        // Collect all registered allocations
-        Pal::IGpuMemory* to_remove[2 + PalDpb::kMaxSlots] = {};
+        // Collect all registered allocations (two surfaces per DPB slot: tiled + linear)
+        Pal::IGpuMemory* to_remove[2 + 2 * PalDpb::kMaxSlots] = {};
         uint32_t remove_count = 0;
 
         if (bitstream_.gpu_memory.Get())
@@ -1332,6 +1444,8 @@ void PalVideoDecoder::Destroy() {
             PalDpbSlot* slot = dpb_.GetSlot(static_cast<int32_t>(i));
             if (slot && slot->image_memory.Get())
                 to_remove[remove_count++] = slot->image_memory.Get();
+            if (slot && slot->target_image_memory.Get())
+                to_remove[remove_count++] = slot->target_image_memory.Get();
         }
 
         if (remove_count > 0)
@@ -1377,17 +1491,37 @@ rocDecStatus PalVideoDecoder::ExportSurface(int pic_idx,
 
     // Get DPB slot
     PalDpbSlot* slot = dpb_.GetSlot(pic_idx);
-    if (!slot || !slot->image.Get() || !slot->image_memory.Get()) {
+    if (!slot || !slot->target_image.Get() || !slot->target_image_memory.Get()) {
         CriticalLog(g_rocdec_logger, "PAL: Invalid DPB slot for export");
         return ROCDEC_INVALID_PARAMETER;
     }
 
-    Pal::IImage* image = slot->image.Get();
-    Pal::IGpuMemory* gpu_mem = slot->image_memory.Get();
+    // Wait for the decode targeting this slot to complete before the CPU reads it.
+    // PAL decode is submitted via a PAL queue; HIP/hipMemcpyDtoH has no visibility into
+    // pending PAL work and will not wait automatically.
+    if (slot->fence.Get()) {
+        Pal::Result fence_status = slot->fence->GetStatus();
+        if (fence_status == Pal::Result::NotReady) {
+            InfoLog(g_rocdec_logger, ROCDEC_STR("PAL: ExportSurface waiting for slot ") +
+                    ROCDEC_TOSTR(pic_idx) + " fence ...");
+            const Pal::IFence* wait_fences[] = { slot->fence.Get() };
+            Pal::Result wait_res = device_->WaitForFences(1, wait_fences, true,
+                                                          std::chrono::nanoseconds(5000000000LL));
+            if (Util::IsErrorResult(wait_res)) {
+                CriticalLog(g_rocdec_logger, ROCDEC_STR("PAL: ExportSurface WaitForFences failed result=") +
+                            ROCDEC_TOSTR((int)wait_res));
+                return ROCDEC_RUNTIME_ERROR;
+            }
+        }
+    }
 
-    // Get image create info to determine format
+    // Export the linear target surface (not the tiled DPB) — this is the clean display
+    // copy VCN wrote, and the only surface allocated interprocess=1 for KMT export.
+    Pal::IImage* image = slot->target_image.Get();
+    Pal::IGpuMemory* gpu_mem = slot->target_image_memory.Get();
+
     const Pal::ImageCreateInfo& create_info = image->GetImageCreateInfo();
-    width = create_info.extent.width;
+    width  = create_info.extent.width;
     height = create_info.extent.height;
 
     // NV12/P010 has 2 planes (Y plane and UV interleaved plane)

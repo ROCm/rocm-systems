@@ -119,8 +119,12 @@ private:
  * @brief DPB (Decoded Picture Buffer) slot for reference frames
  */
 struct PalDpbSlot {
-    PalObject<Pal::IImage> image;            // Decoded frame surface (NV12/P010)
-    PalObject<Pal::IGpuMemory> image_memory; // Backing GPU memory
+    // Tiled DPB surface — VCN reconstructs here (SW_256B_S). Used as DPB curr/ref.
+    PalObject<Pal::IImage> image;            // Tiled DPB surface (NV12/P010)
+    PalObject<Pal::IGpuMemory> image_memory; // Backing GPU memory (GPU-local)
+    // Linear display surface — VCN writes a clean linear copy here; exported to HIP.
+    PalObject<Pal::IImage> target_image;            // Linear decode-target surface
+    PalObject<Pal::IGpuMemory> target_image_memory; // Backing GPU memory (GART, interprocess=1)
     PalObject<Pal::IFence> fence;            // Signaled when this slot's decode completes
     uint32_t image_index;                    // Array layer (usually 0)
 
