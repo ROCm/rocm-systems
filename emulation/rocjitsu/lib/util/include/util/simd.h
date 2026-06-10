@@ -378,22 +378,39 @@ inline native<Float> round_fixup_simd(native<Float> a, Round round) {
 
   const U ai = std::bit_cast<U>(a);
   F r = round(a);
-  // All blends use float-domain masks (simd_mask<Float>) to match the existing
-  // f64 transcendental helpers' compile-tested pattern (== / isnan), keeping the
-  // 64-bit-mask path off the libstdc++ AVX-512 `_S_to_bits<long long>` hazard.
-  //
-  // Zero-magnitude result inherits the input sign: round-to-integer of x in
-  // (-1, 0] is -0.0 (scalar libc result), but the stdx intrinsic yields +0.0 at
-  // narrow widths. `r == 0` matches both +0 and -0 lanes.
-  const F signed_zero = std::bit_cast<F>(ai & U(kSign));
-  stdx::where(r == F(Float(0)), r) = signed_zero;
-  // NaN input -> canonical quiet NaN (sign + payload preserved, quiet bit set),
-  // exactly what scalar `std::trunc/ceil/floor/nearbyint` produce: qNaN passes
-  // through unchanged and sNaN is quieted. The stdx intrinsic instead clears the
-  // quiet bit at narrow widths, so blend the bit-correct value in explicitly.
-  const F quieted = std::bit_cast<F>(ai | U(kQuiet));
-  stdx::where(stdx::isnan(a), r) = quieted;
-  return r;
+  if constexpr (sizeof(Float) == sizeof(uint64_t)) {
+    constexpr std::size_t W = U::size();
+    alignas(U) Bits ai_buf[W];
+    alignas(F) Float r_buf[W];
+    ai.copy_to(ai_buf, stdx::vector_aligned);
+    r.copy_to(r_buf, stdx::vector_aligned);
+    for (std::size_t i = 0; i < W; ++i) {
+      if (r_buf[i] == Float(0))
+        r_buf[i] = std::bit_cast<Float>(ai_buf[i] & kSign);
+      const Bits abs_bits = ai_buf[i] & ~kSign;
+      const bool is_nan = abs_bits > Bits(0x7FF0000000000000ull);
+      if (is_nan)
+        r_buf[i] = std::bit_cast<Float>(ai_buf[i] | kQuiet);
+    }
+    return F(r_buf, stdx::vector_aligned);
+  } else {
+    // All blends use float-domain masks (simd_mask<Float>) to match the existing
+    // f64 transcendental helpers' compile-tested pattern (== / isnan), keeping the
+    // 64-bit-mask path off the libstdc++ AVX-512 `_S_to_bits<long long>` hazard.
+    //
+    // Zero-magnitude result inherits the input sign: round-to-integer of x in
+    // (-1, 0] is -0.0 (scalar libc result), but the stdx intrinsic yields +0.0 at
+    // narrow widths. `r == 0` matches both +0 and -0 lanes.
+    const F signed_zero = std::bit_cast<F>(ai & U(kSign));
+    stdx::where(r == F(Float(0)), r) = signed_zero;
+    // NaN input -> canonical quiet NaN (sign + payload preserved, quiet bit set),
+    // exactly what scalar `std::trunc/ceil/floor/nearbyint` produce: qNaN passes
+    // through unchanged and sNaN is quieted. The stdx intrinsic instead clears the
+    // quiet bit at narrow widths, so blend the bit-correct value in explicitly.
+    const F quieted = std::bit_cast<F>(ai | U(kQuiet));
+    stdx::where(stdx::isnan(a), r) = quieted;
+    return r;
+  }
 }
 
 inline native<float> trunc_simd(native<float> a) {
@@ -633,12 +650,24 @@ inline native<double> frexp_mant_f64_simd(native<double> x) {
   const native<double> mf = stdx::static_simd_cast<native<double>>(M);
   const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
   U dn = sign | (U(1022ull) << 52) | ((M << (U(52ull) - p)) & U(0xFFFFFFFFFFFFFull));
-  U out = normal;
-  stdx::where(E == 0ull, out) = v;                   // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn; // denormal -> renormalized
-  stdx::where(E == 2047ull, out) = v;                // Inf passes through unchanged
-  stdx::where((E == 2047ull) && (M != 0ull), out) = v | U(0x0008000000000000ull); // quiet NaN
-  return std::bit_cast<native<double>>(out);
+  constexpr std::size_t W = U::size();
+  alignas(U) typename U::value_type out_buf[W];
+  alignas(U) typename U::value_type e_buf[W];
+  alignas(U) typename U::value_type m_buf[W];
+  alignas(U) typename U::value_type v_buf[W];
+  alignas(U) typename U::value_type dn_buf[W];
+  normal.copy_to(out_buf, stdx::vector_aligned);
+  E.copy_to(e_buf, stdx::vector_aligned);
+  M.copy_to(m_buf, stdx::vector_aligned);
+  v.copy_to(v_buf, stdx::vector_aligned);
+  dn.copy_to(dn_buf, stdx::vector_aligned);
+  for (std::size_t i = 0; i < W; ++i) {
+    if (e_buf[i] == 0ull)
+      out_buf[i] = m_buf[i] == 0ull ? v_buf[i] : dn_buf[i];
+    if (e_buf[i] == 2047ull)
+      out_buf[i] = m_buf[i] == 0ull ? v_buf[i] : (v_buf[i] | 0x0008000000000000ull);
+  }
+  return std::bit_cast<native<double>>(U(out_buf, stdx::vector_aligned));
 }
 
 /// 64-bit-lane port of the f64 `std::frexp` exponent. Returns each int32 result
@@ -655,11 +684,22 @@ inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
   const native<double> mf = stdx::static_simd_cast<native<double>>(M);
   const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
   U dn = p - U(1073ull);
-  U out = normal;
-  stdx::where(E == 0ull, out) = U(0ull);
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn;
-  stdx::where(E == 2047ull, out) = U(0ull);
-  return out;
+  constexpr std::size_t W = U::size();
+  alignas(U) typename U::value_type out_buf[W];
+  alignas(U) typename U::value_type e_buf[W];
+  alignas(U) typename U::value_type m_buf[W];
+  alignas(U) typename U::value_type dn_buf[W];
+  normal.copy_to(out_buf, stdx::vector_aligned);
+  E.copy_to(e_buf, stdx::vector_aligned);
+  M.copy_to(m_buf, stdx::vector_aligned);
+  dn.copy_to(dn_buf, stdx::vector_aligned);
+  for (std::size_t i = 0; i < W; ++i) {
+    if (e_buf[i] == 0ull)
+      out_buf[i] = m_buf[i] == 0ull ? 0ull : dn_buf[i];
+    if (e_buf[i] == 2047ull)
+      out_buf[i] = 0ull;
+  }
+  return U(out_buf, stdx::vector_aligned);
 }
 
 /// Sum of the four per-byte absolute differences of two uint32 lanes (the core

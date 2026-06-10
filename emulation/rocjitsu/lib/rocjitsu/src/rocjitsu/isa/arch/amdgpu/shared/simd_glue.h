@@ -19,8 +19,10 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -34,6 +36,16 @@ using float32_t = float;
 /// RJ_FORCE_SCALAR); returned by value, so there is no mutable global to
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
+
+/// Clang with libstdc++'s experimental SIMD AVX-512 backend rejects native
+/// 64-bit mask conversions (`_S_to_bits<long long>` vs `long`). Keep 32-bit
+/// SIMD paths enabled, but route 64-bit mask-heavy probes to scalar.
+inline constexpr bool simd_native64_masks_supported =
+#if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
+    false;
+#else
+    true;
+#endif
 
 /// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
 /// generated bodies emit per source: `abs` first (`std::fabs`), then `neg`
@@ -85,8 +97,21 @@ inline util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint
   else if (omod == 3)
     v = v * T(0.5);
   if (clamp) {
-    util::stdx::where(v < T(0), v) = T(0);
-    util::stdx::where(v > T(1), v) = T(1);
+    if constexpr (sizeof(T) == sizeof(uint64_t)) {
+      constexpr std::size_t W = util::native<T>::size();
+      alignas(util::native<T>) T buf[W];
+      v.copy_to(buf, util::stdx::vector_aligned);
+      for (std::size_t i = 0; i < W; ++i) {
+        if (buf[i] < T(0))
+          buf[i] = T(0);
+        else if (buf[i] > T(1))
+          buf[i] = T(1);
+      }
+      v = util::native<T>(buf, util::stdx::vector_aligned);
+    } else {
+      util::stdx::where(v < T(0), v) = T(0);
+      util::stdx::where(v > T(1), v) = T(1);
+    }
   }
   return v;
 }
@@ -2103,26 +2128,46 @@ inline util::native<double> div_fixup_f64_simd(util::native<double> p, util::nat
                                                util::native<double> c) {
   using D = util::native<double>;
   using U = util::native<uint64_t>;
-  const auto bxc = std::bit_cast<D>(std::bit_cast<U>(b) ^ std::bit_cast<U>(c));
-  const auto inf_val = util::stdx::copysign(D(std::numeric_limits<double>::infinity()), bxc);
-  const auto zero_val = util::stdx::copysign(D(0.0), bxc);
-  const auto qnan = D(std::numeric_limits<double>::quiet_NaN());
-  const auto b_nan = util::stdx::isnan(b);
-  const auto c_nan = util::stdx::isnan(c);
-  const auto b_inf = util::stdx::isinf(b);
-  const auto c_inf = util::stdx::isinf(c);
-  const auto b_zero = (b == D(0.0));
-  const auto c_zero = (c == D(0.0));
-  D r = p;
-  util::stdx::where(b_inf, r) = zero_val;
-  util::stdx::where(c_inf, r) = inf_val;
-  util::stdx::where(c_zero, r) = zero_val;
-  util::stdx::where(b_zero, r) = inf_val;
-  util::stdx::where(b_inf && c_inf, r) = qnan;
-  util::stdx::where(b_zero && c_zero, r) = qnan;
-  util::stdx::where(b_nan, r) = b;
-  util::stdx::where(c_nan, r) = c;
-  return r;
+  constexpr std::size_t W = D::size();
+  constexpr uint64_t kSign = 0x8000000000000000ull;
+  constexpr uint64_t kInfAbs = 0x7FF0000000000000ull;
+  constexpr uint64_t kQNaN = 0x7FF8000000000000ull;
+  alignas(D) double p_buf[W];
+  alignas(U) uint64_t b_buf[W];
+  alignas(U) uint64_t c_buf[W];
+  p.copy_to(p_buf, util::stdx::vector_aligned);
+  std::bit_cast<U>(b).copy_to(b_buf, util::stdx::vector_aligned);
+  std::bit_cast<U>(c).copy_to(c_buf, util::stdx::vector_aligned);
+  for (std::size_t i = 0; i < W; ++i) {
+    const uint64_t b_abs = b_buf[i] & ~kSign;
+    const uint64_t c_abs = c_buf[i] & ~kSign;
+    const bool b_nan = b_abs > kInfAbs;
+    const bool c_nan = c_abs > kInfAbs;
+    const bool b_inf = b_abs == kInfAbs;
+    const bool c_inf = c_abs == kInfAbs;
+    const bool b_zero = b_abs == 0;
+    const bool c_zero = c_abs == 0;
+    const uint64_t sign = (b_buf[i] ^ c_buf[i]) & kSign;
+    uint64_t r = std::bit_cast<uint64_t>(p_buf[i]);
+    if (b_inf)
+      r = sign; // copysign(0, b ^ c)
+    if (c_inf)
+      r = sign | kInfAbs;
+    if (c_zero)
+      r = sign;
+    if (b_zero)
+      r = sign | kInfAbs;
+    if (b_inf && c_inf)
+      r = kQNaN;
+    if (b_zero && c_zero)
+      r = kQNaN;
+    if (b_nan)
+      r = b_buf[i];
+    if (c_nan)
+      r = c_buf[i];
+    p_buf[i] = std::bit_cast<double>(r);
+  }
+  return D(p_buf, util::stdx::vector_aligned);
 }
 
 /// VOP3 div_fmas SIMD fast path (f32). The scalar body is `fma(s0, s1, s2)`
@@ -2991,28 +3036,44 @@ template <typename Inst>
 /// so this takes only the dst-accumulate functor. Variadic so the functor's
 /// commas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP2_FMA_F64(...)                                                        \
-  if (::rocjitsu::amdgpu::try_execute_ternary_vop2_f64_simd<double>(inst, wf, __VA_ARGS__))        \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_ternary_vop2_f64_simd<double>(inst, wf, __VA_ARGS__))    \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// 64-bit-lane VOP1 unary counterpart. `T` is the 64-bit lane type (`double`
 /// for the f64 math ops, `uint64_t` for v_mov_b64). Variadic in the functor so
 /// its commas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY_F64(T, ...)                                                   \
-  if (::rocjitsu::amdgpu::try_execute_unary_vop1_f64_simd<T>(inst, wf, __VA_ARGS__))               \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_unary_vop1_f64_simd<T>(inst, wf, __VA_ARGS__))           \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// Mixed-width cvt counterpart, f64 source -> 32-bit dst. `Tout` is the 32-bit
 /// result lane type; the functor (`native<double> -> narrow32<Tout>`) is variadic
 /// so its commas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...)                                                \
-  if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__))            \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__))        \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// Mixed-width cvt counterpart, 32-bit source -> f64 dst. `Tin` is the 32-bit
 /// source lane type; the functor (`narrow32<Tin> -> native<double>`) is variadic.
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))             \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))         \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOPC compare counterpart. `T` is the 32-bit lane read type; the comparison
 /// functor (which may convert/narrow inside) is variadic so its commas pass
@@ -3024,15 +3085,23 @@ template <typename Inst>
 /// 64-bit-lane VOPC compare counterpart (f64/i64/u64). `T` is the 64-bit lane
 /// read type; the comparison functor is variadic so its commas pass through.
 #define ROCJITSU_TRY_SIMD_VOPC64(T, ...)                                                           \
-  if (::rocjitsu::amdgpu::try_execute_vopc64_simd<T>(inst, wf, __VA_ARGS__))                       \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_vopc64_simd<T>(inst, wf, __VA_ARGS__))                   \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// Mixed-width v_cmp_class_f64 counterpart (64-bit value, 32-bit mask). No type
 /// argument; the class functor `(native<uint64_t> bits, narrow32<uint32_t> mask)
 /// -> mask` is variadic so its commas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOPC_CLASS_F64(...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_vopc_class_f64_simd(inst, wf, __VA_ARGS__))                  \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_vopc_class_f64_simd(inst, wf, __VA_ARGS__))              \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 v_cmp_class_f16/f32 counterpart (32-bit value, abs/neg modifiers, src1
 /// mask, SGPR-pair dst). `SM` is the per-op sign-bit mask (0x8000 / 0x80000000);
@@ -3044,8 +3113,12 @@ template <typename Inst>
 /// VOP3 v_cmp_class_f64 counterpart (64-bit value). `SM` is the f64 sign-bit mask
 /// (0x8000000000000000); the class functor is variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_CLASS_F64(SM, ...)                                                  \
-  if (::rocjitsu::amdgpu::try_execute_vop3_class_f64_simd(inst, wf, SM, __VA_ARGS__))              \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_vop3_class_f64_simd(inst, wf, SM, __VA_ARGS__))          \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 integer/bitwise binary counterpart (reads src0/src1, no modifiers).
 /// `T` is the 32-bit integer lane type; variadic in the functor.
@@ -3083,8 +3156,12 @@ template <typename Inst>
 /// modifiers, SGPR-pair dst). `T` is the 64-bit integer lane read type;
 /// variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_INT(T, ...)                                                  \
-  if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_int_simd<T>(inst, wf, __VA_ARGS__))              \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_int_simd<T>(inst, wf, __VA_ARGS__))          \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 f32 VOPC compare counterpart (per-source abs/neg modifiers, SGPR-pair
 /// dst). Lane type is fixed to float32_t; the functor takes already-modified
@@ -3106,8 +3183,12 @@ template <typename Inst>
 /// `double`; the functor takes already-modified `native<double>` arguments
 /// and is variadic so its commas pass through.
 #define ROCJITSU_TRY_SIMD_VOPC64_VOP3_FP64(...)                                                    \
-  if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_fp64_simd(inst, wf, __VA_ARGS__))                \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_vopc64_vop3_fp64_simd(inst, wf, __VA_ARGS__))            \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 integer/bitwise ternary counterpart (reads src0/src1/src2, no
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
@@ -3130,8 +3211,12 @@ template <typename Inst>
 /// VOP3 f64 ternary counterpart (read_simd64, per-source abs/neg, omod/clamp).
 /// Variadic.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP64(...)                                                   \
-  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_fp64_simd(inst, wf, __VA_ARGS__))               \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_ternary_vop3_fp64_simd(inst, wf, __VA_ARGS__))           \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 dst-accumulate FMA counterpart (f32). Per-isa class has no src2;
 /// vdst is the accumulator. abs/neg apply to src0/src1 only.
@@ -3147,8 +3232,12 @@ template <typename Inst>
 
 /// VOP3 dst-accumulate FMA counterpart (f64).
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_FP64(...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_simd(inst, wf, __VA_ARGS__))                  \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_simd(inst, wf, __VA_ARGS__))              \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 ldexp counterpart (f32 src0 + int32 src1 exp). Variadic functor.
 #define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP32(...)                                                     \
@@ -3157,8 +3246,12 @@ template <typename Inst>
 
 /// VOP3 ldexp counterpart (f64 src0 + int32 src1 exp). Variadic functor.
 #define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...)                                                     \
-  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp64_simd(inst, wf, __VA_ARGS__))             \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 div_fmas counterpart (fma(s0,s1,s2) followed by VCC-gated ldexp; no
 /// omod/clamp). No functor — the op is fixed (operand order, ldexp shift) and
@@ -3168,21 +3261,33 @@ template <typename Inst>
   return
 
 #define ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64()                                                     \
-  if (::rocjitsu::amdgpu::try_execute_div_fmas_f64_simd(inst, wf))                                 \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_div_fmas_f64_simd(inst, wf))                             \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 f64 binary counterpart (read_simd64, per-source abs/neg, omod/clamp on
 /// the result). Variadic in the functor so its commas pass through as one
 /// token sequence.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_FP64(...)                                                    \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_fp64_simd(inst, wf, __VA_ARGS__))                \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_binary_vop3_fp64_simd(inst, wf, __VA_ARGS__))            \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 f64 unary counterpart (read_simd64, src0 abs/neg, omod/clamp on
 /// the result). Variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_UNARY_FP64(...)                                                     \
-  if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
-  return
+  do {                                                                                             \
+    if constexpr (::rocjitsu::amdgpu::simd_native64_masks_supported) {                             \
+      if (::rocjitsu::amdgpu::try_execute_unary_vop3_fp64_simd(inst, wf, __VA_ARGS__))             \
+        return;                                                                                    \
+    }                                                                                              \
+  } while (false)
 
 /// VOP3 f16 unary counterpart (raw uint32 lanes; widen f16->f32, src0 abs/neg,
 /// op, omod/clamp, narrow f32->f16). The functor takes already-widened-and-
