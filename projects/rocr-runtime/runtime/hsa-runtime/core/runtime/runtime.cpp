@@ -341,14 +341,13 @@ std::map<const void*, Runtime::AllocationRegion>::iterator Runtime::FindAllocati
   // ASAN's allocate interceptor returns (base + one red-zone page) but its free path
   // doesn't strip it, so |ptr| isn't a tracked key. Recover the owning allocation when
   // |ptr| is exactly one page into the immediately preceding entry.
-  static const size_t kAsanRedZonePageSize = 4096;
+  const size_t red_zone_size = os::PageSize();
   auto candidate = allocation_map_.upper_bound(ptr);
   if (candidate != allocation_map_.begin()) {
     --candidate;
-    const ptrdiff_t delta = static_cast<const char*>(ptr) -
-                            static_cast<const char*>(candidate->first);
-    if (delta == static_cast<ptrdiff_t>(kAsanRedZonePageSize) &&
-        static_cast<size_t>(delta) < candidate->second.size) {
+    const uintptr_t delta = reinterpret_cast<uintptr_t>(ptr) -
+                            reinterpret_cast<uintptr_t>(candidate->first);
+    if (delta == red_zone_size && delta < candidate->second.size) {
       return candidate;
     }
   }
