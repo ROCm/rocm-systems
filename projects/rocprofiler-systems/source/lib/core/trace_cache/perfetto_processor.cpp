@@ -1370,9 +1370,9 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                                       "%", _m.mm_activity);
 
     emit_gpu_scalar<amd_smi_temp_track>(
-        _device_id, _ts, _em.bits.hotspot_temperature || _em.bits.edge_temperature,
-        "Temperature", "deg C",
-        _em.bits.hotspot_temperature ? _m.hotspot_temperature : _m.edge_temperature);
+        _device_id, _ts, pmc::collectors::gpu::has_gpu_temperature_output(_em),
+        pmc::collectors::gpu::gpu_temperature_track_label(_em), "deg C",
+        pmc::collectors::gpu::select_gpu_temperature(_em, _m));
 
     emit_gpu_scalar<amd_smi_power_track>(
         _device_id, _ts, _em.bits.current_socket_power || _em.bits.average_socket_power,

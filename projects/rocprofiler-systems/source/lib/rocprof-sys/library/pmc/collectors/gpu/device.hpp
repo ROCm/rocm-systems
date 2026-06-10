@@ -77,14 +77,6 @@ public:
             {
                 gpu_metrics.average_socket_power = raw.average_socket_power;
             }
-            if(m_supported_metrics.bits.hotspot_temperature)
-            {
-                gpu_metrics.hotspot_temperature = raw.hotspot_temperature;
-            }
-            if(m_supported_metrics.bits.edge_temperature)
-            {
-                gpu_metrics.edge_temperature = raw.edge_temperature;
-            }
             if(m_supported_metrics.bits.gfx_activity)
             {
                 gpu_metrics.gfx_activity = raw.gfx_activity;
@@ -168,6 +160,29 @@ public:
             }
         }
 
+        if(m_supported_metrics.bits.hotspot_temperature)
+        {
+            try
+            {
+                gpu_metrics.hotspot_temperature = m_driver->get_hotspot_temperature();
+            } catch(const std::runtime_error& e)
+            {
+                LOG_DEBUG("GPU device [{}] hotspot temperature query failed: {}", m_index,
+                          e.what());
+            }
+        }
+        if(m_supported_metrics.bits.edge_temperature)
+        {
+            try
+            {
+                gpu_metrics.edge_temperature = m_driver->get_edge_temperature();
+            } catch(const std::runtime_error& e)
+            {
+                LOG_DEBUG("GPU device [{}] edge temperature query failed: {}", m_index,
+                          e.what());
+            }
+        }
+
         collect_sdma_metrics(enabled_cfg, timestamp, gpu_metrics);
 
         return gpu_metrics;
@@ -203,6 +218,17 @@ private:
             m_supported_metrics.bits.memory_usage = 0;
         }
 
+        {
+            const auto hotspot = m_driver->get_hotspot_temperature();
+            m_supported_metrics.bits.hotspot_temperature =
+                is_metric_supported(hotspot, METRIC_VALUE_NOT_SUPPORTED_16) ? 1 : 0;
+        }
+        {
+            const auto edge = m_driver->get_edge_temperature();
+            m_supported_metrics.bits.edge_temperature =
+                is_metric_supported(edge, METRIC_VALUE_NOT_SUPPORTED_16) ? 1 : 0;
+        }
+
         metrics raw{};
         try
         {
@@ -216,10 +242,6 @@ private:
             is_metric_supported(raw.current_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.average_socket_power =
             is_metric_supported(raw.average_socket_power, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.hotspot_temperature =
-            is_metric_supported(raw.hotspot_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
-        m_supported_metrics.bits.edge_temperature =
-            is_metric_supported(raw.edge_temperature, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.gfx_activity =
             is_metric_supported(raw.gfx_activity, METRIC_VALUE_NOT_SUPPORTED_16);
         m_supported_metrics.bits.umc_activity =

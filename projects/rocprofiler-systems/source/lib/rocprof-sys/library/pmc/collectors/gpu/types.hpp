@@ -104,6 +104,45 @@ socket_power_track_label(const enabled_metrics& enabled)
     return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
 }
 
+// GPU die temperature (single track): prefer hotspot when that source is enabled in the
+// user config, otherwise edge (matches ROCPD / Perfetto replay).
+[[nodiscard]] inline bool
+has_gpu_temperature_output(const enabled_metrics& enabled)
+{
+    return enabled.bits.hotspot_temperature != 0 || enabled.bits.edge_temperature != 0;
+}
+
+[[nodiscard]] inline double
+select_gpu_temperature(const enabled_metrics& enabled, const metrics& values)
+{
+    return static_cast<double>(enabled.bits.hotspot_temperature != 0
+                                   ? values.hotspot_temperature
+                                   : values.edge_temperature);
+}
+
+// Display label for the GPU temperature track, matching select_gpu_temperature().
+[[nodiscard]] inline const char*
+gpu_temperature_track_label(const enabled_metrics& enabled)
+{
+    return enabled.bits.hotspot_temperature != 0 ? "Hotspot Temp" : "Edge Temp";
+}
+
+template <typename T>
+[[nodiscard]] constexpr bool
+is_metric_supported(T value, T invalid_sentinel = std::numeric_limits<T>::max())
+{
+    return value != invalid_sentinel;
+}
+
+template <typename T>
+constexpr bool
+populate_if_supported(T& dest, T src, T invalid_sentinel = std::numeric_limits<T>::max())
+{
+    const bool valid = is_metric_supported(src, invalid_sentinel);
+    dest             = valid ? src : T{ 0 };
+    return valid;
+}
+
 }  // namespace gpu
 }  // namespace collectors
 }  // namespace pmc

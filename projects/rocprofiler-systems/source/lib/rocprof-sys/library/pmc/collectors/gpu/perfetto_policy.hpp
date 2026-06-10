@@ -257,6 +257,13 @@ struct perfetto_policy
                         enabled_metric_config.value & device_data.supported_metrics.value;
                     track_name = socket_power_track_label(effective_power);
                 }
+                else if(num == detail::TEMPERATURE_VALUE)
+                {
+                    enabled_metrics effective_temp{};
+                    effective_temp.value =
+                        enabled_metric_config.value & device_data.supported_metrics.value;
+                    track_name = gpu_temperature_track_label(effective_temp);
+                }
                 description.track_indexes.emplace_back(counter_track::emplace(
                     device_index, addendum(track_name), description.units));
             }
@@ -417,13 +424,10 @@ private:
         }
 
         auto temp_it = tracks.find(detail::TEMPERATURE_VALUE);
-        if((effective_metrics.bits.edge_temperature ||
-            effective_metrics.bits.hotspot_temperature) &&
+        if(has_gpu_temperature_output(effective_metrics) &&
            temp_it != tracks.end() && !temp_it->second.track_indexes.empty())
         {
-            const double temp = effective_metrics.bits.hotspot_temperature
-                                    ? metric_values.hotspot_temperature
-                                    : metric_values.edge_temperature;
+            const double temp = select_gpu_temperature(effective_metrics, metric_values);
             TRACE_COUNTER(
                 "device_temp",
                 counter_track::at(device_index, temp_it->second.track_indexes[0]), ts,
