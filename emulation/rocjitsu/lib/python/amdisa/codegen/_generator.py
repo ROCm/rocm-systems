@@ -4902,7 +4902,8 @@ class CodeGenerator:
 
                         _enc_key_for_probe = enc.enc_name.lower().replace('enc_', '')
                         _portable_probe = _simd_probe_arch_portable(
-                            f'{inst.mnemonic}_{_enc_key_for_probe}'
+                            f'{inst.mnemonic}_{_enc_key_for_probe}',
+                            self.isa_spec.profile.vop3p_opsel_fields,
                         )
                         if body_throws:
                             exec_impl = cgen.Line(
@@ -5169,7 +5170,10 @@ class CodeGenerator:
                             return False
                         return self._can_share_execute(
                             i.mnemonic, i, enc.enc_name
-                        ) or _simd_probe_arch_portable(f'{i.mnemonic}_{enc_key}')
+                        ) or _simd_probe_arch_portable(
+                            f'{i.mnemonic}_{enc_key}',
+                            self.isa_spec.profile.vop3p_opsel_fields,
+                        )
 
                     has_shared = any(_delegates_to_shared(i) for i in all_insts)
                     if has_shared:

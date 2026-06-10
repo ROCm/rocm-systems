@@ -471,7 +471,9 @@ private:
 public:
   static inline __device__ void sendPeerNotify(int peer, int connIndex, int steps) {
 #ifdef ENABLE_WARP_SPEED
-    ncclDevChannelPeer* peerPtr = ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer];
+    ncclDevChannelPeer* peerPtr = ncclShmem.warpComm
+        ? ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer]
+        : ncclShmem.channel.peers[peer];
 #else
     ncclDevChannelPeer* peerPtr = ncclShmem.channel.peers[peer];
 #endif
@@ -482,7 +484,9 @@ public:
   static inline __device__ void recvPeerNotify(int peer, int connIndex, int steps) {
     int spins = 0;
 #ifdef ENABLE_WARP_SPEED
-    ncclDevChannelPeer* peerPtr = ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer];
+    ncclDevChannelPeer* peerPtr = ncclShmem.warpComm
+        ? ncclShmem.warpChannel[threadIdx.x/WARP_SIZE].peers[peer]
+        : ncclShmem.channel.peers[peer];
 #else
     ncclDevChannelPeer* peerPtr = ncclShmem.channel.peers[peer];
 #endif
@@ -756,7 +760,9 @@ public:
     barriers_pat = &ncclShmem.barrier_pat;
     this->nworkers = nthreads;
 #ifdef ENABLE_WARP_SPEED
-    auto *channel = &ncclShmem.warpChannel[tidInBlock/WARP_SIZE];
+    auto *channel = ncclShmem.warpComm
+        ? &ncclShmem.warpChannel[tidInBlock/WARP_SIZE]
+        : &ncclShmem.channel;
 #else
     auto *channel = &ncclShmem.channel;
 #endif
