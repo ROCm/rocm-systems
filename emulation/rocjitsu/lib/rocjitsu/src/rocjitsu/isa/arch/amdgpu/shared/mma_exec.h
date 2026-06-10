@@ -23,6 +23,7 @@
 ///   - Input A[row][k]: use input_loc(dim=M, K, B, i=row, k, b, bits).
 ///     Input B[col][k]: use input_loc(dim=N, K, B, i=col, k, b, bits).
 
+#include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -64,10 +65,6 @@ struct PackedOutputLoc {
   uint32_t lane;
   uint32_t sub_element;
 };
-
-/// AccVGPR offset within a unified VGPR block. On CDNA3/4, AccVGPRs occupy
-/// the second half of the 512-register block: acc0 = vgpr_base + 256.
-constexpr uint32_t ACC_VGPR_OFFSET = 256;
 
 /// Resolve VGPR base for an MFMA destination operand.
 /// The acc_cd bit in the MFMA encoding determines whether the destination

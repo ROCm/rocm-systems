@@ -556,8 +556,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       wg_wavefronts.push_back(wf);
     }
-    plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id, entry.vgprs_per_wf,
-                                               entry.sgprs_per_wf,
+    plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
+                                               cu->vgpr_allocation_block_size(), entry.sgprs_per_wf,
                                                std::span<Wavefront *>(wg_wavefronts));
     for (auto *wf : wg_wavefronts)
       plugin_group_->onAmdgpuWavefrontDispatched(*wf);
