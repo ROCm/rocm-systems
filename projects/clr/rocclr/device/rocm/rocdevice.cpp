@@ -1425,102 +1425,110 @@ bool Device::populateOCLDeviceConstants() {
   }
 
   assert(HSA_EXTENSION_IMAGES < 8);
-  const bool image_is_supported = ((hsa_extensions[0] & (1 << HSA_EXTENSION_IMAGES)) != 0);
+  bool image_is_supported = ((hsa_extensions[0] & (1 << HSA_EXTENSION_IMAGES)) != 0);
   if (image_is_supported) {
-    // Images
+    // Images — query image properties, but don't fail device creation if
+    // the image extension queries fail (e.g. image library not loaded).
+    bool image_queries_ok = true;
+
     if (HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS),
                             &info_.maxSamplers_)) {
-      return false;
+      image_queries_ok = false;
     }
 
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES),
                             &info_.maxReadImageArgs_)) {
-      return false;
+      image_queries_ok = false;
     }
 
     // TODO: no attribute for write image.
     info_.maxWriteImageArgs_ = 8;
 
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES),
                             &info_.maxReadWriteImageArgs_)) {
-      return false;
+      image_queries_ok = false;
     }
 
     uint32_t image_max_dim[3];
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS),
                             &image_max_dim)) {
-      return false;
+      image_queries_ok = false;
     }
 
-    info_.image2DMaxWidth_ = image_max_dim[0];
-    info_.image2DMaxHeight_ = image_max_dim[1];
+    if (image_queries_ok) {
+      info_.image2DMaxWidth_ = image_max_dim[0];
+      info_.image2DMaxHeight_ = image_max_dim[1];
+    }
 
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS),
                             &image_max_dim)) {
-      return false;
+      image_queries_ok = false;
     }
 
-    info_.image3DMaxWidth_ = image_max_dim[0];
-    info_.image3DMaxHeight_ = image_max_dim[1];
-    info_.image3DMaxDepth_ = image_max_dim[2];
+    if (image_queries_ok) {
+      info_.image3DMaxWidth_ = image_max_dim[0];
+      info_.image3DMaxHeight_ = image_max_dim[1];
+      info_.image3DMaxDepth_ = image_max_dim[2];
+    }
 
     uint32_t max_array_size = 0;
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS),
                             &max_array_size)) {
-      return false;
+      image_queries_ok = false;
     }
-
-    info_.imageMaxArraySize_ = max_array_size;
+    if (image_queries_ok) info_.imageMaxArraySize_ = max_array_size;
 
     uint32_t max_image1da_width = 0;
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS),
                             &max_image1da_width)) {
-      return false;
+      image_queries_ok = false;
     }
-
-    info_.image1DAMaxWidth_ = max_image1da_width;
+    if (image_queries_ok) info_.image1DAMaxWidth_ = max_image1da_width;
 
     uint32_t max_image2da_width[2] = {0, 0};
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS),
                             &max_image2da_width)) {
-      return false;
+      image_queries_ok = false;
+    }
+    if (image_queries_ok) {
+      info_.image2DAMaxWidth_[0] = max_image2da_width[0];
+      info_.image2DAMaxWidth_[1] = max_image2da_width[1];
     }
 
-    info_.image2DAMaxWidth_[0] = max_image2da_width[0];
-    info_.image2DAMaxWidth_[1] = max_image2da_width[1];
-
     uint32_t max_image1d_width = 0;
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS),
                             &max_image1d_width)) {
-      return false;
+      image_queries_ok = false;
     }
-    info_.image1DMaxWidth_ = max_image1d_width;
+    if (image_queries_ok) info_.image1DMaxWidth_ = max_image1d_width;
 
-    if (HSA_STATUS_SUCCESS !=
+    if (image_queries_ok && HSA_STATUS_SUCCESS !=
         Hsa::agent_get_info(bkendDevice_,
                             static_cast<hsa_agent_info_t>(HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS),
                             &image_max_dim)) {
-      return false;
+      image_queries_ok = false;
     }
-    info_.imageMaxBufferSize_ = (amd::IS_HIP) ? image_max_dim[0] : (1 << 27);
+    if (image_queries_ok) {
+      info_.imageMaxBufferSize_ = (amd::IS_HIP) ? image_max_dim[0] : (1 << 27);
+    }
 
     info_.imagePitchAlignment_ = 256;
 
@@ -1528,7 +1536,16 @@ bool Device::populateOCLDeviceConstants() {
 
     info_.bufferFromImageSupport_ = false;
 
-    info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
+    if (!image_queries_ok) {
+      // Image extension reported as supported but queries failed
+      // (e.g. image library not loaded). Disable image support.
+      image_is_supported = false;
+      info_.imageSupport_ = false;
+      ClPrint(amd::LOG_WARNING, amd::LOG_INIT,
+              "Image extension queries failed, disabling image support");
+    } else {
+      info_.imageSupport_ = (info_.maxReadWriteImageArgs_ > 0) ? true : false;
+    }
   }
 
   // Enable SVM Capabilities of Hsa device. Ensure

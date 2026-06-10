@@ -368,3 +368,7 @@ FILTER[RHEL9]=\
 FILTER[upstream]=\
 "KFDIPCTest.*:"\
 "KFDPCSamplingTest.*"
+
+FILTER[gfx1154]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
