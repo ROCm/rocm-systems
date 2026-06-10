@@ -42,8 +42,7 @@ inline bool simd_force_scalar() { return util::force_scalar(); }
 /// sign bit and unary minus flips it (both NaN-payload preserving), so the
 /// vector form is a pure sign-bit AND/XOR — bit-identical on every input.
 template <unsigned SrcIdx>
-inline util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_t abs,
-                                                  uint32_t neg) {
+util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_t abs, uint32_t neg) {
   using U = util::native<uint32_t>;
   U b = std::bit_cast<U>(v);
   if (abs & (1u << SrcIdx))
@@ -59,8 +58,7 @@ inline util::native<float> apply_vop3_src_mod_f32(util::native<float> v, uint32_
 /// the vector form is a pure AND/XOR — bit-identical incl. NaN payload,
 /// matching the scalar lambda the f64 VOP3 bodies emit.
 template <unsigned SrcIdx>
-inline util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint32_t abs,
-                                                   uint32_t neg) {
+util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint32_t abs, uint32_t neg) {
   using U = util::native<uint64_t>;
   U b = std::bit_cast<U>(v);
   if (abs & (1u << SrcIdx))
@@ -77,7 +75,7 @@ inline util::native<double> apply_vop3_src_mod_f64(util::native<double> v, uint3
 /// matching `std::clamp(v, T(0), T(1))`. Instantiated for float and double; the
 /// `_f32`/`_f64` wrappers below name the two lane types the VOP3 paths use.
 template <typename T>
-inline util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t clamp) {
+util::native<T> apply_vop3_dst_mod(util::native<T> v, uint32_t omod, uint32_t clamp) {
   if (omod == 1)
     v = v * T(2);
   else if (omod == 2)
@@ -108,7 +106,7 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
 /// per-chunk loop then issues a value-semantic `r->simd_load<T>(base)` directly
 /// off the resolved (loop-invariant) object with no further dispatch and no raw
 /// pointer in the kernel body — the storage pointer never escapes `VgprStorage`.
-template <typename Op> inline const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
+template <typename Op> const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
   const VgprStorage *r = SimdAccess::vgpr_storage(op, wf);
   if (r)
     SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
@@ -117,7 +115,7 @@ template <typename Op> inline const VgprStorage *simd_src_reg(const Op &op, cons
 
 /// Mutable counterpart of `simd_src_reg` for the dst write path (single
 /// `simd_vgpr_storage_mut` dispatch).
-template <typename Op> inline VgprStorage *simd_dst_reg(const Op &op, Wavefront &wf) {
+template <typename Op> VgprStorage *simd_dst_reg(const Op &op, Wavefront &wf) {
   return SimdAccess::vgpr_storage_mut(op, wf);
 }
 
@@ -126,8 +124,7 @@ template <typename Op> inline VgprStorage *simd_dst_reg(const Op &op, Wavefront 
 /// hi = reg N+1), or `{nullptr, nullptr}` for a non-VGPR operand. The glue's
 /// 64-bit kernels structured-bind this and issue value-semantic
 /// `lo->simd_load64<T>(*hi, base)` — no raw pointer in the kernel body.
-template <typename Op>
-inline ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
+template <typename Op> ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
   ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
   if (p.lo)
     SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
@@ -136,7 +133,7 @@ inline ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) 
 
 /// Mutable counterpart of `simd_src_reg64` for the 64-bit dst write path
 /// (single `simd_vgpr_storage64_mut` dispatch).
-template <typename Op> inline VgprStoragePair64 simd_dst_reg64(const Op &op, Wavefront &wf) {
+template <typename Op> VgprStoragePair64 simd_dst_reg64(const Op &op, Wavefront &wf) {
   return SimdAccess::vgpr_storage64_mut(op, wf);
 }
 
@@ -146,15 +143,15 @@ template <typename Op> inline VgprStoragePair64 simd_dst_reg64(const Op &op, Wav
 /// invariant (hoisted before the chunk loop), so this is a plain null test +
 /// inlined load — no raw pointer escapes the kernel body.
 template <typename T>
-inline util::native<T> simd_load_or(const VgprStorage *r, uint32_t base, util::native<T> bcast) {
+util::native<T> simd_load_or(const VgprStorage *r, uint32_t base, util::native<T> bcast) {
   return r ? r->template simd_load<T>(base) : bcast;
 }
 
 /// Narrow (native_width64-wide) counterpart of `simd_load_or` for the
 /// mixed-width f64<->32-bit glue.
 template <typename T>
-inline util::narrow32<T> simd_load_narrow_or(const VgprStorage *r, uint32_t base,
-                                             util::narrow32<T> bcast) {
+util::narrow32<T> simd_load_narrow_or(const VgprStorage *r, uint32_t base,
+                                      util::narrow32<T> bcast) {
   return r ? r->template simd_load_narrow<T>(base) : bcast;
 }
 
@@ -163,16 +160,15 @@ inline util::narrow32<T> simd_load_narrow_or(const VgprStorage *r, uint32_t base
 /// storage, otherwise the pre-broadcast scalar `bcast`. The resolved pair is
 /// loop-invariant — no raw pointer escapes the kernel body.
 template <typename T>
-inline util::native<T> simd_load64_or(const ConstVgprStoragePair64 &p, uint32_t base,
-                                      util::native<T> bcast) {
+util::native<T> simd_load64_or(const ConstVgprStoragePair64 &p, uint32_t base,
+                               util::native<T> bcast) {
   return p.lo ? p.lo->template simd_load64<T>(*p.hi, base) : bcast;
 }
 
 /// Mutable-pair overload of `simd_load64_or`, for the dst-accumulate (fmac) f64
 /// paths whose vdst pair is both the accumulator source and the destination.
 template <typename T>
-inline util::native<T> simd_load64_or(const VgprStoragePair64 &p, uint32_t base,
-                                      util::native<T> bcast) {
+util::native<T> simd_load64_or(const VgprStoragePair64 &p, uint32_t base, util::native<T> bcast) {
   return p.lo ? p.lo->template simd_load64<T>(*p.hi, base) : bcast;
 }
 
@@ -402,7 +398,7 @@ template <typename T, typename Inst, typename BinOp>
 /// Trivially inlined to `return false;` so the generated probe at the
 /// call site costs nothing on toolchains without `<experimental/simd>`.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop2_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop2_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -449,7 +445,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the unary path; see the binary-path note above.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop1_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop1_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -466,7 +462,7 @@ template <typename Value, typename Mask> struct SimdCarry {
 /// Deduce-and-wrap helper for the carry functors. Keeps each functor a single
 /// expression while leaving the mask type implicit.
 template <typename Value, typename Mask>
-inline SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
+SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
   return {value, carry};
 }
 
@@ -527,7 +523,7 @@ template <typename Inst, typename CarryOp>
 
 /// Unconstrained fallback for the carry path; see the binary-path note above.
 template <typename Inst, typename CarryOp>
-[[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp) {
+[[nodiscard]] bool try_execute_binary_vop2_carry_simd(Inst &, Wavefront &, CarryOp) {
   return false;
 }
 
@@ -580,8 +576,7 @@ template <typename T, typename Inst, typename FmaOp>
 
 /// Unconstrained fallback for the ternary path; see the binary-path note above.
 template <typename T, typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop2_simd(Inst &, Wavefront &, util::native<T>,
-                                                        FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop2_simd(Inst &, Wavefront &, util::native<T>, FmaOp) {
   return false;
 }
 
@@ -630,7 +625,7 @@ template <typename T, typename Inst, typename FmaOp>
 
 /// Unconstrained fallback for the f64 ternary path; see the binary-path note.
 template <typename T, typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop2_f64_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop2_f64_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -671,7 +666,7 @@ template <typename Inst, typename BinOp>
 
 /// Unconstrained fallback for the f64 vop2 binary path.
 template <typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop2_f64_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop2_f64_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -714,7 +709,7 @@ template <typename T, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the f64 unary path; see the binary-path note.
 template <typename T, typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop1_f64_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop1_f64_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -773,7 +768,7 @@ template <typename Tout, typename Inst, typename CvtOp>
 
 /// Unconstrained fallback for the f64->b32 cvt path; see the binary-path note.
 template <typename Tout, typename Inst, typename CvtOp>
-[[nodiscard]] inline bool try_execute_cvt_f64_to_b32_simd(Inst &, Wavefront &, CvtOp) {
+[[nodiscard]] bool try_execute_cvt_f64_to_b32_simd(Inst &, Wavefront &, CvtOp) {
   return false;
 }
 
@@ -810,7 +805,7 @@ template <typename Tin, typename Inst, typename CvtOp>
 
 /// Unconstrained fallback for the b32->f64 cvt path; see the binary-path note.
 template <typename Tin, typename Inst, typename CvtOp>
-[[nodiscard]] inline bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
+[[nodiscard]] bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
   return false;
 }
 
@@ -868,7 +863,7 @@ template <typename Inst, typename CvtOp>
 }
 
 template <typename Inst, typename CvtOp>
-[[nodiscard]] inline bool try_execute_cvt_vop3_f64_to_b32_fp_simd(Inst &, Wavefront &, CvtOp) {
+[[nodiscard]] bool try_execute_cvt_vop3_f64_to_b32_fp_simd(Inst &, Wavefront &, CvtOp) {
   return false;
 }
 
@@ -912,8 +907,7 @@ template <typename Inst>
 }
 
 /// Unconstrained fallback for the cndmask path; see the binary-path note above.
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_cndmask_vop2_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop2_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -960,8 +954,7 @@ template <typename Inst>
 }
 
 /// Unconstrained fallback for the VOP3 cndmask path; see the binary-path note.
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_cndmask_vop3_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_cndmask_vop3_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -1005,8 +998,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_cndmask_b16_vop3_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_cndmask_b16_vop3_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -1058,7 +1050,7 @@ template <typename T, typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOPC path; see the binary-path note above.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1102,7 +1094,7 @@ template <typename T, typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the 64-bit VOPC path; see the binary-path note.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc64_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc64_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1151,7 +1143,7 @@ template <typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the f64 class path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_class_f64_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_class_f64_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1209,7 +1201,7 @@ template <typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOP3 b32 class path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vop3_class_b32_simd(Inst &, Wavefront &, uint32_t, CmpOp) {
+[[nodiscard]] bool try_execute_vop3_class_b32_simd(Inst &, Wavefront &, uint32_t, CmpOp) {
   return false;
 }
 
@@ -1263,7 +1255,7 @@ template <typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOP3 f64 class path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vop3_class_f64_simd(Inst &, Wavefront &, uint64_t, CmpOp) {
+[[nodiscard]] bool try_execute_vop3_class_f64_simd(Inst &, Wavefront &, uint64_t, CmpOp) {
   return false;
 }
 
@@ -1304,7 +1296,7 @@ template <typename T, typename Inst, typename BinOp>
 /// Unconstrained fallback for the VOP3 integer binary path; see the VOP2
 /// binary-path note above.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop3_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -1315,8 +1307,7 @@ template <typename T, typename Inst, typename BinOp>
 /// to scalar whenever any modifier field is set; the (common) unmodified case
 /// still takes the integer fast path.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf,
-                                                           BinOp bin_op) {
+[[nodiscard]] bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf, BinOp bin_op) {
   if (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
       inst.inst_.clamp != 0u)
     return false;
@@ -1361,7 +1352,7 @@ template <typename T, typename Inst, typename BinOp>
 
 /// Unconstrained fallback for the VOP3 f32 binary path.
 template <typename T, typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_fp_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop3_fp_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -1408,7 +1399,7 @@ template <typename T, typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOP3 integer VOPC path; see the binary-path note.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1454,7 +1445,7 @@ template <typename T, typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the 64-bit VOP3 integer VOPC path; see the binary-path note.
 template <typename T, typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc64_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc64_vop3_int_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1503,7 +1494,7 @@ template <typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOP3 f32 VOPC path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_vop3_fp32_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_vop3_fp32_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1554,7 +1545,7 @@ template <typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOP3 f16 VOPC path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc_vop3_fp16_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc_vop3_fp16_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1606,7 +1597,7 @@ template <typename Inst, typename CmpOp>
 
 /// Unconstrained fallback for the VOP3 f64 VOPC path; see the binary-path note.
 template <typename Inst, typename CmpOp>
-[[nodiscard]] inline bool try_execute_vopc64_vop3_fp64_simd(Inst &, Wavefront &, CmpOp) {
+[[nodiscard]] bool try_execute_vopc64_vop3_fp64_simd(Inst &, Wavefront &, CmpOp) {
   return false;
 }
 
@@ -1654,7 +1645,7 @@ template <typename Inst, typename BinOp>
 
 /// Unconstrained fallback for the VOP3 f64 binary path; see the binary-path note.
 template <typename Inst, typename BinOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_fp64_simd(Inst &, Wavefront &, BinOp) {
+[[nodiscard]] bool try_execute_binary_vop3_fp64_simd(Inst &, Wavefront &, BinOp) {
   return false;
 }
 
@@ -1693,7 +1684,7 @@ template <typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f64 unary path; see the binary-path note.
 template <typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop3_fp64_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp64_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -1737,7 +1728,7 @@ template <typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f16 unary path; see the binary-path note.
 template <typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp16_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -1780,7 +1771,7 @@ template <typename T, typename Inst, typename TernOp>
 
 /// Unconstrained fallback for the VOP3 integer ternary path; see binary-path note.
 template <typename T, typename Inst, typename TernOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_simd(Inst &, Wavefront &, TernOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_simd(Inst &, Wavefront &, TernOp) {
   return false;
 }
 
@@ -1826,7 +1817,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1874,7 +1865,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1921,7 +1912,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_ternary_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_ternary_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -1969,7 +1960,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_fmac_vop3_fp_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -2015,7 +2006,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_fmac_vop3_fp16_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -2060,7 +2051,7 @@ template <typename Inst, typename FmaOp>
 }
 
 template <typename Inst, typename FmaOp>
-[[nodiscard]] inline bool try_execute_fmac_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
+[[nodiscard]] bool try_execute_fmac_vop3_fp64_simd(Inst &, Wavefront &, FmaOp) {
   return false;
 }
 
@@ -2103,7 +2094,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp32_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_ldexp_vop3_fp32_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2146,7 +2137,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp64_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_ldexp_vop3_fp64_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2185,7 +2176,7 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
 
 /// Unconstrained fallback for the VOP3 f32 unary path.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
-[[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp) {
+[[nodiscard]] bool try_execute_unary_vop3_fp_simd(Inst &, Wavefront &, UnOp) {
   return false;
 }
 
@@ -2306,8 +2297,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_div_fmas_f32_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_div_fmas_f32_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2363,8 +2353,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_div_fmas_f64_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_div_fmas_f64_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2405,7 +2394,7 @@ template <typename Inst, typename ShiftOp>
   return true;
 }
 template <typename Inst, typename ShiftOp>
-[[nodiscard]] inline bool try_execute_shift64_vop3_simd(Inst &, Wavefront &, ShiftOp) {
+[[nodiscard]] bool try_execute_shift64_vop3_simd(Inst &, Wavefront &, ShiftOp) {
   return false;
 }
 
@@ -2445,8 +2434,7 @@ template <typename Inst>
   }
   return true;
 }
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_lshl_add_u64_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_lshl_add_u64_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2487,7 +2475,7 @@ template <typename Inst, typename MadOp>
   return true;
 }
 template <typename Inst, typename MadOp>
-[[nodiscard]] inline bool try_execute_mad_wide64_vop3_simd(Inst &, Wavefront &, MadOp) {
+[[nodiscard]] bool try_execute_mad_wide64_vop3_simd(Inst &, Wavefront &, MadOp) {
   return false;
 }
 
@@ -2533,7 +2521,7 @@ template <typename Inst, typename CarryOp>
   return true;
 }
 template <typename Inst, typename CarryOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_co_simd(Inst &, Wavefront &, CarryOp) {
+[[nodiscard]] bool try_execute_binary_vop3_co_simd(Inst &, Wavefront &, CarryOp) {
   return false;
 }
 
@@ -2581,7 +2569,7 @@ template <typename Inst, typename CarryOp>
   return true;
 }
 template <typename Inst, typename CarryOp>
-[[nodiscard]] inline bool try_execute_binary_vop3_cin_simd(Inst &, Wavefront &, CarryOp) {
+[[nodiscard]] bool try_execute_binary_vop3_cin_simd(Inst &, Wavefront &, CarryOp) {
   return false;
 }
 
@@ -2670,7 +2658,7 @@ template <FmaMixDst DstMode, typename Inst>
 }
 
 template <FmaMixDst DstMode, typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_fma_mix_simd(Inst &, Wavefront &) {
+[[nodiscard]] bool try_execute_vop3p_fma_mix_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -2715,7 +2703,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_binary_int_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_binary_int_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2753,7 +2741,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_int_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2812,7 +2800,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_binary_fp16_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_binary_fp16_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2879,7 +2867,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_fp16_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2922,7 +2910,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_binary_f32_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_binary_f32_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -2968,7 +2956,7 @@ template <typename Inst, typename Op>
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_f32_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_vop3p_pk_ternary_f32_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -3006,8 +2994,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_mov_b32_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_vop3p_mov_b32_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -3082,7 +3069,7 @@ template <int ElemBits, bool Signed, typename Inst>
 }
 
 template <int ElemBits, bool Signed, typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &, Wavefront &) {
+[[nodiscard]] bool try_execute_vop3p_dot_int_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -3148,8 +3135,7 @@ template <typename Inst>
   return true;
 }
 
-template <typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &, Wavefront &) {
+template <typename Inst> [[nodiscard]] bool try_execute_vop3p_dot_f16_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -3207,7 +3193,7 @@ template <int ElemBits, typename Inst>
 }
 
 template <int ElemBits, typename Inst>
-[[nodiscard]] inline bool try_execute_vop3p_dot_int_mixed_simd(Inst &, Wavefront &) {
+[[nodiscard]] bool try_execute_vop3p_dot_int_mixed_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -3264,7 +3250,7 @@ template <int ElemBits, bool Vop3, typename Inst>
 }
 
 template <int ElemBits, bool Vop3, typename Inst>
-[[nodiscard]] inline bool try_execute_dotc_int_simd(Inst &, Wavefront &) {
+[[nodiscard]] bool try_execute_dotc_int_simd(Inst &, Wavefront &) {
   return false;
 }
 
@@ -3313,7 +3299,7 @@ template <bool Vop3, typename Inst>
 }
 
 template <bool Vop3, typename Inst>
-[[nodiscard]] inline bool try_execute_dotc_f16_simd(Inst &, Wavefront &) {
+[[nodiscard]] bool try_execute_dotc_f16_simd(Inst &, Wavefront &) {
   return false;
 }
 
