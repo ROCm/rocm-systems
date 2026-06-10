@@ -23,13 +23,16 @@ RJ_DIAGNOSTIC_POP
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <charconv>
 #include <cstring>
 #include <iomanip>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -391,6 +394,31 @@ struct PendingState {
   bool operator==(const PendingState &) const = default;
 };
 
+struct CfgInstructionView {
+  uint64_t section_offset = 0;
+  const Instruction *instruction = nullptr;
+};
+
+struct CfgBlockView {
+  const BasicBlock *block = nullptr;
+  std::vector<CfgInstructionView> instructions;
+};
+
+struct ScalarValueConstraint {
+  std::optional<int64_t> equal;
+  std::set<int64_t> not_equal;
+};
+
+using ScalarConstraints = std::map<uint16_t, ScalarValueConstraint>;
+
+struct SccPredicate {
+  enum class Kind : uint8_t { EqImm };
+
+  Kind kind = Kind::EqImm;
+  uint16_t sgpr = 0;
+  int64_t value = 0;
+};
+
 struct Analyzer {
   Analyzer(WaitcheckReport &report, WaitcheckOptions options)
       : report_(report), options_(options) {}
@@ -473,11 +501,13 @@ struct Analyzer {
       return;
     }
 
+    prepare_cfg_path_filter(blocks);
     for (size_t i = 0; i < blocks.size(); ++i) {
       (void)analyze_block(*blocks[i], in[i], section_name, file_offset_base, arch, true);
       if (should_stop_after_diagnostic())
         break;
     }
+    clear_cfg_path_filter();
   }
 
 private:
@@ -508,6 +538,34 @@ private:
   [[nodiscard]] bool diagnostics_available() const { return !report_.diagnostics_truncated; }
 
   [[nodiscard]] bool should_stop_after_diagnostic() const { return report_.stopped_early; }
+
+  void prepare_cfg_path_filter(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
+    cfg_views_.clear();
+    cfg_view_index_.clear();
+    cfg_block_by_start_offset_.clear();
+    feasible_path_cache_.clear();
+
+    cfg_views_.reserve(blocks.size());
+    for (const auto &block : blocks) {
+      CfgBlockView view;
+      view.block = block.get();
+      uint64_t section_offset = block->start_offset();
+      for (const Instruction &inst : block->instructions()) {
+        view.instructions.push_back({section_offset, &inst});
+        section_offset += static_cast<uint64_t>(inst.size());
+      }
+      cfg_view_index_.emplace(view.block, cfg_views_.size());
+      cfg_block_by_start_offset_.emplace(block->start_offset(), cfg_views_.size());
+      cfg_views_.push_back(std::move(view));
+    }
+  }
+
+  void clear_cfg_path_filter() {
+    cfg_views_.clear();
+    cfg_view_index_.clear();
+    cfg_block_by_start_offset_.clear();
+    feasible_path_cache_.clear();
+  }
 
   void record_diagnostic(WaitcheckDiagnostic diag) {
     ++report_.diagnostics_observed;
@@ -1479,6 +1537,9 @@ private:
   void emit_diagnostic(const Instruction &inst, const PendingEvent &event, RegisterRef reg,
                        WaitcheckAccessKind access, uint32_t required_count, uint64_t section_offset,
                        uint64_t file_offset, rj_code_arch_t arch) {
+    if (!should_emit_cfg_diagnostic(event, section_offset, arch))
+      return;
+
     WaitcheckDiagnostic diag;
     diag.counter = event.counter;
     diag.access = access;
@@ -1639,6 +1700,340 @@ private:
     return std::ranges::any_of(current_events, [&](const ClassifiedEvent &current_event) {
       return event.kind == current_event.kind;
     });
+  }
+
+  [[nodiscard]] std::optional<size_t> cfg_block_index_containing(uint64_t section_offset) const {
+    for (size_t i = 0; i < cfg_views_.size(); ++i) {
+      const BasicBlock *block = cfg_views_[i].block;
+      if (block != nullptr && section_offset >= block->start_offset() &&
+          section_offset < block->end_offset())
+        return i;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] bool instruction_adds_younger_event(const Instruction &inst,
+                                                    const PendingEvent &event,
+                                                    rj_code_arch_t arch) const {
+    const auto events = classify_events(inst, arch);
+    return std::ranges::any_of(events, [&](const ClassifiedEvent &classification) {
+      return classification.counter == event.counter;
+    });
+  }
+
+  void apply_path_pre_dependency_waits(const Instruction &inst, const PendingEvent &event,
+                                       rj_code_arch_t arch, bool &pending, uint32_t &age) {
+    if (!pending)
+      return;
+
+    PendingEvent path_event = event;
+    path_event.min_younger = age;
+    PendingState state;
+    state.pending[counter_index(event.counter)].push_back(path_event);
+
+    if (inst.is_waitcnt()) {
+      apply_waitcnt(state, inst, arch);
+    } else {
+      apply_embedded_waitcnt(state, inst);
+    }
+
+    auto &events = state.pending[counter_index(event.counter)];
+    auto found = find_event(events, path_event);
+    if (found == events.end()) {
+      pending = false;
+      age = 0;
+      return;
+    }
+    age = found->min_younger;
+  }
+
+  [[nodiscard]] static std::optional<int64_t> parse_operand_immediate(const Operand *op) {
+    if (op == nullptr || op->to_register_ref())
+      return std::nullopt;
+
+    std::string name = op->name();
+    int base = 10;
+    std::string_view text(name);
+    if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+      text.remove_prefix(2);
+      base = 16;
+    }
+    int64_t value = 0;
+    auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value, base);
+    if (ec != std::errc{} || ptr != text.data() + text.size())
+      return std::nullopt;
+    return value;
+  }
+
+  [[nodiscard]] static std::optional<SccPredicate> scalar_scc_predicate(const Instruction &inst) {
+    if (inst.mnemonic() != "s_cmp_eq_u32")
+      return std::nullopt;
+    const Operand *lhs = inst.src_operand(0);
+    const Operand *rhs = inst.src_operand(1);
+    if (lhs == nullptr || rhs == nullptr)
+      return std::nullopt;
+
+    auto lhs_ref = lhs->to_register_ref();
+    auto rhs_imm = parse_operand_immediate(rhs);
+    if (!lhs_ref || lhs_ref->cls != RegClass::SGPR || lhs_ref->width != 1 || !rhs_imm)
+      return std::nullopt;
+
+    return SccPredicate{SccPredicate::Kind::EqImm, lhs_ref->index, *rhs_imm};
+  }
+
+  [[nodiscard]] static bool is_scc_conditional_branch(std::string_view mnemonic) {
+    return mnemonic == "s_cbranch_scc0" || mnemonic == "s_cbranch_scc1";
+  }
+
+  [[nodiscard]] static bool
+  apply_scc_branch_constraint(ScalarConstraints &constraints,
+                              const std::optional<SccPredicate> &predicate,
+                              bool branch_condition_true) {
+    if (!predicate)
+      return true;
+
+    switch (predicate->kind) {
+    case SccPredicate::Kind::EqImm: {
+      ScalarValueConstraint &constraint = constraints[predicate->sgpr];
+      if (branch_condition_true) {
+        if (constraint.equal && *constraint.equal != predicate->value)
+          return false;
+        if (constraint.not_equal.contains(predicate->value))
+          return false;
+        constraint.equal = predicate->value;
+        return true;
+      }
+      if (constraint.equal && *constraint.equal == predicate->value)
+        return false;
+      constraint.not_equal.insert(predicate->value);
+      return true;
+    }
+    }
+    return true;
+  }
+
+  [[nodiscard]] static std::string constraints_key(const ScalarConstraints &constraints,
+                                                   const std::optional<SccPredicate> &predicate) {
+    std::ostringstream os;
+    for (const auto &[sgpr, constraint] : constraints) {
+      os << 's' << sgpr << '=';
+      if (constraint.equal)
+        os << *constraint.equal;
+      os << '!';
+      for (int64_t value : constraint.not_equal)
+        os << value << ',';
+      os << ';';
+    }
+    if (predicate)
+      os << "scc:eq:s" << predicate->sgpr << ':' << predicate->value;
+    return os.str();
+  }
+
+  static void invalidate_redefined_scalar_constraints(ScalarConstraints &constraints,
+                                                      const InstDefUse &du) {
+    std::vector<uint16_t> redefined;
+    du.defs.for_each([&](RegisterRef ref) {
+      if (ref.cls == RegClass::SGPR)
+        redefined.push_back(ref.index);
+    });
+    for (uint16_t sgpr : redefined)
+      constraints.erase(sgpr);
+  }
+
+  [[nodiscard]] bool has_cfg_path_with_event_pending(const PendingEvent &event,
+                                                     uint64_t consumer_offset,
+                                                     rj_code_arch_t arch) {
+    if (cfg_views_.empty())
+      return true;
+
+    using CacheKey = std::tuple<uint64_t, uint64_t, WaitCounterKind>;
+    const CacheKey cache_key{event.section_offset, consumer_offset, event.counter};
+    if (auto cached = feasible_path_cache_.find(cache_key); cached != feasible_path_cache_.end())
+      return cached->second;
+
+    const auto producer_block_index = cfg_block_index_containing(event.section_offset);
+    const auto consumer_block_index = cfg_block_index_containing(consumer_offset);
+    if (!producer_block_index) {
+      feasible_path_cache_[cache_key] = true;
+      return true;
+    }
+    if (!consumer_block_index) {
+      feasible_path_cache_[cache_key] = true;
+      return true;
+    }
+    std::set<size_t> can_reach_consumer;
+    std::vector<size_t> reverse_worklist{*consumer_block_index};
+    while (!reverse_worklist.empty()) {
+      const size_t block_index = reverse_worklist.back();
+      reverse_worklist.pop_back();
+      if (!can_reach_consumer.insert(block_index).second)
+        continue;
+      const BasicBlock *block = cfg_views_[block_index].block;
+      if (block == nullptr)
+        continue;
+      for (const BasicBlock *predecessor : block->predecessors()) {
+        const auto predecessor_it = cfg_view_index_.find(predecessor);
+        if (predecessor_it != cfg_view_index_.end())
+          reverse_worklist.push_back(predecessor_it->second);
+      }
+    }
+    if (!can_reach_consumer.contains(*producer_block_index)) {
+      feasible_path_cache_[cache_key] = false;
+      return false;
+    }
+
+    std::set<size_t> can_reach_producer;
+    reverse_worklist.push_back(*producer_block_index);
+    while (!reverse_worklist.empty()) {
+      const size_t block_index = reverse_worklist.back();
+      reverse_worklist.pop_back();
+      if (!can_reach_producer.insert(block_index).second)
+        continue;
+      const BasicBlock *block = cfg_views_[block_index].block;
+      if (block == nullptr)
+        continue;
+      for (const BasicBlock *predecessor : block->predecessors()) {
+        const auto predecessor_it = cfg_view_index_.find(predecessor);
+        if (predecessor_it != cfg_view_index_.end())
+          reverse_worklist.push_back(predecessor_it->second);
+      }
+    }
+
+    struct SearchState {
+      size_t block_index = 0;
+      size_t inst_index = 0;
+      bool pending = false;
+      uint32_t age = 0;
+      ScalarConstraints constraints;
+      std::optional<SccPredicate> scc_predicate;
+    };
+
+    constexpr uint32_t kMaxTrackedAge = 255;
+    constexpr size_t kMaxPathSearchStates = 200000;
+    std::vector<SearchState> worklist;
+    for (size_t i = 0; i < cfg_views_.size(); ++i) {
+      const BasicBlock *block = cfg_views_[i].block;
+      if (block != nullptr && block->predecessors().empty() && can_reach_producer.contains(i))
+        worklist.push_back({i, 0, false, 0, {}, std::nullopt});
+    }
+    if (worklist.empty())
+      worklist.push_back({*producer_block_index, 0, false, 0, {}, std::nullopt});
+    std::set<std::tuple<size_t, size_t, bool, uint32_t, std::string>> visited;
+    size_t states_processed = 0;
+
+    auto can_continue_from = [&](size_t block_index, bool pending) {
+      return pending ? can_reach_consumer.contains(block_index)
+                     : can_reach_producer.contains(block_index);
+    };
+
+    while (!worklist.empty()) {
+      SearchState state = worklist.back();
+      worklist.pop_back();
+      state.age = std::min(state.age, kMaxTrackedAge);
+      const std::string constraint_key = constraints_key(state.constraints, state.scc_predicate);
+      if (!visited
+               .insert(
+                   {state.block_index, state.inst_index, state.pending, state.age, constraint_key})
+               .second)
+        continue;
+      if (++states_processed > kMaxPathSearchStates) {
+        feasible_path_cache_[cache_key] = true;
+        return true;
+      }
+
+      const CfgBlockView &block_view = cfg_views_[state.block_index];
+      if (state.inst_index >= block_view.instructions.size()) {
+        if (block_view.block == nullptr)
+          continue;
+        for (const BasicBlock *successor : block_view.block->successors()) {
+          const auto successor_it = cfg_view_index_.find(successor);
+          if (successor_it != cfg_view_index_.end() &&
+              can_continue_from(successor_it->second, state.pending))
+            worklist.push_back({successor_it->second, 0, state.pending, state.age,
+                                state.constraints, state.scc_predicate});
+        }
+        continue;
+      }
+
+      const CfgInstructionView &inst_view = block_view.instructions[state.inst_index];
+      const Instruction &inst = *inst_view.instruction;
+      apply_path_pre_dependency_waits(inst, event, arch, state.pending, state.age);
+
+      if (inst_view.section_offset == consumer_offset && state.pending) {
+        feasible_path_cache_[cache_key] = true;
+        return true;
+      }
+
+      if (inst_view.section_offset == event.section_offset) {
+        state.pending = true;
+        state.age = 0;
+      } else if (state.pending && !inst.is_waitcnt() && is_program_end(inst.mnemonic())) {
+        state.pending = false;
+        state.age = 0;
+      } else if (state.pending && !inst.is_waitcnt() &&
+                 instruction_adds_younger_event(inst, event, arch)) {
+        state.age = std::min<uint32_t>(state.age + 1, kMaxTrackedAge);
+      }
+
+      const InstDefUse du = inst_def_use_for_waitcheck(inst, VgprMsbState{}, arch);
+      invalidate_redefined_scalar_constraints(state.constraints, du);
+
+      if (const auto predicate = scalar_scc_predicate(inst)) {
+        state.scc_predicate = predicate;
+      } else if (is_scc_conditional_branch(inst.mnemonic())) {
+        const auto branch_delta = inst.branch_offset_bytes();
+        const auto fallthrough_offset =
+            inst_view.section_offset + static_cast<uint64_t>(inst.size());
+        if (branch_delta) {
+          const int64_t target =
+              static_cast<int64_t>(fallthrough_offset) + static_cast<int64_t>(*branch_delta);
+          if (target >= 0) {
+            const auto target_it = cfg_block_by_start_offset_.find(static_cast<uint64_t>(target));
+            if (target_it != cfg_block_by_start_offset_.end() &&
+                can_continue_from(target_it->second, state.pending)) {
+              ScalarConstraints taken_constraints = state.constraints;
+              const bool branch_takes_on_scc_true = inst.mnemonic() == "s_cbranch_scc1";
+              if (apply_scc_branch_constraint(taken_constraints, state.scc_predicate,
+                                              branch_takes_on_scc_true)) {
+                worklist.push_back({target_it->second, 0, state.pending, state.age,
+                                    std::move(taken_constraints), std::nullopt});
+              }
+            }
+          }
+        }
+
+        ScalarConstraints fallthrough_constraints = state.constraints;
+        const bool fallthrough_on_scc_true = inst.mnemonic() == "s_cbranch_scc0";
+        if (apply_scc_branch_constraint(fallthrough_constraints, state.scc_predicate,
+                                        fallthrough_on_scc_true)) {
+          const auto fallthrough_it = cfg_block_by_start_offset_.find(fallthrough_offset);
+          if (fallthrough_it != cfg_block_by_start_offset_.end()) {
+            if (can_continue_from(fallthrough_it->second, state.pending)) {
+              worklist.push_back({fallthrough_it->second, 0, state.pending, state.age,
+                                  std::move(fallthrough_constraints), std::nullopt});
+            }
+          } else if (state.inst_index + 1 < block_view.instructions.size()) {
+            worklist.push_back({state.block_index, state.inst_index + 1, state.pending, state.age,
+                                std::move(fallthrough_constraints), std::nullopt});
+          }
+        }
+        continue;
+      } else if (instruction_defines_special(inst, RegisterRef{RegClass::SCC, 0, 1}) ||
+                 instruction_uses_special(inst, RegisterRef{RegClass::SCC, 0, 1})) {
+        state.scc_predicate.reset();
+      }
+
+      worklist.push_back({state.block_index, state.inst_index + 1, state.pending, state.age,
+                          std::move(state.constraints), state.scc_predicate});
+    }
+
+    feasible_path_cache_[cache_key] = false;
+    return false;
+  }
+
+  [[nodiscard]] bool should_emit_cfg_diagnostic(const PendingEvent &event, uint64_t consumer_offset,
+                                                rj_code_arch_t arch) {
+    return has_cfg_path_with_event_pending(event, consumer_offset, arch);
   }
 
   [[nodiscard]] static bool instruction_uses_special(const Instruction &inst, RegisterRef ref) {
@@ -2077,6 +2472,10 @@ private:
 
   WaitcheckReport &report_;
   WaitcheckOptions options_;
+  std::vector<CfgBlockView> cfg_views_;
+  std::unordered_map<const BasicBlock *, size_t> cfg_view_index_;
+  std::unordered_map<uint64_t, size_t> cfg_block_by_start_offset_;
+  std::map<std::tuple<uint64_t, uint64_t, WaitCounterKind>, bool> feasible_path_cache_;
 };
 
 } // namespace
