@@ -940,24 +940,39 @@ def _load_test_categories() -> Optional[dict]:
                     )
         return compiled
 
+    def _flatten_labels(values):
+        # Mirror _compile_list's one-level flattening for plain label lists
+        # (excluded_labels / labels). A YAML alias of a sequence (e.g.
+        # `- *heavy_labels`) substitutes the anchored list as a single element,
+        # so callers can mix a shared anchor with per-tier additions, e.g.
+        #   excluded_labels:
+        #     - *heavy_labels
+        #     - "openmp"
+        # Without flattening, set([[...], "openmp"]) raises TypeError on the
+        # unhashable inner list.
+        flat = []
+        for v in values or []:
+            flat.extend(v if isinstance(v, list) else [v])
+        return flat
+
     tier_cfg: dict = {}
     for tier in TIER_ORDER:
         cfg = (data.get("test_categories", {}) or {}).get(tier) or {}
         tier_cfg[tier] = {
             "include": _compile_list(cfg.get("test_patterns")),
             "exclude": _compile_list(cfg.get("exclude")),
-            "excluded_labels": set(cfg.get("excluded_labels") or []),
+            "excluded_labels": set(_flatten_labels(cfg.get("excluded_labels"))),
             # Supplementary CTest labels declared by the tier (e.g. quick's
             # `pre-commit` / `smoke`, comprehensive's `nightly`). Emitted in
             # addition to the tier name by _resolve_tier_labels().
-            "labels": list(cfg.get("labels") or []),
+            "labels": _flatten_labels(cfg.get("labels")),
         }
 
     arch_exclude: dict[str, list] = {}  # {label: [compiled_patterns]}
     for _key, section in (data.get("exclude_arch") or {}).items():
         if not isinstance(section, dict):
             continue
-        labels = section.get("labels") or []
+        labels = _flatten_labels(section.get("labels"))
         patterns = _compile_list(section.get("test_patterns"))
         for label in labels:
             arch_exclude.setdefault(label, []).extend(patterns)
