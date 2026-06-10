@@ -12,6 +12,7 @@ set(PY_BUILD_DIR "python_package")
 # additionally defined in pyproject.toml
 set(PY_PACKAGE_DIR "${PY_BUILD_DIR}/amdsmi")
 set(PY_WRAPPER_INSTALL_DIR "${SHARE_INSTALL_PREFIX}" CACHE STRING "Wrapper installation directory")
+set(CONFIGURED_AMDSMI_WRAPPER "${CMAKE_CURRENT_BINARY_DIR}/configured_amdsmi_wrapper.py")
 
 # try to find clang of the right version
 set(GOOD_CLANG_FOUND FALSE)
@@ -35,11 +36,13 @@ if(NOT GOOD_CLANG_FOUND)
         AUTHOR_WARNING
             "A wrapper will not be re-generated! Using old wrapper instead.\nSet -DBUILD_WRAPPER=ON to re-build the wrapper"
     )
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py ${CONFIGURED_AMDSMI_WRAPPER} @ONLY)
     add_custom_command(
         OUTPUT amdsmi_wrapper.py ${PY_PACKAGE_DIR}/amdsmi_wrapper.py
-        DEPENDS ${AMD_SMI} ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py
+        DEPENDS ${AMD_SMI} ${CONFIGURED_AMDSMI_WRAPPER}
         COMMAND mkdir -p ${PY_PACKAGE_DIR}
-        COMMAND  ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/amdsmi_wrapper.py ${PY_PACKAGE_DIR}/)
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CONFIGURED_AMDSMI_WRAPPER} amdsmi_wrapper.py
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CONFIGURED_AMDSMI_WRAPPER} ${PY_PACKAGE_DIR}/amdsmi_wrapper.py)
 else()
     find_package(Python3 3.6 COMPONENTS Interpreter Development REQUIRED)
     # --break-system-packages is needed for python 3.11

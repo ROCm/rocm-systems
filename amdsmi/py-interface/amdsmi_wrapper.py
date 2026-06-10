@@ -164,48 +164,13 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 
 _libraries = {}
-from pathlib import Path
-# libamd_smi.so can be located in several different places.
-# Look for it with below priority:
-# 0. Relative to amdsmi_wrapper.py in TheRock:
-#    `amdsmi_wrapper.py` is located in
-#    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
-#    `_rocm_sdk_core/lib`.
-# 1. ROCM_HOME/ROCM_PATH environment variables
-#    - ROCM_HOME/lib
-#    - ROCM_PATH/lib (usually set to /opt/rocm/)
-# 2. Decided by the linker
-#    - LD_LIBRARY_PATH env var
-#    - defined path in /etc/ld.so.conf.d/
-# 3. Relative to amdsmi_wrapper.py
-#    - parent directory
-#    - current directory
+AMDSMI_VERSION_MAJOR = "@AMDSMI_VERSION_MAJOR@"
+if AMDSMI_VERSION_MAJOR.startswith("@"):
+    AMDSMI_VERSION_MAJOR = "1"
+# libamd_smi.so is provided by the WSL ROCm installation.
 def find_smi_library():
-    err = OSError("Could not load libamd_smi.so")
-    possible_locations = []
-    # 0.
-    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so"
-    possible_locations.append(libamd_smi_path)
-    # 1.
-    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
-    if rocm_path:
-        possible_locations.append(os.path.join(rocm_path, "lib/libamd_smi.so"))
-    # 2.
-    possible_locations.append("libamd_smi.so")
-    # 3.
-    libamd_smi_parent_dir = Path(__file__).resolve().parent / "libamd_smi.so"
-    libamd_smi_cwd = Path.cwd() / "libamd_smi.so"
-    possible_locations.append(libamd_smi_parent_dir)
-    possible_locations.append(libamd_smi_cwd)
-
-    for location in possible_locations:
-        try:
-            lib = ctypes.CDLL(location)
-            return lib, location
-        except OSError as e:
-            err = e
-            continue
-    raise err
+    location = f"/opt/rocm/lib/libamd_smi.so.{AMDSMI_VERSION_MAJOR}"
+    return ctypes.CDLL(location), location
 
 try:
     _libraries['libamd_smi.so'], location = find_smi_library()
