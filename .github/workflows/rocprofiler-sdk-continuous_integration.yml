@@ -132,12 +132,13 @@ jobs:
         id: submods
         shell: bash
         run: |
+          set -x  # Show all commands being executed
           git --version
-          git config --global --add safe.directory '*'
-          git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+          git config --global --add safe.directory '*' 2>&1
+          git submodule status --recursive 2>&1 | awk '{print $1,$2}' > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           # collect submodule paths for cache 'path'
-          git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+          git config --file .gitmodules --get-regexp path 2>&1 | awk '{print $2}' > .git-submodule-paths
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
