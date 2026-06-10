@@ -488,8 +488,16 @@ void append_gfx950_s_waitcnt_vmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8C0F70u);
 }
 
+void append_gfx950_s_waitcnt_vmcnt_1(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8C0F71u);
+}
+
 void append_gfx950_s_waitcnt_lgkmcnt_0(std::vector<uint32_t> &program) {
   program.push_back(0xBF8CC07Fu);
+}
+
+void append_gfx950_s_waitcnt_lgkmcnt_2(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8CC27Fu);
 }
 
 void append_gfx950_buffer_load_dword_v0_v8_s0_offen(std::vector<uint32_t> &program) {
@@ -510,6 +518,51 @@ void append_gfx950_buffer_load_dword_v1_off_s0(std::vector<uint32_t> &program) {
 void append_gfx950_buffer_load_dword_v2_v0_s0_offen(std::vector<uint32_t> &program) {
   program.push_back(0xE0501000u);
   program.push_back(0x80000200u);
+}
+
+void append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(std::vector<uint32_t> &program) {
+  program.push_back(0xE05D1000u);
+  program.push_back(0x80100008u);
+}
+
+void append_gfx950_ds_read_b128_v18_v12_offset64(std::vector<uint32_t> &program) {
+  program.push_back(0xD9FE0040u);
+  program.push_back(0x1200000Cu);
+}
+
+void append_gfx950_ds_read_b128_v82_v13_offset64(std::vector<uint32_t> &program) {
+  program.push_back(0xD9FE0040u);
+  program.push_back(0x5200000Du);
+}
+
+void append_gfx950_ds_read_b128_v148_v13_offset1056(std::vector<uint32_t> &program) {
+  program.push_back(0xD9FE0420u);
+  program.push_back(0x9400000Du);
+}
+
+void append_gfx950_ds_read_b128_v90_v13_offset1120(std::vector<uint32_t> &program) {
+  program.push_back(0xD9FE0460u);
+  program.push_back(0x5A00000Du);
+}
+
+void append_gfx950_v_cvt_pk_bf16_f32_v86_v148_v149(std::vector<uint32_t> &program) {
+  program.push_back(0xD2680056u);
+  program.push_back(0x00032B94u);
+}
+
+void append_gfx950_v_cvt_pk_bf16_f32_v88_v90_v91(std::vector<uint32_t> &program) {
+  program.push_back(0xD2680058u);
+  program.push_back(0x0002B75Au);
+}
+
+void append_gfx950_v_mfma_f32_16x16x32_bf16_v16_acc_cd_0(std::vector<uint32_t> &program) {
+  program.push_back(0xD3B50010u);
+  program.push_back(0x04425D66u);
+}
+
+void append_gfx950_v_mfma_f32_16x16x32_bf16_acc16_acc_cd_1(std::vector<uint32_t> &program) {
+  program.push_back(0xD3B58010u);
+  program.push_back(0x04425D66u);
 }
 
 void append_gfx950_buffer_load_dword_v1_v1_s24_offen(std::vector<uint32_t> &program) {
@@ -681,6 +734,97 @@ TEST(WaitcheckTest, Gfx950AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
   append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
   append_gfx950_s_waitcnt_vmcnt_0(program);
   append_gfx950_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950DoesNotTreatDirectToLdsBufferLoadAsVgprProducer) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950DirectToLdsBufferLoadAgesVmcnt) {
+  std::vector<uint32_t> program;
+  append_gfx950_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx950_buffer_load_dwordx4_v0_s64_offen_lds(program);
+  append_gfx950_s_waitcnt_vmcnt_1(program);
+  append_gfx950_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950DoesNotTreatMfmaAccCdAccumulatorAsVgprUse) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+  append_gfx950_v_mfma_f32_16x16x32_bf16_acc16_acc_cd_1(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx950StillTracksMfmaVgprAccumulatorUse) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b128_v18_v12_offset64(program);
+  append_gfx950_v_mfma_f32_16x16x32_bf16_v16_acc_cd_0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 18);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950ReportsKnownInc0001LgkmcntTwoHazardInIsolation) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b128_v82_v13_offset64(program);
+  append_gfx950_ds_read_b128_v148_v13_offset1056(program);
+  append_gfx950_ds_read_b128_v90_v13_offset1120(program);
+  append_gfx950_s_waitcnt_lgkmcnt_2(program);
+  append_gfx950_v_cvt_pk_bf16_f32_v86_v148_v149(program);
+  append_gfx950_v_cvt_pk_bf16_f32_v88_v90_v91(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 2u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 148u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 1u);
+  EXPECT_EQ(report.diagnostics[1].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[1].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[1].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[1].reg.index, 90u);
+  EXPECT_EQ(report.diagnostics[1].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx950AcceptsKnownInc0001LgkmcntZeroFixInIsolation) {
+  std::vector<uint32_t> program;
+  append_gfx950_ds_read_b128_v82_v13_offset64(program);
+  append_gfx950_ds_read_b128_v148_v13_offset1056(program);
+  append_gfx950_ds_read_b128_v90_v13_offset1120(program);
+  append_gfx950_s_waitcnt_lgkmcnt_0(program);
+  append_gfx950_v_cvt_pk_bf16_f32_v86_v148_v149(program);
+  append_gfx950_v_cvt_pk_bf16_f32_v88_v90_v91(program);
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA4);
 
