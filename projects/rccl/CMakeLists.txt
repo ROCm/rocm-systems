@@ -705,6 +705,10 @@ endif()
 
 ## Install RCCL RAS client (built in src/CMakeLists.txt)
 rocm_install(TARGETS rcclras)
+if(BUILD_TESTS)
+  # Stage rcclras alongside rccl-UnitTests for TheRock CI artifact bundles.
+  rocm_install(TARGETS rcclras COMPONENT tests)
+endif()
 
 if(BUILD_TESTS)
   rocm_package_setup_component(clients)

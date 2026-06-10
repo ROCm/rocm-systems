@@ -13,6 +13,8 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <vector>
@@ -25,6 +27,46 @@
 #endif
 
 namespace RcclUnitTesting {
+
+namespace {
+
+static bool isExecutable(const std::string& path) {
+  return !path.empty() && ::access(path.c_str(), X_OK) == 0;
+}
+
+static std::string dirnameOf(const std::string& path) {
+  const auto pos = path.find_last_of('/');
+  return pos == std::string::npos ? std::string{} : path.substr(0, pos);
+}
+
+static std::string joinPath(const std::string& dir, const char* name) {
+  if (dir.empty()) return name;
+  return dir.back() == '/' ? dir + name : dir + "/" + name;
+}
+
+// Resolves rcclras at runtime. The compile-time RCCL_RAS_CLIENT_BIN path points
+// at the cmake build tree, which is absent in TheRock CI test containers that
+// only stage artifacts under build/bin (THEROCK_BIN_DIR).
+static std::string findRcclrasPath() {
+  if (const char* binDir = std::getenv("THEROCK_BIN_DIR")) {
+    const std::string candidate = joinPath(binDir, "rcclras");
+    if (isExecutable(candidate)) return candidate;
+  }
+
+  char exeBuf[4096];
+  const ssize_t exeLen = ::readlink("/proc/self/exe", exeBuf, sizeof(exeBuf) - 1);
+  if (exeLen > 0) {
+    exeBuf[exeLen] = '\0';
+    const std::string candidate = joinPath(dirnameOf(exeBuf), "rcclras");
+    if (isExecutable(candidate)) return candidate;
+  }
+
+  if (isExecutable(RCCL_RAS_CLIENT_BIN)) return RCCL_RAS_CLIENT_BIN;
+
+  return "rcclras";
+}
+
+}  // namespace
 
 // Picks a likely-free TCP port by binding to port 0 and reading the kernel
 // assignment, then closes the probe socket. Caller must use SO_REUSEADDR (the
@@ -54,11 +96,13 @@ static int pickFreePort() {
 // Runs rcclras via fork+exec and captures stdout. Returns {stdout, exit_code}.
 static std::pair<std::string, int> runRcclras(const std::string& format,
                                               const std::string& portStr) {
+  static const std::string rcclrasPath = findRcclrasPath();
+
   int pipefd[2];
   if (pipe(pipefd) != 0) return {"", -1};
 
   const std::vector<std::string> argStrings = {
-      RCCL_RAS_CLIENT_BIN, "-f", format, "-p", portStr, "-h", "localhost"};
+      rcclrasPath, "-f", format, "-p", portStr, "-h", "localhost"};
   std::vector<std::vector<char>> argBufs;
   std::vector<char*> argv;
   argBufs.reserve(argStrings.size());
@@ -81,7 +125,7 @@ static std::pair<std::string, int> runRcclras(const std::string& format,
     if (dup2(pipefd[1], STDOUT_FILENO) < 0) _exit(127);
     ::close(pipefd[1]);
     ::close(STDERR_FILENO);
-    execv(RCCL_RAS_CLIENT_BIN, argv.data());
+    execv(rcclrasPath.c_str(), argv.data());
     _exit(127);
   }
 
@@ -141,8 +185,9 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        ASSERT_EQ(textRc, 0) << "rcclras -f text failed";
-        ASSERT_EQ(jsonRc, 0) << "rcclras -f json failed";
+        const std::string rcclrasPath = findRcclrasPath();
+        ASSERT_EQ(textRc, 0) << "rcclras -f text failed (binary: " << rcclrasPath << ")";
+        ASSERT_EQ(jsonRc, 0) << "rcclras -f json failed (binary: " << rcclrasPath << ")";
         ASSERT_FALSE(textBody.empty()) << "RAS returned no text response";
         ASSERT_FALSE(jsonBody.empty())
             << "RAS did not respond to 'SET FORMAT json' -- JSON support missing";
