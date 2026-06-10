@@ -46,7 +46,7 @@ namespace stdx = std::experimental;
 template <class T> using native = stdx::native_simd<T>;
 
 /// Native-SIMD width measured in 32-bit lanes. Convenience constant.
-template <class T> inline constexpr std::size_t native_width_v = native<T>::size();
+template <class T> constexpr std::size_t native_width_v = native<T>::size();
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -57,21 +57,21 @@ template <class T> struct native {
   static constexpr std::size_t size() { return 1; }
   constexpr T operator[](std::size_t) const { return T{}; }
 };
-template <class T> inline constexpr std::size_t native_width_v = native<T>::size();
-template <class T> inline native<T> load(const uint32_t *) { return {}; }
-template <class T> inline native<T> broadcast(uint32_t) { return {}; }
-template <class T> inline void masked_store(uint32_t *, native<T>, uint64_t) {}
-template <class T> inline void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
-template <class T> inline native<T> load64(const uint32_t *, const uint32_t *) { return {}; }
-template <class T> inline native<T> broadcast64(uint64_t) { return {}; }
-template <class T> inline void masked_store64(uint32_t *, uint32_t *, native<T>, uint64_t) {}
+template <class T> constexpr std::size_t native_width_v = native<T>::size();
+template <class T> native<T> load(const uint32_t *) { return {}; }
+template <class T> native<T> broadcast(uint32_t) { return {}; }
+template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
+template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
+template <class T> native<T> load64(const uint32_t *, const uint32_t *) { return {}; }
+template <class T> native<T> broadcast64(uint64_t) { return {}; }
+template <class T> void masked_store64(uint32_t *, uint32_t *, native<T>, uint64_t) {}
 template <class T> struct narrow32 {
   static constexpr std::size_t size() { return 1; }
   constexpr T operator[](std::size_t) const { return T{}; }
 };
-template <class T> inline narrow32<T> load_narrow(const uint32_t *) { return {}; }
-template <class T> inline narrow32<T> broadcast_narrow(uint32_t) { return {}; }
-template <class T> inline void masked_store_narrow(uint32_t *, narrow32<T>, uint64_t) {}
+template <class T> narrow32<T> load_narrow(const uint32_t *) { return {}; }
+template <class T> narrow32<T> broadcast_narrow(uint32_t) { return {}; }
+template <class T> void masked_store_narrow(uint32_t *, narrow32<T>, uint64_t) {}
 #endif
 
 /// Native-SIMD width for 64-bit lane types (e.g. native<uint64_t>/<double>),
@@ -83,7 +83,7 @@ inline constexpr std::size_t native_width64 = native<uint64_t>::size();
 #if __has_include(<experimental/simd>)
 /// Load `native<T>` from contiguous uint32_t storage. T must be a
 /// 32-bit trivially-copyable type.
-template <class T> inline native<T> load(const uint32_t *p) {
+template <class T> native<T> load(const uint32_t *p) {
   using Bits = stdx::native_simd<uint32_t>;
   using Val = native<T>;
   static_assert(sizeof(T) == sizeof(uint32_t));
@@ -97,7 +97,7 @@ template <class T> inline native<T> load(const uint32_t *p) {
 
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of
 /// `native<T>`. T must be a 32-bit trivially-copyable type.
-template <class T> inline native<T> broadcast(uint32_t broadcast_bits) {
+template <class T> native<T> broadcast(uint32_t broadcast_bits) {
   using Val = native<T>;
   static_assert(sizeof(T) == sizeof(uint32_t));
   if constexpr (std::is_same_v<T, uint32_t>)
@@ -109,7 +109,7 @@ template <class T> inline native<T> broadcast(uint32_t broadcast_bits) {
 /// Store `v` into contiguous uint32_t storage at `dst`, blending in only
 /// the lanes whose bit is set in `mask`. If `mask` covers the full SIMD
 /// width, falls through to a straight contiguous store.
-template <class T> inline void masked_store(uint32_t *dst, native<T> v, uint64_t mask) {
+template <class T> void masked_store(uint32_t *dst, native<T> v, uint64_t mask) {
   using Bits = stdx::native_simd<uint32_t>;
   using Val = native<T>;
   static_assert(sizeof(T) == sizeof(uint32_t));
@@ -136,7 +136,7 @@ template <class T> inline void masked_store(uint32_t *dst, native<T> v, uint64_t
 /// Same as masked_store, but writes to a caller-supplied uint32_t buffer
 /// instead of contiguous lane storage. For operands whose dst is not a
 /// contiguous VGPR (rocjitsu falls back to write_lane_chunk in that case).
-template <class T> inline void blit_to_buffer(uint32_t (&buf)[native<T>::size()], native<T> v) {
+template <class T> void blit_to_buffer(uint32_t (&buf)[native<T>::size()], native<T> v) {
   using Bits = stdx::native_simd<uint32_t>;
   Bits bits = [&] {
     if constexpr (std::is_same_v<T, uint32_t>)
@@ -154,7 +154,7 @@ template <class T> inline void blit_to_buffer(uint32_t (&buf)[native<T>::size()]
 /// `Operand::read_lane64`. `native_width64` lanes are combined; this is a scalar
 /// gather (the two arrays are not a single contiguous 64-bit load) chosen for
 /// bit-exactness over raw throughput.
-template <class T> inline native<T> load64(const uint32_t *lo, const uint32_t *hi) {
+template <class T> native<T> load64(const uint32_t *lo, const uint32_t *hi) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   using U64 = stdx::native_simd<uint64_t>;
   static_assert(sizeof(native<T>) == sizeof(U64));
@@ -172,7 +172,7 @@ template <class T> inline native<T> load64(const uint32_t *lo, const uint32_t *h
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of `native<T>` for a
 /// 64-bit lane type. The companion of `broadcast` for the f64/i64 path; used when
 /// a source operand resolves to a scalar/immediate rather than per-lane storage.
-template <class T> inline native<T> broadcast64(uint64_t broadcast_bits) {
+template <class T> native<T> broadcast64(uint64_t broadcast_bits) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   using Val = native<T>;
   if constexpr (std::is_same_v<T, uint64_t>)
@@ -186,8 +186,7 @@ template <class T> inline native<T> broadcast64(uint64_t broadcast_bits) {
 /// 64-bit value is split back into lo (low 32) and hi (high 32), mirroring
 /// `Operand::write_lane64`. No full-mask contiguous fast path: lo/hi are
 /// separate registers, so the store is always a per-lane scatter.
-template <class T>
-inline void masked_store64(uint32_t *lo, uint32_t *hi, native<T> v, uint64_t mask) {
+template <class T> void masked_store64(uint32_t *lo, uint32_t *hi, native<T> v, uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   using U64 = stdx::native_simd<uint64_t>;
   static_assert(sizeof(native<T>) == sizeof(U64));
@@ -220,7 +219,7 @@ template <class T> using narrow32 = stdx::fixed_size_simd<T, native_width64>;
 /// `fixed_size_simd` is not trivially copyable (so `std::bit_cast` of the whole
 /// vector is ill-formed, unlike `native_simd`); the bit reinterpretation is done
 /// per lane through the trivially-copyable scalar `T`.
-template <class T> inline narrow32<T> load_narrow(const uint32_t *p) {
+template <class T> narrow32<T> load_narrow(const uint32_t *p) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   if constexpr (std::is_same_v<T, uint32_t>) {
     return narrow32<uint32_t>(p, stdx::element_aligned);
@@ -235,7 +234,7 @@ template <class T> inline narrow32<T> load_narrow(const uint32_t *p) {
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of `narrow32<T>`.
 /// Companion of `broadcast` for the narrow (8-wide) cvt path; used when a source
 /// operand resolves to a scalar/immediate rather than per-lane storage.
-template <class T> inline narrow32<T> broadcast_narrow(uint32_t broadcast_bits) {
+template <class T> narrow32<T> broadcast_narrow(uint32_t broadcast_bits) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   if constexpr (std::is_same_v<T, uint32_t>)
     return narrow32<T>(broadcast_bits);
@@ -247,7 +246,7 @@ template <class T> inline narrow32<T> broadcast_narrow(uint32_t broadcast_bits) 
 /// storage at `dst`, blending in only the lanes whose bit is set in `mask`. The
 /// 32-bit-dst counterpart of `masked_store` for the f64-src cvt glue, which
 /// writes only `native_width64` 32-bit lanes per chunk.
-template <class T> inline void masked_store_narrow(uint32_t *dst, narrow32<T> v, uint64_t mask) {
+template <class T> void masked_store_narrow(uint32_t *dst, narrow32<T> v, uint64_t mask) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   constexpr std::size_t W = native_width64;
   const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
@@ -366,8 +365,7 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
 ///     intrinsic produced (IEEE-754 round-to-integer keeps the operand sign on
 ///     a zero result, so this is exactly the sign of the *input*).
 /// Bit-identical to the scalar reference at every native width.
-template <class Float, class Round>
-inline native<Float> round_fixup_simd(native<Float> a, Round round) {
+template <class Float, class Round> native<Float> round_fixup_simd(native<Float> a, Round round) {
   using F = native<Float>;
   using U = std::conditional_t<sizeof(Float) == 4, native<uint32_t>, native<uint64_t>>;
   using Bits = typename U::value_type;
@@ -575,7 +573,7 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
 ///   if (isnan(a)||isnan(b)) return qNaN;
 ///   if (a==b)              return signbit(a) ? <tie> : <other>;
 ///   return a <cmp> b ? a : b;
-template <typename V> inline V ieee_maximum_simd(V a, V b) {
+template <typename V> V ieee_maximum_simd(V a, V b) {
   const auto nan = stdx::isnan(a) || stdx::isnan(b);
   const auto eq = (a == b);
   const auto sa = stdx::signbit(a); // true when a is negative (incl. -0)
@@ -585,7 +583,7 @@ template <typename V> inline V ieee_maximum_simd(V a, V b) {
   stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
   return res;
 }
-template <typename V> inline V ieee_minimum_simd(V a, V b) {
+template <typename V> V ieee_minimum_simd(V a, V b) {
   const auto nan = stdx::isnan(a) || stdx::isnan(b);
   const auto eq = (a == b);
   const auto sa = stdx::signbit(a);
@@ -880,7 +878,7 @@ inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) 
 #if !__has_include(<experimental/simd>)
 // Fallback stub for non-template gtest callers (e.g. UtilSimd.FlushDenormF32),
 // whose discarded `if constexpr (has_stdx_simd)` branch is still type-checked.
-template <class T> inline native<T> flush_denorm_f32_simd(native<T>) { return {}; }
+template <class T> native<T> flush_denorm_f32_simd(native<T>) { return {}; }
 inline native<float> trunc_simd(native<float>) { return {}; }
 inline native<float> ceil_simd(native<float>) { return {}; }
 inline native<float> floor_simd(native<float>) { return {}; }

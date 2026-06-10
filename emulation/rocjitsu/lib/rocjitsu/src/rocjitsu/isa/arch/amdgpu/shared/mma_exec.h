@@ -112,8 +112,7 @@ constexpr uint32_t WMMA_WAVE32 = 32;
 /// @param get_const Lazy callback returning the 32-bit constant value; only
 ///        called when src2 is not a VGPR. Typically: [&]{ return src2.read_scalar(wf); }
 template <AccMode Mode = AccMode::Unified, typename F>
-inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc,
-                            F &&get_const) {
+uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc, F &&get_const) {
   if constexpr (Mode == AccMode::Unified || Mode == AccMode::Separate) {
     if (src2_ev >= 768 && src2_ev <= 1023) {
       const_acc = ACC_FROM_VGPR;
@@ -562,8 +561,8 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
 /// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
 /// on a platform without <experimental/simd>.
 template <typename T>
-inline void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
-                             const T *Abuf, const T *Bbuf, T *Cbuf) {
+void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
+                      const T *Abuf, const T *Bbuf, T *Cbuf) {
   for (uint32_t row = 0; row < M; ++row) {
     uint32_t col = 0;
     for (; col + W <= N; col += W) {
@@ -1097,7 +1096,7 @@ inline void exec_wmma_f32_16x16x32_bf16(amdgpu::ComputeUnitCore &cu, uint32_t ds
 /// Compile-time fp8 (e4m3) vs bf8 (e5m2) bulk-convert selector for the f8 spec
 /// kernels: converts `n` packed bytes starting at `words` to f32 through the
 /// 256-entry LUTs (bit-exact with extract_fp8/extract_bf8 by construction).
-template <bool FP8> inline void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
+template <bool FP8> void f8_to_f32_block(const uint32_t *words, float *dst, size_t n) {
   if constexpr (FP8)
     util::fp8_e4m3_to_f32_block(reinterpret_cast<const uint8_t *>(words), dst, n);
   else
@@ -1111,8 +1110,8 @@ template <bool FP8> inline void f8_to_f32_block(const uint32_t *words, float *ds
 /// Falls back to the generic exec_wmma_f32_mixed without AVX-512 / under
 /// force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
-inline void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                  uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                           uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
   constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
@@ -1189,8 +1188,8 @@ inline void exec_wmma_f32_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uin
 /// (N a multiple of 16). Falls back to generic exec_wmma_f32 without AVX-512 /
 /// under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K>
-inline void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                   uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_f32_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                            uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 32;
   static_assert(N % 16 == 0, "specialized f32 WMMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -1564,8 +1563,8 @@ void exec_wmma_f16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t
 /// to 16 bits (2 per dst word) and written through the WMMA 16-bit output map.
 /// Falls back to generic exec_wmma_f16 without AVX-512 / under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K>
-inline void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                               uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                        uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 16;
   static_assert(N % 16 == 0, "specialized f16 WMMA assumes N is a multiple of the zmm width");
   auto fallback = [&]() {
@@ -1686,8 +1685,8 @@ void exec_wmma_bf16(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
 /// and bf16 truncation on output. Falls back to generic exec_wmma_bf16 without
 /// AVX-512 / under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K>
-inline void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
-                                uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                         uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 16;
   static_assert(N % 16 == 0, "specialized bf16 WMMA assumes N is a multiple of the zmm width");
   auto fallback = [&]() {
@@ -1783,8 +1782,8 @@ inline void exec_wmma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint3
 /// Falls back to the generic exec_wmma_f16 without AVX-512 / under
 /// force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
-inline void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                  uint32_t s1, uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_f16_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                           uint32_t s2, uint32_t const_acc = ACC_FROM_VGPR) {
   constexpr uint32_t in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 WMMA assumes N is a multiple of the zmm width");
   constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
@@ -2193,10 +2192,9 @@ inline uint32_t pack_i32_acc(int64_t acc, bool clamp) {
 }
 
 template <typename ExtractA, typename ExtractB>
-inline void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                          uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
-                          ExtractA ea, ExtractB eb, bool clamp,
-                          uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_wmma_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
+                   uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
+                   ExtractA ea, ExtractB eb, bool clamp, uint32_t const_acc = ACC_FROM_VGPR) {
   require_wmma_wave32(cu);
   struct Result {
     uint32_t reg;
@@ -2357,11 +2355,10 @@ inline void exec_wmma_i32_16x16x64_iu8(amdgpu::ComputeUnitCore &cu, uint32_t dst
 }
 
 template <typename ExtractA, typename ExtractB>
-inline void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
-                            uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1,
-                            uint32_t acc_base, uint32_t index_base, uint32_t index_entries,
-                            uint32_t index_key, ExtractA ea, ExtractB eb, bool clamp,
-                            uint32_t const_acc = ACC_FROM_VGPR) {
+void exec_swmmac_i32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
+                     uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t acc_base,
+                     uint32_t index_base, uint32_t index_entries, uint32_t index_key, ExtractA ea,
+                     ExtractB eb, bool clamp, uint32_t const_acc = ACC_FROM_VGPR) {
   require_wmma_wave32(cu);
   struct Result {
     uint32_t reg;
@@ -2945,9 +2942,9 @@ void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0
 /// so the 4x4 shape stays on the generic path). Falls back to the generic
 /// exec_f32 without AVX-512 / under force-scalar / with cbsz|blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH>
-inline void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                   uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
-                                   uint32_t abid, uint32_t blgp) {
+void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                            uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
+                            uint32_t blgp) {
   constexpr uint32_t in_bits = 32;
   static_assert(N % 16 == 0, "specialized f32 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -3019,9 +3016,9 @@ inline void exec_f32_mfma_f32_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, ui
 }
 
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
-inline void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                   uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
-                                   uint32_t abid, uint32_t blgp) {
+void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                            uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
+                            uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
   static_assert(N % 16 == 0, "specialized f16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -3107,9 +3104,9 @@ inline void exec_f32_mfma_f16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, ui
 /// (no F16C needed). Falls back to the generic exec_f32 without AVX-512 / under
 /// force-scalar / with cbsz|blgp.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
-inline void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                    uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
-                                    uint32_t abid, uint32_t blgp) {
+void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                             uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
+                             uint32_t blgp) {
   constexpr uint32_t B = BATCH, in_bits = 16;
   static_assert(N % 16 == 0, "specialized bf16 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
@@ -3195,9 +3192,9 @@ inline void exec_f32_mfma_bf16_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, u
 /// compile-time selected. Falls back to the generic exec_f32 without AVX-512 /
 /// under force-scalar / with cbsz|blgp.
 template <uint32_t M, uint32_t N, uint32_t K, bool A_FP8, bool B_FP8>
-inline void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                  uint32_t s1, uint32_t s2, uint32_t const_acc, uint32_t cbsz,
-                                  uint32_t abid, uint32_t blgp) {
+void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                           uint32_t s2, uint32_t const_acc, uint32_t cbsz, uint32_t abid,
+                           uint32_t blgp) {
   constexpr uint32_t B = 1, in_bits = 8;
   static_assert(N % 16 == 0, "specialized f8 MFMA assumes N is a multiple of the zmm width");
   constexpr auto ea = A_FP8 ? &extract_fp8 : &extract_bf8;
@@ -3285,8 +3282,8 @@ inline void exec_f32_mfma_f8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uin
 /// well-defined). Falls back to the generic exec_i32_i8 without AVX-512 /
 /// under force-scalar.
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t BATCH = 1>
-inline void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0,
-                                  uint32_t s1, uint32_t s2, uint32_t const_acc) {
+void exec_i32_mfma_i8_spec(amdgpu::ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                           uint32_t s2, uint32_t const_acc) {
   constexpr uint32_t B = BATCH, in_bits = 8;
   static_assert(N % 16 == 0, "specialized i8 MFMA assumes N is a multiple of the zmm width");
   if constexpr (!util::has_stdx_simd) {
