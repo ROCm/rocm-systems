@@ -419,6 +419,215 @@ class TestKpackRefMarker:
         assert marker_data["kernel_name"] == "bin/my-binary_v2.exe"
 
 
+class TestMultiArchMultiWrapperCoIndex:
+    """Regression tests for the co_index TOC alignment fix.
+
+    libtest_multi_wrapper_multi_arch.so is an RDC build with 2 TUs targeting
+    gfx1100 and gfx1101, producing 4 wrappers in .hipFatBinSegment:
+        wrapper 0: gfx1100 (TU0)  reserved1=0
+        wrapper 1: gfx1101 (TU0)  reserved1=1
+        wrapper 2: gfx1100 (TU1)  reserved1=2
+        wrapper 3: gfx1101 (TU1)  reserved1=3
+
+    CLR passes reserved1 as co_index to kpack_load_code_object which builds
+    the lookup key as kernel_name + "#" + co_index.  The kpack TOC must use
+    the same absolute wrapper index, not a per-arch sequential counter
+    (which would give gfx1101 keys #0 and #1 instead of #1 and #3).
+    """
+
+    _BINARY = "bundled_binaries/linux/cov5/libtest_multi_wrapper_multi_arch.so"
+
+    @pytest.fixture
+    def multi_arch_binary(self, test_assets_dir: Path) -> Path:
+        path = test_assets_dir / self._BINARY
+        if not path.exists():
+            pytest.skip(
+                f"{self._BINARY} not found — run "
+                "test_generation/build_test_bundles.py on a ROCm Linux machine"
+            )
+        return path
+
+    def test_wrapper_reserved1_is_absolute_index(self, multi_arch_binary: Path):
+        """Each wrapper's reserved1 must equal its absolute position (0,1,2,3...).
+
+        rewrite_hipfatbin_magic() iterates all wrappers in order and writes the
+        loop variable i into reserved1.  This test ensures that behaviour holds
+        for a multi-arch binary so that CLR's co_index matches the TOC key.
+        """
+        surgery = ElfSurgery.load(multi_arch_binary)
+
+        segment = surgery.find_section(".hipFatBinSegment")
+        assert segment is not None, "Expected .hipFatBinSegment in multi-arch binary"
+
+        segment_offset = surgery.vaddr_to_file_offset(segment.header.sh_addr)
+        num_wrappers = segment.header.sh_size // WRAPPER_SIZE
+
+        assert num_wrappers >= 4, (
+            f"Expected at least 4 wrappers (2 TUs × 2 arches), got {num_wrappers}"
+        )
+
+        count = rewrite_hipfatbin_magic(surgery)
+        assert count == num_wrappers
+
+        for i in range(num_wrappers):
+            wrapper_offset = segment_offset + i * WRAPPER_SIZE
+            reserved1 = struct.unpack_from("<I", surgery.data, wrapper_offset + 16)[0]
+            assert reserved1 == i, (
+                f"Wrapper {i}: reserved1={reserved1}, expected {i}. "
+                "CLR uses reserved1 as co_index for kpack TOC lookup; a per-arch "
+                "sequential index would cause KPACK_ERROR_KERNEL_NOT_FOUND for "
+                "all wrappers except the first of each architecture."
+            )
+
+    def test_kpack_offload_multi_arch_binary(
+        self, multi_arch_binary: Path, tmp_path: Path
+    ):
+        """kpack_offload_binary must complete successfully for a multi-arch RDC build."""
+        output = tmp_path / "libtest_multi_wrapper_multi_arch_kpacked.so"
+
+        result = kpack_offload_binary(
+            input_path=multi_arch_binary,
+            output_path=output,
+            kpack_search_paths=["../.kpack/blas_lib_@GFXARCH@.kpack"],
+            kernel_name="math-libs/BLAS/rocBLAS/stage/lib/libtest_multi_wrapper_multi_arch.so",
+            verbose=True,
+        )
+
+        assert output.exists()
+        assert result["new_size"] > 0
+
+        # Verify all 4 wrappers were transformed to HIPK
+        surgery = ElfSurgery.load(output)
+        segment = surgery.find_section(".hipFatBinSegment")
+        assert segment is not None
+        segment_offset = surgery.vaddr_to_file_offset(segment.header.sh_addr)
+        num_wrappers = segment.header.sh_size // WRAPPER_SIZE
+
+        for i in range(num_wrappers):
+            wrapper_offset = segment_offset + i * WRAPPER_SIZE
+            magic = struct.unpack_from("<I", surgery.data, wrapper_offset)[0]
+            assert magic == HIPK_MAGIC, (
+                f"Wrapper {i} still has HIPF magic after transform"
+            )
+            reserved1 = struct.unpack_from("<I", surgery.data, wrapper_offset + 16)[0]
+            assert reserved1 == i, (
+                f"Wrapper {i} reserved1={reserved1}, expected absolute index {i}"
+            )
+
+
+class TestDebugInfoSectionOrdering:
+    """Regression tests for the ELF section reordering fix.
+
+    libtest_multi_wrapper_with_debug.so is compiled with -g, so the ELF
+    contains non-allocatable .debug_* sections alongside the HIP fat binary
+    sections.  When kpack adds .rocm_kpack_ref (SHF_ALLOC) it must appear
+    before .debug_* in both the section header table and in file offsets.
+
+    Tools like dh_dwz (DWARF debuginfo compressor used in Debian packaging)
+    abort with "Allocatable section after non-allocatable ones" if an ALLOC
+    section follows a non-ALLOC section in the SHT.  The fix:
+      1. Reorders the SHT so all ALLOC sections precede non-ALLOC ones.
+      2. Splices the .rocm_kpack_ref content before the first non-ALLOC
+         file offset so the physical layout matches the SHT order.
+    """
+
+    _BINARY = "bundled_binaries/linux/cov5/libtest_multi_wrapper_with_debug.so"
+
+    @pytest.fixture
+    def debug_binary(self, test_assets_dir: Path) -> Path:
+        path = test_assets_dir / self._BINARY
+        if not path.exists():
+            pytest.skip(
+                f"{self._BINARY} not found — run "
+                "test_generation/build_test_bundles.py with ROCm on Linux"
+            )
+        return path
+
+    def test_binary_has_debug_sections(self, debug_binary: Path):
+        """Confirm the test asset actually contains .debug_* sections."""
+        result = subprocess.run(
+            ["readelf", "-S", str(debug_binary)], capture_output=True, text=True
+        )
+        assert result.returncode == 0
+        assert ".debug_info" in result.stdout, (
+            "Expected .debug_info in debug binary — was it compiled without -g?"
+        )
+
+    def test_alloc_sections_precede_non_alloc_after_transform(
+        self, debug_binary: Path, tmp_path: Path
+    ):
+        """After kpack transform, all SHF_ALLOC sections must precede non-ALLOC.
+
+        Verifies the section header reordering fix: .rocm_kpack_ref (ALLOC)
+        must appear before .debug_* (non-ALLOC) in the SHT.  If not, dh_dwz
+        aborts during Debian package builds.
+        """
+        output = tmp_path / "libtest_multi_wrapper_with_debug_kpacked.so"
+
+        kpack_offload_binary(
+            input_path=debug_binary,
+            output_path=output,
+            kpack_search_paths=["../.kpack/blas_lib_@GFXARCH@.kpack"],
+            kernel_name="lib/libtest_multi_wrapper_with_debug.so",
+        )
+
+        assert output.exists()
+
+        # Precise check via ElfSurgery: walk sections in SHT order and verify
+        # no ALLOC section appears after a non-ALLOC section with file content.
+        surgery = ElfSurgery.load(output)
+        SHT_NULL = 0
+        SHT_NOBITS = 8
+
+        seen_non_alloc_with_content = False
+        for section in surgery.iter_sections():
+            shdr = section.header
+            if shdr.sh_type == SHT_NULL:
+                continue
+            has_content = shdr.sh_type != SHT_NOBITS and shdr.sh_size > 0
+            if not shdr.is_alloc and has_content:
+                seen_non_alloc_with_content = True
+            if shdr.is_alloc and seen_non_alloc_with_content:
+                pytest.fail(
+                    f"SHF_ALLOC section '{section.name}' appears after non-ALLOC "
+                    "sections in the section header table. dh_dwz will abort with "
+                    "'Allocatable section after non-allocatable ones'."
+                )
+
+    def test_rocm_kpack_ref_file_offset_before_debug(
+        self, debug_binary: Path, tmp_path: Path
+    ):
+        """The .rocm_kpack_ref content must be at a lower file offset than .debug_info.
+
+        The ELF section-reordering fix also splices the .rocm_kpack_ref content
+        before the first non-ALLOC section in the file.  This ensures both the
+        SHT order and physical file layout are correct.
+        """
+        output = tmp_path / "libtest_debug_offset_check.so"
+
+        kpack_offload_binary(
+            input_path=debug_binary,
+            output_path=output,
+            kpack_search_paths=["../.kpack/blas_lib_@GFXARCH@.kpack"],
+            kernel_name="lib/libtest_multi_wrapper_with_debug.so",
+        )
+
+        surgery = ElfSurgery.load(output)
+        SHT_NOBITS = 8
+
+        kpack_ref = surgery.find_section(".rocm_kpack_ref")
+        assert kpack_ref is not None, ".rocm_kpack_ref section must exist after transform"
+
+        debug_info = surgery.find_section(".debug_info")
+        assert debug_info is not None, ".debug_info must exist in debug binary"
+
+        assert kpack_ref.header.sh_offset < debug_info.header.sh_offset, (
+            f".rocm_kpack_ref file offset (0x{kpack_ref.header.sh_offset:x}) "
+            f"must be less than .debug_info offset (0x{debug_info.header.sh_offset:x}). "
+            "The splice fix must insert the ALLOC section before non-ALLOC content."
+        )
+
+
 class TestNotFatBinaryError:
     """Tests for NotFatBinaryError handling."""
 

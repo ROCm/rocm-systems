@@ -435,6 +435,137 @@ class BundleBuilder:
                 output,
             )
 
+    def build_shared_lib_multi_wrapper_multi_arch(self):
+        """Build multi-arch RDC shared library to test co_index TOC alignment.
+
+        Compiles 2 TUs with -fgpu-rdc targeting gfx1100 and gfx1101, producing
+        a binary with 4 wrappers in .hipFatBinSegment:
+            wrapper 0: gfx1100 (TU0)
+            wrapper 1: gfx1101 (TU0)
+            wrapper 2: gfx1100 (TU1)
+            wrapper 3: gfx1101 (TU1)
+
+        This exercises the co_index fix: with a per-arch sequential counter,
+        gfx1101 wrappers 1 and 3 get TOC keys #0 and #1 but CLR requests #1
+        and #3 (absolute positions), causing KPACK_ERROR_KERNEL_NOT_FOUND.
+        The fix uses a global absolute counter so TOC keys match reserved1.
+
+        Linux only — Windows PE/COFF uses a different wrapper layout.
+        """
+        if self.platform == "windows":
+            print("\nSkipping: libtest_multi_wrapper_multi_arch.so (Linux only)")
+            return True
+
+        lib_name = "libtest_multi_wrapper_multi_arch.so"
+        print(f"\nBuilding: {lib_name} (RDC build, gfx1100+gfx1101, 2 TUs)")
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            obj1 = tmpdir / "kernel1.o"
+            obj2 = tmpdir / "kernel2.o"
+            output = self.output_dir / lib_name
+
+            for src, obj, label in [
+                (self.multi_wrapper_src1, obj1, "kernel1"),
+                (self.multi_wrapper_src2, obj2, "kernel2"),
+            ]:
+                print(f"  Compiling {label} with -fgpu-rdc (gfx1100, gfx1101)...")
+                cmd = [
+                    str(self.hipcc),
+                    "-fgpu-rdc",
+                    "-fPIC",
+                    "-c",
+                    str(src),
+                    "--offload-arch=gfx1100",
+                    "--offload-arch=gfx1101",
+                    "-o",
+                    str(obj),
+                ]
+                try:
+                    subprocess.run(cmd, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as e:
+                    print(f"  ✗ Failed to compile {label}: {e.stderr}")
+                    return False
+
+            print("  Linking with -fgpu-rdc...")
+            return self._run_hipcc(
+                [
+                    "-fgpu-rdc",
+                    str(obj1),
+                    str(obj2),
+                    "-shared",
+                    "-o",
+                    str(output),
+                ],
+                output,
+            )
+
+    def build_shared_lib_multi_wrapper_with_debug(self):
+        """Build multi-arch RDC shared library with DWARF debug info.
+
+        Same as build_shared_lib_multi_wrapper_multi_arch but compiled with -g,
+        which adds non-allocatable .debug_* sections to the ELF.  This exercises
+        the section-header reordering fix: when kpack adds .rocm_kpack_ref
+        (SHF_ALLOC) after .debug_* sections already exist, the alloc section
+        ends up after non-alloc sections in the SHT.  Tools like dh_dwz abort
+        with "Allocatable section after non-allocatable ones" unless the headers
+        are reordered (and the file content is spliced) before writing.
+
+        Linux only — debug info layout is ELF-specific.
+        """
+        if self.platform == "windows":
+            print("\nSkipping: libtest_multi_wrapper_with_debug.so (Linux only)")
+            return True
+
+        lib_name = "libtest_multi_wrapper_with_debug.so"
+        print(f"\nBuilding: {lib_name} (RDC build, gfx1100+gfx1101, 2 TUs, -g)")
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            obj1 = tmpdir / "kernel1.o"
+            obj2 = tmpdir / "kernel2.o"
+            output = self.output_dir / lib_name
+
+            for src, obj, label in [
+                (self.multi_wrapper_src1, obj1, "kernel1"),
+                (self.multi_wrapper_src2, obj2, "kernel2"),
+            ]:
+                print(f"  Compiling {label} with -fgpu-rdc -g (gfx1100, gfx1101)...")
+                cmd = [
+                    str(self.hipcc),
+                    "-fgpu-rdc",
+                    "-fPIC",
+                    "-g",
+                    "-c",
+                    str(src),
+                    "--offload-arch=gfx1100",
+                    "--offload-arch=gfx1101",
+                    "-o",
+                    str(obj),
+                ]
+                try:
+                    subprocess.run(cmd, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as e:
+                    print(f"  ✗ Failed to compile {label}: {e.stderr}")
+                    return False
+
+            print("  Linking with -fgpu-rdc...")
+            return self._run_hipcc(
+                [
+                    "-fgpu-rdc",
+                    str(obj1),
+                    str(obj2),
+                    "-shared",
+                    "-o",
+                    str(output),
+                ],
+                output,
+            )
+
     def build_host_only_executable(self):
         """Build host-only executable (no GPU device code)."""
         exe_name = "host_only.exe"
@@ -510,6 +641,10 @@ Bundled Shared Libraries (with GPU device code):
 - {lib_prefix}test_kernel_single{lib_ext}: Single architecture (gfx1100)
 - {lib_prefix}test_kernel_multi{lib_ext}: Multiple architectures (gfx1100, gfx1101)
 - {lib_prefix}test_multi_wrapper{lib_ext}: RDC build with 2 __CudaFatBinaryWrapper structs (gfx1100)
+- libtest_multi_wrapper_multi_arch.so: RDC build, 2 TUs x gfx1100+gfx1101, 4 wrappers (Linux only)
+  Tests co_index TOC alignment: wrapper reserved1 must match absolute position, not per-arch index.
+- libtest_multi_wrapper_with_debug.so: same as above but compiled with -g (Linux only)
+  Tests ELF section reordering: .rocm_kpack_ref (SHF_ALLOC) must precede .debug_* (non-ALLOC).
 
 Host-Only Binaries (NO GPU device code, for negative testing):
 - host_only.exe: Host-only executable
@@ -561,8 +696,12 @@ These assets are used to test unbundling functionality across:
             # Bundled shared libraries
             "test_kernel_single (so/dll)": self.build_shared_lib_single_arch(),
             "test_kernel_multi (so/dll)": self.build_shared_lib_multi_arch(),
-            # Multi-wrapper shared library (RDC build)
+            # Multi-wrapper shared library (RDC build, single arch)
             "test_multi_wrapper (so/dll)": self.build_shared_lib_multi_wrapper(),
+            # Multi-arch RDC build — tests co_index TOC alignment
+            "test_multi_wrapper_multi_arch (so)": self.build_shared_lib_multi_wrapper_multi_arch(),
+            # Multi-arch RDC build with debug info — tests ELF section reordering
+            "test_multi_wrapper_with_debug (so)": self.build_shared_lib_multi_wrapper_with_debug(),
             # Host-only binaries (for negative testing)
             "host_only (exe)": self.build_host_only_executable(),
             "host_only (so/dll)": self.build_host_only_shared_lib(),
