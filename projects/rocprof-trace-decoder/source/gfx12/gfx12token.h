@@ -151,7 +151,7 @@ union wstart_type
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "wgp:" << wgp << " simd:" << simd << " wid:" << wid << " sa:" << sa << " dispatcher:" << dispatcher
+        ss << "wgp:" << wgp << " simd:" << simd << " wid:" << wid << " sa:" << sa << " pipe:" << pipe << " me:" << me
            << " count:" << count;
         return ss;
     }
