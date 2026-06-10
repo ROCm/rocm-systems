@@ -180,7 +180,9 @@ jobs:
         run: |
           git config --global --add safe.directory '*'
           apt-get update
-          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
+          # libopenmpi-dev + openmpi-bin provide an MPI implementation so find_package(MPI)
+          # succeeds and the rocprofv3 mpi-ranks integration tests run instead of being disabled.
+          apt-get install -y g++-11 g++-12 cmake python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev libopenmpi-dev openmpi-bin
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
@@ -533,7 +535,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config
+        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config libopenmpi-dev openmpi-bin
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
         apt-get upgrade -y
