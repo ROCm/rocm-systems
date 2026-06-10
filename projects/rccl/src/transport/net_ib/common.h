@@ -25,9 +25,11 @@
 #include <poll.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <mutex>
 #define ENABLE_TIMER 0
 #include "timer.h"
+#include <sys/utsname.h>
 
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
@@ -128,6 +130,7 @@ struct ncclIbDevInfo {
 
   //remote dev info
   union ibv_gid remoteGid;
+  int ibv_dev_index;
 };
 
 // Retain local RoCE address for error logging
@@ -153,6 +156,7 @@ struct ncclProfilerInfo {
 #define NCCL_NET_IB_REQ_RECV 2
 #define NCCL_NET_IB_REQ_FLUSH 3
 #define NCCL_NET_IB_REQ_GIN_IPUT 4
+#define NCCL_NET_IB_REQ_FAILED 5
 extern const char* ncclIbReqTypeStr[];
 
 // Maximal number of QPs a communicator can have for data transfers
@@ -226,7 +230,7 @@ struct ncclIbNetCommDevBase {
   struct ncclIbGidInfo gidInfo;
 };
 
-struct ncclIbSendFifo {
+struct alignas(64) ncclIbSendFifo {
   uint64_t addr;
   uint64_t size;
   uint32_t rkeys[NCCL_IB_MAX_DEVS_PER_NIC];
@@ -400,8 +404,11 @@ static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-
 
 struct ncclIbGpuFlush {
   struct ibv_mr* hostMr;
+  struct ibv_mr* gpuMr;
+  int* gpuFlushGpuMem;
   struct ibv_sge sge;
   struct ncclIbQp qp;
+  int dmabuf_fd;
 };
 
 // This structure describes the FIFO which the receiver uses when it sends CTS
@@ -502,11 +509,20 @@ ncclResult_t ncclIbPeerMemSupport();
 ncclResult_t ncclIbDmaBufSupport(int dev);
 
 void ncclIbAddEvent(struct ncclIbRequest* req, int devIndex);
+
+// Check if request has any pending events (IBV operations in flight)
+static inline bool ncclIbRequestHasEvents(struct ncclIbRequest* r) {
+  for (int i = 0; i < NCCL_IB_MAX_DEVS_PER_NIC; i++) {
+    if (r->events[i] != 0) return true;
+  }
+  return false;
+}
+
 ncclResult_t ncclIbGetGidIndex(struct ibv_context *context, uint8_t portNum, struct ibv_port_attr* portAttr, int *gidIndex);
 ncclResult_t ncclIbGetRequest(struct ncclIbNetCommBase* base, struct ncclIbRequest** req);
 ncclResult_t ncclIbFreeRequest(struct ncclIbRequest* r);
 
-ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle);
+ncclResult_t ncclIbRegMrDmaBufInternal(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset, int fd, ibv_mr** mhandle);
 
 // Net IB plugin entry functions.
 ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
