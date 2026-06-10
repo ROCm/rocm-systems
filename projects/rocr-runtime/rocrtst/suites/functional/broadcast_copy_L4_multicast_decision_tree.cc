@@ -1,5 +1,9 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Level 4B Tests: Multicast Decision Tree Validation
 // Purpose: Verify correct path selection (MULTICAST vs BROADCAST vs FANOUT)
 //

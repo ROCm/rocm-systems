@@ -1,5 +1,9 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Level 4C Tests: Multicast Chunking Behavior Validation
 // Purpose: Verify automatic chunking for sizes > 1023 bytes (10-bit COUNT limit)
 //

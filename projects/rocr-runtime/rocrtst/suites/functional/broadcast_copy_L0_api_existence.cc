@@ -1,7 +1,12 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Level 0 Tests: API Existence & Linkage
 // Purpose: Verify broadcast copy API symbols exist and are callable
+//
 
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
@@ -24,17 +29,21 @@ class BroadcastCopyL0 : public ::testing::Test {
 };
 
 //
-// TC-L0-001: API Symbol Resolution
+//
+// Note: This test verifies the test wrapper functions are linked.
+// The wrappers internally use hsa_amd_memory_async_batch_copy which is the
+// real exported runtime API.
 //
 
 TEST_F(BroadcastCopyL0, ApiSymbolResolution) {
-  // Verify function pointers are non-null
+  // Verify wrapper function pointers are non-null (these are static inline wrappers)
+  // The actual runtime API is hsa_amd_memory_async_batch_copy
   ASSERT_NE(nullptr, &hsa_amd_memory_broadcast_copy)
-      << "hsa_amd_memory_broadcast_copy symbol not found";
+      << "hsa_amd_memory_broadcast_copy wrapper not found";
   ASSERT_NE(nullptr, &hsa_amd_memory_broadcast_capability)
-      << "hsa_amd_memory_broadcast_capability symbol not found";
+      << "hsa_amd_memory_broadcast_capability wrapper not found";
 
-  std::cout << "[TC-L0-001] API symbols resolved successfully" << std::endl;
+  std::cout << "API wrapper symbols resolved" << std::endl;
   std::cout << "  hsa_amd_memory_broadcast_copy @ " << (void*)&hsa_amd_memory_broadcast_copy
             << std::endl;
   std::cout << "  hsa_amd_memory_broadcast_capability @ "
@@ -42,14 +51,14 @@ TEST_F(BroadcastCopyL0, ApiSymbolResolution) {
 }
 
 //
-// TC-L0-002: Minimal API Call (No Crash)
+//
 //
 
 TEST_F(BroadcastCopyL0, MinimalApiCall) {
   hsa_status_t init_status = hsa_init();
   ASSERT_EQ(HSA_STATUS_SUCCESS, init_status) << "HSA runtime initialization failed";
 
-  std::cout << "[TC-L0-002] Testing minimal API call (all NULL parameters):" << std::endl;
+  std::cout << "Testing minimal API call (all NULL parameters):" << std::endl;
 
   // Call with all NULL (should return error, not crash)
   hsa_status_t status = hsa_amd_memory_broadcast_copy(nullptr,         // src
@@ -68,25 +77,25 @@ TEST_F(BroadcastCopyL0, MinimalApiCall) {
   // Should fail with invalid argument (or not initialized if not implemented)
   ASSERT_NE(HSA_STATUS_SUCCESS, status) << "Expected error for NULL parameters";
 
-  std::cout << "  ✓ API handled NULL parameters gracefully (no crash)" << std::endl;
+  std::cout << "  [PASS] API handled NULL parameters gracefully (no crash)" << std::endl;
 
   hsa_shut_down();
 }
 
 //
-// TC-L0-003: Capability Query Basic Call
+//
 //
 
 TEST_F(BroadcastCopyL0, CapabilityQueryBasicCall) {
   hsa_status_t init_status = hsa_init();
   ASSERT_EQ(HSA_STATUS_SUCCESS, init_status);
 
-  std::cout << "[TC-L0-003] Testing capability query:" << std::endl;
+  std::cout << "Testing capability query:" << std::endl;
 
   hsa_agent_t gpu_agent = BroadcastTestUtils::FindGPUAgent();
 
   if (gpu_agent.handle == 0) {
-    std::cout << "  ⚠️  No GPU agent found - test skipped" << std::endl;
+    std::cout << "  [SKIP] No GPU agent found" << std::endl;
     hsa_shut_down();
     GTEST_SKIP() << "No GPU agent available";
     return;
@@ -106,20 +115,19 @@ TEST_F(BroadcastCopyL0, CapabilityQueryBasicCall) {
   ASSERT_EQ(HSA_STATUS_SUCCESS, status) << "Capability query failed";
 
   // Accept 0 (no HW support) or 1-1024 (HW support)
-  ASSERT_LE(max_dests, 1024) << "max_dests exceeds hardware limit";
+  ASSERT_LE(max_dests, 1024U) << "max_dests exceeds hardware limit";
 
   if (max_dests > 0) {
-    std::cout << "  ✓ Hardware multicast supported (max=" << max_dests << " destinations)"
-              << std::endl;
+    std::cout << "  Broadcast supported (max=" << max_dests << " destinations)" << std::endl;
   } else {
-    std::cout << "  ℹ️  Hardware multicast not supported (will use fallback)" << std::endl;
+    std::cout << "  [INFO] Hardware multicast not supported (will use fallback)" << std::endl;
   }
 
   hsa_shut_down();
 }
 
 //
-// TC-L0-004: Version Check
+//
 //
 
 TEST_F(BroadcastCopyL0, ApiVersionCheck) {
@@ -130,17 +138,17 @@ TEST_F(BroadcastCopyL0, ApiVersionCheck) {
   hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &major);
   hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MINOR, &minor);
 
-  std::cout << "[TC-L0-004] ROCr Runtime Version: " << major << "." << minor << std::endl;
+  std::cout << "ROCr Runtime Version: " << major << "." << minor << std::endl;
 
   // Broadcast copy requires ROCr 1.14+ (use 1.14 if 1.18 not available yet)
   bool version_ok = (major > 1) || (major == 1 && minor >= 14);
 
   if (!version_ok) {
-    std::cout << "  ⚠️  WARNING: ROCr version " << major << "." << minor
+    std::cout << "  [WARNING] ROCr version " << major << "." << minor
               << " may not support broadcast copy" << std::endl;
     std::cout << "  (Expected 1.18+, but 1.14+ may have partial support)" << std::endl;
   } else {
-    std::cout << "  ✓ ROCr version is compatible" << std::endl;
+    std::cout << "  [PASS] ROCr version is compatible" << std::endl;
   }
 
   // Don't fail on version mismatch (may be testing on older runtime)
@@ -150,11 +158,11 @@ TEST_F(BroadcastCopyL0, ApiVersionCheck) {
 }
 
 //
-// TC-L0-005: Runtime Initialization State
+//
 //
 
 TEST_F(BroadcastCopyL0, RuntimeInitializationState) {
-  std::cout << "[TC-L0-005] Testing runtime initialization:" << std::endl;
+  std::cout << "Testing runtime initialization:" << std::endl;
 
   // Test 1: Call without init (should fail)
   hsa_agent_t gpu_agent = BroadcastTestUtils::FindGPUAgent();
@@ -175,14 +183,10 @@ TEST_F(BroadcastCopyL0, RuntimeInitializationState) {
     std::cout << "  After hsa_init(): status=" << status_after << ", max_dests=" << max_dests
               << std::endl;
     ASSERT_EQ(HSA_STATUS_SUCCESS, status_after);
-    std::cout << "  ✓ API works correctly after runtime initialization" << std::endl;
+    std::cout << "  [PASS] API works correctly after runtime initialization" << std::endl;
   } else {
-    std::cout << "  ⚠️  No GPU agent found" << std::endl;
+    std::cout << "  [SKIP] No GPU agent found" << std::endl;
   }
 
   hsa_shut_down();
 }
-
-//
-// Test Summary
-//

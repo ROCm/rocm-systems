@@ -1,46 +1,7 @@
 /*
- * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2026, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * SPDX-License-Identifier: MIT
  */
 
 #ifndef ROCRTST_COMMON_INDIRECT_COPY_UTILS_H_
@@ -224,17 +185,17 @@ class IndirectCopyTestUtils {
                               bool verbose = true) {
     if (src == nullptr || dst == nullptr) {
       if (verbose) {
-        std::cout << "  [" << test_name << "] ❌ NULL pointer passed" << std::endl;
+        std::cout << "  [" << test_name << "] [FAIL] NULL pointer passed" << std::endl;
       }
       return false;
     }
     bool match = (memcmp(src, dst, size) == 0);
     if (verbose) {
       if (match) {
-        std::cout << "  [" << test_name << "] ✓ Data integrity verified (" << size << " bytes)"
+        std::cout << "  [" << test_name << "] [PASS] Data integrity verified (" << size << " bytes)"
                   << std::endl;
       } else {
-        std::cout << "  [" << test_name << "] ❌ Data mismatch detected" << std::endl;
+        std::cout << "  [" << test_name << "] [FAIL] Data mismatch detected" << std::endl;
         // Find first mismatch
         const uint8_t* s = static_cast<const uint8_t*>(src);
         const uint8_t* d = static_cast<const uint8_t*>(dst);

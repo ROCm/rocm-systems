@@ -104,6 +104,13 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
+      # SDMA Broadcast/Swap/Indirect Copy - Basic validation
+      - "rocrtstFunc.BroadcastCopyL0"
+      - "rocrtstFunc.BroadcastCopyL1"
+      - "rocrtstFunc.BroadcastCopyL2"
+      - "rocrtstFunc.BroadcastCopyL3"
+      - "rocrtstFunc.IndirectCopyTest"
+      - "rocrtstFunc.SwapCopyTest"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -188,6 +195,19 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
+      # SDMA Broadcast/Swap/Indirect Copy - Extended
+      - "rocrtstFunc.BroadcastCopyL0"
+      - "rocrtstFunc.BroadcastCopyL1"
+      - "rocrtstFunc.BroadcastCopyL2"
+      - "rocrtstFunc.BroadcastCopyL3"
+      - "rocrtstFunc.BroadcastCopyL4"
+      - "rocrtstFunc.BroadcastCopyL5"
+      - "rocrtstFunc.BroadcastCopyChunking"
+      - "rocrtstFunc.BroadcastCopyDecisionTree"
+      - "rocrtstFunc.BroadcastCopyShaderFallback"
+      - "rocrtstFunc.IndirectCopyTest"
+      - "rocrtstFunc.SwapCopyTest"
+      - "rocrtstFunc.SdmaMulticastTestSuite"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:
@@ -274,6 +294,21 @@ test_categories:
       - "rocrtstPerf.AQL_Dispatch_Time_Single_Interrupt"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_SpinWait"
       - "rocrtstPerf.AQL_Dispatch_Time_Multi_Interrupt"
+      # SDMA Broadcast/Swap/Indirect Copy - Full suite
+      - "rocrtstFunc.BroadcastCopyL0"
+      - "rocrtstFunc.BroadcastCopyL1"
+      - "rocrtstFunc.BroadcastCopyL2"
+      - "rocrtstFunc.BroadcastCopyL3"
+      - "rocrtstFunc.BroadcastCopyL4"
+      - "rocrtstFunc.BroadcastCopyL5"
+      - "rocrtstFunc.BroadcastCopyL6"
+      - "rocrtstFunc.BroadcastCopyChunking"
+      - "rocrtstFunc.BroadcastCopyDecisionTree"
+      - "rocrtstFunc.BroadcastCopyShaderFallback"
+      - "rocrtstFunc.BroadcastCopyPerformance"
+      - "rocrtstFunc.IndirectCopyTest"
+      - "rocrtstFunc.SwapCopyTest"
+      - "rocrtstFunc.SdmaMulticastTestSuite"
     exclude:
       - "rocrtstFunc.Memory_Max_Mem"
     labels:

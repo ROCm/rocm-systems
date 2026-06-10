@@ -1,46 +1,7 @@
 /*
- * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2026, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * SPDX-License-Identifier: MIT
  */
 
 // =============================================================================
@@ -50,16 +11,6 @@
 // Swap copy atomically exchanges contents of two buffers: A ↔ B
 //
 // Test Coverage:
-// - TC-SWAP-001: Basic swap copy (small buffer)
-// - TC-SWAP-002: Various buffer sizes (1B, 16B, 4KB, 1MB)
-// - TC-SWAP-003: Unaligned buffer sizes
-// - TC-SWAP-004: Large buffer swap (100MB)
-// - TC-SWAP-005: In-place swap verification (data integrity)
-// - TC-SWAP-006: Signal dependency handling
-// - TC-SWAP-007: Null pointer validation
-// - TC-SWAP-008: Zero size handling
-// - TC-SWAP-009: Same buffer (src == dst) edge case
-// - TC-SWAP-010: Cross-agent swap (if multi-GPU)
 // =============================================================================
 
 #include <hsa/hsa.h>
@@ -141,7 +92,7 @@ class SwapCopyTestUtils {
     }
 
     if (match) {
-      std::cout << "  [" << buffer_name << "] ✓ Pattern verified (" << size << " bytes)"
+      std::cout << "  [" << buffer_name << "] [PASS] Pattern verified (" << size << " bytes)"
                 << std::endl;
     }
     return match;
@@ -203,10 +154,10 @@ class SwapCopyTest : public ::testing::Test {
 };
 
 // =============================================================================
-// TC-SWAP-001: Basic swap copy (small buffer)
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_001_BasicSwapSmall) {
-  std::cout << "\n=== TC-SWAP-001: Basic Swap Copy (4KB) ===" << std::endl;
+  std::cout << "\n=== Basic Swap Copy (4KB) ===" << std::endl;
 
   const size_t kSize = 4096;
 
@@ -249,10 +200,10 @@ TEST_F(SwapCopyTest, TC_SWAP_001_BasicSwapSmall) {
 }
 
 // =============================================================================
-// TC-SWAP-002: Various buffer sizes
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_002_VariousSizes) {
-  std::cout << "\n=== TC-SWAP-002: Various Buffer Sizes ===" << std::endl;
+  std::cout << "\n=== Various Buffer Sizes ===" << std::endl;
 
   std::vector<size_t> sizes = {1, 16, 256, 4096, 65536, 1024 * 1024};
 
@@ -289,10 +240,10 @@ TEST_F(SwapCopyTest, TC_SWAP_002_VariousSizes) {
 }
 
 // =============================================================================
-// TC-SWAP-003: Unaligned buffer sizes
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_003_UnalignedSizes) {
-  std::cout << "\n=== TC-SWAP-003: Unaligned Buffer Sizes ===" << std::endl;
+  std::cout << "\n=== Unaligned Buffer Sizes ===" << std::endl;
 
   // Test sizes that are not multiples of 16 (shader vectorization boundary)
   std::vector<size_t> sizes = {7, 13, 33, 127, 1000, 4097, 65537};
@@ -330,10 +281,10 @@ TEST_F(SwapCopyTest, TC_SWAP_003_UnalignedSizes) {
 }
 
 // =============================================================================
-// TC-SWAP-004: Large buffer swap
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_004_LargeBuffer) {
-  std::cout << "\n=== TC-SWAP-004: Large Buffer Swap (100MB) ===" << std::endl;
+  std::cout << "\n=== Large Buffer Swap (100MB) ===" << std::endl;
 
   const size_t kSize = 100 * 1024 * 1024;  // 100MB
 
@@ -390,10 +341,10 @@ TEST_F(SwapCopyTest, TC_SWAP_004_LargeBuffer) {
 }
 
 // =============================================================================
-// TC-SWAP-005: Double swap returns to original
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_005_DoubleSwapRestoresOriginal) {
-  std::cout << "\n=== TC-SWAP-005: Double Swap Restores Original ===" << std::endl;
+  std::cout << "\n=== Double Swap Restores Original ===" << std::endl;
 
   const size_t kSize = 8192;
 
@@ -437,10 +388,10 @@ TEST_F(SwapCopyTest, TC_SWAP_005_DoubleSwapRestoresOriginal) {
 }
 
 // =============================================================================
-// TC-SWAP-006: Signal dependency handling
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_006_SignalDependencies) {
-  std::cout << "\n=== TC-SWAP-006: Signal Dependency Handling ===" << std::endl;
+  std::cout << "\n=== Signal Dependency Handling ===" << std::endl;
 
   const size_t kSize = 4096;
 
@@ -494,10 +445,10 @@ TEST_F(SwapCopyTest, TC_SWAP_006_SignalDependencies) {
 }
 
 // =============================================================================
-// TC-SWAP-007: Null pointer validation
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_007_NullPointerValidation) {
-  std::cout << "\n=== TC-SWAP-007: Null Pointer Validation ===" << std::endl;
+  std::cout << "\n=== Null Pointer Validation ===" << std::endl;
 
   const size_t kSize = 4096;
   void* valid_buf = ctx_.AllocateGPUBuffer(kSize);
@@ -524,17 +475,17 @@ TEST_F(SwapCopyTest, TC_SWAP_007_NullPointerValidation) {
                                     nullptr, signal);
   EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT, status);
 
-  std::cout << "  ✓ Null pointer validation passed" << std::endl;
+  std::cout << "  [PASS] Null pointer validation passed" << std::endl;
 
   hsa_signal_destroy(signal);
   ctx_.Free(valid_buf);
 }
 
 // =============================================================================
-// TC-SWAP-008: Zero size handling
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_008_ZeroSizeHandling) {
-  std::cout << "\n=== TC-SWAP-008: Zero Size Handling ===" << std::endl;
+  std::cout << "\n=== Zero Size Handling ===" << std::endl;
 
   const size_t kSize = 4096;
   void* buf_a = ctx_.AllocateGPUBuffer(kSize);
@@ -550,7 +501,7 @@ TEST_F(SwapCopyTest, TC_SWAP_008_ZeroSizeHandling) {
       hsa_amd_memory_swap_copy(buf_a, ctx_.gpu_agent, buf_b, ctx_.gpu_agent, 0, 0, nullptr, signal);
   EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT, status);
 
-  std::cout << "  ✓ Zero size validation passed" << std::endl;
+  std::cout << "  [PASS] Zero size validation passed" << std::endl;
 
   hsa_signal_destroy(signal);
   ctx_.Free(buf_a);
@@ -558,10 +509,10 @@ TEST_F(SwapCopyTest, TC_SWAP_008_ZeroSizeHandling) {
 }
 
 // =============================================================================
-// TC-SWAP-009: Same buffer edge case
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_009_SameBuffer) {
-  std::cout << "\n=== TC-SWAP-009: Same Buffer (src == dst) ===" << std::endl;
+  std::cout << "\n=== Same Buffer (src == dst) ===" << std::endl;
 
   const size_t kSize = 4096;
   void* buf = ctx_.AllocateGPUBuffer(kSize);
@@ -593,10 +544,10 @@ TEST_F(SwapCopyTest, TC_SWAP_009_SameBuffer) {
 }
 
 // =============================================================================
-// TC-SWAP-010: Chained swaps
+//
 // =============================================================================
 TEST_F(SwapCopyTest, TC_SWAP_010_ChainedSwaps) {
-  std::cout << "\n=== TC-SWAP-010: Chained Swaps (A↔B, B↔C, C↔A) ===" << std::endl;
+  std::cout << "\n=== Chained Swaps (A↔B, B↔C, C↔A) ===" << std::endl;
 
   const size_t kSize = 4096;
 
@@ -652,7 +603,7 @@ TEST_F(SwapCopyTest, TC_SWAP_010_ChainedSwaps) {
 
   EXPECT_TRUE(correct) << "Chained swap result incorrect";
   if (correct) {
-    std::cout << "  ✓ Chained swaps verified: A=0xAA, B=0xCC, C=0xBB" << std::endl;
+    std::cout << "  [PASS] Chained swaps verified: A=0xAA, B=0xCC, C=0xBB" << std::endl;
   }
 
   hsa_signal_destroy(signal);

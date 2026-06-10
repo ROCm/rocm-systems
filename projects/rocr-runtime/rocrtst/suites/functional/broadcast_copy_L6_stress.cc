@@ -1,5 +1,9 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Level 6 Tests: Stress & Concurrent Testing
 // Purpose: Long-running stability and multi-threaded concurrency
 
@@ -20,7 +24,7 @@ class BroadcastCopyL6 : public ::testing::Test {
 };
 
 //
-// TC-L6-001: 1000 Iterations Stability Test
+//
 //
 
 TEST_F(BroadcastCopyL6, StabilityTest_1000_Iterations) {
@@ -31,7 +35,7 @@ TEST_F(BroadcastCopyL6, StabilityTest_1000_Iterations) {
   const int NUM_DESTS = 4;
   const int ITERATIONS = 1000;
 
-  std::cout << "[TC-L6-001] Stability test: " << ITERATIONS << " iterations" << std::endl;
+  std::cout << "Stability test: " << ITERATIONS << " iterations" << std::endl;
   std::cout << "  Size: " << SIZE << " bytes, Destinations: " << NUM_DESTS << std::endl;
 
   void* src = ctx.AllocateGPUBuffer(SIZE);
@@ -57,7 +61,7 @@ TEST_F(BroadcastCopyL6, StabilityTest_1000_Iterations) {
                                       SIZE, 0, nullptr, signal, HSA_AMD_SDMA_ENGINE_0, false);
 
     if (status != HSA_STATUS_SUCCESS) {
-      std::cout << "  ❌ Iteration " << iter << " failed with status " << (int)status << std::endl;
+      std::cout << "  [FAIL] Iteration " << iter << " failed with status " << (int)status << std::endl;
       fail_count++;
       continue;
     }
@@ -68,7 +72,7 @@ TEST_F(BroadcastCopyL6, StabilityTest_1000_Iterations) {
     bool all_valid = true;
     for (int i = 0; i < NUM_DESTS; i++) {
       if (!BroadcastTestUtils::VerifyPattern(dsts[i], SIZE, pattern, iter)) {
-        std::cout << "  ❌ Iteration " << iter << ", dst[" << i << "] verification failed"
+        std::cout << "  [FAIL] Iteration " << iter << ", dst[" << i << "] verification failed"
                   << std::endl;
         all_valid = false;
         break;
@@ -100,7 +104,7 @@ TEST_F(BroadcastCopyL6, StabilityTest_1000_Iterations) {
             << std::endl;
 
   ASSERT_EQ(ITERATIONS, pass_count) << "Stability test had failures";
-  std::cout << "  ✓ 1000-iteration stability test passed" << std::endl;
+  std::cout << "  [PASS] 1000-iteration stability test passed" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
@@ -108,7 +112,7 @@ TEST_F(BroadcastCopyL6, StabilityTest_1000_Iterations) {
 }
 
 //
-// TC-L6-002: Concurrent Broadcasts (Multi-Threaded)
+//
 //
 
 void BroadcastWorkerThread(int thread_id, hsa_agent_t gpu_agent, std::atomic<int>& pass_count,
@@ -196,7 +200,7 @@ TEST_F(BroadcastCopyL6, ConcurrentBroadcasts_4_Threads) {
   const int NUM_THREADS = 4;
   const int ITERS_PER_THREAD = 50;
 
-  std::cout << "[TC-L6-002] Concurrent broadcasts with " << NUM_THREADS << " threads" << std::endl;
+  std::cout << "Concurrent broadcasts with " << NUM_THREADS << " threads" << std::endl;
   std::cout << "  Each thread: " << ITERS_PER_THREAD << " iterations" << std::endl;
 
   std::atomic<int> pass_count{0};
@@ -223,18 +227,18 @@ TEST_F(BroadcastCopyL6, ConcurrentBroadcasts_4_Threads) {
             << expected << " total)" << std::endl;
 
   ASSERT_EQ(expected, pass_count.load()) << "Some concurrent broadcasts failed";
-  std::cout << "  ✓ Concurrent broadcasts successful" << std::endl;
+  std::cout << "  [PASS] Concurrent broadcasts successful" << std::endl;
 }
 
 //
-// TC-L6-003: Memory Pressure Test (Allocate Until Failure)
+//
 //
 
 TEST_F(BroadcastCopyL6, MemoryPressureTest) {
   HsaTestContext ctx;
   if (!ctx.HasGPUAgent()) GTEST_SKIP() << "No GPU agent";
 
-  std::cout << "[TC-L6-003] Memory pressure test (allocate until low memory)" << std::endl;
+  std::cout << "Memory pressure test (allocate until low memory)" << std::endl;
 
   const size_t BUFFER_SIZE = 1048576;  // 1MB per buffer
   const int NUM_DESTS = 4;
@@ -304,7 +308,7 @@ TEST_F(BroadcastCopyL6, MemoryPressureTest) {
   }
 
   ASSERT_TRUE(all_valid) << "Data corruption under memory pressure";
-  std::cout << "  ✓ Broadcast successful under memory pressure" << std::endl;
+  std::cout << "  [PASS] Broadcast successful under memory pressure" << std::endl;
 
   // Cleanup
   BroadcastTestUtils::DestroySignal(signal);
@@ -314,7 +318,7 @@ TEST_F(BroadcastCopyL6, MemoryPressureTest) {
 }
 
 //
-// TC-L6-004: Rapid Sequential Broadcasts (Stress SDMA Queue)
+//
 //
 
 TEST_F(BroadcastCopyL6, RapidSequentialBroadcasts) {
@@ -325,7 +329,7 @@ TEST_F(BroadcastCopyL6, RapidSequentialBroadcasts) {
   const int NUM_DESTS = 4;
   const int NUM_RAPID = 100;
 
-  std::cout << "[TC-L6-004] Rapid sequential broadcasts (" << NUM_RAPID << " back-to-back)"
+  std::cout << "Rapid sequential broadcasts (" << NUM_RAPID << " back-to-back)"
             << std::endl;
 
   void* src = ctx.AllocateGPUBuffer(SIZE);
@@ -372,7 +376,7 @@ TEST_F(BroadcastCopyL6, RapidSequentialBroadcasts) {
   }
 
   ASSERT_TRUE(all_valid) << "Data corruption in rapid sequential test";
-  std::cout << "  ✓ All " << NUM_RAPID << " broadcasts completed successfully" << std::endl;
+  std::cout << "  [PASS] All " << NUM_RAPID << " broadcasts completed successfully" << std::endl;
 
   for (auto sig : signals) BroadcastTestUtils::DestroySignal(sig);
   ctx.Free(src);

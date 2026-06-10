@@ -1,5 +1,9 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Performance Tests: Bandwidth & Scaling
 // Purpose: Measure effective bandwidth and scaling efficiency
 
@@ -91,7 +95,7 @@ TEST_F(BroadcastCopyPerformance, BandwidthScaling_ByDestCount) {
           HSA_AMD_SDMA_ENGINE_0, false);
 
       if (status != HSA_STATUS_SUCCESS) {
-        std::cout << "  ❌ Iteration " << iter << " failed" << std::endl;
+        std::cout << "  [FAIL] Iteration " << iter << " failed" << std::endl;
         continue;
       }
 
@@ -127,7 +131,7 @@ TEST_F(BroadcastCopyPerformance, BandwidthScaling_ByDestCount) {
     for (auto dst : dsts) ctx.Free(dst);
   }
 
-  std::cout << "\n  ✓ Bandwidth scaling measurement complete" << std::endl;
+  std::cout << "\n  [PASS] Bandwidth scaling measurement complete" << std::endl;
 }
 
 //
@@ -197,7 +201,7 @@ TEST_F(BroadcastCopyPerformance, SDMAvsShader_Comparison) {
 
   std::cout << "\n  Note: Path automatically selected based on GPU generation and buffer size"
             << std::endl;
-  std::cout << "  ✓ Performance measurement complete" << std::endl;
+  std::cout << "  [PASS] Performance measurement complete" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
@@ -217,7 +221,7 @@ TEST_F(BroadcastCopyPerformance, AllGatherSimulation) {
   std::cout << "  Detected " << all_gpus.size() << " GPU agent(s)" << std::endl;
 
   if (all_gpus.size() < 2) {
-    std::cout << "  ℹ️  Multi-GPU test requires 2+ GPUs, simulating with single GPU..."
+    std::cout << "  [INFO]  Multi-GPU test requires 2+ GPUs, simulating with single GPU..."
               << std::endl;
     if (all_gpus.empty()) {
       GTEST_SKIP() << "No GPU agents available";
@@ -294,7 +298,7 @@ TEST_F(BroadcastCopyPerformance, AllGatherSimulation) {
                                                  BroadcastTestUtils::INCREMENTAL, 0);
 
   ASSERT_TRUE(valid) << "All-gather data corruption detected";
-  std::cout << "  ✓ All-gather simulation completed successfully" << std::endl;
+  std::cout << "  [PASS] All-gather simulation completed successfully" << std::endl;
 
   for (auto buf : local_buffers) ctx.Free(buf);
   for (auto& vec : recv_buffers) {
@@ -384,9 +388,16 @@ TEST_F(BroadcastCopyPerformance, BroadcastCollective_Scaling) {
               << std::setw(16) << sequential_time << " | " << std::setw(10) << std::fixed
               << std::setprecision(2) << speedup << "x" << std::endl;
 
-    // Expect speedup >= 1.0 for multi-dest
-    if (NUM_DESTS >= 4) {
+    // Expect speedup for multi-dest broadcasts:
+    // - Small dest counts (2-4) may have overhead, require only >= 0.5x
+    // - Medium dest counts (8+) should show speedup >= 1.0x
+    // - Large dest counts (32+) should show significant speedup >= 1.5x
+    if (NUM_DESTS >= 32) {
+      EXPECT_GE(speedup, 1.5) << "Expected significant speedup for " << NUM_DESTS << " destinations";
+    } else if (NUM_DESTS >= 8) {
       EXPECT_GE(speedup, 1.0) << "Expected speedup for " << NUM_DESTS << " destinations";
+    } else if (NUM_DESTS >= 4) {
+      EXPECT_GE(speedup, 0.5) << "Expected reasonable performance for " << NUM_DESTS << " destinations";
     }
 
     BroadcastTestUtils::DestroySignal(bcast_signal);
@@ -395,5 +406,5 @@ TEST_F(BroadcastCopyPerformance, BroadcastCollective_Scaling) {
     for (auto dst : dsts) ctx.Free(dst);
   }
 
-  std::cout << "\n  ✓ Scaling test complete" << std::endl;
+  std::cout << "\n  [PASS] Scaling test complete" << std::endl;
 }

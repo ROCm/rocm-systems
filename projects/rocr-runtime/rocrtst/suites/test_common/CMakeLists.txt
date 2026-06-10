@@ -472,8 +472,10 @@ if(NOT ENABLE_SDMA_COPY_TESTS)
   list(FILTER functionalSources EXCLUDE REGEX ".*swap_copy.*\\.cc$")
   # Exclude indirect copy tests
   list(FILTER functionalSources EXCLUDE REGEX ".*indirect_copy.*\\.cc$")
+  # Exclude sdma_multicast tests
+  list(FILTER functionalSources EXCLUDE REGEX ".*sdma_multicast.*\\.cc$")
 else()
-  message(STATUS "SDMA copy tests ENABLED (broadcast, swap, indirect)")
+  message(STATUS "SDMA copy tests ENABLED (broadcast, swap, indirect, multicast)")
 endif()
 
 # Optional: enable hwloc membind nodeset call in NUMA test

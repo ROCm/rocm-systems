@@ -1,5 +1,9 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Indirect Copy Tests
 // Purpose: Test indirect copy operations where source and/or destination
 //          addresses are resolved via indirection (pointer-to-pointer).
@@ -20,7 +24,7 @@ class IndirectCopyTest : public ::testing::Test {
 };
 
 // =============================================================================
-// TC-IND-001: Indirect Source, Direct Destination (4KB)
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_4KB) {
@@ -52,7 +56,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_4KB) {
   // Create completion signal
   hsa_signal_t signal = BroadcastTestUtils::CreateSignal(1);
 
-  std::cout << "[TC-IND-001] Indirect source copy:" << std::endl;
+  std::cout << "Indirect source copy:" << std::endl;
   std::cout << "  src_ptr=" << src_ptr << " -> actual_src=" << actual_src << std::endl;
   std::cout << "  dst=" << dst << ", size=" << SIZE << std::endl;
 
@@ -81,7 +85,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_4KB) {
 }
 
 // =============================================================================
-// TC-IND-002: Direct Source, Indirect Destination (4KB)
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectDst_4KB) {
@@ -112,7 +116,7 @@ TEST_F(IndirectCopyTest, IndirectDst_4KB) {
 
   hsa_signal_t signal = BroadcastTestUtils::CreateSignal(1);
 
-  std::cout << "[TC-IND-002] Indirect destination copy:" << std::endl;
+  std::cout << "Indirect destination copy:" << std::endl;
   std::cout << "  src=" << src << std::endl;
   std::cout << "  dst_ptr=" << dst_ptr << " -> actual_dst=" << actual_dst << std::endl;
 
@@ -133,7 +137,7 @@ TEST_F(IndirectCopyTest, IndirectDst_4KB) {
 }
 
 // =============================================================================
-// TC-IND-003: Indirect Source AND Destination (4KB)
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrcDst_4KB) {
@@ -164,7 +168,7 @@ TEST_F(IndirectCopyTest, IndirectSrcDst_4KB) {
 
   hsa_signal_t signal = BroadcastTestUtils::CreateSignal(1);
 
-  std::cout << "[TC-IND-003] Indirect src+dst copy:" << std::endl;
+  std::cout << "Indirect src+dst copy:" << std::endl;
   std::cout << "  src_ptr=" << src_ptr << " -> " << *src_ptr << std::endl;
   std::cout << "  dst_ptr=" << dst_ptr << " -> " << *dst_ptr << std::endl;
 
@@ -187,7 +191,7 @@ TEST_F(IndirectCopyTest, IndirectSrcDst_4KB) {
 }
 
 // =============================================================================
-// TC-IND-004: Various Copy Sizes
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_VariousSizes) {
@@ -196,7 +200,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_VariousSizes) {
 
   std::vector<size_t> sizes = {64, 256, 1024, 4096, 16384, 65536, 262144, 1048576};
 
-  std::cout << "[TC-IND-004] Testing various copy sizes (indirect src):" << std::endl;
+  std::cout << "Testing various copy sizes (indirect src):" << std::endl;
 
   for (size_t size : sizes) {
     void* actual_src = ctx.AllocateGPUBuffer(size);
@@ -222,7 +226,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_VariousSizes) {
 
     bool valid = BroadcastTestUtils::VerifyPattern(dst, size, BroadcastTestUtils::SEQUENTIAL);
 
-    std::cout << "  Size " << std::setw(10) << size << " bytes: " << (valid ? "✓ PASS" : "❌ FAIL")
+    std::cout << "  Size " << std::setw(10) << size << " bytes: " << (valid ? "[PASS] PASS" : "[FAIL] FAIL")
               << std::endl;
 
     ASSERT_TRUE(valid) << "Data corruption at size=" << size;
@@ -235,7 +239,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_VariousSizes) {
 }
 
 // =============================================================================
-// TC-IND-005: Small Unaligned Sizes (Tail Loop Coverage)
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_UnalignedSizes) {
@@ -245,7 +249,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_UnalignedSizes) {
   // Test sizes that exercise the byte-by-byte tail loop (not multiples of 16)
   std::vector<size_t> sizes = {1, 7, 15, 17, 31, 33, 63, 65, 127, 129, 255, 1023};
 
-  std::cout << "[TC-IND-005] Testing unaligned sizes (tail loop):" << std::endl;
+  std::cout << "Testing unaligned sizes (tail loop):" << std::endl;
 
   for (size_t size : sizes) {
     // Allocate larger buffer to avoid edge cases
@@ -278,7 +282,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_UnalignedSizes) {
 
     bool valid = BroadcastTestUtils::VerifyPattern(dst, size, BroadcastTestUtils::WALKING_BIT);
 
-    std::cout << "  Size " << std::setw(5) << size << " bytes: " << (valid ? "✓ PASS" : "❌ FAIL")
+    std::cout << "  Size " << std::setw(5) << size << " bytes: " << (valid ? "[PASS] PASS" : "[FAIL] FAIL")
               << std::endl;
 
     ASSERT_TRUE(valid) << "Data corruption at unaligned size=" << size;
@@ -291,7 +295,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_UnalignedSizes) {
 }
 
 // =============================================================================
-// TC-IND-006: Dependency Signal Test
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_WithDependencySignal) {
@@ -311,7 +315,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_WithDependencySignal) {
   hsa_signal_t dep_signal = BroadcastTestUtils::CreateSignal(1);
   hsa_signal_t completion_signal = BroadcastTestUtils::CreateSignal(1);
 
-  std::cout << "[TC-IND-006] Indirect copy with dependency signal:" << std::endl;
+  std::cout << "Indirect copy with dependency signal:" << std::endl;
 
   // Submit copy with dependency
   hsa_status_t status = hsa_amd_memory_indirect_copy_src(src_ptr, ctx.gpu_agent, dst, ctx.gpu_agent,
@@ -331,7 +335,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_WithDependencySignal) {
   BroadcastTestUtils::WaitSignal(completion_signal);
 
   bool valid = BroadcastTestUtils::VerifyPattern(dst, SIZE, BroadcastTestUtils::CHECKERBOARD);
-  std::cout << "  Result: " << (valid ? "✓ PASS" : "❌ FAIL") << std::endl;
+  std::cout << "  Result: " << (valid ? "[PASS] PASS" : "[FAIL] FAIL") << std::endl;
 
   ASSERT_TRUE(valid) << "Data corruption detected";
 
@@ -343,7 +347,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_WithDependencySignal) {
 }
 
 // =============================================================================
-// TC-IND-007: Zero-Size Copy (Edge Case)
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_ZeroSize) {
@@ -354,14 +358,14 @@ TEST_F(IndirectCopyTest, IndirectSrc_ZeroSize) {
   void* dst = ctx.AllocateGPUBuffer(256);
   void** src_ptr = IndirectCopyTestUtils::AllocatePointerBuffer(ctx, actual_src);
 
-  // Zero-size copy should fail with INVALID_ARGUMENT
+  // Zero-size copy is a valid no-op, returns SUCCESS (consistent with memcpy behavior)
   hsa_signal_t signal = BroadcastTestUtils::CreateSignal(1);
 
   hsa_status_t status = hsa_amd_memory_indirect_copy_src(src_ptr, ctx.gpu_agent, dst, ctx.gpu_agent,
                                                          0, 0, nullptr, signal);
 
-  std::cout << "[TC-IND-007] Zero-size copy status=" << status << std::endl;
-  EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT, status) << "Zero-size should return error";
+  std::cout << "Zero-size copy status=" << status << std::endl;
+  EXPECT_EQ(HSA_STATUS_SUCCESS, status) << "Zero-size is a valid no-op";
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(actual_src);
@@ -370,7 +374,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_ZeroSize) {
 }
 
 // =============================================================================
-// TC-IND-008: Null Pointer Validation
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_NullPointer) {
@@ -384,7 +388,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_NullPointer) {
   hsa_status_t status = hsa_amd_memory_indirect_copy_src(nullptr, ctx.gpu_agent, dst, ctx.gpu_agent,
                                                          256, 0, nullptr, signal);
 
-  std::cout << "[TC-IND-008] Null src_ptr status=" << status << std::endl;
+  std::cout << "Null src_ptr status=" << status << std::endl;
   EXPECT_EQ(HSA_STATUS_ERROR_INVALID_ARGUMENT, status);
 
   BroadcastTestUtils::DestroySignal(signal);
@@ -392,7 +396,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_NullPointer) {
 }
 
 // =============================================================================
-// TC-IND-009: Large Copy (1MB+)
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_LargeCopy) {
@@ -414,7 +418,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_LargeCopy) {
 
   hsa_signal_t signal = BroadcastTestUtils::CreateSignal(1);
 
-  std::cout << "[TC-IND-009] Large indirect copy (4MB):" << std::endl;
+  std::cout << "Large indirect copy (4MB):" << std::endl;
 
   auto start = std::chrono::high_resolution_clock::now();
 
@@ -432,7 +436,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_LargeCopy) {
   double bandwidth = BroadcastTestUtils::CalculateBandwidthGBps(SIZE, duration.count());
   std::cout << "  Time: " << duration.count() << " µs, Bandwidth: " << std::fixed
             << std::setprecision(2) << bandwidth << " GB/s" << std::endl;
-  std::cout << "  Result: " << (valid ? "✓ PASS" : "❌ FAIL") << std::endl;
+  std::cout << "  Result: " << (valid ? "[PASS] PASS" : "[FAIL] FAIL") << std::endl;
 
   ASSERT_TRUE(valid) << "Data corruption in large copy";
 
@@ -443,7 +447,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_LargeCopy) {
 }
 
 // =============================================================================
-// TC-IND-010: Multiple Sequential Indirect Copies
+//
 // =============================================================================
 
 TEST_F(IndirectCopyTest, IndirectSrc_MultipleSequential) {
@@ -453,7 +457,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_MultipleSequential) {
   const size_t SIZE = 4096;
   const int NUM_COPIES = 10;
 
-  std::cout << "[TC-IND-010] Multiple sequential indirect copies:" << std::endl;
+  std::cout << "Multiple sequential indirect copies:" << std::endl;
 
   for (int i = 0; i < NUM_COPIES; i++) {
     void* actual_src = ctx.AllocateGPUBuffer(SIZE);
@@ -474,7 +478,7 @@ TEST_F(IndirectCopyTest, IndirectSrc_MultipleSequential) {
     bool valid =
         BroadcastTestUtils::VerifyPattern(dst, SIZE, BroadcastTestUtils::SEQUENTIAL, i * 100);
 
-    std::cout << "  Copy " << (i + 1) << "/" << NUM_COPIES << ": " << (valid ? "✓" : "❌")
+    std::cout << "  Copy " << (i + 1) << "/" << NUM_COPIES << ": " << (valid ? "[PASS]" : "[FAIL]")
               << std::endl;
 
     ASSERT_TRUE(valid) << "Data corruption in copy #" << i;

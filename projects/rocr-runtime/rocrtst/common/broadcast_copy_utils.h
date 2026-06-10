@@ -1,53 +1,27 @@
 /*
- * =============================================================================
- *   ROC Runtime Conformance Release License
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
- * Copyright (c) 2026, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * SPDX-License-Identifier: MIT
  */
 
 #ifndef ROCRTST_COMMON_BROADCAST_COPY_UTILS_H_
 #define ROCRTST_COMMON_BROADCAST_COPY_UTILS_H_
 
+// =============================================================================
+// Broadcast Copy Test Utilities
+// =============================================================================
+// This file provides utilities for broadcast/swap/indirect copy tests:
+//   - IsaVersion: General helper for extracting GFX major/minor/stepping
+//   - HsaTestContext: Standalone HSA context manager (doesn't require BaseRocR)
+//   - BroadcastTestUtils: Pattern generation and verification helpers
+//
+// Device discovery uses existing rocrtst helpers from common/common.h:
+//   - rocrtst::FindGPUDevice, rocrtst::FindCPUDevice, rocrtst::IterateGPUAgents
+// =============================================================================
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
+#include "common/common.h"  // For rocrtst::FindGPUDevice, FindCPUDevice, IterateGPUAgents
 
 // =============================================================================
 // GTest compatibility macros for older versions that lack GTEST_SKIP()
@@ -81,10 +55,62 @@
 // SDMA Engine ID enum is now defined in hsa_ext_amd.h
 
 // =============================================================================
+// ISA Version Helper
+// =============================================================================
+// General helper to extract ISA major/minor/stepping from an HSA agent.
+// Can be reused by other tests that need GFX version information.
+// =============================================================================
+
+struct IsaVersion {
+  uint32_t major;    // e.g., 9, 10, 11, 12, 13
+  uint32_t minor;    // e.g., 0, 4, 5
+  uint32_t stepping; // e.g., 0, 2
+
+  IsaVersion() : major(0), minor(0), stepping(0) {}
+
+  // Parse ISA version from agent
+  static IsaVersion FromAgent(hsa_agent_t agent) {
+    IsaVersion ver;
+
+    hsa_isa_t isa;
+    hsa_status_t status = hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
+    if (status != HSA_STATUS_SUCCESS) return ver;
+
+    char isa_name[128];
+    status = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
+    if (status != HSA_STATUS_SUCCESS) return ver;
+
+    // Parse gfxXXXX from name (e.g., "amdgcn-amd-amdhsa--gfx942", "gfx1250")
+    const char* gfx_str = strstr(isa_name, "gfx");
+    if (gfx_str && strlen(gfx_str) > 3) {
+      uint32_t version = 0;
+      if (sscanf(gfx_str, "gfx%u", &version) == 1) {
+        // gfx942  -> major=9, minor=4, stepping=2
+        // gfx1200 -> major=12, minor=0, stepping=0
+        // gfx1250 -> major=12, minor=5, stepping=0
+        ver.major = version / 100;
+        ver.minor = (version / 10) % 10;
+        ver.stepping = version % 10;
+      }
+    }
+    return ver;
+  }
+
+  bool IsValid() const { return major > 0; }
+  bool IsGfx9() const { return major == 9; }
+  bool IsGfx10() const { return major == 10; }
+  bool IsGfx11() const { return major == 11; }
+  bool IsGfx12() const { return major == 12; }
+  bool IsGfx13() const { return major == 13; }
+  bool IsGfx12OrLater() const { return major >= 12; }
+  bool IsGfx1250() const { return major == 12 && minor == 5; }
+};
+
+// =============================================================================
 // Query broadcast copy capability for an agent
 // =============================================================================
 // Returns the maximum number of destinations supported for broadcast copy.
-// For GFX12+ (e.g., MI450), returns 1024. For older GPUs, returns 0.
+// For GFX12+, returns 1024. For older GPUs, returns 0.
 // =============================================================================
 
 /**
@@ -114,34 +140,15 @@ static inline hsa_status_t hsa_amd_memory_broadcast_capability(hsa_agent_t agent
     return HSA_STATUS_SUCCESS;
   }
 
-  // Get ISA to determine GPU architecture
-  hsa_isa_t isa;
-  status = hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
-  if (status != HSA_STATUS_SUCCESS) {
-    *max_destinations = 0;
+  // Use the general ISA version helper
+  IsaVersion ver = IsaVersion::FromAgent(agent);
+
+  // GFX9+ supports broadcast copy via shader fallback path (up to 1024 destinations)
+  // GFX12+ has native SDMA multicast packet support
+  // Both paths support the same max destinations
+  if (ver.major >= 9) {
+    *max_destinations = 1024;
     return HSA_STATUS_SUCCESS;
-  }
-
-  char isa_name[128];
-  status = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
-  if (status != HSA_STATUS_SUCCESS) {
-    *max_destinations = 0;
-    return HSA_STATUS_SUCCESS;
-  }
-
-  // Parse gfxXXXX from ISA name
-  const char* gfx_str = strstr(isa_name, "gfx");
-  if (gfx_str != nullptr && strlen(gfx_str) > 3) {
-    uint32_t version = 0;
-    if (sscanf(gfx_str, "gfx%u", &version) == 1) {
-      uint32_t major = version / 100;  // gfx1200 -> 12
-
-      // GFX12+ supports broadcast copy with up to 1024 destinations
-      if (major >= 12) {
-        *max_destinations = 1024;
-        return HSA_STATUS_SUCCESS;
-      }
-    }
   }
 
   *max_destinations = 0;
@@ -347,31 +354,19 @@ class HsaTestContext {
     }
   }
 
-  uint32_t GetGfxMajorVersion() const {
-    if (gpu_agent.handle == 0) return 0;
-
-    hsa_isa_t isa;
-    hsa_status_t status = hsa_agent_get_info(gpu_agent, HSA_AGENT_INFO_ISA, &isa);
-    if (status != HSA_STATUS_SUCCESS) return 0;
-
-    char isa_name[128];
-    status = hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
-    if (status != HSA_STATUS_SUCCESS) return 0;
-
-    // Parse gfxXXXX from name (e.g., "amdgcn-amd-amdhsa--gfx1300")
-    const char* gfx_str = strstr(isa_name, "gfx");
-    if (gfx_str && strlen(gfx_str) > 3) {
-      uint32_t version = 0;
-      if (sscanf(gfx_str, "gfx%u", &version) == 1) {
-        return version / 100;  // gfx1300 -> 13
-      }
-    }
-    return 0;
+  // Get ISA version using the general helper
+  IsaVersion GetIsaVersion() const {
+    if (gpu_agent.handle == 0) return IsaVersion();
+    return IsaVersion::FromAgent(gpu_agent);
   }
 
-  bool IsMulticastSupported() const { return GetGfxMajorVersion() >= 13; }
+  uint32_t GetGfxMajorVersion() const {
+    return GetIsaVersion().major;
+  }
 
-  bool IsBroadcastSupported() const { return GetGfxMajorVersion() >= 12; }
+  bool IsMulticastSupported() const { return GetIsaVersion().IsGfx13(); }
+
+  bool IsBroadcastSupported() const { return GetIsaVersion().IsGfx12OrLater(); }
 };
 
 // =============================================================================
@@ -575,52 +570,26 @@ class BroadcastTestUtils {
   }
 
   // Find all GPU agents in the system
+  // Uses rocrtst::IterateGPUAgents from common/common.h
   static std::vector<hsa_agent_t> FindAllGPUAgents() {
     std::vector<hsa_agent_t> gpus;
-    hsa_iterate_agents(
-        [](hsa_agent_t agent, void* data) -> hsa_status_t {
-          hsa_device_type_t type;
-          hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-          if (type == HSA_DEVICE_TYPE_GPU) {
-            static_cast<std::vector<hsa_agent_t>*>(data)->push_back(agent);
-          }
-          return HSA_STATUS_SUCCESS;
-        },
-        &gpus);
+    hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
     return gpus;
   }
 
   // Find first GPU agent in the system
+  // Uses rocrtst::FindGPUDevice from common/common.h
   static hsa_agent_t FindGPUAgent() {
     hsa_agent_t gpu_agent = {0};
-    hsa_iterate_agents(
-        [](hsa_agent_t agent, void* data) -> hsa_status_t {
-          hsa_device_type_t type;
-          hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-          if (type == HSA_DEVICE_TYPE_GPU) {
-            *static_cast<hsa_agent_t*>(data) = agent;
-            return HSA_STATUS_INFO_BREAK;
-          }
-          return HSA_STATUS_SUCCESS;
-        },
-        &gpu_agent);
+    hsa_iterate_agents(rocrtst::FindGPUDevice, &gpu_agent);
     return gpu_agent;
   }
 
   // Find first CPU agent in the system
+  // Uses rocrtst::FindCPUDevice from common/common.h
   static hsa_agent_t FindCPUAgent() {
     hsa_agent_t cpu_agent = {0};
-    hsa_iterate_agents(
-        [](hsa_agent_t agent, void* data) -> hsa_status_t {
-          hsa_device_type_t type;
-          hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-          if (type == HSA_DEVICE_TYPE_CPU) {
-            *static_cast<hsa_agent_t*>(data) = agent;
-            return HSA_STATUS_INFO_BREAK;
-          }
-          return HSA_STATUS_SUCCESS;
-        },
-        &cpu_agent);
+    hsa_iterate_agents(rocrtst::FindCPUDevice, &cpu_agent);
     return cpu_agent;
   }
 

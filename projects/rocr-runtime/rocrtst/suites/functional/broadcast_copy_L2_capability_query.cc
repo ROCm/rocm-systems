@@ -1,5 +1,9 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Level 2 Tests: Capability Query
 // Purpose: Test capability detection across different agent types and hardware
 
@@ -25,7 +29,7 @@ struct AgentInfo {
 };
 
 //
-// TC-L2-001: Query All GPU Agents
+//
 //
 
 TEST_F(BroadcastCopyL2, QueryAllGpuAgents) {
@@ -40,7 +44,7 @@ TEST_F(BroadcastCopyL2, QueryAllGpuAgents) {
   hsa_amd_memory_broadcast_capability(ctx.gpu_agent, &info.max_broadcast_dests);
   info.supports_multicast = (info.max_broadcast_dests > 0);
 
-  std::cout << "[TC-L2-001] GPU agent capability:" << std::endl;
+  std::cout << "GPU agent capability:" << std::endl;
   std::cout << "  Agent: " << info.name << std::endl;
   std::cout << "    Handle: 0x" << std::hex << info.agent.handle << std::dec << std::endl;
   std::cout << "    Max Broadcast Dests: " << info.max_broadcast_dests;
@@ -52,11 +56,16 @@ TEST_F(BroadcastCopyL2, QueryAllGpuAgents) {
     std::cout << " (No broadcast support)" << std::endl;
   }
 
-  ASSERT_TRUE(info.supports_multicast) << "GPU should support broadcast copy";
+  // Skip on hardware that doesn't support broadcast (pre-GFX12)
+  if (!info.supports_multicast) {
+    GTEST_SKIP() << "GPU does not support broadcast copy (max_dests=" << info.max_broadcast_dests << ")";
+  }
+
+  std::cout << "  [PASS] Broadcast capability query succeeded" << std::endl;
 }
 
 //
-// TC-L2-002: Query CPU Agent (Should Return 0)
+//
 //
 
 TEST_F(BroadcastCopyL2, QueryCpuAgent) {
@@ -71,7 +80,7 @@ TEST_F(BroadcastCopyL2, QueryCpuAgent) {
   uint32_t max_dests = 999;  // Initialize to non-zero
   hsa_status_t status = hsa_amd_memory_broadcast_capability(cpu_agent, &max_dests);
 
-  std::cout << "[TC-L2-002] CPU agent capability query:" << std::endl;
+  std::cout << "CPU agent capability query:" << std::endl;
   std::cout << "  status=" << status << std::endl;
   std::cout << "  max_dests=" << max_dests << " (expected 0)" << std::endl;
 
@@ -80,7 +89,7 @@ TEST_F(BroadcastCopyL2, QueryCpuAgent) {
 }
 
 //
-// TC-L2-003: Capability Consistency Check
+//
 //
 
 TEST_F(BroadcastCopyL2, CapabilityConsistencyCheck) {
@@ -96,7 +105,7 @@ TEST_F(BroadcastCopyL2, CapabilityConsistencyCheck) {
     results.push_back(max_dests);
   }
 
-  std::cout << "[TC-L2-003] Capability query results (10 iterations):" << std::endl;
+  std::cout << "Capability query results (10 iterations):" << std::endl;
   for (size_t i = 0; i < results.size(); i++) {
     std::cout << "  [" << i << "] = " << results[i] << std::endl;
   }
@@ -107,11 +116,11 @@ TEST_F(BroadcastCopyL2, CapabilityConsistencyCheck) {
         << "Capability query returned inconsistent results: " << results[0] << " vs " << results[i];
   }
 
-  std::cout << "  ✓ All queries returned consistent value: " << results[0] << std::endl;
+  std::cout << "  [PASS] All queries returned consistent value: " << results[0] << std::endl;
 }
 
 //
-// TC-L2-004: Check ISA Version Correlation
+//
 //
 
 TEST_F(BroadcastCopyL2, IsaVersionCorrelation) {
@@ -125,7 +134,7 @@ TEST_F(BroadcastCopyL2, IsaVersionCorrelation) {
   uint32_t max_dests = 0;
   hsa_amd_memory_broadcast_capability(ctx.gpu_agent, &max_dests);
 
-  std::cout << "[TC-L2-004] ISA correlation check:" << std::endl;
+  std::cout << "ISA correlation check:" << std::endl;
   std::cout << "  ISA: " << isa_name << std::endl;
   std::cout << "  Max Broadcast Dests: " << max_dests << std::endl;
 
@@ -135,23 +144,23 @@ TEST_F(BroadcastCopyL2, IsaVersionCorrelation) {
   bool is_gfx14_plus = (strstr(isa_name, "gfx14") != nullptr);
 
   if (is_gfx13_plus || is_gfx14_plus) {
-    std::cout << "  Expected: ≥1024 (MI350+ series or newer)" << std::endl;
+    std::cout << "  Expected: ≥1024 (GFX13+ or newer)" << std::endl;
     if (max_dests == 0) {
-      std::cout << "  ⚠️  WARNING: GFX13+/GFX14+ returned 0, HW/FW support may be missing"
+      std::cout << "  [WARNING]  WARNING: GFX13+/GFX14+ returned 0, HW/FW support may be missing"
                 << std::endl;
     } else {
-      std::cout << "  ✓ GFX13+/GFX14+ reports multicast support" << std::endl;
+      std::cout << "  [PASS] GFX13+/GFX14+ reports multicast support" << std::endl;
     }
   } else {
-    std::cout << "  Expected: 0 (Pre-MI350 hardware)" << std::endl;
+    std::cout << "  Expected: 0 (Pre-GFX13 hardware)" << std::endl;
     if (max_dests > 0) {
-      std::cout << "  ℹ️  Note: Pre-GFX13 hardware reports multicast support" << std::endl;
+      std::cout << "  [INFO]  Note: Pre-GFX13 hardware reports multicast support" << std::endl;
     }
   }
 }
 
 //
-// TC-L2-005: Multiple GPU Agents Capability
+//
 //
 
 TEST_F(BroadcastCopyL2, MultipleGpuAgentsCapability) {
@@ -160,7 +169,7 @@ TEST_F(BroadcastCopyL2, MultipleGpuAgentsCapability) {
   HsaTestContext ctx;
   if (!ctx.HasGPUAgent()) GTEST_SKIP() << "No GPU agent";
 
-  std::cout << "[TC-L2-005] GPU capability check:" << std::endl;
+  std::cout << "GPU capability check:" << std::endl;
 
   hsa_agent_t agent = ctx.gpu_agent;
   char name[64];

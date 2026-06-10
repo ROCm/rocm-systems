@@ -1,7 +1,11 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Shader Fallback Tests
-// Purpose: ⭐ PHASE 2B GATE - Validate blit kernel fallback path
+// Purpose: Validate blit kernel fallback path
 
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
@@ -73,7 +77,7 @@ TEST_F(BroadcastCopyShaderFallback, SmallCopyAutoFallback) {
 
   std::cout << "  Verified: " << pass_count << "/" << NUM_DESTS << " destinations" << std::endl;
   ASSERT_EQ(NUM_DESTS, pass_count) << "Data corruption in small-copy shader path";
-  std::cout << "  ✓ Small-copy shader fallback test passed" << std::endl;
+  std::cout << "  [PASS] Small-copy shader fallback test passed" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
@@ -99,7 +103,7 @@ TEST_F(BroadcastCopyShaderFallback, AutoFallback_NonMulticastHW) {
     GTEST_SKIP() << "GPU does not support broadcast (pre-GFX9 hardware)";
   }
   ASSERT_EQ(1024, max_destinations) << "GFX9+ should report max_destinations=1024";
-  std::cout << "  ✓ GPU supports broadcast (SDMA or shader path)" << std::endl;
+  std::cout << "  [PASS] GPU supports broadcast (SDMA or shader path)" << std::endl;
 
   const size_t SIZE = 8192;
   const int NUM_DESTS = 4;
@@ -134,7 +138,7 @@ TEST_F(BroadcastCopyShaderFallback, AutoFallback_NonMulticastHW) {
   }
 
   ASSERT_TRUE(all_valid) << "Data corruption";
-  std::cout << "  ✓ Broadcast successful (auto fallback if needed)" << std::endl;
+  std::cout << "  [PASS] Broadcast successful (auto fallback if needed)" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
@@ -203,7 +207,7 @@ TEST_F(BroadcastCopyShaderFallback, SmallVsLarge_PathPerformance) {
       std::accumulate(small_times_us.begin(), small_times_us.end(), 0LL) / NUM_ITERS;
 
   std::cout << "    Avg time: " << small_avg << " µs (guaranteed shader path)" << std::endl;
-  std::cout << "    ✓ All small copies verified" << std::endl;
+  std::cout << "    [PASS] All small copies verified" << std::endl;
 
   // Cleanup small buffers
   ctx.Free(src_small);
@@ -255,12 +259,12 @@ TEST_F(BroadcastCopyShaderFallback, SmallVsLarge_PathPerformance) {
   std::cout << "    Avg time: " << large_avg << " µs" << std::endl;
   std::cout << "    Bandwidth: " << std::fixed << std::setprecision(2) << large_bandwidth_gbps
             << " GB/s (effective)" << std::endl;
-  std::cout << "    ✓ All large copies verified" << std::endl;
+  std::cout << "    [PASS] All large copies verified" << std::endl;
 
   std::cout << "\n  Performance comparison:" << std::endl;
   std::cout << "    Small (<4KB):  " << small_avg << " µs (shader)" << std::endl;
   std::cout << "    Large (>=4KB): " << large_avg << " µs (SDMA/shader)" << std::endl;
-  std::cout << "    ✓ Path selection working correctly" << std::endl;
+  std::cout << "    [PASS] Path selection working correctly" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src_large);
@@ -336,7 +340,7 @@ TEST_F(BroadcastCopyShaderFallback, ShaderFallback_VariousSizes) {
     auto time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
     std::cout << std::setw(12) << SIZE << " | " << std::setw(12) << time_us << " | "
-              << (pass ? "✓ PASS" : "❌ FAIL") << std::endl;
+              << (pass ? "[PASS] PASS" : "[FAIL] FAIL") << std::endl;
 
     ASSERT_TRUE(pass) << "Size " << SIZE << " failed";
 
@@ -345,7 +349,7 @@ TEST_F(BroadcastCopyShaderFallback, ShaderFallback_VariousSizes) {
     for (auto dst : dsts) ctx.Free(dst);
   }
 
-  std::cout << "  ✓ All sizes validated" << std::endl;
+  std::cout << "  [PASS] All sizes validated" << std::endl;
 }
 
 //
@@ -417,7 +421,7 @@ TEST_F(BroadcastCopyShaderFallback, ShaderFallback_MultiDest) {
     auto time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
     std::cout << std::setw(10) << NUM_DESTS << " | " << std::setw(12) << time_us << " | "
-              << (pass ? "✓ PASS" : "❌ FAIL") << std::endl;
+              << (pass ? "[PASS] PASS" : "[FAIL] FAIL") << std::endl;
 
     ASSERT_TRUE(pass) << NUM_DESTS << " destinations failed";
 
@@ -426,5 +430,5 @@ TEST_F(BroadcastCopyShaderFallback, ShaderFallback_MultiDest) {
     for (auto dst : dsts) ctx.Free(dst);
   }
 
-  std::cout << "  ✓ Shader fallback scales correctly with destination count" << std::endl;
+  std::cout << "  [PASS] Shader fallback scales correctly with destination count" << std::endl;
 }

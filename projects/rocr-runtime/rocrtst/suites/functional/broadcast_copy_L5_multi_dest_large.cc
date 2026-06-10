@@ -1,7 +1,11 @@
-// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
-//
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 // ROCrtst Level 5 Tests: Large Multi-Destination (100-1024)
-// Purpose: ⭐ PHASE 2A GATE - Validate hardware multicast at scale
+// Purpose: Validate hardware multicast at scale
 
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
@@ -18,7 +22,7 @@ class BroadcastCopyL5 : public ::testing::Test {
 };
 
 //
-// TC-L5-001: 100 Destinations
+//
 //
 
 TEST_F(BroadcastCopyL5, Broadcast_100_Destinations) {
@@ -35,7 +39,7 @@ TEST_F(BroadcastCopyL5, Broadcast_100_Destinations) {
   const size_t SIZE = 65536;  // 64KB
   const int NUM_DESTS = 100;
 
-  std::cout << "[TC-L5-001] Broadcasting to " << NUM_DESTS << " destinations (" << SIZE
+  std::cout << "Broadcasting to " << NUM_DESTS << " destinations (" << SIZE
             << " bytes each)" << std::endl;
 
   void* src = ctx.AllocateGPUBuffer(SIZE);
@@ -74,12 +78,12 @@ TEST_F(BroadcastCopyL5, Broadcast_100_Destinations) {
 
   for (int idx : sample_indices) {
     bool valid = BroadcastTestUtils::CompareBuffers(src, dsts[idx], SIZE);
-    std::cout << "    dst[" << std::setw(3) << idx << "]: " << (valid ? "✓" : "❌") << std::endl;
+    std::cout << "    dst[" << std::setw(3) << idx << "]: " << (valid ? "[PASS]" : "[FAIL]") << std::endl;
     if (valid) pass_count++;
   }
 
   ASSERT_EQ(5, pass_count) << "Sampled destinations have corrupted data";
-  std::cout << "  ✓ Broadcast to 100 destinations successful" << std::endl;
+  std::cout << "  [PASS] Broadcast to 100 destinations successful" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
@@ -87,7 +91,7 @@ TEST_F(BroadcastCopyL5, Broadcast_100_Destinations) {
 }
 
 //
-// TC-L5-002: 256 Destinations
+//
 //
 
 TEST_F(BroadcastCopyL5, Broadcast_256_Destinations) {
@@ -104,7 +108,7 @@ TEST_F(BroadcastCopyL5, Broadcast_256_Destinations) {
   const size_t SIZE = 32768;  // 32KB
   const int NUM_DESTS = 256;
 
-  std::cout << "[TC-L5-002] Broadcasting to " << NUM_DESTS << " destinations" << std::endl;
+  std::cout << "Broadcasting to " << NUM_DESTS << " destinations" << std::endl;
 
   void* src = ctx.AllocateGPUBuffer(SIZE);
   std::vector<void*> dsts(NUM_DESTS);
@@ -143,7 +147,7 @@ TEST_F(BroadcastCopyL5, Broadcast_256_Destinations) {
   std::cout << "  Time: " << time_us << " µs, Verified: " << pass_count << "/" << sample_count
             << " samples" << std::endl;
   ASSERT_EQ(sample_count, pass_count);
-  std::cout << "  ✓ Broadcast to 256 destinations successful" << std::endl;
+  std::cout << "  [PASS] Broadcast to 256 destinations successful" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
@@ -151,7 +155,7 @@ TEST_F(BroadcastCopyL5, Broadcast_256_Destinations) {
 }
 
 //
-// TC-L5-003: 1023 Destinations (Boundary Max-1)
+//
 //
 
 TEST_F(BroadcastCopyL5, Broadcast_1023_Destinations) {
@@ -168,7 +172,7 @@ TEST_F(BroadcastCopyL5, Broadcast_1023_Destinations) {
   const size_t SIZE = 16384;  // 16KB
   const int NUM_DESTS = 1023;
 
-  std::cout << "[TC-L5-003] Broadcasting to " << NUM_DESTS << " destinations (max-1 boundary)"
+  std::cout << "Broadcasting to " << NUM_DESTS << " destinations (max-1 boundary)"
             << std::endl;
   std::cout << "  This tests the upper boundary limit..." << std::endl;
 
@@ -218,14 +222,14 @@ TEST_F(BroadcastCopyL5, Broadcast_1023_Destinations) {
     if (BroadcastTestUtils::CompareBuffers(src, dsts[idx], SIZE)) {
       pass_count++;
     } else {
-      std::cout << "  ❌ dst[" << idx << "] FAILED verification" << std::endl;
+      std::cout << "  [FAIL] dst[" << idx << "] FAILED verification" << std::endl;
     }
   }
 
   std::cout << "  Time: " << time_us << " µs, Verified: " << pass_count << "/10 samples"
             << std::endl;
   ASSERT_GE(pass_count, 9) << "Too many verification failures";
-  std::cout << "  ✓ Broadcast to " << ACTUAL_NUM_DESTS << " destinations successful" << std::endl;
+  std::cout << "  [PASS] Broadcast to " << ACTUAL_NUM_DESTS << " destinations successful" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
@@ -233,8 +237,8 @@ TEST_F(BroadcastCopyL5, Broadcast_1023_Destinations) {
 }
 
 //
-// TC-L5-004: 1024 Destinations (Maximum Limit)
-// ⭐ PHASE 2A CRITICAL TEST
+//
+// CRITICAL TEST
 //
 
 TEST_F(BroadcastCopyL5, Broadcast_1024_Destinations_MAX) {
@@ -244,12 +248,12 @@ TEST_F(BroadcastCopyL5, Broadcast_1024_Destinations_MAX) {
   uint32_t max_destinations = 0;
   hsa_status_t status = hsa_amd_memory_broadcast_capability(ctx.gpu_agent, &max_destinations);
 
-  std::cout << "[TC-L5-004] ⭐ PHASE 2A CRITICAL: Broadcasting to 1024 destinations" << std::endl;
+  std::cout << "* : Broadcasting to 1024 destinations" << std::endl;
   std::cout << "  Hardware reports max_destinations = " << max_destinations << std::endl;
 
   if (status != HSA_STATUS_SUCCESS || max_destinations < 1024) {
     std::cout << "  ⚠ Hardware doesn't support 1024 destinations" << std::endl;
-    std::cout << "  Skipping PHASE 2A gate (shader fallback will be tested instead)" << std::endl;
+    std::cout << "  Skipping hardware multicast test (shader fallback will be tested instead)" << std::endl;
     GTEST_SKIP() << "max_destinations=" << max_destinations << " < 1024";
   }
 
@@ -302,7 +306,7 @@ TEST_F(BroadcastCopyL5, Broadcast_1024_Destinations_MAX) {
   auto end = std::chrono::high_resolution_clock::now();
   auto time_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
-  std::cout << "  ✓ Broadcast completed in " << time_us << " µs" << std::endl;
+  std::cout << "  [PASS] Broadcast completed in " << time_us << " µs" << std::endl;
 
   // Comprehensive verification - 32 samples across the range
   int samples = 32;
@@ -316,7 +320,7 @@ TEST_F(BroadcastCopyL5, Broadcast_1024_Destinations_MAX) {
     if (BroadcastTestUtils::CompareBuffers(src, dsts[idx], SIZE)) {
       pass_count++;
     } else {
-      std::cout << "  ❌ dst[" << idx << "] FAILED" << std::endl;
+      std::cout << "  [FAIL] dst[" << idx << "] FAILED" << std::endl;
     }
   }
 
@@ -327,11 +331,11 @@ TEST_F(BroadcastCopyL5, Broadcast_1024_Destinations_MAX) {
   ASSERT_EQ(samples, pass_count) << "Some destinations have corrupted data";
 
   if (ACTUAL_NUM_DESTS >= 1024) {
-    std::cout << "\n  ⭐⭐⭐ PHASE 2A GATE PASSED ⭐⭐⭐" << std::endl;
+    std::cout << "\n  ***  PASSED ***" << std::endl;
     std::cout << "  Successfully broadcast to 1024 destinations with 100% data integrity!"
               << std::endl;
   } else {
-    std::cout << "  ✓ Broadcast to " << ACTUAL_NUM_DESTS
+    std::cout << "  [PASS] Broadcast to " << ACTUAL_NUM_DESTS
               << " destinations successful (limited by memory)" << std::endl;
   }
 
@@ -341,7 +345,7 @@ TEST_F(BroadcastCopyL5, Broadcast_1024_Destinations_MAX) {
 }
 
 //
-// TC-L5-005: 1025 Destinations (Should Fail - Exceeds Max)
+//
 //
 
 TEST_F(BroadcastCopyL5, Broadcast_1025_Destinations_ShouldFail) {
@@ -355,7 +359,7 @@ TEST_F(BroadcastCopyL5, Broadcast_1025_Destinations_ShouldFail) {
     GTEST_SKIP() << "Test requires exact max_destinations=1024 (got " << max_destinations << ")";
   }
 
-  std::cout << "[TC-L5-005] Testing exceeds-limit case (1025 > 1024)" << std::endl;
+  std::cout << "Testing exceeds-limit case (1025 > 1024)" << std::endl;
 
   const size_t SIZE = 4096;
   const int NUM_DESTS = 1025;  // Intentionally exceeds limit
@@ -372,7 +376,7 @@ TEST_F(BroadcastCopyL5, Broadcast_1025_Destinations_ShouldFail) {
   }
 
   if (allocated < NUM_DESTS) {
-    std::cout << "  ℹ️ Could only allocate " << allocated << " buffers (memory limited)"
+    std::cout << "  [INFO] Could only allocate " << allocated << " buffers (memory limited)"
               << std::endl;
     GTEST_SKIP() << "Insufficient memory to test 1025 destinations";
   }
@@ -396,7 +400,7 @@ TEST_F(BroadcastCopyL5, Broadcast_1025_Destinations_ShouldFail) {
   bool is_error = (status != HSA_STATUS_SUCCESS);
 
   ASSERT_TRUE(is_error) << "Expected error for exceeding max destinations";
-  std::cout << "  ✓ Correctly rejected 1025 destinations" << std::endl;
+  std::cout << "  [PASS] Correctly rejected 1025 destinations" << std::endl;
 
   BroadcastTestUtils::DestroySignal(signal);
   ctx.Free(src);
