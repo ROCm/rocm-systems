@@ -36,6 +36,7 @@ on:
   pull_request:
     paths:
       - 'projects/rccl/**'
+      - 'projects/rccl-tests/**'
       - '.github/workflows/rccl-device-api.yml'
 
 permissions:

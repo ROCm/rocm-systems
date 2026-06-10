@@ -21,7 +21,6 @@
 # Optional env:
 #   RCCL_AMDGPU_TARGETS       RCCL --amdgpu_targets (default: gfx950)
 #   RCCL_DEVICE_API_CACHE     Cache root, shared with head node (default: /apps/rccl-ci)
-#   RCCL_TESTS_REPO/REF       rccl-tests source (default: ROCm/rccl-tests @ develop)
 
 set -euo pipefail
 
@@ -49,8 +48,6 @@ if [[ -z "${RCCL_BUILD_JOBS:-}" ]]; then
 fi
 export RCCL_BUILD_JOBS
 build_jobs="${RCCL_BUILD_JOBS}"
-rccl_tests_repo="${RCCL_TESTS_REPO:-https://github.com/ROCm/rccl-tests.git}"
-rccl_tests_ref="${RCCL_TESTS_REF:-develop}"
 
 # 1) ROCm: provisioned on the head node; consume its shared tree via rocm.env.
 echo "==> [1/5] use ROCm (provisioned on head node)"
@@ -91,11 +88,10 @@ echo "==> [3/5] build RCCL (targets=${amdgpu_targets})"
        --amdgpu_targets="${amdgpu_targets}" )
 rccl_prefix="${workdir}/projects/rccl/build/release"
 
-# 4) rccl-tests: cloned + built fresh each run via its install.sh.
+# 4) rccl-tests: built in-tree from projects/rccl-tests (must match
+# RCCL_TESTS_DIR in run-device-api-ci.sh). install.sh wipes its own build/.
 echo "==> [4/5] build rccl-tests (ENABLE_DEVICE_API=1)"
-rccl_tests_dir="${workdir}/rccl-tests"
-rm -rf "${rccl_tests_dir}"
-git clone --depth 1 --branch "${rccl_tests_ref}" "${rccl_tests_repo}" "${rccl_tests_dir}"
+rccl_tests_dir="${workdir}/projects/rccl-tests"
 ( cd "${rccl_tests_dir}" \
   && ENABLE_DEVICE_API=1 ./install.sh \
        --mpi --mpi_home="${MPI_HOME}" --rccl_home="${rccl_prefix}" )
