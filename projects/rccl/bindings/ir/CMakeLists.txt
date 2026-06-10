@@ -34,42 +34,23 @@ set(FINAL_BC       ${LIBDIR}/librccl_device.bc)
 set(WRAPPER_HEADER ${INCLUDEDIR}/nccl_device_wrapper.h)
 
 ##### Build configuration #####
-# Default GPU architecture for the bitcode artifact. Override via:
+# >>> RCCL-DELTA: NCCL selects a CUDA arch (sm_70/sm_90) from CUDAToolkit_VERSION.
+#     RCCL targets an AMDGPU arch instead; default gfx950, override via
 #     cmake -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942 ...
 set(BITCODE_LIB_ARCH "gfx950" CACHE STRING
     "AMDGPU architecture for the LLVM bitcode (e.g. gfx942, gfx950)")
 set(BITCODE_CXX_STD  "c++17"  CACHE STRING
     "C++ standard for the LLVM bitcode build")
+# <<< RCCL-DELTA
 
-# ROCM_PATH is normally set by the top-level CMakeLists.txt; provide a
-# safe default so this file is also usable standalone (cmake -P style).
-if(NOT DEFINED ROCM_PATH OR ROCM_PATH STREQUAL "")
-  set(ROCM_PATH "/opt/rocm")
-endif()
-set(ROCM_LLVM_BIN "${ROCM_PATH}/llvm/bin")
-
-##### Locate ROCm LLVM toolchain #####
-# RCCL's cmake_minimum_required is 3.16, which predates
-# `find_program(... REQUIRED)`, so check each one explicitly.
-find_program(CLANG_EXECUTABLE    NAMES amdclang++ clang++ HINTS ${ROCM_LLVM_BIN})
-find_program(OPT_EXECUTABLE      NAMES opt                HINTS ${ROCM_LLVM_BIN})
-find_program(LLVM_DIS_EXECUTABLE NAMES llvm-dis           HINTS ${ROCM_LLVM_BIN})
-find_program(LLVM_AS_EXECUTABLE  NAMES llvm-as            HINTS ${ROCM_LLVM_BIN})
-
-foreach(_tool CLANG_EXECUTABLE OPT_EXECUTABLE LLVM_DIS_EXECUTABLE LLVM_AS_EXECUTABLE)
-  if(NOT ${_tool})
-    message(FATAL_ERROR
-      "RCCL IR (EMIT_LLVM_IR=ON): could not locate ${_tool} under "
-      "${ROCM_LLVM_BIN}. Install the ROCm LLVM toolchain or override "
-      "${_tool} on the command line.")
-  endif()
-endforeach()
-
-message(STATUS "RCCL IR: clang     = ${CLANG_EXECUTABLE}")
-message(STATUS "RCCL IR: opt       = ${OPT_EXECUTABLE}")
-message(STATUS "RCCL IR: llvm-dis  = ${LLVM_DIS_EXECUTABLE}")
-message(STATUS "RCCL IR: llvm-as   = ${LLVM_AS_EXECUTABLE}")
-message(STATUS "RCCL IR: target    = ${BITCODE_LIB_ARCH} (${BITCODE_CXX_STD})")
+# Find required tools
+#==================================================================================================
+# >>> RCCL-DELTA: NCCL uses `find_program(CLANG_EXECUTABLE clang REQUIRED)` etc.
+#     RCCL must locate the ROCm LLVM toolchain (amdclang++/opt/llvm-dis/llvm-as
+#     under ${ROCM_PATH}/llvm/bin). That discovery is isolated in a module so this
+#     section stays a small, easy-to-merge delta against upstream NCCL.
+include(${PROJECT_SOURCE_DIR}/cmake/RocmLlvmTools.cmake)
+# <<< RCCL-DELTA
 
 ##### Include paths #####
 # Point at the hipify staging directory so this build sees exactly the
