@@ -1194,6 +1194,13 @@ hsa_status_t HSA_API hsa_amd_queue_set_priority(hsa_queue_t* queue,
 }
 
 // Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_queue_create(hsa_agent_t agent,
+                                          hsa_amd_queue_create_desc_t* descs,
+                                          uint32_t num_descs) {
+  return amdExtTable->hsa_amd_queue_create_fn(agent, descs, num_descs);
+}
+
+// Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_register_deallocation_callback(void* ptr,
                                                     hsa_amd_deallocation_callback_t callback,
                                                     void* user_data) {
