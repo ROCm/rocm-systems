@@ -11,14 +11,14 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX AND GXX_EXEC)
 
     add_custom_target(malloc_custom COMMAND ${GXX_EXEC} -c
         ${CMAKE_CURRENT_SOURCE_DIR}/hipMalloc.cpp -I${HIP_INCLUDE_DIR}
-        -D__HIP_PLATFORM_AMD__ -o malloc.o BYPRODUCTS malloc.o)
+        -fPIC -D__HIP_PLATFORM_AMD__ -o malloc.o BYPRODUCTS malloc.o)
     add_library(malloc_gpp OBJECT IMPORTED)
     set_property(TARGET malloc_gpp PROPERTY IMPORTED_OBJECTS
         "${CMAKE_CURRENT_BINARY_DIR}/malloc.o")
 
     add_custom_target(half_custom COMMAND ${GXX_EXEC} -c
         ${CMAKE_CURRENT_SOURCE_DIR}/half_types.cpp -I${HIP_INCLUDE_DIR}
-        -D__HIP_PLATFORM_AMD__ -o half_types.o BYPRODUCTS half_types.o)
+        -fPIC -D__HIP_PLATFORM_AMD__ -o half_types.o BYPRODUCTS half_types.o)
     add_library(half_types OBJECT IMPORTED)
     set_property(TARGET half_types PROPERTY IMPORTED_OBJECTS
         "${CMAKE_CURRENT_BINARY_DIR}/half_types.o")
