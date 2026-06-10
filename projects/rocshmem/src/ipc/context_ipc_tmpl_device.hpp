@@ -413,6 +413,101 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
+/*
+ * Reduce-scatter: PE r receives the element-wise reduction of
+ * source[r*nreduce .. (r+1)*nreduce - 1] across all PEs into dest[0..nreduce-1].
+ *
+ * Algorithm:
+ *   Each PE s sends source_s[r*nreduce + offset .. + count] to PE r's pWrk
+ *   at slot s (pWrk[team_rank_s * chunk_size]).  After all PEs have written,
+ *   each PE reduces its pWrk slots into dest.  Chunked when pWrk is too small.
+ *
+ * pSync layout: pSync[s] is the flag PE s signals on PE r after writing to
+ * pWrk[s * chunk_size] on PE r.  We use value (c+1) for chunk c to allow
+ * reuse without a full reset between chunks.
+ */
+template <typename T, ROCSHMEM_OP Op>
+__device__ int IPCContext::reduce_scatter(rocshmem_team_t team, T *dest,
+                                          const T *source, int nreduce) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int PE_size   = team_obj->tinfo_wrt_world->size;
+  int PE_start  = team_obj->tinfo_wrt_world->pe_start;
+  int stride    = team_obj->tinfo_wrt_world->stride;
+  int team_rank = (my_pe - PE_start) / stride;
+
+  long *pSync = team_obj->reduce_pSync;
+  T    *pWrk  = reinterpret_cast<T *>(team_obj->pWrk);
+
+  int wg_id   = get_flat_block_id();
+  int wg_size = get_flat_block_size();
+
+  int pWrk_elems = (int)(ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double) / sizeof(T));
+  int chunk_size = max(1, pWrk_elems / PE_size);
+  int n_chunks   = (nreduce + chunk_size - 1) / chunk_size;
+
+  int finish = PE_start + stride * PE_size;
+
+  for (int c = 0; c < n_chunks; c++) {
+    int offset = c * chunk_size;
+    int count  = min(chunk_size, nreduce - offset);
+
+    // For each remote PE r (rank remote_rank), send my contribution for r's
+    // output block: source[remote_rank * nreduce + offset .. + count]
+    // into PE r's pWrk at slot team_rank (pWrk[team_rank * chunk_size]).
+    for (int i = PE_start; i < finish; i += stride) {
+      if (i != my_pe) {
+        int remote_rank = (i - PE_start) / stride;
+        // Write my contribution for PE i's output block into PE i's pWrk
+        // at my slot (team_rank) so PE i knows the sender.
+        internal_putmem_wg(&pWrk[team_rank * chunk_size],
+                           reinterpret_cast<const void *>(
+                               source + remote_rank * nreduce + offset),
+                           count * sizeof(T), i);
+        if (is_thread_zero_in_block()) {
+          fence(i);
+          int64_t flag = (int64_t)(c + 1);
+          // Signal PE i that my slot is ready.
+          internal_putmem(&pSync[team_rank], &flag, sizeof(*pSync), i);
+        }
+      }
+    }
+
+    // Initialize dest from my own contribution to my own output block.
+    for (int j = wg_id; j < count; j += wg_size) {
+      dest[offset + j] = source[team_rank * nreduce + offset + j];
+    }
+    threadfence_system();
+    __syncthreads();
+
+    // Wait for each remote PE s to signal that pWrk[s * chunk_size] is ready,
+    // then accumulate into dest.
+    for (int i = PE_start; i < finish; i += stride) {
+      if (i != my_pe) {
+        int remote_rank = (i - PE_start) / stride;
+        int64_t expected = (int64_t)(c + 1);
+        if (is_thread_zero_in_block()) {
+          wait_until(&pSync[remote_rank], ROCSHMEM_CMP_EQ, expected);
+        }
+        __syncthreads();
+        ipc_compute_reduce<T, Op>(&pWrk[remote_rank * chunk_size], dest + offset,
+                                  count, wg_id, wg_size);
+        threadfence_system();
+      }
+    }
+    __syncthreads();
+  }
+
+  // Reset pSync entries for our slots on all PEs.
+  for (int i = wg_id; i < PE_size; i += wg_size) {
+    pSync[i] = ROCSHMEM_SYNC_VALUE;
+  }
+  __syncthreads();
+
+  barrier_wg(team);
+  return ROCSHMEM_SUCCESS;
+}
+
 template <typename T>
 __device__ void IPCContext::internal_put_broadcast(
     T *dst, const T *src, int nelems, int pe_root, int pe_start,

@@ -22,46 +22,49 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
-#define LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
+#ifndef _TEAM_REDUCE_SCATTER_TESTER_HPP_
+#define _TEAM_REDUCE_SCATTER_TESTER_HPP_
 
+#include <functional>
+#include <utility>
 
-namespace rocshmem {
+#include "tester.hpp"
 
-enum ro_net_cmds {
-  RO_NET_PUT,
-  RO_NET_P,
-  RO_NET_GET,
-  RO_NET_PUT_NBI,
-  RO_NET_GET_NBI,
-  RO_NET_AMO_FOP,
-  RO_NET_AMO_FCAS,
-  RO_NET_FENCE,
-  RO_NET_QUIET,
-  RO_NET_FINALIZE,
-  RO_NET_TEAM_REDUCE,
-  RO_NET_SYNC,
-  RO_NET_BARRIER,
-  RO_NET_TEAM_BROADCAST,
-  RO_NET_ALLTOALL,
-  RO_NET_FCOLLECT,
-  RO_NET_TEAM_REDUCE_SCATTER,
+/******************************************************************************
+ * HOST TESTER CLASS
+ *****************************************************************************/
+template <typename T1, ROCSHMEM_OP T2>
+class TeamReduceScatterTester : public Tester {
+ public:
+  explicit TeamReduceScatterTester(
+      TesterArguments args, std::function<void(T1 &, T1 &)> f1,
+      std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2);
+  virtual ~TeamReduceScatterTester();
+
+ protected:
+  virtual void resetBuffers(uint64_t size) override;
+
+  virtual void preLaunchKernel() override;
+
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                            uint64_t size) override;
+
+  virtual void postLaunchKernel() override;
+
+  virtual void verifyResults(uint64_t size) override;
+
+  T1 *s_buf;  // source: n_pes * size elements per PE
+  T1 *r_buf;  // dest:   size elements per PE
+
+ private:
+  int my_pe = 0;
+  int n_pes = 0;
+
+  std::function<void(T1 &, T1 &)> init_buf;
+  std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>
+      verify_buf;
 };
 
-enum ro_net_types {
-  RO_NET_FLOAT,
-  RO_NET_CHAR,
-  RO_NET_SIGNED_CHAR,
-  RO_NET_UNSIGNED_CHAR,
-  RO_NET_DOUBLE,
-  RO_NET_INT,
-  RO_NET_LONG,
-  RO_NET_UNSIGNED_LONG,
-  RO_NET_LONG_LONG,
-  RO_NET_SHORT,
-  RO_NET_LONG_DOUBLE
-};
+#include "team_reduce_scatter_tester.cpp"
 
-}  // namespace rocshmem
-
-#endif  // LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
+#endif  // _TEAM_REDUCE_SCATTER_TESTER_HPP_

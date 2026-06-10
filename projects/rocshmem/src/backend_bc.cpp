@@ -269,6 +269,7 @@ void Backend::dump_stats() {
     pstat("Put_Signal_NBI",        device_stats.getStat(NUM_PUT_SIGNAL_NBI));
     pstat("WG_Put_Signal_NBI",     device_stats.getStat(NUM_PUT_SIGNAL_NBI_WG));
     pstat("WAVE_Put_Signal_NBI",   device_stats.getStat(NUM_PUT_SIGNAL_NBI_WAVE));
+    pstat("ReduceScatter",         device_stats.getStat(NUM_REDUCE_SCATTER));
     LOG_INFO("%s", buf);
   }
 
