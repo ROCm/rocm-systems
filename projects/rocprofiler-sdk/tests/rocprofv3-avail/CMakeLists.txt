@@ -23,13 +23,30 @@ if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
     set(IS_DISABLED ON)
 endif()
 
-# Hardware-counter enumeration and pmc-check do NOT depend on PC sampling support; on RDNA
-# targets that inherit gfx11 in basic_counters.xml (e.g. gfx1150 on WSL2), SQ_WAVES /
-# GRBM_COUNT / GL2C_HIT enumerate cleanly via rocprofv3-avail. Only disable when the
-# counters literally cannot be queried (gfx906, memcheck).
+# Hardware-counter enumeration (info --pmc) does NOT depend on PC sampling support and
+# works on any arch whose counters can be queried; only disable it where counters
+# literally cannot be queried (gfx906, memcheck).
 set(IS_HW_COUNTERS_DISABLED OFF)
 if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx906$" OR ROCPROFILER_MEMCHECK)
     set(IS_HW_COUNTERS_DISABLED ON)
+endif()
+
+# The pmc-check tests below validate a specific counter list that includes GL2C_HIT. GL2C
+# is an RDNA (gfx10/11/12) cache block; on CDNA (e.g. gfx9xx / MI300) the equivalent L2
+# counter is TCC_HIT, so this exact list cannot be resolved there and pmc-check fails.
+# Restrict these checks to the architectures where the listed counters actually exist
+# (RDNA, e.g. gfx1150 on WSL2).
+#
+# Additionally require /dev/kfd: these tests target device 0 (`-d 0` / `device=0`), but on
+# WSL the only GPU is enumerated at index 1 (a synthetic CPU agent occupies index 0), so
+# `-d 0` resolves to the CPU and pmc-check aborts with "Invalid device id : 0". Gating on
+# /dev/kfd skips them on the WSL/dxg path (where hardware counters cannot be collected
+# anyway) while leaving them enabled on native Linux with a real KFD device.
+set(IS_RDNA_COUNTER_CHECK_DISABLED ON)
+if("${pc-sampling-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$"
+   AND NOT ROCPROFILER_MEMCHECK
+   AND EXISTS "/dev/kfd")
+    set(IS_RDNA_COUNTER_CHECK_DISABLED OFF)
 endif()
 
 # PC sampling is not available on navi2/3/4 (gfx10/11/12), gfx906, under memcheck, or when
@@ -76,7 +93,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    DISABLED "${IS_HW_COUNTERS_DISABLED}")
+    DISABLED "${IS_RDNA_COUNTER_CHECK_DISABLED}")
 
 rocprofiler_add_integration_execute_test(
     rocprofv3-avail-test-check-hw-counters_2
@@ -86,7 +103,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
-    DISABLED "${IS_HW_COUNTERS_DISABLED}")
+    DISABLED "${IS_RDNA_COUNTER_CHECK_DISABLED}")
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-avail-test

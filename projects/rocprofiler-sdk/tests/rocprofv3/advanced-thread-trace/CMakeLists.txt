@@ -322,10 +322,15 @@ rocprofiler_add_integration_validate_test(
          ${TARGET_CU}
     FAIL_REGULAR_EXPRESSION "AssertionError")
 
-# Other SIMD file tests
+# Other SIMD file tests. Requires both a supported arch (gfx11/12) AND the
+# rocprof-trace-decoder library: the test sets ROCPROF_ATT_LIBRARY_PATH and aborts with
+# "rocprof-trace-decoder library path not found" when the decoder is absent (e.g. WSL, or
+# any environment without the decoder installed). Gate on IS_DISABLED (which is ON when
+# attdecoder is not found) like the other ATT tests, so it is skipped rather than failing
+# when the decoder is unavailable.
 set(IS_DISABLED_OTHER_SIMD ON)
 list(GET rocprofiler-sdk-tests-gfx-info 0 att-gpu-0-gfx-info)
-if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$")
+if("${att-gpu-0-gfx-info}" MATCHES "^(gfx(11|12)[0-9][0-9])$" AND NOT IS_DISABLED)
     set(IS_DISABLED_OTHER_SIMD OFF)
 endif()
 

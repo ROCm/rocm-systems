@@ -314,6 +314,7 @@ void TesterArguments::get_arguments() {
     case DeviceBitcodeTestType:
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
+    case TeamSplit2DTestType:
       requires_two_pes = false;
       break;
     default:

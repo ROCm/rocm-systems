@@ -42,10 +42,13 @@ get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
     const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent);
     if(!aql_agent)
         return hsa_ven_amd_aqlprofile_id_query_t{.name = nullptr, .id = 0, .instance_count = 0};
-    // Synthesized topology metrics (see counters/evaluate_ast.cpp) carry no
-    // hardware block; aqlprofile_get_pmc_info would SIGABRT dereferencing
-    // the null block name. Bypass cleanly.
-    if(metric.id() >= 0xFFFF0000ULL || metric.block().empty())
+    // Constant / topology metrics (e.g. simd_count and the topology constants
+    // created in counters/metrics.cpp / evaluate_ast.cpp) are not backed by a
+    // hardware block, so their block name is empty. They are resolved from
+    // agent properties rather than via AQL; passing an empty block name to
+    // aqlprofile_get_pmc_info dereferences a null and SIGABRTs. Skip the AQL
+    // block-id query for any metric without a hardware block.
+    if(metric.block().empty())
         return hsa_ven_amd_aqlprofile_id_query_t{.name = nullptr, .id = 0, .instance_count = 0};
     auto profile =
         aqlprofile_pmc_profile_t{.agent = *aql_agent, .events = nullptr, .event_count = 0};

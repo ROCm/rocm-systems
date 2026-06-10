@@ -275,42 +275,6 @@ load_asts()
             by_name.emplace(metric.name(), metric);
         }
 
-        // Inject synthesized topology Metric stubs (array_count, simd_count,
-        // wave_front_size, etc.) so the AST loader can resolve common
-        // topology attribute names without an AQL agent. Required on the
-        // WSL synth-agent path where these attributes are not exposed via
-        // the standard counter registry. Synthetic IDs use the
-        // 0xFFFF0000ULL range and are short-circuited in aql/helpers.cpp
-        // and counters/dimensions.cpp. Remove once libhsakmt-windows lands
-        // and topology comes from KFD-equivalent properties.
-        {
-            static constexpr const char* kTopoNames[] = {
-                "array_count",
-                "simd_count",
-                "wave_front_size",
-                "simd_arrays_per_engine",
-                "cu_per_simd_array",
-                "simd_per_cu",
-                "max_waves_per_simd",
-            };
-            uint64_t synth_metric_id = 0xFFFF0000ULL;
-            for(const char* tn : kTopoNames)
-            {
-                if(by_name.find(tn) == by_name.end())
-                {
-                    by_name.emplace(tn,
-                                    Metric(gfx,
-                                           tn,
-                                           std::string{},
-                                           std::string{},
-                                           std::string{},
-                                           std::string{},
-                                           std::string{},
-                                           synth_metric_id++));
-                }
-            }
-        }
-
         auto& eval_map = data.emplace(gfx, EvaluateASTMap{}).first->second;
         for(auto& [_, metric] : by_name)
         {

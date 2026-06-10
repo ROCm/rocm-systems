@@ -816,6 +816,26 @@ enumerate()
         if(info.simd_per_cu > 0 && info.num_shader_banks > 0)
             info.cu_per_engine = (info.simd_count / info.simd_per_cu) / info.num_shader_banks;
 
+        // Register the topology properties we populated above so the counter
+        // subsystem can expose them as constants. get_constants() in
+        // metrics.cpp iterates get_agent_available_properties() to build the
+        // constant pseudo-metrics (simd_count, simd_per_cu, ...) that counter
+        // expressions reference. The gnulinux/KFD path registers these as a
+        // side effect of read_property(); on the synthesized WSL path the
+        // fields are assigned directly, so the names must be registered
+        // explicitly here. Without this the constants are never created and
+        // evaluation fails with "Unable to lookup metric <name>".
+        for(const char* prop : {"array_count",
+                                "simd_count",
+                                "wave_front_size",
+                                "simd_arrays_per_engine",
+                                "cu_per_simd_array",
+                                "simd_per_cu",
+                                "max_waves_per_simd"})
+        {
+            ::rocprofiler::agent::get_agent_available_properties().insert(prop);
+        }
+
         // gfx11 workgroup/grid limits are hardcoded in the HSA runtime.
         info.workgroup_max_size = 1024;
         info.workgroup_max_dim  = {1024, 1024, 1024};

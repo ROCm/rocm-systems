@@ -31,8 +31,8 @@ import re
 
 # WSL/DXG does not expose /dev/kfd, so the KFD profiler interface cannot arm the
 # hardware counter blocks and every Counter_Value reads back 0. (gfx115x additionally
-# has known AQLProfile counter-reporting bugs.) Only assert non-zero counter values
-# when the platform can actually collect them.
+# has known AQLProfile counter-reporting bugs.) Skip the counter-value assertions
+# on platforms that cannot collect them.
 HW_COUNTERS_SUPPORTED = os.path.exists("/dev/kfd")
 
 kernel_list = sorted(
@@ -73,8 +73,12 @@ def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
 
     assert len(df["Counter_Value"]) > 0
     assert df["Counter_Name"].str.contains("SQ_WAVES").all()
-    if HW_COUNTERS_SUPPORTED:
-        assert (df["Counter_Value"].astype(int).values > 0).all()
+    if not HW_COUNTERS_SUPPORTED:
+        pytest.skip(
+            "hardware counter collection requires the KFD profiler interface "
+            "(/dev/kfd), which is unavailable on this platform (e.g. WSL2/DXG)"
+        )
+    assert (df["Counter_Value"].astype(int).values > 0).all()
 
     di_list = df["Dispatch_Id"].astype(int).values.tolist()
     di_uniq = sorted(df["Dispatch_Id"].unique().tolist())
