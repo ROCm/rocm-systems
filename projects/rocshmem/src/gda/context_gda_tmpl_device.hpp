@@ -652,10 +652,9 @@ __device__ int GDAContext::reduce_scatter(rocshmem_team_t team, T *dest,
       }
       threadfence_system();
       __syncthreads();
+      // Sync with workgroup 0 of other PEs
+      barrier_wg(team);
     }
-
-    // All workgroups participate in the cross-PE barrier after each chunk.
-    barrier_wg(team);
   }
 
   return ROCSHMEM_SUCCESS;
