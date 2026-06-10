@@ -103,9 +103,10 @@ protocol tag (`PortProtocol`). `send()` is only valid on `OUT` ports.
 **Links** are **unidirectional** connections between two ports with a
 propagation latency. Links have an execution mode: `CLOCKED` (default)
 routes messages through the engine event queue with latency; `FUNCTIONAL`
-invokes the destination handler synchronously with zero overhead. Bidirectional communication requires two links, one
-per direction. This matches hardware reality (request and response paths
-are separate) and keeps timing, flow control, and routing simple.
+invokes the destination handler synchronously with zero overhead.
+Bidirectional communication requires two links, one per direction. This
+matches hardware reality (request and response paths are separate) and
+keeps timing, flow control, and routing simple.
 
 ```
 Component0           Component1
