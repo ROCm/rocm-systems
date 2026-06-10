@@ -186,9 +186,10 @@ class IPCHostContext : public Context {
   /* Helper functions to launch AMO kernel on ctx_stream_ and 
    * return the old value via ipc_staging_buf_.
    */
-  __host__ uint64_t ipc_amo_fadd(void *dst, uint64_t val, bool is32);
-  __host__ uint64_t ipc_amo_fcas(void *dst, uint64_t cond, uint64_t val,
-                                  bool is32);
+  template <typename T>
+  __host__ T ipc_amo_fadd(T *dst, T val);
+  template <typename T>
+  __host__ T ipc_amo_fcas(T *dst, T cond, T val);
 
   /* Fine-grained staging buffer for AMO kernel result readback (non-MPI only) */
   uint64_t *ipc_staging_buf_{nullptr};
