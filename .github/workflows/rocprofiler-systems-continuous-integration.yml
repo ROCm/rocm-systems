@@ -168,8 +168,8 @@ jobs:
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++ \
             projects/rocDecode
-          cmake --build build-rocdecode --target all --parallel 16
-          cmake --build build-rocdecode --target install
+          cmake --build projects/build-rocdecode --target all --parallel 16
+          cmake --build projects/build-rocdecode --target install
           echo "✅ ROCDecode Installation complete!"
 
       - name: Build and Install ROCJPEG
@@ -178,12 +178,12 @@ jobs:
         run: |
           echo "Building & Installing ROCJPEG..."
           cmake -B build-rocjpeg \
-            -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
-            -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
-            -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++ \
             projects/rocJPEG
-          cmake --build build-rocjpeg --target all --parallel 16
-          cmake --build build-rocjpeg --target install
+          cmake --build projects/build-rocjpeg --target all --parallel 16
+          cmake --build projects/build-rocjpeg --target install
           echo "✅ ROCJPEG Installation complete!"
 
       - name: Install Python Test Dependencies
