@@ -542,17 +542,10 @@ TEST_F(UBR_SendRecv, RingPattern_MultiNode)
  * A multi-segment buffer is built by mapping N separate physical handles
  * (hipMemCreate) contiguously into a single reserved virtual address range
  * (hipMemAddressReserve + hipMemMap). cuMemGetAddressRange() on the head of
- * such a buffer returns only the first segment, so ipcRegisterBuffer() in
- * src/transport/p2p.cc detects the cross-boundary case via:
- *
- *     if (baseAddr + baseSize < userbuff + buffSize) multiSegment = true;
- *
- * and dispatches to ipcHandleMultiSegmentRegistration() when both
+ * such a buffer returns only the first segment, so the registration path
+ * detects the cross-boundary case and walks every segment when both 
  * ncclCuMemEnable() and NCCL_MULTI_SEGMENT_REGISTER (default 1) are true.
  *
- * The IPC multi-segment branch is gated on ROCM_VERSION >= 70000 in p2p.cc,
- * so this suite is compiled in only on that path. It needs only 2 same-node
- * ranks (the IPC peer path is what we want to exercise).
  */
 class UBR_MultiSegment : public RegistrationTestBase
 {
@@ -626,7 +619,7 @@ protected:
 /**
  * @brief Out-of-place AllReduce on a buffer that spans multiple VMM segments.
  *
- * Exercises the multi-segment IPC registration branch on Ring AllReduce.
+ * Exercises the multi-segment registration branch on Ring AllReduce.
  *
  * Layout (N = kSegmentsPerHalf, total 2 * N physical segments allocated):
  *   Total reserved VA = 2 * N * kSegmentSize
@@ -634,7 +627,7 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
- *   "IPC registering buffer ... numSegments 4"
+ *   "... numSegments 4"
  */
 TEST_F(UBR_MultiSegment, AllReduce)
 {
@@ -696,7 +689,7 @@ TEST_F(UBR_MultiSegment, AllReduce)
               checker.getSummary().c_str(), checker.getContentLength());
     ASSERT_TRUE(checker.hasNumSegments(kNumSegments / 2))
         << "Expected 'numSegments " << (kNumSegments / 2)
-        << "' in log - the multi-segment IPC registration branch did not fire";
+        << "' in log - the multi-segment registration branch did not fire";
 }
 
 /**
