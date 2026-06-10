@@ -3528,7 +3528,7 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
     attr.type = HSA_SVM_ATTR_PREFERRED_LOC;
     attr.value = 0;
 
-    AMD::CpuAgent* cpu = nullptr;
+    Agent* cpu_agent = nullptr;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, 1, &attr));
 
     if (status == HSAKMT_STATUS_SUCCESS &&
@@ -3540,15 +3540,15 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
         op->target_cpus.push_back(UINT32_MAX);
         continue;
       } else {
-        cpu = static_cast<AMD::CpuAgent*>(agent->GetNearestCpuAgent());
+        cpu_agent = agent->GetNearestCpuAgent();
       }
     }
 
-    if (!cpu) {
+    if (!cpu_agent) {
       // Fallback to use first available CPU agent when nearest fails
-      cpu = static_cast<AMD::CpuAgent*>(cpu_agents_[0]);
+      cpu_agent = cpu_agents_[0];
     }
-    op->target_cpus.push_back(cpu->node_id());
+    op->target_cpus.push_back(cpu_agent->node_id());
   }
 
   // Dependancy signals already at 0 need not be monitored.
