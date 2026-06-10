@@ -332,6 +332,17 @@ jobs:
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile" \
             ${GITHUB_WORKSPACE}/hipfile-build-dir
+      # Trim build intermediates the self-hosted system-test job doesn't need
+      # before uploading. ctest only needs the test executables, runtime *.so's
+      # and the CTestTestfile.cmake chain -- not the *.o (CMakeFiles/), the
+      # FetchContent source/subbuild trees, or the coverage data the build job
+      # already consumed.
+      - name: Prune build directory before upload
+        if: ${{ inputs.upload_artifacts }}
+        run: |
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -name CMakeFiles -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type d -path '*/_deps/*' \( -name '*-src' -o -name '*-subbuild' \) -prune -exec rm -rf {} +
+          find "${GITHUB_WORKSPACE}/hipfile-build-dir" -type f \( -name '*.profraw' -o -name '*.profdata' -o -name '*.gcno' -o -name '*.gcda' -o -name 'coverage-*.txt' \) -delete
       - name: Upload hipFile build directory as an artifact
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
