@@ -30,8 +30,7 @@ struct has_gotcha_data : std::false_type
 {};
 
 template <typename Policy>
-struct has_gotcha_data<Policy, std::void_t<typename Policy::gotcha_data>>
-: std::true_type
+struct has_gotcha_data<Policy, std::void_t<typename Policy::gotcha_data>> : std::true_type
 {};
 
 template <typename Policy, typename = void>
@@ -48,8 +47,7 @@ struct has_ucx_bundle : std::false_type
 {};
 
 template <typename Policy>
-struct has_ucx_bundle<Policy, std::void_t<typename Policy::ucx_bundle_t>>
-: std::true_type
+struct has_ucx_bundle<Policy, std::void_t<typename Policy::ucx_bundle_t>> : std::true_type
 {};
 
 template <typename Policy, typename = void>
@@ -57,8 +55,7 @@ struct has_ucx_gotcha : std::false_type
 {};
 
 template <typename Policy>
-struct has_ucx_gotcha<Policy, std::void_t<typename Policy::ucx_gotcha_t>>
-: std::true_type
+struct has_ucx_gotcha<Policy, std::void_t<typename Policy::ucx_gotcha_t>> : std::true_type
 {};
 
 template <typename Policy>

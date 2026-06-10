@@ -129,8 +129,7 @@ def transpose_trace_delay_env() -> dict[str, str]:
     return {
         "ROCPROFSYS_TRACE_DELAY": "60.0",
         "ROCPROFSYS_ROCM_DOMAINS": (
-            "hip_runtime_api,kernel_dispatch,memory_copy,"
-            "memory_allocation,hsa_api"
+            "hip_runtime_api,kernel_dispatch,memory_copy," "memory_allocation,hsa_api"
         ),
     }
 
@@ -155,9 +154,7 @@ class TestTraceDelayHip(RocprofsysTest):
 
     @pytest.mark.rocpd("transpose_trace_delay_env")
     @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
-    def test_delay_with_hip(
-        self, mode, transpose_trace_delay_env, validation_rules_dir
-    ):
+    def test_delay_with_hip(self, mode, transpose_trace_delay_env, validation_rules_dir):
         result = self.run_test(
             mode,
             "transpose",
@@ -169,9 +166,7 @@ class TestTraceDelayHip(RocprofsysTest):
         self.assert_rocpd(
             result,
             rules_files=[
-                validation_rules_dir
-                / "transpose-trace-delay"
-                / "validation-rules.json",
+                validation_rules_dir / "transpose-trace-delay" / "validation-rules.json",
             ],
         )
 
@@ -187,8 +182,7 @@ def transpose_sampling_delay_env() -> dict[str, str]:
     return {
         "ROCPROFSYS_SAMPLING_DELAY": "60.0",
         "ROCPROFSYS_ROCM_DOMAINS": (
-            "hip_runtime_api,kernel_dispatch,memory_copy,"
-            "memory_allocation,hsa_api"
+            "hip_runtime_api,kernel_dispatch,memory_copy," "memory_allocation,hsa_api"
         ),
     }
 

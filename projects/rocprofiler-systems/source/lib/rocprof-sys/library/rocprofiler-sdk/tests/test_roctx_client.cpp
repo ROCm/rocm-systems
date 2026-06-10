@@ -203,14 +203,31 @@ TEST_F(roctx_client_control_test, pause_resume_no_filter)
     EXPECT_FALSE(client->get_trigger().filter_active());
     EXPECT_TRUE(client->get_trigger().should_write_markers());
 
-    // Pause: stop callback fires, but should_write stays true (no filter)
+    // Pause: stop callback fires and marker writes are suppressed globally.
     client->get_trigger().on_pause();
     EXPECT_EQ(stop_count, 1);
-    EXPECT_TRUE(client->get_trigger().should_write_markers());
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
 
     // Resume: start callback fires
     client->get_trigger().on_resume();
     EXPECT_EQ(start_count, 1);
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+}
+
+TEST_F(roctx_client_control_test, no_filter_range_started_while_paused_suppresses_markers)
+{
+    auto client = make_client("");
+
+    client->get_trigger().on_pause();
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_range_start(1, "Region1");
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_resume();
+    EXPECT_TRUE(client->get_trigger().should_write_markers());
+
+    client->get_trigger().on_range_stop(1);
     EXPECT_TRUE(client->get_trigger().should_write_markers());
 }
 
@@ -435,8 +452,8 @@ TEST_F(roctx_client_control_test, double_pause_is_ignored)
     client->get_trigger().on_pause();
     EXPECT_EQ(stop_count, 1);
 
-    // No region filter => should_write always true; pause only affects callbacks
-    EXPECT_TRUE(client->get_trigger().should_write_markers());
+    // Still paused after the ignored second pause, so marker writes remain suppressed.
+    EXPECT_FALSE(client->get_trigger().should_write_markers());
 }
 
 TEST_F(roctx_client_control_test, resume_without_pause_is_ignored)

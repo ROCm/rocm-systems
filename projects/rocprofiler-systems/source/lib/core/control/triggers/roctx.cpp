@@ -155,7 +155,7 @@ roctx::compute_should_write() const noexcept
     const bool filter    = filter_active();
     const bool in_region = m_in_region.load(std::memory_order_relaxed);
     const bool paused    = m_user_paused.load(std::memory_order_relaxed);
-    return !filter || (in_region && !paused);
+    return !paused && (!filter || in_region);
 }
 
 void

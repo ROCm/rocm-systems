@@ -6,6 +6,7 @@ Tests for OpenMP integration with rocprofiler-systems.
 """
 
 from __future__ import annotations
+import os
 import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
@@ -17,6 +18,54 @@ pytestmark = [
         "6.4"
     ),  # Requires SDK version >= 600, 6.3 ships with 500
 ]
+SAMPLING_DURATION_SEC = 0.25
+SAMPLING_DURATION_TOLERANCE_SEC = 0.35
+
+
+def _assert_sampling_duration_window(result) -> None:
+    """Validate sampled Perfetto rows stay inside the configured active window."""
+    from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
+
+    trace_processor_path = os.environ.get("ROCPROFSYS_TRACE_PROC_SHELL")
+    config = None
+    if trace_processor_path and Path(trace_processor_path).is_file():
+        config = TraceProcessorConfig(bin_path=trace_processor_path)
+
+    trace_processor = (
+        TraceProcessor(trace=str(result.perfetto_file), config=config)
+        if config is not None
+        else TraceProcessor(trace=str(result.perfetto_file))
+    )
+    try:
+        query = """
+            SELECT COUNT(*) AS track_count,
+                   MAX(end_ns - start_ns) AS max_span_ns
+            FROM (
+                SELECT track_id,
+                       MIN(ts) AS start_ns,
+                       MAX(ts + dur) AS end_ns
+                FROM slice
+                WHERE category = 'timer_sampling'
+                GROUP BY track_id
+            )
+        """
+        rows = list(trace_processor.query(query))
+    finally:
+        close = getattr(trace_processor, "close", None)
+        if close is not None:
+            close()
+
+    if not rows or rows[0].track_count < 1 or rows[0].max_span_ns is None:
+        pytest.fail("No timer_sampling rows found in Perfetto output")
+
+    max_span_sec = rows[0].max_span_ns / 1.0e9
+    max_allowed_sec = SAMPLING_DURATION_SEC + SAMPLING_DURATION_TOLERANCE_SEC
+    if max_span_sec > max_allowed_sec:
+        pytest.fail(
+            "Sampling rows exceeded configured duration window: "
+            f"max span {max_span_sec:.3f}s > allowed {max_allowed_sec:.3f}s"
+        )
+
 
 # ============================================================================
 # OpenMP Fixtures
@@ -107,8 +156,6 @@ class TestOpenMPCG(RocprofsysTest):
     DURATION_SAMPLING_PASS_REGEX = [
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
-        r"Sampling will be disabled after 0\.250000 seconds",
-        r"Sampling duration of 0\.250000 seconds (has elapsed|was interrupted by finalization)\. Shutting down sampling",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
@@ -143,6 +190,7 @@ class TestOpenMPCG(RocprofsysTest):
             env=ompt_sampling_env,
         )
         self.assert_regex(result, pass_regex=self.DURATION_SAMPLING_PASS_REGEX)
+        _assert_sampling_duration_window(result)
 
     @pytest.mark.timeout(300)
     @pytest.mark.no_tmp_files
@@ -168,8 +216,6 @@ class TestOpenMPLU(RocprofsysTest):
     DURATION_SAMPLING_PASS_REGEX = [
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
-        r"Sampling will be disabled after 0\.250000 seconds",
-        r"Sampling duration of 0\.250000 seconds (has elapsed|was interrupted by finalization)\. Shutting down sampling",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
@@ -210,6 +256,7 @@ class TestOpenMPLU(RocprofsysTest):
             env=ompt_sampling_env,
         )
         self.assert_regex(result, pass_regex=self.DURATION_SAMPLING_PASS_REGEX)
+        _assert_sampling_duration_window(result)
 
 
 # ============================================================================
