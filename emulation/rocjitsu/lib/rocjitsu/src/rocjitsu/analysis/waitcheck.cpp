@@ -28,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <set>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -35,12 +36,92 @@ namespace rocjitsu {
 namespace {
 
 constexpr size_t kCounterCount = static_cast<size_t>(WaitCounterKind::Count);
+constexpr uint32_t kMaxEncodedSgpr = 105;
 using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size changed");
 
 [[nodiscard]] bool is_supported_waitcheck_arch(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
+[[nodiscard]] bool starts_with(std::string_view text, std::string_view prefix) {
+  return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+
+enum class WaitcntModel { SplitGfx12, LegacyGfx9 };
+
+[[nodiscard]] WaitcntModel waitcnt_model(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? WaitcntModel::LegacyGfx9 : WaitcntModel::SplitGfx12;
+}
+
+[[nodiscard]] bool uses_legacy_waitcnt(rj_code_arch_t arch) {
+  return waitcnt_model(arch) == WaitcntModel::LegacyGfx9;
+}
+
+[[nodiscard]] bool supports_expert_scheduling(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
+}
+
+[[nodiscard]] bool tracks_gfx12_sgpr_hazards(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+[[nodiscard]] WaitCounterKind smem_wait_counter(rj_code_arch_t arch) {
+  return uses_legacy_waitcnt(arch) ? WaitCounterKind::Ds : WaitCounterKind::Km;
+}
+
+[[nodiscard]] WaitCounterKind vmem_store_wait_counter(rj_code_arch_t arch) {
+  return uses_legacy_waitcnt(arch) ? WaitCounterKind::Load : WaitCounterKind::Store;
+}
+
+[[nodiscard]] WaitCounterKind image_sample_wait_counter(rj_code_arch_t arch) {
+  return uses_legacy_waitcnt(arch) ? WaitCounterKind::Load : WaitCounterKind::Sample;
+}
+
+[[nodiscard]] WaitCounterKind image_bvh_wait_counter(rj_code_arch_t arch) {
+  return uses_legacy_waitcnt(arch) ? WaitCounterKind::Load : WaitCounterKind::Bvh;
+}
+
+struct LegacyWaitcnt {
+  uint32_t vmcnt = 0;
+  uint32_t expcnt = 0;
+  uint32_t lgkmcnt = 0;
+};
+
+[[nodiscard]] LegacyWaitcnt decode_legacy_waitcnt(uint32_t value) {
+  return {
+      (value & 0xFu) | (((value >> 14u) & 0x3u) << 4u),
+      (value >> 4u) & 0x7u,
+      (value >> 8u) & 0xFu,
+  };
+}
+
+[[nodiscard]] std::string wait_expression(WaitCounterKind counter, uint32_t required_count,
+                                          rj_code_arch_t arch) {
+  std::ostringstream os;
+  if (uses_legacy_waitcnt(arch)) {
+    switch (counter) {
+    case WaitCounterKind::Load:
+      os << "s_waitcnt vmcnt(" << required_count << ")";
+      return os.str();
+    case WaitCounterKind::Ds:
+      os << "s_waitcnt lgkmcnt(" << required_count << ")";
+      return os.str();
+    case WaitCounterKind::Exp:
+      os << "s_waitcnt expcnt(" << required_count << ")";
+      return os.str();
+    default:
+      break;
+    }
+  }
+  if (counter == WaitCounterKind::VmVsrc) {
+    os << "s_wait_alu depctr_vm_vsrc(" << required_count << ")";
+  } else {
+    os << "s_wait_" << wait_counter_name(counter) << " <= " << required_count;
+  }
+  return os.str();
 }
 
 [[nodiscard]] bool fits_in_image(uint64_t offset, uint64_t size, size_t image_size) {
@@ -322,7 +403,7 @@ struct Analyzer {
     }
 
     PendingState state;
-    state.expert_scheduling.enabled = true;
+    state.expert_scheduling.enabled = supports_expert_scheduling(arch);
     std::vector<uint32_t> padded(words.begin(), words.end());
     padded.resize(padded.size() + 2);
 
@@ -774,7 +855,7 @@ private:
     }
   }
 
-  void apply_waitcnt(PendingState &state, const Instruction &inst) {
+  void apply_waitcnt(PendingState &state, const Instruction &inst, rj_code_arch_t arch) {
     const auto mnemonic = inst.mnemonic();
     if (mnemonic == "s_wait_idle") {
       VgprMsbState vgpr_msb = state.vgpr_msb;
@@ -788,7 +869,12 @@ private:
     const Operand *op = inst.src_operand(0);
     const uint32_t value = op ? static_cast<uint32_t>(op->encoding_value()) : 0;
 
-    if (mnemonic == "s_wait_alu") {
+    if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt") {
+      const LegacyWaitcnt wait = decode_legacy_waitcnt(value);
+      apply_memory_wait(state, WaitCounterKind::Load, wait.vmcnt);
+      apply_wait(state, WaitCounterKind::Exp, wait.expcnt);
+      apply_memory_wait(state, WaitCounterKind::Ds, wait.lgkmcnt);
+    } else if (mnemonic == "s_wait_alu") {
       apply_sgpr_hazard_wait(state.sgpr_hazards, value);
       constexpr uint32_t kDepctrVmVsrcShift = 2;
       constexpr uint32_t kDepctrVmVsrcWidth = 3;
@@ -903,6 +989,102 @@ private:
       du.has_exec_masked_vector_def = true;
   }
 
+  [[nodiscard]] static bool has_enabled_scalar_address(const Instruction &inst) {
+    const std::string_view mnemonic = inst.mnemonic();
+    if (!starts_with(mnemonic, "global_") && !starts_with(mnemonic, "scratch_"))
+      return false;
+
+    for (int i = 1; i < inst.num_src_operands(); ++i) {
+      const Operand *op = inst.src_operand(i);
+      if (!op)
+        continue;
+      if (auto ref = op->to_register_ref(); ref && ref->cls == RegClass::SGPR)
+        return true;
+    }
+    return false;
+  }
+
+  [[nodiscard]] static bool is_cdna4_buffer_vaddr_operand(const Instruction &inst,
+                                                          int operand_index, rj_code_arch_t arch) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4)
+      return false;
+
+    const std::string_view mnemonic = inst.mnemonic();
+    if (starts_with(mnemonic, "buffer_store") || starts_with(mnemonic, "tbuffer_store"))
+      return operand_index == 1;
+    if (starts_with(mnemonic, "buffer_") || starts_with(mnemonic, "tbuffer_"))
+      return operand_index == 0;
+    return false;
+  }
+
+  [[nodiscard]] static std::optional<uint8_t> cdna4_buffer_vaddr_width(const Instruction &inst) {
+    if (inst.raw_encoding() == nullptr || inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
+      return std::nullopt;
+
+    constexpr uint32_t kOffenBit = 12;
+    constexpr uint32_t kIdxenBit = 13;
+    const uint32_t word0 = inst.raw_encoding()[0];
+    const bool offen = (word0 & (1u << kOffenBit)) != 0;
+    const bool idxen = (word0 & (1u << kIdxenBit)) != 0;
+    if (offen && idxen)
+      return 2;
+    if (offen || idxen)
+      return 1;
+    return 0;
+  }
+
+  [[nodiscard]] static bool add_adjusted_source_use(InstDefUse &du, const Instruction &inst,
+                                                    const Operand &op, int operand_index,
+                                                    const VgprMsbState &state,
+                                                    rj_code_arch_t arch) {
+    const std::string_view mnemonic = inst.mnemonic();
+    if (operand_index == 0 && starts_with(mnemonic, "scratch_") && op.encoding_value() == 0)
+      return true;
+
+    if (operand_index == 0 && starts_with(mnemonic, "s_buffer_")) {
+      if (const int encoded = op.encoding_value(); encoded >= 0) {
+        const uint32_t base = static_cast<uint32_t>(encoded) * 2u;
+        if (base <= kMaxEncodedSgpr)
+          du.uses.expand({RegClass::SGPR, static_cast<uint16_t>(base), 4});
+      }
+      return true;
+    }
+
+    if (is_cdna4_buffer_vaddr_operand(inst, operand_index, arch)) {
+      if (const auto width = cdna4_buffer_vaddr_width(inst)) {
+        if (*width == 0)
+          return true;
+        if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::VGPR) {
+          ref->width = *width;
+          expand_vgpr_msb_ref(du.uses, *ref, op, state, arch);
+          return true;
+        }
+      }
+    }
+
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+        (starts_with(mnemonic, "buffer_") || starts_with(mnemonic, "tbuffer_"))) {
+      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::SGPR && ref->width == 4) {
+        if (const int encoded = op.encoding_value(); encoded >= 0) {
+          const uint32_t base = static_cast<uint32_t>(encoded) * 4u;
+          if (base <= kMaxEncodedSgpr)
+            du.uses.expand({RegClass::SGPR, static_cast<uint16_t>(base), 4});
+        }
+        return true;
+      }
+    }
+
+    if (operand_index == 0 && has_enabled_scalar_address(inst)) {
+      if (auto ref = op.to_register_ref(); ref && ref->cls == RegClass::VGPR) {
+        ref->width = 1;
+        expand_vgpr_msb_ref(du.uses, *ref, op, state, arch);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   [[nodiscard]] static InstDefUse inst_def_use_for_waitcheck(const Instruction &inst,
                                                              const VgprMsbState &state,
                                                              rj_code_arch_t arch) {
@@ -925,8 +1107,7 @@ private:
       const Operand *op = inst.src_operand(i);
       if (op == nullptr)
         continue;
-      const std::string_view mnemonic = inst.mnemonic();
-      if (i == 0 && mnemonic.compare(0, 8, "scratch_") == 0 && op->encoding_value() == 0)
+      if (add_adjusted_source_use(du, inst, *op, i, state, arch))
         continue;
       if (auto ref = op->to_register_ref())
         expand_vgpr_msb_ref(du.uses, *ref, *op, state, arch);
@@ -947,10 +1128,6 @@ private:
     std::erase_if(events, [&](const PendingEvent &event) {
       return event.kind == WaitEventKind::SccWrite && event.barrier_id == barrier_id;
     });
-  }
-
-  [[nodiscard]] static bool starts_with(std::string_view text, std::string_view prefix) {
-    return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
   }
 
   [[nodiscard]] static std::optional<uint32_t> vinterp_wait_exp(const Instruction &inst) {
@@ -1076,14 +1253,17 @@ private:
     return mnemonic == "s_endpgm" || mnemonic == "s_endpgm_saved";
   }
 
-  [[nodiscard]] static std::vector<ClassifiedEvent> classify_events(const Instruction &inst) {
+  [[nodiscard]] static std::vector<ClassifiedEvent> classify_events(const Instruction &inst,
+                                                                    rj_code_arch_t arch) {
     std::vector<ClassifiedEvent> events;
+    const bool expert = supports_expert_scheduling(arch);
     const auto mnemonic = inst.mnemonic();
     if (starts_with(mnemonic, "flat_load")) {
       events.push_back({WaitCounterKind::Load, WaitEventKind::FlatLoad});
       events.push_back({WaitCounterKind::Ds, WaitEventKind::Ds});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatLoad,
-                        TrackedRegisterSource::VectorUses, false, true});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatLoad,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
@@ -1095,7 +1275,7 @@ private:
     }
 
     if (mnemonic == "global_wb" || mnemonic == "global_wbinv") {
-      events.emplace_back(WaitCounterKind::Store, WaitEventKind::GlobalWb,
+      events.emplace_back(vmem_store_wait_counter(arch), WaitEventKind::GlobalWb,
                           TrackedRegisterSource::None, false, false, false, std::nullopt,
                           std::nullopt, true);
       return events;
@@ -1105,35 +1285,40 @@ private:
         starts_with(mnemonic, "buffer_load") || starts_with(mnemonic, "tbuffer_load") ||
         starts_with(mnemonic, "image_load")) {
       events.push_back({WaitCounterKind::Load, WaitEventKind::VmemNoSamplerLoad});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
-                        TrackedRegisterSource::VectorUses, false, true});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
     if (is_image_atomic(mnemonic)) {
       events.push_back({WaitCounterKind::Load, WaitEventKind::VmemNoSamplerLoad});
-      events.push_back({WaitCounterKind::Exp, WaitEventKind::VmemStore,
-                        TrackedRegisterSource::StoreDataUses, false, true});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
-                        TrackedRegisterSource::VectorUses, false, true});
+      if (!uses_legacy_waitcnt(arch))
+        events.push_back({WaitCounterKind::Exp, WaitEventKind::VmemStore,
+                          TrackedRegisterSource::StoreDataUses, false, true});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
     if (starts_with(mnemonic, "flat_store")) {
-      events.push_back({WaitCounterKind::Store, WaitEventKind::FlatStore,
+      events.push_back({vmem_store_wait_counter(arch), WaitEventKind::FlatStore,
                         TrackedRegisterSource::None, false, false});
       events.push_back(
           {WaitCounterKind::Ds, WaitEventKind::Ds, TrackedRegisterSource::None, false, false});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatStore,
-                        TrackedRegisterSource::VectorUses, false, true});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatStore,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
     if (is_vmem_store(mnemonic)) {
-      events.push_back({WaitCounterKind::Store, WaitEventKind::VmemStore,
+      events.push_back({vmem_store_wait_counter(arch), WaitEventKind::VmemStore,
                         TrackedRegisterSource::None, false, false});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemStore,
-                        TrackedRegisterSource::VectorUses, false, true});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemStore,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
@@ -1141,8 +1326,9 @@ private:
         starts_with(mnemonic, "ds_read") || starts_with(mnemonic, "ds_bpermute") ||
         starts_with(mnemonic, "ds_permute")) {
       events.push_back({WaitCounterKind::Ds, WaitEventKind::Ds});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Ds,
-                        TrackedRegisterSource::VectorUses, false, true});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Ds,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
@@ -1152,27 +1338,29 @@ private:
     }
 
     if (starts_with(mnemonic, "s_load") || starts_with(mnemonic, "s_buffer_load")) {
-      events.push_back({WaitCounterKind::Km, WaitEventKind::Smem});
+      events.push_back({smem_wait_counter(arch), WaitEventKind::Smem});
       return events;
     }
 
     if (mnemonic == "s_sendmsg_rtn_b32" || mnemonic == "s_sendmsg_rtn_b64") {
-      events.push_back({WaitCounterKind::Km, WaitEventKind::SqMessage});
+      events.push_back({smem_wait_counter(arch), WaitEventKind::SqMessage});
       return events;
     }
 
     if (mnemonic == "image_msaa_load" || starts_with(mnemonic, "image_sample") ||
         starts_with(mnemonic, "image_gather")) {
-      events.push_back({WaitCounterKind::Sample, WaitEventKind::Sample});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,
-                        TrackedRegisterSource::VectorUses, false, true});
+      events.push_back({image_sample_wait_counter(arch), WaitEventKind::Sample});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
     if (starts_with(mnemonic, "image_bvh")) {
-      events.push_back({WaitCounterKind::Bvh, WaitEventKind::Bvh});
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Bvh,
-                        TrackedRegisterSource::VectorUses, false, true});
+      events.push_back({image_bvh_wait_counter(arch), WaitEventKind::Bvh});
+      if (expert)
+        events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Bvh,
+                          TrackedRegisterSource::VectorUses, false, true});
       return events;
     }
 
@@ -1183,9 +1371,10 @@ private:
     }
 
     if (mnemonic == "s_barrier_signal_isfirst") {
-      events.push_back({WaitCounterKind::Km, WaitEventKind::SccWrite, TrackedRegisterSource::None,
-                        true, true, false, RegisterRef{RegClass::SCC, 0, 1},
-                        first_operand_value(inst)});
+      if (!uses_legacy_waitcnt(arch))
+        events.push_back({WaitCounterKind::Km, WaitEventKind::SccWrite, TrackedRegisterSource::None,
+                          true, true, false, RegisterRef{RegClass::SCC, 0, 1},
+                          first_operand_value(inst)});
       return events;
     }
 
@@ -1233,7 +1422,7 @@ private:
 
   void emit_diagnostic(const Instruction &inst, const PendingEvent &event, RegisterRef reg,
                        WaitcheckAccessKind access, uint32_t required_count, uint64_t section_offset,
-                       uint64_t file_offset) {
+                       uint64_t file_offset, rj_code_arch_t arch) {
     WaitcheckDiagnostic diag;
     diag.counter = event.counter;
     diag.access = access;
@@ -1248,12 +1437,7 @@ private:
     diag.required_count = required_count;
 
     std::ostringstream msg;
-    if (event.counter == WaitCounterKind::VmVsrc) {
-      msg << "missing s_wait_alu depctr_vm_vsrc(" << required_count << ") before ";
-    } else {
-      msg << "missing s_wait_" << wait_counter_name(event.counter) << " <= " << required_count
-          << " before ";
-    }
+    msg << "missing " << wait_expression(event.counter, required_count, arch) << " before ";
     if (access == WaitcheckAccessKind::MemoryOrder) {
       msg << "memory operation";
     } else if (access == WaitcheckAccessKind::ProgramEnd) {
@@ -1424,7 +1608,7 @@ private:
 
   void check_dependencies(const PendingState &state, const Instruction &inst, const InstDefUse &du,
                           std::span<const ClassifiedEvent> current_events, uint64_t section_offset,
-                          uint64_t file_offset) {
+                          uint64_t file_offset, rj_code_arch_t arch) {
     for (size_t counter_idx = 0; counter_idx < state.pending.size(); ++counter_idx) {
       const auto &events = state.pending[counter_idx];
       for (size_t i = 0; i < events.size(); ++i) {
@@ -1461,7 +1645,8 @@ private:
           continue;
 
         const auto required_count = event.min_younger;
-        emit_diagnostic(inst, event, *reg, access, required_count, section_offset, file_offset);
+        emit_diagnostic(inst, event, *reg, access, required_count, section_offset, file_offset,
+                        arch);
       }
     }
 
@@ -1476,7 +1661,7 @@ private:
           continue;
         const auto required_count = event.min_younger;
         emit_diagnostic(inst, event, RegisterRef{RegClass::EXEC, 0, 1}, WaitcheckAccessKind::Def,
-                        required_count, section_offset, file_offset);
+                        required_count, section_offset, file_offset, arch);
       }
     }
   }
@@ -1779,7 +1964,7 @@ private:
       return;
     }
     if (inst.is_waitcnt()) {
-      apply_waitcnt(state, inst);
+      apply_waitcnt(state, inst, arch);
       finish_instruction();
       return;
     }
@@ -1789,22 +1974,23 @@ private:
     }
     apply_expert_scheduling_mode(state, inst, arch);
     clear_matching_barrier_scc_write(state, inst);
-    apply_sgpr_hazard_memory_cull(state.sgpr_hazards, inst.mnemonic());
+    if (tracks_gfx12_sgpr_hazards(arch))
+      apply_sgpr_hazard_memory_cull(state.sgpr_hazards, inst.mnemonic());
     apply_embedded_waitcnt(state, inst);
 
     InstDefUse du = inst_def_use_for_waitcheck(inst, state.vgpr_msb, arch);
-    auto events = classify_events(inst);
+    auto events = classify_events(inst, arch);
     if (!expert_waits_enabled(state)) {
       std::erase_if(events, [](const ClassifiedEvent &event) {
         return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
       });
     }
     if (emit_report_diagnostics) {
-      check_dependencies(state, inst, du, events, section_offset, file_offset);
+      check_dependencies(state, inst, du, events, section_offset, file_offset, arch);
       if (expert_waits_enabled(state))
         check_va_vdst_hazard(state.va_vdst_hazards, inst, du, section_offset, file_offset);
     }
-    if (arch != ROCJITSU_CODE_ARCH_GFX1250) {
+    if (tracks_gfx12_sgpr_hazards(arch)) {
       update_sgpr_hazards(state.sgpr_hazards, inst, du, section_name, section_offset, file_offset,
                           emit_report_diagnostics);
     }
@@ -1874,6 +2060,8 @@ rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
     return ROCJITSU_CODE_ARCH_RDNA4;
   case ROCJITSU_CODE_TARGET_GFX1250:
     return ROCJITSU_CODE_ARCH_GFX1250;
+  case ROCJITSU_CODE_TARGET_GFX950:
+    return ROCJITSU_CODE_ARCH_CDNA4;
   default:
     return ROCJITSU_CODE_ARCH_INVALID;
   }

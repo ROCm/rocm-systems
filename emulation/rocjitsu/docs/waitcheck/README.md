@@ -1,10 +1,10 @@
 # Waitcheck
 
-Waitcheck is a gfx12 object-code checker for AMDGPU wait hazards. It treats the
-final encoded instruction stream as the contract: if a kernel generator emits
-ISA directly, there is no LLVM MIR state to preserve or consult. Waitcheck
-inspects final HSA code objects and reports missing or too-weak waits in the
-program that the hardware will execute.
+Waitcheck is an object-code checker for AMDGPU wait hazards. It treats the final
+encoded instruction stream as the contract: if a kernel generator emits ISA
+directly, there is no LLVM MIR state to preserve or consult. Waitcheck inspects
+final HSA code objects and reports missing or too-weak waits in the program that
+the hardware will execute.
 
 It is intended for two workflows:
 
@@ -45,7 +45,7 @@ device images:
 build/tools/rj_waitcheck app_or_fatbin --target gfx1250 --code-object-index 0
 ```
 
-List supported gfx12 code objects in an input:
+List supported code objects in an input:
 
 ```sh
 build/tools/rj_waitcheck app_or_fatbin --list-code-objects
@@ -63,11 +63,11 @@ Useful options:
 
 | Option | Meaning |
 | --- | --- |
-| `--target gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
+| `--target gfx950|gfx1200|gfx1201|gfx1250` | Select one supported target from an executable input. |
 | `--code-object-index N` | Select the Nth code object for the selected target. |
-| `--all-code-objects` | Analyze all supported gfx12 code objects in each input. |
+| `--all-code-objects` | Analyze all supported code objects in each input. |
 | `--recursive` | Expand directory inputs into recursive file sweeps. |
-| `--skip-unsupported` | Skip unparsable inputs, inputs with no supported gfx12 code object, or unsupported analysis failures. |
+| `--skip-unsupported` | Skip unparsable inputs, inputs with no supported code object, or unsupported analysis failures. |
 | `--max-diagnostics N` | Limit collected and printed diagnostics. Use `0` to suppress diagnostic payloads while preserving counts. |
 | `--stop-after-first-diagnostic` | Stop each code object after the first observed hazard. Useful for large sweeps. |
 | `--summary-only` | Print only final batch totals. |
@@ -79,6 +79,34 @@ Exit codes:
 - `1`: command-line usage error.
 - `2`: input selection, parsing, or analysis error.
 - `4`: one or more hazards were found.
+
+## gfx950 Tensile E2E
+
+The optional `rj_waitcheck_gfx950_tensile_e2e` target builds a small TensileLite
+gfx950 corpus and checks the final loadable `Kernels.so-*.hsaco` sidecars:
+
+```sh
+ROCM_VENV="$HOME/rocjitsu/gfx1250-dbt/venv" \
+TENSILELITE_ROOT="$HOME/rocjitsu/rocjitsu-corpus/results-deps/upstream-rocm-libraries/projects/hipblaslt/tensilelite" \
+PYTHON="$PWD/build/waitcheck-e2e/tensile-gfx950/.venv/bin/python" \
+cmake --build build --target rj_waitcheck_gfx950_tensile_e2e
+```
+
+Use `ROCM_VENV` for a TheRock SDK venv, `ROCM_PATH` for a normal ROCm tree, or a
+`rocm-sdk` executable on `PATH`. The selected Python must have TensileLite's
+Python dependencies and `rocisa` installed.
+
+By default the target builds one GEMM config and one sparse GEMM config. Override
+the list with colon-separated paths relative to the TensileLite root:
+
+```sh
+WAITCHECK_TENSILE_CONFIGS="Tensile/Tests/common/gemm/gfx950/bf16_cvt.yaml:Tensile/Tests/common/gradient/gfx950/bf16_gradient_bias.yaml" \
+cmake --build build --target rj_waitcheck_gfx950_tensile_e2e
+```
+
+This target intentionally skips Tensile intermediate `.o` files and
+`TensileLibrary_gfx950.co` containers. Those artifacts need separate triage
+because they are not the final sidecar HSACOs loaded as individual kernels.
 
 ## Runtime Preload
 
@@ -95,7 +123,7 @@ Environment variables:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ROCJITSU_WAITCHECK` | `1` | Set to `0` to disable checking while leaving the shim preloaded. |
-| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to reject supported gfx12 code objects with missing waits by returning `HSA_STATUS_ERROR_INVALID_CODE_OBJECT`. |
+| `ROCJITSU_WAITCHECK_FAIL` | `0` | Set to `1` to reject supported code objects with missing waits by returning `HSA_STATUS_ERROR_INVALID_CODE_OBJECT`. |
 
 The shim prints diagnostics to stderr. With `ROCJITSU_WAITCHECK_FAIL=0`, it
 reports hazards but chains to the real runtime reader.
@@ -128,7 +156,7 @@ It also patches AMD loader extension tables returned through
 clients that call the offset-size reader through the extension table are checked
 too.
 
-The current analyzer models gfx12 object-visible wait behavior including:
+The current analyzer models gfx12 and gfx950 object-visible wait behavior including:
 
 - split `loadcnt`, `storecnt`, `dscnt`, `kmcnt`, `samplecnt`, `bvhcnt`, and
   `expcnt` hazards;
@@ -140,7 +168,7 @@ The current analyzer models gfx12 object-visible wait behavior including:
 - gfx1250 `s_set_vgpr_msb` high-VGPR bank selection;
 - CFG joins, skipped paths, and loop-carried hazards.
 
-Supported targets are `gfx1200`, `gfx1201`, and `gfx1250`.
+Supported targets are `gfx950`, `gfx1200`, `gfx1201`, and `gfx1250`.
 
 ## Limitations
 
@@ -161,10 +189,11 @@ Known boundaries:
 - Compiler-specific questions such as whether LLVM preserved, removed, or
   intentionally avoided a redundant wait are not modeled. Correct final waits
   are accepted; missing final waits are reported.
-- Non-gfx12 targets are out of scope for this prototype.
+- Targets outside gfx12/RDNA4 and gfx950/CDNA4 are out of scope for this
+  prototype.
 - Unsupported or undecodable code objects are analysis failures. For corpus
   measurement, use `--skip-unsupported`; for preload enforcement, supported
-  gfx12 analysis failures fail only when `ROCJITSU_WAITCHECK_FAIL=1`.
+  analysis failures fail only when `ROCJITSU_WAITCHECK_FAIL=1`.
 
 ## Tests
 

@@ -42,3 +42,16 @@ rj_configure_target(rj_dbt_translate TOOL)
 add_executable(rj_waitcheck waitcheck_main.cpp)
 target_link_libraries(rj_waitcheck PRIVATE rocjitsu_tooling)
 rj_configure_target(rj_waitcheck TOOL)
+
+add_custom_target(
+    rj_waitcheck_gfx950_tensile_e2e
+    COMMAND
+        ${CMAKE_SOURCE_DIR}/scripts/run_waitcheck_gfx950_tensile_e2e.sh
+        --waitcheck $<TARGET_FILE:rj_waitcheck> --work-dir
+        ${CMAKE_BINARY_DIR}/waitcheck-e2e/tensile-gfx950
+    DEPENDS rj_waitcheck
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    USES_TERMINAL
+    VERBATIM
+    COMMENT "Build and waitcheck representative gfx950 Tensile kernels"
+)
