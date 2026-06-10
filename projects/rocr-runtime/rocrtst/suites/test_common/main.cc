@@ -514,6 +514,9 @@ TEST(rocrtstFunc, VirtMemory_Basic_Test) {
 }
 
 TEST(rocrtstFunc, VirtMemory_Access_Test) {
+#ifdef ROCRTST_ASAN
+    std::cout << "Skipping VirtMemory_Access_Test under ASAN (vmem free interceptor SEGV)." << std::endl;
+#else
     VirtMemoryTestBasic vmt;
 
     if (!RunCustomTestProlog(&vmt)) return;
@@ -521,6 +524,7 @@ TEST(rocrtstFunc, VirtMemory_Access_Test) {
     vmt.GPUAccessToCPUMemoryTest();
     vmt.GPUAccessToGPUMemoryTest();
     RunCustomTestEpilog(&vmt);
+#endif
 }
 
 TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
