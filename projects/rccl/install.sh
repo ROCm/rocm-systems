@@ -19,7 +19,6 @@ build_static=false
 build_tests=false
 build_verbose=false
 clean_build=true
-collective_trace=true
 dump_asm=false
 enable_code_coverage=false
 enable_ninja=""
@@ -59,7 +58,6 @@ function display_help()
     echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --device-linker         Build with assembly-extract device linker (default)"
-    echo "       --disable-colltrace     Build without collective trace"
     echo "       --disable-roctx         Build without ROCTX logging"
     echo "       --disable-sym-kernels   Disable symmetric memory kernels"
     echo "       --disable-warp-speed    Disable WARP_SPEED kernel optimizations"
@@ -67,7 +65,7 @@ function display_help()
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)"
-    echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)"
+    echo "    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "    -h|--help                  Prints this help message"
     echo "    -i|--install               Install RCCL library (see --prefix argument below)"
@@ -96,7 +94,6 @@ function display_help()
     echo "    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)"
     echo "    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)"
     echo "    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)"
-    echo "    -DPROFILE=ON                          Enable profiling (default: OFF)"
     echo "    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)"
     echo "    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)"
     echo ""
@@ -119,7 +116,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-colltrace,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,npkit-enable,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -141,7 +138,6 @@ while true; do
          --debug-fast)               build_release=false; debug_fast=true;                                                             shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --device-linker)            device_linker=true;                                                                               shift ;;
-         --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
@@ -149,7 +145,7 @@ while true; do
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --enable-mpi-tests)         enable_mpi_tests=true;                                                                            shift ;;
-    -f | --fast)                     build_local_gpu_only=true; collective_trace=false;                                                shift ;;
+    -f | --fast)                     build_local_gpu_only=true;                                                                        shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
     -h | --help)                     display_help;                                                                                     exit 0 ;;
     -i | --install)                  install_library=true;                                                                             shift ;;
@@ -344,11 +340,6 @@ fi
 # shared vs static
 if [[ "${build_static}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_SHARED_LIBS=OFF"
-fi
-
-# Disable collective trace
-if [[ "${collective_trace}" == false ]]; then
-    cmake_common_options="${cmake_common_options} -DCOLLTRACE=OFF"
 fi
 
 # Install dependencies
