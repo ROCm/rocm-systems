@@ -100,6 +100,7 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
   default:
     assert(false /* invalid nic provider */);
   }
+  gda_provider_ = gda_provider;
   /* Setup User Buffer Registration Mechanism */
   pd_ = pd;
   num_user_buffers = envvar::gda::num_user_buffers;
@@ -376,7 +377,7 @@ int QueuePair::buffer_register(uintptr_t addr, size_t length) {
       user_buf_info[i].addr   = addr;
       user_buf_info[i].length = length;
 
-      if (constmem.gda_provider == GDAProvider::MLX5) {
+      if (gda_provider_ == GDAProvider::MLX5) {
         user_buf_info[i].lkey = htobe32(mr->lkey);
       } else {
         user_buf_info[i].lkey = mr->lkey;
