@@ -4688,7 +4688,7 @@ std::unique_ptr<Instruction> Decoder::decodeVDot8U32U4Vop3p(const MachineInst *o
 }
 
 std::unique_ptr<Instruction> Decoder::decodeVop3pX2Prefix(const MachineInst *opcode) {
-  Vop3p::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode + 2);
+  auto op = *reinterpret_cast<const Vop3p::OpEncoding *>(opcode + 2);
   return sub_decode_vop3p[op.op](opcode + 2);
 }
 

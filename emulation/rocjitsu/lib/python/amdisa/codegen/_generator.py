@@ -5572,7 +5572,7 @@ class CodeGenerator:
 
     @staticmethod
     def _gen_narrow_cvt_header_REMOVED_PLACEHOLDER(out_path: str) -> None:
-        pass
+        return
         content_UNUSED = f"""\
 // REMOVED — narrow FP conversions now live in util/data_types.h
 
