@@ -1001,6 +1001,53 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     cu.write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
+/// Scaled MFMA for mixed-format f8f6f4: A and B may have different bit widths.
+/// cbsz/blgp are used as format selectors (not lane permutations).
+template <typename ExtractA, typename ExtractB>
+void exec_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
+                           uint32_t B, uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
+                           uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb, uint32_t const_acc,
+                           uint32_t scale_a_base, uint32_t scale_b_base) {
+  constexpr uint32_t BLOCK_K = 32;
+  struct Result {
+    uint32_t reg;
+    uint32_t lane;
+    uint32_t val;
+  };
+  std::vector<Result> results;
+  results.reserve(M * N * B);
+  uint32_t num_blocks = (K + BLOCK_K - 1) / BLOCK_K;
+  for (uint32_t b = 0; b < B; ++b) {
+    for (uint32_t row = 0; row < M; ++row) {
+      for (uint32_t col = 0; col < N; ++col) {
+        auto out = output_loc_32(M, N, row, col, b);
+        float acc = (const_acc != ACC_FROM_VGPR)
+                        ? std::bit_cast<float>(const_acc)
+                        : std::bit_cast<float>(cu.read_vgpr(s2 + out.reg, out.lane));
+        for (uint32_t blk = 0; blk < num_blocks; ++blk) {
+          float block_sum = 0.0f;
+          uint32_t k_start = blk * BLOCK_K;
+          uint32_t k_end = std::min(k_start + BLOCK_K, K);
+          for (uint32_t k = k_start; k < k_end; ++k) {
+            auto al = input_loc(M, K, B, row, k, b, a_bits);
+            auto bl = input_loc(N, K, B, col, k, b, b_bits);
+            block_sum += ea(cu, s0, al) * eb(cu, s1, bl);
+          }
+          uint32_t sa_raw = cu.read_vgpr(scale_a_base, out.lane);
+          uint32_t sb_raw = cu.read_vgpr(scale_b_base, out.lane);
+          uint8_t sa_e8m0 = static_cast<uint8_t>((sa_raw >> (blk * 8)) & 0xFF);
+          uint8_t sb_e8m0 = static_cast<uint8_t>((sb_raw >> (blk * 8)) & 0xFF);
+          int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
+          acc += std::ldexp(block_sum, scale_exp);
+        }
+        results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+      }
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
 /// MFMA execute for i32 output with i8 input: D = C + A x B.
 inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B,
                         uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
@@ -1167,6 +1214,356 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     cu.write_vgpr(dst + r.reg, r.lane, r.lo);
     cu.write_vgpr(dst + r.reg + 1, r.lane, r.hi);
   }
+}
+
+// ---------------------------------------------------------------------------
+// SMFMAC (Sparse Matrix FMA) helpers and execution functions.
+//
+// Structured 2:4 sparsity: A is half-density (2 of every 4 K positions are
+// nonzero). A per-lane index register selects which 2-of-4 positions are live.
+// Each 4-bit nibble in the index encodes two 2-bit position selectors (p0, p1).
+// ---------------------------------------------------------------------------
+
+inline float smfmac_read_fp8(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) {
+  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
+  return util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
+}
+
+inline float smfmac_read_bf8(ComputeUnitCore &cu, uint32_t base, uint32_t byte_idx, uint32_t lane) {
+  uint32_t raw = cu.read_vgpr(base + byte_idx / 4, lane);
+  return util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> ((byte_idx % 4) * 8)) & 0xFF));
+}
+
+inline float smfmac_read_f16(ComputeUnitCore &cu, uint32_t base, uint32_t elem, uint32_t lane) {
+  uint32_t raw = cu.read_vgpr(base + elem / 2, lane);
+  return util::f16_to_f32(static_cast<uint16_t>((raw >> ((elem % 2) * 16)) & 0xFFFF));
+}
+
+inline float smfmac_read_bf16(ComputeUnitCore &cu, uint32_t base, uint32_t elem, uint32_t lane) {
+  uint32_t raw = cu.read_vgpr(base + elem / 2, lane);
+  return util::bf16_to_f32(static_cast<uint16_t>((raw >> ((elem % 2) * 16)) & 0xFFFF));
+}
+
+/// SMFMAC 16x16x32 f16/bf16 (CDNA3 mai-insts). K=32, 8 sparse groups.
+/// A = v2 (4 halves/lane), B = v4 (8 halves/lane), D = v4 f32.
+template <typename Extract>
+void exec_smfmac_f32_16x16x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                  uint32_t idx_base, Extract ex) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(16 * 16);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      auto out = output_loc_32(16, 16, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float Bcol[32];
+      for (int g = 0; g < 4; ++g)
+        for (int e = 0; e < 8; ++e)
+          Bcol[8 * g + e] = ex(cu, s1, e, g * 16 + col);
+      for (int q = 0; q < 8; ++q) {
+        int laneA = (q / 2) * 16 + row;
+        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        int field = (idxval >> (4 * (q % 2))) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          float av = ex(cu, s0, (2 * q + s) % 4, laneA);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
+/// SMFMAC 32x32x16 f16/bf16 (CDNA3 mai-insts). K=16, 4 sparse groups.
+/// A = v2 (4 halves/lane), B = v4 (8 halves/lane), D = v16 f32.
+template <typename Extract>
+void exec_smfmac_f32_32x32x16_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                  uint32_t idx_base, Extract ex) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(32 * 32);
+  for (uint32_t row = 0; row < 32; ++row) {
+    for (uint32_t col = 0; col < 32; ++col) {
+      auto out = output_loc_32(32, 32, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      uint32_t jlow = col % 16, jhi = col / 16;
+      float Bcol[16];
+      for (int kgrp = 0; kgrp < 2; ++kgrp) {
+        uint32_t b_lane = 16 * (jhi + 2 * kgrp) + jlow;
+        for (int e = 0; e < 8; ++e)
+          Bcol[8 * kgrp + e] = ex(cu, s1, e, b_lane);
+      }
+      for (int q = 0; q < 4; ++q) {
+        int laneA = (q / 2) * 32 + row;
+        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        int field = (idxval >> (4 * (q % 2))) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          float av = ex(cu, s0, (2 * q + s) % 4, laneA);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
+/// SMFMAC 16x16x64 f16/bf16 (gfx950-insts). K=64, 16 sparse groups.
+/// A = v4 (8 halves/lane), B = v8 (16 halves/lane), D = v4 f32.
+template <typename Extract>
+void exec_smfmac_f32_16x16x64_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                  uint32_t idx_base, Extract ex) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(16 * 16);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      auto out = output_loc_32(16, 16, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float Bcol[64];
+      for (int g = 0; g < 4; ++g)
+        for (int e = 0; e < 16; ++e) {
+          int k = 32 * (e / 8) + 8 * g + (e % 8);
+          Bcol[k] = ex(cu, s1, e, g * 16 + col);
+        }
+      for (int q = 0; q < 16; ++q) {
+        int laneA = (q / 4) * 16 + row;
+        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        int field = (idxval >> (4 * (q % 4))) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          float av = ex(cu, s0, (2 * q + s) % 8, laneA);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
+/// SMFMAC 32x32x32 f16/bf16 (gfx950-insts). K=32, 8 sparse groups.
+/// A = v4 (8 halves/lane), B = v8 (16 halves/lane), D = v16 f32.
+template <typename Extract>
+void exec_smfmac_f32_32x32x32_f16(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                  uint32_t idx_base, Extract ex) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(32 * 32);
+  for (uint32_t row = 0; row < 32; ++row) {
+    for (uint32_t col = 0; col < 32; ++col) {
+      auto out = output_loc_32(32, 32, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float Bcol[32];
+      for (int sl = 0; sl < 2; ++sl) {
+        uint32_t src = col + 32 * sl;
+        int kgrp = sl;
+        for (int e = 0; e < 16; ++e) {
+          int k = 16 * (e / 8) + 8 * kgrp + 2 * ((e / 2) % 4) + (e % 2);
+          Bcol[k] = ex(cu, s1, e, src);
+        }
+      }
+      for (int q = 0; q < 8; ++q) {
+        int laneA = (q / 4) * 32 + row;
+        uint32_t idxval = cu.read_vgpr(idx_base, laneA);
+        int field = (idxval >> (4 * (q % 4))) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          float av = ex(cu, s0, (2 * q + s) % 8, laneA);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
+/// SMFMAC 16x16x64 fp8 (CDNA3 fp8-insts). K=64, 16 sparse groups.
+/// A = v2 (8 bytes/lane), B = v4 (16 bytes/lane), D = v4 f32.
+template <typename ExtractA, typename ExtractB>
+void exec_smfmac_f32_16x16x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                  uint32_t idx_base, ExtractA ea, ExtractB eb) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(16 * 16);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      auto out = output_loc_32(16, 16, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float Bcol[64];
+      for (int g = 0; g < 4; ++g)
+        for (int e = 0; e < 16; ++e) {
+          int k = 32 * (e / 8) + 8 * g + (e % 8);
+          Bcol[k] = eb(cu, s1, e, g * 16 + col);
+        }
+      for (int q = 0; q < 16; ++q) {
+        int ga = ((2 * q) % 16) / 4;
+        int laneA = ga * 16 + row;
+        int idxlane = ((q % 8) / 2) * 16 + row;
+        int nb = 2 * (q / 8) + (q % 2);
+        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        int field = (idxval >> (4 * nb)) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          int cc = 2 * q + s;
+          int byte = 4 * (cc / 16) + (cc % 16) % 4;
+          float av = ea(cu, s0, byte, laneA);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
+/// SMFMAC 32x32x32 fp8 (CDNA3 fp8-insts). K=32, 8 sparse groups.
+/// A = v2 (8 bytes/lane), B = v4 (16 bytes/lane), D = v16 f32.
+template <typename ExtractA, typename ExtractB>
+void exec_smfmac_f32_32x32x32_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                  uint32_t idx_base, ExtractA ea, ExtractB eb) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(32 * 32);
+  for (uint32_t row = 0; row < 32; ++row) {
+    for (uint32_t col = 0; col < 32; ++col) {
+      auto out = output_loc_32(32, 32, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float Bcol[32];
+      for (int kgrp = 0; kgrp < 2; ++kgrp) {
+        uint32_t b_lane = col + 32 * kgrp;
+        for (int e = 0; e < 16; ++e) {
+          int k = 16 * (e / 8) + 8 * kgrp + 2 * ((e / 2) % 4) + (e % 2);
+          Bcol[k] = eb(cu, s1, e, b_lane);
+        }
+      }
+      for (int q = 0; q < 8; ++q) {
+        int ga = ((2 * q) % 8) / 4;
+        int laneA = ga * 32 + row;
+        int idxlane = ((q % 4) / 2) * 32 + row;
+        int nb = 2 * (q / 4) + (q % 2);
+        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        int field = (idxval >> (4 * nb)) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          int cc = 2 * q + s;
+          int byte = 4 * (cc / 8) + (cc % 8) % 4;
+          float av = ea(cu, s0, byte, laneA);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
+/// SMFMAC 16x16x128 fp8 (gfx950-insts). K=128, 32 sparse groups.
+/// A = v4 (16 bytes/lane), B = v8 (32 bytes/lane), D = v4 f32.
+template <typename ExtractA, typename ExtractB>
+void exec_smfmac_f32_16x16x128_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                   uint32_t idx_base, ExtractA ea, ExtractB eb) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(16 * 16);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      auto out = output_loc_32(16, 16, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float Bcol[128];
+      for (int g = 0; g < 4; ++g)
+        for (int e = 0; e < 32; ++e) {
+          int k = 32 * (e / 8) + 8 * g + (e % 8);
+          Bcol[k] = eb(cu, s1, e, g * 16 + col);
+        }
+      for (int q = 0; q < 32; ++q) {
+        int idxlane = 16 * (2 * (q / 16) + ((q / 4) % 2)) + row;
+        int nb = 2 * ((q / 8) % 2) + 4 * ((q % 4) / 2) + ((q % 4) % 2);
+        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        int field = (idxval >> (4 * nb)) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          int cc = 2 * q + s;
+          int ga = 2 * ((cc >> 5) & 1) + ((cc >> 3) & 1);
+          int hb = 2 * ((cc >> 2) & 1) + ((cc >> 4) & 1);
+          int byte = 4 * hb + (cc & 3);
+          float av = ea(cu, s0, byte, ga * 16 + row);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
+}
+
+/// SMFMAC 32x32x64 fp8 (gfx950-insts). K=64, 16 sparse groups.
+/// A = v4 (16 bytes/lane), B = v8 (32 bytes/lane), D = v16 f32.
+template <typename ExtractA, typename ExtractB>
+void exec_smfmac_f32_32x32x64_fp8(ComputeUnitCore &cu, uint32_t dst, uint32_t s0, uint32_t s1,
+                                  uint32_t idx_base, ExtractA ea, ExtractB eb) {
+  struct Result {
+    uint32_t reg, lane, val;
+  };
+  std::vector<Result> results;
+  results.reserve(32 * 32);
+  for (uint32_t row = 0; row < 32; ++row) {
+    for (uint32_t col = 0; col < 32; ++col) {
+      auto out = output_loc_32(32, 32, row, col, 0);
+      float acc = std::bit_cast<float>(cu.read_vgpr(dst + out.reg, out.lane));
+      float Bcol[64];
+      for (int kgrp = 0; kgrp < 2; ++kgrp) {
+        uint32_t b_lane = kgrp * 32 + col;
+        for (int e = 0; e < 32; ++e) {
+          int k = 16 * (e / 8) + 8 * kgrp + (e % 8);
+          Bcol[k] = eb(cu, s1, e, b_lane);
+        }
+      }
+      for (int q = 0; q < 16; ++q) {
+        int idxlane = 32 * (q / 8) + row;
+        int nb = (q % 2) + 2 * ((q / 4) % 2) + 4 * ((q / 2) % 2);
+        uint32_t idxval = cu.read_vgpr(idx_base, idxlane);
+        int field = (idxval >> (4 * nb)) & 0xF;
+        int p0 = field & 3, p1 = (field >> 2) & 3;
+        for (int s = 0; s < 2; ++s) {
+          int cc = 2 * q + s;
+          int ga = (cc >> 4) & 1;
+          int hb = 2 * ((cc >> 2) & 1) + ((cc >> 3) & 1);
+          int byte = 4 * hb + (cc & 3);
+          float av = ea(cu, s0, byte, ga * 32 + row);
+          acc += av * Bcol[4 * q + (s == 0 ? p0 : p1)];
+        }
+      }
+      results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(acc)});
+    }
+  }
+  for (const auto &r : results)
+    cu.write_vgpr(dst + r.reg, r.lane, r.val);
 }
 
 } // namespace amdgpu
