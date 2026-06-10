@@ -290,6 +290,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "no_docker",
         "shmem",
         "nic",
+        "ainic",
     ]
 
     # Informational markers, only used for test labeling
@@ -569,6 +570,10 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
+        if "ainic" in item.keywords:
+            _msg = ainic_unavailable_reason(rocprof_config)
+            if _msg is not None:
+                item.add_marker(pytest.mark.skip(reason=_msg))
         if "kfd" in item.keywords or "unified_memory" in item.keywords:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
@@ -797,6 +802,19 @@ def nic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     if caps.papi_nic_events is not None and caps.perf_event_paranoid <= 2:
         return None
     return "Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+
+
+def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
+    """Check if AI NIC tracking is available.
+
+    Requires ``amd-smi static`` to report at least one NETDEV entry.
+    """
+    if not rocprof_config.capabilities.ai_nic_devices:
+        return (
+            "No AI NIC devices found "
+            "(amd-smi static reports no NETDEV entries)"
+        )
+    return None
 
 
 def kfd_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
