@@ -2100,6 +2100,7 @@ class ROCMHealthCheck:
         if run_all:
             # Store original directory
             original_dir = os.getcwd()
+            setup_failed = False
 
             try:
                 # Create or validate temp directory
@@ -2202,7 +2203,12 @@ class ROCMHealthCheck:
 
             except Exception as e:
                 self.logger.error(f"Error during rocm-examples setup: \n{str(e)}")
+                setup_failed = True
             finally:
+                if setup_failed:
+                    os.chdir(original_dir)
+                    return self.results, actual_temp_dir
+
                 # Run component tests
                 component_results = self.run_component_tests()
                 self.results.update(component_results)
