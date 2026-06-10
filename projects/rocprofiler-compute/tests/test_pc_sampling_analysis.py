@@ -4,6 +4,7 @@
 import json
 import sqlite3
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 
 import common
@@ -41,7 +42,7 @@ def _make_record(
     inst_index: int,
     dispatch_id: int,
     wave_issued: bool = True,
-    stall_reason: str | None = None,
+    stall_reason: Optional[str] = None,
 ) -> dict:
     snapshot = {}
     if stall_reason is not None:
@@ -64,7 +65,7 @@ def make_record_without_snapshot(
     code_object_id: int,
     offset: int,
     inst_index: int,
-    dispatch_id: int | None,
+    dispatch_id: Optional[int],
     wave_issued: bool,
 ) -> dict:
     """A record missing the ``snapshot`` key entirely."""
@@ -83,11 +84,11 @@ def make_record_without_snapshot(
 
 def _write_json(
     path: Path,
-    stochastic: list | None = None,
-    host_trap: list | None = None,
-    instructions: list | None = None,
-    comments: list | None = None,
-    kernel_symbols: list | None = None,
+    stochastic: Optional[list] = None,
+    host_trap: Optional[list] = None,
+    instructions: Optional[list] = None,
+    comments: Optional[list] = None,
+    kernel_symbols: Optional[list] = None,
 ) -> Path:
     data = {
         "rocprofiler-sdk-tool": [
@@ -206,8 +207,8 @@ def _setup_per_kernel_files(
 
 def write_per_kernel_guard_files(
     tmp_path: Path,
-    instructions: list | None,
-    comments: list | None,
+    instructions: Optional[list],
+    comments: Optional[list],
     indices: tuple[int, int] = (0, 1),
 ) -> tuple[Path, Path]:
     """Per-kernel JSON + trace with caller-controlled instruction/comment tables."""
@@ -556,8 +557,8 @@ def test_load_per_kernel_schema_and_sort(
 )
 def test_load_per_kernel_out_of_range_index_guards(
     tmp_path: Path,
-    instructions: list | None,
-    comments: list | None,
+    instructions: Optional[list],
+    comments: Optional[list],
     instruction_none: str,
     source_line_none: str,
     indices: tuple[int, int],
@@ -587,8 +588,8 @@ def test_load_per_kernel_out_of_range_index_guards(
 )
 def test_load_per_kernel_empty_string_table_exits(
     tmp_path: Path,
-    instructions: list | None,
-    comments: list | None,
+    instructions: Optional[list],
+    comments: Optional[list],
 ) -> None:
     """An empty instruction/comment table is treated as missing and exits."""
     json_path, kt = write_per_kernel_guard_files(tmp_path, instructions, comments)
@@ -1176,7 +1177,7 @@ def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
     monkeypatch,
 ) -> None:
-    """Analyze in db mode produces a populated pcsampling table."""
+    """Analyze in db mode produces a populated pc sampling table."""
     workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
     db_path = workload_dir / f"{db_name}.db"
