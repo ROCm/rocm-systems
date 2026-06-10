@@ -75,6 +75,7 @@ struct BenchFixture {
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
+    cfg.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("cu_wmma_simd", cfg, &gpu_mem, &l2);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     if (wf)
