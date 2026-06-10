@@ -200,17 +200,15 @@ jobs:
             -- \
             -E "${{ steps.setup_env.outputs.excluded_tests }}"
 
-      - name: Output Logs
+      - name: Upload Test Logs (on failure)
         if: steps.test.outcome == 'failure'
-        working-directory: projects/rocprofiler-compute
-        run: |
-          echo "❌ Run Failed: Outputting available log files..."
-          for log in build/Testing/Temporary/LastTest*.log build/Testing/Temporary/LastConfigure*.log; do
-            if [ -f "$log" ]; then
-              echo "=== $log ==="
-              cat "$log"
-            fi
-          done
+        uses: actions/upload-artifact@v7
+        with:
+          name: failed-test-logs-ubuntu-${{ matrix.system.os-release }}-${{ matrix.system.arch }}
+          path: |
+            projects/rocprofiler-compute/build/ctest-results.xml
+            projects/rocprofiler-compute/build/Testing/Temporary/**
+          retention-days: 2
 
       - name: Check Test Results
         if: always()
