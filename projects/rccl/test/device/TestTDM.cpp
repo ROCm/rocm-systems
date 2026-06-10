@@ -96,7 +96,24 @@ __global__ void kernelNaiveTDMCopy(const T* __restrict__ src, T* __restrict__ ds
    }
  }
 
-class TDMTest : public DeviceTestBase { 
+// Launcher policies select which kernel a fixture exercises. Each provides a
+// templated operator() so it works for any element type under test.
+struct NaiveTDMLauncher {
+  template<typename T>
+  void operator()(int numBlocks, int blockSize, int sharedMem, const T* in, T* out, size_t numElements, int numElementsPerTile) const {
+    kernelNaiveTDMCopy<<<numBlocks, blockSize, sharedMem>>>(in, out, numElements, numElementsPerTile);
+  }
+};
+
+struct TileApiTDMLauncher {
+  template<typename T>
+  void operator()(int numBlocks, int blockSize, int sharedMem, const T* in, T* out, size_t numElements, int numElementsPerTile) const {
+    kernelNaiveTDMCopyTileApi<<<numBlocks, blockSize, sharedMem>>>(in, out, numElements, numElementsPerTile);
+  }
+};
+
+template<typename Launcher>
+class TDMTestBase : public DeviceTestBase { 
 protected: 
   template<typename T> 
   void TestRoundTrip(const std::vector<T>& h_in) { 
@@ -106,7 +123,7 @@ protected:
     d_in.copyFrom(h_in); 
     const int numElementsPerTile = 1024 * 4; 
     int minSharedMemorySize = numElementsPerTile * sizeof(T) * kDefaultBlockSize / warpSize;
-    kernelNaiveTDMCopyTileApi<<<numBlocks, kDefaultBlockSize, minSharedMemorySize>>>(d_in.ptr, d_out.ptr, N, numElementsPerTile); 
+    Launcher{}(numBlocks, kDefaultBlockSize, minSharedMemorySize, d_in.ptr, d_out.ptr, N, numElementsPerTile); 
     syncAndCheck(); 
   
     auto h_out = d_out.copyTo(); 
@@ -114,6 +131,9 @@ protected:
       EXPECT_EQ(h_in[i], h_out[i]) << "at index " << i; 
   } 
 }; 
+
+using TDMTest = TDMTestBase<NaiveTDMLauncher>;
+using TDMTestTileApi = TDMTestBase<TileApiTDMLauncher>;
 
 TEST_F(TDMTest, Float) {
   const int N = 1024*1024 + 128;
@@ -129,4 +149,18 @@ TEST_F(TDMTest, Double) {
   TestRoundTrip(h_in);
 }
 
+TEST_F(TDMTestTileApi, Float) {
+  const int N = 1024*1024 + 128;
+  std::vector<float> h_in(N);
+  for (int i = 0; i < N; i++) h_in[i] = 1.0f / (i + 1);
+  TestRoundTrip(h_in);
 }
+
+TEST_F(TDMTestTileApi, Double) {
+  const int N = 1024*1024 + 128;
+  std::vector<double> h_in(N);
+  for (int i = 0; i < N; i++) h_in[i] = static_cast<double>(i) * 3.14159;
+  TestRoundTrip(h_in);
+}
+
+}  // namespace RcclUnitTesting
