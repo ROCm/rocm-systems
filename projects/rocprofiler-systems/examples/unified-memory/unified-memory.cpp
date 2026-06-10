@@ -608,8 +608,6 @@ static void
 test_madvise_unmap_from_gpu(size_t bytes, int device)
 {
     banner("Test 8: madvise(MADV_DONTNEED) -> UNMAP_FROM_GPU_MMU_NOTIFY");
-    banner("Test 8: madvise(MADV_DONTNEED) -> UNMAP_FROM_GPU_MMU_NOTIFY");
-
     long   pgsize_l = sysconf(_SC_PAGESIZE);
     size_t pgsize   = (pgsize_l > 0) ? static_cast<size_t>(pgsize_l) : 4096;
     bytes           = (bytes + pgsize - 1) & ~(pgsize - 1);
