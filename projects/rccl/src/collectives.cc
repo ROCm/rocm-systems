@@ -563,7 +563,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   // Reset value forcing direct reduce scatter algorithm 
   comm->enableDirectReduceScatter = 0;
 
-  // Skip DIRECT (DDA IPC and legacy) if the symmetric path will handle this op, so both don't run and deadlock.
+  // Skip DDA IPC and Direct RS if the symmetric path will handle this op, so they don't collide and deadlock.
   bool symEligible = false;
   // Symmetric reduce-scatter is sum-only (refer ncclSymkImplemented), so only gate on ncclSum.
   if (comm->symmetricSupport && op == ncclSum) {
