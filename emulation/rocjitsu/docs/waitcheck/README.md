@@ -54,7 +54,7 @@ build/tools/rj_waitcheck app_or_fatbin --list-code-objects
 Sweep a directory or corpus:
 
 ```sh
-build/tools/rj_waitcheck "$HOME/rocjitsu/rocjitsu-corpus/corpus" \
+build/tools/rj_waitcheck path/to/corpus \
   --recursive --all-code-objects --skip-unsupported --no-fail \
   --max-diagnostics 0 --stop-after-first-diagnostic --summary-only
 ```
@@ -80,15 +80,90 @@ Exit codes:
 - `2`: input selection, parsing, or analysis error.
 - `4`: one or more hazards were found.
 
+## Generated Or Standalone Kernel Code
+
+Waitcheck is a static checker. You do not need a matching GPU to analyze a
+kernel; you only need the final AMDGPU code object, fat binary, or executable
+that contains the code object. This makes it useful for code produced by kernel
+generators, handwritten assembly, reduced reproducers, and compiler test cases.
+
+If your build already leaves a loadable `.hsaco`, `.co`, HIP fat binary, or host
+executable, run waitcheck on that artifact directly:
+
+```sh
+rj_waitcheck generated-kernels.hsaco --target gfx950 --max-diagnostics 64
+```
+
+If the artifact contains several AMDGPU images, list them first and select the
+one you want:
+
+```sh
+rj_waitcheck generated-app --list-code-objects
+rj_waitcheck generated-app --target gfx950 --code-object-index 0
+```
+
+If your generator emits AMDGPU assembly, assemble and link it into a code object
+first. The exact command depends on the assembly format, but a typical flow is:
+
+```sh
+llvm-mc -triple=amdgcn-amd-amdhsa -mcpu=gfx950 \
+  -filetype=obj generated-kernel.s -o generated-kernel.o
+ld.lld -shared generated-kernel.o -o generated-kernel.hsaco
+rj_waitcheck generated-kernel.hsaco --target gfx950 --max-diagnostics 64
+```
+
+The assembly must contain the normal AMDHSA kernel descriptor and metadata needed
+to create a loadable code object. If your source is HIP or another high-level
+language, use the compiler flags your build normally uses to keep the generated
+code object or saved device binary, then pass that artifact to `rj_waitcheck`.
+
+For generated-code triage, `rj_co` is often useful next to `rj_waitcheck`:
+
+```sh
+rj_co generated-kernel.hsaco --target gfx950 --list-kernels
+rj_co generated-kernel.hsaco --target gfx950 \
+  --disassemble-window .text+0xd1b44 --context-bytes 384
+rj_co generated-kernel.hsaco --target gfx950 \
+  --waitcheck --repro-diagnostic 0 --max-diagnostics 64
+```
+
+The diagnostic location is a section-relative offset such as `.text+0xd1b44`.
+Use `--disassemble-window` to inspect the producer, the consumer, and any waits
+between them. Use `--repro-diagnostic N` when you need a small markdown block
+with the command, diagnostic, and nearby ISA for a bug report or review.
+
+A typical fix/verify loop is:
+
+1. Generate or compile the code object.
+2. Run `rj_waitcheck` on the final artifact.
+3. Inspect each reported producer/consumer pair with `rj_co`.
+4. Add or strengthen the relevant `s_waitcnt`, `s_wait_*`, or embedded wait in
+   the generated ISA.
+5. Regenerate the code object and rerun `rj_waitcheck`.
+
+For corpus-sized generated output, use a bounded first pass:
+
+```sh
+rj_waitcheck path/to/generated/artifacts \
+  --recursive --all-code-objects --skip-unsupported --no-fail \
+  --stop-after-first-diagnostic --summary-only
+```
+
+Then rerun individual artifacts without `--summary-only` when you need the full
+diagnostic details. Prefer checking the final loadable code objects when a build
+also emits relocatable objects, container files, or other intermediate artifacts;
+intermediates may not have the same code-object shape as the image that is
+actually loaded.
+
 ## gfx950 Tensile E2E
 
 The optional `rj_waitcheck_gfx950_tensile_e2e` target builds a small TensileLite
 gfx950 corpus and checks the final loadable `Kernels.so-*.hsaco` sidecars:
 
 ```sh
-ROCM_VENV="$HOME/rocjitsu/gfx1250-dbt/venv" \
-TENSILELITE_ROOT="$HOME/rocjitsu/rocjitsu-corpus/results-deps/upstream-rocm-libraries/projects/hipblaslt/tensilelite" \
-PYTHON="$PWD/build/waitcheck-e2e/tensile-gfx950/.venv/bin/python" \
+ROCM_VENV=/path/to/therock/venv \
+TENSILELITE_ROOT=/path/to/TensileLite \
+PYTHON=/path/to/python \
 cmake --build build --target rj_waitcheck_gfx950_tensile_e2e
 ```
 
