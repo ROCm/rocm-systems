@@ -257,7 +257,10 @@ install(
 )
 
 # Libraries: lib/
-install(TARGETS rocjitsu_shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(
+    TARGETS rocjitsu_shared rocjitsu_hooks
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(

@@ -1802,47 +1802,7 @@ VMacF16Vop3::VMacF16Vop3(const MachineInst *inst)
   num_dst_ = 1;
 }
 
-void VMacF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
-                      float v = [&]() {
-                        float v = std::fma(
-                            [&]() {
-                              float sv =
-                                  util::f16_to_f32(static_cast<uint16_t>(src0.read_lane(wf, lane)));
-                              if (inst_.abs & (1u << 0))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 0))
-                                sv = -sv;
-                              return sv;
-                            }(),
-                            [&]() {
-                              float sv =
-                                  util::f16_to_f32(static_cast<uint16_t>(src1.read_lane(wf, lane)));
-                              if (inst_.abs & (1u << 1))
-                                sv = std::fabs(sv);
-                              if (inst_.neg & (1u << 1))
-                                sv = -sv;
-                              return sv;
-                            }(),
-                            util::f16_to_f32(static_cast<uint16_t>(vdst.read_lane(wf, lane))));
-                        if (inst_.omod == 1)
-                          v *= 2.0f;
-                        else if (inst_.omod == 2)
-                          v *= 4.0f;
-                        else if (inst_.omod == 3)
-                          v *= 0.5f;
-                        return v;
-                      }();
-                      if (inst_.clamp)
-                        v = std::clamp(v, 0.0f, 1.0f);
-                      return v;
-                    }()));
-  }
-}
+void VMacF16Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mac_f16_vop3(*this, wf); }
 
 VAddU16Vop3::VAddU16Vop3(const MachineInst *inst)
     : Vop3("v_add_u16", reinterpret_cast<const OpEncoding *>(inst), make_exec_fn<VAddU16Vop3>()),
@@ -2300,17 +2260,7 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
 }
 
 void VMadI32I24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, [&]() {
-      auto a = static_cast<int32_t>(src0.read_lane(wf, lane) << 8) >> 8;
-      auto b = static_cast<int32_t>(src1.read_lane(wf, lane) << 8) >> 8;
-      return static_cast<uint32_t>(static_cast<int64_t>(a) * b +
-                                   static_cast<int32_t>(src2.read_lane(wf, lane)));
-    }());
-  }
+  amdgpu::execute_v_mad_i32_i24_vop3(*this, wf);
 }
 
 VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
@@ -2329,15 +2279,7 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
 }
 
 void VMadU32U24Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(
-        wf, lane,
-        ((src0.read_lane(wf, lane) & 0x00FFFFFFu) * (src1.read_lane(wf, lane) & 0x00FFFFFFu) +
-         src2.read_lane(wf, lane)));
-  }
+  amdgpu::execute_v_mad_u32_u24_vop3(*this, wf);
 }
 
 VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
@@ -2528,18 +2470,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
 }
 
 void VAlignbitB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, [&]() {
-      auto a = src0.read_lane(wf, lane);
-      auto b = src1.read_lane(wf, lane);
-      auto c = src2.read_lane(wf, lane);
-      uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
-      return static_cast<uint32_t>(val >> (c & 31u));
-    }());
-  }
+  amdgpu::execute_v_alignbit_b32_vop3(*this, wf);
 }
 
 VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
@@ -2558,18 +2489,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
 }
 
 void VAlignbyteB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    vdst.write_lane(wf, lane, [&]() {
-      auto a = src0.read_lane(wf, lane);
-      auto b = src1.read_lane(wf, lane);
-      auto c = src2.read_lane(wf, lane);
-      uint64_t val = (static_cast<uint64_t>(a) << 32) | b;
-      return static_cast<uint32_t>(val >> ((c & 3u) * 8u));
-    }());
-  }
+  amdgpu::execute_v_alignbyte_b32_vop3(*this, wf);
 }
 
 VMin3F32Vop3::VMin3F32Vop3(const MachineInst *inst)
