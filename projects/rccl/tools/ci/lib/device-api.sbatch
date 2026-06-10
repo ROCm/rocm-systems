@@ -66,6 +66,28 @@ if [[ ! -x "${ROCM_PATH:-}/bin/hipcc" ]]; then
   exit 1
 fi
 echo "    ROCM_PATH=${ROCM_PATH}"
+echo "    ROCM_RELEASE=${ROCM_RELEASE:-<unset>}"
+
+# Prove the build uses the ROCm we downloaded, not a system /opt/rocm. Fail loudly
+# rather than silently compiling against the wrong toolchain.
+rocm_cache="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}/rocm"
+case "${ROCM_PATH}" in
+  "${rocm_cache}"/*) : ;;
+  *)
+    if [[ -z "${ROCM_PATH_OVERRIDE:-}" ]]; then
+      echo "ERROR: ROCM_PATH=${ROCM_PATH} is not under the provisioned cache" >&2
+      echo "       ${rocm_cache} (stale rocm.env or wrong ROCm?)." >&2
+      exit 1
+    fi
+    echo "    (ROCM_PATH_OVERRIDE in effect; skipping cache-path check)" ;;
+esac
+if [[ -n "${ROCM_RELEASE:-}" ]] \
+   && ! grep -qx "release=${ROCM_RELEASE}" "${ROCM_PATH}/.stamp" 2>/dev/null; then
+  echo "ERROR: ${ROCM_PATH}/.stamp does not record release=${ROCM_RELEASE}" >&2
+  cat "${ROCM_PATH}/.stamp" 2>/dev/null >&2 || echo "       (.stamp missing)" >&2
+  exit 1
+fi
+echo "    hipcc: $("${ROCM_PATH}/bin/hipcc" --version 2>/dev/null | head -n1)"
 
 # 2) OpenMPI (cached, --with-rocm) -> .ci-out/ompi.env (MPI_HOME)
 echo "==> [2/5] build OpenMPI"
@@ -80,6 +102,14 @@ export HIP_PATH="${ROCM_PATH}"
 export PATH="${ROCM_PATH}/bin:${MPI_HOME}/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${MPI_HOME}/lib:${LD_LIBRARY_PATH:-}"
 export CMAKE_PREFIX_PATH="${ROCM_PATH}/lib/cmake:${ROCM_PATH}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+
+# Confirm the hipcc on PATH is the provisioned one (nothing shadows it).
+resolved_hipcc="$(command -v hipcc || true)"
+if [[ "${resolved_hipcc}" != "${ROCM_PATH}/bin/hipcc" ]]; then
+  echo "ERROR: hipcc on PATH is '${resolved_hipcc}', expected '${ROCM_PATH}/bin/hipcc'" >&2
+  exit 1
+fi
+echo "==> verified hipcc = ${resolved_hipcc}"
 
 # 3) RCCL via its own install.sh (-l = local gpu arch only).
 echo "==> [3/5] build RCCL (targets=${amdgpu_targets})"

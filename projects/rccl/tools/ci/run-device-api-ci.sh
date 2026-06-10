@@ -11,17 +11,21 @@
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
 #
+# Test matrix lives in lib/device-api-tests.json; RCCL_CI_DEBUG=1 adds its
+# debug_env to every run.
+#
 # Environment overrides:
 #   ROCM_PATH / MPI_HOME   Else read from .ci-out/{rocm,ompi}.env
 #   NP                     MPI ranks per run         (default: 8)
-#   BENCH_ARGS             Common bench args         (default: "-b 8 -e 1G -f 2 -g 1")
+#   BENCH_ARGS             Common bench args         (default: from JSON bench_args)
 #   BENCH_TIMEOUT          Per-bench wall-clock cap  (default: 600s)
 #   BENCH_KILL_AFTER       SIGKILL grace after BENCH_TIMEOUT (default: 30s)
+#   CONFIG                 Test-matrix JSON          (default: lib/device-api-tests.json)
+#   RCCL_CI_DEBUG          Set to 1 to add debug_env to every run
 
 set -euo pipefail
 
 NP="${NP:-8}"
-BENCH_ARGS="${BENCH_ARGS:--b 8 -e 1G -f 2 -g 1}"
 BENCH_TIMEOUT="${BENCH_TIMEOUT:-600s}"
 BENCH_KILL_AFTER="${BENCH_KILL_AFTER:-30s}"
 
@@ -31,6 +35,7 @@ WORKDIR="$(cd "${RCCL_DIR}/../.." && pwd)"
 
 RCCL_LIB_DIR="${WORKDIR}/projects/rccl/build/release"
 RCCL_TESTS_DIR="${WORKDIR}/projects/rccl-tests"
+CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 
 # Prefer the build stages' env fragments over any ambient ROCM_PATH / MPI_HOME.
 # shellcheck source=/dev/null  # runtime fragment written by fetch-rocm.sh
@@ -72,13 +77,25 @@ if [[ ! -d "${PERF_DIR}" || ! -f "${PERF_DIR}/all_gather_perf" ]]; then
   exit 1
 fi
 
-# Supported bins per device-api feature. Extend as new device-kernel impls land.
-SYMMETRIC_BINS="broadcast_perf reduce_perf sendrecv_perf scatter_perf gather_perf"
-LSA_BINS="all_reduce_perf"
-GIN_BINS="alltoall_perf"
+[[ -f "${CONFIG}" ]] || { echo "ERROR: test-matrix config not found: ${CONFIG}" >&2; exit 1; }
+echo "==> test matrix = ${CONFIG}"
 
-BASE_ENV="-x NCCL_CUMEM_ENABLE=1 -x HSA_FORCE_FINE_GRAIN_PCIE=1"
-GIN_ENV="${BASE_ENV} -x NCCL_DMABUF_ENABLE=1 -x NCCL_GIN_TYPE=2 -x HSA_NO_SCRATCH_RECLAIM=1 -x NCCL_ENV_PLUGIN=none"
+# Tab-separated records: bench_args / debug_env / suite rows.
+mapfile -t CONFIG_RECORDS < <(python3 "${script_dir}/lib/parse_device_api_config.py" "${CONFIG}")
+
+CFG_BENCH_ARGS=""
+DEBUG_ENV=""
+SUITE_NAMES=() SUITE_ENVS=() SUITE_ARGS=() SUITE_BINS=()
+for rec in "${CONFIG_RECORDS[@]}"; do
+  IFS=$'\t' read -r kind f1 f2 f3 f4 <<< "${rec}"
+  case "${kind}" in
+    bench_args) CFG_BENCH_ARGS="${f1}" ;;
+    debug_env)  DEBUG_ENV="${f1}" ;;
+    suite)      SUITE_NAMES+=("${f1}"); SUITE_ENVS+=("${f2}"); SUITE_ARGS+=("${f3}"); SUITE_BINS+=("${f4}") ;;
+  esac
+done
+
+BENCH_ARGS="${BENCH_ARGS:-${CFG_BENCH_ARGS}}"
 
 FAILED_RUNS=()
 
@@ -107,27 +124,18 @@ run_bench() {
   fi
 }
 
-run_collective_suite() {
-  local bins="$1"
-  local mode="$2"
-  local env_flags="$3"
-  shift 3
-  for bin in ${bins}; do
-    run_bench "${mode}" "${bin}" "${env_flags}" "$@"
+for i in "${!SUITE_NAMES[@]}"; do
+  mode="${SUITE_NAMES[$i]}"
+  env_flags="${SUITE_ENVS[$i]}"
+  extra_args="${SUITE_ARGS[$i]}"
+  if [[ -n "${RCCL_CI_DEBUG:-}" && -n "${DEBUG_ENV}" ]]; then
+    env_flags="${env_flags} ${DEBUG_ENV}"
+  fi
+  echo "=== suite: ${mode} ==="
+  # shellcheck disable=SC2086  # intentional word-splitting
+  for bin in ${SUITE_BINS[$i]}; do
+    run_bench "${mode}" "${bin}" "${env_flags}" ${extra_args}
   done
-}
-
-echo "=== 1) Symmetric memory ==="
-run_collective_suite "${SYMMETRIC_BINS}" symmetric "${BASE_ENV}" -R 2
-
-echo "=== 2) LSA device kernels ==="
-for d in 1 2; do
-  run_collective_suite "${LSA_BINS}" "lsa-d${d}" "${BASE_ENV}" -R 2 -D "${d}"
-done
-
-echo "=== 3) GIN proxy ==="
-for d in 3 4; do
-  run_collective_suite "${GIN_BINS}" "gin-d${d}" "${GIN_ENV}" -R 2 -D "${d}"
 done
 
 if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
