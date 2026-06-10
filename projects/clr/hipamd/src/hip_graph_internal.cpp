@@ -228,6 +228,7 @@ void Graph::ScheduleOneNode(Node start, int stream_id) {
       hipError_t status = child->ScheduleNodes();
       (void)status;
       max_streams_ = std::max(max_streams_, child->max_streams_);
+      cgn->GraphExec::TopologicalOrder();
     }
 
     const auto& edges = cur->GetEdges();

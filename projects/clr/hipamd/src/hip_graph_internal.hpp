@@ -961,12 +961,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExec() {
-    {
-      std::scoped_lock lock(graphExecSetLock_);
-      // GraphExecSet is normally erased in hipGraphExecDestroy() before release(), but child graph
-      // nodes (which inherit GraphExec) are destroyed via delete and never go through that path.
-      graphExecSet_.erase(this);
-    }
     for (auto& streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
@@ -1158,15 +1152,6 @@ class ChildGraphNode : public GraphNode, public GraphExec {
   ChildGraphNode(Graph* g) : GraphNode(hipGraphNodeTypeGraph, "solid", "rectangle"), GraphExec() {
     g->clone(this);
     graphCaptureStatus_ = false;
-  }
-
-  ~ChildGraphNode() {
-    // A child graph node stores an owning reference to its completion command. Each launch releases
-    // the previous launch's stored command, but the final launch's command is only released here.
-    for (auto command : commands_) {
-      command->release();
-    }
-    commands_.clear();
   }
 
   // Delete copy-assignment operator to prevent accidental copies causing unexpected behaviors.
