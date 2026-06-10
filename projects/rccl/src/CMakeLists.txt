@@ -628,14 +628,6 @@ if(ROCTX_ENABLE)
 endif()
 
 ## Set RCCL compile definitions
-if(ENABLE_MSCCL_KERNEL)
-  message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
-  target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
-endif()
-if(ENABLE_MSCCLPP)
-  target_compile_definitions(rccl PRIVATE ENABLE_MSCCLPP)
-endif()
-
 if(NCCL_OS_LINUX)
   target_compile_definitions(rccl PRIVATE NCCL_OS_LINUX)
 elseif(NCCL_OS_WINDOWS)
@@ -676,7 +668,7 @@ if (ENABLE_ROCSHMEM)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
   endif()
 
-  # Moved to where MSCCL target_links
+  # Moved to where rocSHMEM target_links
   ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
   target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
@@ -1152,10 +1144,6 @@ else()
 endif()
 if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER)
   target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker -mllvm=-amdgpu-kernarg-preload-count=16")
-endif()
-
-if(ENABLE_MSCCLPP)
-  include(${RCCL_SOURCE_DIR}/cmake/MSCCLPP.cmake)
 endif()
 
 ## Track linking time

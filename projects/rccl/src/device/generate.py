@@ -76,7 +76,6 @@ def paste(sep, *args):
   return sep.join(x for x in args if x is not None)
 
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
-# sys.argv[3] reserved (was ENABLE_MSCCL_KERNEL; MSCCL device kernels removed)
 is_local_arch_only = 1 if sys.argv[4] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[5] == "ON" else 0
 
