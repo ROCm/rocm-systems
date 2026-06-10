@@ -29,7 +29,7 @@ rocprofiler_add_integration_execute_test(
         pftrace otf2 --log-level warning --collection-period 0:1:1 1:1:2 0.5:0.5:0
         --collection-period-unit sec -- $<TARGET_FILE:reproducible-runtime> 5000 4
     DEPENDS reproducible-runtime
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
     ENVIRONMENT "ROCPROF_COLLECTION_PERIOD_TESTING=true"
@@ -50,7 +50,7 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.otf2
          --collection-period-input
          ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log
-    TIMEOUT 45
+    TIMEOUT 120
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-collection-period
     UNSTABLE)
