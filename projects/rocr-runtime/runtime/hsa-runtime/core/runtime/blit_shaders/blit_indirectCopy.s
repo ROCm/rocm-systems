@@ -107,6 +107,15 @@
   .endif
 .endm
 
+// Non-carry add (doesn't use/modify VCC)
+.macro V_ADD_NC_U32 vdst, src0, vsrc1
+  .if (.amdgcn.gfx_generation_number >= 10)
+    v_add_nc_u32        \vdst, \src0, \vsrc1
+  .else
+    v_add_u32           \vdst, \src0, \vsrc1
+  .endif
+.endm
+
 // GFX12.5 (gfx1250) uses new wait instructions
 .macro S_WAITCNT_KMCNT
   .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
@@ -297,16 +306,24 @@ L_INDIRECT_VEC_DONE:
 
     // =====================================================
     // Phase 3: Tail loop (byte-by-byte for remainder)
+    // Start at: (copy_size & ~0xF) + thread_offset
+    // This handles the remaining 0-15 bytes after vectorized phase
     // =====================================================
 
-    // v[2:3] = src_addr + thread_offset
+    // v1 = copy_size & ~0xF (aligned_size = start of tail region)
+    v_and_b32           v1, 0xFFFFFFF0, s8
+
+    // v1 = aligned_size + thread_offset
+    V_ADD_NC_U32        v1, v1, v0
+
+    // v[2:3] = src_addr + aligned_size + thread_offset
     v_mov_b32           v3, s5
-    V_ADD_CO_U32        v2, v0, s4
+    V_ADD_CO_U32        v2, v1, s4
     V_ADD_CO_CI_U32     v3, v3, 0x0
 
-    // v[4:5] = dst_addr + thread_offset
+    // v[4:5] = dst_addr + aligned_size + thread_offset
     v_mov_b32           v5, s7
-    V_ADD_CO_U32        v4, v0, s6
+    V_ADD_CO_U32        v4, v1, s6
     V_ADD_CO_CI_U32     v5, v5, 0x0
 
     // v[6:7] = src_addr + copy_size (end address)

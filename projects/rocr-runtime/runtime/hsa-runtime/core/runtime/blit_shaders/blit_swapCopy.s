@@ -247,21 +247,30 @@ SwapCopy:
 
 L_SWAP_VEC_DONE:
     // Tail Loop: Byte-by-byte swap for remaining bytes (swap_size % 16)
-    // Only threads with local_id < (swap_size % 16) participate
-    // Use saved global_id (v1) and v0 for local_id
+    // The tail region is bytes [aligned_size, swap_size).
+    // We need threads to handle one byte each, starting from offset 0 within the tail.
+    //
+    // Compute local_id from global_id:
+    //   local_id = global_id & 63 (since workgroup size is 64)
+    //
+    // Then compute tail_offset = aligned_size + local_id
+    // Only threads with tail_offset < swap_size participate.
 
-    // v[6:7] = addr_a + (swap_size & ~0xF) + local_id (reuse v6:7)
-    v_and_b32           v6, 0xFFFFFFF0, s8       // aligned_size
-    V_ADD_NC_U32        v6, v6, v1               // add global_id (v1 saved earlier)
+    // v4 = local_id = global_id & 63
+    v_and_b32           v4, 0x3F, v1
+
+    // v[6:7] = addr_a + aligned_size + local_id
+    v_and_b32           v6, 0xFFFFFFF0, s8       // aligned_size = swap_size & ~0xF
+    V_ADD_NC_U32        v6, v6, v4               // add local_id (not global_id!)
     v_mov_b32           v7, s5
-    V_ADD_CO_U32        v6, v6, s4               // v6:7 = addr_a + aligned_size + global_id
+    V_ADD_CO_U32        v6, v6, s4               // v6:7 = addr_a + aligned_size + local_id
     V_ADD_CO_CI_U32     v7, v7, 0x0
 
-    // v[8:9] = addr_b + (swap_size & ~0xF) + local_id
+    // v[8:9] = addr_b + aligned_size + local_id
     v_and_b32           v8, 0xFFFFFFF0, s8       // aligned_size
-    V_ADD_NC_U32        v8, v8, v1               // add global_id
+    V_ADD_NC_U32        v8, v8, v4               // add local_id
     v_mov_b32           v9, s7
-    V_ADD_CO_U32        v8, v8, s6               // v8:9 = addr_b + aligned_size + global_id
+    V_ADD_CO_U32        v8, v8, s6               // v8:9 = addr_b + aligned_size + local_id
     V_ADD_CO_CI_U32     v9, v9, 0x0
 
     // v[10:11] = addr_a + swap_size (end address for tail)

@@ -119,7 +119,7 @@ class Blit {
                                                   core::Signal& out_signal,
                                                   std::vector<core::Signal*>& gang_signals) {
     // Default implementation: not supported
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   /// @brief Submit a swap copy command (exchange contents of two buffers).
@@ -138,7 +138,7 @@ class Blit {
                                              core::Signal& out_signal,
                                              std::vector<core::Signal*>& gang_signals) {
     // Default implementation: not supported
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   /// @brief Submit an indirect copy command where source and/or destination
@@ -161,7 +161,7 @@ class Blit {
                                                  core::Signal& out_signal,
                                                  std::vector<core::Signal*>& gang_signals) {
     // Default implementation: not supported
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
   }
 
   /// @brief Enable profiling of the asynchronous copy command. The timestamp

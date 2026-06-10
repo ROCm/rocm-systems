@@ -413,15 +413,15 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
        {
            {NULL, 0, 0, 0},                                               // gfx7 (not supported)
            {NULL, 0, 0, 0},                                               // gfx8 (not supported)
-           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 20},      // gfx9
-           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 20},      // gfx90a
-           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 24, 20},      // gfx942
-           {kCodeIndirectCopy1010, sizeof(kCodeIndirectCopy1010), 24, 20},  // gfx1010
-           {kCodeIndirectCopy10, sizeof(kCodeIndirectCopy10), 24, 20},      // gfx10
-           {kCodeIndirectCopy11, sizeof(kCodeIndirectCopy11), 24, 20},      // gfx11
-           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 24, 20},      // gfx12
-           {kCodeIndirectCopy1250, sizeof(kCodeIndirectCopy1250), 24, 20},  // gfx1250
-           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 24, 20},      // gfx13 (use gfx12)
+           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 16, 16},      // gfx9
+           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 16, 16},      // gfx90a
+           {kCodeIndirectCopy9, sizeof(kCodeIndirectCopy9), 16, 16},      // gfx942
+           {kCodeIndirectCopy1010, sizeof(kCodeIndirectCopy1010), 16, 16},  // gfx1010
+           {kCodeIndirectCopy10, sizeof(kCodeIndirectCopy10), 16, 16},      // gfx10
+           {kCodeIndirectCopy11, sizeof(kCodeIndirectCopy11), 16, 16},      // gfx11
+           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 16, 16},      // gfx12
+           {kCodeIndirectCopy1250, sizeof(kCodeIndirectCopy1250), 16, 16},  // gfx1250
+           {kCodeIndirectCopy12, sizeof(kCodeIndirectCopy12), 16, 16},      // gfx13 (use gfx12)
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
@@ -1777,7 +1777,16 @@ hsa_status_t GpuAgent::DmaCopySwap(const hsa_amd_memory_copy_op_t& op,
   if (blit_sdma->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit_sdma).get());
     if (sdma_blit->SwapSupported()) {
-      // Use SDMA HW swap path via fan-out
+      // Single swap: convert scalar fields to single-entry lists
+      if (op.num_entries == 0) {
+        const void* src_list[1] = {op.src};
+        void* dst_list[1] = {op.dst};
+        hsa_agent_t dst_agents[1] = {op.dst_agent};
+        size_t sizes[1] = {op.src_size};
+        return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal, dep_signals,
+                               1, src_list, dst_list, dst_agents, sizes);
+      }
+      // Multi-entry swap: use list fields directly
       return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal, dep_signals,
                              op.num_entries, const_cast<const void* const*>(op.src_list),
                              op.dst_list, op.dst_agent_list, op.size_list);
