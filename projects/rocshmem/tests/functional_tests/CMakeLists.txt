@@ -30,6 +30,9 @@ cmake_minimum_required(VERSION 3.16.3 FATAL_ERROR)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 project(rocshmem_functional_tests VERSION 1.0.0 LANGUAGES CXX)
 
+# ASAN option (if not already defined by parent project)
+option(ASAN "Enable AddressSanitizer" ${ASAN})
+
 ###############################################################################
 # SOURCES
 ###############################################################################
@@ -52,7 +55,6 @@ target_sources(
     ping_pong_tester.cpp
     ping_all_tester.cpp
     primitive_tester.cpp
-    primitive_mr_tester.cpp
     default_ctx_primitive_tester.cpp
     team_ctx_primitive_tester.cpp
     team_ctx_infra_tester.cpp
@@ -113,6 +115,21 @@ target_link_libraries(
     $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
     $<TARGET_NAME_IF_EXISTS:PMIx::pmix>
     hiprtc
+)
+
+###############################################################################
+# ASAN SETTINGS
+###############################################################################
+target_compile_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g>
+)
+
+target_link_options(
+  ${PROJECT_NAME}
+  PRIVATE
+    $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
 )
 
 ###############################################################################

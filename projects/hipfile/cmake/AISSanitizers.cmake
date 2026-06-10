@@ -27,12 +27,16 @@ function(ais_add_sanitizers target)
 
     if(AIS_USE_SANITIZERS)
         set(SANITIZER_LIST address,float-divide-by-zero,integer,leak,local-bounds,nullability,undefined,vptr)
+        # unsigned-integer-overflow is well-defined wrap-around in C++ (not UB).
+        # Keep -fsanitize=integer enabled, but disable the unsigned overflow check.
         target_compile_options(${target} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:-fsanitize=${SANITIZER_LIST}>
+            $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize=unsigned-integer-overflow>
             $<$<COMPILE_LANGUAGE:CXX>:-fno-sanitize-recover=integer>
         )
         target_link_options(${target} PRIVATE
             -Xarch_host -fsanitize=${SANITIZER_LIST}
+            -Xarch_host -fno-sanitize=unsigned-integer-overflow
             -Xarch_host -fno-sanitize-recover=integer
         )
     endif()

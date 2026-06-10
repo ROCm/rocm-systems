@@ -38,7 +38,7 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
                                        long long int *end_time, char *source,
                                        char *dest, size_t size, TestType type,
                                        ShmemContextType ctx_type,
-                                       int wf_size) {
+                                       int wf_size, int batch) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
@@ -48,31 +48,39 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
   int wf_id = get_flat_block_id() / wf_size;
   int wg_offset = wg_id * ((get_flat_block_size() - 1 ) / wf_size + 1);
   int idx = wf_id + wg_offset;
-  size_t offset = size * idx;
-  source += offset;
-  dest += offset;
+  // Each wavefront owns `batch` contiguous slots of `size` bytes.
+  source += size * batch * idx;
+  dest += size * batch * idx;
+
+  // Choose start_slot so that after `skip` iterations slot wraps to 0.
+  int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip) {
-      // Ensures all RMA calls from the skip loops are completed
+    size_t offset = ((start_slot + i) % batch) * size;
+
+    // Quiet at batch boundaries to allow safe buffer reuse
+    if (offset == 0) {
       rocshmem_ctx_quiet(ctx);
       __syncthreads();
-      if (is_thread_zero_in_wave()) {
-        start_time[idx] = wall_clock64();
+      if (i == skip) {
+        if (is_thread_zero_in_wave()) {
+          start_time[idx] = wall_clock64();
+        }
       }
     }
+
     switch (type) {
       case WAVEGetTestType:
-        rocshmem_ctx_getmem_wave(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem_wave(ctx, dest + offset, source + offset, size, 1);
         break;
       case WAVEGetNBITestType:
-        rocshmem_ctx_getmem_nbi_wave(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem_nbi_wave(ctx, dest + offset, source + offset, size, 1);
         break;
       case WAVEPutTestType:
-        rocshmem_ctx_putmem_wave(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem_wave(ctx, dest + offset, source + offset, size, 1);
         break;
       case WAVEPutNBITestType:
-        rocshmem_ctx_putmem_nbi_wave(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem_nbi_wave(ctx, dest + offset, source + offset, size, 1);
         break;
       default:
         break;
@@ -92,7 +100,7 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
  *****************************************************************************/
 WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = max_msg_size * args.num_wgs * num_warps;
+  size_t buff_size = max_msg_size * batch_size * args.num_wgs * num_warps;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
 
@@ -110,9 +118,7 @@ WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
       break;
   }
 
-  for(size_t i = 0; i < buff_size; i++) {
-    source[i] = static_cast<char>('a' + i % 26);
-  }
+  CHECK_HIP(hipMemset(source, 'a', buff_size));
 }
 
 WaveFrontPrimitiveTester::~WaveFrontPrimitiveTester() {
@@ -138,8 +144,8 @@ WaveFrontPrimitiveTester::~WaveFrontPrimitiveTester() {
 }
 
 void WaveFrontPrimitiveTester::resetBuffers(size_t size) {
-  size_t buff_size = size * args.num_wgs * num_warps;
-  memset(dest, '1', buff_size);
+  size_t buff_size = size * batch_size * args.num_wgs * num_warps;
+  CHECK_HIP(hipMemset(dest, '1', buff_size));
 }
 
 void WaveFrontPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
@@ -149,7 +155,7 @@ void WaveFrontPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(WaveFrontPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
                      source, dest, size, _type, _shmem_context,
-                     wf_size);
+                     wf_size, batch_size);
 
   num_msgs = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;
@@ -161,21 +167,33 @@ void WaveFrontPrimitiveTester::verifyResults(size_t size) {
                      : 1;
 
   if (args.myid == check_id) {
-    size_t buff_size = size * args.num_wgs * num_warps;
-    size_t verify_wg_size = std::min((size_t) 1024, buff_size);
-    size_t verify_num_wgs = buff_size / verify_wg_size;
+    int start_slot = (batch_size - (args.skip % batch_size)) % batch_size;
+    int verify_iters = std::min(batch_size, num_loops + args.skip);
+    size_t buf_bytes = size * batch_size;
+    size_t concurrency = args.num_wgs * num_warps;
+    size_t total = size * verify_iters * concurrency;
+    size_t verify_wg_size = std::min((size_t) 1024, total);
+    size_t verify_num_wgs = (total + verify_wg_size - 1) / verify_wg_size;
 
     hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
-                       source, dest, buff_size, verification_error);
+                       dest, size, buf_bytes, concurrency,
+                       num_loops, args.skip, batch_size, verification_error);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     if (*verification_error) {
-      for (size_t i = 0; i < buff_size; i++) {
-        if (dest[i] != source[i]) {
-          std::cerr << "Data validation error at idx " << i << std::endl;
-          std::cerr << " Got " << dest[i] << ", Expected "
-                    << source[i] << std::endl;
-          exit(-1);
+      for (size_t b = 0; b < concurrency; b++) {
+        for (int iter = 0; iter < verify_iters; iter++) {
+          int slot = (start_slot + iter) % batch_size;
+          for (size_t i = 0; i < size; i++) {
+            if (dest[b * buf_bytes + slot * size + i] != 'a') {
+              std::cerr << "Data validation error at buffer " << b
+                        << " slot " << slot << " idx " << i << std::endl;
+              std::cerr << " Got " << (int)(unsigned char)dest[b * buf_bytes + slot * size + i]
+                        << ", Expected " << (int)(unsigned char)'a'
+                        << std::endl;
+              exit(-1);
+            }
+          }
         }
       }
       *verification_error = false;

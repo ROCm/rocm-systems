@@ -437,6 +437,11 @@
           "test_filter": "EnqueueCountTests.*"
         },
         {
+          "name": "DdaCollCommonTests",
+          "description": "Dda collective tests",
+          "test_filter": "DdaCollCommon.*"
+        },
+        {
           "name": "DeviceOp128_PtrLoadStore",
           "description": "Pointer-based volatile, relaxed, and acquire/release global load/store roundtrips",
           "test_filter": "PackRoundtripTest.LdStVolatileGlobalPtr:PackRoundtripTest.LdStRelaxedSysGlobal:PackRoundtripTest.LdStAcquireReleaseSysGlobal:PackRoundtripTest.L2_VolatileGlobalPtr_MultiElement:PackRoundtripTest.CvtaFromGlobal"
@@ -514,6 +519,11 @@
           "name": "XmlTest",
           "description": "XML topology parsing tests",
           "test_filter": "XmlTest.*"
+        },
+        {
+          "name": "DdaIpcEligibilityTest",
+          "description": "Dda IPC eligibility tests",
+          "test_filter": "DdaIpcEligibilityTest.*"
         }
       ]
     },
