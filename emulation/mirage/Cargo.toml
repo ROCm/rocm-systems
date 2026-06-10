@@ -1,0 +1,66 @@
+[package]
+name = "mirage"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "mirage"
+path = "src/main.rs"
+
+[dependencies]
+mirage_core = { workspace = true }
+mirage_ctl = { workspace = true }
+mirage_host = { workspace = true }
+mirage_daemon = { workspace = true }
+mirage_rocjitsu = { workspace = true }
+mirage_hotswap = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+mirage_builtin = { workspace = true }
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+serde = { workspace = true }
+serde_json = "1.0"
+chrono = { workspace = true }
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+tokio = { workspace = true }
+tungstenite = "0.24"
+libc = { workspace = true }
+nix = { workspace = true }
+
+[workspace]
+members = ["builtin","core", "container", "ctl", "daemon", "dashboard", "host", "hotswap", "rocjitsu"]
+
+[workspace.dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.6.1", features = ["derive", "env"] }
+anyhow = "1.0"
+thiserror = "2.0"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+futures = "0.3"
+nix = { version = "0.29", features = ["fs", "signal", "process", "term", "user"] }
+libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tempfile = "3"
+once_cell = "1"
+
+mirage_core = { path = "core" }
+mirage_ctl = { path = "ctl" }
+mirage_builtin = { path = "builtin" }
+mirage_host = { path = "host" }
+mirage_daemon = { path = "daemon" }
+mirage_rocjitsu = { path = "rocjitsu" }
+mirage_hotswap = { path = "hotswap" }
+mirage_container = { path = "container" }

@@ -137,22 +137,61 @@ __device__ void GDAContext::getmem_nbi(void *dest, const void *source,
   qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
 }
 
-__device__ void GDAContext::fence() { //TODO: optimize
-  ActiveWFInfo wf_info(ctx_id_);
-  for (uint32_t i = 0; i < num_qps; i++) {
-    qps[i].quiet(wf_info);
+__device__ void GDAContext::fence() {
+  /**
+   * Operations issued by this context may use two backends: RDMA QPs
+   * for remote PEs and the IPC fast path, when enabled, for shm-local
+   * peers. The fence must order writes across both paths.
+   *
+   * RDMA: A single QP already orders its own traffic through in-order
+   * delivery; only the multi-QP case requires an explicit per-QP quiet.
+   */
+  if (num_qps_per_pe > 1) {
+    ActiveWFInfo wf_info(ctx_id_);
+    for (uint32_t i = 0; i < num_qps; i++) {
+      qps[i].quiet(wf_info);
+    }
   }
-  ipcImpl_.ipcFence();
+
+  /**
+   * IPC: Skip when there are no shm-local peers. Otherwise, issue a
+   * system-scope release fence to ensure prior IPC writes are visible
+   * to peer ranks.
+   */
+  if (constmem.ipc_shm_size != 0) {
+    ipcImpl_.ipcFence();
+  }
 }
 
-__device__ void GDAContext::fence([[maybe_unused]] int pe) {
-  //TODO: optimize
-  ActiveWFInfo wf_info(ctx_id_);
-  for(uint32_t i = 0; i < num_qps_per_pe; i++) {
-    int qp_index = i * num_pes + pe;
-    qps[qp_index].quiet(wf_info);
+__device__ void GDAContext::fence(int pe) {
+  /**
+   * Operations targeting `pe` may use two backends: RDMA QPs for remote
+   * PEs and the IPC fast path, when enabled, for shm-local peers. The
+   * fence must order writes to `pe` across both paths.
+   *
+   * RDMA: A single QP per PE already orders its own traffic through
+   * in-order delivery; only the multi-QP-per-PE case requires an explicit
+   * quiet on each QP associated with `pe`.
+   */
+  if (num_qps_per_pe > 1) {
+    ActiveWFInfo wf_info(ctx_id_);
+    for(uint32_t i = 0; i < num_qps_per_pe; i++) {
+      int qp_index = i * num_pes + pe;
+      qps[qp_index].quiet(wf_info);
+    }
   }
-  ipcImpl_.ipcFence();
+
+  /**
+   * IPC: Skip when `pe` is not shm-local. Otherwise, issue a
+   * system-scope release fence so prior IPC writes to `pe` are visible
+   * to that peer rank. Passing `local_pe` lets the SDMA-enabled policy
+   * quiet only the channels associated with `pe` instead of falling
+   * back to sdmaQuietAll().
+   */
+  int local_pe;
+  if (ipcImpl_.isIpcAvailable(my_pe, pe, &local_pe)) {
+    ipcImpl_.ipcFence(local_pe);
+  }
 }
 
 __device__ void GDAContext::quiet() {
@@ -618,6 +657,16 @@ __device__ void GDAContext::internal_getmem_nbi_wave(void *dest, const void *sou
     uint64_t L_offset = const_cast<char *>(src_typed) - base_heap[my_pe];
     qps[qp_index].get_nbi(dest, base_heap[pe] + L_offset, nelems, pe, wf_info);
   }
+}
+
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
+ *****************************************************************************/
+
+__device__ int GDAContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
+                                                 [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
 }
 
 }  // namespace rocshmem
