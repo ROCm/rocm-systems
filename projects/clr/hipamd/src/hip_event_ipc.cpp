@@ -264,7 +264,7 @@ hipError_t IPCEvent::OpenHandle(ihipIpcEventHandle_t* handle) {
     return hipErrorInvalidValue;
   }
 
-  if (!ipc_signal_->IpcImport(handle->ipc_signal_handle, IHIP_IPC_EVENT_HANDLE_SIZE)) {
+  if (!ipc_signal_->IpcImport(handle->ipc_signal_handle, IHIP_IPC_EVENT_HANDLE_SIZE, dev)) {
     delete ipc_signal_;
     ipc_signal_ = nullptr;
     return hipErrorInvalidValue;
