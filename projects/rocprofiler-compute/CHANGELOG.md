@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added support for GPU metrics on gfx1150 and gfx1152 hardware.
 
+* Added roofline benchmarking support for gfx1150 and gfx1152 hardware.
+
 ### Changed
 
 * Moved `--gui` and `--tui` analyze options to experimental status. These features now require the `--experimental` flag to be enabled (e.g., `rocprof-compute analyze --experimental --gui`).
