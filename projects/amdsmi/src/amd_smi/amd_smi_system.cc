@@ -477,12 +477,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
     AMDSmiAINICDevice::AINICInfo ai_nic_info = {};
     amdsmi_status_t status = populate_amd_ainic_device(ainic_ctx_, bdfid, ai_nic_info);
     if (status != AMDSMI_STATUS_SUCCESS) {
-      // Per-device failure is not fatal — skip this NIC and continue.
-      // The error details are already logged by CHK_AMDNIC_RET inside
-      // populate_amd_ainic_device(). This prevents a single problematic
-      // NIC (e.g. Pensando DSC without a compatible driver configuration)
-      // from aborting the entire amdsmi_init(), which would also block
-      // GPU functionality.
+      // Skip a NIC that fails to populate so one bad device can't abort
+      // discovery for the rest. The failure is already logged above.
       continue;
     }
     ai_nic_info_.emplace_back(ai_nic_info);
