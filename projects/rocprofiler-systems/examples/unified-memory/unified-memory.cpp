@@ -466,8 +466,8 @@ test_pingpong(size_t bytes, int device, int iterations)
 }
 
 // ---------------------------------------------------------------------------
-// Test 7:  mits QUEUE_EVICT_SVM event by forcing GPU_ALWAYS_MAPPED via raw KFD SVM ioctl
-//          deterministically fires QUEUE_EVICT_SVM under HSA_XNACK=1
+// Test 7: Emits QUEUE_EVICT_SVM by forcing GPU_ALWAYS_MAPPED via raw KFD SVM ioctl
+//         Deterministically fires QUEUE_EVICT_SVM under HSA_XNACK=1
 // ---------------------------------------------------------------------------
 
 static int
