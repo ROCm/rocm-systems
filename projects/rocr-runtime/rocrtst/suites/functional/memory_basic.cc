@@ -138,12 +138,8 @@ hsa_status_t MemoryTest::TestAllocate(hsa_amd_memory_pool_t pool, size_t sz) {
   err = hsa_amd_memory_pool_allocate(pool, sz, 0, &ptr);
 
   if (err == HSA_STATUS_SUCCESS) {
-    hsa_amd_pointer_info_t pi = {};
-    pi.size = sizeof(pi);
-    hsa_status_t info_err = hsa_amd_pointer_info(ptr, &pi, NULL, 0, NULL);
-    err = (info_err == HSA_STATUS_SUCCESS)
-        ? hsa_memory_free(pi.agentBaseAddress)
-        : info_err;
+    // Free the exact pointer returned by hsa_amd_memory_pool_allocate.
+    err = hsa_amd_memory_pool_free(ptr);
   }
 
   return err;
@@ -510,10 +506,8 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
 
   err = hsa_amd_memory_pool_allocate(pool, allocate_sz2, 0, &memPtr2);
   if (err != HSA_STATUS_SUCCESS) {
-    hsa_amd_pointer_info_t pi = {};
-    pi.size = sizeof(pi);
-    if (hsa_amd_pointer_info(memPtr1, &pi, NULL, 0, NULL) == HSA_STATUS_SUCCESS)
-      hsa_memory_free(pi.agentBaseAddress);
+    hsa_status_t free_err = hsa_amd_memory_pool_free(memPtr1);
+    EXPECT_EQ(free_err, HSA_STATUS_SUCCESS) << "Cleanup of memPtr1 failed";
   }
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
@@ -531,18 +525,10 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
     std::cout << "   Available memory after: " << ag_avail_memory_after << std::endl;
   }
 
-  hsa_amd_pointer_info_t pi1 = {};
-  pi1.size = sizeof(pi1);
-  err = hsa_amd_pointer_info(memPtr1, &pi1, NULL, 0, NULL);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-  err = hsa_memory_free(pi1.agentBaseAddress);
+  err = hsa_amd_memory_pool_free(memPtr1);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  hsa_amd_pointer_info_t pi2 = {};
-  pi2.size = sizeof(pi2);
-  err = hsa_amd_pointer_info(memPtr2, &pi2, NULL, 0, NULL);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-  err = hsa_memory_free(pi2.agentBaseAddress);
+  err = hsa_amd_memory_pool_free(memPtr2);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   err = hsa_agent_get_info(ag, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
