@@ -264,12 +264,14 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
 # inexact transcendentals (sin/cos) are excluded.
 # VOP1 base mnemonics whose VOP3 form applies float abs/neg/omod/clamp modifiers
 # over an f32 source and result (so the VOP3 twin routes through the f32 unary
-# modifier glue rather than reusing the plain VOP1 path). v_mov_b32's VOP3 body
-# treats src0 as f32 and applies the same modifiers, so it belongs here too.
-# v_accvgpr_mov_b32 (acc<->acc move) has the identical f32-modifier VOP3 body.
+# modifier glue rather than reusing the plain VOP1 path).
+# NOTE: v_mov_b32 / v_accvgpr_mov_b32 are deliberately NOT here. They are integer
+# bit-moves: OMOD/CLAMP are float-only modifiers, so their generated VOP3 scalar
+# body is a raw copy that ignores them. Routing them through the f32 modifier glue
+# made the SIMD path apply clamp/omod the scalar never does (clamp=1: scalar keeps
+# the raw bits vs simd clamps to 1.0). They fall through to the plain VOP1 unary
+# raw-copy path below, matching the scalar body for every modifier combination.
 _VOP3_UNARY_FP_F32 = {
-    'v_mov_b32',
-    'v_accvgpr_mov_b32',
     'v_floor_f32',
     'v_ceil_f32',
     'v_trunc_f32',
@@ -1782,11 +1784,12 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     # for all non-NaN inputs; NaN-result lanes are skipped by the A/B test.
     'v_rcp_f64_vop3': '[](auto a) { return util::native<double>(1.0) / a; }',
     'v_rsq_f64_vop3': '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
-    # v_mov_b64 with VOP3 modifiers: scalar bit_casts to double, applies
-    # abs/neg/omod/clamp, bit_casts back. The f64 unary glue operates entirely
-    # in native<double> domain, so an identity functor + the same modifier
-    # helpers reproduce the scalar bit pattern exactly.
-    'v_mov_b64_vop3': '[](auto a) { return a; }',
+    # NOTE: v_mov_b64 is deliberately NOT here. It is an integer 64-bit bit-move;
+    # OMOD/CLAMP are float-only, so its generated VOP3 scalar body is a raw copy
+    # that ignores them. Routing it through the f64 modifier glue made the SIMD
+    # path apply clamp/omod the scalar never does (clamp=1: scalar keeps the raw
+    # bits vs simd clamps to 1.0). With no entry here it stays scalar (a 64-bit
+    # register copy gains nothing from vectorization anyway).
 }
 
 
@@ -2511,6 +2514,20 @@ def simd_probe_line(template_name: str) -> str | None:
             cpp_t, cpp_op = spec2v3
             if cpp_t == 'float32_t':
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});'
+            # f16 float binaries (v_add/sub/subrev/mul/max/min/ldexp_f16) are
+            # uint32-typed (the functor widens f16->f32 by hand), but their VOP3
+            # twin applies abs/neg/omod/clamp around the f16<->f32 round trip (see
+            # the generated scalar body). The plain integer VOP3 glue
+            # (ROCJITSU_TRY_SIMD_VOP3_BINARY_INT) does NOT apply those, so it would
+            # silently drop the modifiers and return the VOP2-style result. No fp16
+            # VOP3 binary modifier glue exists yet, so route them through the f16
+            # variant that bails to the (modifier-applying) scalar body whenever a
+            # modifier field is set, and takes the fast path only for the common
+            # unmodified case. (Keeping a probe present — rather than returning None
+            # — also avoids perturbing the cross-ISA shared plan via the
+            # simd_probe_arch_portable gate.)
+            if base.endswith('_f16'):
+                return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_F16({cpp_t}, {cpp_op});'
             return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
         # VOP3-encoded twins of the SIMD VOP1 unary ops. The plain int/cvt forms
         # apply no modifiers and read the same src0/vdst operands as VOP1, so they
@@ -2550,7 +2567,10 @@ def simd_probe_line(template_name: str) -> str | None:
     return None
 
 
-def simd_probe_arch_portable(template_name: str) -> bool:
+def simd_probe_arch_portable(
+    template_name: str,
+    vop3p_opsel_fields: tuple[str, str] = ('op_sel', 'op_sel_hi'),
+) -> bool:
     """Whether a SIMD-probe kernel can be force-routed through the shared
     execute template on an ISA that is not in its cross-ISA shared group.
 
@@ -2565,11 +2585,26 @@ def simd_probe_arch_portable(template_name: str) -> bool:
     expression in SIMD_VOP2_TERNARY and are left to the genuine shared plan;
     the dst-accumulate forms (literal ``"0u"``: v_fmac/v_mac, and v_fmac_f64)
     are portable.
+
+    A second non-portable family is VOP3P: the shared VOP3P execute template
+    reads the op_sel field by its canonical member name (``op_sel`` /
+    ``op_sel_hi``), but RDNA4/gfx1250 rename it to ``opsel`` / ``opsel_hi`` in
+    their ``Vop3pMachineInst`` struct.  An ISA that renames the field cannot
+    compile against the canonical-named shared body, so it must NOT be
+    force-routed through it — it falls back to an inline body generated with
+    its own (renamed) field accessors.  ``vop3p_opsel_fields`` carries the
+    calling ISA's profile field names; when they differ from the canonical
+    pair, VOP3P probes are not portable for that ISA.
     """
     if simd_probe_line(template_name) is None:
         return False
     spect = SIMD_VOP2_TERNARY.get(template_name)
     if spect is not None and spect[1] != '0u':
+        return False
+    if template_name.endswith('_vop3p') and vop3p_opsel_fields != (
+        'op_sel',
+        'op_sel_hi',
+    ):
         return False
     return True
 
