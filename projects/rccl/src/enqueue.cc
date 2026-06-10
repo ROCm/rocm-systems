@@ -141,7 +141,7 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
           cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem),
           result, next_kernel);
         ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
-        continue; // sym kernels skip the legacy ncclMaxSharedMem path
+        continue; // sym kernels skip the non-symmetric ncclMaxSharedMem path
       }
 #endif
       if (ncclMaxSharedMem != 0) {
