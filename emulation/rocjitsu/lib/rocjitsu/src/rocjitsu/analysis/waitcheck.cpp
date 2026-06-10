@@ -8,6 +8,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
@@ -1085,6 +1086,52 @@ private:
     return false;
   }
 
+  [[nodiscard]] static bool is_cdna4_mubuf_lds_load(const Instruction &inst, rj_code_arch_t arch) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || !starts_with(inst.mnemonic(), "buffer_load") ||
+        inst.raw_encoding() == nullptr || inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
+      return false;
+
+    constexpr uint32_t kCdna4MubufLdsBit = 1u << 16u;
+    return (inst.raw_encoding()[0] & kCdna4MubufLdsBit) != 0;
+  }
+
+  [[nodiscard]] static std::optional<cdna4::Vop3pMfmaMachineInst>
+  cdna4_vop3p_mfma_encoding(const Instruction &inst, rj_code_arch_t arch) {
+    if (arch != ROCJITSU_CODE_ARCH_CDNA4 || !inst.is_mfma() || inst.raw_encoding() == nullptr ||
+        inst.size() < static_cast<int>(sizeof(cdna4::Vop3pMfmaMachineInst)))
+      return std::nullopt;
+
+    cdna4::Vop3pMfmaMachineInst encoding{};
+    std::memcpy(&encoding, inst.raw_encoding(), sizeof(encoding));
+    constexpr uint32_t kCdna4Vop3pMfmaEncoding = 0x1a7;
+    if (encoding.encoding != kCdna4Vop3pMfmaEncoding)
+      return std::nullopt;
+    return encoding;
+  }
+
+  static void remap_vgpr_ref_to_acc(RegisterSet &regs, const Operand *op) {
+    if (op == nullptr)
+      return;
+    auto ref = op->to_register_ref();
+    if (!ref || ref->cls != RegClass::VGPR)
+      return;
+
+    regs.erase(*ref);
+    ref->cls = RegClass::ACC_VGPR;
+    regs.expand(*ref);
+  }
+
+  static void adjust_cdna4_mfma_acc_cd_def_use(InstDefUse &du, const Instruction &inst,
+                                               rj_code_arch_t arch) {
+    const auto encoding = cdna4_vop3p_mfma_encoding(inst, arch);
+    if (!encoding || encoding->acc_cd == 0)
+      return;
+
+    remap_vgpr_ref_to_acc(du.defs, inst.dst_operand(0));
+    if (starts_with(inst.mnemonic(), "v_mfma_"))
+      remap_vgpr_ref_to_acc(du.uses, inst.src_operand(2));
+  }
+
   [[nodiscard]] static InstDefUse inst_def_use_for_waitcheck(const Instruction &inst,
                                                              const VgprMsbState &state,
                                                              rj_code_arch_t arch) {
@@ -1094,12 +1141,14 @@ private:
     du.has_exec_masked_vector_def = false;
     du.has_predicated_def = inst.flags() & PREDICATED_DEF;
 
-    for (int i = 0; i < inst.num_dst_operands(); ++i) {
-      const Operand *op = inst.dst_operand(i);
-      if (op == nullptr)
-        continue;
-      if (auto ref = op->to_register_ref())
-        add_def(du, *ref, *op, state, arch);
+    if (!is_cdna4_mubuf_lds_load(inst, arch)) {
+      for (int i = 0; i < inst.num_dst_operands(); ++i) {
+        const Operand *op = inst.dst_operand(i);
+        if (op == nullptr)
+          continue;
+        if (auto ref = op->to_register_ref())
+          add_def(du, *ref, *op, state, arch);
+      }
     }
     inst.implicit_defs(du.defs);
 
@@ -1113,6 +1162,7 @@ private:
         expand_vgpr_msb_ref(du.uses, *ref, *op, state, arch);
     }
     inst.implicit_uses(du.uses);
+    adjust_cdna4_mfma_acc_cd_def_use(du, inst, arch);
 
     return du;
   }
@@ -1278,6 +1328,12 @@ private:
       events.emplace_back(vmem_store_wait_counter(arch), WaitEventKind::GlobalWb,
                           TrackedRegisterSource::None, false, false, false, std::nullopt,
                           std::nullopt, true);
+      return events;
+    }
+
+    if (is_cdna4_mubuf_lds_load(inst, arch)) {
+      events.push_back({WaitCounterKind::Load, WaitEventKind::LdsDirect,
+                        TrackedRegisterSource::None, false, false});
       return events;
     }
 
