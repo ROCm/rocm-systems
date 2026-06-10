@@ -50,7 +50,7 @@ concurrency:
 
 jobs:
   device-api:
-    name: Build + run RCCL device-API benchmarks (1 node x 8 GPU)
+    name: Single node device API Testing
     runs-on: ruby-linux-slurm-scale-runner
     timeout-minutes: 240
     defaults:
@@ -102,14 +102,45 @@ jobs:
           export RCCL_DEVICE_API_CACHE="${RCCL_DEVICE_API_CACHE:-/apps/rccl-ci}"
           echo "Cache root: ${RCCL_DEVICE_API_CACHE}"
 
-          # `--wait` blocks until the job reaches a terminal state and
-          # propagates the job's exit code as sbatch's exit code.
-          sbatch --wait \
+          # `--wait` blocks until terminal; `--parsable` makes stdout just the job id.
+          set +e
+          job_id="$(sbatch --parsable --wait \
             --export=ALL,RCCL_DEVICE_API_WORKDIR,RCCL_DEVICE_API_CACHE,ROCM_RELEASE,ROCM_AMDGPU_FAMILY,RCCL_AMDGPU_TARGETS \
-            "${{ github.workspace }}/projects/rccl/tools/ci/lib/device-api.sbatch"
+            "${{ github.workspace }}/projects/rccl/tools/ci/lib/device-api.sbatch")"
           rc=$?
-          echo "sbatch --wait exited with rc=${rc}"
-          exit "${rc}"
+          set -e
+          job_id="${job_id%%;*}"
+          echo "sbatch --wait rc=${rc}, job_id=${job_id}"
+          if [[ ${rc} -ne 0 ]]; then
+            echo "ERROR: sbatch reported failure (rc=${rc})" >&2
+            exit "${rc}"
+          fi
+
+          # `sbatch --wait` can still exit 0 for scheduler-killed jobs (TIMEOUT/OOM/node failure); cross-check via sacct (retry: accounting can lag).
+          state=""; exit_code=""
+          if [[ -n "${job_id}" ]]; then
+            for _ in $(seq 1 10); do
+              line="$(sacct -j "${job_id}" -X -n -P --format=State,ExitCode 2>/dev/null | head -n1 || true)"
+              state="${line%%|*}"; state="${state%% *}"
+              exit_code="${line##*|}"
+              case "${state}" in
+                ""|RUNNING|PENDING|REQUEUED|COMPLETING|RESIZING) sleep 3 ;;
+                *) break ;;
+              esac
+            done
+          fi
+          echo "sacct: state=${state:-<unavailable>} exit_code=${exit_code:-<unavailable>}"
+
+          # Only trust an explicit COMPLETED; empty state = no sacct, fall back to rc=0.
+          if [[ -n "${state}" && "${state}" != "COMPLETED" ]]; then
+            echo "ERROR: job ${job_id} terminal state=${state} (exit ${exit_code})" >&2
+            exit 1
+          fi
+          if [[ -n "${exit_code}" && "${exit_code%%:*}" != "0" ]]; then
+            echo "ERROR: job ${job_id} reported ExitCode=${exit_code}" >&2
+            exit 1
+          fi
+          echo "device-api job ${job_id} succeeded (state=${state:-<no sacct>})"
 
       - name: Dump compute-node logs
         if: always()

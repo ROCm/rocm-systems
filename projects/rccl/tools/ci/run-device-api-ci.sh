@@ -77,11 +77,17 @@ if [[ ! -d "${PERF_DIR}" || ! -f "${PERF_DIR}/all_gather_perf" ]]; then
   exit 1
 fi
 
+PARSER="${script_dir}/lib/parse_device_api_config.py"
 [[ -f "${CONFIG}" ]] || { echo "ERROR: test-matrix config not found: ${CONFIG}" >&2; exit 1; }
+[[ -f "${PARSER}" ]] || { echo "ERROR: config parser not found: ${PARSER}" >&2; exit 1; }
 echo "==> test matrix = ${CONFIG}"
 
-# Tab-separated records: bench_args / debug_env / suite rows.
-mapfile -t CONFIG_RECORDS < <(python3 "${script_dir}/lib/parse_device_api_config.py" "${CONFIG}")
+# Capture to a var (not `mapfile < <(...)`) so a parser failure aborts the job.
+CONFIG_TSV="$(python3 "${PARSER}" "${CONFIG}")" || {
+  echo "ERROR: failed to parse test matrix ${CONFIG}" >&2
+  exit 1
+}
+mapfile -t CONFIG_RECORDS <<< "${CONFIG_TSV}"
 
 CFG_BENCH_ARGS=""
 DEBUG_ENV=""
@@ -94,6 +100,12 @@ for rec in "${CONFIG_RECORDS[@]}"; do
     suite)      SUITE_NAMES+=("${f1}"); SUITE_ENVS+=("${f2}"); SUITE_ARGS+=("${f3}"); SUITE_BINS+=("${f4}") ;;
   esac
 done
+
+if [[ ${#SUITE_NAMES[@]} -eq 0 ]]; then
+  echo "ERROR: no suites parsed from ${CONFIG}; refusing to report success" >&2
+  exit 1
+fi
+echo "==> ${#SUITE_NAMES[@]} suites to run: ${SUITE_NAMES[*]}"
 
 BENCH_ARGS="${BENCH_ARGS:-${CFG_BENCH_ARGS}}"
 
