@@ -56,18 +56,6 @@ DynCO::~DynCO() {
       assert(err == hipSuccess);
     }
 
-    if (elem.second->GetVarKind() == Var::DVK_Variable) {
-      for (auto dev : g_devices) {
-        amd::Memory* mem = nullptr;
-        hipError_t err = elem.second->GetDeviceVarPtr(&mem, dev->deviceId());
-        assert(err == hipSuccess);
-        if (mem != nullptr) {
-          // free also deletes the device ptr
-          err = ihipFree(memDevPtr(mem));
-          assert(err == hipSuccess);
-        }
-      }
-    }
     delete elem.second;
   }
   vars_.clear();
