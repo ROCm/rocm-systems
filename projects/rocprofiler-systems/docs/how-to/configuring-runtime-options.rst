@@ -366,6 +366,9 @@ setting is on -- you do not need to add ``kfd_events`` to
    export HSA_XNACK=1
    export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
 
+For a step-by-step workflow with examples and sample output, see
+:doc:`Unified memory profiling <./unified-memory-profiling>`.
+
 ROCPROFSYS_SELECTED_REGIONS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
