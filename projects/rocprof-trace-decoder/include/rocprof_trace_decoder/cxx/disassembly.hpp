@@ -168,7 +168,8 @@ public:
         decoded_path.reserve(path.length());
         for (size_t i = 0; i < path.length(); ++i)
         {
-            if (path[i] == '%' && std::isxdigit(path[i + 1]) != 0 && std::isxdigit(path[i + 2]) != 0)
+            if (path[i] == '%' && i + 2 < path.length() && std::isxdigit(path[i + 1]) != 0 &&
+                std::isxdigit(path[i + 2]) != 0)
             {
                 decoded_path += std::stoi(path.substr(i + 1, 2), nullptr, 16);
                 i += 2;

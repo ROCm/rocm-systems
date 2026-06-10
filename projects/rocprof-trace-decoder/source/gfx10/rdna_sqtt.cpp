@@ -154,7 +154,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     target_simd = header.DSIMD;
 
                     int mask = tt_version < 3 ? 0xF : 7;
-                    dprate = 1 << ((header.DPRate & mask) - 1);
+                    int dpr = header.DPRate & mask;
+                    dprate = dpr ? (1 << (dpr - 1)) : 1;
                     derate = 1 << (header.dp_derate);
                     if (tt_version == 4) exclude_barrier_wait = (token.contents >> 59) & 1;
                 }
@@ -533,7 +534,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     default: break;
                 }
 
-                if (type != ROCPROF_TRACE_DECODER_EVENT_NONE) stitch.sendEvent(type, token.time, event.me, event.pipe, 0, event.bop, true);
+                if (type != ROCPROF_TRACE_DECODER_EVENT_NONE)
+                    stitch.sendEvent(type, token.time, event.me, event.pipe, 0, event.bop, true);
 
                 break;
             }

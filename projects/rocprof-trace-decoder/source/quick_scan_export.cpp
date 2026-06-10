@@ -408,6 +408,11 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
     }
 
+    // Every path below dereferences an 8-byte header word (load_header_word) and
+    // gfx9 chunk 0 subtracts an 8-byte header_skip; a chunk smaller than that
+    // word can't hold a header or a full token. Reject it before any 8-byte read.
+    if (data_size < sizeof(uint64_t)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
     TIMING(t0);
 
     int gfxip = 0;
@@ -579,9 +584,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         }
 
         if (chunk_index == 0)
-        {
             temp = CSRegisterHandler{};
-        }
         else if (const CSRegisterHandler* p = decoder->pipestate.get(chunk_index))
             temp = *p;
         else

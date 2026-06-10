@@ -529,7 +529,7 @@ public:
         event.me_id = me;
         event.pipe_id = pipe;
 
-        uint64_t pc = (wave_start_addr.at(me).at(pipe) << 8) & BITMASK;
+        uint64_t pc = (wave_start_addr.at(me & 0x1).at(pipe) << 8) & BITMASK;
         event.entry_point = pcinfo_t{.address = pc, .code_object_id = 0};
         for (const auto& co : active_codeobjs.read())
             if (co.inrange(pc))
@@ -566,10 +566,10 @@ public:
 
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
-        return ToPcV2(table.write(), (wave_start_addr.at_reg(token) << 8) & BITMASK);
+        return ToPcV2(table.read(), (wave_start_addr.at_reg(token) << 8) & BITMASK);
     }
 
-    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start.write(), addr); }
+    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start.read(), addr); }
 };
 
 template <typename WaveArray> struct AnalysisReturnData

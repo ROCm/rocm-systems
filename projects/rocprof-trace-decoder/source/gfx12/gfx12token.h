@@ -110,22 +110,22 @@ union wstart_type
 {
     struct
     {
-        uint64_t header     : 4;
-        uint64_t isExt      : 1;
-        uint64_t tm         : 2;
-        uint64_t sa         : 1;
-        uint64_t simd       : 2;
-        uint64_t wgp        : 4;
-        uint64_t reserved   : 1;
-        uint64_t wid        : 5;
-        uint64_t pipe       : 2;
-        uint64_t me         : 1;
-        uint64_t reserved2  : 2;
-        uint64_t count      : 7;
-        uint64_t extlds     : 1;
-        uint64_t wgid       : 5;
-        uint64_t last       : 1;
-        uint64_t dvg        : 1;
+        uint64_t header    : 4;
+        uint64_t isExt     : 1;
+        uint64_t tm        : 2;
+        uint64_t sa        : 1;
+        uint64_t simd      : 2;
+        uint64_t wgp       : 4;
+        uint64_t reserved  : 1;
+        uint64_t wid       : 5;
+        uint64_t pipe      : 2;
+        uint64_t me        : 1;
+        uint64_t reserved2 : 2;
+        uint64_t count     : 7;
+        uint64_t extlds    : 1;
+        uint64_t wgid      : 5;
+        uint64_t last      : 1;
+        uint64_t dvg       : 1;
     };
     uint64_t raw;
 

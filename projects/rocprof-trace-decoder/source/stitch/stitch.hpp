@@ -165,7 +165,13 @@ public:
         sendVec(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, vec);
     };
     void sendEvent(
-        rocprofiler_thread_trace_decoder_event_type_t type, int64_t time, uint8_t me, uint8_t pipe, uint32_t payload, bool bop, bool per_pipe
+        rocprofiler_thread_trace_decoder_event_type_t type,
+        int64_t time,
+        uint8_t me,
+        uint8_t pipe,
+        uint32_t payload,
+        bool bop,
+        bool per_pipe
     )
     {
         rocprofiler_thread_trace_decoder_event_t event{};

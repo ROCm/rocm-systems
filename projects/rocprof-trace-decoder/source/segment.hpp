@@ -47,4 +47,4 @@ template <> struct std::hash<pcinfo_t>
 };
 
 /// Internal helper: translate a raw virtual address to a pcinfo_t using the table.
-pcinfo_t ToPcV2(CodeobjTableTranslator& table, uint64_t pc);
+pcinfo_t ToPcV2(const CodeobjTableTranslator& table, uint64_t pc);

@@ -72,8 +72,8 @@ TEST(Gfx12WaveStartTest, GetReturnsCommonType)
     ws.simd = 1;
     ws.wgp = 8;
     ws.wid = 10;
-    ws.pipe  = 0b01;
-    ws.me    = 1;
+    ws.pipe = 0b01;
+    ws.me = 1;
     ws.count = 50;
 
     wstart_type_common common = ws.get();
@@ -302,9 +302,9 @@ TEST(Gfx12WaveStartEdgeCaseTest, MaxFieldValues)
 {
     gfx12::wstart_type ws{};
     ws.raw = 0;
-    ws.sa = 1;          // Max for 1-bit
-    ws.simd = 3;        // Max for 2-bit
-    ws.wgp = 15;        // Max for 4-bit
+    ws.sa = 1;      // Max for 1-bit
+    ws.simd = 3;    // Max for 2-bit
+    ws.wgp = 15;    // Max for 4-bit
     ws.wid = 31;    // Max for 5-bit
     ws.pipe = 3;    // Max for 2-bit
     ws.me = 1;      // Max for 1-bit

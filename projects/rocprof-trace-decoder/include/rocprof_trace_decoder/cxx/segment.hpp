@@ -90,19 +90,20 @@ public:
      * @param[out] out   Populated with the matching range on success.
      * @return true if a matching range was found, false otherwise.
      */
-    bool find_codeobj_in_range(uint64_t addr, address_range_t& out)
+    bool find_codeobj_in_range(uint64_t addr, address_range_t& out) const
     {
-        if (!cached_segment.inrange(addr))
+        if (cached_owner == this && cached_segment.inrange(addr))
         {
-            auto it = ranges_.find(address_range_t{addr, 0, 0});
-            if (it == ranges_.end()) return false;
-            cached_segment = *it;
+            out = cached_segment;
+            return true;
         }
-        out = cached_segment;
+        auto it = ranges_.find(address_range_t{addr, 0, 0});
+        if (it == ranges_.end()) return false;
+        cached_owner = this;
+        cached_segment = *it;
+        out = *it;
         return true;
     }
-
-    void clear_cache() { cached_segment = {}; }
 
     bool remove(const address_range_t& range)
     {
@@ -114,8 +115,13 @@ public:
     const std::set<address_range_t>& ranges() const { return ranges_; }
 
 private:
+    void clear_cache() { cached_owner = nullptr; }
+
     std::set<address_range_t> ranges_;
-    address_range_t cached_segment{};
+
+    // thread_local so concurrent const lookups over a shared table don't race.
+    inline static thread_local const CodeobjTableTranslator* cached_owner{nullptr};
+    inline static thread_local address_range_t cached_segment{};
 };
 
 } // namespace codeobj
