@@ -42,9 +42,10 @@ struct is_streamable : std::false_type
 {};
 
 template <typename Tp>
-struct is_streamable<Tp,
-                     std::void_t<decltype(std::declval<std::stringstream&>()
-                                          << std::declval<const Tp&>())>> : std::true_type
+struct is_streamable<
+    Tp,
+    std::void_t<decltype(std::declval<std::stringstream&>() << std::declval<const Tp&>())>>
+: std::true_type
 {};
 
 template <typename Tp>

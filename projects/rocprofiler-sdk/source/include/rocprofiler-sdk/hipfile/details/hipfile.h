@@ -11,39 +11,39 @@
 #    include <hipfile.h>
 #else
 
-#include <hip/hip_runtime_api.h>
+#    include <hip/hip_runtime_api.h>
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <time.h>
+#    include <stdbool.h>
+#    include <stdint.h>
+#    include <stdlib.h>
+#    include <sys/types.h>
+#    include <time.h>
 
-#ifdef _WIN32
-#    include <BaseTsd.h>
-#    include <winsock2.h>
+#    ifdef _WIN32
+#        include <BaseTsd.h>
+#        include <winsock2.h>
 typedef __int64 hoff_t;
 typedef SSIZE_T ssize_t;
-#else
-#    include <sys/socket.h>
+#    else
+#        include <sys/socket.h>
 typedef off_t hoff_t;
-#endif
+#    endif
 
-#if defined(__GNUC__)
-#    define HIPFILE_API __attribute__((visibility("default")))
-#else
-#    define HIPFILE_API
-#endif
+#    if defined(__GNUC__)
+#        define HIPFILE_API __attribute__((visibility("default")))
+#    else
+#        define HIPFILE_API
+#    endif
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 extern "C" {
-#endif
+#    endif
 
-#define HIPFILE_VERSION_MAJOR 0
-#define HIPFILE_VERSION_MINOR 2
-#define HIPFILE_VERSION_PATCH 0
+#    define HIPFILE_VERSION_MAJOR 0
+#    define HIPFILE_VERSION_MINOR 2
+#    define HIPFILE_VERSION_PATCH 0
 
-#define HIPFILE_BASE_ERR 5000
+#    define HIPFILE_BASE_ERR 5000
 
 typedef enum hipFileOpError
 {
@@ -236,74 +236,98 @@ typedef enum hipFileStringConfigParameter_t
     hipFileParamLogDir,
 } hipFileStringConfigParameter_t;
 
-HIPFILE_API const char* hipFileGetOpErrorString(hipFileOpError_t status);
-HIPFILE_API hipFileError_t hipFileHandleRegister(hipFileHandle_t* fh, hipFileDescr_t* descr);
-HIPFILE_API void hipFileHandleDeregister(hipFileHandle_t fh);
-HIPFILE_API hipFileError_t hipFileBufRegister(const void* buffer_base, size_t length, int flags);
-HIPFILE_API hipFileError_t hipFileBufDeregister(const void* buffer_base);
-HIPFILE_API ssize_t hipFileRead(hipFileHandle_t fh,
-                                void*           buffer_base,
-                                size_t          size,
-                                hoff_t          file_offset,
-                                hoff_t          buffer_offset);
-HIPFILE_API ssize_t hipFileWrite(hipFileHandle_t fh,
-                                 const void*     buffer_base,
-                                 size_t          size,
-                                 hoff_t          file_offset,
-                                 hoff_t          buffer_offset);
-HIPFILE_API hipFileError_t hipFileDriverOpen(void);
-HIPFILE_API hipFileError_t hipFileDriverClose(void);
-HIPFILE_API int64_t hipFileUseCount(void);
-HIPFILE_API hipFileError_t hipFileDriverGetProperties(hipFileDriverProps_t* props);
-HIPFILE_API hipFileError_t hipFileDriverSetPollMode(bool poll, size_t poll_threshold_size);
-HIPFILE_API hipFileError_t hipFileDriverSetMaxDirectIOSize(size_t max_direct_io_size);
-HIPFILE_API hipFileError_t hipFileDriverSetMaxCacheSize(size_t max_cache_size);
-HIPFILE_API hipFileError_t hipFileDriverSetMaxPinnedMemSize(size_t max_pinned_size);
-HIPFILE_API hipFileError_t hipFileBatchIOSetUp(hipFileBatchHandle_t* batch_idp, unsigned max_nr);
-HIPFILE_API hipFileError_t hipFileBatchIOSubmit(hipFileBatchHandle_t batch_idp,
-                                                unsigned             nr,
-                                                hipFileIOParams_t*   iocbp,
-                                                unsigned             flags);
-HIPFILE_API hipFileError_t hipFileBatchIOGetStatus(hipFileBatchHandle_t batch_idp,
-                                                   unsigned             min_nr,
-                                                   unsigned*            nr,
-                                                   hipFileIOEvents_t*   iocbp,
-                                                   struct timespec*     timeout);
-HIPFILE_API hipFileError_t hipFileBatchIOCancel(hipFileBatchHandle_t batch_idp);
-HIPFILE_API void hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
-HIPFILE_API hipFileError_t hipFileReadAsync(hipFileHandle_t fh,
-                                            void*           buffer_base,
-                                            size_t*         size_p,
-                                            hoff_t*         file_offset_p,
-                                            hoff_t*         buffer_offset_p,
-                                            ssize_t*        bytes_read_p,
-                                            hipStream_t     stream);
-HIPFILE_API hipFileError_t hipFileWriteAsync(hipFileHandle_t fh,
-                                             void*           buffer_base,
-                                             size_t*         size_p,
-                                             hoff_t*         file_offset_p,
-                                             hoff_t*         buffer_offset_p,
-                                             ssize_t*        bytes_written_p,
-                                             hipStream_t     stream);
-HIPFILE_API hipFileError_t hipFileStreamRegister(hipStream_t stream, unsigned flags);
-HIPFILE_API hipFileError_t hipFileStreamDeregister(hipStream_t stream);
-HIPFILE_API hipFileError_t hipFileGetVersion(unsigned* major, unsigned* minor, unsigned* patch);
-HIPFILE_API hipFileError_t hipFileGetParameterSizeT(hipFileSizeTConfigParameter_t param,
-                                                    size_t*                        value);
-HIPFILE_API hipFileError_t hipFileGetParameterBool(hipFileBoolConfigParameter_t param,
-                                                   bool*                          value);
-HIPFILE_API hipFileError_t hipFileGetParameterString(hipFileStringConfigParameter_t param,
-                                                     char*                          desc_str,
-                                                     int                            len);
-HIPFILE_API hipFileError_t hipFileSetParameterSizeT(hipFileSizeTConfigParameter_t param,
-                                                    size_t                         value);
-HIPFILE_API hipFileError_t hipFileSetParameterBool(hipFileBoolConfigParameter_t param,
-                                                   bool                           value);
-HIPFILE_API hipFileError_t hipFileSetParameterString(hipFileStringConfigParameter_t param,
-                                                     const char*                    desc_str);
+HIPFILE_API const char*
+hipFileGetOpErrorString(hipFileOpError_t status);
+HIPFILE_API hipFileError_t
+hipFileHandleRegister(hipFileHandle_t* fh, hipFileDescr_t* descr);
+HIPFILE_API void
+hipFileHandleDeregister(hipFileHandle_t fh);
+HIPFILE_API hipFileError_t
+hipFileBufRegister(const void* buffer_base, size_t length, int flags);
+HIPFILE_API hipFileError_t
+hipFileBufDeregister(const void* buffer_base);
+HIPFILE_API ssize_t
+hipFileRead(hipFileHandle_t fh,
+            void*           buffer_base,
+            size_t          size,
+            hoff_t          file_offset,
+            hoff_t          buffer_offset);
+HIPFILE_API ssize_t
+hipFileWrite(hipFileHandle_t fh,
+             const void*     buffer_base,
+             size_t          size,
+             hoff_t          file_offset,
+             hoff_t          buffer_offset);
+HIPFILE_API hipFileError_t
+hipFileDriverOpen(void);
+HIPFILE_API hipFileError_t
+hipFileDriverClose(void);
+HIPFILE_API int64_t
+hipFileUseCount(void);
+HIPFILE_API hipFileError_t
+hipFileDriverGetProperties(hipFileDriverProps_t* props);
+HIPFILE_API hipFileError_t
+hipFileDriverSetPollMode(bool poll, size_t poll_threshold_size);
+HIPFILE_API hipFileError_t
+hipFileDriverSetMaxDirectIOSize(size_t max_direct_io_size);
+HIPFILE_API hipFileError_t
+hipFileDriverSetMaxCacheSize(size_t max_cache_size);
+HIPFILE_API hipFileError_t
+hipFileDriverSetMaxPinnedMemSize(size_t max_pinned_size);
+HIPFILE_API hipFileError_t
+hipFileBatchIOSetUp(hipFileBatchHandle_t* batch_idp, unsigned max_nr);
+HIPFILE_API hipFileError_t
+hipFileBatchIOSubmit(hipFileBatchHandle_t batch_idp,
+                     unsigned             nr,
+                     hipFileIOParams_t*   iocbp,
+                     unsigned             flags);
+HIPFILE_API hipFileError_t
+hipFileBatchIOGetStatus(hipFileBatchHandle_t batch_idp,
+                        unsigned             min_nr,
+                        unsigned*            nr,
+                        hipFileIOEvents_t*   iocbp,
+                        struct timespec*     timeout);
+HIPFILE_API hipFileError_t
+hipFileBatchIOCancel(hipFileBatchHandle_t batch_idp);
+HIPFILE_API void
+hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
+HIPFILE_API hipFileError_t
+hipFileReadAsync(hipFileHandle_t fh,
+                 void*           buffer_base,
+                 size_t*         size_p,
+                 hoff_t*         file_offset_p,
+                 hoff_t*         buffer_offset_p,
+                 ssize_t*        bytes_read_p,
+                 hipStream_t     stream);
+HIPFILE_API hipFileError_t
+hipFileWriteAsync(hipFileHandle_t fh,
+                  void*           buffer_base,
+                  size_t*         size_p,
+                  hoff_t*         file_offset_p,
+                  hoff_t*         buffer_offset_p,
+                  ssize_t*        bytes_written_p,
+                  hipStream_t     stream);
+HIPFILE_API hipFileError_t
+hipFileStreamRegister(hipStream_t stream, unsigned flags);
+HIPFILE_API hipFileError_t
+hipFileStreamDeregister(hipStream_t stream);
+HIPFILE_API hipFileError_t
+hipFileGetVersion(unsigned* major, unsigned* minor, unsigned* patch);
+HIPFILE_API hipFileError_t
+hipFileGetParameterSizeT(hipFileSizeTConfigParameter_t param, size_t* value);
+HIPFILE_API hipFileError_t
+hipFileGetParameterBool(hipFileBoolConfigParameter_t param, bool* value);
+HIPFILE_API hipFileError_t
+hipFileGetParameterString(hipFileStringConfigParameter_t param, char* desc_str, int len);
+HIPFILE_API hipFileError_t
+hipFileSetParameterSizeT(hipFileSizeTConfigParameter_t param, size_t value);
+HIPFILE_API hipFileError_t
+hipFileSetParameterBool(hipFileBoolConfigParameter_t param, bool value);
+HIPFILE_API hipFileError_t
+hipFileSetParameterString(hipFileStringConfigParameter_t param, const char* desc_str);
 
-#ifdef __cplusplus
+#    ifdef __cplusplus
 }
-#endif
+#    endif
 
 #endif

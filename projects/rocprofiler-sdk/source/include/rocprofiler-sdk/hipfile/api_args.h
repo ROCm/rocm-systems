@@ -59,7 +59,7 @@ typedef union rocprofiler_hipfile_api_args_t
     struct
     {
         hipFileHandle_t* fh;
-        hipFileDescr_t* descr;
+        hipFileDescr_t*  descr;
     } hipFileHandleRegister;
 
     struct

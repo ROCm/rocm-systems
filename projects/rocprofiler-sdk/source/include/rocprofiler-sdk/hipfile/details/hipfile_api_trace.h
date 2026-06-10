@@ -11,10 +11,10 @@
 #    include <hipfile-api-trace.h>
 #else
 
-#include <rocprofiler-sdk/hipfile/details/hipfile.h>
+#    include <rocprofiler-sdk/hipfile/details/hipfile.h>
 
-#define HIPFILE_RUNTIME_API_TABLE_MAJOR_VERSION 0
-#define HIPFILE_RUNTIME_API_TABLE_STEP_VERSION 0
+#    define HIPFILE_RUNTIME_API_TABLE_MAJOR_VERSION 0
+#    define HIPFILE_RUNTIME_API_TABLE_STEP_VERSION  0
 
 typedef const char* (*PfnHipFileGetOpErrorString)(hipFileOpError_t status);
 typedef hipFileError_t (*PfnHipFileHandleRegister)(hipFileHandle_t* fh, hipFileDescr_t* descr);
@@ -39,55 +39,52 @@ typedef hipFileError_t (*PfnHipFileDriverSetPollMode)(bool poll, size_t poll_thr
 typedef hipFileError_t (*PfnHipFileDriverSetMaxDirectIOSize)(size_t max_direct_io_size);
 typedef hipFileError_t (*PfnHipFileDriverSetMaxCacheSize)(size_t max_cache_size);
 typedef hipFileError_t (*PfnHipFileDriverSetMaxPinnedMemSize)(size_t max_pinned_size);
-typedef hipFileError_t (*PfnHipFileBatchIOSetUp)(hipFileBatchHandle_t* batch_idp,
-                                                unsigned               max_nr);
+typedef hipFileError_t (*PfnHipFileBatchIOSetUp)(hipFileBatchHandle_t* batch_idp, unsigned max_nr);
 typedef hipFileError_t (*PfnHipFileBatchIOSubmit)(hipFileBatchHandle_t batch_idp,
-                                                 unsigned             nr,
-                                                 hipFileIOParams_t*   iocbp,
-                                                 unsigned             flags);
+                                                  unsigned             nr,
+                                                  hipFileIOParams_t*   iocbp,
+                                                  unsigned             flags);
 typedef hipFileError_t (*PfnHipFileBatchIOGetStatus)(hipFileBatchHandle_t batch_idp,
-                                                    unsigned             min_nr,
-                                                    unsigned*            nr,
-                                                    hipFileIOEvents_t*   iocbp,
-                                                    struct timespec*     timeout);
+                                                     unsigned             min_nr,
+                                                     unsigned*            nr,
+                                                     hipFileIOEvents_t*   iocbp,
+                                                     struct timespec*     timeout);
 typedef hipFileError_t (*PfnHipFileBatchIOCancel)(hipFileBatchHandle_t batch_idp);
 typedef void (*PfnHipFileBatchIODestroy)(hipFileBatchHandle_t batch_idp);
 typedef hipFileError_t (*PfnHipFileReadAsync)(hipFileHandle_t fh,
-                                             void*           buffer_base,
-                                             size_t*         size_p,
-                                             hoff_t*         file_offset_p,
-                                             hoff_t*         buffer_offset_p,
-                                             ssize_t*        bytes_read_p,
-                                             hipStream_t     stream);
-typedef hipFileError_t (*PfnHipFileWriteAsync)(hipFileHandle_t fh,
                                               void*           buffer_base,
                                               size_t*         size_p,
                                               hoff_t*         file_offset_p,
                                               hoff_t*         buffer_offset_p,
-                                              ssize_t*        bytes_written_p,
+                                              ssize_t*        bytes_read_p,
                                               hipStream_t     stream);
+typedef hipFileError_t (*PfnHipFileWriteAsync)(hipFileHandle_t fh,
+                                               void*           buffer_base,
+                                               size_t*         size_p,
+                                               hoff_t*         file_offset_p,
+                                               hoff_t*         buffer_offset_p,
+                                               ssize_t*        bytes_written_p,
+                                               hipStream_t     stream);
 typedef hipFileError_t (*PfnHipFileStreamRegister)(hipStream_t stream, unsigned flags);
 typedef hipFileError_t (*PfnHipFileStreamDeregister)(hipStream_t stream);
-typedef hipFileError_t (*PfnHipFileGetVersion)(unsigned* major,
-                                              unsigned* minor,
-                                              unsigned* patch);
+typedef hipFileError_t (*PfnHipFileGetVersion)(unsigned* major, unsigned* minor, unsigned* patch);
 typedef hipFileError_t (*PfnHipFileGetParameterSizeT)(hipFileSizeTConfigParameter_t param,
-                                                     size_t*                        value);
+                                                      size_t*                       value);
 typedef hipFileError_t (*PfnHipFileGetParameterBool)(hipFileBoolConfigParameter_t param,
-                                                    bool*                          value);
+                                                     bool*                        value);
 typedef hipFileError_t (*PfnHipFileGetParameterString)(hipFileStringConfigParameter_t param,
-                                                      char*                          desc_str,
-                                                      int                            len);
+                                                       char*                          desc_str,
+                                                       int                            len);
 typedef hipFileError_t (*PfnHipFileSetParameterSizeT)(hipFileSizeTConfigParameter_t param,
-                                                     size_t                         value);
+                                                      size_t                        value);
 typedef hipFileError_t (*PfnHipFileSetParameterBool)(hipFileBoolConfigParameter_t param,
-                                                    bool                           value);
+                                                     bool                         value);
 typedef hipFileError_t (*PfnHipFileSetParameterString)(hipFileStringConfigParameter_t param,
-                                                      const char*                    desc_str);
+                                                       const char*                    desc_str);
 
 struct hipFileDispatchTable
 {
-    size_t                               size;
+    size_t                              size;
     PfnHipFileGetOpErrorString          pfn_hipfile_get_op_error_string;
     PfnHipFileHandleRegister            pfn_hipfile_handle_register;
     PfnHipFileHandleDeregister          pfn_hipfile_handle_deregister;
