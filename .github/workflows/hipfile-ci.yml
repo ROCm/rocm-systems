@@ -70,8 +70,9 @@ jobs:
 
   build_and_test_NVIDIA:
     # NVIDIA can't build with amdclang++; its meaningful compilers (clang++, g++)
-    # arrive via the cxx_compiler axis, so skip the amdclang++ legs here.
-    if: ${{ !startsWith(inputs.rocm_version, '7.13.') && inputs.rocm_version != 'nightly' && inputs.cxx_compiler != 'amdclang++' }}
+    # arrive via the cxx_compiler axis, so skip the amdclang++ legs here. Only
+    # run on the default C++20 standard.
+    if: ${{ !startsWith(inputs.rocm_version, '7.13.') && inputs.rocm_version != 'nightly' && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
     uses: ./.github/workflows/hipfile-build-nvidia.yml
     with:
       ci_image: ${{ inputs.ci_image_nvidia }}
