@@ -168,7 +168,8 @@ ExecTest_SLR() {
   if [[ "" == "$NOTIMEOUT" ]]; then
     TIMEOUT=$((5 * 60)) # Timeout in seconds
   fi
-  HEAP_SIZE=$((6*1024*1024*1024))
+  # Use ROCSHMEM_HEAP_SIZE if already set (e.g., by heatmap tests), otherwise default to 6GB
+  HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((6*1024*1024*1024))}
 
   if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
   then
