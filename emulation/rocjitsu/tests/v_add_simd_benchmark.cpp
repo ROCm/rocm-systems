@@ -418,7 +418,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCmpClassF32_Vop3) {
     return;
   }
   uint32_t w0 = (106u & 0xFF) | ((16u & 0x3FF) << 16) | (0x34u << 26); // vdst=VCC, op=16
-  uint32_t w1 = 256u | (1u << 9);                                      // src0=v0, src1=v1
+  uint32_t w1 = 256u | (257u << 9);                                    // src0=v0, src1=v1
   run_words("v_cmp_class_f32_e64 v0, v1 -> vcc", w0, w1, /*sanitize_finite=*/false);
 }
 
@@ -610,7 +610,7 @@ TEST(VAddSimdBenchmark, Cdna4_VAdd3U32_Vop3) {
   }
   // VOP3: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|src2<<18.
   uint32_t w0 = (2u) | ((511u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (3u << 18); // src0=v0 src1=v1 src2=v3
+  uint32_t w1 = 256u | (257u << 9) | (259u << 18); // src0=v0 src1=v1 src2=v3
   run_words("v_add3_u32_e64 v2, v0, v1, v3", w0, w1, /*sanitize_finite=*/false);
 }
 
@@ -672,7 +672,7 @@ TEST(VAddSimdBenchmark, Cdna4_VDivFmasF32_Vop3) {
     return;
   }
   uint32_t w0 = (6u) | ((482u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (2u << 18); // src0=v0 src1=v1 src2=v2
+  uint32_t w1 = 256u | (257u << 9) | (258u << 18); // src0=v0 src1=v1 src2=v2
   run_words("v_div_fmas_f32_e64 v6, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
 }
 
@@ -687,7 +687,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCndmaskB32_Vop3) {
   // VOP3 ternary encoding: word0 = vdst|op<<16|0x34<<26; word1 = src0|src1<<9|
   // src2<<18. src2=VCC=106. Selector pattern is set by seed_inputs (vcc init).
   uint32_t w0 = (2u) | ((256u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (106u << 18);
+  uint32_t w1 = 256u | (257u << 9) | (106u << 18);
   run_words("v_cndmask_b32_e64 v2, v0, v1, vcc", w0, w1, /*sanitize_finite=*/false);
 }
 
@@ -716,7 +716,7 @@ TEST(VAddSimdBenchmark, Cdna4_VFmaF32_Vop3) {
   }
   // VOP3 ternary: word0 vdst|op<<16|0x34<<26; word1 src0|src1<<9|src2<<18.
   uint32_t w0 = (6u) | ((459u & 0x3FF) << 16) | (0x34u << 26);
-  uint32_t w1 = 256u | (1u << 9) | (2u << 18); // src0=v0 src1=v1 src2=v2
+  uint32_t w1 = 256u | (257u << 9) | (258u << 18); // src0=v0 src1=v1 src2=v2
   run_words("v_fma_f32_e64 v6, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
 }
 
@@ -750,7 +750,7 @@ TEST(VAddSimdBenchmark, Cdna4_VCubemaF32_Vop3) {
     return;
   }
   uint32_t w0, w1;
-  vop3_tern_encode(455, /*vdst=*/3, /*src0=*/256, /*src1=*/257, /*src2=*/2, w0, w1);
+  vop3_tern_encode(455, /*vdst=*/3, /*src0=*/256, /*src1=*/257, /*src2=*/258, w0, w1);
   run_words("v_cubema_f32_e64 v3, v0, v1, v2", w0, w1, /*sanitize_finite=*/true);
 }
 
