@@ -152,12 +152,12 @@ int ualoe_cdev_close(ualoe_handle_t handle) {
   int rc;
 
   rc = ualoe_cdev_find_handle(handle, &cdev_handle);
-  if (!rc) {
-    pthread_mutex_lock(&cdev_handle_lock);
-    LIST_REMOVE(cdev_handle, lentry);
-    pthread_mutex_unlock(&cdev_handle_lock);
-    free(cdev_handle);
-  }
+  if (rc) return rc;
+
+  pthread_mutex_lock(&cdev_handle_lock);
+  LIST_REMOVE(cdev_handle, lentry);
+  pthread_mutex_unlock(&cdev_handle_lock);
+  free(cdev_handle);
 
   ualoe_cb_fini(handle);
 
@@ -573,6 +573,14 @@ int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry
     /* Skip NULL datasets (filtered categories) */
     if (telemetry->datasets[i] == NULL) continue;
 
+    if (cfg_tele.datasets[i].instance_count > CFG_TELEMETRY_MAX_INSTANCES) {
+      ualoe_log_error(
+          "Failed to get telemetry, category %d instance_count %u exceeds maximum %d.\n", i,
+          cfg_tele.datasets[i].instance_count, CFG_TELEMETRY_MAX_INSTANCES);
+      rc = EINVAL;
+      goto out_free_instances;
+    }
+
     telemetry->datasets[i]->category = cfg_tele.datasets[i].category;
     telemetry->datasets[i]->generation_count = cfg_tele.datasets[i].generation_count;
     telemetry->datasets[i]->timestamp = cfg_tele.datasets[i].timestamp;
@@ -588,6 +596,13 @@ int ualoe_cdev_telemetry_get(ualoe_handle_t handle, ualoe_telemetry_t* telemetry
 
       telemetry->datasets[i]->instances[j].logical_idx =
           cfg_tele.datasets[i].instances[j].logical_id;
+      if (cfg_tele.datasets[i].instances[j].item_count > CFG_TELEMETRY_MAX_ITEMS) {
+        ualoe_log_error(
+            "Failed to get telemetry, category %d instance %d item_count %u exceeds maximum %d.\n",
+            i, j, cfg_tele.datasets[i].instances[j].item_count, CFG_TELEMETRY_MAX_ITEMS);
+        rc = EINVAL;
+        goto out_free_instances;
+      }
       telemetry->datasets[i]->instances[j].item_count =
           cfg_tele.datasets[i].instances[j].item_count;
       for (int k = 0; k < telemetry->datasets[i]->instances[j].item_count; k++) {

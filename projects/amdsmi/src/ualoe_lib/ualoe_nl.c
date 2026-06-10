@@ -230,16 +230,16 @@ int ualoe_nl_open(const char* name, ualoe_handle_t* handle) {
   rc = ualoe_nl_connect(nl_handle, name);
   if (rc) goto free_socket;
 
-  pthread_mutex_lock(&handle_lock);
-  LIST_INSERT_HEAD(&open_handles, nl_handle, lentry);
-  pthread_mutex_unlock(&handle_lock);
-
   /**
    * For now, keep cdev fd for ioctl calls until netlink support is
    * added for all operations.
    */
   rc = ualoe_cdev_open(name, &nl_handle->cdev_fd);
   if (rc) goto free_socket;
+
+  pthread_mutex_lock(&handle_lock);
+  LIST_INSERT_HEAD(&open_handles, nl_handle, lentry);
+  pthread_mutex_unlock(&handle_lock);
 
   *handle = nl_handle->fd;
 
@@ -1857,9 +1857,11 @@ static int ifoe_nl_parse_netport_state(const struct nlattr* attr, void* data) {
       state->loopback_mode = mnl_attr_get_u32(attr);
       break;
     case CFG_ATTR_NETPORT_IFOE_MAC_ADDR:
+      if (mnl_attr_get_payload_len(attr) < UALOE_MAC_ADDRESS_SIZE) return MNL_CB_ERROR;
       memcpy(state->ifoe_mac_addr, mnl_attr_get_payload(attr), UALOE_MAC_ADDRESS_SIZE);
       break;
     case CFG_ATTR_NETPORT_PERM_ADDR:
+      if (mnl_attr_get_payload_len(attr) < UALOE_MAC_ADDRESS_SIZE) return MNL_CB_ERROR;
       memcpy(state->permanent_mac_addr, mnl_attr_get_payload(attr), UALOE_MAC_ADDRESS_SIZE);
       break;
     default:
