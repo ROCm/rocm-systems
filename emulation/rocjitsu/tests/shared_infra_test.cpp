@@ -177,7 +177,7 @@ TEST(CuFactoryTest, AccVgprIsasDoNotAliasNextWaveSlot) {
     auto *wf1 = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf1, nullptr);
 
-    const uint32_t wf0_acc0 = wf0->vgpr_alloc().base + 256;
+    const uint32_t wf0_acc0 = wf0->vgpr_alloc().base + amdgpu::ACC_VGPR_OFFSET;
     const uint32_t wf1_v0 = wf1->vgpr_alloc().base;
     EXPECT_NE(wf0_acc0, wf1_v0);
 
