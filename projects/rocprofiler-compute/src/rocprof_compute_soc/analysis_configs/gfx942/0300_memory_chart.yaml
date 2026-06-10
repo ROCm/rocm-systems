@@ -60,7 +60,7 @@ Panel Config:
         VL1 Atomic:
           value: ROUND(SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom), 0)
         VL1 Hit:
-          value: ROUND(100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum), 0)
+          value: ROUND(100 - SUM(100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM(TCP_TOTAL_READ_sum + TCP_TOTAL_WRITE_sum), 0)
         VL1 Coalesce:
           value: ROUND(100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum)), 0)
         VL1 Stall:
