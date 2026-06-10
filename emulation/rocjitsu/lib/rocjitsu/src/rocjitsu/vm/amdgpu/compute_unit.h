@@ -29,6 +29,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/simulation.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -435,6 +436,9 @@ protected:
   /// @brief Count the number of free VGPR allocation blocks.
   virtual uint32_t free_vgpr_blocks() const = 0;
 
+  /// @brief Number of physical VGPR registers in one allocation block.
+  virtual uint32_t vgpr_allocation_block_size() const = 0;
+
   /// @brief Update wavefront states (WAITCNT, BARRIER, ENDING transitions).
   void update_wf_states();
 
@@ -562,8 +566,11 @@ public:
   IsaExecComputeUnit(std::string name, const ComputeUnitCore::Config &config, GpuMemory *memory,
                      L2Cache *l2)
       : ExecComputeUnit<Mode>(std::move(name), config, memory, l2, Isa::WF_SIZE) {
-    vgpr_file_.init(config.num_wf_slots * config.vgprs_per_wf, config.vgprs_per_wf);
-    vgpr_to_wave_.resize(config.num_wf_slots * config.vgprs_per_wf, nullptr);
+    constexpr uint32_t accvgpr_extent =
+        Isa::MAX_ACC_VGPRS_PER_WF == 0 ? 0 : Isa::MAX_VGPRS_PER_WF + Isa::MAX_ACC_VGPRS_PER_WF;
+    vgprs_per_block_ = std::max(config.vgprs_per_wf, accvgpr_extent);
+    vgpr_file_.init(config.num_wf_slots * vgprs_per_block_, vgprs_per_block_);
+    vgpr_to_wave_.resize(config.num_wf_slots * vgprs_per_block_, nullptr);
     for (uint32_t i = 0; i < config.num_wf_slots; ++i)
       this->wfs_[i] = std::make_unique<IsaWavefront<Isa>>(*this, i);
     this->sram_ecc_ = Isa::SRAM_ECC;
@@ -613,6 +620,8 @@ protected:
 
   uint32_t free_vgpr_blocks() const override { return vgpr_file_.free_block_count(); }
 
+  uint32_t vgpr_allocation_block_size() const override { return vgprs_per_block_; }
+
   /// @brief Execute one instruction on the given wavefront.
   ///
   /// @brief Execute one instruction on the given wavefront via direct dispatch.
@@ -621,6 +630,7 @@ protected:
 private:
   simdojo::RegisterFile<Vgpr> vgpr_file_{"vgpr"};
   std::vector<Wavefront *> vgpr_to_wave_; ///< Physical VGPR → owning wavefront.
+  uint32_t vgprs_per_block_ = 0;
 };
 
 } // namespace amdgpu

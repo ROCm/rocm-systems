@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/machine_insts.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
@@ -42,7 +43,9 @@ using namespace rocjitsu;
 static_assert(GpuIsa<cdna3::Isa>);
 static_assert(GpuIsa<gfx1250::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
+static_assert(HasAccVgpr<cdna2::Isa>);
 static_assert(HasAccVgpr<cdna3::Isa>);
+static_assert(HasAccVgpr<cdna4::Isa>);
 static_assert(!HasAccVgpr<gfx1250::Isa>);
 static_assert(!HasAccVgpr<rdna4::Isa>);
 static_assert(HasMonolithicWaitcnt<cdna3::Isa>);
@@ -60,6 +63,7 @@ static_assert(gfx1250::Isa::WF_SIZE_MAX == 32);
 static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == 0);
 static_assert(cdna2::Isa::MAX_ACC_VGPRS_PER_WF == 256);
 static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == 256);
+static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == 256);
 
 // ---------------------------------------------------------------------------
 // MFMA register layout tests
@@ -149,6 +153,40 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->arch(), arch);
+}
+
+TEST(CuFactoryTest, AccVgprIsasDoNotAliasNextWaveSlot) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(::testing::Message() << "arch=" << static_cast<int>(arch));
+    amdgpu::GpuMemory mem("test_mem");
+    amdgpu::L2Cache l2("test_l2");
+
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 2;
+    cfg.sgprs_per_wf = 104;
+    cfg.vgprs_per_wf = 256;
+    cfg.lds_size_kb = 64;
+
+    auto cu = amdgpu::ComputeUnitCore::create("test_cu", cfg, &mem, &l2);
+    ASSERT_NE(cu, nullptr);
+
+    auto *wf0 = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf0, nullptr);
+    auto *wf1 = cu->dispatch_wf(1, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf1, nullptr);
+
+    const uint32_t wf0_acc0 = wf0->vgpr_alloc().base + 256;
+    const uint32_t wf1_v0 = wf1->vgpr_alloc().base;
+    EXPECT_NE(wf0_acc0, wf1_v0);
+
+    cu->write_vgpr(wf0_acc0, 0, 0xA55A0001u);
+    cu->write_vgpr(wf1_v0, 0, 0x5AA50002u);
+
+    EXPECT_EQ(cu->read_vgpr(wf0_acc0, 0), 0xA55A0001u);
+    EXPECT_EQ(cu->read_vgpr(wf1_v0, 0), 0x5AA50002u);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(AllIsas, CuFactoryTest,
