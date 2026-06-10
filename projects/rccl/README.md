@@ -42,14 +42,13 @@ RCCL build & installation helper script
        --debug                 Build debug library
        --debug-fast            Build debug library with lto optimization disabled (fast build times)
     -d|--dependencies          Install RCCL dependencies
-       --disable-colltrace     Build without collective trace
        --disable-roctx         Build without ROCTX logging
        --disable-warp-speed    Disable WARP_SPEED kernel optimizations
        --dump-asm              Disassemble code and dump assembly with inline code
     -c|--enable-code-coverage  Enable code coverage
        --enable_backtrace      Build with custom backtrace support
        --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
-    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
+    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
        --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
        --generate-sym-kernels  Generate symmetric memory kernels (default: OFF)
     -h|--help                  Prints this help message
@@ -78,7 +77,6 @@ RCCL build & installation helper script
     -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
     -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
     -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
-    -DPROFILE=ON                          Enable profiling (default: OFF)
     -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
     -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
 
