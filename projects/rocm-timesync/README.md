@@ -103,7 +103,7 @@ diagram below illustrates one such architecture.
 The key steps:
 - A standalone `ROCm-timesync` system service is deployed. It runs `rocm-timesync-d_m` which query KFD for
   (`CLOCK_REALTIME`, GPU `m`) crosststamps. We envision one thread per GPU on the system 
-- These threads publish data streams througgh a tracing infrastructure such as [lttng](https://lttng.org/).
+- These threads publish data streams through a tracing infrastructure such as [lttng](https://lttng.org/).
 - On the ROCR side, `ROCR-timesync-r_m` consumes the data streams it needs (e.g., the GPUs its process is using),
   and stores this data in a shared TSDB.
 - ROCR's implementation of `hsa_amd_profiling_tick_to_system_domain()` invokes a translation function provided by `ROCm
@@ -112,16 +112,16 @@ The key steps:
 #### Regarding lttng
 
 `lttng` is a open-source tracing infrastructure in Linux. Using it in this way lets us decouple the producer
-(`ROCM-timesync service`) from the consumer (`ROCR/librocr-timesync-consumer.so`). This has some nice benefits,
+(`ROCM-timesync` service) from the consumer (`ROCR/librocr-timesync-consumer.so`). This has some nice benefits,
 including:
 
-+ Producer/consumer do not explicltiy communicate via an API. 
++ Producer/consumer do not explicitly communicate via an API. 
 
-    - One alternative architecture involves consumers explicitly
-    calling into producers via an API to configure things like sampling frequencies. The approach here is simpler: we just
-    publish data streams at multiple frequencies and allow consumers to attach to the one(s) they need. For example, a
-    PTP-enabled multi-node workload needing ~100ns precision for performance analysis may need sampling at a high frequency
-    such as 100 Hz, while a client application can tolerate lower precision such as 1 Hz. 
+    - One alternative architecture involves consumers calling into producers via an API to configure things like sampling
+    frequencies. The approach here is simpler: we just publish data streams at multiple frequencies and allow consumers to
+    attach to the one(s) they need. For example, a PTP-enabled multi-node workload needing ~100ns precision for performance
+    analysis may need sampling at a high frequencyu such as 100 Hz, while a client application can tolerate lower precision
+    such as 1 Hz. 
     
         - We envision publishing `M * N` streams, where `M` is the number of GPUs on the node and `N` is the
           number of precisions/frequencies supported.
@@ -145,6 +145,6 @@ Cons:
 - Simplicity: clearly this is not as simple as the in-process design; however, we strike some balance by using a
   fully API-less design and relying on a system service in `lttng` that will likely already be shipping with future
   versions of ROCm.
-- Data retention: the fact that data is now stored out of process means that it is not straightforwards to reap old
+- Data retention: the fact that data is now stored out of process means that it is not straightforward to reap old
   data. There must be some mechanism to tag on insertion with the corresponding consumer process(es), or absent that a
   downsampling process to gradually decrease and ultimately evict data as it ages.
