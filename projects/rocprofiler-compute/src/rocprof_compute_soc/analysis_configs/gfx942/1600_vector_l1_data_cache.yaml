@@ -91,9 +91,9 @@ Panel Config:
           max: MAX(TCP_TOTAL_CACHE_ACCESSES_sum / $denom)
           unit: (Requests + $normUnit)
         Cache Hits:
-          avg: SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom)
-          min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom)
-          max: MAX((TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom)
+          avg: SUM(TCP_TOTAL_READ_sum + TCP_TOTAL_WRITE_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / SUM($denom)
+          min: MIN(((TCP_TOTAL_READ_sum + TCP_TOTAL_WRITE_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / $denom))
+          max: MAX(((TCP_TOTAL_READ_sum + TCP_TOTAL_WRITE_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / $denom))
           unit: (Requests + $normUnit)
         Invalidations:
           avg: SUM(TCP_TOTAL_WRITEBACK_INVALIDATES_sum) / SUM($denom)
