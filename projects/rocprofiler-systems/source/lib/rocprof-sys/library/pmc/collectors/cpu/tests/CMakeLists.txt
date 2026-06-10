@@ -17,6 +17,7 @@ target_link_libraries(
         rocprofiler-systems-logger
         rocprofiler-systems-common-library
         rocprofiler-systems-user-library
+        rocprofiler-systems::rocprofiler-systems-procfs-backend
 )
 
 target_include_directories(

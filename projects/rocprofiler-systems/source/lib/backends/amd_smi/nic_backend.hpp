@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "library/pmc/collectors/nic/types.hpp"
+#include "backends/amd_smi/nic_types.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -14,11 +14,12 @@
 
 #include <amd_smi/amdsmi.h>
 
-namespace rocprofsys::pmc::collectors::nic
+namespace rocprofsys::backends::amd_smi
 {
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
 /**
- * @brief NIC driver that owns a processor handle and abstracts AMD SMI.
+ * @brief NIC backend that owns a processor handle and abstracts AMD SMI.
  *
  * Each instance wraps a single NIC processor handle. All AMD SMI details
  * (handle, status codes, raw structs) are encapsulated here so that
@@ -26,10 +27,10 @@ namespace rocprofsys::pmc::collectors::nic
  *
  * Methods throw std::runtime_error on AMD SMI failures.
  */
-class nic_driver
+class nic_backend
 {
 public:
-    explicit nic_driver(amdsmi_processor_handle handle) noexcept
+    explicit nic_backend(amdsmi_processor_handle handle) noexcept
     : m_handle{ handle }
     {}
 
@@ -38,7 +39,7 @@ public:
      * @return ASIC info with vendor and product names.
      * @throws std::runtime_error If AMD SMI query fails.
      */
-    [[nodiscard]] asic_info get_nic_asic_info() const
+    [[nodiscard]] nic::asic_info get_nic_asic_info() const
     {
         amdsmi_nic_asic_info_t raw{};
         check(amdsmi_get_nic_asic_info(m_handle, &raw), "get_nic_asic_info");
@@ -50,7 +51,7 @@ public:
      * @return Port info with device name (empty if no ports).
      * @throws std::runtime_error If AMD SMI query fails.
      */
-    [[nodiscard]] port_info get_nic_port_info() const
+    [[nodiscard]] nic::port_info get_nic_port_info() const
     {
         amdsmi_nic_port_info_t raw{};
         check(amdsmi_get_nic_port_info(m_handle, &raw), "get_nic_port_info");
@@ -66,7 +67,7 @@ public:
      * @return RDMA info with port count (zero if no RDMA devices).
      * @throws std::runtime_error If AMD SMI query fails.
      */
-    [[nodiscard]] rdma_info get_nic_rdma_info() const
+    [[nodiscard]] nic::rdma_info get_nic_rdma_info() const
     {
         // Heap-allocate: amdsmi_nic_rdma_devices_info_t is ~558 KiB (above the
         // -Wstack-usage=524288 ceiling).
@@ -85,7 +86,7 @@ public:
      * @return Vector of stat entries (empty if no statistics available).
      * @throws std::runtime_error If AMD SMI query fails.
      */
-    [[nodiscard]] std::vector<stat_entry> get_nic_rdma_port_statistics(
+    [[nodiscard]] std::vector<nic::stat_entry> get_nic_rdma_port_statistics(
         std::uint8_t rdma_port_idx) const
     {
         std::uint32_t num_stats = 0;
@@ -103,11 +104,11 @@ public:
                                                   raw.data()),
               "get_nic_rdma_port_statistics (data)");
 
-        std::vector<stat_entry> result;
+        std::vector<nic::stat_entry> result;
         result.reserve(num_stats);
         for(const auto& stat : raw)
         {
-            result.emplace_back(stat_entry{ stat.name, stat.value });
+            result.emplace_back(nic::stat_entry{ stat.name, stat.value });
         }
         return result;
     }
@@ -131,5 +132,6 @@ private:
 
     const amdsmi_processor_handle m_handle;
 };
+#endif
 
-}  // namespace rocprofsys::pmc::collectors::nic
+}  // namespace rocprofsys::backends::amd_smi

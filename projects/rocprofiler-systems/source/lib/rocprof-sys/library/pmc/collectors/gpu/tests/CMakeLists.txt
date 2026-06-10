@@ -9,6 +9,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-logger
         rocprofiler-systems::rocprofiler-systems-headers
+        rocprofiler-systems::rocprofiler-systems-amd-smi-backend
 )
 
 if(ROCPROFSYS_BUILD_AINIC)

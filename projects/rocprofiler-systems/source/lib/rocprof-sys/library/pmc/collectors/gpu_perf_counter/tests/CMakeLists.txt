@@ -17,5 +17,6 @@ target_link_libraries(
         rocprofiler-systems-logger
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-rocm
+        rocprofiler-systems::rocprofiler-systems-rocprofiler-sdk-backend
         rocprofiler-systems::rocprofiler-systems-timemory
 )

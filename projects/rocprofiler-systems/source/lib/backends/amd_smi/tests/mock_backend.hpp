@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "backends/amd_smi/backend.hpp"
 #include "core/sdma_feature.hpp"
 #include <cstdint>
 
@@ -12,20 +13,20 @@
 
 #include <utility>
 
-namespace rocprofsys::pmc::drivers::amd_smi::testing
+namespace rocprofsys::backends::amd_smi::testing
 {
 
 /**
- * @brief Mock implementation of AMD SMI driver for unit testing.
+ * @brief Mock implementation of AMD SMI backend for unit testing.
  *
- * This is the unified mock driver used across all PMC tests. It provides a complete
- * Google Mock implementation of the driver interface with factory pattern support
+ * This is the unified mock backend used across all PMC tests. It provides a complete
+ * Google Mock implementation of the backend interface with factory pattern support
  * and default behaviors via set_up_defaults().
  *
- * Used by both provider-level tests and device collector tests (aliased as MockDriver
+ * Used by both provider-level tests and device collector tests (aliased as MockBackend
  * in test_device.cpp for compatibility).
  */
-class mock_driver
+class mock_backend
 {
 public:
     MOCK_METHOD(amdsmi_status_t, init, ());
@@ -89,35 +90,37 @@ public:
 };
 
 /**
- * @brief Factory for creating and injecting mock driver instances in tests.
+ * @brief Factory for creating and injecting mock backend instances in tests.
  *
- * This factory allows tests to inject a mock_driver instance that will be
+ * This factory allows tests to inject a mock_backend instance that will be
  * used by the code under test. The mock can be configured with expectations
- * and behaviors before being injected via set_mock_driver().
+ * and behaviors before being injected via set_mock_backend().
  */
-struct mock_driver_factory
+struct mock_backend_factory
 {
-    using driver_t = mock_driver;
+    using backend_t = mock_backend;
 
-    static std::shared_ptr<driver_t> s_mock_driver;
-
-    /**
-     * @brief Create (retrieve) the mock driver instance.
-     * @return Shared pointer to the currently set mock driver.
-     */
-    static std::shared_ptr<driver_t> create_driver() { return s_mock_driver; }
+    static std::shared_ptr<backend_t> s_mock_backend;
 
     /**
-     * @brief Set the mock driver instance to be used by tests.
-     * @param driver Mock driver instance to inject.
+     * @brief Create (retrieve) the mock backend instance.
+     * @return Shared pointer to the currently set mock backend.
      */
-    static void set_mock_driver(std::shared_ptr<driver_t> driver)
+    static std::shared_ptr<backend_t> create_backend() { return s_mock_backend; }
+
+    /**
+     * @brief Set the mock backend instance to be used by tests.
+     * @param backend Mock backend instance to inject.
+     */
+    static void set_mock_backend(std::shared_ptr<backend_t> backend)
     {
-        s_mock_driver = std::move(driver);
+        s_mock_backend = std::move(backend);
     }
 };
 
-/// Global mock driver instance shared across tests
-inline std::shared_ptr<mock_driver> mock_driver_factory::s_mock_driver = nullptr;
+/// Global mock backend instance shared across tests
+inline std::shared_ptr<mock_backend> mock_backend_factory::s_mock_backend = nullptr;
 
-}  // namespace rocprofsys::pmc::drivers::amd_smi::testing
+static_assert(rocprofsys::backends::amd_smi::management_backend<mock_backend>);
+
+}  // namespace rocprofsys::backends::amd_smi::testing

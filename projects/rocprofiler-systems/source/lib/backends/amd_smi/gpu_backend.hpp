@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "core/amd_smi.hpp"
-#include "library/pmc/collectors/gpu/types.hpp"
+#include "backends/amd_smi/gpu_types.hpp"
+#include "core/sdma_feature.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -14,13 +14,20 @@
 
 #include <amd_smi/amdsmi.h>
 
-namespace rocprofsys::pmc::collectors::gpu
+namespace rocprofsys::backends::amd_smi
 {
 
-class gpu_driver
+using gpu::asic_info;
+using gpu::MAX_NUM_JPEG_V1;
+using gpu::MAX_NUM_XCP;
+using gpu::MAX_NUM_XGMI_LINKS;
+using gpu::metrics;
+using gpu::populate_if_supported;
+
+class gpu_backend
 {
 public:
-    explicit gpu_driver(amdsmi_processor_handle handle) noexcept
+    explicit gpu_backend(amdsmi_processor_handle handle) noexcept
     : m_handle{ handle }
     {}
 
@@ -186,4 +193,4 @@ private:
     amdsmi_processor_handle m_handle;
 };
 
-}  // namespace rocprofsys::pmc::collectors::gpu
+}  // namespace rocprofsys::backends::amd_smi

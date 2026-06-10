@@ -5,7 +5,10 @@ add_library(pmc-nic-collector-tests OBJECT test_nic_device.cpp)
 
 target_link_libraries(
     pmc-nic-collector-tests
-    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-logger
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-logger
+        rocprofiler-systems::rocprofiler-systems-amd-smi-backend
 )
 
 if(ROCPROFSYS_BUILD_AINIC)
