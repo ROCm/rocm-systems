@@ -122,15 +122,24 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
     return ctx;
   }
   auto bytes_read = read(fd, ctx.buffer.get(), ctx.file_size);
-  if (bytes_read <= 0) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
-       << "[CPER] failed to read complete file, read only  " << bytes_read << " of "
-       << ctx.file_size << " bytes";
+  if (bytes_read < 0) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to read file, read only  "
+       << bytes_read << " of " << ctx.file_size << " bytes";
     LOG_ERROR(ss);
     close(fd);
     return ctx;
   }
   close(fd);
+
+  // An empty CPER ring (no RAS records) is a valid state, not an error. The
+  // amdgpu_ring_cper debugfs node advertises the ring capacity via st_size, but
+  // read() returns only the bytes actually present (0 when the ring is empty).
+  // Treat a zero read as success so callers report "no CPER records" instead of
+  // AMDSMI_STATUS_FILE_ERROR.
+  if (bytes_read == 0) {
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] CPER ring is empty (no records)";
+    LOG_DEBUG(ss);
+  }
 
   ctx.status = AMDSMI_STATUS_SUCCESS;
   ctx.file_size = bytes_read;
