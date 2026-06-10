@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/spm.hpp"
+#include "common/environment.hpp"
 #include "common/rocm_spm.hpp"
 #include "core/rocprofiler-sdk.hpp"
 
 #include "logger/debug.hpp"
-
-#include <cstdlib>
 
 namespace rocprofsys
 {
@@ -114,7 +113,7 @@ prepare_beta_environment(const beta_request& request)
 {
     if(!request.requested()) return;
 
-    ::setenv(beta_env_name, beta_env_value, 1);
+    ::rocprofsys::common::environment<>::set_env(beta_env_name, beta_env_value, 1);
     LOG_WARNING("ROCm SPM counter collection is enabled as a beta feature");
 }
 }  // namespace spm
