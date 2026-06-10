@@ -37,9 +37,6 @@ void Signal::Reset(uint64_t value) { Hsa::signal_store_screlease(signal_, value)
 // ================================================================================================
 
 IpcSignal::~IpcSignal() {
-  if (gpu_ptr_ != nullptr) {
-    Hsa::memory_unlock(reinterpret_cast<void*>(signal_.handle));
-  }
   if (signal_.handle != 0) {
     Hsa::signal_destroy(signal_);
   }

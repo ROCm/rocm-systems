@@ -32,7 +32,6 @@ class Signal : public device::Signal {
 class IpcSignal : public device::Signal {
  private:
   hsa_signal_t signal_;
-  void* gpu_ptr_ = nullptr;  // GPU-accessible pointer from memory_lock (if needed)
 
  public:
   IpcSignal() { signal_.handle = 0; }
