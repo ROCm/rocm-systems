@@ -334,7 +334,11 @@ if(BUILD_TESTS)
       ce/CeMPITests.cpp
       ce/CeInternalMPITests.cpp
       GrowMPITests.cpp
+<<<<<<< HEAD
       GinNcclTimeoutMPITests.cpp
+=======
+      SymmetricKernelMPITests.cpp
+>>>>>>> 45d97f63a6 ([AICOMRCCL-1119] [RCCL] test: add symmetric kernel data corruption regression tests)
     )
 
     add_executable(rccl-UnitTestsMPI ${MPI_TEST_SOURCE_FILES})
