@@ -837,6 +837,11 @@ class Runtime {
   // registered & mapped arrays.
   std::shared_mutex memory_lock_;
 
+  // Resolve |ptr| to its allocation_map_ entry, tolerating the one-page ASAN
+  // red-zone offset added by the allocate interceptor (see runtime.cpp). Returns
+  // allocation_map_.end() if no owning allocation is found.
+  std::map<const void*, AllocationRegion>::iterator FindAllocationEntry(const void* ptr);
+
   // Array containing driver interfaces for compatible agent kernel-mode
   // drivers. Currently supports AIE agents.
   std::vector<std::unique_ptr<Driver>> agent_drivers_;

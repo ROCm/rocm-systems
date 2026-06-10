@@ -333,6 +333,29 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
   return status;
 }
 
+std::map<const void*, Runtime::AllocationRegion>::iterator Runtime::FindAllocationEntry(
+    const void* ptr) {
+  auto it = allocation_map_.find(ptr);
+  if (it != allocation_map_.end()) return it;
+#if defined(SANITIZER_AMDGPU)
+  // ASAN's allocate interceptor returns (base + one red-zone page) but its free path
+  // doesn't strip it, so |ptr| isn't a tracked key. Recover the owning allocation when
+  // |ptr| is exactly one page into the immediately preceding entry.
+  static const size_t kAsanRedZonePageSize = 4096;
+  auto candidate = allocation_map_.upper_bound(ptr);
+  if (candidate != allocation_map_.begin()) {
+    --candidate;
+    const ptrdiff_t delta = static_cast<const char*>(ptr) -
+                            static_cast<const char*>(candidate->first);
+    if (delta == static_cast<ptrdiff_t>(kAsanRedZonePageSize) &&
+        static_cast<size_t>(delta) < candidate->second.size) {
+      return candidate;
+    }
+  }
+#endif
+  return allocation_map_.end();
+}
+
 hsa_status_t Runtime::FreeMemory(void* ptr) {
   if (ptr == nullptr) {
     return HSA_STATUS_SUCCESS;
@@ -342,16 +365,21 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   size_t size = 0;
   std::unique_ptr<std::vector<AllocationRegion::notifier_t>> notifiers;
   MemoryRegion::AllocateFlags alloc_flags = core::MemoryRegion::AllocateNoFlags;
+  // The pointer actually handed to the region/driver for release.  Normally this is
+  // the caller's |ptr|, but under ASAN FindAllocationEntry resolves a tracked base one
+  // red-zone page below |ptr|; release that base instead.
+  void* free_ptr = ptr;
 
   {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
-    std::map<const void*, AllocationRegion>::iterator it = allocation_map_.find(ptr);
+    std::map<const void*, AllocationRegion>::iterator it = FindAllocationEntry(ptr);
 
     if (it == allocation_map_.end()) {
       debug_warning(false && "Can't find address in allocation map");
       return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     }
+    free_ptr = const_cast<void*>(it->first);
     region = it->second.region;
     size = it->second.size;
     alloc_flags = it->second.alloc_flags;
@@ -389,12 +417,12 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   if (alloc_flags & core::MemoryRegion::AllocateAsan) {
-    HSAKMT_STATUS asan_status = HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(ptr));
+    HSAKMT_STATUS asan_status = HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(free_ptr));
     assert(asan_status == HSAKMT_STATUS_SUCCESS);
     UNUSED(asan_status);
   }
 
-  const hsa_status_t err = region->Free(ptr, size);
+  const hsa_status_t err = region->Free(free_ptr, size);
   if (err != HSA_STATUS_SUCCESS) {
     // hsaKmtFreeMemory failed to free this pointer. Throw a memory error event
 
@@ -417,7 +445,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
       memory_error_event.event_type = HSA_AMD_GPU_MEMORY_ERROR_EVENT;
       hsa_amd_gpu_memory_error_info_t& error_info = memory_error_event.memory_error;
 
-      error_info.virtual_address = reinterpret_cast<const uint64_t>(ptr);
+      error_info.virtual_address = reinterpret_cast<const uint64_t>(free_ptr);
       error_info.error_reason_mask = HSA_AMD_MEMORY_ERROR_MEMORY_IN_USE;
       error_info.agent = Agent::Convert(agentOwner);
 
@@ -432,7 +460,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
               "Memory critical error by agent node-%u (Agent handle: %p) on address %p. Reason: "
               "Memory in use. \n",
               agentOwner->node_id(), reinterpret_cast<void*>(agentOwner->public_handle().handle),
-              ptr);
+              free_ptr);
 
       assert(false && "GPU memory error.");
       std::abort();
@@ -683,11 +711,15 @@ hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
                                   const hsa_agent_t* agents, const void* ptr) {
   const AMD::MemoryRegion* amd_region = NULL;
   size_t alloc_size = 0;
+  // The tracked base of the allocation. Under ASAN FindAllocationEntry resolves a base
+  // one red-zone page below |ptr|; the region access must be granted on that base (and
+  // full size), not on the offset |ptr|, or the mapping over-runs the allocation.
+  const void* base_ptr = ptr;
 
   {
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
 
-    std::map<const void*, AllocationRegion>::const_iterator it = allocation_map_.find(ptr);
+    std::map<const void*, AllocationRegion>::iterator it = FindAllocationEntry(ptr);
 
     if (it == allocation_map_.end()) {
       /* See if this address was mapped via VMM */
@@ -702,10 +734,11 @@ hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
     if (!amd_region)
       return HSA_STATUS_SUCCESS;
 
+    base_ptr = it->first;
     alloc_size = it->second.size;
   }
 
-  return amd_region->AllowAccess(num_agents, agents, ptr, alloc_size);
+  return amd_region->AllowAccess(num_agents, agents, base_ptr, alloc_size);
 }
 
 hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
