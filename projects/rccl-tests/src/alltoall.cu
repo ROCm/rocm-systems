@@ -283,6 +283,9 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 
 // Message slice size above which CTAs stripe peers (not offsets) for xGMI link parallelism.
 constexpr size_t kAlltoAllPeerParallelByteThreshold = 64 * 1024;
+// Host-side mirror of kAlltoAllPeerParallelByteThreshold (device constant).
+static constexpr size_t kAlltoAllSmallMessageRankSliceBytes = 64 * 1024;
+
 // Hybrid GIN path: pipeline remote SDMA puts with local LSA copy in 1 MiB chunks.
 constexpr size_t kAlltoAllGinPipelineChunkBytes = 1 << 20;
 
@@ -335,11 +338,15 @@ template <typename T>
 __device__ __forceinline__ void AlltoAllNvlCopyPeerParallel(ncclWindow_t sendwin, size_t sendoffset,
     ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int blockId,
     int nBlocks, int tid, int nthreads) {
-  T* sendPtr = (T*)ncclGetLsaPointer(sendwin, sendoffset, rank);
+  (void)tid;
+  (void)nthreads;
+  T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
   for (int peer = blockId; peer < nRanks; peer += nBlocks) {
-    T* sendPeer = sendPtr + peer * count;
+    T* sendPeer = sendLocal + peer * count;
     T* recvPeer = (T*)ncclGetLsaPointer(recvwin, recvoffset, peer) + rank * count;
-    AlltoAllCopyOnePeerVectorized<T>(sendPeer, recvPeer, count, tid, nthreads);
+    int localTid = threadIdx.x;
+    int localNthreads = blockDim.x;
+    AlltoAllCopyOnePeerVectorized<T>(sendPeer, recvPeer, count, localTid, localNthreads);
   }
 }
 
@@ -526,6 +533,22 @@ __device__ __forceinline__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sen
   }
 }
 
+// Gin-anvil single-node fast path: below the peer-parallel threshold, use the same NVL
+// vectorized copy as GIN host proxy (-D 1). At larger per-rank slices, keep LSA copy
+// (AlltoAllNvlCopyPeerParallel regressed large-message bandwidth when selected blindly).
+template <typename T>
+__device__ __forceinline__ void AlltoAllGinAdaptiveLocalCopy(ncclWindow_t sendwin, size_t sendoffset,
+    ncclWindow_t recvwin, size_t recvoffset, size_t count, int recvRank, int startLsa,
+    int lsaSize, int rank, int nRanks, int blockId, int nBlocks, int tid, int nthreads) {
+  if (count * sizeof(T) < kAlltoAllPeerParallelByteThreshold) {
+    AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
+                                tid, nthreads);
+  } else {
+    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, recvRank, startLsa,
+                       lsaSize, tid, nthreads);
+  }
+}
+
 // Element-range variant for pipelined hybrid alltoall chunks.
 template <typename T>
 __device__ __forceinline__ void AlltoAllLsaCopyRange(ncclWindow_t sendwin, size_t sendoffset,
@@ -609,8 +632,9 @@ __global__ void GinAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
-                             world.nRanks, blockIdx.x, gridDim.x, tid, nthreads);
+    AlltoAllGinAdaptiveLocalCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count,
+                                    world.rank, startLsa, lsa.nRanks, world.rank, world.nRanks,
+                                    blockIdx.x, gridDim.x, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
@@ -687,8 +711,9 @@ __global__ void GinAdaptiveAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffse
       ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x};
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
-    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, world.rank,
-                       startLsa, lsaSize, tid, nthreads);
+    AlltoAllGinAdaptiveLocalCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count,
+                                    world.rank, startLsa, lsa.nRanks, world.rank, world.nRanks,
+                                    blockIdx.x, gridDim.x, tid, nthreads);
 
     lsaBar.sync(ncclCoopCta(), cuda::memory_order_release);
     return;
@@ -773,9 +798,20 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
       case 4:
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(HybridAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
-      case 5:
-        TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAdaptiveAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
+      case 5: {
+        auto ginAdaptiveKernel = SPECIALIZE_KERNEL(GinAdaptiveAlltoAllKernel, type, op);
+        if (ginAdaptiveKernel == nullptr) return testNotImplemented;
+        ncclDevComm* devComm = (ncclDevComm*)comm;
+        ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
+        ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
+        size_t rankSliceBytes = count * wordSize(type);
+        // Latency-bound slices: one CTA avoids 16x LSA barrier tax; large slices keep peer striping.
+        int ctas = (rankSliceBytes < kAlltoAllSmallMessageRankSliceBytes) ? 1 : deviceCtaCount;
+        constexpr int kGinAdaptiveThreads = 512;
+        ginAdaptiveKernel<<<ctas, kGinAdaptiveThreads, 0, stream>>>(
+            sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm);
         return testSuccess;
+      }
 #endif
       default:
         return testNotImplemented;
