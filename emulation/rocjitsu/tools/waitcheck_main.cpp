@@ -32,10 +32,11 @@ struct TargetInfo {
   rj_code_target_id_t target;
 };
 
-constexpr std::array<TargetInfo, 3> kSupportedTargets = {{
+constexpr std::array<TargetInfo, 4> kSupportedTargets = {{
     {"gfx1200", ROCJITSU_CODE_TARGET_GFX1200},
     {"gfx1201", ROCJITSU_CODE_TARGET_GFX1201},
     {"gfx1250", ROCJITSU_CODE_TARGET_GFX1250},
+    {"gfx950", ROCJITSU_CODE_TARGET_GFX950},
 }};
 
 struct CliOptions {
@@ -83,8 +84,8 @@ void print_help() {
             << "Options:\n"
             << "  --target TARGET          Select target from executable inputs\n"
             << "  --code-object-index N    Code-object index for the selected target (default: 0)\n"
-            << "  --all-code-objects       Analyze all supported gfx12 code objects\n"
-            << "  --list-code-objects      List supported gfx12 code objects and exit\n"
+            << "  --all-code-objects       Analyze all supported code objects\n"
+            << "  --list-code-objects      List supported code objects and exit\n"
             << "  --recursive              Expand directory inputs into recursive file sweeps\n"
             << "  --skip-unsupported       Skip unparsable or unsupported inputs\n"
             << "  --max-diagnostics N      Limit collected and printed diagnostics (default: 32)\n"

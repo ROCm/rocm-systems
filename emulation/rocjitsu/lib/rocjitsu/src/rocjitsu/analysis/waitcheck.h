@@ -21,7 +21,10 @@ namespace rocjitsu {
 
 class CodeObject;
 
-/// @brief GFX12 split wait counters tracked by waitcheck.
+/// @brief Internal wait counters tracked by waitcheck.
+///
+/// @details GFX12 targets use the split counter names directly. Legacy gfx9
+/// style targets reuse Load for vmcnt, Ds for lgkmcnt, and Exp for expcnt.
 enum class WaitCounterKind : uint8_t {
   Load = 0,
   Store,
@@ -92,14 +95,12 @@ struct WaitcheckReport {
 
 /// @brief Return the RocJITsu ISA arch supported by waitcheck for @p target.
 ///
-/// @details This keeps the current prototype intentionally scoped to gfx12
-/// targets. Unsupported targets return ROCJITSU_CODE_ARCH_INVALID.
+/// @details Unsupported targets return ROCJITSU_CODE_ARCH_INVALID.
 [[nodiscard]] rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target);
 
 /// @brief Analyze one stream of 32-bit instruction words.
 ///
-/// @details The initial implementation is intentionally scoped to gfx12.
-/// Other architectures return a report with supported=false.
+/// @details Unsupported architectures return a report with supported=false.
 [[nodiscard]] WaitcheckReport analyze_waitcnts(std::span<const uint32_t> words, rj_code_arch_t arch,
                                                WaitcheckOptions options = {});
 
