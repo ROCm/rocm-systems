@@ -13,6 +13,13 @@ pd.set_option(
     "mode.chained_assignment", None
 )  # ignore SettingWithCopyWarning pandas warning
 
+PCT_PEAK_ALIASES = {"percent of peak", "pct of peak", "pop", "pct", "percent"}
+
+
+def _find_pct_peak_col(df: pd.DataFrame) -> str | None:
+    """Return the first column whose lowercase name matches a percent-of-peak alias."""
+    return next((c for c in df.columns if str(c).lower() in PCT_PEAK_ALIASES), None)
+
 
 ####################
 # GRAPHICAL ELEMENTS
@@ -122,16 +129,19 @@ def create_sol_charts(display_df: pd.DataFrame, table_id: int) -> list[px.bar]:
             )
 
     elif table_id == 1101:
-        # Special formatting reference 'Percent of Peak' value
-        display_df["Percent of Peak"] = display_df["Percent of Peak"].apply(
+        pct_col = _find_pct_peak_col(display_df)
+        if pct_col is None:
+            console_error("Table id 1101: no percent-of-peak column found.", exit=False)
+            return []
+        display_df[pct_col] = display_df[pct_col].apply(
             lambda x: float(x) if x != "N/A" else 0.0
         )
         charts.append(
             px.bar(
                 display_df,
-                x="Percent of Peak",
+                x=pct_col,
                 y="Metric",
-                color="Percent of Peak",
+                color=pct_col,
                 range_color=[0, 100],
                 labels={"Avg": "%"},
                 height=400,
@@ -239,7 +249,7 @@ def build_table_chart(
     formatted_columns = []
     for col in display_df.columns:
         col_lower = str(col).lower()
-        if col_lower in {"pct", "percent", "percent of peak"}:
+        if col_lower in PCT_PEAK_ALIASES:
             formatted_columns.append({
                 "id": col,
                 "name": col,
