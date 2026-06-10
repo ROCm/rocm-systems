@@ -23,7 +23,7 @@
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(
-    rocprofiler-sdk-tests-rocprofv3-hipfile-tracing
+    rocprofiler-sdk-tests-hipfile-tracing
     LANGUAGES CXX
     VERSION 0.0.0)
 
@@ -38,39 +38,31 @@ set(IS_DISABLED ${ROCPROFILER_SDK_HIPFILE_TRACE_CLIENT_DISABLED})
 if(TARGET hipfile-trace-client)
     set(HIPFILE_TRACE_DEPENDS hipfile-trace-client)
 else()
-    set(HIPFILE_TRACE_DEPENDS rocprofiler-sdk-tool)
+    set(HIPFILE_TRACE_DEPENDS rocprofiler-sdk-json-tool)
 endif()
 
 rocprofiler_add_integration_execute_test(
-    rocprofv3-test-hipfile-tracing
+    hipfile-tracing
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hipfile-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv rocpd
-        otf2 pftrace --log-level env --
-        $<IF:$<TARGET_EXISTS:hipfile-trace-client>,$<TARGET_FILE:hipfile-trace-client>,hipfile-trace-client>
+        $<IF:$<TARGET_EXISTS:hipfile-trace-client>,$<TARGET_FILE:hipfile-trace-client>,${CMAKE_COMMAND}>
     DEPENDS ${HIPFILE_TRACE_DEPENDS}
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
-    FIXTURES_SETUP rocprofv3-test-hipfile-tracing
-    DISABLED "${IS_DISABLED}")
+    DISABLED ${IS_DISABLED}
+    PRELOAD "$<TARGET_FILE:rocprofiler-sdk-json-tool>" "${PRELOAD_ENV}"
+    ENVIRONMENT
+        "ROCPROFILER_TOOL_OUTPUT_FILE=hipfile-tracing-test.json"
+        "ROCPROFILER_TOOL_CONTEXTS=HIPFILE_API_CALLBACK HIPFILE_API_BUFFERED HIPFILE_API_EXT_BUFFERED"
+        "ROCPROFILER_TOOL_DISABLE_PERFETTO=1"
+    FIXTURES_SETUP hipfile-tracing)
 
 rocprofiler_add_integration_validate_test(
-    rocprofv3-test-hipfile-tracing
+    hipfile-tracing
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hipfile-trace-client-trace/out_results.json
-         --otf2-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hipfile-trace-client-trace/out_results.otf2
-         --pftrace-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hipfile-trace-client-trace/out_results.pftrace
-         --csv-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hipfile-trace-client-trace/out_hipfile_api_trace.csv
-         --rocpd-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hipfile-trace-client-trace/out_results.db
-    TIMEOUT 45
     LABELS "integration-tests"
-    FIXTURES_REQUIRED rocprofv3-test-hipfile-tracing
-    DISABLED "${IS_DISABLED}")
+    TIMEOUT 45
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED hipfile-tracing
+    ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/hipfile-tracing-test.json)

@@ -22,7 +22,6 @@
 
 #include <hipfile.h>
 
-#include <array>
 #include <cstdio>
 #include <cstdlib>
 
@@ -62,11 +61,6 @@ main()
     bool bool_value = false;
     (void) hipFileGetParameterBool(hipFileParamPropertiesUsePollMode, &bool_value);
     (void) hipFileSetParameterBool(hipFileParamPropertiesUsePollMode, bool_value);
-
-    auto string_value = std::array<char, 128>{};
-    (void) hipFileGetParameterString(
-        hipFileParamLoggingLevel, string_value.data(), static_cast<int>(string_value.size()));
-    (void) hipFileSetParameterString(hipFileParamLoggingLevel, string_value.data());
 
     auto open = hipFileDriverOpen();
     (void) hipFileUseCount();

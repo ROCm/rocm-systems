@@ -37,6 +37,10 @@ inputs:
     description: 'Enable ROCJPEG build'
     required: false
     default: 'false'
+  enable-hipfile-build:
+    description: 'Enable hipFILE build'
+    required: false
+    default: 'false'
   enable-rocprof-trace-decoder-build:
     description: 'Enable rocprof-trace-decoder build'
     required: false
@@ -97,6 +101,34 @@ runs:
         else
           echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
         fi
+
+    - name: Install hipFILE runtime dependencies
+      if: ${{ inputs.enable-hipfile-build == 'true' }}
+      shell: bash
+      run: |
+        if command -v apt-get >/dev/null 2>&1; then
+          apt-get update
+          apt-get install -y libtbb-dev
+        elif command -v dnf >/dev/null 2>&1; then
+          dnf install -y tbb-devel
+        elif command -v yum >/dev/null 2>&1; then
+          yum install -y tbb-devel
+        elif command -v zypper >/dev/null 2>&1; then
+          zypper --non-interactive install tbb-devel
+        else
+          echo "No supported package manager found for installing TBB"
+          exit 1
+        fi
+
+    - name: Checkout hipFILE tracing dependency branches
+      if: ${{ inputs.enable-hipfile-build == 'true' }}
+      shell: bash
+      run: |
+        git fetch --no-tags --depth=1 origin \
+          develop:refs/remotes/origin/develop \
+          users/venkat1361/rocprofiler-register-hipfile-trace:refs/remotes/origin/users/venkat1361/rocprofiler-register-hipfile-trace
+        git checkout origin/users/venkat1361/rocprofiler-register-hipfile-trace -- projects/rocprofiler-register
+        git checkout origin/develop -- projects/hipfile
 
     - name: Build and Install ROCR-Runtime
       if: ${{ inputs.enable-rocr-build == 'true' }}
@@ -160,6 +192,33 @@ runs:
         cmake --build build-rocprofiler-register --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build-rocprofiler-register --target install
         echo "✅ ROCProfiler-Register Installation complete!"
+
+    - name: Build and Install hipFILE
+      if: ${{ inputs.enable-hipfile-build == 'true' }}
+      shell: bash
+      working-directory: projects/hipfile
+      run: |
+        export ROCM_PATH=${{ inputs.rocm-path }}
+        export HIP_PLATFORM=amd
+        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        echo "Install hipFILE..."
+        cmake -B build-hipfile \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/amdclang++ \
+          -DCMAKE_CXX_FLAGS="-DHIPFILE_ROCPROFILER_REGISTER=1 -DHIPFILE_ROCP_REG_VERSION_MAJOR=0 -DHIPFILE_ROCP_REG_VERSION_MINOR=2 -DHIPFILE_ROCP_REG_VERSION_PATCH=0" \
+          -DCMAKE_HIP_PLATFORM=amd \
+          -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
+          -DBUILD_TESTING=OFF \
+          -DAIS_INSTALL_EXAMPLES=OFF \
+          -DAIS_INSTALL_TOOLS=OFF \
+          .
+        cmake --build build-hipfile --target hipfile --parallel ${{ inputs.build-jobs }}
+        cmake --build build-hipfile --target install
+        echo "✅ hipFILE Installation complete!"
 
     - name: Build and Install Aqlprofile
       if: ${{ inputs.enable-aqlprofile-build == 'true' }}

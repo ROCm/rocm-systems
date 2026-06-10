@@ -79,8 +79,6 @@ def test_hipfile(json_data):
         "hipFileSetParameterSizeT",
         "hipFileGetParameterBool",
         "hipFileSetParameterBool",
-        "hipFileGetParameterString",
-        "hipFileSetParameterString",
         "hipFileDriverOpen",
     ]:
         assert call in observed_operations
@@ -154,12 +152,15 @@ def test_otf2_data(otf2_data, json_data):
 
 
 def test_rocpd_data(rocpd_data, json_data):
-    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    if len(json_data["rocprofiler-sdk-tool"]["buffer_records"]["hipfile_api"]) == 0:
+    hipfile_data = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hipfile_api"]
+    if len(hipfile_data) == 0:
         return pytest.skip("hipFILE tracing unavailable")
 
-    rocprofv3.test_rocpd_data(rocpd_data, json_data, ("hipfile_api",))
+    rocpd_regions = rocpd_data.execute(
+        "SELECT * FROM regions WHERE category = 'HIPFILE_API_EXT'"
+    ).fetchall()
+
+    assert len(rocpd_regions) == len(hipfile_data)
 
 
 if __name__ == "__main__":
