@@ -1,20 +1,28 @@
 ---
 errorHandling:
-  Unit_hipGetErrorName_Positive_Basic: *level_2
+  Unit_hipGetErrorName_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipGetErrorName_Negative_Parameters: *level_2
-  Unit_hipGetErrorString_Positive_Basic: *level_2
+  Unit_hipGetErrorString_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipGetErrorString_Negative_Parameters: *level_2
   Unit_hipDrvGetErrorName_Positive_Basic: *level_2
   Unit_hipDrvGetErrorName_Negative_Parameters: *level_2
   Unit_hipDrvGetErrorString_Positive_Basic: *level_2
   Unit_hipDrvGetErrorString_Negative_Parameters: *level_2
-  Unit_hipGetLastError_Positive_Basic: *level_2
+  Unit_hipGetLastError_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipGetLastError_Positive_Threaded: *level_2
   Unit_hipGetLastError_with_hipMemcpyPeerAsync:
     <<: *level_2
     tags: [multigpu]
   Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
-  Unit_hipGetLastError_with_hipMemcpyParam2DAsync: *level_2
+  Unit_hipGetLastError_with_hipMemcpyParam2DAsync:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -24,7 +32,9 @@ errorHandling:
   Unit_hipGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
   Unit_hipGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
   Unit_hipGetLastError_with_hipMemPrefetchAsync: *level_2
-  Unit_hipGetLastError_with_hipMemcpy2DAsync: *level_2
+  Unit_hipGetLastError_with_hipMemcpy2DAsync:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync: *level_2
   Unit_hipGetLastError_with_MemCpyAsync_thread: *level_2
@@ -40,7 +50,9 @@ errorHandling:
   Unit_hipGetLastError_With_Thread: *level_2
   Unit_hipGetLastError_MultiProcess: *level_2
   Unit_hipGetLastError_Kernel_Invalid_Config: *level_2
-  Unit_hipPeekAtLastError_Positive_Basic: *level_2
+  Unit_hipPeekAtLastError_Positive_Basic:
+    <<: *level_2
+    tags: [smoke]
   Unit_hipPeekAtLastError_Positive_Threaded: *level_2
   Unit_hipPeekAtLastError_Positive: *level_2
   Unit_hipPeekAtLastError_Chk_Updated_Status: *level_2
@@ -60,7 +72,9 @@ errorHandling:
     <<: *level_2
     tags: [multigpu]
   Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
-  Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpy3DAsync:
     <<: *level_2
@@ -70,7 +84,9 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync: *level_2
   Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemPrefetchAsync: *level_2
-  Unit_hipExtGetLastError_with_hipMemcpy2DAsync: *level_2
+  Unit_hipExtGetLastError_with_hipMemcpy2DAsync:
+    <<: *level_2
+    disabled: [amd_wsl]
   Unit_hipExtGetLastError_with_hipMemsetAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync: *level_2
   Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_2
@@ -81,8 +97,8 @@ errorHandling:
   Unit_hipDynamicLogging_Positive_Basic:
     <<: *level_2
     # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
     <<: *level_2
     # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]

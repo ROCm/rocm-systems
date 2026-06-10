@@ -54,6 +54,11 @@ target_compile_definitions(
     INTERFACE $<BUILD_INTERFACE:ROCPROFSYS_INTERNAL_BUILD=1>
 )
 
+target_link_libraries(
+    rocprofiler-systems-common-library
+    INTERFACE $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
+)
+
 if(ROCPROFSYS_BUILD_TESTING)
     add_subdirectory(tests)
 endif()

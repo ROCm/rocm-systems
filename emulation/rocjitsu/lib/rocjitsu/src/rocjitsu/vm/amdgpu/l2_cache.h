@@ -28,14 +28,15 @@ class GpuMemory; // Forward declaration for backing store writeback.
 /// @brief L2 cache component shared per Accelerator Complex Die (XCD).
 ///
 /// 128-byte lines, 2048 sets, 16-way set-associative = 4MB (default).
-/// Write-back to the backing store (HBM controller or memory-side cache)
-/// via the requester port.
+/// In functional mode, writes are kept visible through the backing store
+/// (HBM controller or memory-side cache) via the requester port.
 ///
 /// Mtype-aware behavior:
 ///   - UC: Bypass L2, forward directly to backing store.
 ///   - CC: Allocate in L2, MOESI coherence state tracking for CPU-GPU
 ///         shared memory. Write-through on CC stores.
-///   - RW/WB: Allocate in L2, write-back on eviction.
+///   - RW/WB: Allocate in L2, with functional-mode stores written through to
+///            the backing store so completed dispatches are globally visible.
 ///   - NT: Allocate in L2 (L1 is bypassed, but L2 still caches).
 ///
 /// Serves as the backing store for both L1 Scalar (K$) and L1 Vector (V$).
@@ -80,13 +81,13 @@ public:
 
   /// @brief Read a cache line worth of data (or partial line).
   ///
-  /// Used by L1 controllers to fetch on miss. Always checks L2 first,
-  /// then falls through to HBM on L2 miss.
+  /// Used by L1 controllers to fetch on miss. In functional mode this refetches
+  /// from backing memory to avoid stale clean lines across independent L2s.
   /// @param addr The starting address (line-aligned or not).
   /// @param dst Destination buffer.
   /// @param size Number of bytes to read.
   /// @param mtype Memory type for caching policy.
-  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW);
+  void read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype = Mtype::RW, uint32_t vmid = 0);
 
   /// @brief Write data to L2 (and possibly through to HBM).
   ///
@@ -95,7 +96,8 @@ public:
   /// @param src Source data.
   /// @param size Number of bytes to write.
   /// @param mtype Memory type for caching policy.
-  void write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype = Mtype::RW);
+  void write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype = Mtype::RW,
+             uint32_t vmid = 0);
 
   /// @brief Fetch an entire cache line into the given buffer.
   ///
@@ -103,13 +105,14 @@ public:
   /// at the line-aligned address containing addr.
   /// @param addr Any address within the desired cache line.
   /// @param[out] line_buf Buffer of at least LINE_SIZE bytes.
-  void fetch_line(uint64_t addr, uint8_t *line_buf);
+  void fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t vmid = 0);
 
   /// @brief Write back a full cache line from L1 eviction.
   /// @param line_addr Line-aligned address.
   /// @param[in] data Full cache line data (LINE_SIZE bytes).
   /// @param mtype Memory type for caching policy.
-  void writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype = Mtype::RW);
+  void writeback_line(uint64_t line_addr, const uint8_t *data, Mtype mtype = Mtype::RW,
+                      uint32_t vmid = 0);
 
   /// @brief Perform an atomic read-modify-write on a cache line.
   ///
@@ -124,27 +127,24 @@ public:
   /// @param size Access size in bytes (4 or 8).
   /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
   ///           old value, compute the new value, and write it in place.
-  template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn) {
-    // Stripe by cache line address for parallelism across different lines.
+  template <typename F> void atomic_rmw(uint64_t addr, uint32_t size, F &&fn, uint32_t vmid = 0) {
     uint32_t stripe = (addr >> LINE_SIZE_BITS) & (ATOMIC_STRIPE_COUNT - 1);
     std::lock_guard<std::mutex> lock(atomic_stripes_[stripe]);
-    ensure_line(addr);
+    ensure_line(addr, vmid);
 
-    // Operate directly on the cache line data.
     uint32_t offset = CacheStore::line_offset(addr);
     uint8_t *line = cache_.line_data_for_write(addr);
     assert(line != nullptr && "ensure_line must guarantee hit");
 
     fn(line, offset);
 
-    // Atomic stores write through to backing (same as CC mtype).
-    send_backing(addr, line + offset, size, simdojo::MessageOp::WRITE);
+    send_backing(addr, line + offset, size, simdojo::MessageOp::WRITE, vmid);
 
     simdojo::CacheTag *ctag = nullptr;
     cache_.lookup(addr, &ctag);
     if (ctag) {
       ctag->coherence = simdojo::CoherenceState::MODIFIED;
-      ctag->dirty = false; // Written through to backing.
+      ctag->dirty = false;
     }
   }
 
@@ -154,13 +154,18 @@ public:
   /// written back to the backing store before the line is invalidated,
   /// so a subsequent ensure_line() refetch gets the latest data.
   /// @param addr Any address within the target cache line.
-  void flush_line(uint64_t addr);
+  void flush_line(uint64_t addr, uint32_t vmid = 0);
 
   /// @brief Invalidate all L2 lines.
   void invalidate_all() { cache_.invalidate_all(); }
 
+  /// @brief Invalidate L2 lines covering an address range.
+  /// @details Used after host/SDMA writes to ensure GPU reads reload from
+  /// backing store. No writeback — the backing store already has latest data.
+  void invalidate_range(uint64_t addr, uint32_t size);
+
   /// @brief Flush all dirty L2 lines to HBM and invalidate.
-  void flush_all();
+  void flush_all(uint32_t vmid = 0);
 
   /// @brief Create a completer port for a CU connection (one per CU).
   /// @param name Name suffix for the port (used for port naming).
@@ -183,12 +188,9 @@ public:
   const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
 
 private:
-  /// @brief Ensure the L2 line for addr is present, fetching from HBM on miss.
-  /// @param addr Any address within the desired cache line.
-  void ensure_line(uint64_t addr);
-
-  /// @brief Send a read or write request to the backing store via the req port.
-  void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op);
+  void ensure_line(uint64_t addr, uint32_t vmid = 0);
+  void send_backing(uint64_t addr, uint8_t *data, uint32_t size, simdojo::MessageOp op,
+                    uint32_t vmid = 0);
 
   static constexpr uint32_t ATOMIC_STRIPE_COUNT = 64;
 

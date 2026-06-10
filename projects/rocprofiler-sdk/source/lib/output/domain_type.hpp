@@ -41,6 +41,8 @@ enum class domain_type
     ROCJPEG,
     PC_SAMPLING_STOCHASTIC,
     KFD,
+    SPM_COUNTER_COLLECTION,
+    SPM_COUNTER_VALUES,
     LAST,
 };
 

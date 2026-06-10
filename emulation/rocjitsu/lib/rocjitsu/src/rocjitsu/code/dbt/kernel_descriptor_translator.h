@@ -6,11 +6,12 @@
 
 #pragma once
 
+#include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstdint>
+#include <optional>
 #include <span>
-#include <string>
 #include <vector>
 
 namespace rocjitsu {
@@ -33,10 +34,41 @@ struct KdTranslation {
   uint64_t descriptor_file_offset = 0;
   uint64_t entry_text_offset = 0;
 
+  /// @brief Ordinary architectural VGPRs required by translated code.
+  ///
+  /// @details This excludes any target AccVGPR window. Liveness analysis,
+  /// semantic scratch allocation, and descriptor growth requests should use
+  /// this field when they mean normal v0..vN VGPR demand.
   uint32_t target_vgpr_count = 0;
+
+  /// @brief Unified VGPR allocation encoded in COMPUTE_PGM_RSRC1.
+  ///
+  /// @details On targets with AccVGPRs this may be larger than
+  /// @c target_vgpr_count because the descriptor allocation must cover both
+  /// ordinary VGPRs and the AccVGPR window selected by ACCUM_OFFSET. Use this
+  /// field only for descriptor encoding/resource-limit checks, not ordinary
+  /// VGPR liveness.
+  uint32_t target_vgpr_allocation_count = 0;
+
+  /// @brief Encoded target COMPUTE_PGM_RSRC1.GRANULATED_WORKITEM_VGPR_COUNT.
   uint32_t target_vgpr_granulated = 0;
+
+  /// @brief First unified VGPR index reserved for target AccVGPRs.
+  ///
+  /// @details For CDNA-to-CDNA translations semantic scratch may force this
+  /// base upward so ordinary temporary VGPRs do not alias a0, a1, ...
+  uint32_t target_accvgpr_base = 0;
+
+  /// @brief Guest AccVGPR base decoded from the source descriptor.
   uint32_t accvgpr_base = 0;
+
+  /// @brief Number of target AccVGPRs preserved as a real AccVGPR window.
+  uint32_t target_agpr_count = 0;
+
+  /// @brief Future spill tier: number of VGPRs to virtualize through LDS.
   uint32_t vgpr_spill_to_lds_count = 0;
+
+  /// @brief Future spill tier: number of VGPRs to virtualize through scratch memory.
   uint32_t vgpr_spill_to_scratch_count = 0;
 
   uint32_t target_sgpr_count = 0;
@@ -64,16 +96,43 @@ struct KdTranslation {
   uint8_t guest_wavefront_size = 64;
   uint8_t host_wavefront_size = 64;
 
+  /// @brief Ordinary guest VGPR count decoded from the source descriptor.
+  ///
+  /// @details This excludes any source AccVGPR window. It is the right source
+  /// floor for ordinary VGPR liveness and scratch reasoning.
   uint32_t guest_vgpr_count = 0;
+
+  /// @brief Source descriptor's unified VGPR allocation count.
+  ///
+  /// @details This is decoded from COMPUTE_PGM_RSRC1 and may include the
+  /// AccVGPR window on CDNA descriptors. Use it when preserving or re-encoding
+  /// descriptor allocation size, not when asking how many ordinary VGPRs the
+  /// guest program used.
+  uint32_t guest_vgpr_allocation_count = 0;
+
+  /// @brief Source AccVGPR count derived from allocation count and ACCUM_OFFSET.
+  uint32_t guest_agpr_count = 0;
+
+  /// @brief Ordinary host VGPR count after translation requirements are applied.
   uint32_t host_vgpr_count = 0;
+
+  /// @brief Host descriptor's unified VGPR allocation count.
+  ///
+  /// @details Mirrors @c target_vgpr_allocation_count for diagnostics/reporting
+  /// and includes any preserved target AccVGPR window.
+  uint32_t host_vgpr_allocation_count = 0;
+
+  /// @brief Ordinary guest SGPR count decoded from the source descriptor.
   uint32_t guest_sgpr_count = 0;
+
+  /// @brief Ordinary host SGPR count after translation requirements are applied.
   uint32_t host_sgpr_count = 0;
 
   uint32_t source_occupancy = 0;
   uint32_t target_occupancy = 0;
 
   bool supported = true;
-  std::vector<std::string> warnings;
+  std::vector<TranslationDiagnostic> diagnostics;
 };
 
 /// @brief Compute descriptor patches and semantic metadata for one DBT pair.
@@ -84,6 +143,19 @@ public:
   [[nodiscard]] std::vector<KdTranslation>
   translate_image(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                   const KernelDescriptorTranslationOptions &options) const;
+
+  /// @brief Recompute one already-discovered kernel descriptor.
+  ///
+  /// @details BinaryTranslator uses this after instruction lowering discovers
+  /// additional per-kernel SGPR/VGPR requirements. The descriptor's file offset
+  /// and entry offset come from the original image-wide descriptor discovery, so
+  /// this avoids rescanning or recomputing unrelated kernel descriptors.
+  /// @returns A translated descriptor plan, or std::nullopt if @p descriptor_file_offset
+  /// does not point at a complete AMDHSA kernel descriptor in @p image.
+  [[nodiscard]] std::optional<KdTranslation>
+  translate_descriptor(std::span<const uint8_t> image, uint64_t descriptor_file_offset,
+                       uint64_t entry_text_offset,
+                       const KernelDescriptorTranslationOptions &options) const;
 
 private:
   rj_code_arch_t guest_arch_;

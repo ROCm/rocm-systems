@@ -125,6 +125,31 @@ public:
                         [[maybe_unused]] size_t request_size) override {}
 
   /**
+   * @brief Allocates aligned memory from the heap
+   *
+   * Delegates to dlmalloc's mspace_memalign. dlmalloc internally:
+   *   - rounds @p alignment up to the next power of two if needed,
+   *   - clamps it to at least MIN_CHUNK_SIZE,
+   *   - falls back to plain mspace_malloc if @p alignment is <=
+   *     MALLOC_ALIGNMENT (the default 128-byte heap alignment), and
+   *   - over-allocates and trims to guarantee an aligned user pointer.
+   *
+   * @param[in, out] ptr           Address of raw pointer (&pointer_to_char)
+   * @param[in]      alignment     Required pointer alignment in bytes
+   * @param[in]      request_size  Size in bytes of memory allocation
+   */
+  void align(char** ptr, size_t alignment, size_t request_size) override {
+    assert(ptr);
+    *ptr = nullptr;
+
+    if (!request_size) {
+      return;
+    }
+    *ptr = static_cast<char*>(
+        DLMalloc::mspace_memalign(mspace_, alignment, request_size));
+  }
+
+  /**
    * @brief Frees memory from the heap
    *
    * Released memory is tracked by bookkeeping structures within this class.
