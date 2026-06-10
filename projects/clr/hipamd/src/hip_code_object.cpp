@@ -403,15 +403,6 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   if (managedVarsIter != managedVars_.end()) {
     for (auto& managedVar : managedVarsIter->second) {
       hipError_t err = hipSuccess;
-      for (auto dev : g_devices) {
-        amd::Memory* mem = nullptr;
-        IHIP_RETURN_ONFAIL(managedVar->GetDeviceVarPtr(&mem, dev->deviceId()));
-        if (mem != nullptr) {
-          // free also deletes the device ptr
-          err = ihipFree(memDevPtr(mem));
-          assert(err == hipSuccess);
-        }
-      }
       if (managedVar->GetAllocFlag()) {  // check if it is a managed or host alloc
         err = ihipFree(*(static_cast<void**>(managedVar->GetManagedVarPtr())));
       } else {
