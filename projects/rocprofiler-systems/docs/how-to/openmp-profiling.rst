@@ -8,10 +8,9 @@ OpenMP performance profiling
 
 `ROCm Systems Profiler <https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/index.html>`_ supports profiling OpenMP programs starting with ROCm 6.4.0.
 
-It captures OpenMP performance data by intercepting callbacks from the OpenMP Tools Interface (OMPT) using `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/>`_.
-ROCm 6.4.0 is the minimum required version, as this release introduced OMPT support in ROCprofiler-SDK.
+It captures OpenMP performance data by intercepting callbacks from the OpenMP Tools Interface (OMPT). It uses `ROCprofiler-SDK <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/>`_ to perform this interception. ROCm 6.4.0 is the minimum required version, as this release introduced OMPT support in ROCprofiler-SDK.
 
-Only a subset of OMPT callbacks are processed. The list of supported callbacks can be viewed by running the following command:
+ROCm Systems Profiler processes only a subset of OMPT callbacks. The list of supported callbacks can be viewed by running the following command:
 
 .. code-block:: shell
 
@@ -34,14 +33,14 @@ Profiling a Fortran program that uses GPU offloading
 
 .. tip::
 
-   The steps in this section also apply to C/C++ programs.
+   These steps also apply to C and C++ programs.
 
-For this example, we will be using the `jacobi-fortran-targetdata-markers example <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/hpc/jacobi-fortran-targetdata-markers>`_.
+This sample steps uses the `jacobi-fortran-targetdata-markers example <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/hpc/jacobi-fortran-targetdata-markers>`_.
 
 Building the example
 ---------------------------------------------
 
-This example uses ``amdflang`` as the Fortran compiler.
+This example uses the ``amdflang`` Fortran compiler.
 
 #. Clone the ``rocm-systems`` repository and sparse checkout the necessary examples:
 
@@ -70,7 +69,7 @@ The resulting binary is at ``rocm-systems/build-hpc/jacobi-fortran-targetdata-ma
 .. note::
 
     This example requires the ``hipfort`` Fortran module file
-    (``hipfort.mod``). Install it via the ``hipfort-dev`` package on
+    (``hipfort.mod``). Install it through the ``hipfort-dev`` package on
     Debian/Ubuntu or the ``hipfort-devel`` package on RHEL/Rocky/SLES.
 
 Collecting a trace with rocprof-sys-run
@@ -87,8 +86,7 @@ Callback APIs, such as OMPT, can be traced using ``rocprof-sys-run`` with the ``
    .. note::
 
        ``--preset=trace-openmp`` requires ROCm 7.13.0 or later. On earlier
-       versions, use the equivalent environment variables (see
-       :ref:`openmp-env-var-config`).
+       versions, use the :ref:`openmp-env-var-config`).
 
 #. Once the command completes, an output directory will be generated:
 
@@ -98,9 +96,7 @@ Callback APIs, such as OMPT, can be traced using ``rocprof-sys-run`` with the ``
 
    By default, a ``.proto`` trace file containing all captured traces from the profiling session is written under this directory.
 
-.. tip::
-
-    More information about presets can be found in the :doc:`Using preset profiles <using-preset-profiles>` documentation.
+For more information about presets, see :doc:`Using preset profiles <using-preset-profiles>`.
 
 Understanding the proto file output
 -----------------------------------------------
@@ -167,7 +163,7 @@ For ``flang`` based compilers (which includes ``amdflang``), the kernel has the 
 
   __omp_offloading_<Device-ID>_<File-ID>_QMlaplacian_modPlaplacian_l22.kd
 
-``Device-ID`` and ``File-ID`` are unique to the system and are not important for our purposes.
+``Device-ID`` and ``File-ID`` are unique for each system. You can ignore these values for this instruction.
 
 In general, for ``flang`` compiled code containing modules with subroutines using OpenMP to perform GPU offloading, the kernel's name will be of the following form:
 
@@ -207,72 +203,78 @@ The image below shows the standard way that flow events are displayed in Perfett
     :alt: An ``omp_target_data_op_emi`` event with ``optype = target_data_transfer_to_device`` pointing to its corresponding ``MEMORY_COPY_HOST_TO_DEVICE``
     :width: 800
 
-Optional: Instrumenting the application with rocprof-sys-instrument
---------------------------------------------------------------------
+Instrumenting the application with rocprof-sys-instrument
+----------------------------------------------------------------
 
-The application can be instrumented with ``rocprof-sys-instrument`` to also capture user-defined functions alongside the OMPT events.
-More details on ``rocprof-sys-instrument`` and the data it gathers can be found in the :doc:`data collection modes <../conceptual/data-collection-modes>` document.
+The application can be instrumented with ``rocprof-sys-instrument`` to also capture user-defined functions alongside the OMPT events. Expand for step-by-step instructions:
 
-#. Instrument the application to generate an instrumented binary, ``jacobi.inst``:
-
-   .. code-block:: shell
-
-       rocprof-sys-instrument -o jacobi.inst -- "$JACOBI_FORTRAN_BIN"
-
-#. Profile the instrumented binary with OMPT tracing enabled:
-
-   .. code-block:: shell
-
-       rocprof-sys-run --preset=trace-openmp -- ./jacobi.inst
-
-#. Once profiling completes, an output directory will be generated:
-
-   .. code-block:: shell
-
-       rocprofsys-jacobi-inst-output/<timestamp>/
-
-   A ``.proto`` trace file is written under this directory, and can be viewed using the same method described in the previous section.
-   Compared to the trace from the preset-only run, the instrumented trace additionally surfaces user-defined functions in the ``jacobi-fortran-targetdata-markers`` track,
-   allowing application-level call paths to be correlated with OMPT and GPU activity.
-
-.. important::
-
-    With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
-    may prevent the expected function from being instrumented. For details, see the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide (in particular, its "Selective instrumentation" section).
-
-.. _openmp-env-var-config:
-
-Optional: Environment variable configuration
-=============================================
-
-The following environment variables are equivalent to ``--preset=trace-openmp``:
-
-.. code-block:: shell
-
-    export ROCPROFSYS_USE_OMPT=true  # enable OMPT callback capture
-    export ROCPROFSYS_TRACE=true     # enable the Perfetto tracing backend (produces the .proto trace)
-    export ROCPROFSYS_PROFILE=false  # disable the timemory profiling backend (statistical text/JSON summaries)
-    export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api,memory_copy  # ROCm API domains to trace
-
-Once these are set, ``rocprof-sys-run`` can be invoked without ``--preset``:
-
-.. code-block:: shell
-
-    rocprof-sys-run -- "$JACOBI_FORTRAN_BIN"
-
-.. tip::
-
-    Creating a default configuration file helps maintain consistent profiling settings across sessions.
-    For details, see the :doc:`Configuring runtime options <configuring-runtime-options>` guide.
-
-.. note::
-
-    If you are interested in seeing how the compiler translates the OpenMP offload
-    constructs into ``hsa`` function calls, you can use either the more detailed
-    ``--preset=trace-hpc`` preset or add ``hsa_api`` to ``ROCPROFSYS_ROCM_DOMAINS``.
-    Because the variable *replaces* the active domain list, include it alongside the
-    domains shown above:
+.. dropdown:: Optional: Steps for instrumenting the application with rocprof-sys-instrument
+    
+    1. Instrument the application to generate an instrumented binary, ``jacobi.inst``:
 
     .. code-block:: shell
 
-        export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api,memory_copy,hsa_api
+        rocprof-sys-instrument -o jacobi.inst -- "$JACOBI_FORTRAN_BIN"
+
+    2. Profile the instrumented binary with OMPT tracing enabled:
+
+    .. code-block:: shell
+
+        rocprof-sys-run --preset=trace-openmp -- ./jacobi.inst
+
+    3. Once profiling completes, an output directory will be generated:
+
+    .. code-block:: shell
+
+        rocprofsys-jacobi-inst-output/<timestamp>/
+
+    A ``.proto`` trace file is written under this directory, and can be viewed using the same method described in the previous section.
+    Compared to the trace from the preset-only run, the instrumented trace additionally surfaces user-defined functions in the ``jacobi-fortran-targetdata-markers`` track,
+    allowing application-level call paths to be correlated with OMPT and GPU activity.
+
+    .. important::
+
+        With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
+        may prevent the expected function from being instrumented. For details, see the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide (in particular, its "Selective instrumentation" section).
+
+For more details on ``rocprof-sys-instrument`` and the data it gathers, see :doc:`data collection modes <../conceptual/data-collection-modes>`. 
+
+.. _openmp-env-var-config:
+
+Environment variable configuration
+=============================================
+
+The ``--preset=trace-openmp`` option requires ROCm 7.13.0 or later. On earlier
+versions, use the equivalent environment variables. The environment variables provides more granular control over profiling settings. It can ease the process of integrating profiling into automated scripts, or need to maintain consistent configurations across multiple profiling sessions. Expand for detailed steps to configure the environment variable:
+
+.. dropdown:: Optional: Configure environment variable
+
+    .. code-block:: shell
+
+        export ROCPROFSYS_USE_OMPT=true  # enable OMPT callback capture
+        export ROCPROFSYS_TRACE=true     # enable the Perfetto tracing backend (produces the .proto trace)
+        export ROCPROFSYS_PROFILE=false  # disable the timemory profiling backend (statistical text/JSON summaries)
+        export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api,memory_copy  # ROCm API domains to trace
+
+    Once these are set, ``rocprof-sys-run`` can be invoked without ``--preset``:
+
+    .. code-block:: shell
+
+        rocprof-sys-run -- "$JACOBI_FORTRAN_BIN"
+
+    .. tip::
+
+        Creating a default configuration file helps maintain consistent profiling settings across sessions.
+        For details, see the :doc:`Configuring runtime options <configuring-runtime-options>` guide.
+
+    .. note::
+
+        If you are interested in seeing how the compiler translates the OpenMP offload
+        constructs into ``hsa`` function calls, you can use either the more detailed
+        ``--preset=trace-hpc`` preset or add ``hsa_api`` to ``ROCPROFSYS_ROCM_DOMAINS``.
+        Because the variable *replaces* the active domain list, include it alongside the
+        domains shown above:
+
+        .. code-block:: shell
+
+            export ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,marker_api,memory_copy,hsa_api
