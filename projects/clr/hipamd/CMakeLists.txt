@@ -231,15 +231,14 @@ endif()
 #############################
 # Configure variables
 #############################
-# Determine HIP_PLATFORM
+# Determine HIP_PLATFORM: prefer explicit -DHIP_PLATFORM, then env var, then default to "amd".
 if(NOT DEFINED HIP_PLATFORM)
-    if(NOT DEFINED ENV{HIP_PLATFORM})
-        execute_process(COMMAND ${__HIPCONFIG_EXECUTABLE__} --platform
-            OUTPUT_VARIABLE HIP_PLATFORM
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(DEFINED ENV{HIP_PLATFORM})
+        set(HIP_PLATFORM "$ENV{HIP_PLATFORM}" CACHE STRING "HIP Platform")
     else()
-        set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
+        set(HIP_PLATFORM "amd" CACHE STRING "HIP Platform")
     endif()
+    message(STATUS "HIP_PLATFORM set to: ${HIP_PLATFORM}")
 endif()
 message(STATUS "HIP Platform: " ${HIP_PLATFORM})
 

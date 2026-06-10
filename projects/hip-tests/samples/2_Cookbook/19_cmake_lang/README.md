@@ -1,4 +1,7 @@
 ### This will test cmake lang support: CXX and Fortran
+
+ROCM_PATH is the path where ROCM is installed. default path is /opt/rocm.
+
 I. Prepare
 1) You must install cmake version 3.18 or above to support LINK_LANGUAGE.
    Otherwise, Fortran build will fail.
@@ -10,19 +13,19 @@ II. Build
 ```
 $ mkdir -p build; cd build
 $ rm -rf *;
-$ CXX="$(hipconfig -l)"/clang++ FC=$(which gfortran) cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
+$ CXX=<ROCM_PATH>/llvm/bin/clang++ FC=$(which gfortran) cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
 $ cmake ..
 $ make
 ```
 
 Note, users may need to add AMD GPU support, if test failed, for example,
 ```
-$ CXX="$(hipconfig -l)"/clang++ FC=$(which gfortran) cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DAMDGPU_TARGETS="gfx1102" ..
+$ CXX=<ROCM_PATH>/llvm/bin/clang++ FC=$(which gfortran) cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DAMDGPU_TARGETS="gfx1102" ..
 ```
 To enable compiler auto detection of gpu users may need to add ADMGPU support as command line option,
 if test failed to run, for example,
 ```
-$ CXX="$(hipconfig -l)"/clang++ FC=$(which gfortran) cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DAMDGPU_TARGETS=native ..
+$ CXX=<ROCM_PATH>/llvm/bin/clang++ FC=$(which gfortran) cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DAMDGPU_TARGETS=native ..
 ```
 III. Test
 ```

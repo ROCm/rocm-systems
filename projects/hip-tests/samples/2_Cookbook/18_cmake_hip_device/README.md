@@ -1,15 +1,18 @@
 ### This will test linking hip::device interface in cmake
+
+ROCM_PATH is the path where ROCM is installed. default path is /opt/rocm.
+
 I. Build
 
 ```
 $ mkdir build; cd build
-$ CXX="$(hipconfig -l)"/clang++ cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
+$ CXX=<ROCM_PATH>/llvm/bin/clang++ cmake -DCMAKE_PREFIX_PATH=/opt/rocm ..
 $ make
 ```
 
 Note, users may need to add ADMGPU support as command line option, if test failed to run, for example,
 ```
-$ CXX="$(hipconfig -l)"/clang++ cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DAMDGPU_TARGETS="gfx1102" ..
+$ CXX=<ROCM_PATH>/llvm/bin/clang++ cmake -DCMAKE_PREFIX_PATH=/opt/rocm -DAMDGPU_TARGETS="gfx1102" ..
 ```
 
 II. Test
