@@ -549,10 +549,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgGetQueueDataCtx(HsaKFDContext *ctx,
 	*data = malloc(*n_entries * *entry_size);
 	if (!*data)
 		return HSAKMT_STATUS_NO_MEMORY;
-	if (suspend_queues && *n_entries)
+	if (suspend_queues && *n_entries) {
 		queue_ids = (uint32_t *)malloc(sizeof(uint32_t) * *n_entries);
-	if (!queue_ids ||
-	    dbg_trap_get_queue_data(ctx, *data, n_entries, *entry_size, queue_ids))
+		if (!queue_ids)
+			goto free_data;
+	}
+	if (dbg_trap_get_queue_data(ctx, *data, n_entries, *entry_size, queue_ids))
 		goto free_data;
 	if (queue_ids) {
 		if (dbg_trap_suspend_queues(ctx, queue_ids, *n_entries) ||

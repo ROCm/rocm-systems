@@ -385,7 +385,10 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store agent_info_entry_size in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(entry_size);
 
-    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
+    /* Skip queue suspension during core dump - the process is self-debugging
+       and KFD returns EPERM for self-suspend. Queue data is still captured
+       via GET_QUEUE_SNAPSHOT without suspension. */
+    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, false))) {
        HSAKMT_CALL(hsaKmtDbgDisable());
        fprintf(stderr, "Failed to fetch queues snapshot.\n");
        return HSA_STATUS_ERROR;
