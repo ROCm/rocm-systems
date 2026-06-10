@@ -78,8 +78,40 @@ def gen_mfma(
     dst_bits = inst.operands[0].size if inst.operands else 0
     dst_regs = max(1, dst_bits // 32)
 
-    # SMFMAC: per-lane dot-product functional model (no cross-lane mapping).
+    # SMFMAC: cross-lane matrix multiply-accumulate.
     if 'SMFMAC' in name:
+        _SMFMAC_READ = {
+            'F16': 'amdgpu::smfmac_read_f16',
+            'BF16': 'amdgpu::smfmac_read_bf16',
+            'FP8': 'amdgpu::smfmac_read_fp8',
+            'BF8': 'amdgpu::smfmac_read_bf8',
+        }
+        if arch_name == 'cdna4' and input_type != 'I8':
+            L = []
+            L.append(f'  auto &cu = wf.cu();')
+            L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
+            L.append(
+                f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
+            )
+            L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
+            L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
+            L.append(f'  uint32_t idx = amdgpu::src_base(vb, {s2}.encoding_value_);')
+            if input_type in ('F16', 'BF16'):
+                read_fn = _SMFMAC_READ[input_type]
+                L.append(
+                    f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst, s0b, s1b, idx, {read_fn});'
+                )
+            else:
+                parts = input_type.split('_')
+                read_a = _SMFMAC_READ.get(parts[0], 'amdgpu::smfmac_read_fp8')
+                read_b = _SMFMAC_READ.get(parts[1], 'amdgpu::smfmac_read_fp8')
+                L.append(
+                    f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_fp8(cu, dst, s0b, s1b, idx, {read_a},'
+                )
+                L.append(f'                                        {read_b});')
+            return '\n'.join(L)
+
+        # Fallback: per-lane dot-product functional model.
         L = []
         L.append(
             f'  // MFMA: {name} \u2014 {M}x{N}x{K} {input_type}\u2192{result_type}'
@@ -368,6 +400,48 @@ def gen_mfma(
             else:
                 L.append(f'                    s2, {ea}, {eb}, const_acc);')
         else:
+            if input_type in ('F8_F6_F4', 'F8F6F4'):
+                L.append(
+                    f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);'
+                )
+                L.append(
+                    f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);'
+                )
+                L.append(f'  if (!(inst_.abid & 1u)) {{')
+                L.append(
+                    f'    amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+                )
+                L.append(
+                    f'                                     [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {{'
+                )
+                L.append(
+                    f'                                       amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
+                )
+                L.append(
+                    f'                                                              dst, s0b, s1b, s2, ea, eb, const_acc);'
+                )
+                L.append(f'                                     }});')
+                L.append(f'  }} else {{')
+                L.append(
+                    f'    uint32_t sa_base = amdgpu::src_base(vb, x2_dw1_ & 0x1FFu);'
+                )
+                L.append(
+                    f'    uint32_t sb_base = amdgpu::src_base(vb, (x2_dw1_ >> 9) & 0x1FFu);'
+                )
+                L.append(f'    amdgpu::dispatch_matrix_fmt_pair(')
+                L.append(
+                    f'        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {{'
+                )
+                L.append(
+                    f'          amdgpu::exec_f32_scaled_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits, dst, s0b, s1b, s2, ea,'
+                )
+                L.append(
+                    f'                                        eb, const_acc, sa_base, sb_base);'
+                )
+                L.append(f'        }});')
+                L.append(f'  }}')
+                return '\n'.join(L)
+
             has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             L.append(f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
             L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
@@ -377,51 +451,5 @@ def gen_mfma(
                 L.append(f'                 inst_.cbsz, inst_.abid, inst_.blgp);')
             else:
                 L.append(f'                 s2, {ea}, {eb}, const_acc);')
-
-        if input_type in ('F8_F6_F4', 'F8F6F4'):
-            # Rewrite the MFMA call: if ABID[0]=1 (scaling enabled),
-            # use exec_f32_scaled which applies per-32-K-block E8M0
-            # exponent biases from scale VGPRs in the X2 prefix.
-            # Dwords 0-1 of the VOP3PX2 encoding are at inst[-2]/[-1]
-            # relative to the MFMA encoding pointer.
-            # Dword 1 bits [8:0] = scale_src0, bits [17:9] = scale_src1.
-            L_scaled = []
-            L_scaled.append('  if (inst_.abid & 1u) {')
-            L_scaled.append(
-                '    auto *raw = reinterpret_cast<const uint32_t *>(&inst_);'
-            )
-            L_scaled.append('    uint32_t x2_dw1 = raw[-1];')
-            L_scaled.append('    uint32_t scale_src0_enc = x2_dw1 & 0x1FFu;')
-            L_scaled.append('    uint32_t scale_src1_enc = (x2_dw1 >> 9) & 0x1FFu;')
-            L_scaled.append(
-                '    uint32_t sa_base = amdgpu::src_base(vb, scale_src0_enc);'
-            )
-            L_scaled.append(
-                '    uint32_t sb_base = amdgpu::src_base(vb, scale_src1_enc);'
-            )
-            L_scaled.append(
-                f'    amdgpu::exec_f32_scaled(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,'
-            )
-            L_scaled.append(f'        amdgpu::src_base(vb, {s0}.encoding_value_),')
-            L_scaled.append(f'        amdgpu::src_base(vb, {s1}.encoding_value_),')
-            L_scaled.append(f'        s2, {ea}, {eb}, const_acc,')
-            L_scaled.append(
-                f'        inst_.cbsz, inst_.abid, inst_.blgp, sa_base, sb_base);'
-            )
-            L_scaled.append('  }')
-            # Replace the unscaled MFMA call with a conditional:
-            # if ABID[0]=1 use scaled path, else the existing unscaled path.
-            # Find and wrap the existing exec_f32 call in an else block.
-            for i, line in enumerate(L):
-                if 'amdgpu::exec_f32(' in line:
-                    L.insert(i, '  if (!(inst_.abid & 1u)) {')
-                    # Find the closing semicolon
-                    for j in range(i + 1, len(L)):
-                        if L[j].rstrip().endswith(';'):
-                            L.insert(j + 1, '  } else {')
-                            break
-                    break
-            L.extend(L_scaled)
-            L.append('  }')
 
     return '\n'.join(L)

@@ -4696,6 +4696,9 @@ class CodeGenerator:
                     _size_overrides = self.isa_spec.profile.inst_size_overrides
                     if inst.name in _size_overrides:
                         ctor_body_parts.append(f'size_ = {_size_overrides[inst.name]};')
+                        private_members.append(cgen.Statement('uint32_t x2_dw1_ = 0'))
+                        init_list_parts.append('x2_dw1_(inst[-1])')
+                        init_list = ', '.join(init_list_parts)
 
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (
@@ -6909,6 +6912,37 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         decode_table_entries = []
         sub_decode_table_entries = []
         decode_funcs_found = set()
+        _custom_decode_bodies: dict[str, object] = {}
+        _vop3px2_opcode = self.isa_spec.profile.vop3px2_prefix_opcode
+        if _vop3px2_opcode is not None:
+            _ie_names = {
+                inst.name for ie in self.isa_spec.inst_encodings for inst in ie.insts
+            }
+            _vop3px2_active = any(
+                n in _ie_names for n in self.isa_spec.profile.inst_size_overrides
+            )
+            if _vop3px2_active:
+                for _dte in self.isa_spec.primary_decode_table:
+                    if (
+                        _dte is not None
+                        and not _dte.is_primary
+                        and _dte.sub_decode_funcs is not None
+                        and _dte.sub_decode_table
+                        and 'vop3p' in _dte.sub_decode_table
+                    ):
+                        _pfx = 'decodeVop3pX2Prefix'
+                        _dte.sub_decode_funcs[_vop3px2_opcode] = _pfx
+                        _custom_decode_bodies[_pfx] = cgen.Block(
+                            [
+                                cgen.Statement(
+                                    f'auto op = *reinterpret_cast<const {_dte.enc.fmt_enc_name}::OpEncoding *>(opcode + 2)'
+                                ),
+                                cgen.Statement(
+                                    f'return {_dte.sub_decode_table}[op.op](opcode + 2)'
+                                ),
+                            ]
+                        )
+                        break
         for dte in self.isa_spec.primary_decode_table:
             if dte is not None:
                 decode_table_entries.append(f'&Decoder::{dte.decode_func},')
@@ -6980,6 +7014,17 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                         ],
                                     )
                                 )
+                                _fn_body = (
+                                    _custom_decode_bodies[fn]
+                                    if fn in _custom_decode_bodies
+                                    else cgen.Block(
+                                        [
+                                            cgen.Statement(
+                                                f'return std::make_unique<{class_name}>(opcode)'
+                                            )
+                                        ]
+                                    )
+                                )
                                 decode_table_funcs.append(
                                     cgen.FunctionBody(
                                         cgen.FunctionDeclaration(
@@ -6994,13 +7039,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                                 )
                                             ],
                                         ),
-                                        cgen.Block(
-                                            [
-                                                cgen.Statement(
-                                                    f'return std::make_unique<{class_name}>(opcode)'
-                                                )
-                                            ]
-                                        ),
+                                        _fn_body,
                                     )
                                 )
                             sub_decode_table_entry_str.append(f'&Decoder::{fn},')
