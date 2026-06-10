@@ -1,0 +1,52 @@
+if(DEFINED ENV{DESTDIR} AND NOT "$ENV{DESTDIR}" STREQUAL "")
+    return()
+endif()
+
+if(DEFINED CMAKE_INSTALL_PREFIX AND NOT "${CMAKE_INSTALL_PREFIX}" STREQUAL "@AMDSMI_INSTALL_PREFIX@")
+    return()
+endif()
+
+if(NOT EXISTS "@AMDSMI_INSTALL_PREFIX@/share/amd_smi")
+    return()
+endif()
+
+set(_is_wsl FALSE)
+if(EXISTS "/proc/sys/fs/binfmt_misc/WSLInterop")
+    set(_is_wsl TRUE)
+elseif(EXISTS "/proc/version")
+    file(READ "/proc/version" _proc_version)
+    string(TOLOWER "${_proc_version}" _proc_version_lower)
+    if(_proc_version_lower MATCHES "microsoft|wsl")
+        set(_is_wsl TRUE)
+    endif()
+endif()
+
+if(NOT _is_wsl)
+    message(STATUS "Skipping WSL AMD-SMI .pth registration outside WSL")
+    return()
+endif()
+
+execute_process(
+    COMMAND python3 -c "import site; print(site.getsitepackages()[0])"
+    RESULT_VARIABLE _site_packages_result
+    OUTPUT_VARIABLE _site_packages
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+if(NOT _site_packages_result EQUAL 0 OR "${_site_packages}" STREQUAL "")
+    message(WARNING "Could not determine python site-packages; skipping WSL AMD-SMI .pth registration")
+    return()
+endif()
+
+if(NOT EXISTS "${_site_packages}")
+    message(WARNING "Python site-packages directory does not exist: ${_site_packages}; skipping WSL AMD-SMI .pth registration")
+    return()
+endif()
+
+set(_pth_template "@AMDSMI_INSTALL_PREFIX@/share/amd_smi/zz-wsl-amdsmi.pth")
+if(NOT EXISTS "${_pth_template}")
+    message(WARNING "WSL AMD-SMI .pth template does not exist: ${_pth_template}; skipping WSL AMD-SMI .pth registration")
+    return()
+endif()
+
+file(COPY_FILE "${_pth_template}" "${_site_packages}/zz-wsl-amdsmi.pth")
+message(STATUS "Registered WSL AMD-SMI Python paths in ${_site_packages}/zz-wsl-amdsmi.pth")

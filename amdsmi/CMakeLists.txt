@@ -26,7 +26,8 @@ cmake_minimum_required(VERSION 3.20)
 
 set(AMD_SMI "amd_smi")
 set(AMD_SMI_LIBS_TARGET "${AMD_SMI}_lib")
-set(CPACK_PACKAGE_NAME amd-smi-lib CACHE STRING "")
+set(CPACK_PACKAGE_NAME rocdxg-amd-smi-lib CACHE STRING "" FORCE)
+set(ROCM_DIR "/opt/rocm-wsl" CACHE STRING "ROCm WSL directory." FORCE)
 
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
 
@@ -85,10 +86,9 @@ set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 
 project(${AMD_SMI_LIBS_TARGET} DESCRIPTION "AMD System Management libraries")
 
-# Set default installation prefix to /opt/rocm
-if(NOT CMAKE_INSTALL_PREFIX)
-    set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Installation prefix" FORCE)
-endif()
+# Install WSL AMD SMI side-by-side with the native ROCm packages.
+set(CMAKE_INSTALL_PREFIX "/opt/rocm-wsl" CACHE PATH "Installation prefix" FORCE)
+set(AMDSMI_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -122,7 +122,6 @@ include(CMakeDependentOption)
 cmake_dependent_option(BUILD_WRAPPER "Rebuild AMDSMI-wrapper" OFF "BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(BUILD_CLI "Build AMDSMI-CLI and install" ON "BUILD_SHARED_LIBS" OFF)
 cmake_dependent_option(BUILD_RUST_WRAPPER "Build rust wrapper and install" OFF "BUILD_SHARED_LIBS" OFF)
-cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldconfig." ON "BUILD_SHARED_LIBS" OFF)
 
 # Set share path here because project name != amd_smi
 set(SHARE_INSTALL_PREFIX "${CMAKE_INSTALL_DATAROOTDIR}/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
@@ -259,6 +258,26 @@ set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 # $CURRENT_YEAR is used by copyright.in
 string(TIMESTAMP CURRENT_YEAR "%Y")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/copyright.in DEBIAN/copyright @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/env.sh.in .env.sh @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/profile.d/rocdxg-amd-smi-lib.sh.in
+               rocdxg-amd-smi-lib.sh @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/zz-wsl-amdsmi.pth.in zz-wsl-amdsmi.pth @ONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/install_wsl_amdsmi_pth.cmake.in
+               cmake/install_wsl_amdsmi_pth.cmake @ONLY)
+
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/.env.sh"
+    DESTINATION .
+    COMPONENT dev)
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/rocdxg-amd-smi-lib.sh"
+    DESTINATION /etc/profile.d
+    COMPONENT dev)
+install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/zz-wsl-amdsmi.pth"
+    DESTINATION ${SHARE_INSTALL_PREFIX}
+    COMPONENT dev)
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/cmake/install_wsl_amdsmi_pth.cmake" COMPONENT dev)
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(
@@ -306,7 +325,7 @@ configure_file(
 set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
 set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
 
-# install copyright file into share/doc/amd-smi-lib/copyright
+# install copyright file into share/doc/rocdxg-amd-smi-lib/copyright
 # required for debian package compliance
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/copyright"

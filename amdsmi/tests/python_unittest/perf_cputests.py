@@ -28,7 +28,7 @@ import unittest
 import time
 import statistics
 import os
-sys.path.append("/opt/rocm/libexec/amdsmi_cli/")
+sys.path.append("/opt/rocm-wsl/libexec/amdsmi_cli/")
 
 try:
     import amdsmi

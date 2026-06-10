@@ -1,0 +1,1 @@
+import os, sys; _paths = ["@AMDSMI_INSTALL_PREFIX@/share/amd_smi", "@AMDSMI_INSTALL_PREFIX@/libexec/amdsmi_cli"]; [sys.path.insert(0, p) for p in reversed(_paths) if os.path.isdir(p) and p not in sys.path]

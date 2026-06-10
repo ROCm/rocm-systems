@@ -1,0 +1,4 @@
+# Register rocdxg-amd-smi-lib environment for new shells.
+if [ -f "@AMDSMI_INSTALL_PREFIX@/.env.sh" ]; then
+    . "@AMDSMI_INSTALL_PREFIX@/.env.sh"
+fi

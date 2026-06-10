@@ -167,9 +167,12 @@ _libraries = {}
 AMDSMI_VERSION_MAJOR = "@AMDSMI_VERSION_MAJOR@"
 if AMDSMI_VERSION_MAJOR.startswith("@"):
     AMDSMI_VERSION_MAJOR = "1"
+AMDSMI_INSTALL_PREFIX = "@AMDSMI_INSTALL_PREFIX@"
+if AMDSMI_INSTALL_PREFIX.startswith("@"):
+    AMDSMI_INSTALL_PREFIX = "/opt/rocm-wsl"
 # libamd_smi.so is provided by the WSL ROCm installation.
 def find_smi_library():
-    location = f"/opt/rocm/lib/libamd_smi.so.{AMDSMI_VERSION_MAJOR}"
+    location = f"{AMDSMI_INSTALL_PREFIX}/lib/libamd_smi.so.{AMDSMI_VERSION_MAJOR}"
     return ctypes.CDLL(location), location
 
 try:
@@ -177,7 +180,7 @@ try:
     #print(f"found smi lib in [", location, "]")
 except OSError as e:
     print(e)
-    print("Unable to find libamd_smi.so library try installing amd-smi-lib from your package manager")
+    print("Unable to find libamd_smi.so library try installing rocdxg-amd-smi-lib from your package manager")
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs

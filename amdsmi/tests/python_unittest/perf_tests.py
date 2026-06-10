@@ -27,7 +27,7 @@ import sys
 import unittest
 import time
 import statistics
-sys.path.append("/opt/rocm/share/amd_smi/")
+sys.path.append("/opt/rocm-wsl/share/amd_smi/")
 
 try:
     import amdsmi

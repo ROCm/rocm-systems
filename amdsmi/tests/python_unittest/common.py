@@ -26,7 +26,7 @@ import os
 import sys
 import unittest
 
-amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
+amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm-wsl/share/amd_smi')
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.')
 sys.path.append(amdsmi_path)

@@ -2,7 +2,7 @@
 
 do_configureLogrotate() {
   local IS_SYSTEMD=0
-  local packageName="amd-smi-lib"
+  local packageName="rocdxg-amd-smi-lib"
   local logPath=/var/log/amd_smi_lib
   local logFile="${logPath}/AMD-SMI-lib.log"
   local logrotateConfFile=/etc/logrotate.d/amd_smi.conf
@@ -96,14 +96,6 @@ EOF
   fi
 }
 
-do_ldconfig() {
-  # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
-  if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
-    echo @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBDIR@ > /etc/ld.so.conf.d/x86_64-libamd_smi_lib.conf
-    ldconfig
-  fi
-}
-
 do_install_amdsmi_python_lib() {
   # get python version
   local python3_minor_version
@@ -169,8 +161,37 @@ do_install_amdsmi_python_lib() {
   fi
 }
 
+install_wsl_amdsmi_pth() {
+  if [ ! -e /proc/sys/fs/binfmt_misc/WSLInterop ] && ! grep -qiE "microsoft|wsl" /proc/version 2>/dev/null; then
+    echo "[INFO] WSL environment not detected. WSL AMD-SMI path registration skipped."
+    return
+  fi
+
+  local site_packages
+  site_packages=$(python3 -c 'import site; print(site.getsitepackages()[0])')
+  if [ $? -ne 0 ] || [ -z "$site_packages" ]; then
+    echo "[WARNING] Could not determine python site-packages. "\
+      "WSL AMD-SMI path registration will be skipped."
+    return
+  fi
+  if [ ! -d "$site_packages" ]; then
+    echo "[WARNING] Python site-packages directory does not exist: $site_packages. "\
+      "WSL AMD-SMI path registration will be skipped."
+    return
+  fi
+  local pth_template="@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/zz-wsl-amdsmi.pth"
+  if [ ! -f "$pth_template" ]; then
+    echo "[WARNING] WSL AMD-SMI .pth template does not exist: $pth_template. "\
+      "WSL AMD-SMI path registration will be skipped."
+    return
+  fi
+
+  cp "$pth_template" "$site_packages/zz-wsl-amdsmi.pth"
+}
+
   # Call the function
   check_and_install_amdsmi
+  install_wsl_amdsmi_pth
 
   export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
   export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
@@ -198,7 +219,6 @@ do_install_amdsmi_python_lib() {
 case "$1" in
   ( configure )
     do_install_amdsmi_python_lib
-    do_ldconfig
     do_configureLogrotate || exit 0
   ;;
   ( abort-upgrade | abort-remove | abort-deconfigure )

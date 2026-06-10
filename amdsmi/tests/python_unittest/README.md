@@ -10,41 +10,41 @@ Follow our install/build guides to ensure the Python API is installed correctly 
 
 ***Versions***: Python 3.8+
 
-> **Note:** **`cli_unit_test.py`** must be run with **`sudo`** and with **`/opt/rocm/bin` on `PATH`** (it invokes `amd-smi`). Example:
-> `sudo env PATH="$PATH:/opt/rocm/bin" /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v`
+> **Note:** **`cli_unit_test.py`** must be run with **`sudo`** and with **`/opt/rocm-wsl/bin` on `PATH`** (it invokes `amd-smi`). Example:
+> `sudo env PATH="$PATH:/opt/rocm-wsl/bin" /opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py -v`
 
 ## How to Run
 ### Basic How To
 The three test scripts are installed as:
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py
-/opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py
 ```
 
 **Unittest only (not verbose)**
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b
-sudo env PATH="$PATH:/opt/rocm/bin" /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -b
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -b
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -b
+sudo env PATH="$PATH:/opt/rocm-wsl/bin" /opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py -b
 ```
 
 **Unittest verbose**
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
-sudo env PATH="$PATH:/opt/rocm/bin" /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -v
+sudo env PATH="$PATH:/opt/rocm-wsl/bin" /opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
 ```
 
 **Unittest filter and verbose**
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "testname" -v
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "testname" -v
-sudo env PATH="$PATH:/opt/rocm/bin" /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "testname" -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -k "testname" -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -k "testname" -v
+sudo env PATH="$PATH:/opt/rocm-wsl/bin" /opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "testname" -v
 ```
 
 From the `python_unittest` directory you can use `./cli_unit_test.py` (and the same `sudo env PATH=...` prefix) instead of the full path.
@@ -64,9 +64,9 @@ Runs all tests. Silence print statements to stdout. Lists tests results.
 This is also the best way to list all tests available.
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b
-sudo env PATH="$PATH:/opt/rocm/bin" /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -b
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -b
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -b
+sudo env PATH="$PATH:/opt/rocm-wsl/bin" /opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py -b
 ```
 
 ex.
@@ -74,7 +74,7 @@ ex.
   <summary>Click for example: <i><b>Unittest: not verbose</i></b></summary>
 
 ~~~shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -b
 ....s.sss..s...sss..sss.....s.....ss...s.........s.s.....s......s.........s.................
 .....ss...s..s.........ssss.s.s.ss...s.sssss.ssss.sssss.sss....s...ss...
 ----------------------------------------------------------------------
@@ -89,9 +89,9 @@ OK (skipped=53)
 Helpful to see print outs of Python.
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
-sudo env PATH="$PATH:/opt/rocm/bin" /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -v
+sudo env PATH="$PATH:/opt/rocm-wsl/bin" /opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py -v
 ```
 
 
@@ -100,7 +100,7 @@ ex.
   <summary>Click for example: <i><b>Unittest: verbose (with print statements)</i></b></summary>
 
 ~~~shell
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -v
 AMD SMI Integration Tests
 asic info(gpu=0)
 {
@@ -302,9 +302,9 @@ OK (skipped=2)
 Allow filtering based on common or specific test names.
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "testname" -v
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_walkthrough" -v
-sudo env PATH="$PATH:/opt/rocm/bin" /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "testname" -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -k "testname" -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -k "test_walkthrough" -v
+sudo env PATH="$PATH:/opt/rocm-wsl/bin" /opt/rocm-wsl/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "testname" -v
 ```
 
 ex.
@@ -312,7 +312,7 @@ ex.
   <summary>Click for example: <i><b>Unittest: filter and verbose</b></i></summary>
 
 ~~~shell
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_asic_kfd_info" -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -k "test_asic_kfd_info" -v
 AMD SMI Integration Tests
 ==============================================================
 Legend: . = pass, s = skipped, F = fail, E = error
@@ -360,7 +360,7 @@ OK
 Please refer to Python's UnitTest documentation for better overview of commands to run.
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/unit_tests.py -v
 ...(output truncated)...
 test_check_res (__main__.TestAmdSmiPythonBDF.test_check_res) ... ok
 test_format_bdf (__main__.TestAmdSmiPythonBDF.test_format_bdf) ... ok
@@ -373,7 +373,7 @@ OK (skipped=53)
 ```
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "temperature" -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -k "temperature" -v
 AMD SMI Integration Tests
 ==============================================================
 Legend: . = pass, s = skipped, F = fail, E = error
@@ -447,7 +447,7 @@ OK
 ```
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "info" -b -v
+/opt/rocm-wsl/share/amd_smi/tests/python_unittest/integration_test.py -k "info" -b -v
 test_asic_kfd_info (__main__.TestAmdSmiPythonInterface.test_asic_kfd_info) ... ok
 test_bad_page_info (__main__.TestAmdSmiPythonInterface.test_bad_page_info) ... ok
 test_board_info (__main__.TestAmdSmiPythonInterface.test_board_info) ... ok
