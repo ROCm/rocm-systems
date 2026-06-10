@@ -188,9 +188,7 @@ public:
   const std::vector<simdojo::Port *> &cpl_ports() const { return cpl_ports_; }
 
 private:
-  std::mutex &set_mutex(uint64_t addr) const {
-    return set_mutexes_[CacheStore::set_index(addr)];
-  }
+  std::mutex &set_mutex(uint64_t addr) const { return set_mutexes_[CacheStore::set_index(addr)]; }
 
   class AllSetLocks {
   public:
