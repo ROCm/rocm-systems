@@ -632,7 +632,9 @@ def gen_vector_permlane64(dst: list[str], src: list[str]) -> str:
     return '\n'.join(L)
 
 
-def gen_vector_cvt_pk(dst: list[str], src: list[str], cls: str, op: str | None) -> str:
+def gen_vector_cvt_pk(
+    dst: list[str], src: list[str], cls: str, op: str | None, *, opsel: str = '0u'
+) -> str:
     """Generate pack/convert instructions."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -705,17 +707,33 @@ def gen_vector_cvt_pk(dst: list[str], src: list[str], cls: str, op: str | None) 
                 )
             L.append(f'    uint32_t lo = {conv}(s0);')
             L.append(f'    uint32_t hi = {conv}(s1);')
-            L.append(f'    {dst[0]}.write_lane(wf, lane, lo | (hi << 8));')
+            L.append(
+                '    uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);'
+            )
+            L.append(f'    bool word_hi = ({opsel} >> 3) & 1;')
+            L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+            L.append('    if (word_hi)')
+            L.append(
+                f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));'
+            )
+            L.append('    else')
+            L.append(
+                f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));'
+            )
         elif op in ('f32_fp8', 'f32_bf8', 'f16_fp8', 'f16_bf8'):
             conv = (
                 'util::fp8_e4m3_to_f32'
                 if op.endswith('_fp8')
                 else 'util::bf8_e5m2_to_f32'
             )
-            L.append(f'    uint32_t raw = {src[0]}.read_lane(wf, lane);')
-            L.append(f'    float lo = {conv}(static_cast<uint8_t>(raw & 0xFFu));')
+            L.append(f'    uint32_t packed = {src[0]}.read_lane(wf, lane);')
+            L.append(f'    bool src_hi = {opsel} & 1;')
             L.append(
-                f'    float hi = {conv}(static_cast<uint8_t>((raw >> 8) & 0xFFu));'
+                '    uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);'
+            )
+            L.append(f'    float lo = {conv}(static_cast<uint8_t>(half & 0xFFu));')
+            L.append(
+                f'    float hi = {conv}(static_cast<uint8_t>((half >> 8) & 0xFFu));'
             )
             if op.startswith('f32_'):
                 L.append('    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);')
@@ -808,6 +826,20 @@ def _scale_encode_call(fmt: str, value_expr: str) -> str:
     raise ValueError(f'unsupported scaled conversion output format: {fmt}')
 
 
+def _scale_sr_encode_call(fmt: str, value_expr: str, seed_expr: str) -> str:
+    if fmt == 'fp4':
+        return f'util::f32_to_fp4_e2m1_sr({value_expr}, {seed_expr})'
+    if fmt == 'fp6':
+        return f'util::f32_to_fp6_e2m3_sr({value_expr}, {seed_expr})'
+    if fmt == 'bf6':
+        return f'util::f32_to_bf6_e3m2_sr({value_expr}, {seed_expr})'
+    if fmt == 'fp8':
+        return f'util::f32_to_fp8_e4m3_sr({value_expr}, {seed_expr})'
+    if fmt == 'bf8':
+        return f'util::f32_to_bf8_e5m2_sr({value_expr}, {seed_expr})'
+    raise ValueError(f'unsupported scaled SR conversion output format: {fmt}')
+
+
 def _scale_lowp_bits(fmt: str) -> int:
     if fmt == 'fp4':
         return 4
@@ -888,7 +920,13 @@ def gen_vector_cvt_scale(
     if cls != 'vector_cvt_scale' or op is None:
         raise ValueError('vector_cvt_scale requires an operation')
 
-    parts = op.split('_')
+    stochastic = False
+    parsed_op = op
+    if parsed_op.startswith('sr_'):
+        stochastic = True
+        parsed_op = parsed_op[3:]
+
+    parts = parsed_op.split('_')
     if len(parts) != 4 or parts[1] not in ('pk8', 'pk16'):
         raise ValueError(f'unsupported vector_cvt_scale operation: {op}')
 
@@ -899,7 +937,14 @@ def gen_vector_cvt_scale(
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     _scale_read_vgpr_base(L, 'dst_base', dst[0])
-    L.append(f'    float scale = std::bit_cast<float>({src[1]}.read_lane(wf, lane));')
+    scale_src = src[2] if stochastic else src[1]
+    L.append(
+        f'    float scale = std::bit_cast<float>({scale_src}.read_lane(wf, lane));'
+    )
+    if stochastic:
+        L.append(
+            f'    uint32_t seed = static_cast<uint32_t>({src[1]}.read_lane(wf, lane));'
+        )
 
     if direction == 'unpack':
         bits = _scale_lowp_bits(in_fmt)
@@ -959,15 +1004,797 @@ def gen_vector_cvt_scale(
         L.append('        dst_words[word + 1u] |= code >> (32u - shift);')
         L.append('    };')
         L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
-        L.append('      float value = read_scaled_input(index) * scale;')
-        L.append(
-            f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value')});"
-        )
+        L.append('      float value = read_scaled_input(index) / scale;')
+        if stochastic:
+            L.append(
+                f"      pack_scaled_dst(index, {_scale_sr_encode_call(out_fmt, 'value', 'seed')});"
+            )
+            L.append('      seed = util::prng_advance(seed);')
+        else:
+            L.append(
+                f"      pack_scaled_dst(index, {_scale_encode_call(out_fmt, 'value')});"
+            )
         L.append('    }')
         L.append(f'    for (uint32_t word = 0; word < {out_words}u; ++word)')
         L.append('      wf.cu().write_vgpr(dst_base + word, lane, dst_words[word]);')
     else:
         raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
+
+    L.append('  }')
+    return '\n'.join(L)
+
+
+# ---------------------------------------------------------------------------
+# Non-scaled FP8/BF8 pack/convert instructions (CDNA3/4, RDNA4)
+# ---------------------------------------------------------------------------
+
+
+def _opsel_field(ctx) -> str:
+    """Return the correct opsel field name for the current ISA encoding."""
+    if 'op_sel' in ctx.enc_field_names:
+        return 'inst_.op_sel'
+    if 'opsel' in ctx.enc_field_names:
+        return 'inst_.opsel'
+    return '0u'
+
+
+def gen_cvt_fp8(ctx) -> str:
+    """Generate execute body for non-scaled V_CVT_{PK,SR}_{FP8,BF8}_F32
+    and V_CVT_PK_F32_{FP8,BF8} instructions."""
+    from amdisa.codegen.execute import ExecuteContext
+
+    op = ctx.op
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    opsel = _opsel_field(ctx) if is_vop3 else '0u'
+
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+
+    if op == 'pk_fp8_f32':
+        _gen_pk_narrow_fp8(L, dst, src, 'util::f32_to_fp8_e4m3_rne', opsel)
+    elif op == 'pk_bf8_f32':
+        _gen_pk_narrow_fp8(L, dst, src, 'util::f32_to_bf8_e5m2_rne', opsel)
+    elif op == 'sr_fp8_f32':
+        _gen_sr_narrow_fp8(L, dst, src, 'util::f32_to_fp8_e4m3_sr', opsel)
+    elif op == 'sr_bf8_f32':
+        _gen_sr_narrow_fp8(L, dst, src, 'util::f32_to_bf8_e5m2_sr', opsel)
+    elif op == 'pk_f32_fp8':
+        _gen_pk_widen_fp8(L, dst, src, 'util::fp8_e4m3_to_f32', opsel)
+    elif op == 'pk_f32_bf8':
+        _gen_pk_widen_fp8(L, dst, src, 'util::bf8_e5m2_to_f32', opsel)
+
+    L.append('  }')
+    return '\n'.join(L)
+
+
+def _gen_pk_narrow_fp8(
+    L: list[str], dst: list[str], src: list[str], cvt_fn: str, opsel: str = '0u'
+) -> None:
+    """Pack 2×F32 → 2×FP8/BF8 with OPSEL[3] half selection, R-M-W."""
+    L.append(
+        f'    float s0 = std::bit_cast<float>(static_cast<uint32_t>({src[0]}.read_lane(wf, lane)));'
+    )
+    L.append(
+        f'    float s1 = std::bit_cast<float>(static_cast<uint32_t>({src[1]}.read_lane(wf, lane)));'
+    )
+    L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
+    L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+    L.append(
+        '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
+    )
+    L.append(f'    bool hi = ({opsel} >> 3) & 1;')
+    L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+    L.append('    if (hi)')
+    L.append(f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));')
+    L.append('    else')
+    L.append(
+        f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));'
+    )
+
+
+def _gen_sr_narrow_fp8(
+    L: list[str], dst: list[str], src: list[str], cvt_fn: str, opsel: str = '0u'
+) -> None:
+    """Single F32 → FP8/BF8 with stochastic rounding, OPSEL[3:2] byte sel, R-M-W."""
+    L.append(
+        f'    float s0 = std::bit_cast<float>(static_cast<uint32_t>({src[0]}.read_lane(wf, lane)));'
+    )
+    L.append(f'    uint32_t seed = {src[1]}.read_lane(wf, lane);')
+    L.append(f'    uint8_t result = {cvt_fn}(s0, seed);')
+    L.append(f'    uint32_t dst_byte = ({opsel} >> 2) & 0x3;')
+    L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+    L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
+    L.append(
+        f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));'
+    )
+
+
+def _gen_pk_widen_fp8(
+    L: list[str], dst: list[str], src: list[str], cvt_fn: str, opsel: str = '0u'
+) -> None:
+    """Unpack 2×FP8/BF8 → 2×F32 with OPSEL[0] half selection."""
+    L.append(f'    uint32_t packed = {src[0]}.read_lane(wf, lane);')
+    L.append(f'    bool hi = {opsel} & 1;')
+    L.append('    uint32_t half = hi ? (packed >> 16) : (packed & 0xFFFFu);')
+    L.append(f'    float f0 = {cvt_fn}(static_cast<uint8_t>(half & 0xFF));')
+    L.append(f'    float f1 = {cvt_fn}(static_cast<uint8_t>((half >> 8) & 0xFF));')
+    L.append('    uint64_t result = static_cast<uint64_t>(std::bit_cast<uint32_t>(f0))')
+    L.append('        | (static_cast<uint64_t>(std::bit_cast<uint32_t>(f1)) << 32);')
+    L.append(f'    {dst[0]}.write_lane64(wf, lane, result);')
+
+
+# ---------------------------------------------------------------------------
+# Scaled FP8/BF8/FP4/FP6/BF6 format conversion instructions (CDNA4)
+# ---------------------------------------------------------------------------
+
+_NARROW_FMTS = frozenset({'fp8', 'bf8', 'fp4', 'fp6', 'bf6'})
+_WIDE_FMTS = frozenset({'f32', 'f16', 'bf16'})
+
+# Mapping from narrow format name → util:: conversion functions
+_NARROW_TO_F32 = {
+    'fp8': 'util::fp8_e4m3_to_f32',
+    'bf8': 'util::bf8_e5m2_to_f32',
+    'fp4': 'util::fp4_e2m1_to_f32',
+    'fp6': 'util::fp6_e2m3_to_f32',
+    'bf6': 'util::bf6_e3m2_to_f32',
+}
+_F32_TO_NARROW_RNE = {
+    'fp8': 'util::f32_to_fp8_e4m3_rne',
+    'bf8': 'util::f32_to_bf8_e5m2_rne',
+    'fp4': 'util::f32_to_fp4_e2m1_rne',
+    'fp6': 'util::f32_to_fp6_e2m3_rne',
+    'bf6': 'util::f32_to_bf6_e3m2_rne',
+}
+_F32_TO_NARROW_SR = {
+    'fp8': 'util::f32_to_fp8_e4m3_sr',
+    'bf8': 'util::f32_to_bf8_e5m2_sr',
+    'fp4': 'util::f32_to_fp4_e2m1_sr',
+    'fp6': 'util::f32_to_fp6_e2m3_sr',
+    'bf6': 'util::f32_to_bf6_e3m2_sr',
+}
+
+
+def _parse_scalef32_op(op: str):
+    """Parse a CVT_SCALEF32 operation suffix into components.
+
+    Returns (stochastic, mode, dst_fmt, src_fmt, direction).
+    """
+    s = op
+    stochastic = False
+    if s.startswith('sr_'):
+        stochastic = True
+        s = s[3:]
+
+    if s.startswith('2xpk16_'):
+        mode = '2xpk16'
+        s = s[7:]
+    elif s.startswith('pk32_'):
+        mode = 'pk32'
+        s = s[5:]
+    elif s.startswith('pk_'):
+        mode = 'pk'
+        s = s[3:]
+    else:
+        mode = 'single'
+
+    parts = s.split('_')
+    assert len(parts) == 2, f'unexpected scalef32 suffix: {op}'
+    dst_fmt, src_fmt = parts
+
+    if dst_fmt in _NARROW_FMTS and src_fmt in _WIDE_FMTS:
+        direction = 'narrow'
+    elif dst_fmt in _WIDE_FMTS and src_fmt in _NARROW_FMTS:
+        direction = 'widen'
+    else:
+        raise ValueError(f'cannot determine direction for {op}: {dst_fmt} vs {src_fmt}')
+
+    return stochastic, mode, dst_fmt, src_fmt, direction
+
+
+def _read_as_f32(src_name: str, src_fmt: str) -> str:
+    """Return C++ expression to read a source value as float."""
+    if src_fmt == 'f32':
+        return f'std::bit_cast<float>(static_cast<uint32_t>({src_name}.read_lane(wf, lane)))'
+    elif src_fmt == 'f16':
+        return f'util::f16_to_f32(static_cast<uint16_t>({src_name}.read_lane(wf, lane) & 0xFFFF))'
+    elif src_fmt == 'bf16':
+        return f'util::bf16_to_f32(static_cast<uint16_t>({src_name}.read_lane(wf, lane) & 0xFFFF))'
+    raise ValueError(f'unsupported source format: {src_fmt}')
+
+
+def _write_as_fmt(dst_name: str, dst_fmt: str, val_expr: str) -> str:
+    """Return C++ statement to write a float result in the target format."""
+    if dst_fmt == 'f32':
+        return f'{dst_name}.write_lane(wf, lane, std::bit_cast<uint32_t>({val_expr}));'
+    elif dst_fmt == 'f16':
+        return f'{dst_name}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_f16({val_expr})));'
+    elif dst_fmt == 'bf16':
+        return f'{dst_name}.write_lane(wf, lane, static_cast<uint32_t>(util::f32_to_bf16({val_expr})));'
+    raise ValueError(f'unsupported dst format: {dst_fmt}')
+
+
+def _nan_for_fmt(dst_fmt: str) -> str:
+    """Return the quiet-NaN bit pattern for a wide format, or 0 for narrow."""
+    if dst_fmt in _NARROW_FMTS:
+        return '0u'
+    if dst_fmt == 'f32':
+        return '0x7FC00000u'
+    if dst_fmt == 'f16':
+        return 'static_cast<uint32_t>(0x7E00u)'
+    if dst_fmt == 'bf16':
+        return 'static_cast<uint32_t>(0x7FC0u)'
+    return '0x7FC00000u'
+
+
+def gen_cvt_scalef32(ctx) -> str:
+    """Generate execute body for V_CVT_SCALEF32_* instructions."""
+    from amdisa.codegen.execute import ExecuteContext
+
+    op = ctx.op
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    stochastic, mode, dst_fmt, src_fmt, direction = _parse_scalef32_op(op)
+
+    if mode in ('pk32', '2xpk16', 'sr_pk32'):
+        return _gen_wide_scalef32(ctx, stochastic, mode, dst_fmt, src_fmt, direction)
+
+    if direction == 'narrow':
+        if stochastic:
+            return _gen_sr_scalef32(ctx, mode, dst_fmt, src_fmt)
+        return _gen_narrow_scalef32(ctx, mode, dst_fmt, src_fmt)
+    else:
+        return _gen_widen_scalef32(ctx, mode, dst_fmt, src_fmt)
+
+
+def _scale_preamble(L: list[str], scale_src: str) -> None:
+    """Emit per-lane scale factor extraction with E8M0 NaN check."""
+    L.append(f'    uint32_t scale_bits = {scale_src}.read_lane(wf, lane);')
+    L.append('    uint32_t biased_exp = (scale_bits >> 23) & 0xFFu;')
+
+
+def _gen_narrow_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
+    """Narrowing: F32/F16/BF16 → FP8/BF8/FP4, with scale, RNE."""
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    cvt_fn = _F32_TO_NARROW_RNE[dst_fmt]
+    nan_val = _nan_for_fmt(dst_fmt)
+
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+
+    if mode == 'pk' and src_fmt == 'f32' and dst_fmt != 'fp4':
+        # 3-src: src0=F32[0], src1=F32[1], src2=scale
+        scale_src = src[2]
+        _scale_preamble(L, scale_src)
+        L.append(
+            f'    if (biased_exp == 0xFFu) {{ {dst[0]}.write_lane(wf, lane, {dst[0]}.read_lane(wf, lane)); continue; }}'
+        )
+        L.append(
+            '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+        )
+        L.append(
+            f'    float s0 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>({src[0]}.read_lane(wf, lane)))) / scale);'
+        )
+        L.append(
+            f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>({src[1]}.read_lane(wf, lane)))) / scale);'
+        )
+        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
+        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(
+            '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
+        )
+        L.append('    bool hi = (inst_.op_sel >> 3) & 1;')
+        L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+        L.append('    if (hi)')
+        L.append(
+            f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));'
+        )
+        L.append('    else')
+        L.append(
+            f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));'
+        )
+    elif mode == 'pk' and src_fmt in ('f16', 'bf16'):
+        # 2-src: src0=packed 2xF16/BF16, src1=scale
+        scale_src = src[1]
+        _scale_preamble(L, scale_src)
+        L.append(
+            f'    if (biased_exp == 0xFFu) {{ {dst[0]}.write_lane(wf, lane, {dst[0]}.read_lane(wf, lane)); continue; }}'
+        )
+        L.append(
+            '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+        )
+        L.append(f'    uint32_t packed_src = {src[0]}.read_lane(wf, lane);')
+        if src_fmt == 'f16':
+            L.append(
+                '    float s0 = static_cast<float>(static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);'
+            )
+            L.append(
+                '    float s1 = static_cast<float>(static_cast<double>(util::f16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
+            )
+        else:
+            L.append(
+                '    float s0 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);'
+            )
+            L.append(
+                '    float s1 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
+            )
+        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
+        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        if dst_fmt == 'fp4':
+            L.append(
+                '    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);'
+            )
+            L.append('    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;')
+            L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+            L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));'
+            )
+        else:
+            L.append(
+                '    uint32_t packed = static_cast<uint32_t>(r0) | (static_cast<uint32_t>(r1) << 8);'
+            )
+            L.append('    bool hi = (inst_.op_sel >> 3) & 1;')
+            L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+            L.append('    if (hi)')
+            L.append(
+                f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));'
+            )
+            L.append('    else')
+            L.append(
+                f'      {dst[0]}.write_lane(wf, lane, (old & 0xFFFF0000u) | (packed & 0xFFFFu));'
+            )
+    elif mode == 'pk' and dst_fmt == 'fp4' and src_fmt == 'f32':
+        # 3-src: src0=F32[0], src1=F32[1], src2=scale → packed 2×FP4 (8-bit)
+        scale_src = src[2]
+        _scale_preamble(L, scale_src)
+        L.append(
+            f'    if (biased_exp == 0xFFu) {{ {dst[0]}.write_lane(wf, lane, {dst[0]}.read_lane(wf, lane)); continue; }}'
+        )
+        L.append(
+            '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+        )
+        L.append(
+            f'    float s0 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>({src[0]}.read_lane(wf, lane)))) / scale);'
+        )
+        L.append(
+            f'    float s1 = static_cast<float>(static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>({src[1]}.read_lane(wf, lane)))) / scale);'
+        )
+        L.append(f'    uint8_t r0 = {cvt_fn}(s0);')
+        L.append(f'    uint8_t r1 = {cvt_fn}(s1);')
+        L.append(
+            '    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);'
+        )
+        L.append('    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;')
+        L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+        L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));'
+        )
+
+    L.append('  }')
+    return '\n'.join(L)
+
+
+def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
+    """Narrowing with stochastic rounding: scale + SR."""
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    cvt_fn = _F32_TO_NARROW_SR[dst_fmt]
+    op = ctx.op
+
+    L = []
+    is_sr_pk_fp4_f32 = op == 'sr_pk_fp4_f32'
+    if is_sr_pk_fp4_f32:
+        L.append('  auto &cu = wf.cu();')
+        L.append('  uint32_t vb = wf.vgpr_alloc().base;')
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+
+    if mode == 'pk' and dst_fmt == 'fp4':
+        data_src, random_src, scale_src = src[0], src[1], src[2]
+        _scale_preamble(L, scale_src)
+        L.append(
+            f'    if (biased_exp == 0xFFu) {{ {dst[0]}.write_lane(wf, lane, {dst[0]}.read_lane(wf, lane)); continue; }}'
+        )
+        L.append(
+            '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+        )
+        if is_sr_pk_fp4_f32:
+            L.append(
+                f'    uint32_t seed_lo = static_cast<uint32_t>({random_src}.read_lane(wf, lane));'
+            )
+            L.append(
+                f'    float val0 = std::bit_cast<float>(static_cast<uint32_t>({data_src}.read_lane(wf, lane)));'
+            )
+            L.append(
+                f'    float val1 = std::bit_cast<float>(cu.read_vgpr(vb + {data_src}.unified_vgpr_index() + 1, lane));'
+            )
+        else:
+            L.append(f'    uint32_t packed_src = {data_src}.read_lane(wf, lane);')
+            L.append(f'    uint32_t seed_lo = {random_src}.read_lane(wf, lane);')
+        if is_sr_pk_fp4_f32:
+            L.append(
+                '    float s0 = static_cast<float>(static_cast<double>(val0) / scale);'
+            )
+            L.append(
+                '    float s1 = static_cast<float>(static_cast<double>(val1) / scale);'
+            )
+            L.append(f'    uint8_t r0 = {cvt_fn}(s0, seed_lo);')
+            L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
+            L.append(f'    uint8_t r1 = {cvt_fn}(s1, seed_hi);')
+        elif src_fmt == 'f16':
+            L.append(
+                '    float s0 = static_cast<float>(static_cast<double>(util::f16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);'
+            )
+            L.append(
+                '    float s1 = static_cast<float>(static_cast<double>(util::f16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
+            )
+            L.append(f'    uint8_t r0 = {cvt_fn}(s0, seed_lo);')
+            L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
+            L.append(f'    uint8_t r1 = {cvt_fn}(s1, seed_hi);')
+        elif src_fmt == 'bf16':
+            L.append(
+                '    float s0 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>(packed_src & 0xFFFF))) / scale);'
+            )
+            L.append(
+                '    float s1 = static_cast<float>(static_cast<double>(util::bf16_to_f32(static_cast<uint16_t>((packed_src >> 16) & 0xFFFF))) / scale);'
+            )
+            L.append(f'    uint8_t r0 = {cvt_fn}(s0, seed_lo);')
+            L.append('    uint32_t seed_hi = util::prng_advance(seed_lo);')
+            L.append(f'    uint8_t r1 = {cvt_fn}(s1, seed_hi);')
+        L.append(
+            '    uint32_t packed = static_cast<uint32_t>(r0 & 0xF) | (static_cast<uint32_t>(r1 & 0xF) << 4);'
+        )
+        L.append('    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;')
+        L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+        L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (packed << (dst_byte * 8)));'
+        )
+    else:
+        # SR single FP8/BF8: src0=data, src1=random, src2=scale
+        data_src, random_src, scale_src = src[0], src[1], src[2]
+        _scale_preamble(L, scale_src)
+        L.append(
+            f'    if (biased_exp == 0xFFu) {{ {dst[0]}.write_lane(wf, lane, {dst[0]}.read_lane(wf, lane)); continue; }}'
+        )
+        L.append(
+            '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+        )
+        if src_fmt == 'f32':
+            L.append(
+                f'    float val = std::bit_cast<float>(static_cast<uint32_t>({data_src}.read_lane(wf, lane)));'
+            )
+        elif src_fmt == 'f16':
+            L.append(f'    uint32_t src_packed = {data_src}.read_lane(wf, lane);')
+            L.append(
+                '    float val = util::f16_to_f32(static_cast<uint16_t>(src_packed & 0xFFFF));'
+            )
+        else:
+            L.append(f'    uint32_t src_packed = {data_src}.read_lane(wf, lane);')
+            L.append(
+                '    float val = util::bf16_to_f32(static_cast<uint16_t>(src_packed & 0xFFFF));'
+            )
+        L.append(
+            '    float scaled = static_cast<float>(static_cast<double>(val) / scale);'
+        )
+        L.append(f'    uint32_t seed = {random_src}.read_lane(wf, lane);')
+        L.append(f'    uint8_t result = {cvt_fn}(scaled, seed);')
+        L.append('    uint32_t dst_byte = (inst_.op_sel >> 2) & 0x3;')
+        L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+        L.append('    uint32_t mask = ~(0xFFu << (dst_byte * 8));')
+        L.append(
+            f'    {dst[0]}.write_lane(wf, lane, (old & mask) | (static_cast<uint32_t>(result) << (dst_byte * 8)));'
+        )
+
+    L.append('  }')
+    return '\n'.join(L)
+
+
+def _gen_widen_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
+    """Widening: FP8/BF8/FP4 → F32/F16/BF16, with scale."""
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    cvt_fn = _NARROW_TO_F32[src_fmt]
+    nan_val = _nan_for_fmt(dst_fmt)
+
+    L = []
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+
+    scale_src = src[1]
+    _scale_preamble(L, scale_src)
+
+    if mode == 'single':
+        # Single widening: src0 = narrow value (byte selected by OPSEL[1:0])
+        if dst_fmt in ('f16', 'bf16'):
+            conv = 'util::f32_to_f16' if dst_fmt == 'f16' else 'util::f32_to_bf16'
+            L.append('    bool hi = (inst_.op_sel >> 3) & 1;')
+            L.append(f'    uint32_t old = {dst[0]}.read_lane(wf, lane);')
+            L.append('    if (biased_exp == 0xFFu) {')
+            L.append(f'      uint32_t nv = {nan_val};')
+            L.append(
+                f'      {dst[0]}.write_lane(wf, lane, hi ? ((old & 0xFFFFu) | (nv << 16)) : ((old & 0xFFFF0000u) | nv));'
+            )
+            L.append('      continue;')
+            L.append('    }')
+        else:
+            L.append(
+                f'    if (biased_exp == 0xFFu) {{ {dst[0]}.write_lane(wf, lane, {nan_val}); continue; }}'
+            )
+        L.append(
+            '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+        )
+        L.append(f'    uint32_t src_raw = {src[0]}.read_lane(wf, lane);')
+        L.append('    uint32_t src_byte = inst_.op_sel & 0x3;')
+        if src_fmt == 'fp4':
+            L.append(
+                '    uint8_t narrow_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xF);'
+            )
+        else:
+            L.append(
+                '    uint8_t narrow_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);'
+            )
+        L.append(
+            f'    float f = static_cast<float>(static_cast<double>({cvt_fn}(narrow_val)) * scale);'
+        )
+        if dst_fmt in ('f16', 'bf16'):
+            L.append(f'    uint32_t bits = static_cast<uint32_t>({conv}(f));')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, hi ? ((old & 0xFFFFu) | (bits << 16)) : ((old & 0xFFFF0000u) | (bits & 0xFFFFu)));'
+            )
+        else:
+            L.append(f'    {_write_as_fmt(dst[0], dst_fmt, "f")}')
+    elif mode == 'pk':
+        # Packed widening: 2 narrow values → 2 wide values
+        if src_fmt == 'fp4':
+            # OPSEL[1:0] selects source byte
+            L.append(f'    if (biased_exp == 0xFFu) {{')
+            if dst_fmt == 'f32':
+                L.append(
+                    f'      {dst[0]}.write_lane64(wf, lane, 0x7FC000007FC00000ULL); continue;'
+                )
+            else:
+                L.append(
+                    f'      {dst[0]}.write_lane(wf, lane, {nan_val} | ({nan_val} << 16)); continue;'
+                )
+            L.append('    }')
+            L.append(
+                '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+            )
+            L.append(f'    uint32_t src_raw = {src[0]}.read_lane(wf, lane);')
+            L.append('    uint32_t src_byte = inst_.op_sel & 0x3;')
+            L.append(
+                '    uint8_t byte_val = static_cast<uint8_t>((src_raw >> (src_byte * 8)) & 0xFF);'
+            )
+            L.append(
+                f'    float f0 = static_cast<float>(static_cast<double>({cvt_fn}(static_cast<uint8_t>(byte_val & 0xF))) * scale);'
+            )
+            L.append(
+                f'    float f1 = static_cast<float>(static_cast<double>({cvt_fn}(static_cast<uint8_t>((byte_val >> 4) & 0xF))) * scale);'
+            )
+        else:
+            # FP8/BF8: OPSEL[0] selects half
+            L.append(f'    if (biased_exp == 0xFFu) {{')
+            if dst_fmt == 'f32':
+                L.append(
+                    f'      {dst[0]}.write_lane64(wf, lane, 0x7FC000007FC00000ULL); continue;'
+                )
+            else:
+                L.append(
+                    f'      {dst[0]}.write_lane(wf, lane, {nan_val} | ({nan_val} << 16)); continue;'
+                )
+            L.append('    }')
+            L.append(
+                '    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);'
+            )
+            L.append(f'    uint32_t src_raw = {src[0]}.read_lane(wf, lane);')
+            L.append('    bool src_hi = inst_.op_sel & 1;')
+            L.append(
+                '    uint32_t half = src_hi ? (src_raw >> 16) : (src_raw & 0xFFFFu);'
+            )
+            L.append(
+                f'    float f0 = static_cast<float>(static_cast<double>({cvt_fn}(static_cast<uint8_t>(half & 0xFF))) * scale);'
+            )
+            L.append(
+                f'    float f1 = static_cast<float>(static_cast<double>({cvt_fn}(static_cast<uint8_t>((half >> 8) & 0xFF))) * scale);'
+            )
+
+        if dst_fmt == 'f32':
+            L.append(
+                '    uint64_t result = static_cast<uint64_t>(std::bit_cast<uint32_t>(f0))'
+            )
+            L.append(
+                '        | (static_cast<uint64_t>(std::bit_cast<uint32_t>(f1)) << 32);'
+            )
+            L.append(f'    {dst[0]}.write_lane64(wf, lane, result);')
+        elif dst_fmt == 'f16':
+            L.append(
+                '    uint32_t result = static_cast<uint32_t>(util::f32_to_f16(f0))'
+            )
+            L.append('        | (static_cast<uint32_t>(util::f32_to_f16(f1)) << 16);')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
+        else:
+            L.append(
+                '    uint32_t result = static_cast<uint32_t>(util::f32_to_bf16(f0))'
+            )
+            L.append('        | (static_cast<uint32_t>(util::f32_to_bf16(f1)) << 16);')
+            L.append(f'    {dst[0]}.write_lane(wf, lane, result);')
+
+    L.append('  }')
+    return '\n'.join(L)
+
+
+def _gen_wide_scalef32(
+    ctx, stochastic: bool, mode: str, dst_fmt: str, src_fmt: str, direction: str
+) -> str:
+    """Wide (pk32/2xpk16) FP6/BF6 instructions — 32 elements across multi-VGPRs."""
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+
+    L = []
+    L.append('  auto &cu = wf.cu();')
+    L.append('  uint32_t vb = wf.vgpr_alloc().base;')
+    L.append(
+        '  auto rd = [&](const auto &op, uint32_t lane, uint32_t dw) -> uint32_t {'
+    )
+    L.append('    return cu.read_vgpr(vb + op.unified_vgpr_index() + dw, lane);')
+    L.append('  };')
+    L.append(
+        '  auto wr = [&](const auto &op, uint32_t lane, uint32_t dw, uint32_t val) {'
+    )
+    L.append('    cu.write_vgpr(vb + op.unified_vgpr_index() + dw, lane, val);')
+    L.append('  };')
+
+    L.append('  uint64_t exec = wf.exec();')
+    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+    L.append('    if (!(exec & (1ULL << lane))) continue;')
+
+    scale_src = src[-1]
+    if stochastic and len(src) >= 3:
+        scale_src = src[2]
+        random_src = src[1]
+    elif len(src) >= 2:
+        scale_src = src[-1]
+
+    _scale_preamble(L, scale_src)
+    L.append('    if (biased_exp == 0xFFu) continue;')
+    L.append('    double scale = std::ldexp(1.0, static_cast<int>(biased_exp) - 127);')
+
+    if direction == 'narrow':
+        cvt_fn = (
+            _F32_TO_NARROW_SR[dst_fmt] if stochastic else _F32_TO_NARROW_RNE[dst_fmt]
+        )
+        n_elems = 32
+        bits_per_elem = 6
+
+        if stochastic:
+            L.append(f'    uint32_t seed = {random_src}.read_lane(wf, lane);')
+
+        L.append(f'    uint8_t vals[{n_elems}];')
+
+        if mode == '2xpk16':
+            # src0 = 16×F32 (lo), src1 = 16×F32 (hi), interleaved in output:
+            # field[2k] = lo[k], field[2k+1] = hi[k]
+            for half in range(2):
+                s = src[half]
+                for j in range(16):
+                    idx = j * 2 + half
+                    L.append(f'    {{')
+                    L.append(
+                        f'      float v = std::bit_cast<float>(rd({s}, lane, {j}));'
+                    )
+                    L.append(
+                        f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
+                    )
+                    if stochastic:
+                        L.append(f'      vals[{idx}] = {cvt_fn}(sv, seed);')
+                        L.append(f'      seed = util::prng_advance(seed);')
+                    else:
+                        L.append(f'      vals[{idx}] = {cvt_fn}(sv);')
+                    L.append(f'    }}')
+        elif src_fmt == 'f32':
+            # sr_pk32: src0 = 32×F32 (32 DWORDs)
+            for j in range(32):
+                L.append(f'    {{')
+                L.append(
+                    f'      float v = std::bit_cast<float>(rd({src[0]}, lane, {j}));'
+                )
+                L.append(
+                    f'      float sv = static_cast<float>(static_cast<double>(v) / scale);'
+                )
+                if stochastic:
+                    L.append(f'      vals[{j}] = {cvt_fn}(sv, seed);')
+                    L.append(f'      seed = util::prng_advance(seed);')
+                else:
+                    L.append(f'      vals[{j}] = {cvt_fn}(sv);')
+                L.append(f'    }}')
+        else:
+            # pk32 from F16/BF16: src0 = 32×F16/BF16 (16 DWORDs, 2 per DWORD)
+            to_f32 = 'util::f16_to_f32' if src_fmt == 'f16' else 'util::bf16_to_f32'
+            for j in range(16):
+                L.append(f'    {{')
+                L.append(f'      uint32_t dw = rd({src[0]}, lane, {j});')
+                L.append(
+                    f'      float v0 = {to_f32}(static_cast<uint16_t>(dw & 0xFFFF));'
+                )
+                L.append(
+                    f'      float v1 = {to_f32}(static_cast<uint16_t>((dw >> 16) & 0xFFFF));'
+                )
+                L.append(
+                    f'      float sv0 = static_cast<float>(static_cast<double>(v0) / scale);'
+                )
+                L.append(
+                    f'      float sv1 = static_cast<float>(static_cast<double>(v1) / scale);'
+                )
+                if stochastic:
+                    L.append(f'      vals[{j*2}] = {cvt_fn}(sv0, seed);')
+                    L.append(f'      seed = util::prng_advance(seed);')
+                    L.append(f'      vals[{j*2+1}] = {cvt_fn}(sv1, seed);')
+                    L.append(f'      seed = util::prng_advance(seed);')
+                else:
+                    L.append(f'      vals[{j*2}] = {cvt_fn}(sv0);')
+                    L.append(f'      vals[{j*2+1}] = {cvt_fn}(sv1);')
+                L.append(f'    }}')
+
+        L.append('    uint32_t dwords[6];')
+        L.append('    util::pack_6bit(vals, dwords);')
+        for d in range(6):
+            L.append(f'    wr({dst[0]}, lane, {d}, dwords[{d}]);')
+
+    else:
+        # Widening: FP6/BF6 → F32/F16/BF16
+        cvt_fn = _NARROW_TO_F32[src_fmt]
+        n_elems = 32
+
+        L.append('    uint32_t src_dwords[6];')
+        for d in range(6):
+            L.append(f'    src_dwords[{d}] = rd({src[0]}, lane, {d});')
+        L.append('    uint8_t vals[32];')
+        L.append('    util::unpack_6bit(src_dwords, vals);')
+
+        if dst_fmt == 'f32':
+            for j in range(32):
+                L.append(
+                    f'    wr({dst[0]}, lane, {j}, std::bit_cast<uint32_t>(static_cast<float>(static_cast<double>({cvt_fn}(vals[{j}])) * scale)));'
+                )
+        elif dst_fmt == 'f16':
+            to_narrow = 'util::f32_to_f16'
+            for j in range(16):
+                L.append(f'    {{')
+                L.append(
+                    f'      float f0 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2}])) * scale);'
+                )
+                L.append(
+                    f'      float f1 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2+1}])) * scale);'
+                )
+                L.append(
+                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0)) | (static_cast<uint32_t>({to_narrow}(f1)) << 16));'
+                )
+                L.append(f'    }}')
+        else:
+            to_narrow = 'util::f32_to_bf16'
+            for j in range(16):
+                L.append(f'    {{')
+                L.append(
+                    f'      float f0 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2}])) * scale);'
+                )
+                L.append(
+                    f'      float f1 = static_cast<float>(static_cast<double>({cvt_fn}(vals[{j*2+1}])) * scale);'
+                )
+                L.append(
+                    f'      wr({dst[0]}, lane, {j}, static_cast<uint32_t>({to_narrow}(f0)) | (static_cast<uint32_t>({to_narrow}(f1)) << 16));'
+                )
+                L.append(f'    }}')
 
     L.append('  }')
     return '\n'.join(L)
