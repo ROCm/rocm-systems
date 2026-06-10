@@ -167,7 +167,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++ \
-            projects/rocDecode
+            ${GITHUB_WORKSPACE}/projects/rocDecode
           cmake --build projects/build-rocdecode --target all --parallel 16
           cmake --build projects/build-rocdecode --target install
           echo "✅ ROCDecode Installation complete!"
@@ -181,7 +181,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++ \
-            projects/rocJPEG
+            ${GITHUB_WORKSPACE}/projects/rocJPEG
           cmake --build projects/build-rocjpeg --target all --parallel 16
           cmake --build projects/build-rocjpeg --target install
           echo "✅ ROCJPEG Installation complete!"
