@@ -234,29 +234,36 @@ CuidGpu::get_hardware_fingerprint(uint64_t &fingerprint) const {
       return AMDCUID_STATUS_UNSUPPORTED;
     }
   } else if (m_info.header.fields.gpu.unit_id == 0) {
-    // attempt to get fingerprint through PCI Config Space if not a partition
+    // attempt to get fingerprint through PCI Config Space if not a VF
     uint16_t offset = 0;
     amdcuid_status_t status =
-        PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
+        PciUtil::get_pci_dsn_cap_offset(m_info.bdf, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      return status;
+      // attempt to get fingerprint through VSEC fallback if DSN capability is
+      // not found
+      status = PciUtil::get_pci_vsec_cap_offset(m_info.bdf, offset);
+      if (status != AMDCUID_STATUS_SUCCESS) {
+        fingerprint = 0;
+        return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+      }
     }
 
-    uint8_t fingerprint_size = 8;
-    uint8_t *fingerprint_buffer = new uint8_t[fingerprint_size];
-    status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer,
+    const uint8_t fingerprint_size = 8;
+    uint8_t fingerprint_bytes[fingerprint_size] = {0};
+    status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_bytes,
                                             fingerprint_size, offset);
     if (status != AMDCUID_STATUS_SUCCESS) {
       fingerprint = 0;
-      delete[] fingerprint_buffer;
       return status;
     }
     // pcie config file is little endian, so need to convert to big endian
-    fingerprint = PciUtil::le64_to_be64(
-        *reinterpret_cast<uint64_t *>(fingerprint_buffer));
-    delete[] fingerprint_buffer;
+    uint64_t fingerprint_value = 0;
+    std::memcpy(&fingerprint_value, fingerprint_bytes,
+                sizeof(fingerprint_value));
+    fingerprint = PciUtil::le64_to_be64(fingerprint_value);
   } else {
-    // partitioned device without unique_id file cannot get fingerprint
+    // partitioned device without unique_id file or pci config cannot get
+    // fingerprint
     fingerprint = 0;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
