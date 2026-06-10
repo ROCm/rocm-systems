@@ -3171,7 +3171,7 @@ class AMDSMIHelpers:
                     }
                 return f"Unable to set {power_type_key} power cap to {requested_power_cap}W, current value is {current_power_cap}W"
             elif not (
-                min_power_cap < requested_power_cap <= max_power_cap and requested_power_cap > 0
+                min_power_cap <= requested_power_cap <= max_power_cap and requested_power_cap > 0
             ):
                 # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                 min_cap_display = 1 if min_power_cap == 0 else min_power_cap
