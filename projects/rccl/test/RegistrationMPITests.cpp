@@ -195,6 +195,12 @@ protected:
         return (!mseg || std::string(mseg) != "0");
     }
 
+    bool isWinEnabled()
+    {
+        const char* win = getenv("NCCL_WIN_ENABLE");
+        return (!win || std::string(win) != "0");
+    }
+
     bool isPerRankLoggingEnabled() { return MPIHelpers::isPerRankLoggingEnabled(); }
 
     // Log File Access
@@ -630,7 +636,7 @@ protected:
  * Confirmation in the logs (NCCL_DEBUG=TRACE NCCL_DEBUG_SUBSYS=REG):
  *   "IPC registering buffer ... numSegments 4"
  */
-TEST_F(UBR_MultiSegment, AllReduce_SpansMultipleSegments)
+TEST_F(UBR_MultiSegment, AllReduce)
 {
     if (!validateTestPrerequisites(/*min_processes=*/2)) {
         GTEST_SKIP() << "Requires 2+ ranks";
@@ -671,8 +677,7 @@ TEST_F(UBR_MultiSegment, AllReduce_SpansMultipleSegments)
     size_t count   = halfSize / sizeof(T);
 
     void* regHandle = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-                  ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
     auto regCleanup = makeScopeGuard([&]() {
         if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
     });
@@ -680,9 +685,7 @@ TEST_F(UBR_MultiSegment, AllReduce_SpansMultipleSegments)
 
     initSendBuffer<T>(sendBuf, count, rank);
 
-    ncclResult_t result = ncclAllReduce(sendBuf, recvBuf, count,
-                                        getNcclDataType<T>(), ncclSum,
-                                        getActiveCommunicator(), getActiveStream());
+    ncclResult_t result = ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream());
     ASSERT_MPI_EQ(ncclSuccess, result);
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
@@ -695,6 +698,79 @@ TEST_F(UBR_MultiSegment, AllReduce_SpansMultipleSegments)
         << "Expected 'numSegments " << (kNumSegments / 2)
         << "' in log - the multi-segment IPC registration branch did not fire";
 }
+
+/**
+ * @brief Multi-segment registration on the symmetric-window path.
+ *
+ * Validates GPU-only multi-segment registration for symmetric windows
+ * (ncclCommWindowRegister, NCCL_WIN_COLL_SYMMETRIC). The reserved VA spans
+ * several physical cuMem segments, so the LSA team maps each segment
+ * individually (dev_runtime.cc symMemoryMapLsaTeam) and logs, per segment:
+ *   "[<lsaRank>] Segment <i>, Type : <t>, numSegments <N>, Segment size ..."
+ *
+ * Unlike the ncclCommRegister path, the multi-segment registration happens once
+ * at ncclCommWindowRegister time. The two AllReduce calls then reuse the same
+ * window, confirming it stays valid and correct across collectives.
+ */
+ TEST_F(UBR_MultiSegment, AllReduce_Symmetric)
+ {
+     if (!validateTestPrerequisites(/*min_processes=*/2)) {
+         GTEST_SKIP() << "Requires 2+ ranks";
+     }
+     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+ 
+     ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+     ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
+     ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+ 
+     int dev = 0;
+     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+ 
+     constexpr size_t kSegmentSize = 32 * 1024 * 1024;
+     constexpr int    kNumSegments = 4;
+ 
+     int rank   = 0;
+     int nRanks = 0;
+     ncclCommUserRank(getActiveCommunicator(), &rank);
+     ncclCommCount(getActiveCommunicator(), &nRanks);
+ 
+     SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments));
+ 
+     MultiSegmentBuffer buf;
+     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, buf));
+     if (buf.totalSize == 0) {
+         GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+     }
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+ 
+     const size_t halfSize = buf.totalSize / 2;
+     ASSERT_EQ(halfSize % sizeof(T), 0u);
+     char*  base    = reinterpret_cast<char*>(buf.vaBase);
+     void*  sendBuf = base;
+     void*  recvBuf = base + halfSize;
+     size_t count   = halfSize / sizeof(T);
+ 
+     ncclWindow_t win = nullptr;
+     ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &win, NCCL_WIN_COLL_SYMMETRIC));
+     auto winCleanup = makeScopeGuard([&]() {
+         if (win) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), win));
+     });
+     ASSERT_MPI_NE(win, nullptr);
+ 
+     initSendBuffer<T>(sendBuf, count, rank);
+ 
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+ 
+     REGLogChecker checker = getLogChecker();
+     TEST_INFO("SymmetricWindow_MultiSegment: %s (log size: %zu bytes)",
+               checker.getSummary().c_str(), checker.getContentLength());
+     ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
+         << "Expected 'numSegments " << kNumSegments
+         << "' in log - the symmetric-window multi-segment LSA registration "
+            "(symMemoryMapLsaTeam) did not fire";
+ }
 
 /**
  * @brief Register once, AllReduce twice - exercises the IPC reuse fast path.
@@ -730,8 +806,7 @@ TEST_F(UBR_MultiSegment, AllReduce_RegisterOnceUseTwice)
     constexpr int    kNumSegments          = 4;
 
     MultiSegmentBuffer buf;
-    ASSERT_NO_FATAL_FAILURE(
-        createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
     if (buf.totalSize == 0) {
         GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
     }
@@ -745,8 +820,7 @@ TEST_F(UBR_MultiSegment, AllReduce_RegisterOnceUseTwice)
     size_t count   = halfSize / sizeof(T);
 
     void* regHandle = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess,
-                  ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
     auto regCleanup = makeScopeGuard([&]() {
         if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
     });
@@ -759,19 +833,13 @@ TEST_F(UBR_MultiSegment, AllReduce_RegisterOnceUseTwice)
 
     initSendBuffer<T>(sendBuf, count, rank);
 
-    ASSERT_MPI_EQ(ncclSuccess,
-                  ncclAllReduce(sendBuf, recvBuf, count,
-                                getNcclDataType<T>(), ncclSum,
-                                getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count,getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 
     ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, halfSize));
 
-    ASSERT_MPI_EQ(ncclSuccess,
-                  ncclAllReduce(sendBuf, recvBuf, count,
-                                getNcclDataType<T>(), ncclSum,
-                                getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
 

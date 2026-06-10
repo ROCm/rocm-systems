@@ -364,7 +364,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + devr->lsaSelf * maxSegments + segment;
     NCCLCHECKGOTO(symMemoryExportSegmentHandle(comm, msg, mem->memHandles[segment], segmentSizes[segment]), ret, fail);
-    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %ld, memHandle : %lld", devr->lsaSelf, segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
+    INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments %d, Segment size : %ld, memHandle : %lld", devr->lsaSelf, segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
   }
 
   NCCLCHECKGOTO(bootstrapIntraNodeAllGather(comm->bootstrap, devr->lsaRankList, devr->lsaSelf, devr->lsaSize, messages, sizeof(symLsaMessage) * maxSegments), ret, fail);
