@@ -141,8 +141,10 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
     }
   }
 
-  if (!GetDevice()->WaitOnPagingFenceFromCpu())
+  if (!GetDevice()->WaitOnPagingFenceFromCpu()) {
+    (void)UnlockSystemMemory();
     code = ErrorCode::Unknown;
+  }
 
   return code;
 }
