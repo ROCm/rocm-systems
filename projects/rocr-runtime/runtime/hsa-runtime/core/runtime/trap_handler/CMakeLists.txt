@@ -55,7 +55,7 @@ find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm 
 # rewind, which is correct everywhere except revision 0.
 set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250;gfx1250;gfx1310")
 set (POSTFIX "9;942;950;1010;10;11;12;1250;1250_rev0;13")
-set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12;_gfx12;_gfx12")
+set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12;_gfx12;_gfx13")
 set (ASM_DEFSYM ";;;;;;;;HAVE_VOP3PX_FIXUP=1;")
 
 # The four lists above are indexed in parallel, so a miscounted separator in
