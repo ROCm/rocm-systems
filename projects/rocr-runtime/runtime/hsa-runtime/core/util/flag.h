@@ -313,8 +313,15 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DTIF");
     enable_dtif_ = (var == "1") ? true : false;
 
+    // Shared DTIF/FFM fast-copy enable: skips the staging blit and uses host
+    // memcpy in the ROCr blit kernel/SDMA paths.
+    //   HSA_ENABLE_DTIF_FAST_COPY=1 -> on
+    //   HSA_ENABLE_DTIF_FAST_COPY=0 -> off
+    //   unset -> on if HSA_MODEL_TOPOLOGY is set (FFM model mode default).
     var = os::GetEnvVar("HSA_ENABLE_DTIF_FAST_COPY");
-    enable_dtif_fast_copy_ = (var == "1") ? true : false;
+    enable_dtif_fast_copy_ = var.empty()
+        ? os::IsEnvVarSet("HSA_MODEL_TOPOLOGY")
+        : (var == "1");
 
     var = os::GetEnvVar("HSA_DTIF_SKIP_INV_CODE_CACHE");
     enable_dtif_skip_inv_code_cache_ = (var == "1") ? true : false;
