@@ -76,9 +76,9 @@ Panel Config:
         sL1D Rd:
           value: ROUND(SUM(SQC_DCACHE_REQ) / SUM($denom), 0)
         sL1D Hit:
-          value: ROUND(SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ) * 100, 0)
+          value: ROUND(100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ), 0)
         sL1D Lat:
-          value: ROUND(SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_DCACHE_REQ) * 100, 0)
+          value: ROUND(100 * SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_DCACHE_REQ), 0)
         sL1D_L2 Rd:
           value: ROUND(SUM(SQC_TC_DATA_READ_REQ) / SUM($denom), 0)
         sL1D_L2 Wr:
@@ -88,9 +88,9 @@ Panel Config:
         IL1 Fetch:
           value: ROUND(SUM(SQC_ICACHE_REQ) / SUM($denom), 0)
         IL1 Hit:
-          value: ROUND(SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ) * 100, 0)
+          value: ROUND(100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ), 0)
         IL1 Lat:
-          value: ROUND(SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_ICACHE_REQ) * 100, 0)
+          value: ROUND(100 * SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_ICACHE_REQ), 0)
         IL1_L2 Rd:
           value: ROUND(SUM(SQC_TC_INST_REQ) / SUM($denom), 0)
         L2 Rd:

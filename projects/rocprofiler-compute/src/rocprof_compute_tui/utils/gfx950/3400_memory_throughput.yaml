@@ -84,7 +84,7 @@ Panel Config:
           peak: $max_sclk / 1000 * 128 * $cu_per_gpu
           pct_of_peak: true
         vL1D Cache Utilization:
-          value: SUM(TCP_GATE_EN2_sum * 100) / SUM(TCP_GATE_EN1_sum)
+          value: 100 * SUM(TCP_GATE_EN2_sum) / SUM(TCP_GATE_EN1_sum)
           unit: Percent
           peak: 100
           pct_of_peak: false
@@ -110,7 +110,7 @@ Panel Config:
           peak: $max_sclk / 1000 * 128 * TO_INT($total_l2_chan)
           pct_of_peak: true
         L2 Cache Utilization:
-          value: SUM(TCC_BUSY_sum * 100) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)
+          value: 100 * SUM(TCC_BUSY_sum) / SUM(TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)
           unit: Percent
           peak: 100
           pct_of_peak: false
