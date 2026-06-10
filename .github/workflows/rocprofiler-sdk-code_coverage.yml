@@ -291,7 +291,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GPU_RUNNER: ${{ matrix.system.runner }}
+      GPU_RUNNER: ${{ matrix.system.gpu }}
       GCC_COMPILER_VERSION: 11
 
     steps:
