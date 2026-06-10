@@ -333,11 +333,12 @@ static void initPluginLibsOnceFunc() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   {
     const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) {
+    if (envNet && (strcasecmp(envNet, "ROCM-IB") == 0)) {
+       envNet = "IB-CAST";
+    }
+    if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !(envNetPlugin)) ||
+        (!envNet && rcclUseAinic() && !(envNetPlugin))) {
       netPluginLibs[pluginCounter].ncclNet = &netIbCast;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
-    } else if ((rcclUseAinic() == 1) && !(envNetPlugin)) {
-      netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
       netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
     } else {
 #endif

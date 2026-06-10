@@ -2582,7 +2582,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
-  NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+  if (!job->parent && comm->nNodes == 1 && comm->nRanks == 8) {
+  	NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+  }
   // update communicator state
   comm->initState = ncclSuccess;
 
@@ -2778,8 +2780,12 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
   }
 
   envNetName = ncclGetEnv("NCCL_NET");
-  if (envNetName)
-    tmpNetName = envNetName;
+  if (envNetName) {
+    if (strcasecmp(envNetName, "ROCM-IB")==0)
+      tmpNetName = "IB-CAST";
+    else
+      tmpNetName = envNetName;
+  }
   if (tmpNetName != NULL) {
     if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR)
       INFO(NCCL_ENV, "Comm config netName reset to NCCL_NET=%s", tmpNetName);

@@ -2,7 +2,6 @@
 name = "mirage_rocjitsu"
 version = "0.1.0"
 edition = "2024"
-build = "build.rs"
 
 [lib]
 path = "src/lib.rs"
@@ -16,4 +15,5 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+mirage_builtin = { workspace = true }
 tempfile = { workspace = true }

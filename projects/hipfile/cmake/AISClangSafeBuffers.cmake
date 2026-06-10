@@ -2,6 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
+include_guard(GLOBAL)
+
 #-----------------------------------------------------------------------------
 # Warn about unsafe buffer operations (llvm C++ only)
 #

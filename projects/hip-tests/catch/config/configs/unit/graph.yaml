@@ -1230,6 +1230,9 @@ graph:
   Unit_hipLaunchHostFunc_H2D_Kernel_D2H_Capture:
     <<: *level_2
     tags: [capture]
+  Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
+    <<: *level_2
+    tags: [capture]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
     tags: [userobj]
