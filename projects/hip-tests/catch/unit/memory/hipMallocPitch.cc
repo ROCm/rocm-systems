@@ -312,7 +312,10 @@ static constexpr auto CHUNK_LOOP{100};
 
 
 template <typename T> __global__ void copy_var(T* A, T* B, size_t ROWS, size_t pitch_A) {
-  for (uint64_t i = 0; i < ROWS * pitch_A; i = i + pitch_A) {
+  const size_t pitch = pitch_A / sizeof(T);
+  const size_t size = ROWS * pitch;
+
+  for (size_t i = 0; i < size; i += pitch) {
     A[i] = B[i];
   }
 }
@@ -477,6 +480,8 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipMallocPitch_KernelLaunch, int, float, double) {
                         ROWS, hipMemcpyHostToDevice));
 
 
+  // Since we will be iterating over both array with same index
+  REQUIRE(pitch_A == pitch_B);
   hipLaunchKernelGGL(copy_var<TestType>, dim3(1), dim3(1), 0, 0, static_cast<TestType*>(A_d),
                      static_cast<TestType*>(B_d), ROWS, pitch_A);
   HIP_CHECK(hipGetLastError());
