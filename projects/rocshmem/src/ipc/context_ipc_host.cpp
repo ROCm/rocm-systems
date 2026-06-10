@@ -144,9 +144,10 @@ __host__ void *IPCHostContext::shmem_ptr(const void *dest, int pe) {
 }
 
 template <typename T>
-__host__ T IPCHostContext::ipc_amo_fadd(T *dst, T val) {
+__host__ T IPCHostContext::ipc_amo_fadd(T *dst, T val, bool fetch) {
   ipc_fadd<T><<<1, 1, 0, ctx_stream_>>>(dst, val,
                                          reinterpret_cast<T *>(ipc_staging_buf_));
+  if (!fetch) return T{};
   CHECK_HIP(hipStreamSynchronize(ctx_stream_));
   return *reinterpret_cast<T *>(ipc_staging_buf_);
 }
@@ -159,12 +160,12 @@ __host__ T IPCHostContext::ipc_amo_fcas(T *dst, T cond, T val) {
   return *reinterpret_cast<T *>(ipc_staging_buf_);
 }
 
-#define IPC_AMO_STANDARD_INST(T)                                    \
-  template __host__ T IPCHostContext::ipc_amo_fadd(T *, T);         \
+#define IPC_AMO_STANDARD_INST(T)                                          \
+  template __host__ T IPCHostContext::ipc_amo_fadd(T *, T, bool);         \
   template __host__ T IPCHostContext::ipc_amo_fcas(T *, T, T);
 
-#define IPC_AMO_EXTENDED_INST(T)                                    \
-  template __host__ T IPCHostContext::ipc_amo_fadd(T *, T);
+#define IPC_AMO_EXTENDED_INST(T)                                          \
+  template __host__ T IPCHostContext::ipc_amo_fadd(T *, T, bool);
 
 IPC_AMO_STANDARD_INST(int)
 IPC_AMO_STANDARD_INST(long)

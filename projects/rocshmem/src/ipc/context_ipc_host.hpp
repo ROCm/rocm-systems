@@ -191,11 +191,13 @@ class IPCHostContext : public Context {
   /* Per-context HIP stream for non-MPI IPC host ops (nullptr on MPI path) */
   hipStream_t ctx_stream_{nullptr};
 
-  /* Helper functions to launch AMO kernel on ctx_stream_ and 
-   * return the old value via ipc_staging_buf_.
+  /* ipc_amo_fadd: fetch=true (default) syncs the stream and returns the old
+   * value via ipc_staging_buf_.  fetch=false enqueues the kernel without
+   * syncing; the caller is responsible for ordering via quiet/fence.
+   * ipc_amo_fcas: always syncs and returns the old value.
    */
   template <typename T>
-  __host__ T ipc_amo_fadd(T *dst, T val);
+  __host__ T ipc_amo_fadd(T *dst, T val, bool fetch = true);
   template <typename T>
   __host__ T ipc_amo_fcas(T *dst, T cond, T val);
 
