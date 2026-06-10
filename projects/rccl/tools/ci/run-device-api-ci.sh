@@ -30,7 +30,7 @@ RCCL_DIR="$(cd "${script_dir}/../.." && pwd)"
 WORKDIR="$(cd "${RCCL_DIR}/../.." && pwd)"
 
 RCCL_LIB_DIR="${WORKDIR}/projects/rccl/build/release"
-RCCL_TESTS_DIR="${WORKDIR}/rccl-tests"
+RCCL_TESTS_DIR="${WORKDIR}/projects/rccl-tests"
 
 # Prefer the build stages' env fragments over any ambient ROCM_PATH / MPI_HOME.
 # shellcheck source=/dev/null  # runtime fragment written by fetch-rocm.sh
