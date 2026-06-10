@@ -91,6 +91,71 @@ inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
   }
 }
 
+/// @brief Return the rocjitsu ISA family used by an AMDGPU ELF MACH value.
+///
+/// @details Several concrete GPU steppings share one rocjitsu decoder/translator
+/// family. Keep this mapping next to the ELF constants so code-object parsing,
+/// load-time hooks, and tests do not each grow their own copy.
+inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
+  switch (mach & EF_AMDGPU_MACH) {
+  case EF_AMDGPU_MACH_AMDGCN_GFX908:
+    return ROCJITSU_CODE_ARCH_CDNA1;
+  case EF_AMDGPU_MACH_AMDGCN_GFX90A:
+    return ROCJITSU_CODE_ARCH_CDNA2;
+  case EF_AMDGPU_MACH_AMDGCN_GFX940:
+  case EF_AMDGPU_MACH_AMDGCN_GFX941:
+  case EF_AMDGPU_MACH_AMDGCN_GFX942:
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  case EF_AMDGPU_MACH_AMDGCN_GFX950:
+    return ROCJITSU_CODE_ARCH_CDNA4;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1010:
+    return ROCJITSU_CODE_ARCH_RDNA1;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1030:
+    return ROCJITSU_CODE_ARCH_RDNA2;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+    return ROCJITSU_CODE_ARCH_RDNA3;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1150:
+    return ROCJITSU_CODE_ARCH_RDNA3_5;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1200:
+  case EF_AMDGPU_MACH_AMDGCN_GFX1201:
+    return ROCJITSU_CODE_ARCH_RDNA4;
+  default:
+    return ROCJITSU_CODE_ARCH_INVALID;
+  }
+}
+
+/// @brief Return the canonical gfx name for an AMDGPU ELF MACH value.
+inline constexpr const char *elf_mach_name(uint32_t mach) {
+  switch (mach & EF_AMDGPU_MACH) {
+  case EF_AMDGPU_MACH_AMDGCN_GFX908:
+    return "gfx908";
+  case EF_AMDGPU_MACH_AMDGCN_GFX90A:
+    return "gfx90a";
+  case EF_AMDGPU_MACH_AMDGCN_GFX940:
+    return "gfx940";
+  case EF_AMDGPU_MACH_AMDGCN_GFX941:
+    return "gfx941";
+  case EF_AMDGPU_MACH_AMDGCN_GFX942:
+    return "gfx942";
+  case EF_AMDGPU_MACH_AMDGCN_GFX950:
+    return "gfx950";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1010:
+    return "gfx1010";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1030:
+    return "gfx1030";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1100:
+    return "gfx1100";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1150:
+    return "gfx1150";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1200:
+    return "gfx1200";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1201:
+    return "gfx1201";
+  default:
+    return "unknown";
+  }
+}
+
 inline constexpr uint32_t SHT_NULL = 0;
 inline constexpr uint32_t SHT_PROGBITS = 1;
 inline constexpr uint32_t SHT_SYMTAB = 2;

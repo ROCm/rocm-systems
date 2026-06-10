@@ -324,6 +324,10 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     if name == 'S_BARRIER':
         return InstructionSemantics(name, 'barrier')
 
+    if name == 'S_SET_GPR_IDX_OFF':
+        return InstructionSemantics(name, 'gpr_idx', operation='off')
+    if name == 'S_SET_GPR_IDX_MODE':
+        return InstructionSemantics(name, 'gpr_idx', operation='mode')
     # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_ICACHE_INV,
     # S_INCPERFLEVEL, S_DECPERFLEVEL — all are either no-ops or system/debug
     # instructions that don't affect compute simulation correctness.
@@ -363,8 +367,8 @@ _SOP1_SPECIAL = {
     'S_SEXT_I32_I8': None,  # handled specially below
     'S_SEXT_I32_I16': None,
     'S_QUADMASK': ('scalar_unary', 'quadmask'),
-    'S_SET_GPR_IDX_ON': ('true_nop', None),
-    'S_SET_GPR_IDX_IDX': ('true_nop', None),
+    'S_SET_GPR_IDX_ON': ('gpr_idx', 'on'),
+    'S_SET_GPR_IDX_IDX': ('gpr_idx', 'idx'),
     'S_BITREPLICATE': ('scalar_bitreplicate', None),
     'S_CBRANCH_JOIN': ('true_nop', None),
     'S_BITREPL_B64_B32': ('scalar_bitreplicate', None),
@@ -612,7 +616,9 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
             return InstructionSemantics(
                 name, 'scalar_cmp', operation=op, data_type=_DTYPE_MAP[dt_raw]
             )
-    # Unrecognized SOPC instructions (S_SETVSKIP, S_SET_GPR_IDX_ON, …) → nop
+    if name == 'S_SET_GPR_IDX_ON':
+        return InstructionSemantics(name, 'gpr_idx', operation='on')
+    # Unrecognized SOPC instructions (S_SETVSKIP, …) → nop
     return InstructionSemantics(name, 'nop')
 
 
@@ -666,8 +672,9 @@ _VOP1_OP_MAP = {
     'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
     'V_CVT_F32_BF8': ('vector_unary', 'cvt_f32_bf8'),
     'V_CVT_F32_BF16': ('vector_unary', 'cvt_f32_bf16'),
-    'V_CVT_PK_F32_FP8': ('nop', None),  # TODO: needs dual-VGPR write
-    'V_CVT_PK_F32_BF8': ('nop', None),  # TODO: needs dual-VGPR write
+    'V_CVT_PK_F32_FP8': ('cvt_fp8', 'pk_f32_fp8'),
+    'V_CVT_PK_F32_BF8': ('cvt_fp8', 'pk_f32_bf8'),
+    'V_CVT_OFF_F32_I4': ('nop', None),
     'V_CVT_NORM_I16': ('vector_unary', 'cvt_norm_i16_f16'),
     'V_CVT_NORM_U16': ('vector_unary', 'cvt_norm_u16_f16'),
     'V_SWAP': ('vector_swap', None),
@@ -1298,22 +1305,49 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
             name, 'vector_cvt_scale', operation=scaled_pack_conversions[name]
         )
 
-    # FP8/BF8 stochastic-round pack/convert (non-scaled, CDNA3/4)
-    _FP8_PATTERNS = (
-        'V_CVT_SR_FP8_F32',
-        'V_CVT_SR_BF8_F32',
-        'V_CVT_PKNORM_I16_F16',
-        'V_CVT_PKNORM_U16_F16',
-    )
-    if name in _FP8_PATTERNS:
+    scaled_sr_pack_conversions = {
+        'V_CVT_SCALEF32_SR_PK8_FP4_F32': 'sr_pack_pk8_fp4_f32',
+        'V_CVT_SCALEF32_SR_PK8_FP4_F16': 'sr_pack_pk8_fp4_f16',
+        'V_CVT_SCALEF32_SR_PK8_FP4_BF16': 'sr_pack_pk8_fp4_bf16',
+        'V_CVT_SCALEF32_SR_PK8_FP8_F32': 'sr_pack_pk8_fp8_f32',
+        'V_CVT_SCALEF32_SR_PK8_FP8_F16': 'sr_pack_pk8_fp8_f16',
+        'V_CVT_SCALEF32_SR_PK8_FP8_BF16': 'sr_pack_pk8_fp8_bf16',
+        'V_CVT_SCALEF32_SR_PK8_BF8_F32': 'sr_pack_pk8_bf8_f32',
+        'V_CVT_SCALEF32_SR_PK8_BF8_F16': 'sr_pack_pk8_bf8_f16',
+        'V_CVT_SCALEF32_SR_PK8_BF8_BF16': 'sr_pack_pk8_bf8_bf16',
+        'V_CVT_SCALEF32_SR_PK16_FP6_F32': 'sr_pack_pk16_fp6_f32',
+        'V_CVT_SCALEF32_SR_PK16_FP6_F16': 'sr_pack_pk16_fp6_f16',
+        'V_CVT_SCALEF32_SR_PK16_FP6_BF16': 'sr_pack_pk16_fp6_bf16',
+        'V_CVT_SCALEF32_SR_PK16_BF6_F32': 'sr_pack_pk16_bf6_f32',
+        'V_CVT_SCALEF32_SR_PK16_BF6_F16': 'sr_pack_pk16_bf6_f16',
+        'V_CVT_SCALEF32_SR_PK16_BF6_BF16': 'sr_pack_pk16_bf6_bf16',
+    }
+    if name in scaled_sr_pack_conversions:
+        return InstructionSemantics(
+            name, 'vector_cvt_scale', operation=scaled_sr_pack_conversions[name]
+        )
+
+    # FP8/BF8 pack/convert (non-scaled, CDNA3/4/RDNA4)
+    _CVT_FP8_MAP = {
+        'V_CVT_SR_FP8_F32': 'sr_fp8_f32',
+        'V_CVT_SR_BF8_F32': 'sr_bf8_f32',
+    }
+    if name in _CVT_FP8_MAP:
+        return InstructionSemantics(name, 'cvt_fp8', operation=_CVT_FP8_MAP[name])
+
+    if name in ('V_CVT_PKNORM_I16_F16', 'V_CVT_PKNORM_U16_F16'):
         return InstructionSemantics(name, 'nop')
 
     # Scaled FP8/BF8/FP6/FP4 conversions not covered by the exact gfx1250
     # mappings above still need per-encoding validation.
     if 'CVT_SCALEF32' in name.upper():
-        return InstructionSemantics(
-            name, 'nop'
-        )  # scaled conversions not yet implemented
+        suffix = name.upper()
+        prefix = 'V_CVT_SCALEF32_'
+        if suffix.startswith(prefix):
+            op = suffix[len(prefix) :].lower()
+        else:
+            op = suffix.split('CVT_SCALEF32_', 1)[1].lower()
+        return InstructionSemantics(name, 'cvt_scalef32', operation=op)
 
     # V_PK_FMAC_F16 VOP2 form — the VOP3P form is handled via _VOP3P_PK16_MAP.
     if name == 'V_PK_FMAC_F16':
