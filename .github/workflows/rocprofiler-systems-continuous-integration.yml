@@ -95,6 +95,9 @@ jobs:
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
     permissions:
       packages: read
+    defaults:
+      run:
+        shell: bash
     container:
       image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-systems-ci-multiarch
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
@@ -112,6 +115,8 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
+            projects/rocDecode/
+            projects/rocJPEG/
             .gitmodules
           submodules: recursive
 
@@ -132,9 +137,8 @@ jobs:
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
-      # TODO: Add rocjpeg and rocdecode
+      # TODO: Move to Dockerfile.ubuntu.ci
       - name: Install dependencies
-        shell: bash
         run: |
           apt-get update
           apt install -y libdw-dev pkg-config
@@ -154,6 +158,33 @@ jobs:
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
+
+      - name: Build and Install ROCDecode
+        shell: bash
+        run: |
+          echo "Building & Installing ROCDecode..."
+          cmake -B build-rocdecode \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++ \
+            projects/rocDecode
+          cmake --build build-rocdecode --target all --parallel 16
+          cmake --build build-rocdecode --target install
+          echo "✅ ROCDecode Installation complete!"
+
+      - name: Build and Install ROCJPEG
+        if: ${{ inputs.enable-rocjpeg-build == 'true' }}
+        shell: bash
+        run: |
+          echo "Building & Installing ROCJPEG..."
+          cmake -B build-rocjpeg \
+            -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+            -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
+            -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
+            projects/rocJPEG
+          cmake --build build-rocjpeg --target all --parallel 16
+          cmake --build build-rocjpeg --target install
+          echo "✅ ROCJPEG Installation complete!"
 
       - name: Install Python Test Dependencies
         timeout-minutes: 10
