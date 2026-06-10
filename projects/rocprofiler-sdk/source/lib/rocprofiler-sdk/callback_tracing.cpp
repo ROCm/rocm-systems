@@ -23,9 +23,9 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
-#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -41,8 +41,8 @@
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rccl/table_id.h>
@@ -614,7 +614,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         {
             rocprofiler::hipfile::iterate_args<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(
                 record.operation,
-                *static_cast<rocprofiler_callback_tracing_hipfile_api_data_t*>(record.payload),
+                static_cast<rocprofiler_callback_tracing_hipfile_api_data_t*>(record.payload)->args,
                 callback,
                 max_deref,
                 user_data);

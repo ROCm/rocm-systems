@@ -23,9 +23,9 @@
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
-#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hip/stream.hpp"
+#include "lib/rocprofiler-sdk/hipfile/hipfile.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
@@ -42,8 +42,8 @@
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hipfile/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rccl/table_id.h>
@@ -101,6 +101,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIPFILE_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIPFILE_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_STREAM)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_RUNTIME_API_EXT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API_EXT)
@@ -333,6 +334,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT:
         {
             val = rocprofiler::hipfile::name_by_id<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(operation);
             break;
@@ -500,6 +502,7 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIPFILE_API:
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT:
         {
             ops = rocprofiler::hipfile::get_ids<ROCPROFILER_HIPFILE_TABLE_ID_CORE>();
             break;
@@ -584,6 +587,14 @@ rocprofiler_iterate_buffer_tracing_record_args(
             auto* _payload =
                 static_cast<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t*>(record.payload);
             rocprofiler::rocdecode::iterate_args<ROCPROFILER_ROCDECODE_TABLE_ID_CORE>(
+                _payload->operation, _payload->args, callback, user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT:
+        {
+            auto* _payload =
+                static_cast<rocprofiler_buffer_tracing_hipfile_api_ext_record_t*>(record.payload);
+            rocprofiler::hipfile::iterate_args<ROCPROFILER_HIPFILE_TABLE_ID_CORE>(
                 _payload->operation, _payload->args, callback, user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }

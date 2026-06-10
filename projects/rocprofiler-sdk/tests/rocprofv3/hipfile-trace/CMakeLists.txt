@@ -45,8 +45,8 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-hipfile-tracing
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hipfile-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv rocpd
-        otf2 pftrace --log-level env --
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json csv rocpd otf2
+        pftrace --log-level env --
         $<IF:$<TARGET_EXISTS:hipfile-trace-client>,$<TARGET_FILE:hipfile-trace-client>,hipfile-trace-client>
     DEPENDS ${HIPFILE_TRACE_DEPENDS}
     TIMEOUT 45

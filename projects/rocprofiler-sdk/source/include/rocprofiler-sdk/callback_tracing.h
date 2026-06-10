@@ -24,8 +24,8 @@
 
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hipfile.h>
 #include <rocprofiler-sdk/hip.h>
+#include <rocprofiler-sdk/hipfile.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/ompt.h>

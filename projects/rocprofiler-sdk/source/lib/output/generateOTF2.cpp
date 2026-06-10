@@ -370,7 +370,7 @@ write_otf2(const output_config&                                          cfg,
            std::deque<tool_buffer_tracing_memory_allocation_ext_record_t>* memory_allocation_data,
            std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>* rocdecode_api_data,
            std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>*       rocjpeg_api_data,
-           std::deque<rocprofiler_buffer_tracing_hipfile_api_record_t>*       hipfile_api_data)
+           std::deque<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>*   hipfile_api_data)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -589,8 +589,8 @@ write_otf2(const output_config&                                          cfg,
                         continue;
                 }
 
-                auto name        = buffer_names.at(itr.kind, itr.operation);
-                auto paradigm    = OTF2_PARADIGM_HIP;
+                auto name     = buffer_names.at(itr.kind, itr.operation);
+                auto paradigm = OTF2_PARADIGM_HIP;
                 if constexpr(std::is_same<value_type,
                                           rocprofiler_buffer_tracing_marker_api_record_t>::value)
                 {

@@ -35,21 +35,23 @@ namespace hipfile
 template <>
 struct hipfile_domain_info<ROCPROFILER_HIPFILE_TABLE_ID_LAST>
 {
-    using args_type          = rocprofiler_hipfile_api_args_t;
-    using retval_type        = rocprofiler_hipfile_api_retval_t;
-    using callback_data_type = rocprofiler_callback_tracing_hipfile_api_data_t;
-    using buffer_data_type   = rocprofiler_buffer_tracing_hipfile_api_record_t;
+    using args_type              = rocprofiler_hipfile_api_args_t;
+    using retval_type            = rocprofiler_hipfile_api_retval_t;
+    using callback_data_type     = rocprofiler_callback_tracing_hipfile_api_data_t;
+    using buffer_data_type       = rocprofiler_buffer_tracing_hipfile_api_record_t;
+    using buffered_ext_data_type = rocprofiler_buffer_tracing_hipfile_api_ext_record_t;
 };
 
 template <>
 struct hipfile_domain_info<ROCPROFILER_HIPFILE_TABLE_ID_CORE>
 : hipfile_domain_info<ROCPROFILER_HIPFILE_TABLE_ID_LAST>
 {
-    using enum_type                           = rocprofiler_hipfile_api_id_t;
-    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HIPFILE_API;
-    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HIPFILE_API;
-    static constexpr auto none                = ROCPROFILER_HIPFILE_API_ID_NONE;
-    static constexpr auto last                = ROCPROFILER_HIPFILE_API_ID_LAST;
+    using enum_type                               = rocprofiler_hipfile_api_id_t;
+    static constexpr auto callback_domain_idx     = ROCPROFILER_CALLBACK_TRACING_HIPFILE_API;
+    static constexpr auto buffered_domain_idx     = ROCPROFILER_BUFFER_TRACING_HIPFILE_API;
+    static constexpr auto buffered_ext_domain_idx = ROCPROFILER_BUFFER_TRACING_HIPFILE_API_EXT;
+    static constexpr auto none                    = ROCPROFILER_HIPFILE_API_ID_NONE;
+    static constexpr auto last                    = ROCPROFILER_HIPFILE_API_ID_LAST;
     static constexpr auto external_correlation_id_domain_idx =
         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIPFILE_API;
 };

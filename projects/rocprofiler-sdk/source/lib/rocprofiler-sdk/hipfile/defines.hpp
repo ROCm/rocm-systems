@@ -24,88 +24,8 @@
 
 #include "lib/common/defines.hpp"
 
-#define HIPFILE_API_INFO_DEFINITION_0(                                                            \
-    HIPFILE_TABLE, HIPFILE_API_ID, HIPFILE_FUNC, HIPFILE_FUNC_PTR)                                \
-    namespace rocprofiler                                                                         \
-    {                                                                                             \
-    namespace hipfile                                                                             \
-    {                                                                                             \
-    template <>                                                                                   \
-    struct hipfile_api_info<HIPFILE_TABLE, HIPFILE_API_ID> : hipfile_domain_info<HIPFILE_TABLE>   \
-    {                                                                                             \
-        static constexpr auto table_idx     = HIPFILE_TABLE;                                      \
-        static constexpr auto operation_idx = HIPFILE_API_ID;                                     \
-        static constexpr auto name          = #HIPFILE_FUNC;                                      \
-                                                                                                  \
-        using domain_type = hipfile_domain_info<table_idx>;                                       \
-        using this_type   = hipfile_api_info<table_idx, operation_idx>;                           \
-        using base_type   = hipfile_api_impl<table_idx, operation_idx>;                           \
-                                                                                                  \
-        static constexpr auto callback_domain_idx = domain_type::callback_domain_idx;             \
-        static constexpr auto buffered_domain_idx = domain_type::buffered_domain_idx;             \
-                                                                                                  \
-        using domain_type::args_type;                                                             \
-        using domain_type::retval_type;                                                           \
-        using domain_type::callback_data_type;                                                    \
-                                                                                                  \
-        static constexpr auto offset()                                                            \
-        {                                                                                         \
-            return offsetof(hipfile_table_lookup<table_idx>::type, HIPFILE_FUNC_PTR);             \
-        }                                                                                         \
-                                                                                                  \
-        static_assert(offsetof(hipfile_table_lookup<table_idx>::type, HIPFILE_FUNC_PTR) ==        \
-                          (sizeof(size_t) + (operation_idx * sizeof(void*))),                     \
-                      "ABI error for " #HIPFILE_FUNC);                                            \
-                                                                                                  \
-        static auto& get_table() { return hipfile_table_lookup<table_idx>{}(); }                  \
-                                                                                                  \
-        template <typename TableT>                                                                \
-        static auto& get_table(TableT& _v)                                                        \
-        {                                                                                         \
-            return hipfile_table_lookup<table_idx>{}(_v);                                         \
-        }                                                                                         \
-                                                                                                  \
-        template <typename TableT>                                                                \
-        static auto& get_table_func(TableT& _table)                                               \
-        {                                                                                         \
-            if constexpr(std::is_pointer<TableT>::value)                                          \
-            {                                                                                     \
-                assert(_table != nullptr && "nullptr to hipFILE table for " #HIPFILE_FUNC         \
-                                            " function");                                        \
-                return _table->HIPFILE_FUNC_PTR;                                                  \
-            }                                                                                     \
-            else                                                                                  \
-            {                                                                                     \
-                return _table.HIPFILE_FUNC_PTR;                                                   \
-            }                                                                                     \
-        }                                                                                         \
-                                                                                                  \
-        static auto& get_table_func() { return get_table_func(get_table()); }                     \
-                                                                                                  \
-        template <typename DataT>                                                                 \
-        static auto& get_api_data_args(DataT& _data)                                              \
-        {                                                                                         \
-            return _data.HIPFILE_FUNC;                                                            \
-        }                                                                                         \
-                                                                                                  \
-        template <typename RetT, typename... Args>                                                \
-        static auto get_functor(RetT (*)(Args...))                                                \
-        {                                                                                         \
-            return &base_type::functor<RetT, Args...>;                                            \
-        }                                                                                         \
-                                                                                                  \
-        static std::vector<void*> as_arg_addr(callback_data_type) { return std::vector<void*>{}; } \
-                                                                                                  \
-        static std::vector<common::stringified_argument> as_arg_list(callback_data_type, int32_t) \
-        {                                                                                         \
-            return {};                                                                            \
-        }                                                                                         \
-    };                                                                                            \
-    }                                                                                             \
-    }
-
-#define HIPFILE_API_INFO_DEFINITION_V(                                                             \
-    HIPFILE_TABLE, HIPFILE_API_ID, HIPFILE_FUNC, HIPFILE_FUNC_PTR, ...)                            \
+#define HIPFILE_API_INFO_DEFINITION_0(                                                             \
+    HIPFILE_TABLE, HIPFILE_API_ID, HIPFILE_FUNC, HIPFILE_FUNC_PTR)                                 \
     namespace rocprofiler                                                                          \
     {                                                                                              \
     namespace hipfile                                                                              \
@@ -121,8 +41,9 @@
         using this_type   = hipfile_api_info<table_idx, operation_idx>;                            \
         using base_type   = hipfile_api_impl<table_idx, operation_idx>;                            \
                                                                                                    \
-        static constexpr auto callback_domain_idx = domain_type::callback_domain_idx;              \
-        static constexpr auto buffered_domain_idx = domain_type::buffered_domain_idx;              \
+        static constexpr auto callback_domain_idx     = domain_type::callback_domain_idx;          \
+        static constexpr auto buffered_domain_idx     = domain_type::buffered_domain_idx;          \
+        static constexpr auto buffered_ext_domain_idx = domain_type::buffered_ext_domain_idx;      \
                                                                                                    \
         using domain_type::args_type;                                                              \
         using domain_type::retval_type;                                                            \
@@ -151,7 +72,7 @@
             if constexpr(std::is_pointer<TableT>::value)                                           \
             {                                                                                      \
                 assert(_table != nullptr && "nullptr to hipFILE table for " #HIPFILE_FUNC          \
-                                            " function");                                         \
+                                            " function");                                          \
                 return _table->HIPFILE_FUNC_PTR;                                                   \
             }                                                                                      \
             else                                                                                   \
@@ -174,17 +95,102 @@
             return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
+        static std::vector<void*> as_arg_addr(rocprofiler_hipfile_api_args_t)                      \
         {                                                                                          \
-            return std::vector<void*>{                                                             \
-                GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
+            return std::vector<void*>{};                                                           \
         }                                                                                          \
                                                                                                    \
-        static auto as_arg_list(callback_data_type trace_data, int32_t max_deref)                  \
+        static std::vector<common::stringified_argument> as_arg_list(                              \
+            rocprofiler_hipfile_api_args_t,                                                        \
+            int32_t)                                                                               \
+        {                                                                                          \
+            return {};                                                                             \
+        }                                                                                          \
+    };                                                                                             \
+    }                                                                                              \
+    }
+
+#define HIPFILE_API_INFO_DEFINITION_V(                                                             \
+    HIPFILE_TABLE, HIPFILE_API_ID, HIPFILE_FUNC, HIPFILE_FUNC_PTR, ...)                            \
+    namespace rocprofiler                                                                          \
+    {                                                                                              \
+    namespace hipfile                                                                              \
+    {                                                                                              \
+    template <>                                                                                    \
+    struct hipfile_api_info<HIPFILE_TABLE, HIPFILE_API_ID> : hipfile_domain_info<HIPFILE_TABLE>    \
+    {                                                                                              \
+        static constexpr auto table_idx     = HIPFILE_TABLE;                                       \
+        static constexpr auto operation_idx = HIPFILE_API_ID;                                      \
+        static constexpr auto name          = #HIPFILE_FUNC;                                       \
+                                                                                                   \
+        using domain_type = hipfile_domain_info<table_idx>;                                        \
+        using this_type   = hipfile_api_info<table_idx, operation_idx>;                            \
+        using base_type   = hipfile_api_impl<table_idx, operation_idx>;                            \
+                                                                                                   \
+        static constexpr auto callback_domain_idx     = domain_type::callback_domain_idx;          \
+        static constexpr auto buffered_domain_idx     = domain_type::buffered_domain_idx;          \
+        static constexpr auto buffered_ext_domain_idx = domain_type::buffered_ext_domain_idx;      \
+                                                                                                   \
+        using domain_type::args_type;                                                              \
+        using domain_type::retval_type;                                                            \
+        using domain_type::callback_data_type;                                                     \
+                                                                                                   \
+        static constexpr auto offset()                                                             \
+        {                                                                                          \
+            return offsetof(hipfile_table_lookup<table_idx>::type, HIPFILE_FUNC_PTR);              \
+        }                                                                                          \
+                                                                                                   \
+        static_assert(offsetof(hipfile_table_lookup<table_idx>::type, HIPFILE_FUNC_PTR) ==         \
+                          (sizeof(size_t) + (operation_idx * sizeof(void*))),                      \
+                      "ABI error for " #HIPFILE_FUNC);                                             \
+                                                                                                   \
+        static auto& get_table() { return hipfile_table_lookup<table_idx>{}(); }                   \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_table(TableT& _v)                                                         \
+        {                                                                                          \
+            return hipfile_table_lookup<table_idx>{}(_v);                                          \
+        }                                                                                          \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_table_func(TableT& _table)                                                \
+        {                                                                                          \
+            if constexpr(std::is_pointer<TableT>::value)                                           \
+            {                                                                                      \
+                assert(_table != nullptr && "nullptr to hipFILE table for " #HIPFILE_FUNC          \
+                                            " function");                                          \
+                return _table->HIPFILE_FUNC_PTR;                                                   \
+            }                                                                                      \
+            else                                                                                   \
+            {                                                                                      \
+                return _table.HIPFILE_FUNC_PTR;                                                    \
+            }                                                                                      \
+        }                                                                                          \
+                                                                                                   \
+        static auto& get_table_func() { return get_table_func(get_table()); }                      \
+                                                                                                   \
+        template <typename DataT>                                                                  \
+        static auto& get_api_data_args(DataT& _data)                                               \
+        {                                                                                          \
+            return _data.HIPFILE_FUNC;                                                             \
+        }                                                                                          \
+                                                                                                   \
+        template <typename RetT, typename... Args>                                                 \
+        static auto get_functor(RetT (*)(Args...))                                                 \
+        {                                                                                          \
+            return &base_type::functor<RetT, Args...>;                                             \
+        }                                                                                          \
+                                                                                                   \
+        static std::vector<void*> as_arg_addr(rocprofiler_hipfile_api_args_t args)                 \
+        {                                                                                          \
+            return std::vector<void*>{                                                             \
+                GET_ADDR_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__)};                     \
+        }                                                                                          \
+                                                                                                   \
+        static auto as_arg_list(rocprofiler_hipfile_api_args_t args, int32_t max_deref)            \
         {                                                                                          \
             return utils::stringize(                                                               \
-                max_deref,                                                                         \
-                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
+                max_deref, GET_NAMED_MEMBER_FIELDS(get_api_data_args(args), __VA_ARGS__));         \
         }                                                                                          \
     };                                                                                             \
     }                                                                                              \

@@ -25,7 +25,6 @@
 import sys
 import pytest
 
-
 EXPECTED_CALLS = [
     "hipFileGetVersion",
     "hipFileGetOpErrorString",

@@ -178,6 +178,7 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
     using info_type           = hipfile_api_info<TableIdx, OpIdx>;
     using callback_api_data_t = typename hipfile_domain_info<TableIdx>::callback_data_type;
     using buffered_api_data_t = typename hipfile_domain_info<TableIdx>::buffer_data_type;
+    using buffered_ext_data_t = typename hipfile_domain_info<TableIdx>::buffered_ext_data_type;
 
     constexpr auto external_corr_id_domain_idx =
         hipfile_domain_info<TableIdx>::external_correlation_id_domain_idx;
@@ -195,6 +196,7 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
     auto           thr_id            = common::get_tid();
     auto           callback_contexts = tracing::callback_context_data_vec_t{};
     auto           buffered_contexts = tracing::buffered_context_data_vec_t{};
+    auto           extended_contexts = tracing::buffered_context_data_vec_t{};
     auto           external_corr_ids = tracing::external_correlation_id_map_t{};
 
     tracing::populate_contexts(info_type::callback_domain_idx,
@@ -203,8 +205,12 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                callback_contexts,
                                buffered_contexts,
                                external_corr_ids);
+    tracing::populate_contexts(info_type::buffered_ext_domain_idx,
+                               info_type::operation_idx,
+                               extended_contexts,
+                               external_corr_ids);
 
-    if(callback_contexts.empty() && buffered_contexts.empty())
+    if(callback_contexts.empty() && buffered_contexts.empty() && extended_contexts.empty())
     {
         [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
         if constexpr(!std::is_void<RetT>::value)
@@ -214,6 +220,7 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
     }
 
     auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
+    auto  extended_record  = common::init_public_api_struct(buffered_ext_data_t{});
     auto  tracer_data      = common::init_public_api_struct(callback_api_data_t{});
     auto* corr_id          = tracing::correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
@@ -225,10 +232,13 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                info_type::operation_idx,
                                                internal_corr_id);
 
-    if(!callback_contexts.empty())
+    if(!callback_contexts.empty() || !extended_contexts.empty())
     {
         set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
+    }
 
+    if(!callback_contexts.empty())
+    {
         tracing::execute_phase_enter_callbacks(callback_contexts,
                                                thr_id,
                                                internal_corr_id,
@@ -242,7 +252,7 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
     tracing::update_external_correlation_ids(
         external_corr_ids, thr_id, external_corr_id_domain_idx);
 
-    if(!buffered_contexts.empty())
+    if(!buffered_contexts.empty() || !extended_contexts.empty())
     {
         buffer_record.start_timestamp = common::timestamp_ns();
     }
@@ -251,15 +261,18 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
 
     auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
 
-    if(!buffered_contexts.empty())
+    if(!buffered_contexts.empty() || !extended_contexts.empty())
     {
         buffer_record.end_timestamp = common::timestamp_ns();
     }
 
-    if(!callback_contexts.empty())
+    if(!callback_contexts.empty() || !extended_contexts.empty())
     {
         set_data_retval(tracer_data.retval, _ret);
+    }
 
+    if(!callback_contexts.empty())
+    {
         tracing::execute_phase_exit_callbacks(callback_contexts,
                                               external_corr_ids,
                                               info_type::callback_domain_idx,
@@ -277,6 +290,23 @@ hipfile_api_impl<TableIdx, OpIdx>::functor(Args... args)
                                                info_type::buffered_domain_idx,
                                                info_type::operation_idx,
                                                buffer_record);
+    }
+
+    if(!extended_contexts.empty())
+    {
+        extended_record.start_timestamp = buffer_record.start_timestamp;
+        extended_record.end_timestamp   = buffer_record.end_timestamp;
+        extended_record.args            = tracer_data.args;
+        extended_record.retval          = tracer_data.retval;
+
+        tracing::execute_buffer_record_emplace(extended_contexts,
+                                               thr_id,
+                                               internal_corr_id,
+                                               external_corr_ids,
+                                               ancestor_corr_id,
+                                               info_type::buffered_ext_domain_idx,
+                                               info_type::operation_idx,
+                                               extended_record);
     }
 
     corr_id->sub_ref_count();
@@ -345,13 +375,13 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<OpIdx, OpIdx
         get_names<TableIdx>(_name_list, std::index_sequence<OpIdxTail...>{});
 }
 
-template <size_t TableIdx, typename DataT, size_t OpIdx, size_t... OpIdxTail>
+template <size_t TableIdx, typename DataT, typename FuncT, size_t OpIdx, size_t... OpIdxTail>
 void
-iterate_args(const uint32_t                                   id,
-             const DataT&                                     data,
-             rocprofiler_callback_tracing_operation_args_cb_t func,
-             int32_t                                          max_deref,
-             void*                                            user_data,
+iterate_args(const uint32_t id,
+             const DataT&   data,
+             FuncT          func,
+             int32_t        max_deref,
+             void*          user_data,
              std::index_sequence<OpIdx, OpIdxTail...>)
 {
     if(OpIdx == id)
@@ -361,16 +391,39 @@ iterate_args(const uint32_t                                   id,
         auto&& arg_addr = info_type::as_arg_addr(data);
         for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
         {
-            auto ret = func(info_type::callback_domain_idx,
-                            id,
-                            i,
-                            arg_addr.at(i),
-                            arg_list.at(i).indirection_level,
-                            arg_list.at(i).type,
-                            arg_list.at(i).name,
-                            arg_list.at(i).value.c_str(),
-                            arg_list.at(i).dereference_count,
-                            user_data);
+            int ret = 0;
+            if constexpr(std::is_same<FuncT,
+                                      rocprofiler_callback_tracing_operation_args_cb_t>::value)
+            {
+                ret = func(info_type::callback_domain_idx,
+                           id,
+                           i,
+                           arg_addr.at(i),
+                           arg_list.at(i).indirection_level,
+                           arg_list.at(i).type,
+                           arg_list.at(i).name,
+                           arg_list.at(i).value.c_str(),
+                           arg_list.at(i).dereference_count,
+                           user_data);
+            }
+            else if constexpr(std::is_same<FuncT,
+                                           rocprofiler_buffer_tracing_operation_args_cb_t>::value)
+            {
+                ret = func(info_type::buffered_ext_domain_idx,
+                           id,
+                           i,
+                           arg_addr.at(i),
+                           arg_list.at(i).indirection_level,
+                           arg_list.at(i).type,
+                           arg_list.at(i).name,
+                           arg_list.at(i).value.c_str(),
+                           user_data);
+            }
+            else
+            {
+                static_assert(common::mpl::assert_false<FuncT>::value,
+                              "Error! unsupported callback type");
+            }
             if(ret != 0) break;
         }
         return;
@@ -383,6 +436,7 @@ iterate_args(const uint32_t                                   id,
 bool
 should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
                     rocprofiler_buffer_tracing_kind_t   _buffered_domain,
+                    rocprofiler_buffer_tracing_kind_t   _buffered_ext_domain,
                     int                                 _operation)
 {
     for(const auto& itr : context::get_registered_contexts())
@@ -395,6 +449,10 @@ should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
 
         if(itr->buffered_tracer && itr->buffered_tracer->domains(_buffered_domain) &&
            itr->buffered_tracer->domains(_buffered_domain, _operation))
+            return true;
+
+        if(itr->buffered_tracer && itr->buffered_tracer->domains(_buffered_ext_domain) &&
+           itr->buffered_tracer->domains(_buffered_ext_domain, _operation))
             return true;
     }
     return false;
@@ -449,8 +507,10 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 
         if(_info.offset() >= _orig->size) return;
 
-        if(!should_wrap_functor(
-               _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
+        if(!should_wrap_functor(_info.callback_domain_idx,
+                                _info.buffered_domain_idx,
+                                _info.buffered_ext_domain_idx,
+                                _info.operation_idx))
             return;
 
         ROCP_TRACE << "updating table entry for " << _info.name;
@@ -484,16 +544,16 @@ template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id<TableIdx>(
-        id, std::make_index_sequence<hipfile_domain_info<TableIdx>::last>{});
+    return name_by_id<TableIdx>(id,
+                                std::make_index_sequence<hipfile_domain_info<TableIdx>::last>{});
 }
 
 template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name)
 {
-    return id_by_name<TableIdx>(
-        name, std::make_index_sequence<hipfile_domain_info<TableIdx>::last>{});
+    return id_by_name<TableIdx>(name,
+                                std::make_index_sequence<hipfile_domain_info<TableIdx>::last>{});
 }
 
 template <size_t TableIdx>
@@ -520,17 +580,33 @@ get_names()
 
 template <size_t TableIdx>
 void
-iterate_args(uint32_t                                                id,
-             const rocprofiler_callback_tracing_hipfile_api_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t       callback,
-             int32_t                                                max_deref,
-             void*                                                  user_data)
+iterate_args(uint32_t                                         id,
+             const rocprofiler_hipfile_api_args_t&            data,
+             rocprofiler_callback_tracing_operation_args_cb_t callback,
+             int32_t                                          max_deref,
+             void*                                            user_data)
 {
     if(callback)
         iterate_args<TableIdx>(id,
                                data,
                                callback,
                                max_deref,
+                               user_data,
+                               std::make_index_sequence<hipfile_domain_info<TableIdx>::last>{});
+}
+
+template <size_t TableIdx>
+void
+iterate_args(uint32_t                                       id,
+             const rocprofiler_hipfile_api_args_t&          data,
+             rocprofiler_buffer_tracing_operation_args_cb_t callback,
+             void*                                          user_data)
+{
+    if(callback)
+        iterate_args<TableIdx>(id,
+                               data,
+                               callback,
+                               0,
                                user_data,
                                std::make_index_sequence<hipfile_domain_info<TableIdx>::last>{});
 }
@@ -555,18 +631,21 @@ update_table(TableT* _orig)
                                std::make_index_sequence<hipfile_domain_info<TableIdx>::last>{});
 }
 
-using hipfile_api_data_t   = rocprofiler_callback_tracing_hipfile_api_data_t;
-using hipfile_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
+using hipfile_api_args_t      = rocprofiler_hipfile_api_args_t;
+using hipfile_cb_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
+using hipfile_bf_op_args_cb_t = rocprofiler_buffer_tracing_operation_args_cb_t;
 
-#define INSTANTIATE_HIPFILE_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                      \
-    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
-    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
-    template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
-    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
-    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
-    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
-    template void                     iterate_args<TABLE_IDX>(                                     \
-        uint32_t, const hipfile_api_data_t&, hipfile_op_args_cb_t, int32_t, void*);
+#define INSTANTIATE_HIPFILE_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                              \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);          \
+    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                         \
+    template const char*              name_by_id<TABLE_IDX>(uint32_t);                                     \
+    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                                  \
+    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                                \
+    template std::vector<const char*> get_names<TABLE_IDX>();                                              \
+    template void                     iterate_args<TABLE_IDX>(                                             \
+        uint32_t, const hipfile_api_args_t&, hipfile_cb_op_args_cb_t, int32_t, void*); \
+    template void iterate_args<TABLE_IDX>(                                                                 \
+        uint32_t, const hipfile_api_args_t&, hipfile_bf_op_args_cb_t, void*);
 
 INSTANTIATE_HIPFILE_TABLE_FUNC(hipfile_api_func_table_t, ROCPROFILER_HIPFILE_TABLE_ID_CORE)
 }  // namespace hipfile

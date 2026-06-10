@@ -1146,11 +1146,10 @@ auto rccl_api_bf_records      = std::deque<rocprofiler_buffer_tracing_rccl_api_r
 auto rocdecode_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocdecode_api_record_t>{};
 auto rocdecode_api_ext_bf_records =
     std::deque<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>{};
-auto rocjpeg_api_bf_records = std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>{};
-auto hipfile_api_bf_records = std::deque<rocprofiler_buffer_tracing_hipfile_api_record_t>{};
-auto hipfile_api_ext_bf_records =
-    std::deque<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>{};
-auto ompt_bf_records        = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
+auto rocjpeg_api_bf_records     = std::deque<rocprofiler_buffer_tracing_rocjpeg_api_record_t>{};
+auto hipfile_api_bf_records     = std::deque<rocprofiler_buffer_tracing_hipfile_api_record_t>{};
+auto hipfile_api_ext_bf_records = std::deque<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>{};
+auto ompt_bf_records            = std::deque<rocprofiler_buffer_tracing_ompt_record_t>{};
 auto kfd_page_migrate_event_records =
     std::deque<rocprofiler_buffer_tracing_kfd_event_page_migrate_record_t>{};
 auto kfd_page_fault_event_records =
