@@ -5,6 +5,23 @@
 
 #include "basic_sqlite_backend.hpp"
 #include "sqlite_api_policy.hpp"
+#include "common/traits.hpp"
+#include "debug.hpp"
+#include <fmt/core.h>
+
+#include <sqlite3.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
 namespace profiler_hub::data_storage
 {

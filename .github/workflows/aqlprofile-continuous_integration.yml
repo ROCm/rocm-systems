@@ -54,7 +54,7 @@ jobs:
         system:
           # - { gpu: 'navi4', runner: 'linux-gfx120X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx120X' }
           # - { gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx110X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:
@@ -139,9 +139,9 @@ jobs:
       fail-fast: false
       matrix:
         system:
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
-          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', os: 'rhel-8.8', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', os: 'rhel-9.5', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
+          - { gpu: 'mi325', runner: 'linux-gfx942-1gpu-core42-ossci-rocm', os: 'sles-15.6', build-type: 'RelWithDebInfo', gpu-target: 'gfx94X' }
 
     runs-on: ${{ matrix.system.runner }}
     container:

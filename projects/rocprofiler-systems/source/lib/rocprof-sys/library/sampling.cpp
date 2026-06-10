@@ -50,7 +50,6 @@
 #include <timemory/units.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>

@@ -93,7 +93,7 @@ test_asic_kfd_info (__main__.TestAmdSmiPythonInterface) ...
 
   asic_info['market_name'] is: NAVI21
   asic_info['vendor_id'] is: 0x1002
-  asic_info['vendor_name'] is: Advanced Micro Devices Inc. [AMD/ATI]
+  asic_info['vendor_name'] is: Advanced Micro Devices, Inc. [AMD/ATI]
   asic_info['device_id'] is: 0x73bf
   asic_info['rev_id'] is: 0xc1
   asic_info['asic_serial'] is: 0xF8FFEB47A027DE4D
@@ -507,7 +507,7 @@ test_walkthrough (__main__.TestAmdSmiPythonInterface) ...
 
   asic_info['market_name'] is: NAVI21
   asic_info['vendor_id'] is: 0x1002
-  asic_info['vendor_name'] is: Advanced Micro Devices Inc. [AMD/ATI]
+  asic_info['vendor_name'] is: Advanced Micro Devices, Inc. [AMD/ATI]
   asic_info['device_id'] is: 0x73bf
   asic_info['rev_id'] is: 0xc1
   asic_info['subsystem_id'] is: 0xc34
@@ -622,6 +622,9 @@ ok
 Ran 31 tests in 0.592s
 
 OK
+
+[----------] 31 tests ran. (592 ms total)
+[  PASSED  ] 31 tests.
 ~~~
 
 </details>
@@ -646,7 +649,7 @@ test_asic_kfd_info (__main__.TestAmdSmiPythonInterface) ...
 
   asic_info['market_name'] is: NAVI21
   asic_info['vendor_id'] is: 0x1002
-  asic_info['vendor_name'] is: Advanced Micro Devices Inc. [AMD/ATI]
+  asic_info['vendor_name'] is: Advanced Micro Devices, Inc. [AMD/ATI]
   asic_info['device_id'] is: 0x73bf
   asic_info['rev_id'] is: 0xc1
   asic_info['asic_serial'] is: 0xF8FFEB47A027DE4D
@@ -665,6 +668,9 @@ ok
 Ran 1 test in 0.453s
 
 OK
+
+[----------] 1 test ran. (453 ms total)
+[  PASSED  ] 1 test.
 ~~~
 </details>
 
@@ -682,6 +688,9 @@ test_parse_bdf (__main__.TestAmdSmiPythonBDF) ... ok
 Ran 3 tests in 0.001s
 
 OK
+
+[----------] 3 tests ran. (1 ms total)
+[  PASSED  ] 3 tests.
 ```
 
 ```shell
@@ -742,6 +751,9 @@ ok
 Ran 4 tests in 0.466s
 
 OK
+
+[----------] 4 tests ran. (466 ms total)
+[  PASSED  ] 4 tests.
 ```
 
 ```shell

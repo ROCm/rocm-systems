@@ -336,15 +336,24 @@ ROCpd outputs:
 
 * ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
   trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
-  host-to-device / device-to-host effective migration throughput.
+  host-to-device / device-to-host effective migration throughput when migration
+  events are present.
 * ``unified_memory.json`` -- machine-readable equivalent with the same fields
   plus an ``xnack_enabled`` flag and an always-present
-  ``device_to_device`` direction bucket for schema stability.
+  ``device_to_device`` direction bucket for schema stability. Migration buckets
+  can remain at zero on systems that do not generate KFD migration events.
 
 The migration-throughput value is computed as migrated bytes divided by KFD
 page-migration event duration. It is an end-to-end migration-service metric and
 should not be interpreted as PCIe, XGMI, SDMA, HBM, or raw memory-subsystem
 bandwidth.
+
+On MI300A and other systems where CPU and GPU agents point to the same physical
+HBM, page faults can occur without page migrations because there is no separate
+CPU memory and GPU memory to migrate between. In that topology, the
+unified-memory view is expected to be fault-only: page-fault totals and trigger
+breakdowns can populate, migration counters remain zero, and the Perfetto
+migration-throughput track is not shown.
 
 Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and
 ROCProfiler-SDK 1.2.2 or above. The KFD tracing domains
