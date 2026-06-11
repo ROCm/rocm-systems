@@ -9,6 +9,9 @@
 #include "common_cast.h"
 #include "p2p_resiliency_cast.h"
 #include "net_ib_fault_inject.h"
+#ifdef ENABLE_FAULT_INJECTION
+#include "net_ib_ops_fault.h"
+#endif
 
 NCCL_PARAM(IbCastArThreshold, "IB_AR_THRESHOLD", -2);
 int64_t IbCastArThreshold = 8192;
@@ -1182,6 +1185,62 @@ ncclResult_t ncclIbCastFaultCheckErrorFatal(void* sendComm, int wcStatus, bool* 
       break;
   }
   *isFatal = fatal;
+  return ncclSuccess;
+}
+
+/* ── Ops-overload fault API (bridges comm → ibv_context + qp_num) ─────────── */
+
+// The synthesized idle-completion wr_id must stay outside the receiver's
+// recv-slot range [0, NET_IB_MAX_REQUESTS] and flush range
+// [NCCL_IB_FLUSH_REQ_WR_ID_OFFSET, +NET_IB_MAX_REQUESTS); else the receiver
+// would treat it as a real slot. Fail the build if the ranges ever overlap it.
+static_assert(NCCL_IB_OPS_FAULT_SYNTH_WR_ID > NET_IB_MAX_REQUESTS &&
+              (NCCL_IB_OPS_FAULT_SYNTH_WR_ID < NCCL_IB_FLUSH_REQ_WR_ID_OFFSET ||
+               NCCL_IB_OPS_FAULT_SYNTH_WR_ID >= NCCL_IB_FLUSH_REQ_WR_ID_OFFSET + NET_IB_MAX_REQUESTS),
+              "synthesized fault wr_id collides with a receiver wr_id range");
+
+ncclResult_t ncclIbCastFaultOpsSetPostSendError(void* sendComm, int qpIdx, int errnoVal) {
+  if (!sendComm) return ncclInvalidArgument;
+  struct ncclIbSendComm* comm = (struct ncclIbSendComm*)sendComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  struct ibv_qp* qp = comm->base.activeQps[qpIdx]->qp;
+  // qp can be NULL while resiliency recovery has the QP torn down.
+  if (!qp || !qp->context) return ncclInvalidArgument;
+  return ncclIbOpsFaultArmPostSend(qp->context, qp->qp_num, errnoVal);
+}
+
+ncclResult_t ncclIbCastFaultOpsSetPostRecvError(void* recvComm, int qpIdx, int errnoVal) {
+  if (!recvComm) return ncclInvalidArgument;
+  struct ncclIbRecvComm* comm = (struct ncclIbRecvComm*)recvComm;
+  if (qpIdx < 0 || qpIdx >= comm->base.nqps) return ncclInvalidArgument;
+  struct ibv_qp* qp = comm->base.activeQps[qpIdx]->qp;
+  // qp can be NULL while resiliency recovery has the QP torn down.
+  if (!qp || !qp->context) return ncclInvalidArgument;
+  return ncclIbOpsFaultArmPostRecv(qp->context, qp->qp_num, errnoVal);
+}
+
+ncclResult_t ncclIbCastFaultOpsSetPollCqError(void* comm, int qpIdx, int wcStatus,
+                                              int injectCount, bool injectWhenIdle) {
+  if (!comm) return ncclInvalidArgument;
+  // Both send and recv comms share ncclIbNetCommBase as their first member.
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  if (qpIdx < 0 || qpIdx >= base->nqps) return ncclInvalidArgument;
+  struct ibv_qp* qp = base->activeQps[qpIdx]->qp;
+  // qp can be NULL while resiliency recovery has the QP torn down.
+  if (!qp || !qp->context) return ncclInvalidArgument;
+  return ncclIbOpsFaultArmPollCq(qp->context, qp->qp_num, wcStatus, injectCount, injectWhenIdle);
+}
+
+ncclResult_t ncclIbCastFaultOpsClear(void* comm) {
+  if (!comm) return ncclInvalidArgument;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  // Clear by per-device PD context, not QP: a QP can be NULL during recovery
+  // while its context stays alive and armed. The PD context survives teardown.
+  for (int devIndex = 0; devIndex < base->vProps.ndevs; devIndex++) {
+    struct ncclIbNetCommDevBase* devBase = IbCastGetNetCommDevBase(base, devIndex);
+    if (devBase && devBase->pd && devBase->pd->context)
+      NCCLCHECK(ncclIbOpsFaultClear(devBase->pd->context));
+  }
   return ncclSuccess;
 }
 
