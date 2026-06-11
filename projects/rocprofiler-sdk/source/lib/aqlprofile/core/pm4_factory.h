@@ -322,7 +322,7 @@ private:
 
     static bool CheckConcurrent(const profile_t* profile);
 
-    // Mutex for inter thread synchronization for the instances create/destroy
+    // Serializes updates to the process-lifetime factory cache
     static mutex_t mutex_;
     // Process-lifetime factory cache; intentionally not destroyed during library unload.
     static instances_t* instances_;
