@@ -180,17 +180,8 @@ private:
   /// @brief Dispatch workgroups from entry to CUs. Returns number dispatched.
   uint32_t dispatch_workgroups(DispatchEntry &entry);
 
-  /// @brief Asynchronous Compute Engine (ACE): dispatch workgroups from all
-  /// active queues to SPIs and run CUs to completion.
-  bool ace_dispatch_all();
-
   /// @brief Process all queues: dispatch undispatched entries, handle non-kernel entries.
   void process_queues();
-
-  /// @brief Execute one functional quantum on each active CU.
-  /// @details Delegates wavefront execution to the SPIs (which own the host
-  /// worker pools); falls back to serial execution when no SPIs are present.
-  bool run_active_cus_once();
 
   bool has_active_cus() const;
 

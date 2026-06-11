@@ -107,13 +107,6 @@ bool cp_profile_enabled() {
 }
 
 struct CpProfileCounters {
-  std::atomic<uint64_t> run_calls{0};
-  std::atomic<uint64_t> idle_run_calls{0};
-  std::atomic<uint64_t> parallel_run_calls{0};
-  std::atomic<uint64_t> active_cu_sum{0};
-  std::atomic<uint64_t> max_active_cus{0};
-  std::atomic<uint64_t> effective_thread_sum{0};
-  std::atomic<uint64_t> max_effective_threads{0};
   std::atomic<uint64_t> dispatch_calls{0};
   std::atomic<uint64_t> dispatch_wgs{0};
   std::atomic<uint64_t> zero_dispatch_calls{0};
@@ -123,29 +116,15 @@ struct CpProfileCounters {
     if (!cp_profile_enabled())
       return;
 
-    uint64_t runs = run_calls.load(std::memory_order_relaxed);
-    uint64_t active_runs = runs - idle_run_calls.load(std::memory_order_relaxed);
-    uint64_t active_sum = active_cu_sum.load(std::memory_order_relaxed);
-    uint64_t effective_sum = effective_thread_sum.load(std::memory_order_relaxed);
     uint64_t dispatches = dispatch_calls.load(std::memory_order_relaxed);
     uint64_t wgs = dispatch_wgs.load(std::memory_order_relaxed);
-    double avg_active = active_runs ? static_cast<double>(active_sum) / active_runs : 0.0;
-    double avg_effective = active_runs ? static_cast<double>(effective_sum) / active_runs : 0.0;
     double avg_wgs = dispatches ? static_cast<double>(wgs) / dispatches : 0.0;
 
     std::fprintf(
         stderr,
-        "RJ_CP_PROFILE run_calls=%llu idle_run_calls=%llu parallel_run_calls=%llu "
-        "avg_active_cus=%.2f max_active_cus=%llu avg_effective_threads=%.2f "
-        "max_effective_threads=%llu dispatch_calls=%llu dispatch_wgs=%llu "
+        "RJ_CP_PROFILE dispatch_calls=%llu dispatch_wgs=%llu "
         "zero_dispatch_calls=%llu avg_wgs_per_dispatch_call=%.2f "
         "max_wgs_per_dispatch_call=%llu\n",
-        static_cast<unsigned long long>(runs),
-        static_cast<unsigned long long>(idle_run_calls.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(parallel_run_calls.load(std::memory_order_relaxed)),
-        avg_active, static_cast<unsigned long long>(max_active_cus.load(std::memory_order_relaxed)),
-        avg_effective,
-        static_cast<unsigned long long>(max_effective_threads.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(dispatches), static_cast<unsigned long long>(wgs),
         static_cast<unsigned long long>(zero_dispatch_calls.load(std::memory_order_relaxed)),
         avg_wgs,
@@ -770,51 +749,6 @@ bool CommandProcessor::has_active_cus() const {
   return false;
 }
 
-bool CommandProcessor::run_active_cus_once() {
-  size_t active_cus = 0;
-  for (auto *cu : cus_) {
-    if (cu->has_active_wfs())
-      ++active_cus;
-  }
-  if (active_cus == 0) {
-    if (cp_profile_enabled()) {
-      auto &profile = cp_profile_counters();
-      profile.run_calls.fetch_add(1, std::memory_order_relaxed);
-      profile.idle_run_calls.fetch_add(1, std::memory_order_relaxed);
-    }
-    return false;
-  }
-
-  uint32_t effective_threads =
-      std::min<uint32_t>(dispatch_threads_, static_cast<uint32_t>(active_cus));
-  if (cp_profile_enabled()) {
-    auto &profile = cp_profile_counters();
-    profile.run_calls.fetch_add(1, std::memory_order_relaxed);
-    profile.active_cu_sum.fetch_add(active_cus, std::memory_order_relaxed);
-    profile.effective_thread_sum.fetch_add(effective_threads, std::memory_order_relaxed);
-    atomic_max(profile.max_active_cus, active_cus);
-    atomic_max(profile.max_effective_threads, effective_threads);
-    if (effective_threads > 1)
-      profile.parallel_run_calls.fetch_add(1, std::memory_order_relaxed);
-  }
-
-  // Wavefront execution is driven by the SPIs, which own the worker pools.
-  // The CP only orchestrates queue fetch, dispatch, and completion.
-  if (!spis_.empty()) {
-    bool ran = false;
-    for (auto *spi : spis_)
-      ran |= spi->run_active_cus_once(dispatch_threads_);
-    return ran;
-  }
-
-  // Fallback for topologies without SPIs (direct add_compute_unit harnesses).
-  for (auto *cu : cus_) {
-    if (cu->has_active_wfs())
-      cu->run_quantum();
-  }
-  return true;
-}
-
 rocr::llvm::amdhsa::kernel_descriptor_t
 CommandProcessor::read_kernel_descriptor(uint64_t kernel_object, uint32_t vmid,
                                          [[maybe_unused]] bool host_accessible) {
@@ -1242,7 +1176,22 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
     if (dispatch_threads_ <= 1 || !has_active_cus())
       return false;
     lock.unlock();
-    bool ran = run_active_cus_once();
+    // Wavefront execution is driven by the SPIs, which own the worker pools;
+    // the CP only orchestrates queue fetch, dispatch, and completion. SPI-less
+    // topologies (direct add_compute_unit test harnesses) fall back to driving
+    // the CUs directly.
+    bool ran = false;
+    if (!spis_.empty()) {
+      for (auto *spi : spis_)
+        ran |= spi->run_active_cus_once(dispatch_threads_);
+    } else {
+      for (auto *cu : cus_) {
+        if (cu->has_active_wfs()) {
+          cu->run_quantum();
+          ran = true;
+        }
+      }
+    }
     lock.lock();
     if (completion_)
       completion_->drain_completions(new_queue_states_);
