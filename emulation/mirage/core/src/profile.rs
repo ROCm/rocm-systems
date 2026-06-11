@@ -108,6 +108,16 @@ pub struct ContainerizedDef {
     /// the GPU device nodes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<String>,
+
+    /// Expose the host's GPUs to every node container. When set, each
+    /// container is launched with the supplementary groups needed to
+    /// open the passed-through GPU device nodes. The mechanism is
+    /// provider-specific: podman inherits the launching user's groups
+    /// via `--group-add keep-groups`, while docker (which has no
+    /// `keep-groups`) is given the named [`groups`](Self::groups)
+    /// explicitly.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host_gpus: bool,
 }
 
 /// A profile is a named, on-disk emulator preset that can be referenced
