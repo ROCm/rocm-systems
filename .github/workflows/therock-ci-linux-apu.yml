@@ -1,0 +1,135 @@
+name: TheRock CI Linux APU
+
+# Opt-in build and test job for APU hardware (gfx1151 / Strix Halo).
+# Triggered when the 'ci:apu-test' label is added to a pull request, or via
+# workflow_dispatch with run_apu_ci=true. Not part of the default per-PR gate.
+
+on:
+  workflow_call:
+    inputs:
+      cmake_options:
+        type: string
+      projects_to_test:
+        type: string
+      package_version:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  therock-build-linux-apu:
+    name: Build Linux APU Packages (gfx1151)
+    runs-on: azure-linux-scale-rocm
+    permissions:
+      id-token: write
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2 # 2026-04-16
+      options: -v /runner/config:/home/awsconfig/
+    strategy:
+      fail-fast: true
+    env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+      AMDGPU_FAMILIES: "gfx1151"
+      TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+    steps:
+      - name: "Checking out repository for rocm-systems"
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/TheRock"
+          path: "TheRock"
+          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-dev" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
+
+      - name: Fetch sources
+        timeout-minutes: 30
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+
+      - name: Patch rocm-systems
+        run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          # rm ./TheRock/patches/amd-mainline/rocm-systems/0003-Use-is_versioned-true-consistently-in-both-Comgr-Loa.patch
+
+      - name: Configure Projects
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ${{ inputs.package_version }}
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
+          BUILD_DIR: build
+        run: |
+          python TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Build therock-artifacts and therock-dist
+        run: cmake --build TheRock/build --target therock-artifacts therock-dist -- -k 0
+
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: |
+          echo "Full SDK du:"
+          echo "------------"
+          du -h -d 1 TheRock/build/dist/rocm
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 TheRock/build/artifacts
+          echo "CCache Stats:"
+          echo "-------------"
+          ccache -s
+
+      - name: Configure AWS Credentials
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Push artifacts
+        run: |
+          python3 TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build \
+            --stage all
+
+      - name: Post Build Upload
+        if: always()
+        run: |
+          python TheRock/build_tools/github_actions/post_build_upload.py \
+            --run-id ${{ github.run_id }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --build-dir TheRock/build \
+            --upload
+
+  therock-test-linux-apu:
+    name: "Test APU (gfx1151)"
+    needs: [therock-build-linux-apu]
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: "gfx1151"
+      test_runs_on: "linux-gfx1151-gpu-rocm"
+      platform: "linux"
