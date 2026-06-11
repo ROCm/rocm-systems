@@ -186,7 +186,7 @@ struct collector
             else
             {
                 LOG_DEBUG("Collected {} samples for {} device '{}'", _count,
-                    Traits::device_name, _device_name);
+                          Traits::device_name, _device_name);
             }
         }
     }
