@@ -28,8 +28,12 @@
 // build of librocprofiler-sdk must satisfy.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
-#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
+#ifndef _WIN32
+#    include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
+#    include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
+#else
+#    include "lib/rocprofiler-sdk/platform/windows/agent.hpp"
+#endif
 
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
@@ -38,7 +42,9 @@
 
 #include <gtest/gtest.h>
 
-#include <unistd.h>
+#ifndef _WIN32
+#    include <unistd.h>
+#endif
 
 namespace fs       = ::rocprofiler::common::filesystem;
 namespace common   = ::rocprofiler::common;
@@ -70,6 +76,7 @@ private:
     std::vector<std::pair<std::string, std::string>> saved_;
 };
 
+#ifndef _WIN32
 fs::path
 local_topology_path()
 {
@@ -80,8 +87,10 @@ local_topology_path()
     auto dir = fs::canonical(exe).parent_path() / "data" / "topology" / "nodes";
     return fs::exists(dir) ? dir : fs::path{};
 }
+#endif
 }  // namespace
 
+#ifndef _WIN32
 // wsl::is_available() must be safe to call on any Linux host, including
 // machines without /dev/dxg. CI runners are bare-metal Linux, so the
 // expected answer there is false.
@@ -184,3 +193,42 @@ TEST(platform_dispatch, force_platform_unknown_falls_back_to_autodetect)
     agent::internal_refresh_topology();
     EXPECT_FALSE(agent::get_agents().empty());
 }
+#endif  // !_WIN32
+
+#ifdef _WIN32
+// windows::is_available() must be safe to call on any Windows host. With the
+// D3DKMT module forced to a bogus name, the loader cannot resolve the entry
+// points, so the expected answer is false - the negative path every GPU-less
+// Windows CI build must satisfy.
+TEST(platform_dispatch, windows_is_available_bogus_module_is_false)
+{
+    EnvGuard guard{{"ROCPROFILER_D3DKMT_MODULE"}};
+    common::set_env("ROCPROFILER_D3DKMT_MODULE", std::string{"rocprofiler-no-such-d3dkmt.dll"}, 1);
+    EXPECT_FALSE(platform::windows::is_available());
+}
+
+// windows::enumerate() must degrade to an empty vector (not crash, not throw)
+// when the D3DKMT entry points are unavailable. Exercises the early-out branch
+// in the enumerator on every Windows CI host.
+TEST(platform_dispatch, windows_enumerate_bogus_module_is_empty)
+{
+    EnvGuard guard{{"ROCPROFILER_D3DKMT_MODULE"}};
+    common::set_env("ROCPROFILER_D3DKMT_MODULE", std::string{"rocprofiler-no-such-d3dkmt.dll"}, 1);
+    auto agents = platform::windows::enumerate();
+    EXPECT_TRUE(agents.empty());
+}
+
+// Forcing the windows enumerator with a bogus D3DKMT module must yield an empty
+// topology rather than crashing - the dispatcher honors
+// ROCPROFILER_FORCE_PLATFORM=windows and routes to the (empty) enumerator.
+TEST(platform_dispatch, force_platform_windows_returns_empty_bogus_module)
+{
+    EnvGuard guard{{"ROCPROFILER_FORCE_PLATFORM", "ROCPROFILER_D3DKMT_MODULE"}};
+    common::set_env("ROCPROFILER_FORCE_PLATFORM", std::string{"windows"}, 1);
+    common::set_env("ROCPROFILER_D3DKMT_MODULE", std::string{"rocprofiler-no-such-d3dkmt.dll"}, 1);
+
+    rocprofiler::registration::init_logging();
+    agent::internal_refresh_topology();
+    EXPECT_TRUE(agent::get_agents().empty());
+}
+#endif  // _WIN32
