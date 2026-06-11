@@ -58,7 +58,6 @@ RCCL build & installation helper script
     -l|--local_gpu_only        Only compile for local GPU architecture
        --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
        --no_clean              Don't delete files if they already exist
-       --npkit-enable          Compile with npkit enabled
        --openmp-test-enable    Enable OpenMP in rccl unit tests
     -p|--package_build         Build RCCL package
        --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
