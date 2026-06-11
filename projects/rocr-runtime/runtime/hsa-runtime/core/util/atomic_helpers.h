@@ -273,44 +273,21 @@ static __forceinline void Fence(std::memory_order order=std::memory_order_seq_cs
 template <class T>
 static __forceinline void BasicCheck(const T* ptr) {
 #if defined(__linux__)
-  constexpr bool value = __atomic_always_lock_free(sizeof(T), 0);
+  using U = std::remove_volatile_t<T>;
+  constexpr bool value = __atomic_always_lock_free(sizeof(U), 0);
   static_assert(value, "Atomic type may not be compatible with peripheral atomics.");
 #endif
-};
-
-template <class T>
-static __forceinline void BasicCheck(const volatile T* ptr) {
-#if defined(__linux__)
-  constexpr bool value = __atomic_always_lock_free(sizeof(T), 0);
-  static_assert(value, "Atomic type may not be compatible with peripheral atomics.");
-#endif
-};
-
-/// @brief: Load value of type T atomically with specified memory order.
-/// @param: ptr(Input), a pointer to type T.
-/// @param: order(Input), memory order with atomic load, relaxed by default.
-/// @return: T, loaded value.
-template <class T>
-static __forceinline T
-    Load(const T* ptr, std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  T ret;
-  PreFence(order);
-  __atomic_load(ptr, &ret, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
 }
 
-/// @brief: function overloading, for more info, see previous one.
-/// @param: ptr(Input), a pointer to volatile type T.
+/// @brief: Load value of type T atomically with specified memory order.
+/// @param: ptr(Input), a pointer to type T (may be volatile).
 /// @param: order(Input), memory order with atomic load, relaxed by default.
-/// @return: T, loaded value.
+/// @return: T (without volatile), loaded value.
 template <class T>
-static __forceinline T
-    Load(const volatile T* ptr,
-         std::memory_order order = std::memory_order_relaxed) {
+static __forceinline std::remove_volatile_t<T>
+    Load(const T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
-  T ret;
+  std::remove_volatile_t<T> ret;
   PreFence(order);
   __atomic_load(ptr, &ret, c11ToBuiltInFlags(order));
   PostFence(order);
@@ -318,27 +295,13 @@ static __forceinline T
 }
 
 /// @brief: Store value of type T with specified memory order.
-/// @param: ptr(Input), a pointer to instance which will be stored.
+/// @param: ptr(Input), a pointer to instance which will be stored (may be volatile).
 /// @param: val(Input), value to be stored.
 /// @param: order(Input), memory order with atomic store, relaxed by default.
 /// @return: void.
 template <class T>
 static __forceinline void Store(
-    T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  __atomic_store(ptr, &val, c11ToBuiltInFlags(order));
-  PostFence(order);
-}
-
-/// @brief: Function overloading, for more info, see previous one.
-/// @param: ptr(Input), a pointer to volatile instance which will be stored.
-/// @param: val(Input), value to be stored.
-/// @param: order(Input), memory order with atomic store, relaxed by default.
-/// @return: void.
-template <class T>
-static __forceinline void Store(
-    volatile T* ptr, T val,
+    T* ptr, std::remove_volatile_t<T> val,
     std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
@@ -347,31 +310,14 @@ static __forceinline void Store(
 }
 
 /// @brief: Compare and swap value atomically with specified memory order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value to be stored if condition is satisfied.
 /// @param: expected(Input), value which is expected.
 /// @param: order(Input), memory order with atomic operation.
-/// @return: T, observed value of type T.
+/// @return: T (without volatile), observed value.
 template <class T>
-static __forceinline T
-    Cas(T* ptr, T val, T expected,
-        std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  __atomic_compare_exchange(ptr, &expected, &val, false, c11ToBuiltInFlags(order), __ATOMIC_RELAXED);
-  PostFence(order);
-  return expected;
-}
-
-/// @brief: Function overloading, for more info, see previous one.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: val(Input), value to be stored if condition is satisfied.
-/// @param: expected(Input), value which is expected.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, observed value of type T.
-template <class T>
-static __forceinline T
-    Cas(volatile T* ptr, T val, T expected,
+static __forceinline std::remove_volatile_t<T>
+    Cas(T* ptr, std::remove_volatile_t<T> val, std::remove_volatile_t<T> expected,
         std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
@@ -381,33 +327,16 @@ static __forceinline T
 }
 
 /// @brief: Exchange the value atomically with specified memory order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value to be stored.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, the value prior to the exchange.
+/// @return: T (without volatile), the value prior to the exchange.
 template <class T>
-static __forceinline T
-    Exchange(T* ptr, T val,
+static __forceinline std::remove_volatile_t<T>
+    Exchange(T* ptr, std::remove_volatile_t<T> val,
              std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
-  T ret;
-  PreFence(order);
-  __atomic_exchange(ptr, &val, &ret, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Function overloading, for more info, see previous one.
-/// @param: ptr(Input), a pointer to variable which is operated on.
-/// @param: val(Input), value to be stored.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, the value prior to the exchange.
-template <class T>
-static __forceinline T
-    Exchange(volatile T* ptr, T val,
-             std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  T ret;
+  std::remove_volatile_t<T> ret;
   PreFence(order);
   __atomic_exchange(ptr, &val, &ret, c11ToBuiltInFlags(order));
   PostFence(order);
@@ -415,223 +344,114 @@ static __forceinline T
 }
 
 /// @brief: Add value to variable atomically with specified memory order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value to be added.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, the value of the variable prior to the addition.
+/// @return: T (without volatile), the value of the variable prior to the addition.
 template <class T>
-static __forceinline T
-    Add(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline std::remove_volatile_t<T>
+    Add(T* ptr, std::remove_volatile_t<T> val,
+        std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  T ret = __atomic_fetch_add(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_volatile_t<T> ret = __atomic_fetch_add(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
 
 /// @brief: Subtract value from the variable atomically with specified memory
 /// order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value to be subtraced.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of the variable prior to the subtraction.
+/// @return: T (without volatile), value of the variable prior to the subtraction.
 template <class T>
-static __forceinline T
-    Sub(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline std::remove_volatile_t<T>
+    Sub(T* ptr, std::remove_volatile_t<T> val,
+        std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  T ret = __atomic_fetch_sub(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_volatile_t<T> ret = __atomic_fetch_sub(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
 
 /// @brief: Bit And operation on variable atomically with specified memory
 /// order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value which is ANDed with variable.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
+/// @return: T (without volatile), value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    And(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline std::remove_volatile_t<T>
+    And(T* ptr, std::remove_volatile_t<T> val,
+        std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  T ret = __atomic_fetch_and(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_volatile_t<T> ret = __atomic_fetch_and(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
 
 /// @brief: Bit Or operation on variable atomically with specified memory order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value which is ORed with variable.
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
+/// @return: T (without volatile), value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    Or(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline std::remove_volatile_t<T>
+    Or(T* ptr, std::remove_volatile_t<T> val,
+       std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  T ret = __atomic_fetch_or(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_volatile_t<T> ret = __atomic_fetch_or(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
 
 /// @brief: Bit Xor operation on variable atomically with specified memory
 /// order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: val(Input), value which is XORed with variable.
 /// @order: order(Input), memory order which is relaxed by default.
-/// @return: T, valud of variable prior to the opertaion.
+/// @return: T (without volatile), value of variable prior to the operation.
 template <class T>
-static __forceinline T
-    Xor(T* ptr, T val, std::memory_order order = std::memory_order_relaxed) {
+static __forceinline std::remove_volatile_t<T>
+    Xor(T* ptr, std::remove_volatile_t<T> val,
+        std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  T ret = __atomic_fetch_xor(ptr, val, c11ToBuiltInFlags(order));
+  std::remove_volatile_t<T> ret = __atomic_fetch_xor(ptr, val, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
 
 /// @brief: Increase the value of variable atomically with specified memory
 /// order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
+/// @return: T (without volatile), value of variable prior to the operation.
 template <class T>
-static __forceinline T
+static __forceinline std::remove_volatile_t<T>
     Increment(T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  T ret = __atomic_fetch_add(ptr, 1, c11ToBuiltInFlags(order));
+  std::remove_volatile_t<T> ret = __atomic_fetch_add(ptr, 1, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
 
 /// @brief: Decrease the value of the variable atomically with specified memory
 /// order.
-/// @param: ptr(Input), a pointer to variable which is operated on.
+/// @param: ptr(Input), a pointer to variable which is operated on (may be volatile).
 /// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
+/// @return: T (without volatile), value of variable prior to the operation.
 template <class T>
-static __forceinline T
+static __forceinline std::remove_volatile_t<T>
     Decrement(T* ptr, std::memory_order order = std::memory_order_relaxed) {
   BasicCheck<T>(ptr);
   PreFence(order);
-  T ret = __atomic_fetch_sub(ptr, 1, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Add value to variable atomically with specified memory order.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: val(Input), value to be added.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, the value of the variable prior to the addition.
-template <class T>
-static __forceinline T
-    Add(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  T ret = __atomic_fetch_add(ptr, val, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Subtract value from the variable atomically with specified memory
-/// order.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: val(Input), value to be subtraced.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of the variable prior to the subtraction.
-template <class T>
-static __forceinline T
-    Sub(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  T ret = __atomic_fetch_sub(ptr, val, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Bit And operation on variable atomically with specified memory
-/// order.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: val(Input), value which is ANDed with variable.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
-template <class T>
-static __forceinline T
-    And(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  T ret = __atomic_fetch_and(ptr, val, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Bit Or operation on variable atomically with specified memory order.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: val(Input), value which is ORed with variable.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
-template <class T>
-static __forceinline T Or(volatile T* ptr, T val,
-                          std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  T ret = __atomic_fetch_or(ptr, val, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Bit Xor operation on variable atomically with specified memory
-/// order.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: val(Input), value which is XORed with variable.
-/// @order: order(Input), memory order which is relaxed by default.
-/// @return: T, valud of variable prior to the opertaion.
-template <class T>
-static __forceinline T
-    Xor(volatile T* ptr, T val,
-        std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  T ret = __atomic_fetch_xor(ptr, val, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Increase the value of variable atomically with specified memory
-/// order.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
-template <class T>
-static __forceinline T
-    Increment(volatile T* ptr,
-              std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  T ret = __atomic_fetch_add(ptr, 1, c11ToBuiltInFlags(order));
-  PostFence(order);
-  return ret;
-}
-
-/// @brief: Decrease the value of the variable atomically with specified memory
-/// order.
-/// @param: ptr(Input), a pointer to volatile variable which is operated on.
-/// @param: order(Input), memory order which is relaxed by default.
-/// @return: T, value of variable prior to the operation.
-template <class T>
-static __forceinline T
-    Decrement(volatile T* ptr,
-              std::memory_order order = std::memory_order_relaxed) {
-  BasicCheck<T>(ptr);
-  PreFence(order);
-  T ret = __atomic_fetch_sub(ptr, 1, c11ToBuiltInFlags(order));
+  std::remove_volatile_t<T> ret = __atomic_fetch_sub(ptr, 1, c11ToBuiltInFlags(order));
   PostFence(order);
   return ret;
 }
