@@ -53,6 +53,7 @@ set(CUID_SOURCES
     ${SRC_DIR}/cuid_cpu.cc
     ${SRC_DIR}/cuid_gpu.cc
     ${SRC_DIR}/cuid_nic.cc
+    ${SRC_DIR}/cuid_npu.cc
     ${SRC_DIR}/cuid_platform.cc
     ${SRC_DIR}/cuid_file.cc
     ${SRC_DIR}/hmac.cc
@@ -69,6 +70,7 @@ set(CUID_HEADERS
     ${SRC_DIR}/cuid_cpu.h
     ${SRC_DIR}/cuid_gpu.h
     ${SRC_DIR}/cuid_nic.h
+    ${SRC_DIR}/cuid_npu.h
     ${SRC_DIR}/cuid_platform.h
     ${SRC_DIR}/cuid_file.h
     ${SRC_DIR}/hmac.h
@@ -116,28 +118,37 @@ endif()
 # Shared library
 install(
     TARGETS amdcuid_shared
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}    # Windows DLLs go here
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Linux .so
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Static libs & Windows import libs
-    COMPONENT ${LIB_COMPONENT}
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_BINDIR} # Windows DLLs go here
+    LIBRARY
+        DESTINATION
+            ${CMAKE_INSTALL_LIBDIR} # Linux .so
+    ARCHIVE
+        DESTINATION
+            ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
+        COMPONENT ${LIB_COMPONENT}
 )
 
 # Static library
 install(
     TARGETS amdcuid_static
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}    # Windows DLLs go here
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}    # Static libs & Windows import libs
-    COMPONENT ${LIB_COMPONENT}
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_BINDIR} # Windows DLLs go here
+    ARCHIVE
+        DESTINATION
+            ${CMAKE_INSTALL_LIBDIR} # Static libs & Windows import libs
+        COMPONENT ${LIB_COMPONENT}
 )
 
 # Install public headers
-set(PUBLIC_HEADERS
-    ${INC_DIR}/amd_cuid.h
-)
+set(PUBLIC_HEADERS ${INC_DIR}/amd_cuid.h)
 install(
     FILES ${PUBLIC_HEADERS}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${AMDCUID}
-    COMPONENT ${LIB_COMPONENT})
+    COMPONENT ${LIB_COMPONENT}
+)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                  Finished Cmake amdcuid library                   ")

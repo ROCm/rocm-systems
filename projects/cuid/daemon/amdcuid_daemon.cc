@@ -32,8 +32,6 @@
 #include <iostream>
 #include <map>
 #include <memory>
-#include <vector>
-#include <fcntl.h>
 #include <sstream>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -241,7 +239,7 @@ int main() {
 #ifndef AMDCUID_CONFIG_DIR
 #error "AMDCUID_CONFIG_DIR must be defined via CMake"
 #endif
-  std::ifstream config_file("/opt/amdcuid/etc/amdcuid_daemon.conf");
+  std::ifstream config_file(AMDCUID_CONFIG_DIR "/amdcuid_daemon.conf");
   std::vector<std::string> config_lines;
 
   if (config_file.is_open()) {

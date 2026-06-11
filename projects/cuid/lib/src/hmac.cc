@@ -68,6 +68,7 @@ struct cuid_hmac::Impl {
 
 cuid_hmac::cuid_hmac()
     : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
@@ -286,12 +287,9 @@ struct cuid_hmac::Impl {
   std::string digest_name;
 };
 
- #ifndef AMDCUID_CONFIG_DIR
- #error "AMDCUID_CONFIG_DIR is not defined. Please define it to the CUID configuration directory path."
- #endif
-
 cuid_hmac::cuid_hmac()
     : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->mac = nullptr;
@@ -437,7 +435,8 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
+    : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
+  key_file_path = AMDCUID_CONFIG_DIR "/hmac_key.bin";
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->ctx = HMAC_CTX_new();

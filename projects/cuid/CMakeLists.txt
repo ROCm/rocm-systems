@@ -34,11 +34,23 @@ set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 # Read version from amd_cuid.h so there is a single source of truth
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/lib/include/amd_cuid.h" _CUID_HEADER)
-string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MAJOR ([0-9]+)" _ "${_CUID_HEADER}")
+string(
+    REGEX MATCH "#define AMDCUID_LIB_VERSION_MAJOR ([0-9]+)"
+    _
+    "${_CUID_HEADER}"
+)
 set(VERSION_MAJOR "${CMAKE_MATCH_1}")
-string(REGEX MATCH "#define AMDCUID_LIB_VERSION_MINOR ([0-9]+)" _ "${_CUID_HEADER}")
+string(
+    REGEX MATCH "#define AMDCUID_LIB_VERSION_MINOR ([0-9]+)"
+    _
+    "${_CUID_HEADER}"
+)
 set(VERSION_MINOR "${CMAKE_MATCH_1}")
-string(REGEX MATCH "#define AMDCUID_LIB_VERSION_PATCH ([0-9]+)" _ "${_CUID_HEADER}")
+string(
+    REGEX MATCH "#define AMDCUID_LIB_VERSION_PATCH ([0-9]+)"
+    _
+    "${_CUID_HEADER}"
+)
 set(VERSION_PATCH "${CMAKE_MATCH_1}")
 set(VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 message("Package version: ${VERSION_STRING}")
@@ -55,13 +67,15 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
         set(CMAKE_INSTALL_PREFIX
             "C:/Program Files/AMD/ROCM/AMDCUID"
-            CACHE PATH "Default installation directory."
+            CACHE PATH
+            "Default installation directory."
             FORCE
         )
-    else()  # Linux/Unix
+    else() # Linux/Unix
         set(CMAKE_INSTALL_PREFIX
             "${ROCM_DIR}/core"
-            CACHE PATH "Default installation directory."
+            CACHE PATH
+            "Default installation directory."
             FORCE
         )
     endif()
@@ -75,10 +89,12 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# When cmake -DBUILD_TESTS=off, it will not build CUID tests.
+# When cmake -DBUILD_TESTS off by default, it will not build the CUID test suite
 option(BUILD_TESTS "Build test suite" OFF)
-# When cmake -DBUILD_EXAMPLES=off, it will not build CUID examples
+# When cmake -DBUILD_EXAMPLES off by default, it will not build the CUID examples
 option(BUILD_EXAMPLES "Build examples" OFF)
+# When cmake -DBUILD_DAEMON off by default, it will not build the CUID daemon
+option(BUILD_DAEMON "Build daemon" OFF)
 
 # Version-independent directory shared by all installed versions.
 # The HMAC key and daemon config file are stored here so that multi-version
@@ -88,12 +104,14 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 if(WIN32)
     set(AMDCUID_SHARED_CONFIG_DIR
         "C:/ProgramData/AMD/AMDCUID/config"
-        CACHE PATH "Version-independent directory for the HMAC key and daemon config."
+        CACHE PATH
+        "Version-independent directory for the HMAC key and daemon config."
     )
 else()
     set(AMDCUID_SHARED_CONFIG_DIR
         "/etc/amdcuid"
-        CACHE PATH "Version-independent directory for the HMAC key and daemon config."
+        CACHE PATH
+        "Version-independent directory for the HMAC key and daemon config."
     )
 endif()
 
@@ -139,7 +157,9 @@ set(TESTS_COMPONENT "tests")
 
 add_subdirectory(lib)
 add_subdirectory(cli)
-add_subdirectory(daemon)
+if(BUILD_DAEMON)
+    add_subdirectory(daemon)
+endif()
 if(BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()
@@ -155,10 +175,14 @@ if(NOT TARGET uninstall)
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
-        IMMEDIATE @ONLY
+        IMMEDIATE
+        @ONLY
     )
-    add_custom_target(uninstall
-        COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+    add_custom_target(
+        uninstall
+        COMMAND
+            ${CMAKE_COMMAND} -P
+            "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
         COMMENT "Uninstalling ${AMDCUID} ..."
     )
 endif()
