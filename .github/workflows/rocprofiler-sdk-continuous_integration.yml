@@ -450,7 +450,7 @@ jobs:
             -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
@@ -564,26 +564,26 @@ jobs:
       timeout-minutes: 45
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run:
-        sudo sysctl -w vm.mmap_rnd_bits=28;
-        export PATH="$HOME/.local/bin:$PATH";
-        if [[ -n "${HIP_VISIBLE_DEVICES:-}" ]]; then unset GPU_DEVICE_ORDINAL; fi;
-        python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
-          --build-jobs 16
-          --mode ${CI_MODE}
-          --site ${{ matrix.system.runner }}
-          --gpu-targets ${{ env.GPU_TARGETS }}
-          --memcheck ${{ matrix.system.sanitizer }}
-          --run-attempt ${{ github.run_attempt }}
-          --
+      run: |
+        sudo sysctl -w vm.mmap_rnd_bits=28
+        export PATH="$HOME/.local/bin:$PATH"
+        if [[ -n "${HIP_VISIBLE_DEVICES:-}" ]]; then unset GPU_DEVICE_ORDINAL; fi
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }} \
+          --build-jobs 16 \
+          --mode ${CI_MODE} \
+          --site ${{ matrix.system.runner }} \
+          --gpu-targets ${{ env.GPU_TARGETS }} \
+          --memcheck ${{ matrix.system.sanitizer }} \
+          --run-attempt ${{ github.run_attempt }} \
+          -- \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
-          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
-          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
-          -DPython3_EXECUTABLE=$(which python3)
-          ${{ env.GLOBAL_CMAKE_OPTIONS }}
-          --
-          --parallel 4
-          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
+          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
+          -DPython3_EXECUTABLE=$(which python3) \
+          ${{ env.GLOBAL_CMAKE_OPTIONS }} \
+          -- \
+          --parallel 4 \
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
