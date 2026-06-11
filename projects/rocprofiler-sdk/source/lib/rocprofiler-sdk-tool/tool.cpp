@@ -3363,7 +3363,7 @@ tool_detach(void* /*tool_data*/)
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
 
     // Flush all buffers, stop context to ensure in-flight GPU operations complete,
-    // then flush again to capture any final events (same pattern as tool_fini)
+    // then flush again to capture any final events (same pattern as tool_fini).
     flush();
     rocprofiler_stop_context(get_client_ctx());
     flush();

@@ -10,6 +10,8 @@
 #include "../core_tmp.h"
 #include "nccl_device/gin/gin_device_host_common.h"
 
+#define NCCL_GIN_MAX_CONNECTIONS 4
+
 // nccl.h has: typedef ncclWindow_vidmem* ncclWindow_t;
 struct ncclWindow_vidmem {
   void* winHost;

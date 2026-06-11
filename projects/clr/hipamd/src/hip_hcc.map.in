@@ -306,6 +306,7 @@ global:
     hipDestroyExternalSemaphore;
     hipImportExternalMemory;
     hipExternalMemoryGetMappedBuffer;
+    hipExternalMemoryGetMappedMipmappedArray;
     hipDestroyExternalMemory;
     hipMemcpy2DToArrayAsync;
     hipDrvMemcpy2DUnaligned;
