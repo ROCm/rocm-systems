@@ -10,6 +10,11 @@
 # Required variables (set by src/CMakeLists.txt before including this file):
 #   HIPIFY_DIR, GEN_DIR, GPU_TARGETS, PROJECT_BINARY_DIR, PROJECT_SOURCE_DIR,
 #   Python3_EXECUTABLE
+#
+# MIRROR NOTE: this pipeline is the ENABLE_DEVICE_LINKER=ON realization of NCCL's separately-built
+# nccl_device library. Its role is also documented (as the add_library(nccl_device ...) analog) in
+# projects/rccl/src/device/CMakeLists.txt, a structural mirror of NCCL's src/device/CMakeLists.txt.
+# This file remains the authoritative, live implementation -- it is not moved there.
 
 message(STATUS "Device Linker: assembly-extract pipeline enabled (RCCLDEV language)")
 
