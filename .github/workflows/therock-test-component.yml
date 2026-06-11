@@ -111,6 +111,8 @@ jobs:
           # Windows hip-tests (PAL=1, ROCR=0) set this via matrix; other
           # components leave it empty. See: https://github.com/ROCm/TheRock/issues/3587
           GPU_ENABLE_PAL: ${{ fromJSON(inputs.component).gpu_enable_pal }}
+          # Temporary change to enable verbose HIP logs to check Unit_hipGetProcAddress_IPC_Event failure
+          AMD_LOG_LEVEL: ${{ (contains(inputs.test_runs_on, 'gfx942') || contains(inputs.amdgpu_families, 'gfx94X')) && '7' || '0' }}
         run: |
           ${{ fromJSON(inputs.component).test_script }}
 
