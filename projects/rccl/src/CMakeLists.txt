@@ -428,8 +428,6 @@ set(SRC_FILES
 # (NCCL L20-23, the NVTX conditional append of init_nvtx.cc, IS mapped: RCCL lists init_nvtx.cc
 #  unconditionally in SRC_FILES -- see the L1-18 marker above.)
 
-# Prepend src/ to all source files for proper paths from root
-
 # [NCCL src/CMakeLists.txt L30-35] UNMAPPED in this file -- implemented in the RCCL top-level
 # projects/rccl/CMakeLists.txt (RCCL configures rccl.h/nccl.h from src/nccl.h.in; there is no
 # RCCL nccl.pc.in pkg-config). Verbatim NCCL block kept for merge reference:
@@ -520,6 +518,7 @@ foreach(FULL_SRC_FILE ${SRC_FILES})
   if (FAULT_INJECTION)
     add_custom_command(
       OUTPUT ${HIP_FILE}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       COMMAND mkdir -p ${HIP_FILE_DIR}
               && ${hipify-perl_executable} -experimental -quiet-warnings ${FULL_SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
@@ -530,6 +529,7 @@ foreach(FULL_SRC_FILE ${SRC_FILES})
   else()
     add_custom_command(
       OUTPUT ${HIP_FILE}
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
       COMMAND mkdir -p ${HIP_FILE_DIR}
               && ${hipify-perl_executable} -experimental -quiet-warnings ${FULL_SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
@@ -1050,6 +1050,9 @@ endif()
 # (placed after all target_compile_definitions so DeviceLinker.cmake
 #  can read the rccl target's definitions directly)
 #==================================================================================================
+# MIRROR NOTE: this wire-up (and the -fgpu-rdc / --offload-host-only selection in the compile-flags
+# block above) is also mirrored as NCCL's add_library(nccl_device ...) analog in
+# projects/rccl/src/device/CMakeLists.txt. This copy here is the authoritative, live one.
 if(ENABLE_DEVICE_LINKER)
   include(${PROJECT_SOURCE_DIR}/cmake/DeviceLinker.cmake)
   add_dependencies(rccl device_linker_build)
