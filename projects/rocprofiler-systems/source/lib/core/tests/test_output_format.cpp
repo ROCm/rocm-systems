@@ -24,6 +24,8 @@ TEST(output_format, rocpd_disables_perfetto_and_profile)
     EXPECT_FALSE(sel.perfetto);
     EXPECT_TRUE(sel.rocpd);
     EXPECT_FALSE(sel.profile);
+    EXPECT_FALSE(sel.json);
+    EXPECT_FALSE(sel.text);
 }
 
 TEST(output_format, json_selects_timemory_json)
@@ -53,6 +55,8 @@ TEST(output_format, proto_and_rocpd_combine)
     EXPECT_TRUE(sel.perfetto);
     EXPECT_TRUE(sel.rocpd);
     EXPECT_FALSE(sel.profile);
+    EXPECT_FALSE(sel.json);
+    EXPECT_FALSE(sel.text);
 }
 
 TEST(output_format, proto_and_json_combine)
