@@ -200,6 +200,19 @@ class IsaProfile(ABC):
         """
         return {}
 
+    def source_split_file_stem(
+        self, enc_name: str, inst_name: str, semantics: object | None
+    ) -> str | None:
+        """Optional logical source-file stem for a generated instruction.
+
+        When ``source_split_max_bytes`` asks the generator to split an
+        encoding's implementation file, profiles can return a descriptive
+        stem such as ``cvt_pack`` or ``cmpx_f32``. The generator writes
+        matching ``<encoding>_<stem>.cpp`` chunks while still enforcing the
+        configured byte limit.
+        """
+        return None
+
     @property
     def uses_vgpr_msb_indexing(self) -> bool:
         """True when VGPR operands use MODE-controlled high-bank bits."""
@@ -243,6 +256,11 @@ class IsaProfile(ABC):
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
         """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
+        return False
+
+    @property
+    def smem_address_uses_access_size(self) -> bool:
+        """True when generated SMEM address helpers need the access size."""
         return False
 
     @property
@@ -1436,12 +1454,110 @@ class Gfx1250Profile(Rdna4Profile):
         return True
 
     @property
+    def smem_address_uses_access_size(self) -> bool:
+        return True
+
+    @property
     def source_split_max_bytes(self) -> dict[str, int]:
         # Keep generated gfx1250 instruction sources under the repository's
         # added-file size hook without changing the hook policy for all users.
         # clang-format expands constructor-heavy generated sources, so leave
         # enough room below the hook instead of targeting the hook limit itself.
         return {
-            'ENC_VOP3': 340 * 1024,
-            'ENC_VOPC': 340 * 1024,
+            'ENC_VOP3': 450 * 1024,
+            'ENC_VOPC': 450 * 1024,
         }
+
+    def source_split_file_stem(
+        self, enc_name: str, inst_name: str, semantics: object | None
+    ) -> str | None:
+        enc = enc_name.upper()
+        name = inst_name.upper()
+        sem_class = getattr(semantics, 'semantic_class', None)
+
+        if enc == 'ENC_VOPC':
+            return self._vopc_source_split_file_stem(name)
+        if enc == 'ENC_VOP3':
+            return self._vop3_source_split_file_stem(name, sem_class)
+        return None
+
+    @staticmethod
+    def _vopc_source_split_file_stem(inst_name: str) -> str:
+        if inst_name.startswith('V_CMPX_'):
+            return 'cmpx'
+        if inst_name.startswith('V_CMP_'):
+            return 'cmp'
+        return 'misc'
+
+    @staticmethod
+    def _vop3_source_split_file_stem(
+        inst_name: str,
+        sem_class: str | None,
+    ) -> str:
+        if inst_name.startswith(('V_CMPX_', 'V_CMP_')):
+            return 'cmp'
+
+        if inst_name.startswith(('V_CVT_', 'V_PACK_', 'V_FREXP_')):
+            return 'cvt'
+
+        if inst_name.startswith('V_DIV_'):
+            return 'alu'
+        if inst_name.startswith(('V_PERM', 'V_CUBE')):
+            return 'data'
+        if inst_name in ('V_READFIRSTLANE_B32', 'V_READLANE_B32', 'V_WRITELANE_B32'):
+            return 'data'
+        # Carry-out instructions are grouped with ALU even when their generic
+        # semantic class is a multiply-add family.
+        if '_CO_' in inst_name:
+            return 'alu'
+
+        if sem_class == 'vector_cvt_scale':
+            return 'cvt'
+        if sem_class in {
+            'vector_cvt_pk',
+            'vector_cvt_pknorm',
+            'vector_cvt_pk_u8_f32',
+            'vector_cvt_pkrtz_f16_f32',
+            'vector_cvt_pk_f16_f32',
+            'vector_cvt_pk_bf16_f32',
+            'vector_cvt_sr_f16_f32',
+            'vector_cvt_sr_bf16_f32',
+            'vector_pack_b32_f16',
+        }:
+            return 'cvt'
+        if sem_class in {'vector_readfirstlane', 'vector_readlane', 'vector_writelane'}:
+            return 'data'
+        if sem_class in {
+            'vector_permlane16',
+            'vector_permlanex16',
+            'vector_permlane16_swap',
+            'vector_permlane32_swap',
+            'vector_permlane64',
+        }:
+            return 'data'
+        if sem_class in {'vector_div_fixup', 'vector_div_scale', 'vector_div_fmas'}:
+            return 'alu'
+        if sem_class in {'vector_mad_32_16', 'vector_mad_64_32'}:
+            return 'ternary'
+        if sem_class in {'vector_mbcnt', 'vector_bitop3'}:
+            return 'alu'
+        if sem_class == 'vector_add_co':
+            return 'alu'
+        if sem_class == 'vector_binop':
+            return 'alu'
+        if sem_class == 'vector_ternary':
+            return 'ternary'
+        if sem_class in {
+            'vector_cndmask',
+            'vector_mov',
+            'vector_movrel',
+        }:
+            return 'data'
+        if sem_class in {'vector_dot', 'vector_dot2c_bf16'}:
+            return 'alu'
+        if sem_class == 'vector_unary':
+            return 'alu'
+        if sem_class in {'nop', 'true_nop'}:
+            return 'misc'
+
+        return 'misc'
