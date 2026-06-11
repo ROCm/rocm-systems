@@ -89,7 +89,7 @@ project_map = {
     # Same test coverage as TheRock submodule-bump PRs (rocm-systems scope).
     # Nightly (schedule) uses this entry explicitly for alignment with runtimes coverage.
     "nightly": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
         "projects_to_test": therock_projects_to_test,
     },
 }
