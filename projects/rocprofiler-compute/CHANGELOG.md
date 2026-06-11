@@ -22,6 +22,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* PC sampling analysis now sources the per-instruction table's ``instruction`` and ``source_line`` columns from the native collector's code-object listing (``*_code_obj_info.json``) when present, matched by code object id and offset. Runs without the native collector fall back to the rocprofiler-sdk string tables and are unchanged.
+
 * Moved `--gui` and `--tui` analyze options to experimental status. These features now require the `--experimental` flag to be enabled (e.g., `rocprof-compute analyze --experimental --gui`).
 
 * `--output-format csv` in analyze mode now uses the database analysis workflow and produces one CSV per analysis view. Requires `--format-rocprof-output rocpd` and no longer prints the report to the terminal (matching `db` format).

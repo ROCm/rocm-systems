@@ -242,6 +242,37 @@ def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
         console_error(f"PC sampling: failed to parse {json_path}: {error}")
 
 
+@demarcate
+def load_native_code_object_map(
+    workload_path: str,
+) -> dict[tuple[int, int], dict[str, str]]:
+    """
+    Build a disassembly lookup from native-tool ``*_code_obj_info.json`` files.
+
+    Globs every ``*_code_obj_info.json`` in *workload_path* (the native
+    collector writes one per pid), merging their instructions into one flat
+    dict keyed by ``(code_object_id, instruction code_obj_offset)`` ->
+    ``{"name", "comment"}``.  That key matches a PC sample's
+    ``pc.code_object_id`` + ``pc.code_object_offset``, so a sampled PC can be
+    resolved to its disassembled instruction.  Returns ``{}`` when no files
+    match (missing path included); last-writer-wins on duplicate keys.
+    """
+    code_object_map: dict[tuple[int, int], dict[str, str]] = {}
+    for json_path in Path(workload_path).glob("*code_obj_info.json"):
+        with json_path.open(encoding="utf-8") as json_file:
+            data = json.load(json_file)
+        for code_object in data["code_objects"]:
+            code_object_id = int(code_object["id"])
+            for symbol in code_object["symbols"]:
+                for instruction in symbol["instructions"]:
+                    key = (code_object_id, int(instruction["code_obj_offset"]))
+                    code_object_map[key] = {
+                        "name": instruction.get("name", ""),
+                        "comment": instruction.get("comment", ""),
+                    }
+    return code_object_map
+
+
 def process_pc_sampling_kernel_trace(
     tool_data: Optional[dict[str, Any]],
 ) -> pd.DataFrame:

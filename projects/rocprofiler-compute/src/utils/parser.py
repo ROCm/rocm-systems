@@ -15,6 +15,7 @@ from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.pc_sampling_analysis import (
     SOURCE_LINE_MISSING,
+    NativeCodeObjectMap,
     aggregate_pc_sample_records,
     detect_pc_sampling_method,
     enrich_with_metadata,
@@ -404,6 +405,7 @@ def load_pc_sampling_data_per_kernel(
     tool_data: dict[str, Any],
     sorting_type: str,
     kernel_name: Optional[str] = None,
+    native_code_object_map: Optional[NativeCodeObjectMap] = None,
 ) -> pd.DataFrame:
     """Build the detailed per-instruction PC sampling table from *tool_data*.
 
@@ -434,6 +436,7 @@ def load_pc_sampling_data_per_kernel(
         aggregated_df,
         tool_data,
         attach={"instruction", "source_line", "kernel_name"},
+        native_code_object_map=native_code_object_map,
     )
     if df.empty:
         console_warning("PC sampling: no records found in PC sampling data.")
@@ -483,6 +486,7 @@ def load_pc_sampling_data(
     file_prefix: str,
     sorting_type: str,
     tool_data: Optional[dict[str, Any]],
+    native_code_object_map: Optional[NativeCodeObjectMap] = None,
 ) -> pd.DataFrame:
     """Return the detailed per-instruction table for a single kernel or all.
 
@@ -507,6 +511,7 @@ def load_pc_sampling_data(
             pc_sampling_method,
             tool_data,
             sorting_type,
+            native_code_object_map=native_code_object_map,
         )
 
     if len(workload.filter_kernel_ids) > 1:
@@ -533,6 +538,7 @@ def load_pc_sampling_data(
         tool_data,
         sorting_type,
         kernel_name,
+        native_code_object_map=native_code_object_map,
     )
 
 
@@ -581,6 +587,7 @@ def load_non_mertrics_table(
     dir_path: str,
     args: argparse.Namespace,
     pc_sampling_tool_data: Optional[dict[str, Any]] = None,
+    native_code_object_map: Optional[NativeCodeObjectMap] = None,
 ) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
@@ -624,6 +631,7 @@ def load_non_mertrics_table(
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
                 pc_sampling_tool_data,
+                native_code_object_map=native_code_object_map,
             )
 
     workload.dfs.update(tmp)

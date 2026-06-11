@@ -41,6 +41,11 @@ NORMALIZED_RECORD_COLUMNS = [
 
 SOURCE_LINE_MISSING = "N/A"
 
+# Maps a sampled PC's (code_object_id, code_obj_offset) to its native-collector
+# instruction record ({"name", "comment"}). Built by
+# ``file_io.load_native_code_object_map`` and threaded into ``enrich_with_metadata``.
+NativeCodeObjectMap = dict[tuple[int, int], dict[str, Optional[str]]]
+
 
 def detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
     """Detect the PC sampling method from the populated buffer record array.
@@ -135,27 +140,51 @@ def enrich_with_metadata(
     aggregated_df: pd.DataFrame,
     tool_data: dict[str, Any],
     attach: set[str],
+    native_code_object_map: Optional[NativeCodeObjectMap] = None,
 ) -> pd.DataFrame:
-    """Attach the columns named in *attach* by index into *tool_data*."""
+    """Attach the columns named in *attach*.
+
+    ``instruction`` and ``source_line`` are resolved per row by
+    ``(code_object_id, code_object_offset)`` lookup into
+    *native_code_object_map* when it is a non-empty dict, otherwise by index
+    into *tool_data*. ``kernel_name`` is always resolved from *tool_data*.
+    """
     df = aggregated_df.copy()
     strings = tool_data["strings"]
     instructions = strings["pc_sample_instructions"]
     comments = strings["pc_sample_comments"]
 
-    if "instruction" in attach:
-        df["instruction"] = df["inst_index"].apply(
-            lambda index: instructions[index] if index < len(instructions) else None
+    if native_code_object_map:
+        keys = zip(
+            df["code_object_id"].astype(int), df["code_object_offset"].astype(int)
         )
-    if "source_line" in attach:
-        # Keep the raw comment; "N/A" (not "") when empty or out of range so the
-        # caller trims real strings and display code keeps the column.
-        df["source_line"] = df["inst_index"].apply(
-            lambda index: (
-                comments[index]
-                if index < len(comments) and comments[index]
+        records = [native_code_object_map.get(key) for key in keys]
+        if "instruction" in attach:
+            df["instruction"] = [
+                record.get("name") if record else None for record in records
+            ]
+        if "source_line" in attach:
+            df["source_line"] = [
+                record["comment"]
+                if record and record.get("comment")
                 else SOURCE_LINE_MISSING
+                for record in records
+            ]
+    else:
+        if "instruction" in attach:
+            df["instruction"] = df["inst_index"].apply(
+                lambda index: instructions[index] if index < len(instructions) else None
             )
-        )
+        if "source_line" in attach:
+            # Keep the raw comment; "N/A" (not "") when empty or out of range so
+            # the caller trims real strings and display code keeps the column.
+            df["source_line"] = df["inst_index"].apply(
+                lambda index: (
+                    comments[index]
+                    if index < len(comments) and comments[index]
+                    else SOURCE_LINE_MISSING
+                )
+            )
     if "kernel_name" in attach:
         kernel_id_to_name = {
             symbol["kernel_id"]: symbol["formatted_kernel_name"]
