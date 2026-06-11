@@ -419,8 +419,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         '[](auto a) {'
         ' util::native<uint32_t> u = a;'
         ' util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;'
-        ' auto c = util::clz_u32_simd(u);'
-        ' util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;'
+        ' auto c = util::clz_u32_simd(u) - 1u;'
+        ' util::stdx::where(u == 0u, c) = 31u;'
         ' return c; }',
     ),
     # v_bfrev_b32: reverse the 32 bits of src0. The scalar body loops bit-by-bit;
