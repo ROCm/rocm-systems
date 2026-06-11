@@ -6,22 +6,24 @@
 #include "comm.h"
 #include "device.h"
 #include "archinfo.h"
+#include "profiler.h"
 
 __attribute__ ((visibility("default")))
 ncclResult_t ncclCommDump(
     const ncclComm_t comm,
     std::unordered_map<std::string, std::string>& map) {
+  (void)map;
   if (comm == nullptr) {
     WARN("ncclCommDump comm is null");
     return ncclSuccess;
   }
-  if (comm->proxyState->proxyTrace == nullptr) {
-    WARN("ncclCommDump comm->proxyState->proxyTrace is null");
+  if (comm->proxyState == nullptr) {
+    WARN("ncclCommDump comm->proxyState is null");
     return ncclSuccess;
   }
 
-  WARN("ncclCommDump() ProxyTrace:");
-  WARN("%s", comm->proxyState->proxyTrace->dump().c_str());
+  WARN("ncclCommDump() proxy-trace (profiler plugin):");
+  ncclProfilerProxyTraceDumpIfAny(comm->profilerContext);
 
   return ncclSuccess;
 }
