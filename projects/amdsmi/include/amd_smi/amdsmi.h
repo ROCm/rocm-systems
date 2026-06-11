@@ -6041,6 +6041,10 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  * as the driver cache may not contain the severity user is interested in. The API should return
  * AMDSMI_STATUS_SUCCESS in this case so that user can ignore that call.
  *
+ * An empty CPER ring (no RAS records recorded by the driver) is also reported as
+ * AMDSMI_STATUS_SUCCESS with entry_count == 0, not as an error. Treat SUCCESS with
+ * entry_count == 0 as the canonical "no records" result.
+ *
  * @ingroup tagRasInfo
  *
  * @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}
