@@ -104,6 +104,12 @@ _LITERAL_ENCODING_OPERANDS = {
 }
 
 
+@dataclass
+class _SourceImplUnit:
+    file_stem: str | None
+    impls: list[object]
+
+
 class _SemanticEmitter:
     """Entry point for execute() body generation.
 
@@ -360,6 +366,34 @@ class CodeGenerator:
 
             namespace {
 
+            // VOPD slot opcode values are the MRISA <Opcode> values for V_DUAL_* encodings.
+            constexpr uint16_t kVopdFmacF32 = 0;
+            constexpr uint16_t kVopdFmaakF32 = 1;
+            constexpr uint16_t kVopdFmamkF32 = 2;
+            constexpr uint16_t kVopdMulF32 = 3;
+            constexpr uint16_t kVopdAddF32 = 4;
+            constexpr uint16_t kVopdSubF32 = 5;
+            constexpr uint16_t kVopdSubrevF32 = 6;
+            constexpr uint16_t kVopdMulDx9ZeroF32 = 7;
+            constexpr uint16_t kVopdMovB32 = 8;
+            constexpr uint16_t kVopdCndmaskB32 = 9;
+            constexpr uint16_t kVopdMaxNumF32 = 10;
+            constexpr uint16_t kVopdMinNumF32 = 11;
+            constexpr uint16_t kVopdAddNcU32 = 16;
+            constexpr uint16_t kVopdLshlrevB32 = 17;
+            constexpr uint16_t kVopdBitop2B32 = 18;
+            constexpr uint16_t kVopdFmaF32 = 19;
+            constexpr uint16_t kVopdSubNcU32 = 20;
+            constexpr uint16_t kVopdLshrrevB32 = 21;
+            constexpr uint16_t kVopdAshrrevI32 = 22;
+            constexpr uint16_t kVopdMaxI32 = 23;
+            constexpr uint16_t kVopdMinI32 = 24;
+            constexpr uint16_t kVopdAddF64 = 32;
+            constexpr uint16_t kVopdMulF64 = 33;
+            constexpr uint16_t kVopdMinNumF64 = 34;
+            constexpr uint16_t kVopdMaxNumF64 = 35;
+            constexpr uint16_t kVopdFmacF64 = 36;
+
             Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal,
                               uint16_t encoded) {
               if (use_literal && encoded == 255)
@@ -382,57 +416,57 @@ class CodeGenerator:
 
             const char *Vopd::op_name(uint16_t op) {
               switch (op) {
-              case 0:
+              case kVopdFmacF32:
                 return "v_dual_fmac_f32";
-              case 1:
+              case kVopdFmaakF32:
                 return "v_dual_fmaak_f32";
-              case 2:
+              case kVopdFmamkF32:
                 return "v_dual_fmamk_f32";
-              case 3:
+              case kVopdMulF32:
                 return "v_dual_mul_f32";
-              case 4:
+              case kVopdAddF32:
                 return "v_dual_add_f32";
-              case 5:
+              case kVopdSubF32:
                 return "v_dual_sub_f32";
-              case 6:
+              case kVopdSubrevF32:
                 return "v_dual_subrev_f32";
-              case 7:
+              case kVopdMulDx9ZeroF32:
                 return "v_dual_mul_dx9_zero_f32";
-              case 8:
+              case kVopdMovB32:
                 return "v_dual_mov_b32";
-              case 9:
+              case kVopdCndmaskB32:
                 return "v_dual_cndmask_b32";
-              case 10:
+              case kVopdMaxNumF32:
                 return "v_dual_max_num_f32";
-              case 11:
+              case kVopdMinNumF32:
                 return "v_dual_min_num_f32";
-              case 16:
+              case kVopdAddNcU32:
                 return "v_dual_add_nc_u32";
-              case 17:
+              case kVopdLshlrevB32:
                 return "v_dual_lshlrev_b32";
-              case 18:
+              case kVopdBitop2B32:
                 return "v_dual_bitop2_b32";
-              case 19:
+              case kVopdFmaF32:
                 return "v_dual_fma_f32";
-              case 20:
+              case kVopdSubNcU32:
                 return "v_dual_sub_nc_u32";
-              case 21:
+              case kVopdLshrrevB32:
                 return "v_dual_lshrrev_b32";
-              case 22:
+              case kVopdAshrrevI32:
                 return "v_dual_ashrrev_i32";
-              case 23:
+              case kVopdMaxI32:
                 return "v_dual_max_i32";
-              case 24:
+              case kVopdMinI32:
                 return "v_dual_min_i32";
-              case 32:
+              case kVopdAddF64:
                 return "v_dual_add_f64";
-              case 33:
+              case kVopdMulF64:
                 return "v_dual_mul_f64";
-              case 34:
+              case kVopdMinNumF64:
                 return "v_dual_min_num_f64";
-              case 35:
+              case kVopdMaxNumF64:
                 return "v_dual_max_num_f64";
-              case 36:
+              case kVopdFmacF64:
                 return "v_dual_fmac_f64";
               default:
                 return "v_dual_unknown";
@@ -441,17 +475,17 @@ class CodeGenerator:
 
             bool Vopd::is_float32_op(uint16_t op) {
               switch (op) {
-              case 0:
-              case 1:
-              case 2:
-              case 3:
-              case 4:
-              case 5:
-              case 6:
-              case 7:
-              case 10:
-              case 11:
-              case 19:
+              case kVopdFmacF32:
+              case kVopdFmaakF32:
+              case kVopdFmamkF32:
+              case kVopdMulF32:
+              case kVopdAddF32:
+              case kVopdSubF32:
+              case kVopdSubrevF32:
+              case kVopdMulDx9ZeroF32:
+              case kVopdMaxNumF32:
+              case kVopdMinNumF32:
+              case kVopdFmaF32:
                 return true;
               default:
                 return false;
@@ -485,85 +519,85 @@ class CodeGenerator:
               }
 
               switch (slot.op) {
-              case 0: {
+              case kVopdFmacF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src1),
                                         std::bit_cast<float>(slot.dst->read_lane(wf, lane)));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 1: {
+              case kVopdFmaakF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src1),
                                         std::bit_cast<float>(src2));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 2: {
+              case kVopdFmamkF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src2),
                                         std::bit_cast<float>(src1));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 3: {
+              case kVopdMulF32: {
                 float result = std::bit_cast<float>(src0) * std::bit_cast<float>(src1);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 7: {
+              case kVopdMulDx9ZeroF32: {
                 float lhs = std::bit_cast<float>(src0);
                 float rhs = std::bit_cast<float>(src1);
                 if (lhs == 0.0f || rhs == 0.0f)
                   return std::bit_cast<uint32_t>(0.0f);
                 return std::bit_cast<uint32_t>(lhs * rhs);
               }
-              case 4: {
+              case kVopdAddF32: {
                 float result = std::bit_cast<float>(src0) + std::bit_cast<float>(src1);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 5: {
+              case kVopdSubF32: {
                 float result = std::bit_cast<float>(src0) - std::bit_cast<float>(src1);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 6: {
+              case kVopdSubrevF32: {
                 float result = std::bit_cast<float>(src1) - std::bit_cast<float>(src0);
                 return std::bit_cast<uint32_t>(result);
               }
-              case 8:
+              case kVopdMovB32:
                 return src0;
-              case 9: {
+              case kVopdCndmaskB32: {
                 uint64_t condition = slot.uses_vcc ? wf.vcc() : slot.src2->read_scalar64(wf);
                 return ((condition >> lane) & 1u) ? src1 : src0;
               }
-              case 10: {
+              case kVopdMaxNumF32: {
                 float result = std::fmax(std::bit_cast<float>(src0),
                                          std::bit_cast<float>(src1));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 11: {
+              case kVopdMinNumF32: {
                 float result = std::fmin(std::bit_cast<float>(src0),
                                          std::bit_cast<float>(src1));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 16:
+              case kVopdAddNcU32:
                 return src0 + src1;
-              case 17:
+              case kVopdLshlrevB32:
                 return src1 << (src0 & 31u);
-              case 18:
+              case kVopdBitop2B32:
                 return bitop2(src0, src1, slot.src2_imm);
-              case 19: {
+              case kVopdFmaF32: {
                 float result = std::fma(std::bit_cast<float>(src0),
                                         std::bit_cast<float>(src1),
                                         std::bit_cast<float>(src2));
                 return std::bit_cast<uint32_t>(result);
               }
-              case 20:
+              case kVopdSubNcU32:
                 return src0 - src1;
-              case 21:
+              case kVopdLshrrevB32:
                 return src1 >> (src0 & 31u);
-              case 22:
+              case kVopdAshrrevI32:
                 return static_cast<uint32_t>(static_cast<int32_t>(src1) >> (src0 & 31u));
-              case 23:
+              case kVopdMaxI32:
                 return static_cast<uint32_t>(std::max(static_cast<int32_t>(src0),
                                                       static_cast<int32_t>(src1)));
-              case 24:
+              case kVopdMinI32:
                 return static_cast<uint32_t>(std::min(static_cast<int32_t>(src0),
                                                       static_cast<int32_t>(src1)));
               default:
@@ -610,10 +644,10 @@ class CodeGenerator:
                 srcy0_ = make_src0(32, true, false, 0, srcy0);
                 srcx1_ = Operand(32, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(32, OperandType::OPR_VGPR, vsrcy1);
-                srcx2_ = (opx_ == 9) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
-                                     : Operand(32, OperandType::OPR_VGPR, vsrcx2);
-                srcy2_ = (opy_ == 9) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
-                                     : Operand(32, OperandType::OPR_VGPR, vsrcy2);
+                srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
+                                                   : Operand(32, OperandType::OPR_VGPR, vsrcx2);
+                srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
+                                                   : Operand(32, OperandType::OPR_VGPR, vsrcy2);
               } else {
                 format_ = Format::VopdXy;
                 encoding_id_ = 0x32;
@@ -626,8 +660,9 @@ class CodeGenerator:
                 uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
                 uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
                 uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
-                has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == 1 ||
-                               opx_ == 2 || opy_ == 1 || opy_ == 2;
+                has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == kVopdFmaakF32 ||
+                               opx_ == kVopdFmamkF32 || opy_ == kVopdFmaakF32 ||
+                               opy_ == kVopdFmamkF32;
                 size_ = has_literal_ ? 12 : 8;
                 if (has_literal_) {
                   word2_ = words[2];
@@ -666,20 +701,20 @@ class CodeGenerator:
                         false};
 
               if (vopd3) {
-                x_.has_src2_operand = opx_ == 9 || opx_ == 19;
-                y_.has_src2_operand = opy_ == 9 || opy_ == 19;
-                x_.src2_is_imm = opx_ == 18;
-                y_.src2_is_imm = opy_ == 18;
+                x_.has_src2_operand = opx_ == kVopdCndmaskB32 || opx_ == kVopdFmaF32;
+                y_.has_src2_operand = opy_ == kVopdCndmaskB32 || opy_ == kVopdFmaF32;
+                x_.src2_is_imm = opx_ == kVopdBitop2B32;
+                y_.src2_is_imm = opy_ == kVopdBitop2B32;
                 x_.src2_imm = static_cast<uint32_t>(srcx2_.encoding_value());
                 y_.src2_imm = static_cast<uint32_t>(srcy2_.encoding_value());
               } else {
-                x_.uses_vcc = opx_ == 9;
-                y_.uses_vcc = opy_ == 9;
-                if (opx_ == 1 || opx_ == 2) {
+                x_.uses_vcc = opx_ == kVopdCndmaskB32;
+                y_.uses_vcc = opy_ == kVopdCndmaskB32;
+                if (opx_ == kVopdFmaakF32 || opx_ == kVopdFmamkF32) {
                   x_.src2_is_imm = true;
                   x_.src2_imm = literal_;
                 }
-                if (opy_ == 1 || opy_ == 2) {
+                if (opy_ == kVopdFmaakF32 || opy_ == kVopdFmamkF32) {
                   y_.src2_is_imm = true;
                   y_.src2_imm = literal_;
                 }
@@ -687,39 +722,70 @@ class CodeGenerator:
 
               dst_operands_[0] = &dstx_;
               dst_operands_[1] = &dsty_;
-              src_operands_[0] = &srcx0_;
-              src_operands_[1] = &srcx1_;
-              src_operands_[2] = &srcy0_;
-              src_operands_[3] = &srcy1_;
               num_dst_ = 2;
-              num_src_ = 4;
+              num_src_ = 0;
+
+              const auto add_src = [this](Operand *op) {
+                if (op)
+                  src_operands_[num_src_++] = op;
+              };
+              const auto add_slot_sources = [&](const Slot &slot) {
+                switch (slot.op) {
+                case kVopdFmacF32:
+                  add_src(slot.dst);
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  break;
+                case kVopdMovB32:
+                  add_src(slot.src0);
+                  break;
+                case kVopdCndmaskB32:
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  if (!slot.uses_vcc)
+                    add_src(slot.src2);
+                  break;
+                case kVopdFmaF32:
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  add_src(slot.src2);
+                  break;
+                default:
+                  add_src(slot.src0);
+                  add_src(slot.src1);
+                  break;
+                }
+              };
+
+              add_slot_sources(x_);
+              add_slot_sources(y_);
             }
 
             std::string Vopd::format_slot(const Slot &slot) const {
               std::string out = op_name(slot.op);
               out += " ";
               switch (slot.op) {
-              case 8:
+              case kVopdMovB32:
                 out += slot.dst->name() + ", " + slot.src0->name();
                 break;
-              case 9:
+              case kVopdCndmaskB32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1);
                 if (!slot.uses_vcc)
                   out += ", " + slot.src2->name();
                 break;
-              case 18:
+              case kVopdBitop2B32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1);
                 out += std::format(" bitop3:0x{:02x}", slot.src2_imm & 0xFF);
                 break;
-              case 19:
+              case kVopdFmaF32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1) + ", " +
                        slot.src2->name();
                 break;
-              case 1:
+              case kVopdFmaakF32:
                 out += operand_list(*slot.dst, *slot.src0, *slot.src1);
                 out += std::format(", 0x{:08x}", slot.src2_imm);
                 break;
-              case 2:
+              case kVopdFmamkF32:
                 out += slot.dst->name() + ", " + slot.src0->name();
                 out += std::format(", 0x{:08x}, ", slot.src2_imm);
                 out += slot.src1->name();
@@ -1314,6 +1380,25 @@ class CodeGenerator:
                 'reinterpret_cast<const OpEncoding *>(inst)->opsel_hi)'
             )
         return f'gfx1250_matrix_fmt_operand_size_bits({fmt_expr}, {dim}, {k})'
+
+    @staticmethod
+    def _vbuffer_vaddr_operand_size_expr(enc_name: str, opnd_name: str) -> str | None:
+        if enc_name.upper() != 'ENC_VBUFFER' or opnd_name != 'vaddr':
+            return None
+        return 'vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
+
+    @staticmethod
+    def _emit_vbuffer_helpers() -> str:
+        return textwrap.dedent('''\
+            namespace {
+            uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
+              if (inst->idxen && inst->offen)
+                return 64;
+              if (inst->idxen || inst->offen)
+                return 32;
+              return 0;
+            }
+            } // namespace''')
 
     @staticmethod
     def _emit_gfx1250_matrix_fmt_helpers() -> str:
@@ -1928,6 +2013,24 @@ class CodeGenerator:
 
         if cls == 'true_nop':
             return '  (void)wf;'
+
+        if cls == 'gpr_idx':
+            if op == 'on':
+                return (
+                    '  uint32_t idx = ssrc0.read_scalar(wf) & 0xFF;\n'
+                    '  uint32_t mode = ssrc1.read_scalar(wf) & 0xF;\n'
+                    '  wf.set_m0((wf.m0() & 0xFFFFF000u) | (mode << 8) | idx);\n'
+                    '  wf.set_mode_raw(wf.mode_raw() | Wavefront::GPR_IDX_EN_BIT);'
+                )
+            if op == 'off':
+                return '  wf.set_mode_raw(wf.mode_raw() & ~Wavefront::GPR_IDX_EN_BIT);'
+            if op == 'idx':
+                return '  wf.set_m0((wf.m0() & 0xFFFFFF00u) | (ssrc0.read_scalar(wf) & 0xFF));'
+            if op == 'mode':
+                return (
+                    f'  wf.set_m0((wf.m0() & 0xFFFFF0FFu) '
+                    f'| (({src_ops[0]}.read_scalar(wf) & 0xF) << 8));'
+                )
 
         if cls == 'set_vgpr_msb':
             L.append(
@@ -2742,7 +2845,11 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, 'smem_load')
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
-        L.append('  d->addr = smem_calculate_address(inst_, wf);')
+        if self.isa_spec.profile.smem_address_uses_access_size:
+            addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
+        else:
+            addr_args = 'inst_, wf'
+        L.append(f'  d->addr = smem_calculate_address({addr_args});')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -2754,6 +2861,8 @@ class CodeGenerator:
         nd = sem.num_elems
         L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
         L.append(f'  d->num_dwords = {nd};')
+        if self.isa_spec.profile.smem_address_uses_access_size:
+            L.append('  d->elem_size = 4;')
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, 'smem_store')
         L.append(f'  d->mtype = {self._mtype_expr(is_smem=True)};')
@@ -2761,7 +2870,11 @@ class CodeGenerator:
         L.append('  uint32_t sdata_base = wf.sgpr_alloc().base + inst_.sdata;')
         L.append(f'  for (uint32_t i = 0; i < {nd}; ++i)')
         L.append('    d->store_data[i] = cu.read_sgpr(sdata_base + i);')
-        L.append('  d->addr = smem_calculate_address(inst_, wf);')
+        if self.isa_spec.profile.smem_address_uses_access_size:
+            addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
+        else:
+            addr_args = 'inst_, wf'
+        L.append(f'  d->addr = smem_calculate_address({addr_args});')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
@@ -4084,6 +4197,11 @@ class CodeGenerator:
             # V_CMPX writes VCC+EXEC on CDNA but only EXEC on RDNA:
             'vector_cmpx',
             'vector_cmpx_class',
+            # FP8/BF8 conversions access inst_.op_sel (VOP3-only field):
+            'cvt_fp8',
+            'cvt_scalef32',
+            # vector_cvt_pk FP8 pack/unpack uses inst_.op_sel for word sel:
+            'vector_cvt_pk',
         }
     )
     _NON_SHAREABLE_MNEMONICS = frozenset(
@@ -4181,6 +4299,7 @@ class CodeGenerator:
         for enc in self.isa_spec.inst_encodings:
             inst_classes = []
             class_func_impls = []
+            source_impl_units: list[_SourceImplUnit] = []
             # Collect instructions from this encoding plus any child
             # alt encodings that contribute to this file.
             all_insts = list(enc.insts)
@@ -4241,6 +4360,10 @@ class CodeGenerator:
                         opnd_size_expr = self._gfx1250_matrix_fmt_operand_size_expr(
                             gfx1250_f8f6f4_shape, opnd.name
                         )
+                        if opnd_size_expr is None:
+                            opnd_size_expr = self._vbuffer_vaddr_operand_size_expr(
+                                enc.enc_name, opnd.name
+                            )
                         if opnd_size_expr is None:
                             opnd_size_expr = str(opnd.size)
                         operand_size_exprs[opnd.name] = opnd_size_expr
@@ -4628,6 +4751,7 @@ class CodeGenerator:
                         'S_WAITCNT',
                         'S_WAIT_LOADCNT',
                         'S_WAIT_STORECNT',
+                        'S_WAIT_XCNT',
                         'S_WAIT_EXPCNT',
                         'S_WAIT_DSCNT',
                         'S_WAIT_KMCNT',
@@ -4673,6 +4797,13 @@ class CodeGenerator:
                     _size_overrides = self.isa_spec.profile.inst_size_overrides
                     if inst.name in _size_overrides:
                         ctor_body_parts.append(f'size_ = {_size_overrides[inst.name]};')
+                        ctor_body_parts.append(
+                            'raw_words_ = {inst[-2], inst[-1], inst[0], inst[1]};'
+                            'raw_encoding_ = raw_words_.data();'
+                        )
+                        private_members.append(
+                            cgen.Statement('std::array<uint32_t, 4> raw_words_{}')
+                        )
 
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (
@@ -4969,9 +5100,9 @@ class CodeGenerator:
                         )
 
                     inst_classes.append(s)
-                    class_func_impls.append(class_ctor_impl)
+                    inst_impls = [class_ctor_impl]
                     if gfx1250_f8f6f4_shape is not None:
-                        class_func_impls.append(
+                        inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
                                 f'  out += " matrix_a_fmt:";\n'
@@ -4982,7 +5113,7 @@ class CodeGenerator:
                             )
                         )
                     elif gfx1250_swmmac_has_modifiers:
-                        class_func_impls.append(
+                        inst_impls.append(
                             cgen.Line(
                                 f'void {inst.fmt_name}::build_modifiers(std::string &out) const {{\n'
                                 f'  if (inst_.opsel & 0x1)\n'
@@ -4999,7 +5130,7 @@ class CodeGenerator:
                         and inst_sem.semantic_class in ('branch', 'cbranch')
                         and label_operand
                     ):
-                        class_func_impls.append(
+                        inst_impls.append(
                             cgen.Line(
                                 f'std::optional<int64_t> '
                                 f'{inst.fmt_name}::branch_offset_bytes() const {{\n'
@@ -5010,7 +5141,16 @@ class CodeGenerator:
                                 f'}}'
                             )
                         )
-                    class_func_impls.append(exec_impl)
+                    inst_impls.append(exec_impl)
+                    class_func_impls.extend(inst_impls)
+                    source_impl_units.append(
+                        _SourceImplUnit(
+                            profile.source_split_file_stem(
+                                enc.enc_name, inst.name, inst_sem
+                            ),
+                            inst_impls,
+                        )
+                    )
 
                 # Build include lists for .cpp files
                 cpp_includes = [
@@ -5155,34 +5295,32 @@ class CodeGenerator:
 
                 # Include the unified shared execute template header when
                 # any instruction in this encoding delegates to a template.
-                if self.shared_plan is not None:
-                    from amdisa.codegen.execute.simd_codegen import (
-                        simd_probe_arch_portable as _simd_probe_arch_portable,
+                # Portable SIMD probes can delegate even outside --multi mode,
+                # so this cannot be gated solely on shared_plan.
+                from amdisa.codegen.execute.simd_codegen import (
+                    simd_probe_arch_portable as _simd_probe_arch_portable,
+                )
+
+                enc_key = enc.enc_name.lower().replace('enc_', '')
+
+                def _delegates_to_shared(i: Instruction) -> bool:
+                    if not self.semantics or i.name not in self.semantics.instructions:
+                        return False
+                    return self._can_share_execute(
+                        i.mnemonic, i, enc.enc_name
+                    ) or _simd_probe_arch_portable(
+                        f'{i.mnemonic}_{enc_key}',
+                        self.isa_spec.profile.vop3p_opsel_fields,
                     )
 
-                    enc_key = enc.enc_name.lower().replace('enc_', '')
-
-                    def _delegates_to_shared(i: Instruction) -> bool:
-                        if (
-                            not self.semantics
-                            or i.name not in self.semantics.instructions
-                        ):
-                            return False
-                        return self._can_share_execute(
-                            i.mnemonic, i, enc.enc_name
-                        ) or _simd_probe_arch_portable(
-                            f'{i.mnemonic}_{enc_key}',
-                            self.isa_spec.profile.vop3p_opsel_fields,
+                has_shared = any(_delegates_to_shared(i) for i in all_insts)
+                if has_shared:
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
+                            False,
                         )
-
-                    has_shared = any(_delegates_to_shared(i) for i in all_insts)
-                    if has_shared:
-                        cpp_includes.append(
-                            (
-                                'rocjitsu/isa/arch/amdgpu/shared/execute_shared.h',
-                                False,
-                            )
-                        )
+                    )
 
                 # Build per-ISA header includes.
                 h_includes = [
@@ -5199,11 +5337,18 @@ class CodeGenerator:
                         False,
                     ),
                 ]
+                _has_size_overrides = any(
+                    i.name in self.isa_spec.profile.inst_size_overrides
+                    for i in all_insts
+                )
+                if _has_size_overrides:
+                    h_includes.append(('array', True))
                 if (
                     self._supports_gfx1250_scaled_wmma_vop3px2()
                     and enc.enc_name.upper() == 'ENC_VOP3P'
                 ):
-                    h_includes.append(('array', True))
+                    if not _has_size_overrides:
+                        h_includes.append(('array', True))
                     cpp_includes.append(('array', True))
                     inst_classes.append(
                         cgen.Line(self._emit_gfx1250_scaled_wmma_vop3px2_class())
@@ -5232,6 +5377,9 @@ class CodeGenerator:
                     class_func_impls.insert(
                         0, cgen.Line(self._emit_gfx1250_matrix_fmt_helpers())
                     )
+
+                if enc.enc_name.upper() == 'ENC_VBUFFER':
+                    class_func_impls.insert(0, cgen.Line(self._emit_vbuffer_helpers()))
 
                 if has_getreg and profile.use_hwreg_helpers and not is_mem_enc:
                     class_func_impls.insert(0, cgen.Line(self._emit_hwreg_helpers()))
@@ -5277,6 +5425,7 @@ class CodeGenerator:
                     f'{enc.fmt_enc_name.lower()}',
                     cpp_includes,
                     class_func_impls,
+                    source_impl_units,
                 )
 
         # Generate the umbrella insts.h header that includes all per-
@@ -5317,24 +5466,26 @@ class CodeGenerator:
         base_name: str,
         cpp_includes: list[tuple[str, bool]],
         class_func_impls: list[object],
+        source_impl_units: list[_SourceImplUnit] | None = None,
     ) -> None:
         """Write implementation files for one encoding, splitting when needed.
 
         Some generated encodings, notably gfx1250 VOP3/VOPC, are large enough
         to trip the repository's added-file size hook. Profiles can set a byte
-        limit in ``source_split_max_bytes``; this emits ``<base>_partN.cpp``
-        chunks under that limit and removes stale split/unsplit files when the
-        split decision changes.
+        limit in ``source_split_max_bytes``. Profiles can also supply logical
+        file stems for instructions; this emits ``<base>_<stem>.cpp`` chunks
+        that keep related instructions together while removing stale
+        split/unsplit files when the split decision changes.
         """
         max_bytes = self.isa_spec.profile.source_split_max_bytes.get(enc_name.upper())
-        if not max_bytes:
-            import os
+        import os
 
-            arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
+        arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
+        if not max_bytes:
             if os.path.isdir(arch_dir):
-                for filename in os.listdir(arch_dir):
-                    if re.fullmatch(rf'{re.escape(base_name)}_part\d+\.cpp', filename):
-                        os.remove(os.path.join(arch_dir, filename))
+                self._remove_generated_source_split_files(
+                    arch_dir, base_name, source_impl_units
+                )
             CppFile(
                 base_name,
                 self.out_path,
@@ -5346,33 +5497,50 @@ class CodeGenerator:
             ).gen_code()
             return
 
-        import os
-
-        arch_dir = os.path.join(self.out_path, self.isa_spec.arch_name)
         if os.path.isdir(arch_dir):
-            for filename in os.listdir(arch_dir):
-                if re.fullmatch(rf'{re.escape(base_name)}_part\d+\.cpp', filename):
-                    os.remove(os.path.join(arch_dir, filename))
+            self._remove_generated_source_split_files(
+                arch_dir, base_name, source_impl_units
+            )
+
+        use_logical_split = bool(
+            source_impl_units and any(u.file_stem for u in source_impl_units)
+        )
 
         chunks: list[list[object]] = []
-        current_chunk: list[object] = []
-        current_size = 0
+        chunk_file_names: list[str] = []
 
         # CppFile adds a short prologue, include block, and namespace wrapper.
         # Leave margin under the profile limit so formatting and include growth
         # do not push a chunk over the added-file size hook.
         chunk_overhead = 16 * 1024
-        for impl in class_func_impls:
-            impl_size = len(f'{impl}\n\n'.encode())
-            if current_chunk and current_size + impl_size + chunk_overhead > max_bytes:
-                chunks.append(current_chunk)
-                current_chunk = []
-                current_size = 0
-            current_chunk.append(impl)
-            current_size += impl_size
+        if use_logical_split:
+            logical_chunks = self._build_logical_source_chunks(
+                base_name,
+                class_func_impls,
+                source_impl_units or [],
+                max_bytes,
+                chunk_overhead,
+            )
+            for file_name, chunk in logical_chunks:
+                chunk_file_names.append(file_name)
+                chunks.append(chunk)
+        else:
+            current_chunk: list[object] = []
+            current_size = 0
+            for impl in class_func_impls:
+                impl_size = len(f'{impl}\n\n'.encode())
+                if (
+                    current_chunk
+                    and current_size + impl_size + chunk_overhead > max_bytes
+                ):
+                    chunks.append(current_chunk)
+                    current_chunk = []
+                    current_size = 0
+                current_chunk.append(impl)
+                current_size += impl_size
 
-        if current_chunk:
-            chunks.append(current_chunk)
+            if current_chunk:
+                chunks.append(current_chunk)
 
         if len(chunks) > 1:
             unsplit_file = os.path.join(arch_dir, f'{base_name}.cpp')
@@ -5380,7 +5548,12 @@ class CodeGenerator:
                 os.remove(unsplit_file)
 
         for idx, chunk in enumerate(chunks):
-            file_name = base_name if len(chunks) == 1 else f'{base_name}_part{idx + 1}'
+            if len(chunks) == 1:
+                file_name = base_name
+            elif chunk_file_names:
+                file_name = chunk_file_names[idx]
+            else:
+                file_name = f'{base_name}_part{idx + 1}'
             CppFile(
                 file_name,
                 self.out_path,
@@ -5390,6 +5563,144 @@ class CodeGenerator:
                 chunk,
                 self.isa_spec.arch_name,
             ).gen_code()
+
+    @staticmethod
+    def _sanitize_source_split_file_stem(stem: str | None) -> str:
+        clean = re.sub(r'[^a-z0-9]+', '_', (stem or 'misc').lower()).strip('_')
+        return clean or 'misc'
+
+    @staticmethod
+    def _source_impl_size(impls: list[object]) -> int:
+        return sum(len(f'{impl}\n\n'.encode()) for impl in impls)
+
+    def _chunk_source_impl_units(
+        self,
+        units: list[_SourceImplUnit],
+        max_bytes: int,
+        chunk_overhead: int,
+    ) -> list[list[_SourceImplUnit]]:
+        chunks: list[list[_SourceImplUnit]] = []
+        current_chunk: list[_SourceImplUnit] = []
+        current_size = 0
+        for unit in units:
+            unit_size = self._source_impl_size(unit.impls)
+            if current_chunk and current_size + unit_size + chunk_overhead > max_bytes:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_size = 0
+            current_chunk.append(unit)
+            current_size += unit_size
+        if current_chunk:
+            chunks.append(current_chunk)
+        return chunks
+
+    def _build_logical_source_chunks(
+        self,
+        base_name: str,
+        class_func_impls: list[object],
+        source_impl_units: list[_SourceImplUnit],
+        max_bytes: int,
+        chunk_overhead: int,
+    ) -> list[tuple[str, list[object]]]:
+        """Return deterministic logical source chunks for a split encoding."""
+        grouped_units: dict[str, list[_SourceImplUnit]] = {}
+        unit_impl_ids = {id(impl) for unit in source_impl_units for impl in unit.impls}
+        extra_impls = [
+            impl for impl in class_func_impls if id(impl) not in unit_impl_ids
+        ]
+
+        logical_chunks: list[tuple[str, list[object]]] = []
+        if extra_impls:
+            extra_units = [_SourceImplUnit('support', [impl]) for impl in extra_impls]
+            self._append_logical_source_chunks(
+                logical_chunks,
+                base_name,
+                'support',
+                extra_units,
+                max_bytes,
+                chunk_overhead,
+            )
+
+        for unit in source_impl_units:
+            stem = self._sanitize_source_split_file_stem(unit.file_stem)
+            grouped_units.setdefault(stem, []).append(unit)
+
+        for stem, units in grouped_units.items():
+            self._append_logical_source_chunks(
+                logical_chunks, base_name, stem, units, max_bytes, chunk_overhead
+            )
+
+        self._assert_unique_source_file_names(
+            file_name for file_name, _ in logical_chunks
+        )
+        return logical_chunks
+
+    def _append_logical_source_chunks(
+        self,
+        logical_chunks: list[tuple[str, list[object]]],
+        base_name: str,
+        stem: str,
+        units: list[_SourceImplUnit],
+        max_bytes: int,
+        chunk_overhead: int,
+    ) -> None:
+        unit_chunks = self._chunk_source_impl_units(units, max_bytes, chunk_overhead)
+        for idx, unit_chunk in enumerate(unit_chunks):
+            chunk_stem = stem if len(unit_chunks) == 1 else f'{stem}_{idx + 1}'
+            logical_chunks.append(
+                (
+                    f'{base_name}_{chunk_stem}',
+                    [impl for chunk_unit in unit_chunk for impl in chunk_unit.impls],
+                )
+            )
+
+    @classmethod
+    def _is_generated_source_split_file(
+        cls,
+        base_name: str,
+        filename: str,
+        source_impl_units: list[_SourceImplUnit] | None,
+    ) -> bool:
+        if re.fullmatch(rf'{re.escape(base_name)}_part\d+\.cpp', filename):
+            return True
+
+        has_logical_stems = any(unit.file_stem for unit in source_impl_units or [])
+        stems = {
+            cls._sanitize_source_split_file_stem(unit.file_stem)
+            for unit in source_impl_units or []
+            if unit.file_stem or has_logical_stems
+        }
+        return any(
+            re.fullmatch(
+                rf'{re.escape(base_name)}_{re.escape(stem)}(?:_\d+)?\.cpp', filename
+            )
+            for stem in stems
+        )
+
+    @classmethod
+    def _remove_generated_source_split_files(
+        cls,
+        arch_dir: str,
+        base_name: str,
+        source_impl_units: list[_SourceImplUnit] | None,
+    ) -> None:
+        import os
+
+        for filename in os.listdir(arch_dir):
+            if cls._is_generated_source_split_file(
+                base_name, filename, source_impl_units
+            ):
+                os.remove(os.path.join(arch_dir, filename))
+
+    @staticmethod
+    def _assert_unique_source_file_names(file_names) -> None:
+        seen: set[str] = set()
+        for file_name in file_names:
+            if file_name in seen:
+                raise AssertionError(
+                    f'duplicate generated source file name: {file_name}'
+                )
+            seen.add(file_name)
 
     def _write_shared_inst_files(
         self,
@@ -5546,6 +5857,386 @@ class CodeGenerator:
             f'{len(entries)} template functions',
             file=sys.stderr,
         )
+
+    @staticmethod
+    def _gen_narrow_cvt_header_REMOVED_PLACEHOLDER(out_path: str) -> None:
+        return
+        content_UNUSED = f"""\
+// REMOVED — narrow FP conversions now live in util/data_types.h
+
+#ifndef {guard}
+#define {guard}
+
+#include <bit>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+
+namespace util {{
+
+// LFSR for stochastic rounding seed advancement
+inline uint32_t prng_advance(uint32_t seed) {{
+  return (seed << 1) ^ ((seed >> 31) ? 197u : 0u);
+}}
+
+// --- FP8 E4M3 (OCP E4M3FN) with RNE rounding ---
+
+inline uint8_t f32_to_fp8_e4m3_rne(float val) {{
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  if (std::isnan(val)) return static_cast<uint8_t>(sign | 0x7F);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7E);
+  int32_t exp = f_exp - 127 + 7;
+  if (exp <= 0) {{
+    if (exp < -3) return static_cast<uint8_t>(sign);
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 21 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (mant >> (shift - 1)) & 1;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 8) {{ result = 4; exp = 1; return static_cast<uint8_t>(sign | (1 << 3) | (result & 0x7)); }}
+    return static_cast<uint8_t>(sign | (result & 0x7));
+  }}
+  if (exp >= 15) {{
+    uint32_t mant = (f_mant >> 20) & 0x7;
+    if (exp > 15 || (exp == 15 && mant >= 7))
+      return static_cast<uint8_t>(sign | 0x7E);
+    return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+  }}
+  uint32_t round_bit = (f_mant >> 19) & 1;
+  uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x7) {{
+    mant = 0;
+    exp += 1;
+    if (exp >= 15) {{
+      if (exp > 15) return static_cast<uint8_t>(sign | 0x7E);
+      return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3));
+    }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+inline uint8_t f32_to_fp8_e4m3_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return static_cast<uint8_t>((std::bit_cast<uint32_t>(val) >> 24) & 0x80) | 0x7F;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7E);
+  int32_t exp = f_exp - 127 + 7;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp >= 15) return static_cast<uint8_t>(sign | 0x7E);
+  uint32_t trunc_bits = f_mant & 0xFFFFF;
+  uint32_t random_add = seed >> 12;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  if ((trunc_bits + random_add) > 0xFFFFF) {{
+    mant += 1;
+    if (mant > 0x7) {{ mant = 0; exp += 1; if (exp >= 15) return static_cast<uint8_t>(sign | 0x7E); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+// --- BF8 E5M2 with RNE rounding ---
+
+inline uint8_t f32_to_bf8_e5m2_rne(float val) {{
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  if (std::isnan(val)) return static_cast<uint8_t>(sign | 0x7F);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7C);
+  int32_t exp = f_exp - 127 + 15;
+  if (exp <= 0) {{
+    if (exp < -1) return static_cast<uint8_t>(sign);
+    uint32_t mant = f_mant | 0x800000;
+    int shift = 22 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (mant >> (shift - 1)) & 1;
+    uint32_t sticky = (mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 4) {{ return static_cast<uint8_t>(sign | (1 << 2) | 0); }}
+    return static_cast<uint8_t>(sign | (result & 0x3));
+  }}
+  if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C);
+  uint32_t round_bit = (f_mant >> 20) & 1;
+  uint32_t sticky = (f_mant & 0xFFFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x3) {{
+    mant = 0; exp += 1;
+    if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+inline uint8_t f32_to_bf8_e5m2_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return static_cast<uint8_t>((std::bit_cast<uint32_t>(val) >> 24) & 0x80) | 0x7F;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 24) & 0x80;
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  if (f_exp == 0xFF) return static_cast<uint8_t>(sign | 0x7C);
+  int32_t exp = f_exp - 127 + 15;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C);
+  uint32_t trunc_bits = f_mant & 0x1FFFFF;
+  uint32_t random_add = seed >> 11;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  if ((trunc_bits + random_add) > 0x1FFFFF) {{
+    mant += 1;
+    if (mant > 0x3) {{ mant = 0; exp += 1; if (exp >= 31) return static_cast<uint8_t>(sign | 0x7C); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+// --- FP4 E2M1 (bias=1, no NaN/Inf, max=6.0) ---
+
+inline float fp4_e2m1_to_f32(uint8_t v) {{
+  uint32_t sign = (v >> 3) & 1;
+  uint32_t exp = (v >> 1) & 0x3;
+  uint32_t mant = v & 0x1;
+  if (exp == 0 && mant == 0) return std::bit_cast<float>(sign << 31);
+  if (exp == 0) {{
+    float result = 0.5f;
+    return sign ? -result : result;
+  }}
+  uint32_t f = (sign << 31) | ((exp + 127 - 1) << 23) | (mant << 22);
+  return std::bit_cast<float>(f);
+}}
+
+inline uint8_t f32_to_fp4_e2m1_rne(float val) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 28) & 0x8;
+  if (std::isinf(val)) return static_cast<uint8_t>(sign | 0x7);
+  float absval = std::fabs(val);
+  if (absval > 6.0f) return static_cast<uint8_t>(sign | 0x7);
+  if (absval < 0.25f) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) {{
+    uint32_t round_bit = (f_mant >> 22) & 1;
+    uint32_t sticky = (f_mant & 0x3FFFFF) ? 1 : 0;
+    uint32_t result = round_bit & (sticky | 0);
+    return static_cast<uint8_t>(sign | result);
+  }}
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x7);
+  uint32_t round_bit = (f_mant >> 21) & 1;
+  uint32_t sticky = (f_mant & 0x1FFFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 22) & 0x1;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 1) {{
+    mant = 0; exp += 1;
+    if (exp > 3) return static_cast<uint8_t>(sign | 0x7);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 1) | mant);
+}}
+
+inline uint8_t f32_to_fp4_e2m1_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 28) & 0x8;
+  if (std::isinf(val) || std::fabs(val) > 6.0f) return static_cast<uint8_t>(sign | 0x7);
+  if (std::fabs(val) < 0.25f) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x7);
+  uint32_t trunc_bits = f_mant & 0x3FFFFF;
+  uint32_t random_add = seed >> 10;
+  uint32_t mant = (f_mant >> 22) & 0x1;
+  if ((trunc_bits + random_add) > 0x3FFFFF) {{
+    mant += 1;
+    if (mant > 1) {{ mant = 0; exp += 1; if (exp > 3) return static_cast<uint8_t>(sign | 0x7); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 1) | mant);
+}}
+
+// --- FP6 E2M3 (bias=1, no NaN/Inf, max=7.5) ---
+
+inline float fp6_e2m3_to_f32(uint8_t v) {{
+  uint32_t sign = (v >> 5) & 1;
+  uint32_t exp = (v >> 3) & 0x3;
+  uint32_t mant = v & 0x7;
+  if (exp == 0 && mant == 0) return std::bit_cast<float>(sign << 31);
+  if (exp == 0) {{
+    float result = std::ldexp(static_cast<float>(mant), -3);
+    return sign ? -result : result;
+  }}
+  uint32_t f = (sign << 31) | ((exp + 127 - 1) << 23) | (mant << 20);
+  return std::bit_cast<float>(f);
+}}
+
+inline uint8_t f32_to_fp6_e2m3_rne(float val) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 7.5f) return static_cast<uint8_t>(sign | 0x1F);
+  float absval = std::fabs(val);
+  if (absval < std::ldexp(1.0f, -4)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) {{
+    uint32_t full_mant = f_mant | 0x800000;
+    int shift = 21 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (full_mant >> (shift - 1)) & 1;
+    uint32_t sticky = (full_mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = full_mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 8) return static_cast<uint8_t>(sign | (1 << 3));
+    return static_cast<uint8_t>(sign | (result & 0x7));
+  }}
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t round_bit = (f_mant >> 19) & 1;
+  uint32_t sticky = (f_mant & 0x7FFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x7) {{
+    mant = 0; exp += 1;
+    if (exp > 3) return static_cast<uint8_t>(sign | 0x1F);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+inline uint8_t f32_to_fp6_e2m3_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 7.5f) return static_cast<uint8_t>(sign | 0x1F);
+  if (std::fabs(val) < std::ldexp(1.0f, -4)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 1;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp > 3) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t trunc_bits = f_mant & 0xFFFFF;
+  uint32_t random_add = seed >> 12;
+  uint32_t mant = (f_mant >> 20) & 0x7;
+  if ((trunc_bits + random_add) > 0xFFFFF) {{
+    mant += 1;
+    if (mant > 0x7) {{ mant = 0; exp += 1; if (exp > 3) return static_cast<uint8_t>(sign | 0x1F); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 3) | mant);
+}}
+
+// --- BF6 E3M2 (bias=3, no NaN/Inf, max=28.0) ---
+
+inline float bf6_e3m2_to_f32(uint8_t v) {{
+  uint32_t sign = (v >> 5) & 1;
+  uint32_t exp = (v >> 2) & 0x7;
+  uint32_t mant = v & 0x3;
+  if (exp == 0 && mant == 0) return std::bit_cast<float>(sign << 31);
+  if (exp == 0) {{
+    float result = std::ldexp(static_cast<float>(mant), -4);
+    return sign ? -result : result;
+  }}
+  uint32_t f = (sign << 31) | ((exp + 127 - 3) << 23) | (mant << 21);
+  return std::bit_cast<float>(f);
+}}
+
+inline uint8_t f32_to_bf6_e3m2_rne(float val) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 28.0f) return static_cast<uint8_t>(sign | 0x1F);
+  float absval = std::fabs(val);
+  if (absval < std::ldexp(1.0f, -5)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 3;
+  if (exp <= 0) {{
+    uint32_t full_mant = f_mant | 0x800000;
+    int shift = 22 - exp;
+    if (shift > 23) return static_cast<uint8_t>(sign);
+    uint32_t round_bit = (full_mant >> (shift - 1)) & 1;
+    uint32_t sticky = (full_mant & ((1u << (shift - 1)) - 1)) ? 1 : 0;
+    uint32_t result = full_mant >> shift;
+    result += round_bit & (sticky | (result & 1));
+    if (result >= 4) return static_cast<uint8_t>(sign | (1 << 2));
+    return static_cast<uint8_t>(sign | (result & 0x3));
+  }}
+  if (exp > 7) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t round_bit = (f_mant >> 20) & 1;
+  uint32_t sticky = (f_mant & 0xFFFFF) ? 1 : 0;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  mant += round_bit & (sticky | (mant & 1));
+  if (mant > 0x3) {{
+    mant = 0; exp += 1;
+    if (exp > 7) return static_cast<uint8_t>(sign | 0x1F);
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+inline uint8_t f32_to_bf6_e3m2_sr(float val, uint32_t seed) {{
+  if (std::isnan(val)) return 0;
+  uint32_t f = std::bit_cast<uint32_t>(val);
+  uint32_t sign = (f >> 26) & 0x20;
+  if (std::isinf(val) || std::fabs(val) > 28.0f) return static_cast<uint8_t>(sign | 0x1F);
+  if (std::fabs(val) < std::ldexp(1.0f, -5)) return static_cast<uint8_t>(sign);
+  int32_t f_exp = static_cast<int32_t>((f >> 23) & 0xFF);
+  uint32_t f_mant = f & 0x7FFFFF;
+  int32_t exp = f_exp - 127 + 3;
+  if (exp <= 0) return static_cast<uint8_t>(sign);
+  if (exp > 7) return static_cast<uint8_t>(sign | 0x1F);
+  uint32_t trunc_bits = f_mant & 0x1FFFFF;
+  uint32_t random_add = seed >> 11;
+  uint32_t mant = (f_mant >> 21) & 0x3;
+  if ((trunc_bits + random_add) > 0x1FFFFF) {{
+    mant += 1;
+    if (mant > 0x3) {{ mant = 0; exp += 1; if (exp > 7) return static_cast<uint8_t>(sign | 0x1F); }}
+  }}
+  return static_cast<uint8_t>(sign | (static_cast<uint32_t>(exp) << 2) | mant);
+}}
+
+// --- 6-bit packing/unpacking (32×6-bit values ↔ 6 DWORDs, little-endian) ---
+
+inline void pack_6bit(const uint8_t vals[32], uint32_t dwords[6]) {{
+  for (int d = 0; d < 6; ++d) dwords[d] = 0;
+  for (int i = 0; i < 32; ++i) {{
+    uint64_t bit_offset = static_cast<uint64_t>(i) * 6;
+    uint32_t dw_idx = static_cast<uint32_t>(bit_offset / 32);
+    uint32_t bit_pos = static_cast<uint32_t>(bit_offset % 32);
+    uint32_t val6 = vals[i] & 0x3F;
+    dwords[dw_idx] |= val6 << bit_pos;
+    if (bit_pos > 26)
+      dwords[dw_idx + 1] |= val6 >> (32 - bit_pos);
+  }}
+}}
+
+inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
+  for (int i = 0; i < 32; ++i) {{
+    uint64_t bit_offset = static_cast<uint64_t>(i) * 6;
+    uint32_t dw_idx = static_cast<uint32_t>(bit_offset / 32);
+    uint32_t bit_pos = static_cast<uint32_t>(bit_offset % 32);
+    uint32_t val = (dwords[dw_idx] >> bit_pos) & 0x3F;
+    if (bit_pos > 26)
+      val |= (dwords[dw_idx + 1] << (32 - bit_pos)) & 0x3F;
+    vals[i] = static_cast<uint8_t>(val);
+  }}
+}}
+
+}} // namespace util
+
+#endif // {guard}
+"""
+        filepath = os.path.join(shared_dir, 'narrow_cvt.h')
+        with open(filepath, 'w') as f:
+            f.write(content)
+
+        import sys
+
+        print(f'Generated shared/narrow_cvt.h', file=sys.stderr)
 
     def gen_operand_types(self) -> None:
         """Generate operand type and OpSel enums."""
@@ -5738,6 +6429,8 @@ class CodeGenerator:
             )
         ref_impl = (
             f'std::optional<RegisterRef> Operand::to_register_ref() const {{\n'
+            f'if (size_bits_ == 0)\n'
+            f'  return std::nullopt;\n'
             f'// Liveness tracks operands as contiguous 32-bit register lanes.\n'
             f'const auto reg_width = static_cast<uint8_t>(size_bits_ > 32 ? size_bits_ / 32 : 1);\n'
             f'{packed_16bit_ref_check}'
@@ -6031,8 +6724,10 @@ class CodeGenerator:
             )
         read_lane_lines.extend(
             [
-                f'  if (auto off = {_resolved_vgpr_read_call})',
-                '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + *off, lane);',
+                f'  if (auto off = {_resolved_vgpr_read_call}) {{',
+                '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;',
+                '    return wf.cu().read_vgpr(wf.vgpr_alloc().base + voff, lane);',
+                '  }',
                 '  if (is_immediate_type(opr_type_))',
                 '    return static_cast<uint32_t>(ev);',
                 '  return resolve_src_scalar(wf, ev);',
@@ -6046,7 +6741,8 @@ class CodeGenerator:
             '  if (delegate()) return delegate()->read_lane64(wf, lane);\n'
             '  int ev = encoding_value_;\n'
             f'  if (auto off = {_resolved_vgpr_read_call}) {{\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + *off;\n'
+            '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, false) : *off;\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
             '    uint32_t lo = wf.cu().read_vgpr(idx, lane);\n'
             '    uint32_t hi = wf.cu().read_vgpr(idx + 1, lane);\n'
             '    return static_cast<uint64_t>(hi) << 32 | lo;\n'
@@ -6359,7 +7055,8 @@ class CodeGenerator:
             '\n'
             'void Operand::write_lane(amdgpu::Wavefront &wf, uint32_t lane, uint32_t val) const {\n'
             f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
-            '    wf.cu().write_vgpr(wf.vgpr_alloc().base + *off, lane, val);\n'
+            '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
+            '    wf.cu().write_vgpr(wf.vgpr_alloc().base + voff, lane, val);\n'
             '    return;\n'
             '  }\n'
             '  throw std::logic_error("write_lane called on non-VGPR operand type");\n'
@@ -6367,7 +7064,8 @@ class CodeGenerator:
             '\n' + _read_lane64_body + '\n\n'
             'void Operand::write_lane64(amdgpu::Wavefront &wf, uint32_t lane, uint64_t val) const {\n'
             f'  if (auto off = {_resolved_vgpr_encoded_call}) {{\n'
-            '    uint32_t idx = wf.vgpr_alloc().base + *off;\n'
+            '    uint32_t voff = wf.gpr_idx_en() ? amdgpu::apply_gpr_idx(wf, *off, true) : *off;\n'
+            '    uint32_t idx = wf.vgpr_alloc().base + voff;\n'
             '    wf.cu().write_vgpr(idx, lane, static_cast<uint32_t>(val));\n'
             '    wf.cu().write_vgpr(idx + 1, lane, static_cast<uint32_t>(val >> 32));\n'
             '    return;\n'
@@ -6501,6 +7199,37 @@ class CodeGenerator:
         decode_table_entries = []
         sub_decode_table_entries = []
         decode_funcs_found = set()
+        _custom_decode_bodies: dict[str, object] = {}
+        _vop3px2_opcode = self.isa_spec.profile.vop3px2_prefix_opcode
+        if _vop3px2_opcode is not None:
+            _ie_names = {
+                inst.name for ie in self.isa_spec.inst_encodings for inst in ie.insts
+            }
+            _vop3px2_active = any(
+                n in _ie_names for n in self.isa_spec.profile.inst_size_overrides
+            )
+            if _vop3px2_active:
+                for _dte in self.isa_spec.primary_decode_table:
+                    if (
+                        _dte is not None
+                        and not _dte.is_primary
+                        and _dte.sub_decode_funcs is not None
+                        and _dte.sub_decode_table
+                        and 'vop3p' in _dte.sub_decode_table
+                    ):
+                        _pfx = 'decodeVop3pX2Prefix'
+                        _dte.sub_decode_funcs[_vop3px2_opcode] = _pfx
+                        _custom_decode_bodies[_pfx] = cgen.Block(
+                            [
+                                cgen.Statement(
+                                    f'auto op = *reinterpret_cast<const {_dte.enc.fmt_enc_name}::OpEncoding *>(opcode + 2)'
+                                ),
+                                cgen.Statement(
+                                    f'return {_dte.sub_decode_table}[op.op](opcode + 2)'
+                                ),
+                            ]
+                        )
+                        break
         for dte in self.isa_spec.primary_decode_table:
             if dte is not None:
                 decode_table_entries.append(f'&Decoder::{dte.decode_func},')
@@ -6572,6 +7301,17 @@ class CodeGenerator:
                                         ],
                                     )
                                 )
+                                _fn_body = (
+                                    _custom_decode_bodies[fn]
+                                    if fn in _custom_decode_bodies
+                                    else cgen.Block(
+                                        [
+                                            cgen.Statement(
+                                                f'return std::make_unique<{class_name}>(opcode)'
+                                            )
+                                        ]
+                                    )
+                                )
                                 decode_table_funcs.append(
                                     cgen.FunctionBody(
                                         cgen.FunctionDeclaration(
@@ -6586,13 +7326,7 @@ class CodeGenerator:
                                                 )
                                             ],
                                         ),
-                                        cgen.Block(
-                                            [
-                                                cgen.Statement(
-                                                    f'return std::make_unique<{class_name}>(opcode)'
-                                                )
-                                            ]
-                                        ),
+                                        _fn_body,
                                     )
                                 )
                             sub_decode_table_entry_str.append(f'&Decoder::{fn},')
