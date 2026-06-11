@@ -11,6 +11,7 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -22,6 +23,7 @@ RJ_DIAGNOSTIC_POP
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -86,10 +88,15 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t total_wgs, uint3
   auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
-  loaded.engine_config.num_threads = 1;
+  // RJ_XCD_PARTITIONS>1: run each XCD on its own engine partition/thread so the
+  // XCDs execute concurrently across their separate L2s (vs. one XCD at a time).
+  uint32_t xcd_parts = env_u32("RJ_XCD_PARTITIONS").value_or(1);
+  loaded.engine_config.num_threads = std::max(xcd_parts, 1u);
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
+  if (xcd_parts > 1)
+    amdgpu::partition_topology_by_xcds(engine->topology(), soc, xcd_parts);
   soc->for_each_cp([num_threads](auto *cp) { cp->set_dispatch_threads(num_threads); });
   engine->build();
 
@@ -138,6 +145,16 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t total_wgs, uint3
   engine->run();
   soc->flush_all();
   auto end = std::chrono::steady_clock::now();
+
+  // Correctness check: checksum the C output so partitioned runs can be
+  // compared against the serial baseline (RJ_CHECKSUM=1).
+  if (std::getenv("RJ_CHECKSUM")) {
+    double sum = 0;
+    for (size_t i = 0; i < elems; ++i)
+      sum += std::bit_cast<float>(memory->read32(C_ADDR + i * sizeof(float)));
+    std::fprintf(stderr, "[checksum] %s parts=%u dispatch=%u sum=%.6e\n", kernel_name, xcd_parts,
+                 num_threads, sum);
+  }
 
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
