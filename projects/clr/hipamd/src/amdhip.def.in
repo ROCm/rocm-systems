@@ -558,4 +558,5 @@ hipStreamGetDevResource
 hipExecutionCtxRecordEvent
 hipExecutionCtxSynchronize
 hipExecutionCtxWaitEvent
+hipMemGetDefaultMemPool
 @HSA_EXPORTS@

@@ -695,6 +695,7 @@ global:
     hipExecutionCtxRecordEvent;
     hipExecutionCtxSynchronize;
     hipExecutionCtxWaitEvent;
+    hipMemGetDefaultMemPool;
 local:
     *;
 } hip_7.2;
