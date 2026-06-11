@@ -133,52 +133,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: AMDSMI Command Tests
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/test-results-${{ matrix.os }}
-          commands=(
-            "amd-smi version"
-            "amd-smi list"
-            "amd-smi static"
-            "amd-smi firmware"
-            "amd-smi ucode"
-            "amd-smi bad-pages"
-            "amd-smi metric"
-            "amd-smi process"
-            "amd-smi topology"
-            "amd-smi monitor"
-            "amd-smi dmon"
-            "amd-smi xgmi"
-            "amd-smi partition"
-          )
-          # Command failures are not hard fails here; the AMDSMI CI
-          # Summary step scans amd-smi_*.log for 'Error code:' / 'Traceback'
-          # / 'AmdSmiException' and surfaces any failures in the summary.
-          for cmd in "${commands[@]}"; do
-            debug_cmd="$cmd --loglevel debug"
-            echo "Running: $debug_cmd"
-            log="/tmp/test-results-${{ matrix.os }}/$(echo $cmd | tr ' ' '_').log"
-            rc=0
-            eval "$debug_cmd" > "$log" 2>&1 || rc=$?
-            if [ "$rc" -ne 0 ]; then
-              echo "Command '$debug_cmd' failed (exit $rc)."
-              cat "$log"
-              echo "Error code: $rc" >> "$log"
-            fi
-          done
-
-      - name: Upload AMDSMI Command Test Results
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: amdsmi-command-tests-${{ matrix.os }}
-          path: /tmp/test-results-${{ matrix.os }}
-
-      - name: Run AMDSMI, Python, and Example Tests
+      - name: Run AMDSMI, Python, CLI, and Example Tests
         run: |
           set -euo pipefail
           RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
+          mkdir -p "$RESULTS_DIR"
 
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
@@ -189,6 +148,10 @@ jobs:
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
           ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          # amd-smi CLI test suite. Failures hard-fail the step (no `|| echo`)
+          # and are surfaced by the AMDSMI CI Summary step, which scans
+          # cli_test_output.txt for 'FAIL:'/'ERROR:' lines.
+          ./cli_unit_test.py -v > "$RESULTS_DIR/cli_test_output.txt" 2>&1
           if [ -f ./perf_tests.py ]; then
             ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else
@@ -215,6 +178,10 @@ jobs:
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
 
+      - name: CLI Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/cli_test_output.txt || echo "No CLI test results"
+
       - name: Perf Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
@@ -226,6 +193,13 @@ jobs:
       - name: Example NoDRM Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/amd_smi_nodrm_ex.log || echo "No NoDRM example results"
+
+      - name: Upload AMDSMI Test Results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: amdsmi-test-results-${{ matrix.os }}
+          path: /tmp/test-results-${{ matrix.os }}
 
       - name: AMDSMI CI Summary
         if: always()
