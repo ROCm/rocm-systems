@@ -36,7 +36,7 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
                               long long int *end_time, char *source,
                               char *dest, size_t size, TestType type,
                               [[maybe_unused]] ShmemContextType ctx_type,
-                              int wf_size, int batch) {
+                              int wf_size, int batch, int *grid_psync) {
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
   int wf_id = t_id / wf_size;
@@ -71,6 +71,10 @@ __global__ void DefaultCTXPrimitiveTest(int loop, int skip,
       }
       __syncthreads();
       if (i == skip) {
+        // Global barrier ensures all WGs have finished their skip-region
+        // puts before any WG starts timing, preventing skip traffic from
+        // contaminating the timed window.
+        grid_barrier(grid_psync, gridDim.x);
         // Capture the start time of each wavefront to identify the earliest one
         wf_start_time[wf_id] = wall_clock64();
       }
@@ -139,6 +143,7 @@ DefaultCTXPrimitiveTester::DefaultCTXPrimitiveTester(TesterArguments args)
   size_t buff_size = max_msg_size * batch_size * args.wg_size * args.num_wgs;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
+  CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
 
   switch (_type) {
     case DefaultCTXPutTestType:
@@ -181,6 +186,7 @@ DefaultCTXPrimitiveTester::~DefaultCTXPrimitiveTester() {
 
   free_test_buffer(local, args.local_buf_type);
   free_test_buffer(remote);
+  CHECK_HIP(hipFree(grid_psync));
 }
 
 void DefaultCTXPrimitiveTester::resetBuffers(size_t size) {
@@ -192,10 +198,11 @@ void DefaultCTXPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                              int loop, size_t size) {
   size_t shared_bytes = 0;
 
+  CHECK_HIP(hipMemset(grid_psync, 0, sizeof(int)));
   hipLaunchKernelGGL(DefaultCTXPrimitiveTest, gridSize, blockSize,
                      shared_bytes, stream, loop, args.skip, start_time,
                      end_time, source, dest, size, _type, _shmem_context,
-                     wf_size, batch_size);
+                     wf_size, batch_size, grid_psync);
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;
