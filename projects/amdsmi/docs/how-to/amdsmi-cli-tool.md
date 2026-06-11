@@ -684,6 +684,17 @@ Command Modifiers:
 
 Reset options for specified devices.
 
+```{warning}
+
+   * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
+     GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
+
+   * Any process with an open `/dev/kfd` handle will be terminated when a GPU reset occurs,
+     even if that process is not using the GPU being reset. GPU isolation techniques using the
+     environment variables `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` do not
+     prevent this.
+```
+
 ```shell-session
 ~$ amd-smi reset --help
 usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]

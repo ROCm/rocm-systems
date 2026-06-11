@@ -13,6 +13,7 @@
 #include "rocclr/os/os.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "hrr/hip_capture.h"
 #include "profiler/hip_clr_profiler.hpp"
 namespace hip {
 const HipToolsDispatchTable* GetHipToolsDispatchTable();
@@ -82,6 +83,10 @@ void init(bool* status) {
 
   // Complete platform initialization
   PlatformState::Instance().Init();
+
+  // HRR in-tree capture — snapshot dispatch table while real fn ptrs are live.
+  // Installs capture shims only when HIP_HRR_CAPTURE_OUTPUT env var is set.
+  hip_capture_init();
 
   // Initialize built-in CLR profiler (no-op unless GPU_CLR_PROFILE=1)
   HipProfilerInitExt();

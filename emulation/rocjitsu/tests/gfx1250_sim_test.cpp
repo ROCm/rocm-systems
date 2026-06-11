@@ -53,6 +53,7 @@ using namespace rocjitsu;
 const std::string kGfx1250ConfigPath = std::string(CONFIG_DIR) + "/amdgpu_gfx1250.json";
 
 constexpr uint32_t S_ENDPGM_GFX12 = 0xBFB00000u;
+constexpr uint32_t S_WAIT_KMCNT_0_GFX12 = 0xBFC70000u;
 constexpr uint32_t S_SET_VGPR_MSB = 0xBF860000u;
 // LLVM references for these gfx1250 register capacities:
 // - llvm/lib/Target/AMDGPU/Utils/AMDGPUBaseInfo.cpp:
@@ -243,6 +244,15 @@ constexpr uint32_t make_vmov_b32(uint8_t vdst) {
 
 constexpr std::array<uint32_t, 2> make_vmov_b32_literal(uint8_t vdst, uint32_t literal) {
   return {make_vmov_b32(vdst), literal};
+}
+
+constexpr std::array<uint32_t, 2> make_s_load_b32_scaled_imm(uint8_t sdata, uint8_t sbase_pair,
+                                                             uint32_t scaled_offset) {
+  constexpr uint32_t kSmemEncoding = 0x3Du << 26;
+  constexpr uint32_t kSoffsetNull = 0x7Cu;
+  return {kSmemEncoding | ((static_cast<uint32_t>(sdata) & 0x7Fu) << 6) |
+              (static_cast<uint32_t>(sbase_pair) & 0x3Fu),
+          (scaled_offset & 0x00FF'FFFFu) | (1u << 24) | (kSoffsetNull << 25)};
 }
 
 constexpr uint16_t vopd_src0_vgpr(uint16_t reg) { return 256 + reg; }
@@ -1302,6 +1312,36 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   EXPECT_EQ(read_wave_sgpr64(*sim.cu(), *wf, 0), kKernargAddr);
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 2), args[1]);
   EXPECT_EQ(sim.cu()->read_sgpr(sbase + 3), args[2]);
+}
+
+TEST(Gfx1250SimulationTest, SLoadB32ScalesImmediateOffset) {
+  using namespace rocr::llvm::amdhsa;
+
+  constexpr uint64_t kKernelAddr = 0x10000;
+  constexpr uint64_t kKernargAddr = 0x400000;
+  constexpr uint32_t kExpected = 0x12345678u;
+
+  std::vector<uint32_t> code;
+  append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 1));
+  append_instruction(code, S_WAIT_KMCNT_0_GFX12);
+  append_instruction(code, S_ENDPGM_GFX12);
+
+  uint32_t kernel_code_properties = 0;
+  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+
+  Gfx1250Sim sim;
+  write_global_u32(*sim.memory, kKernargAddr + 4, kExpected);
+  uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size(), 104, 32, 2,
+                                            false, false, false, kernel_code_properties, 16);
+
+  test::AqlQueue queue(sim.memory, sim.cp());
+  queue.dispatch(kernel_object, 32, 32, kKernargAddr);
+  step_until_halted(*sim.engine, *sim.cu());
+
+  ASSERT_EQ(sim.cu()->num_wfs(), 1u);
+  auto *wf = sim.cu()->wf(0);
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(read_wave_sgpr(*sim.cu(), *wf, 4), kExpected);
 }
 
 TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {

@@ -180,6 +180,17 @@ class IsaProfile(ABC):
         return {}
 
     @property
+    def vop3px2_prefix_opcode(self) -> int | None:
+        """VOP3P opcode slot for the VOP3PX2 128-bit prefix decoder.
+
+        Returns the opcode index in the VOP3P sub-decode table where the
+        VOP3PX2 prefix handler should be placed.  The prefix reads the
+        actual MFMA opcode from DW2-DW3 and re-dispatches.  ``None``
+        means VOP3PX2 is not supported.
+        """
+        return None
+
+    @property
     def source_split_max_bytes(self) -> dict[str, int]:
         """Maximum generated source chunk size by encoding.
 
@@ -232,6 +243,11 @@ class IsaProfile(ABC):
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
         """True when generator should synthesize scaled-WMMA VOP3PX2 support."""
+        return False
+
+    @property
+    def smem_address_uses_access_size(self) -> bool:
+        """True when generated SMEM address helpers need the access size."""
         return False
 
     @property
@@ -887,6 +903,10 @@ class CdnaProfile(_AmdgpuProfileBase):
             'V_MFMA_F32_32X32X64_F8F6F4': 16,
         }
 
+    @property
+    def vop3px2_prefix_opcode(self) -> int | None:
+        return 0x2C
+
     # ISA dimension properties for CDNA3/4 (the two ISAs this profile covers).
     # Cdna1Profile and Cdna2Profile override the ones that differ.
 
@@ -1418,6 +1438,10 @@ class Gfx1250Profile(Rdna4Profile):
 
     @property
     def generate_scaled_wmma_vop3px2(self) -> bool:
+        return True
+
+    @property
+    def smem_address_uses_access_size(self) -> bool:
         return True
 
     @property

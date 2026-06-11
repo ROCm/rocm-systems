@@ -932,7 +932,7 @@ The test runner invokes `install.sh` directly, so build options map to `install.
 ```json
 {
   "build_configuration": {
-    "install_flags": ["-t", "-l", "--disable-colltrace", "--no_clean"]
+    "install_flags": ["-t", "-l", "--no_clean"]
   }
 }
 ```

@@ -281,8 +281,10 @@ iterate_args_callback(rocprofiler_buffer_tracing_kind_t /*kind*/,
 
     auto* _data = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
+    {
         _data->emplace_back(
             argument_info{arg_number, common::cxx_demangle(arg_type), arg_name, arg_value_str});
+    }
     return 0;
 }
 
@@ -1110,9 +1112,16 @@ write_rocpd(
                          itr.demangled_kernel_name,
                          itr.truncated_kernel_name);
 
+    // Create a local copy of the rename map to use for this output run instead of using
+    // get_kernel_name(), which may access a modified version of the map
+    auto _rename_strings = std::unordered_map<uint64_t, std::string_view>{};
     for(const auto& itr : tool_metadata.kernel_rename_map.get())
     {
-        add_string_entry(_metadata, itr.first);
+        if(!itr.first.empty())
+        {
+            add_string_entry(_metadata, itr.first);
+            _rename_strings.emplace(itr.second, itr.first);
+        }
     }
 
     for(const auto& itr : tool_metadata.get_code_objects())
@@ -1477,10 +1486,9 @@ write_rocpd(
             // Unconditionally collect kernel rename data if it is available. rocpd needs to be able
             // to use kernel rename option after data has already been collected, so the kernel
             // rename data needs to be stored in generated db.
+            auto _rename_it = _rename_strings.find(corr_id.external.value);
             auto region_name =
-                (corr_id.external.value > 0 && (enable_duplicate_check || kernel_id > 0))
-                    ? tool_metadata.get_kernel_name(kernel_id, true, corr_id.external.value)
-                    : std::string_view{};
+                (_rename_it != _rename_strings.end()) ? _rename_it->second : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
 
@@ -1837,15 +1845,16 @@ write_rocpd(
                 {
                     auto demangled_type = common::cxx_demangle(arg_info.arg_type);
 
-                    get_insert_statement(db,
-                                         "rocpd_arg{{uuid}}",
-                                         {
-                                             insert_value("event_id", evt_id),
-                                             insert_value("position", arg_info.arg_number),
-                                             insert_value("type", demangled_type),
-                                             insert_value("name", arg_info.arg_name),
-                                             insert_value("value", arg_info.arg_value),
-                                         });
+                    get_insert_statement(
+                        db,
+                        "rocpd_arg{{uuid}}",
+                        {
+                            insert_value("event_id", evt_id),
+                            insert_value("position", arg_info.arg_number),
+                            insert_value("type", demangled_type),
+                            insert_value("name", arg_info.arg_name),
+                            insert_value("value", arg_info.arg_value, allow_empty_string{}),
+                        });
                 }
 
                 if(itr.start_timestamp != itr.end_timestamp)
