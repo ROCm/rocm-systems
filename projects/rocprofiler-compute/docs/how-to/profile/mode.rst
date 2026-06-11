@@ -28,7 +28,6 @@ Profiling with ROCm Compute Profiler provides the following benefits:
   the output format of raw performance counter data produced by the underlying
   :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` backend. Supported output formats are
   ``csv`` and ``rocpd``. The default output format is ``rocpd``.
-
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
 
@@ -733,9 +732,7 @@ that contains both ``roofline.csv`` and application performance counters
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
 
-   Additionally, cache levels will vary by the architecture being profiled:
-   * CDNA architectures have High Bandwidth Memory (HBM); RDNA APUs do not.
-   * Certain architectures have L3/Last Level Cache/MALL.
+   Additionally, the cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
 
 Roofline options (profile)
 --------------------------

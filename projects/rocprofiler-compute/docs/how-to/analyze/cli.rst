@@ -39,7 +39,7 @@ There are three high-level GPU analysis views:
 
 * System Speed-of-Light: Key GPU performance metrics to show overall GPU performance and utilization.
 * Memory chart: Shows memory transactions and throughput on each cache hierarchical level.
-* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth (on L0/L1/L2/LDS/HBM, architecture-dependent). When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
+* Empirical hierarchical roofline: Roofline model that compares achieved throughput with attainable peak hardware limits, more specifically peak compute throughput and memory bandwidth. When combined with kernel filtering, provides detailed per-kernel arithmetic intensity analysis and performance breakdowns.
 
 **System Speed-of-Light:**
 
@@ -497,13 +497,11 @@ Roofline HTML plots are generated during analyze mode. Profile mode creates
 data to produce interactive HTML roofline charts.
 
 .. note::
-   Matrix multiplication outputs will vary depending on which architecture was profiled:
+   Matrix multiplication performance data will vary depending on which architecture is profiled:
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
 
-   Additionally, cache levels will vary by the architecture that was profiled:
-   * CDNA architectures have High Bandwidth Memory (HBM); RDNA APUs do not.
-   * Certain architectures have L3/Last Level Cache/MALL.
+   Additionally, the cache level data available for analysis is dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
 
 Two-step workflow:
 
