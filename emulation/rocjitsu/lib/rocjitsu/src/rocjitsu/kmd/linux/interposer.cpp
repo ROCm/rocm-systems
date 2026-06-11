@@ -724,7 +724,7 @@ int ioctl(int fd, unsigned long request, ...) {
             uint32_t enabled_rb_pipes_mask;
             uint32_t num_rb_pipes;
             uint32_t num_hw_gfx_contexts;
-            uint32_t pad0;
+            uint32_t pcie_gen;
             uint64_t ids_flags;
             uint64_t virtual_address_offset;
             uint64_t virtual_address_max;
@@ -740,6 +740,10 @@ int ioctl(int fd, unsigned long request, ...) {
             uint64_t pos_buf_gpu_addr;
             uint64_t cntl_sb_buf_gpu_addr;
             uint64_t param_buf_gpu_addr;
+            uint32_t prim_buf_size;
+            uint32_t pos_buf_size;
+            uint32_t cntl_sb_buf_size;
+            uint32_t param_buf_size;
             uint32_t wave_front_size;
             uint32_t num_shader_visible_vgprs;
             uint32_t num_cu_per_sh;
@@ -747,8 +751,8 @@ int ioctl(int fd, unsigned long request, ...) {
             uint32_t gs_vgt_table_depth;
             uint32_t gs_prim_buffer_depth;
             uint32_t max_gs_waves_per_vgt;
-            uint32_t pad1;
-            uint64_t cu_ao_bitmap[4][4];
+            uint32_t pcie_num_lanes;
+            uint32_t cu_ao_bitmap[4][4];
             uint64_t high_va_offset;
             uint64_t high_va_max;
             uint32_t pa_sc_tile_steering_override;
@@ -764,7 +768,7 @@ int ioctl(int fd, unsigned long request, ...) {
               dev->num_shader_arrays_per_engine = gpu->num_shader_arrays_per_engine;
               dev->wave_front_size = gpu->wave_front_size;
               dev->num_cu_per_sh = gpu->num_cu_per_sh;
-              dev->vram_type = 3; // HBM
+              dev->vram_type = 6; // AMDGPU_VRAM_TYPE_HBM
               dev->vram_bit_width = gpu->mem_width;
               dev->cu_active_number =
                   gpu->num_shader_engines * gpu->num_shader_arrays_per_engine * gpu->num_cu_per_sh;
@@ -1589,7 +1593,8 @@ int drmGetDevices2(uint32_t /*flags*/, drmDevice **devices, int max_devices) {
 // drmFreeDevice fallback calls dlsym(RTLD_NEXT, "drmFreeDevice") and
 // including it here would cause infinite recursion.
 void *dlsym(void *handle, const char *symbol) {
-  if (InterposerContext::real.ready()) {
+  auto symbol_addr = reinterpret_cast<uintptr_t>(symbol);
+  if (symbol_addr != 0 && InterposerContext::real.ready()) {
     static const std::unordered_map<std::string_view, void *> overrides = {
         {"drmGetDevice", reinterpret_cast<void *>(&drmGetDevice)},
         {"drmGetDevice2", reinterpret_cast<void *>(&drmGetDevice2)},
