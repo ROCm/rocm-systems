@@ -563,21 +563,20 @@ static __device__ __hip_fp8_storage_t cast_to_f8_from_f32(float v, bool saturate
     ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
                ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_sr_fp8_f32)
                       ? __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)
-                      : decltype(__builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)){})
+                      : 0u)
                : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_sr_bf8_f32)
                       ? __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0)
-                      : decltype(__builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0)){});  // 0 pos
+                      : 0u);  // 0 pos
     val.i32val = ival;
     i8data = val.i8val[0];  // little endian
   } else {                  // RNE CVT
-    ival =
-        (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-            ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f32)
-                   ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
-                   : decltype(__builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)){})
-            : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f32)
-                   ? __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false)
-                   : decltype(__builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false)){});  // false -> WORD0
+    ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
+               ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f32)
+                      ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
+                      : 0u)
+               : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f32)
+                      ? __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false)
+                      : 0u);  // false -> WORD0
     val.i32val = ival;
     i8data = val.i8val[0];
   }
@@ -604,7 +603,7 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
       }
       if ((f2val.i32val[1] & 0x7F800000) != 0x7F800000) {
         if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
-          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.x, 240.0, -240.0);
+          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.y, 240.0, -240.0);
       }
     } else if (interpret == __HIP_E4M3) {
       if ((f2val.i32val[0] & 0x7F800000) != 0x7F800000) {
@@ -613,7 +612,7 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
       }
       if ((f2val.i32val[1] & 0x7F800000) != 0x7F800000) {
         if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
-          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.x, 448.0, -448.0);
+          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.y, 448.0, -448.0);
       }
     } else {
       if ((f2val.i32val[0] & 0x7F800000) != 0x7F800000) {
@@ -622,7 +621,7 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
       }
       if ((f2val.i32val[1] & 0x7F800000) != 0x7F800000) {
         if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_fmed3f))
-          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.x, 57344.0, -57344.0);
+          f2val.fval.y = __builtin_amdgcn_fmed3f(f2val.fval.y, 57344.0, -57344.0);
       }
     }
   }
@@ -630,10 +629,10 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
   f2val.i32val[0] = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
                         ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f32)
                                ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
-                               : decltype(__builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)){})
+                               : 0u)
                         : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f32)
                                ? __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false)
-                               : decltype(__builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false)){});
+                               : 0u);
 
   return static_cast<__hip_fp8x2_storage_t>(f2val.i16val[0]);
 }
@@ -649,10 +648,10 @@ static __device__ float cast_to_f32_from_f8(__hip_fp8_storage_t v,
   float fval = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
                    ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_f32_fp8)
                           ? __builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)
-                          : decltype(__builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)){})
+                          : 0.0f)
                    : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_f32_bf8)
                           ? __builtin_amdgcn_cvt_f32_bf8(val.i32val, 0)
-                          : decltype(__builtin_amdgcn_cvt_f32_bf8(val.i32val, 0)){});
+                          : 0.0f);
   return fval;
 }
 
@@ -667,10 +666,10 @@ static __device__ float2 cast_to_f32x2_from_f8x2(__hip_fp8x2_storage_t v,
   auto f2 = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
                 ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_f32_fp8)
                        ? __builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)
-                       : decltype(__builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)){})
+                       : __amd_floatx2_storage_t{})
                 : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_f32_bf8)
                        ? __builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false)
-                       : decltype(__builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false)){});
+                       : __amd_floatx2_storage_t{});
   return float2{f2[0], f2[1]};
 }
 #endif  // HIP_FP8_CVT_FAST_PATH

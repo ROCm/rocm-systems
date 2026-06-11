@@ -162,17 +162,14 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
 }
 #endif
 
-template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof(TyElem)>
-__CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
-                                                const TyElem* __restrict__ src,
-                                                const TySize& count) {
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
-    __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
-  details::dispatch_async_memcpy(group, dst, src, count);
-#else
-  // Traditional Copy since we do not have memcpy_async builtins
-  // Partition the memory in group of segments which each thread will copy portion of
-  // Similar to what we do in accelerated copy
+// Traditional Copy used when memcpy_async builtins are unavailable or not invocable on the target.
+// Partition the memory into segments which each thread copies a portion of, similar to the
+// accelerated copy.
+template <class TyGroup, typename TyElem, typename TySize>
+__CG_STATIC_QUALIFIER__ void traditional_memcpy_bytes(const TyGroup& group,
+                                                      TyElem* __restrict__ dst,
+                                                      const TyElem* __restrict__ src,
+                                                      const TySize& count) {
   size_t group_size = group.size();
   size_t bytes_per_thread = count / group_size; /* each thread will copy this much */
   unsigned char *c_src = ((unsigned char*)src) + (group.thread_rank() * bytes_per_thread),
@@ -188,6 +185,24 @@ __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __
       ((unsigned char*)dst)[i] = ((unsigned char*)src)[i];
     }
   }
+}
+
+template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof(TyElem)>
+__CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
+                                                const TyElem* __restrict__ src,
+                                                const TySize& count) {
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) and                           \
+    __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
+  // Use the async path only when the builtins are actually invocable on the target, otherwise the
+  // accelerated loop would advance offsets without issuing any load/store and silently drop data.
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b128) &&
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128)) {
+    details::dispatch_async_memcpy(group, dst, src, count);
+  } else {
+    traditional_memcpy_bytes(group, dst, src, count);
+  }
+#else
+  traditional_memcpy_bytes(group, dst, src, count);
 #endif
 }
 }  // namespace details
