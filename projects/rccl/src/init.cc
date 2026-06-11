@@ -362,104 +362,7 @@ void NCCL_NO_OPTIMIZE commPoison(ncclComm_t comm) {
 RCCL_PARAM_DECLARE(EnableProxyTrace);
 RCCL_PARAM(EnableProxyTrace, "ENABLE_PROXY_TRACE", 0);
 
-RCCL_PARAM(KernelCollTraceEnable, "KERNEL_COLL_TRACE_ENABLE", 0);
-RCCL_PARAM(KernelCollTraceThreadEnable, "KERNEL_COLL_TRACE_THREAD_ENABLE", 0);
-
 extern int64_t ncclParamLaunchOrderImplicit();
-
-#ifdef ENABLE_COLLTRACE
-// Should be in sync with 'ALL_COLLS' in Generator.cmake
-void *ncclCommThreadMain(void *arg) {
-  ncclComm_t comm = (ncclComm_t)arg;
-  int head[MAXCHANNELS];
-  double vega_gpu_rtc_freq;
-
-  vega_gpu_rtc_freq = GetDeviceWallClockRateInKhz(comm->cudaDev) * 1.0E3;
-  for (int channel = 0; channel < MAXCHANNELS; channel++) {
-    int tail = comm->collTraceTail[channel].tail;
-    if (tail < COLLTRACE_NUM_ITEMS)
-      head[channel] = 0;
-    else
-      head[channel] = tail - COLLTRACE_NUM_ITEMS;
-  }
-  do {
-    int numActiveChans = MAXCHANNELS;
-    for (int channel = 0; channel < MAXCHANNELS; channel++) {
-      int tail = comm->collTraceTail[channel].tail;
-      int count;
-      count = tail - head[channel];
-      if (count == 0) {
-        numActiveChans--;
-        continue;
-      }
-      for (int i = 0; i < count; i++) {
-        volatile struct ncclCollTrace *td = comm->collTrace+COLLTRACE_NUM_ITEMS*channel+head[channel]%COLLTRACE_NUM_ITEMS;
-        const uint8_t type = td->type;
-        if (type == ncclCollTraceNotReady)
-          break;
-        head[channel] ++;
-        char line[1024];
-        int offset = 0;
-        const uint16_t fIdx = td->funcIndex;
-        if (type == ncclCollTraceDataType) {
-          sprintf(line, "## [%012.6f] [%02d:%02d-%02d:%02x] L:%04d DT %08x %016lx %016lx",
-            (double)(td->timeStamp)/vega_gpu_rtc_freq, comm->rank, channel, td->channelId, td->tid, fIdx, td->data_0, td->opCount, td->data_1);
-        } else {
-          if (type & ncclCollTraceP2pElemType)
-            sprintf(line, "## [%012.6f] [%02d:%02d-%02d:%02x] %06x-%06x", (double)(td->timeStamp)/vega_gpu_rtc_freq, comm->rank, channel, td->channelId, td->tid, td->p2pOpCount[0], td->p2pOpCount[1]);
-          else
-            sprintf(line, "## [%012.6f] [%02d:%02d-%02d:%02x] %06lx", (double)(td->timeStamp)/vega_gpu_rtc_freq, comm->rank, channel, td->channelId, td->tid, td->opCount);
-          offset = strlen(line);
-          if (type == ncclCollTraceCollElemType) {
-            sprintf(line+offset, " CE %s nw %d bi %d nc %d root %d busId %lx nRanks %d", funcNames[fIdx], td->coll.nWarps, td->coll.bid, td->coll.nChannels, td->coll.root, comm->busId, comm->nRanks);
-          } else if (type == ncclCollTraceP2pElemType) {
-            sprintf(line+offset, " Recv %d -> %d/%d/%d/%d ConnIdx/LL/Reg/nc %d/%d/%d/%d -> Send %d cb %d busId %lx nRanks %d",
-              td->p2p.recvRank, td->p2p.recvConnIndex, td->p2p.recvProtoLL, td->p2p.recvRegistered, td->p2p.nRecvChannels, td->p2p.sendConnIndex, td->p2p.sendProtoLL, td->p2p.sendRegistered, td->p2p.nSendChannels, td->p2p.sendRank, td->p2p.channelBase,
-              comm->busId, comm->nRanks);
-          } else {
-            switch (type&0xf) {
-              case ncclCollTraceKernelLaunchType:
-              case ncclCollTraceCollLaunchType:
-                if ((type&0xf) == ncclCollTraceKernelLaunchType)
-                  sprintf(line+offset, " KL %s [%02d:%02d-%02d:%02x] HWID %d:%x ", funcNames[fIdx], comm->rank, channel, td->channelId, td->tid, td->xccId, td->data_0);
-                else if ((type&0xf) == ncclCollTraceCollLaunchType)
-                  sprintf(line+offset, " CL %s [%02d:%02d-%02d:%02x] %d ", funcNames[fIdx], comm->rank, channel, td->channelId, td->tid, td->batchIx);
-                offset = strlen(line);
-                if ((type&0xf0) == ncclCollTraceCollElemType)
-                  sprintf(line+offset, " nw %d bi %d nc %d root %d busId %lx nRanks %d", td->coll.nWarps, td->coll.bid, td->coll.nChannels, td->coll.root, comm->busId, comm->nRanks);
-                else if ((type&0xf0) == ncclCollTraceP2pElemType)
-                  sprintf(line+offset, " Recv %d -> %d/%d/%d/%d ConnIdx/LL/Reg/nc %d/%d/%d/%d -> Send %d cb %d busId %lx nRanks %d",
-                    td->p2p.recvRank, td->p2p.recvConnIndex, td->p2p.recvProtoLL, td->p2p.recvRegistered, td->p2p.nRecvChannels, td->p2p.sendConnIndex, td->p2p.sendProtoLL, td->p2p.sendRegistered, td->p2p.nSendChannels, td->p2p.sendRank, td->p2p.channelBase,
-                    comm->busId, comm->nRanks);
-                break;
-              case ncclCollTraceKernelEndType:
-                sprintf(line+offset, " KE %s [%02d:%02d-%02d:%02x] busId %lx nRanks %d", funcNames[fIdx], comm->rank, channel, td->channelId, td->tid, comm->busId, comm->nRanks);
-                break;
-              case ncclCollTraceAbortType:
-                sprintf(line+offset, " KA %s [%02d:%02d-%02d:%02x]", funcNames[fIdx], comm->rank, channel, td->channelId, td->tid);
-                break;
-              default:
-                sprintf(line+offset, " unknown collective trace data type");
-                break;
-            }
-          }
-        }
-        INFO(NCCL_COLL, "%s td->type:%d", line, type);
-        volatile uint8_t *tdtype = &td->type;
-        *tdtype = ncclCollTraceNotReady;
-        (*tdtype); // read back for flushing
-      }
-    }
-    if (comm->collTraceExit && numActiveChans == 0)
-      break;
-    usleep(1000); //sleep 1ms
-  } while(true);
-  if (comm->collTraceThread)
-    pthread_exit(NULL);
-  else
-    return 0;
-}
-#endif
 
 #undef NCCL_NO_OPTIMIZE
 
@@ -587,41 +490,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
     }
   }
 
-
-#ifdef ENABLE_PROFILING
-  struct ncclProf *prof, *prof_seq;
-  prof = (struct ncclProf*)malloc(sizeof(struct ncclProf)*MAXCHANNELS*PROFILE_NUM_LAUNCHES);
-  if (prof == nullptr) {
-    WARN("Failed to allocate profiling buffer");
-    // Skip profiling but continue with destruction
-    goto skip_profiling;
-  }
-  CUDACHECK(hipMemcpy(prof, comm->devComm->devProf, sizeof(struct ncclProf)*MAXCHANNELS*PROFILE_NUM_LAUNCHES, hipMemcpyDeviceToHost));
-  #define VEGA_GPU_RTC_FREQUENCY 2.5E7
-  for (int i=0; i<comm->nChannels; i++) {
-    for (int s=0; s<prof[MAXCHANNELS*i].seq; s++) {
-      if (prof[MAXCHANNELS*s+i].count == 0) continue;
-      for (int j=0; j<prof[MAXCHANNELS*s+i].count; j++) {
-        INFO(NCCL_INIT, "# [%02d:%02d] %02d-%02d L:%04u %6.2fus", comm->rank, i, s, j, prof[MAXCHANNELS*s+i].elem[j].line, (prof[MAXCHANNELS*s+i].elem[j].timeStamp-prof[MAXCHANNELS*s+i].elem[0].timeStamp)/VEGA_GPU_RTC_FREQUENCY*1.0E6);
-      }
-    }
-  }
-  free(prof);
-  CUDACHECK(hipFree(comm->devComm->devProf));
-skip_profiling:
-#endif
-
-#ifdef ENABLE_COLLTRACE
-  comm->collTraceExit = 1;
-  if (comm->collTraceEnabled) {
-    if (comm->collTraceThread)
-      pthread_join(comm->collTraceThread, NULL);
-    else
-      ncclCommThreadMain((void *)comm);
-  }
-  NCCLCHECK(ncclCudaFree((void *)comm->collTrace, comm->memManager));
-  NCCLCHECK(ncclCudaHostFree((void *)comm->collTraceTail));
-#endif
 
   free(comm->peerInfo);
   if (comm->topo)
@@ -879,24 +747,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
     NCCLCHECK(ncclMemManagerInit(comm));
   }
 
-#ifdef ENABLE_COLLTRACE
-  NCCLCHECK(ncclCudaHostCalloc(&comm->collTraceTail, MAXCHANNELS));
-#if defined(HIP_UNCACHED_MEMORY)
-  NCCLCHECK(ncclCudaCalloc(&comm->collTrace, COLLTRACE_NUM_ITEMS*MAXCHANNELS, comm->memManager, ncclMemPersist, hipDeviceMallocUncached));
-#else
-  NCCLCHECK(ncclCudaCalloc(&comm->collTrace, COLLTRACE_NUM_ITEMS*MAXCHANNELS, comm->memManager, ncclMemPersist));
-#endif
-  comm->collTraceExit = 0;
-  comm->collTraceEnabled = false; // we can enable colltrace without starting a thread
-  if ((ncclDebugLevel >= NCCL_LOG_INFO) && rcclParamKernelCollTraceEnable()) {
-    comm->collTraceEnabled = true;
-    if (rcclParamKernelCollTraceThreadEnable())
-      pthread_create(&comm->collTraceThread, NULL, ncclCommThreadMain, (void *)comm);
-    else
-      comm->collTraceThread = 0;
-  }
-#endif
-
   if (rcclParamInjectFaults() != 0) {
 #ifdef ENABLE_FAULT_INJECTION
     comm->faults = rcclParamInjectFaults();
@@ -1060,22 +910,12 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
     }
   }
 
-#ifdef ENABLE_COLLTRACE
-  tmpCommAndChans.comm.collTrace = comm->collTrace;
-  tmpCommAndChans.comm.collTraceTail = comm->collTraceTail;
-  tmpCommAndChans.comm.collTraceThread = comm->collTraceThread;
-#endif
-
 #if defined(ENABLE_NPKIT)
   WARN("NPKIT is deprecated, please use Profiler Plugin instead!");
   // Init NPKit
   NCCLCHECK(NpKit::Init(comm->rank));
   tmpCommAndChans.comm.npKitEventCollectContexts = NpKit::GetGpuEventCollectContexts();
   tmpCommAndChans.comm.cpuTimestamp = NpKit::GetCpuTimestamp();
-#endif
-
-#ifdef ENABLE_PROFILING
-  NCCLCHECK(ncclCudaCalloc(&tmpCommAndChans.comm.devProf, MAXCHANNELS*PROFILE_NUM_LAUNCHES, comm->memManager, ncclMemPersist));
 #endif
 
 #ifdef ENABLE_FAULT_INJECTION
