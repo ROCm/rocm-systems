@@ -3,24 +3,6 @@
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # SPDX-License-Identifier: MIT
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to
-# deal in the Software without restriction, including without limitation the
-# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-# sell copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-# IN THE SOFTWARE.
 ###############################################################################
 if true || tty -s; then
   PRETTY_FAILED="\033[1;31mFAILED\033[0m"
@@ -154,7 +136,159 @@ declare -A TEST_NUMBERS=(
   ["teamsplit2d"]="119"
 )
 
+# Detect which runtime to use
+if [[ "${ROCSHMEM_TEST_SLR:-0}" == "1" ]]; then
+  USE_SLR=1
+  echo "========================================================================"
+  echo "Using SLR (Simple Local Runtime) - Single-Node Mode"
+  echo "========================================================================"
+  echo ""
+else
+  USE_SLR=0
+fi
+
+# Router function - dispatches to appropriate implementation
 ExecTest() {
+  if [ $USE_SLR -eq 1 ]; then
+    ExecTest_SLR "$@"
+  else
+    ExecTest_MPI "$@"
+  fi
+}
+
+# SLR implementation
+ExecTest_SLR() {
+  TEST_NAME=$1
+  NUM_RANKS=$2
+  NUM_WG=$3
+  NUM_THREADS=$4
+  MAX_MSG_SIZE=$5
+  IS_RETRY=${6:-0}  # Optional 6th parameter to indicate if this is a retry
+
+  if [[ "" == "$NOTIMEOUT" ]]; then
+    TIMEOUT=$((5 * 60)) # Timeout in seconds
+  fi
+  # Use ROCSHMEM_HEAP_SIZE if already set (e.g., by heatmap tests), otherwise default to 6GB
+  HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((6*1024*1024*1024))}
+
+  if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
+  then
+    NUM_GPUS=${NUM_GPUS:-$(amd-smi list | grep GPU | wc -l)}
+  elif command -v rocm-smi >/dev/null && rocm-smi --version 2>&1 >/dev/null
+  then
+    NUM_GPUS=${NUM_GPUS:-$(rocm-smi --showserial | grep GPU | wc -l)}
+  fi
+  NUM_GPUS=${NUM_GPUS:-0}
+  NUM_GPUS=$(($NUM_GPUS > 0? $NUM_GPUS: 8))
+
+  TEST_NUM=${TEST_NUMBERS[$TEST_NAME]}
+
+  if [[ "" == "$TEST_NUM" ]]
+  then
+    echo "Test $TEST_NAME does not exist" >&2
+    DRIVER_RETURN_STATUS=1
+    return
+  fi
+
+  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
+  then
+    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
+  fi
+
+  # Build command as an array using SLR instead of MPI
+  local -a cmd
+  local -a env_vars
+
+  # Build environment variable list
+  env_vars=(
+    "ROCSHMEM_SLR_NP=$NUM_RANKS"
+    "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+    "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+  )
+
+  # Add optional environment variables
+  if [[ -n "${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:-}" ]]; then
+    env_vars+=("ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS")
+  fi
+  if [[ -n "${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}" ]]; then
+    env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
+  fi
+  # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
+
+  # Construct Test Command
+  TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
+
+  # Build the command with timeout if specified
+  if [[ -n "$TIMEOUT" ]]; then
+    cmd=("timeout" "$TIMEOUT")
+  else
+    cmd=()
+  fi
+
+  # Add environment variables and application
+  cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+
+  if [[ "" != "$MAX_MSG_SIZE" ]]
+  then
+    # Check if in volume mode
+    if [[ $MAX_MSG_SIZE == v* ]]; then
+      cmd+=( -v "${MAX_MSG_SIZE#v}" )
+    else
+      cmd+=( -s "$MAX_MSG_SIZE" )
+    fi
+    TEST_LOG_NAME+=_"$MAX_MSG_SIZE"B
+  fi
+
+  # Create a human-readable representation of the command for logging purposes
+  CMD="${cmd[@]}"
+
+  # Determine log file name based on whether this is a retry
+  if [ $IS_RETRY -eq 1 ]; then
+    LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.retry.log"
+    echo "Retry:  $TEST_LOG_NAME"
+  else
+    LOG_FILE="$LOG_DIR/$TEST_LOG_NAME.log"
+    echo "Test:   $TEST_LOG_NAME"
+  fi
+
+  # Run Test
+  # For SLR, we need enough GPUs for the processes
+  if [ $NUM_GPUS -ge $NUM_RANKS ]; then
+    echo "# $CMD >> $LOG_FILE" >"$LOG_FILE"
+    "${cmd[@]}" >>"$LOG_FILE" 2>&1
+  else
+    echo "Skip:   $TEST_LOG_NAME (SLR requires $NUM_RANKS GPUs, only $NUM_GPUS available)"
+    return
+  fi
+
+  # Validate Test
+  if [ $? -ne 0 ]
+  then
+    echo -e "$PRETTY_FAILED: $TEST_LOG_NAME" >&2
+    cat "$LOG_FILE"
+    DRIVER_RETURN_STATUS=1
+    if [ $IS_RETRY -eq 0 ]; then
+      # Track failed tests with their parameters for potential retry
+      # Capture environment/config state to ensure retry runs under same conditions
+      FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
+      FAILED_TESTS+=("$TEST_NAME|$NUM_RANKS|$NUM_WG|$NUM_THREADS|$MAX_MSG_SIZE|${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}|${ROCSHMEM_MAX_NUM_CONTEXTS:-}|${NOTIMEOUT:-}|${NOVERIF:-}")
+    else
+      # Track tests that failed even after retry
+      RETRY_FAILED_LIST="$RETRY_FAILED_LIST $TEST_LOG_NAME"
+    fi
+  else
+    # If this was a retry and it passed, remove from failed list
+    if [ $IS_RETRY -eq 1 ]; then
+      echo -e "$PRETTY_PASSED: $TEST_LOG_NAME (passed on retry)"
+      RETRY_PASSED_LIST="$RETRY_PASSED_LIST $TEST_LOG_NAME"
+    fi
+  fi
+
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+}
+
+# MPI implementation (original ExecTest)
+ExecTest_MPI() {
   TEST_NAME=$1
   NUM_RANKS=$2
   NUM_WG=$3
@@ -753,7 +887,12 @@ ValidateInput() {
     echo "        <threads>      : number of threads per workgroup"
     echo "        [max_msg_size] : maximum message size to test"
     echo "    <log_dir>     : path to output log directory"
-    echo "    [hostfile]    : path to hostfile"
+    echo "    [hostfile]    : path to hostfile (MPI only, not supported with SLR)"
+    echo
+    echo "Runtime Selection:"
+    echo "  - Set ROCSHMEM_TEST_SLR=1 to use SLR (Simple Local Runtime) for single-node testing"
+    echo "  - Use mpirun/mpiexec for MPI (default, supports multi-node)"
+    echo "  Note: ROCSHMEM_SLR_NP is set automatically by the script based on test requirements"
     exit 1
   fi
 }
@@ -852,6 +991,15 @@ RETRY_THRESHOLD=${RETRY_THRESHOLD:-5}  # Maximum number of failed tests to retry
 
 ValidateInput ${#_POSITIONAL[@]}
 ValidateLogDir $LOG_DIR
+
+# Validate SLR and hostfile are not used together
+if [[ $USE_SLR -eq 1 && -n "$HOSTFILE" ]]; then
+  echo "ERROR: SLR (Simple Local Runtime) does not support hostfiles (single-node only)"
+  echo "       Either:"
+  echo "         - Unset ROCSHMEM_TEST_SLR to use MPI with hostfile"
+  echo "         - Remove hostfile argument to use SLR"
+  exit 1
+fi
 
 # Print build info and environment variables before running tests
 ROCSHMEM_INFO="$(dirname "$APP")/rocshmem_info"
