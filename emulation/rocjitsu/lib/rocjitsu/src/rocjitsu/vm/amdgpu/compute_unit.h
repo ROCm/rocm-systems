@@ -171,16 +171,25 @@ public:
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
-  void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
+  void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
+                       uint64_t entry_pc) {
     // Invalidate per-CU caches once per dispatch (when a new kernel's first WG
     // lands on this CU), not once per wavefront. The L1 scalar cache must be
-    // flushed so wavefronts read fresh kernargs; the instruction-fetch and
-    // decoded-instruction caches must drop any prior kernel's code. Doing this
-    // per wavefront (in dispatch_wf) repeated the work ~wfs_per_dispatch times.
+    // flushed so wavefronts read fresh kernargs every dispatch. Doing this per
+    // wavefront (in dispatch_wf) repeated the work ~wfs_per_dispatch times.
     if (dispatch_id != last_invalidated_dispatch_id_) {
       last_invalidated_dispatch_id_ = dispatch_id;
       l1_scalar_.invalidate_all();
-      invalidate_inst_fetch_cache();
+      // The instruction-fetch and decoded-instruction caches hold the kernel's
+      // code, keyed by PC. Code at a given PC does not change between dispatches
+      // of the same kernel, so only drop these caches when the kernel's entry
+      // PC actually changes. Workloads that re-dispatch one kernel many times
+      // (e.g. per-layer GEMMs in a transformer) thus keep their decode cache
+      // warm across dispatches instead of re-decoding on every CU every time.
+      if (entry_pc != last_inst_kernel_pc_) {
+        last_inst_kernel_pc_ = entry_pc;
+        invalidate_inst_fetch_cache();
+      }
     }
     active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
   }
@@ -581,6 +590,11 @@ protected:
   // invalidation happens once per dispatch (in begin_workgroup) rather than per
   // wavefront. UINT32_MAX = none yet.
   uint32_t last_invalidated_dispatch_id_ = UINT32_MAX;
+
+  // PC of the kernel whose code currently populates the instruction-fetch and
+  // decoded-instruction caches. Used to skip invalidating those caches when a
+  // new dispatch runs the same kernel (same entry PC) as the previous one.
+  uint64_t last_inst_kernel_pc_ = UINT64_MAX;
 
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".

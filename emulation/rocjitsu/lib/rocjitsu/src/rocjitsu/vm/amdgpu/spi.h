@@ -80,7 +80,8 @@ public:
         continue;
 
       uint32_t lds_base = cu->allocate_lds(wg.entry->group_segment_fixed_size);
-      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup);
+      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup,
+                          wg.entry->kernel_entry_pc);
       std::vector<Wavefront *> wg_wfs;
       wg_wfs.reserve(wg.entry->wfs_per_workgroup);
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {

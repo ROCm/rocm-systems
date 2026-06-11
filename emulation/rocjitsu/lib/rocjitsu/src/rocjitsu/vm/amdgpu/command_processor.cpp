@@ -675,7 +675,8 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       break;
 
     uint32_t lds_base = cu->allocate_lds(entry.group_segment_fixed_size);
-    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
+    cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
+                        entry.kernel_entry_pc);
 
     std::vector<Wavefront *> wg_wavefronts;
     wg_wavefronts.reserve(entry.wfs_per_workgroup);
