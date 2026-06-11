@@ -46,6 +46,7 @@ env:
 
 jobs:
   build-and-test-ubuntu:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Build & Test • mi325 • Ubuntu 22.04
 
     runs-on: linux-gfx942-1gpu-core42-ossci-rocm
@@ -113,6 +114,7 @@ jobs:
   # Mirrors the rocprofiler-sdk core-rpm job for rhel-9.5 / sles-15.6 on mi325.
   # ---------------------------------------------------------------------------
   build-and-test-rocprofiler-sdk-rpm:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Build & Test rocprofiler-sdk • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     timeout-minutes: 90
     strategy:
