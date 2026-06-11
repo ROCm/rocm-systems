@@ -374,6 +374,7 @@ def _check_opencode_bundled_config() -> tuple[bool, str]:
 def _check_llm_providers() -> tuple[list[str], list[str]]:
     """Check which LLM providers are configured."""
     import os
+    from perfxpert.cli.opencode_launcher import resolve_opencode_binary
 
     configured = []
     unconfigured = []
@@ -394,7 +395,20 @@ def _check_llm_providers() -> tuple[list[str], list[str]]:
     }
 
     for name, env_vars in providers.items():
-        if name == "opencode" or any(os.getenv(env_var) for env_var in env_vars):
+        if name == "private":
+            endpoint = any(os.getenv(env_var) for env_var in env_vars)
+            if endpoint and os.getenv("PERFXPERT_LLM_PRIVATE_API_KEY"):
+                configured.append(name)
+            else:
+                unconfigured.append(name)
+        elif name == "opencode":
+            try:
+                resolve_opencode_binary()
+            except FileNotFoundError:
+                unconfigured.append(name)
+            else:
+                configured.append(name)
+        elif any(os.getenv(env_var) for env_var in env_vars):
             configured.append(name)
         else:
             unconfigured.append(name)

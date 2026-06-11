@@ -53,6 +53,10 @@ class GpuMetricAvailability:
     vcn_busy: bool = False  # xcp_stats[].vcn_busy[]
     jpeg_busy: bool = False  # xcp_stats[].jpeg_busy[]
 
+    # Clocks (from amd-smi metric -c --json)
+    gfx_clock: bool = False  # current_gfxclk
+    mem_clock: bool = False  # current_uclk
+
     # Coarse fields (derived from fine-grained, kept for backward compat)
     busy: bool = False  # gfx_activity or umc_activity or mm_activity
     temp: bool = False  # hotspot_temperature or edge_temperature
@@ -82,6 +86,10 @@ class GpuMetricAvailability:
             categories.append("vcn_activity")
         if self.jpeg_activity or self.jpeg_busy:
             categories.append("jpeg_activity")
+        if self.gfx_clock:
+            categories.append("gfx_clock")
+        if self.mem_clock:
+            categories.append("mem_clock")
         return ", ".join(categories)
 
 
@@ -293,6 +301,41 @@ def detect_power_metrics(gpus: list[GpuMetricAvailability]) -> None:
         ) or _is_available(power.get("average_socket_power"))
 
 
+def detect_clock_metrics(gpus: list[GpuMetricAvailability]) -> None:
+    """Detect clock metrics from 'amd-smi metric -c --json'.
+
+    Populates: gfx_clock, mem_clock.
+
+    Mirrors C++ detection in device.hpp for current_gfxclk / current_uclk.
+    The 'clock' section of `amd-smi metric -c --json` exposes per-domain
+    sub-objects keyed like 'gfx_<n>' and 'mem_<n>'; presence of any non-N/A
+    `clk` value within a domain group implies the metric is supported.
+    """
+    gpu_data = _run_amd_smi_metric_json(["-c"])
+    if not gpu_data:
+        return
+
+    for gpu in gpus:
+        entry = _find_gpu_entry(gpu_data, gpu.gpu_id)
+        if entry is None:
+            continue
+
+        clock = entry.get("clock")
+        if not isinstance(clock, dict):
+            continue
+
+        def _domain_available(prefix: str) -> bool:
+            for key, val in clock.items():
+                if not key.startswith(prefix):
+                    continue
+                if isinstance(val, dict) and _is_available(val.get("clk")):
+                    return True
+            return False
+
+        gpu.gfx_clock = _domain_available("gfx")
+        gpu.mem_clock = _domain_available("mem")
+
+
 def detect_pcie_metrics(gpus: list[GpuMetricAvailability]) -> None:
     """Detect PCIe metrics from 'amd-smi metric -P --json'.
 
@@ -397,6 +440,8 @@ _FINE_GRAINED_NAMES = (
     "current_socket_power",
     "vcn_busy",
     "jpeg_busy",
+    "gfx_clock",
+    "mem_clock",
 )
 
 # Note: vcn_activity and jpeg_activity are handled separately in
@@ -436,6 +481,7 @@ def get_available_metrics() -> list[GpuMetricAvailability]:
     detect_temperature_metrics(gpus)
     detect_power_metrics(gpus)
     detect_pcie_metrics(gpus)
+    detect_clock_metrics(gpus)
 
     # 3. XGMI from existing text parser
     xgmi_map = run_amd_smi_xgmi()
@@ -517,6 +563,8 @@ def main():
             print(f"  jpeg_activity:        {gpu.jpeg_activity}")
             print(f"  vcn_busy:             {gpu.vcn_busy}")
             print(f"  jpeg_busy:            {gpu.jpeg_busy}")
+            print(f"  gfx_clock:            {gpu.gfx_clock}")
+            print(f"  mem_clock:            {gpu.mem_clock}")
             print(f"  mem_usage:            {gpu.mem_usage}")
             print(f"  xgmi:                 {gpu.xgmi}")
             print(f"  pcie:                 {gpu.pcie}")

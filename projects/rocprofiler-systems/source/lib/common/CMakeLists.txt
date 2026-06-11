@@ -29,13 +29,13 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/invoke.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/join.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/md5sum.hpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/output.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/path.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/span.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/traits.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/units.hpp
 )
 
 get_filename_component(COMMON_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
@@ -53,6 +53,11 @@ target_include_directories(
 target_compile_definitions(
     rocprofiler-systems-common-library
     INTERFACE $<BUILD_INTERFACE:ROCPROFSYS_INTERNAL_BUILD=1>
+)
+
+target_link_libraries(
+    rocprofiler-systems-common-library
+    INTERFACE $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-logger>
 )
 
 if(ROCPROFSYS_BUILD_TESTING)

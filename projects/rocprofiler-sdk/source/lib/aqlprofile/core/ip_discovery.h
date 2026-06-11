@@ -29,7 +29,7 @@
 #include <unordered_map>
 #include <optional>
 
-#include "util/reg_offsets.h"
+#include "lib/aqlprofile/util/reg_offsets.h"
 
 using base_addr_segments_t = std::array<uint32_t, HWIP_MAX_SEGMENT>;
 

@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -326,7 +327,13 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
       return RSMI_STATUS_PERMISSION;
     case EPERM:
     case ENOENT:
+    case ENOTSUP:
       return RSMI_STATUS_NOT_SUPPORTED;
+    case EROFS:
+      // Sysfs is read-only (e.g. unprivileged container). Distinct from a
+      // kernel-unsupported feature (ENOENT/ENOTSUP -> NOT_SUPPORTED above);
+      // map to PERMISSION so callers can tell the two apart.
+      return RSMI_STATUS_PERMISSION;
     case EBADF:
     case EISDIR:
       return RSMI_STATUS_FILE_ERROR;
@@ -344,22 +351,6 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
       return RSMI_STATUS_DIRECTORY_NOT_FOUND;
     default:
       return RSMI_STATUS_UNKNOWN_ERROR;
-  }
-}
-
-rsmi_status_t SysfsWriteErrnoToRsmiStatus(int err) {
-  switch (err) {
-    case 0:
-      return RSMI_STATUS_SUCCESS;
-    case EACCES:
-    case EPERM:
-      return RSMI_STATUS_PERMISSION;
-    case ENOENT:
-      return RSMI_STATUS_NOT_SUPPORTED;
-    case EINVAL:
-      return RSMI_STATUS_INVALID_ARGS;
-    default:
-      return RSMI_STATUS_FILE_ERROR;
   }
 }
 
@@ -481,13 +472,13 @@ int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
   int write_ret = WriteSysfsStr(path, value);
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
 
   // Commit by writing 'c'
   write_ret = WriteSysfsStr(path, "c");
   if (write_ret != 0) {
-    return SysfsWriteErrnoToRsmiStatus(write_ret);
+    return ErrnoToRsmiStatus(write_ret);
   }
   return RSMI_STATUS_SUCCESS;
 }
@@ -1460,5 +1451,26 @@ uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain) {
   (bdfid) &= 0xFFFFFFFF;                 // keep bottom 32 bits of pci_id
   bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
   return bdfid;
+}
+
+// Use nanosleep in a loop so that signals (e.g. SIGCHLD) do not
+// shorten the sleep and cause the full duration to be skipped.
+void sleep_interruptible(const struct timespec& duration) {
+  struct timespec remaining = duration;
+  while (remaining.tv_sec > 0 || remaining.tv_nsec > 0) {
+    struct timespec interval = remaining;
+    if (nanosleep(&interval, &remaining) == 0) {
+      break;
+    }
+    // EINTR: a signal interrupted the sleep; remaining has time left, retry.
+    // Any other error (e.g. EINVAL) is unrecoverable — stop to avoid looping forever.
+    if (errno != EINTR) {
+      break;
+    }
+  }
+}
+
+void sleep_interruptible(uint32_t seconds) {
+  sleep_interruptible({static_cast<time_t>(seconds), 0});
 }
 }  // namespace amd::smi

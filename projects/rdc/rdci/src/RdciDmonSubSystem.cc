@@ -291,6 +291,10 @@ void RdciDmonSubSystem::create_temp_field_group() {
     return;
   }
 
+  if (field_ids_.size() > RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+    throw RdcException(RDC_ST_MAX_LIMIT, "Too many field IDs specified");
+  }
+
   const std::string field_group_name("rdci-dmon-field-group");
   rdc_field_grp_t group_id = 0;
   rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];

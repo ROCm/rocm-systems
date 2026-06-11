@@ -590,6 +590,39 @@ For attachment profiling of running processes:
         action="append",
     )
 
+    spm_options = parser.add_argument_group("Streaming Performance Monitor(SPM) options")
+
+    add_parser_bool_argument(
+        spm_options,
+        "--spm-beta-enabled",
+        help="enable SPM; beta version",
+    )
+
+    spm_options.add_argument(
+        "--spm",
+        help=(
+            "Specify SPM events to collect(comma OR space separated in case of more than 1 counters). "
+            "Note: job will fail if entire set of counters cannot be collected in single pass"
+        ),
+        default=None,
+        nargs="*",
+    )
+
+    spm_options.add_argument(
+        "--spm-sample-interval",
+        help="Specifies the sampling interval for SPM counter collection. It is used with spm-sample-interval-unit to define how frequently counters are sampled",
+        default=None,
+        type=int,
+    )
+
+    spm_options.add_argument(
+        "--spm-sample-interval-unit",
+        help="Specifies the unit for the SPM sample interval. Used with --spm-sample-interval to define the sampling interval",
+        default=None,
+        type=str.lower,
+        choices=("sclk_cycles",),
+    )
+
     pc_sampling_options = parser.add_argument_group("PC sampling options")
 
     add_parser_bool_argument(
@@ -796,7 +829,7 @@ For attachment profiling of running processes:
         display_options,
         "-L",
         "--list-avail",
-        help="List available PC sampling configurations and metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters",
+        help="List available PC sampling configurations, SPM configurations, and metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters",
     )
 
     add_parser_bool_argument(
@@ -936,6 +969,12 @@ For attachment profiling of running processes:
         "--attach-children",
         help="""When --pid is used, attach to the target process and all of its descendant processes. Enabled by default; use --attach-children=false to attach only to the specified PID.""",
         default=True,
+    )
+
+    add_parser_bool_argument(
+        advanced_options,
+        "--attach-sync-output",
+        help="[Attach mode only] Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
     )
 
     if args is None:
@@ -1291,6 +1330,20 @@ def get_args(
     return patch_args(dotdict(data))
 
 
+def int_auto(num_str):
+    if isinstance(num_str, str):
+        if "0x" in num_str:
+            return int(num_str, 16)
+        else:
+            return int(num_str, 10)
+    elif isinstance(num_str, int):
+        return num_str
+    else:
+        raise ValueError(
+            f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
+        )
+
+
 def run(app_args, args, **kwargs):
 
     app_env = dict(os.environ)
@@ -1482,6 +1535,7 @@ def run(app_args, args, **kwargs):
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
+    update_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", args.attach_sync_output)
     if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
@@ -1810,6 +1864,11 @@ def run(app_args, args, **kwargs):
                 [sys.executable, path, "info", "--pc-sampling"],
                 env=app_env,
             )
+
+            exit_code = subprocess.check_call(
+                [sys.executable, path, "info", "--spm-config"],
+                env=app_env,
+            )
         else:
             app_args = [sys.executable, path, "info", "--pmc"]
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
@@ -1819,6 +1878,10 @@ def run(app_args, args, **kwargs):
                 )
             exit_code = subprocess.check_call(
                 [sys.executable, path, "info", "--pc-sampling"],
+                env=app_env,
+            )
+            exit_code = subprocess.check_call(
+                [sys.executable, path, "info", "--spm-config"],
                 env=app_env,
             )
 
@@ -1946,6 +2009,50 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
+    if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit:
+
+        if (
+            not args.spm_beta_enabled
+            and os.environ.get("ROCPROFILER_SPM_BETA_ENABLED", None) is None
+        ):
+            fatal_error(
+                "SPM unavailable. The feature is implicitly disabled. To enable it, use --spm-beta-enabled option"
+            )
+
+        update_env("ROCPROFILER_SPM_BETA_ENABLED", True, overwrite=True)
+        update_env("ROCPROF_SPM_COUNTER_COLLECTION", True, overwrite=True)
+
+        if (
+            args.pmc
+            or args.pc_sampling_beta_enabled
+            or os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is not None
+        ):
+            fatal_error(
+                "SPM feature cannot be enabled along with pc sampling or pmc counter collection"
+            )
+
+        if args.spm is None:
+            fatal_error("Please input list of counters to be sampled")
+
+        update_env(
+            "ROCPROF_SPM_COUNTERS",
+            "spm: {}".format(" ".join(args.spm)),
+            overwrite=True,
+        )
+
+        if args.spm_sample_interval:
+            update_env(
+                "ROCPROF_SPM_SAMPLE_INTERVAL",
+                args.spm_sample_interval,
+                overwrite=True,
+            )
+        if args.spm_sample_interval_unit:
+            update_env(
+                "ROCPROF_SPM_SAMPLE_INTERVAL_UNIT",
+                args.spm_sample_interval_unit,
+                overwrite=True,
+            )
+
     if args.disable_signal_handlers is not None:
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
 
@@ -1956,19 +2063,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
-
-        def int_auto(num_str):
-            if isinstance(num_str, str):
-                if "0x" in num_str:
-                    return int(num_str, 16)
-                else:
-                    return int(num_str, 10)
-            elif isinstance(num_str, int):
-                return num_str
-            else:
-                raise ValueError(
-                    f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
-                )
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
 

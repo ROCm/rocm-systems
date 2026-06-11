@@ -33,6 +33,7 @@
  * It is the top-level interface for these resources.
  */
 
+#include <map>
 #include <vector>
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
@@ -193,6 +194,26 @@ class Backend {
   virtual void ctx_destroy(Context* ctx) = 0;
 
   /**
+   * @brief Structure to keep user buffer registrations.
+   */
+  std::map<uintptr_t, size_t> user_buffer_regions;
+
+  /**
+   * @brief Register a user buffer.
+   */
+  virtual int buffer_register(void *addr, size_t length);
+
+  /**
+   * @brief Unregister a user buffer.
+   */
+  virtual int buffer_unregister(void *addr);
+
+  /**
+   * @brief Unregister all previously registered user buffers.
+   */
+  virtual void buffer_unregister_all();
+
+  /**
    * @brief High level device stats that do not depend on backend type.
    */
   ROCStats globalStats{};
@@ -277,7 +298,7 @@ class Backend {
    */
   TeamTracker team_tracker{};
 
-  BackendType get_backend_type() { return type; }
+  BackendType get_type() { return type; }
 
   /**
    * Fine grained memory allocator for buffers used in collectives Routines

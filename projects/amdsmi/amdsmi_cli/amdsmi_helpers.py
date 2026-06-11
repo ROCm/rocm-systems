@@ -45,6 +45,8 @@ from functools import lru_cache
 from amdsmi_init import *
 from BDF import BDF
 
+import amdsmi_cli_exceptions
+
 
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
@@ -116,6 +118,20 @@ class AMDSMIHelpers:
                 logging.debug(
                     "Unable to determine virtualization status: " + str(e.get_error_code())
                 )
+
+        self.convert_clock_type = {
+            "sys": amdsmi_interface.AmdSmiClkType.SYS,
+            "mem": amdsmi_interface.AmdSmiClkType.MEM,
+            "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
+            "soc": amdsmi_interface.AmdSmiClkType.SOC,
+            "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
+            # vclk and dclk currently do not support levels so average clk is given for frequency levels
+            "vclk0": amdsmi_interface.AmdSmiClkType.VCLK0,
+            "vclk1": amdsmi_interface.AmdSmiClkType.VCLK1,
+            "dclk0": amdsmi_interface.AmdSmiClkType.DCLK0,
+            "dclk1": amdsmi_interface.AmdSmiClkType.DCLK1,
+        }
 
     def increment_set_count(self):
         self._count_of_sets_called += 1
@@ -1361,12 +1377,7 @@ class AMDSMIHelpers:
         return clock_types_str, clock_types_int
 
     def get_power_profiles(self):
-        power_profiles_str = [
-            profile.name for profile in amdsmi_interface.AmdSmiPowerProfilePresetMasks
-        ]
-        if "UNKNOWN" in power_profiles_str:
-            power_profiles_str.remove("UNKNOWN")
-        return power_profiles_str
+        return list(self.get_power_profile_name_mapping().keys())
 
     def get_power_profile_name_mapping(self):
         """Returns dict mapping friendly names to enum values"""
@@ -1693,6 +1704,46 @@ class AMDSMIHelpers:
         page_size = os.sysconf("SC_PAGESIZE")
         bytes_value = pages * page_size
         return bytes_value / (1024**3)
+
+    def read_pending_gtt_pages(self):
+        """Read the pending GTT pages_limit written by `amd-smi set --gtt`.
+
+        Returns the integer ``pages_limit`` from the modprobe.d snippet
+        produced by ``amdsmi_set_ttm_pages_limit``, which will take effect
+        on the next boot once the initramfs picks it up. The file name
+        depends on the active TTM module detected by the C++ layer
+        (``amdttm``, ``amd-ttm``, or ``ttm``), so all three candidates are
+        probed in the same priority order. The ``AMDSMI_TTM_SYSFS_NAME``
+        environment variable (when set to one of ``amdttm`` / ``amd_ttm`` /
+        ``ttm``) is checked first to mirror the C++ override. Returns
+        ``None`` if no candidate file exists, none is readable, or none
+        contains a valid ``options <mod> ... pages_limit=<int>`` directive.
+        """
+        candidates = ["amdttm", "amd-ttm", "ttm"]
+        override = os.environ.get("AMDSMI_TTM_SYSFS_NAME", "").strip()
+        if override:
+            # Mirror C++ ttm_modprobe_name(): sysfs "amd_ttm" -> conf "amd-ttm".
+            override_conf = "amd-ttm" if override == "amd_ttm" else override
+            if override_conf in candidates:
+                candidates.remove(override_conf)
+            candidates.insert(0, override_conf)
+
+        pattern = re.compile(r"^\s*options\s+\S+\s+.*?pages_limit\s*=\s*(\d+)", re.MULTILINE)
+        for name in candidates:
+            path = "/etc/modprobe.d/" + name + ".conf"
+            try:
+                with open(path, "r") as f:
+                    content = f.read()
+            except (OSError, IOError):
+                continue
+            m = pattern.search(content)
+            if not m:
+                continue
+            try:
+                return int(m.group(1))
+            except ValueError:
+                continue
+        return None
 
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.
@@ -2969,6 +3020,19 @@ class AMDSMIHelpers:
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_D,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_USR,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_UCIE,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAA,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075,
         ]
 
         for temp_type in gpu_board_temp_types:
@@ -3111,16 +3175,14 @@ class AMDSMIHelpers:
             ):
                 # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                 min_cap_display = 1 if min_power_cap == 0 else min_power_cap
-                if logger.is_json_format() or logger.is_csv_format():
-                    return {
-                        "status": "error",
-                        "sensor": power_type_key,
-                        "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
-                        "min_power_cap": self.unit_format(logger, min_cap_display, "W"),
-                        "max_power_cap": self.unit_format(logger, max_power_cap, "W"),
-                        "message": f"Power cap must be between {min_cap_display}W and {max_power_cap}W",
-                    }
-                return f"Power cap must be between {min_cap_display}W and {max_power_cap}W"
+
+                # Raise so the caller exits with a non-zero return code
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_power_cap}W",
+                    self.get_output_format(),
+                    hint=f"Power cap must be between {min_cap_display}W and {max_power_cap}W",
+                )
             # Set the power cap
             new_power_cap = self.convert_SI_unit(
                 requested_power_cap, AMDSMIHelpers.SI_Unit.BASE, AMDSMIHelpers.SI_Unit.MICRO

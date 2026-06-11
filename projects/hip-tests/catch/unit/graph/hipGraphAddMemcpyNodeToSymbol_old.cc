@@ -233,11 +233,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalMemoryPeerDevice) {
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, false);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 /*
@@ -254,11 +253,10 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNodeToSymbol_GlobalConstMemoryPeerDevice) {
     if (canAccessPeer) {
       hipGraphAddMemcpyNodeToSymbol_GlobalMemory(true, true);
     } else {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
+      HIP_SKIP_TEST(HipTest::SkipReason::kPeerAccessUnavailable);
     }
   } else {
-    HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
-    return;
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
   }
 }
 #endif

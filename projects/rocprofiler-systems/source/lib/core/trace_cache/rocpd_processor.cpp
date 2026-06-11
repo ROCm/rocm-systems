@@ -13,6 +13,8 @@
 #include "core/rocpd/data_storage/database.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
+
+#include "common/units.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
@@ -206,7 +208,7 @@ rocpd_processor_t::handle([[maybe_unused]] const memory_allocate_sample& _mas)
     auto  process = m_metadata->get_process_info();
     auto  thread_primary_key =
         m_data_processor->map_thread_id_to_primary_key(_mas.thread_id);
-    auto agent_primary_key = std::optional<uint64_t>{};
+    auto agent_primary_key = std::optional<std::uint64_t>{};
 
     const auto invalid_context = ROCPROFILER_CONTEXT_NONE;
     if(_mas.agent_id_handle != invalid_context.handle)
@@ -369,14 +371,19 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_power>::value,
                   info::format_track_name<category::amd_smi_power>(),
                   enabled.bits.current_socket_power || enabled.bits.average_socket_power,
-                  enabled.bits.current_socket_power ? m.current_socket_power
-                                                    : m.average_socket_power);
+                  pmc::collectors::gpu::select_socket_power(enabled, m));
     insert_scalar(trait::name<category::amd_smi_memory_usage>::value,
                   info::format_track_name<category::amd_smi_memory_usage>(),
                   enabled.bits.memory_usage, m.memory_usage / units::megabyte);
     insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
                   info::format_track_name<category::amd_smi_sdma_usage>(),
                   enabled.bits.sdma_usage, m.sdma_usage);
+    insert_scalar(trait::name<category::amd_smi_gfx_clock>::value,
+                  info::format_track_name<category::amd_smi_gfx_clock>(),
+                  enabled.bits.gfx_clock, m.gfx_clock_mhz);
+    insert_scalar(trait::name<category::amd_smi_mem_clock>::value,
+                  info::format_track_name<category::amd_smi_mem_clock>(),
+                  enabled.bits.mem_clock, m.mem_clock_mhz);
 
     auto insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
                                   const auto& format_name) {
@@ -414,8 +421,7 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
         {
             if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16) continue;
 
-            auto suffix     = "_" + std::to_string(i);
-            auto pmc_name   = std::string(base_name) + suffix;
+            auto pmc_name   = fmt::format("{}_{}", base_name, i);
             auto track_name = pmc_name;
 
             LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
@@ -487,7 +493,7 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
             .base_id;
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
-                             uint64_t value) {
+                             std::uint64_t value) {
         if(!enabled) return;
 
         LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
@@ -519,6 +525,48 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_pmc_sample& _nic_sample)
     insert_metric(enabled.bits.tx_rdma_cnp_pkts,
                   trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                   "ainic_tx_rdma_cnp_pkts", m.tx_rdma_cnp_pkts);
+    insert_metric(enabled.bits.tx_rdma_ack_timeout,
+                  trait::name<category::amd_smi_nic_tx_rdma_ack_timeout>::value,
+                  "ainic_tx_rdma_ack_timeout", m.tx_rdma_ack_timeout);
+    insert_metric(enabled.bits.resp_tx_pkt_seq_err,
+                  trait::name<category::amd_smi_nic_resp_tx_pkt_seq_err>::value,
+                  "ainic_resp_tx_pkt_seq_err", m.resp_tx_pkt_seq_err);
+    insert_metric(enabled.bits.req_rx_pkt_seq_err,
+                  trait::name<category::amd_smi_nic_req_rx_pkt_seq_err>::value,
+                  "ainic_req_rx_pkt_seq_err", m.req_rx_pkt_seq_err);
+    insert_metric(enabled.bits.req_rx_impl_nak_seq_err,
+                  trait::name<category::amd_smi_nic_req_rx_impl_nak_seq_err>::value,
+                  "ainic_req_rx_impl_nak_seq_err", m.req_rx_impl_nak_seq_err);
+}
+
+void
+rocpd_processor_t::handle(
+    [[maybe_unused]] const gpu_perf_counter_sample& _gpu_perf_counter)
+{
+    if(_gpu_perf_counter.entries.empty()) return;
+
+    const auto* _name            = "rocm_counter_collection";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+
+    auto base_id =
+        m_agent_manager
+            ->get_agent_by_type_index(_gpu_perf_counter.device_id, agent_type::GPU)
+            .base_id;
+
+    for(const auto& entry : _gpu_perf_counter.entries)
+    {
+        auto name_info = m_metadata->find_gpu_perf_counter_by_id(
+            _gpu_perf_counter.device_id, entry.counter_id);
+        if(!name_info) continue;
+
+        const auto& info = name_info->get();
+
+        m_data_processor->insert_pmc_event(event_id, base_id, info.pmc_info_name.c_str(),
+                                           entry.value);
+        m_data_processor->insert_sample(info.track_name.c_str(),
+                                        _gpu_perf_counter.timestamp, event_id);
+    }
 }
 
 void
@@ -536,7 +584,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         double value;
     };
 
-    auto deserialize_freqs = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_freqs = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
@@ -552,7 +600,7 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_pmc_sample& _cpu_pmc_sample
         return result;
     };
 
-    auto deserialize_loads = [](const std::vector<uint8_t>& buffer) {
+    auto deserialize_loads = [](const std::vector<std::uint8_t>& buffer) {
         std::vector<core_load_sample> result;
         size_t                        offset = 0;
 

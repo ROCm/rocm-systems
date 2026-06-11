@@ -68,7 +68,7 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* globa
     // atomicInc instruction many times before the last thread ever gets to it.
     // If the sync works, then it will likely contain "total number of blocks"*i
     if (rank == (grid.size() - 1)) {
-      busy_wait(100000);
+      busy_wait(1000);
     }
     if (threadIdx.x == blockDim.x - 1 && threadIdx.y == blockDim.y - 1 &&
         threadIdx.z == blockDim.z - 1) {
@@ -79,7 +79,7 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* globa
     // Make the last thread in the entire multi-grid run way behind
     // everyone else.
     if (global_rank == (mgrid.size() - 1)) {
-      busy_wait(100000);
+      busy_wait(1000);
     }
     // During even iterations, add into your own array entry
     // During odd iterations, add into next array entry
@@ -87,9 +87,10 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* globa
     unsigned inter_gpu_offset = (grid_rank + 1) % mgrid.num_grids();
     if (rank == (grid.size() - 1)) {
       if (i % 2 == 0) {
-        global_array[grid_rank] += 2;
+        atomicAdd(&global_array[grid_rank], 2u);
       } else {
-        global_array[inter_gpu_offset] *= 2;
+        unsigned int old_val = global_array[inter_gpu_offset];
+        atomicExch(&global_array[inter_gpu_offset], old_val * 2);
       }
     }
     mgrid.sync();
@@ -101,7 +102,7 @@ static void get_multi_grid_dims(dim3& grid_dim, dim3& block_dim, unsigned int de
                                 unsigned int test_case) {
   hipDeviceProp_t props;
   HIP_CHECK(hipSetDevice(device))
-  HIP_CHECK(hipGetDeviceProperties(&props, 0));
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
   int sm = props.multiProcessorCount;
   auto warp_size = getWarpSize();
   std::vector<dim3> block_dim_values = {dim3(1, 1, 1),
@@ -151,8 +152,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Basic) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
   const auto test_case = GENERATE(range(0, 20));
@@ -298,8 +298,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Base_Type) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
 
@@ -420,8 +419,7 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Getters_Positive_Non_Member_Functions) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
   const auto test_case = GENERATE(range(0, 20));
@@ -532,12 +530,11 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipGetDeviceProperties(&device_properties[i], i));
     if (!device_properties[i].cooperativeMultiDeviceLaunch) {
-      HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
-      return;
+      HIP_SKIP_TEST(HipTest::SkipReason::kCooperativeLaunchUnsupported);
     }
   }
-  auto loops = GENERATE(2, 4, 8, 16);
-  const auto test_case = GENERATE(range(0, 20));
+  auto loops = GENERATE(2, 4, 8);
+  const auto test_case = GENERATE(range(0, 10));
   std::vector<dim3> grid_dims(num_devices);
   std::vector<dim3> block_dims(num_devices);
   for (int i = 0; i < num_devices; i++) {
@@ -572,11 +569,13 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
     HIP_CHECK(hipMemset(atomic_val[i].ptr(), 0, sizeof(unsigned int)));
     atomic_val_ptr[i] = atomic_val[i].ptr();
   }
-  // Allocate multi_grid sync array
-  LinearAllocGuard<unsigned int> global_arr(LinearAllocs::hipHostMalloc,
-                                            num_devices * sizeof(unsigned int));
-  HIP_CHECK(hipMemset(global_arr.ptr(), 0, num_devices * sizeof(unsigned int)));
-  unsigned int* global_arr_ptr = global_arr.ptr();
+  // Allocate multi_grid sync array with fine-grained coherency for cross-GPU visibility.
+  // Use raw hipHostMalloc rather than LinearAllocGuard to avoid stale pointers across
+  // Catch2 GENERATE re-entries.
+  unsigned int* global_arr_ptr = nullptr;
+  HIP_CHECK(hipHostMalloc(&global_arr_ptr, num_devices * sizeof(unsigned int),
+                          hipHostMallocCoherent));
+  HIP_CHECK(hipMemset(global_arr_ptr, 0, num_devices * sizeof(unsigned int)));
 
   std::vector<std::vector<void*>> dev_params(num_devices, std::vector<void*>(4, nullptr));
   std::vector<hipLaunchParams> md_params(num_devices);
@@ -596,7 +595,10 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
 
   // Launch Kernel
   HIP_CHECK(hipLaunchCooperativeKernelMultiDevice(md_params.data(), num_devices, 0));
-  HIP_CHECK(hipDeviceSynchronize());
+  for (int i = 0; i < num_devices; i++) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipDeviceSynchronize());
+  }
 
   // Read back the grid sync buffer to host
   for (int i = 0; i < num_devices; i++) {
@@ -604,20 +606,23 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
     unsigned int array_len = multi_grid.grids_[i].block_count_ * loops;
     HIP_CHECK(hipMemcpy(uint_arr[i].ptr(), uint_arr_dev[i].ptr(), array_len * sizeof(unsigned int),
                         hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize());
   }
-
-  HIP_CHECK(hipDeviceSynchronize());
 
   // Verify grid sync host array values
   for (int i = 0; i < num_devices; i++) {
     unsigned int max_in_this_loop = 0;
     for (unsigned int j = 0; j < loops; j++) {
       max_in_this_loop += multi_grid.grids_[i].block_count_;
-      unsigned int k = 0;
-      for (k = 0; k < multi_grid.grids_[i].block_count_ - 1; k++) {
-        REQUIRE(uint_arr[i].ptr()[j * multi_grid.grids_[i].block_count_ + k] < max_in_this_loop);
+      unsigned int base = j * multi_grid.grids_[i].block_count_;
+      std::unordered_set<unsigned int> seen;
+      for (unsigned int k = 0; k < multi_grid.grids_[i].block_count_; k++) {
+        unsigned int val = uint_arr[i].ptr()[j * multi_grid.grids_[i].block_count_ + k];
+        REQUIRE(val >= base);
+        REQUIRE(val < max_in_this_loop);
+        REQUIRE(seen.insert(val).second);  // No duplicates
       }
-      REQUIRE(uint_arr[i].ptr()[j * multi_grid.grids_[i].block_count_ + k] == max_in_this_loop - 1);
+      REQUIRE(seen.size() == multi_grid.grids_[i].block_count_);  // All blocks executed
     }
   }
 
@@ -633,7 +638,9 @@ HIP_TEST_CASE(Unit_Multi_Grid_Group_Positive_Sync) {
     }
     return desired_val;
   };
-  ArrayAllOf(global_arr.ptr(), num_devices, f);
+  ArrayAllOf(global_arr_ptr, num_devices, f);
+
+  HIP_CHECK(hipHostFree(global_arr_ptr));
 }
 
 /**

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "utility.hpp"
+#include <cstdint>
 
 #include "logger/debug.hpp"
 
@@ -72,16 +73,26 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
 
         if(_v.find('-') != std::string::npos)
         {
+            // split the string into two parts at the '-' character and check if the
+            // result is valid
             auto _vv = tim::delimit(_v, "-");
             if(_vv.size() != 2)
             {
-                throw std::runtime_error(fmt::format(
-                    "Invalid {} range specification: {}. Required format N-M, e.g. 0-4",
-                    _label, _v));
+                LOG_WARNING("Invalid {} range specification: {}. Required format N-M, "
+                            "e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
             }
 
             Tp _vn = _get_value(_vv.at(0));
             Tp _vN = _get_value(_vv.at(1));
+            if(_vn > _vN)
+            {
+                LOG_WARNING("Invalid {} range specification: {}. Start exceeds end; "
+                            "required format N-M with N <= M, e.g. 0-4. Ignoring {}...",
+                            _label, _v, _v);
+                continue;
+            }
             do
             {
                 emplace(_result, _vn);
@@ -96,13 +107,16 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     return _result;
 }
 
-template std::set<int64_t>
-parse_numeric_range<int64_t, std::set<int64_t>>(std::string, const std::string&, long);
-template std::vector<int64_t>
-parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::string&, long);
-template std::unordered_set<int64_t>
-parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
+template std::set<std::int64_t>
+parse_numeric_range<std::int64_t, std::set<std::int64_t>>(std::string, const std::string&,
                                                           long);
+template std::vector<std::int64_t>
+parse_numeric_range<std::int64_t, std::vector<std::int64_t>>(std::string,
+                                                             const std::string&, long);
+template std::unordered_set<std::int64_t>
+parse_numeric_range<std::int64_t, std::unordered_set<std::int64_t>>(std::string,
+                                                                    const std::string&,
+                                                                    long);
 
 void
 trim_str(std::string& str)

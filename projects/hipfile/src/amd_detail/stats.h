@@ -74,27 +74,29 @@ struct PerGpuStatsV1 {
     std::array<StatsHistogram, 2> ioSizeBytes{};
     std::array<StatsHistogram, 2> ioCount{};
     std::array<StatsHistogram, 2> ioTimeUs{};
+    std::array<StatsHistogram, 2> errorCount{};
 
-    using Histograms = std::tuple<StatsHistogram *, StatsHistogram *, StatsHistogram *>;
-    using ConstHistograms =
-        std::tuple<const StatsHistogram *, const StatsHistogram *, const StatsHistogram *>;
+    using Histograms = std::tuple<StatsHistogram *, StatsHistogram *, StatsHistogram *, StatsHistogram *>;
+    using ConstHistograms = std::tuple<const StatsHistogram *, const StatsHistogram *, const StatsHistogram *,
+                                       const StatsHistogram *>;
 
     Histograms getHistograms(IoType ioType) noexcept
     {
         if (ioType != IoType::Read && ioType != IoType::Write) {
-            return Histograms{nullptr, nullptr, nullptr};
+            return Histograms{nullptr, nullptr, nullptr, nullptr};
         }
         return Histograms{&ioSizeBytes[static_cast<size_t>(ioType)], &ioCount[static_cast<size_t>(ioType)],
-                          &ioTimeUs[static_cast<size_t>(ioType)]};
+                          &ioTimeUs[static_cast<size_t>(ioType)], &errorCount[static_cast<size_t>(ioType)]};
     }
 
     ConstHistograms getHistograms(IoType ioType) const noexcept
     {
         if (ioType != IoType::Read && ioType != IoType::Write) {
-            return ConstHistograms{nullptr, nullptr, nullptr};
+            return ConstHistograms{nullptr, nullptr, nullptr, nullptr};
         }
         return ConstHistograms{&ioSizeBytes[static_cast<size_t>(ioType)],
-                               &ioCount[static_cast<size_t>(ioType)], &ioTimeUs[static_cast<size_t>(ioType)]};
+                               &ioCount[static_cast<size_t>(ioType)], &ioTimeUs[static_cast<size_t>(ioType)],
+                               &errorCount[static_cast<size_t>(ioType)]};
     }
 };
 
@@ -147,10 +149,43 @@ public:
                            [](const PerGpuStats &stats) { return stats.inUse.load() != 0; });
     }
 
+    std::atomic_uint64_t &getFileRegistrations() noexcept
+    {
+        return m_fileRegistrations;
+    }
+
+    const std::atomic_uint64_t &getFileRegistrations() const noexcept
+    {
+        return m_fileRegistrations;
+    }
+
+    std::atomic_uint64_t &getBufferRegistrations() noexcept
+    {
+        return m_bufferRegistrations;
+    }
+
+    const std::atomic_uint64_t &getBufferRegistrations() const noexcept
+    {
+        return m_bufferRegistrations;
+    }
+
+    std::atomic_uint64_t &getFastpathRejections() noexcept
+    {
+        return m_fastpathRejections;
+    }
+
+    const std::atomic_uint64_t &getFastpathRejections() const noexcept
+    {
+        return m_fastpathRejections;
+    }
+
 private:
-    const uint64_t   m_version{PerGpuStatsT::version};
-    StatsLevel       m_level{};
-    PerGpuStatsArray m_perGpuStats{};
+    const uint64_t       m_version{PerGpuStatsT::version};
+    StatsLevel           m_level{};
+    std::atomic_uint64_t m_fileRegistrations{};
+    std::atomic_uint64_t m_bufferRegistrations{};
+    std::atomic_uint64_t m_fastpathRejections{};
+    PerGpuStatsArray     m_perGpuStats{};
 };
 
 using StatsV1 = StatsTemplate<PerGpuStatsV1, 16>;
@@ -263,5 +298,9 @@ class StatsCollection {
 public:
     virtual ~StatsCollection() = default;
     virtual void addIo(IoType ioType, StatsBackend backend, uint64_t bytes, uint64_t timeUs) const noexcept;
+    virtual void error(IoType ioType, StatsBackend backend, uint64_t bytes) const noexcept;
+    virtual void fileRegistration() const noexcept;
+    virtual void bufferRegistration() const noexcept;
+    virtual void fastpathRejection() const noexcept;
 };
 }

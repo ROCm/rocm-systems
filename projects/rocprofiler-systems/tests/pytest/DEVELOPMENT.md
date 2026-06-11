@@ -43,7 +43,7 @@ Contains wrappers for the validation scripts and other helper functions that can
 These fixtures run as **subtests**, meaning multiple validations within a single test are independently reported (one can fail without blocking others). They are automatically injected into `RocprofsysTest` via its `_setup` fixture, so test methods access them as `self.assert_regex(...)`, `self.assert_perfetto(...)`, etc.
 
 | Fixture | Description |
-|---------|-------------|
+| --------- | ------------- |
 | `assert_regex` | Validates test output against pass/fail regex patterns. Patterns can be per-mode (e.g., different patterns for `binary_rewrite` vs `sampling`). |
 | `assert_file_regex` | Like `assert_regex` but validates against a file's contents. |
 | `assert_perfetto` | Validates that a Perfetto trace was generated and optionally checks its contents. |
@@ -58,9 +58,11 @@ See the docstrings in `conftest.py` for full argument details.
 
 ### General Rules
 
+At the minimum, the following rules should always be followed. If you have a reason not to, a comment should be left explaining the reasoning behind your choice.
+
 - Test methods should always be inside a test class.
 - Every test class should inherit from `RocprofsysTest`.
-- At minimum, a test should use both `run_test` and `assert_regex`.
+- At minimum, a test should use both `run_test` and `assert_regex`. They have complementary responsibilities: `run_test` performs process-level validation (subprocess launch, exit code, signals, timeout), while `assert_regex` performs content-level validation (matching against pass/fail patterns in the captured output). A test that only calls `run_test` will detect a crash but not a silent regression where the binary runs to completion without emitting the expected instrumentation output.
 
 ### Runner Modes
 
@@ -73,6 +75,8 @@ class TestExample(RocprofsysTest):
         result = self.run_test(mode, ...)
         self.assert_regex(result)
 ```
+
+If a test is hard-coded to a single mode (no `@pytest.mark.parametrize("mode", ...)` decorator), tag it with `@pytest.mark.<mode>` (e.g. `@pytest.mark.sampling`) so `_generate_ctest_definitions` records the correct CTest mode label. When `parametrize("mode", [...])` is used — even with a single-element list — this is handled automatically.
 
 ### Test Parametrization
 
@@ -246,7 +250,6 @@ class Test<NAME>(RocprofsysTest):
 
     # Any test level markers here
     def test_<NAME>(self, <test>_env):
-        # Run the test
         result = self.run_test(
             # mode,
             # target,

@@ -58,6 +58,7 @@
 #include "common/helper_funcs.h"
 #include "common/hsatimer.h"
 #include "common/concurrent_utils.h"
+#include "common/platform_filter.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
@@ -293,6 +294,7 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
 
   ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, sizeof_mem_handle));
   ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handleTypePinned));
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRange, sizeof_addrRange));
   ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRangeUnmapped, sizeof_addrRangeUnmapped));
 }
@@ -1619,6 +1621,7 @@ void VirtMemoryTestBasic::SetUp(void) {
   hsa_status_t err;
 
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
@@ -1685,6 +1688,8 @@ static void ClearShared(SharedVirtMem* s) {
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
 void VirtMemoryTestInterProcess::SetUp(void) {
+  if (!checkPlatformFiltering()) return;
+
   hsa_status_t err;
 
   // We must fork process before doing HSA stuff, specifically, hsa_init, as
@@ -1744,6 +1749,7 @@ void VirtMemoryTestInterProcess::SetUp(void) {
   }
 
   TestBase::SetUp();
+  if (test_skipped_) return;
 
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));

@@ -1,0 +1,270 @@
+.. meta::
+  :description: Instruction on how to install rocSHMEM.
+  :keywords: rocSHMEM, ROCm, install, build, dependencies, MPI, UCX, Open MPI
+
+.. _install-rocshmem:
+
+--------------------------
+Build rocSHMEM from source
+--------------------------
+
+To build rocSHMEM as part of the ROCm Core SDK, see `TheRock build instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
+
+Alternatively, you can build rocSHMEM standalone using the following
+instructions.
+
+Requirements
+------------
+
+* ROCm 6.4.0 or later, including the :doc:`HIP runtime <hip:index>`. For more information, see `ROCm installation for Linux <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
+
+  * ROCm 7.0 or later is required for the VMM POSIX memory allocator (``USE_HEAP_DEVICE_VMM_POSIX``).
+
+* The following AMD GPUs have been fully tested for compatibility with rocSHMEM:
+
+  * MI250X
+
+  * MI300X, MI308X
+
+  * MI325X
+
+  * MI350X, MI355X (Requires ROCm 7.0 or later)
+
+* The following AMD GPUs have experimental support in rocSHMEM:
+
+  * Radeon AI PRO9700, Radeon RX 9070XT, Radeon RX 9070
+
+  * Radeon Pro W7900, Radeon RX 7900XTX, Radeon RX 7900XT
+
+
+  .. note::
+
+    Other AMD GPUs might function with unknown limitations. For the complete list of supported hardware, see `ROCm System Requirements <https://rocm.docs.amd.com/projects/install-on-linux-internal/en/latest/reference/system-requirements.html>`_.
+
+* The RO backend requires ROCm-aware Open MPI and UCX. When using the IPC or GDA backends, MPI is optional.
+  For more information about installing ROCm-aware Open MPI and UCX, see :ref:`install-dependencies`.
+
+* Inter-node communication requires AMD Pollara IONIC, Broadcom Thor 2, or CX7 Infiniband NICs.
+
+Available network backends
+--------------------------
+
+rocSHMEM supports the following network backends:
+
+* The **IPC (Inter-Process Communication)** backend enables fast communication between GPUs on the same host using ROCm inter-process mechanisms. It does not support inter-node communication.
+* The **RO (Reverse Offload)** backend enables communication between GPUs on different nodes through a NIC, using a host-based proxy to forward communication orders to and from the GPU. RO is built on an MPI-RMA compatibility layer.
+* The **GDA (GPU Direct Async)** backend enables communication between GPUs on different nodes through a NIC. In this backend, the GPU directly interacts with the NIC with no host (CPU) involvement in the critical path of communication.
+
+You can activate IPC, RO, and GDA backends in the same rocSHMEM build.
+
+.. note::
+
+  When RO + IPC is active, all atomic operations use the RO backend, even for intra-node communication.
+  When GDA + IPC is active, all atomic operations use the GDA backend, even for intra-node communication.
+
+.. _install-dependencies:
+
+Building dependencies
+---------------------
+
+GDA NIC dependencies
+^^^^^^^^^^^^^^^^^^^^
+
+- GDA on Mellanox NICs should work on any recent version of rdma-core.
+- GDA on Broadcom Thor requires driver version 233.2.108.0 and firmware version 233.2.104.0 or later.
+- GDA on AMD Pensando Pollara 400 AI NIC requires a newer driver and firmware version - contact AMD for the latest supported version.
+
+Building rocSHMEM with MPI (Optional)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+rocSHMEM requires ROCm-Aware Open MPI and UCX for the RO backend.
+MPI is optional with the IPC and GDA backends.
+Other MPI implementations, such as MPICH, have not been fully tested.
+
+To build and configure ROCm-Aware UCX 1.17.0 or later, run:
+
+.. code-block:: bash
+
+  git clone https://github.com/ROCm/ucx.git -b v1.17.x
+  cd ucx
+  ./autogen.sh
+  ./configure --prefix=<prefix_dir> --with-rocm=<rocm_path> --enable-mt
+  make -j 8
+  make -j 8 install
+
+To build Open MPI 5.0.7 or later with UCX support, run:
+
+.. code-block:: bash
+
+  git clone --recursive https://github.com/open-mpi/ompi.git -b v5.0.x
+  cd ompi
+  ./autogen.pl
+  ./configure --prefix=<prefix_dir> --with-rocm=<rocm_path> --with-ucx=<ucx_path>
+  make -j 8
+  make -j 8 install
+
+Alternatively, you can use a script to install dependencies:
+
+.. code-block:: bash
+
+  export BUILD_DIR=/path/to/not_rocshmem_src_or_build/dependencies
+  /path/to/rocshmem_src/scripts/install_dependencies.sh
+
+.. note::
+
+  Configuration options vary by platform. Review the script to ensure it is compatible with your system.
+
+For more information about OpenMPI-UCX support, see
+`GPU-enabled Message Passing Interface <https://rocm.docs.amd.com/en/latest/how-to/gpu-enabled-mpi.html>`_.
+
+Installing from source
+--------------------------------
+
+You can choose from three communication backends at build time for rocSHMEM: IPC, RO, and GDA.
+Backend can be combined during build time.
+
+MPI is not required to build rocSHMEM. To disable MPI, pass
+the following flag to the build configuration scripts ``-DUSE_EXTERNAL_MPI=OFF``.
+However, this will disable the functional and unit
+tests, as they require MPI to run.
+
+Memory allocator options
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+rocSHMEM provides several GPU memory allocator options that control how the symmetric heap is allocated:
+
+* **USE_HEAP_DEVICE_FINEGRAIN** (default): GPU memory with fine-grained coherency. Provides CPU access to GPU memory with cache coherency.
+
+* **USE_HEAP_DEVICE_COARSEGRAIN**: GPU memory with coarse-grained coherency. Better performance for GPU-only access patterns.
+
+* **USE_HEAP_DEVICE_UNCACHED**: GPU memory in uncached mode (requires ROCm 5.5+). May provide better performance on some architectures.
+
+* **USE_HEAP_DEVICE_VMM_POSIX**: GPU memory using Virtual Memory Management (VMM) with POSIX file descriptor-based IPC (requires ROCm 7.0+).
+  This allocator uses advanced HIP VMM APIs (``hipMemCreate``, ``hipMemAddressReserve``, ``hipMemMap``) and
+  cross-process file descriptor sharing via Linux kernel syscalls (``pidfd_open``, ``pidfd_getfd``).
+
+  .. note::
+
+    The VMM POSIX allocator requires:
+
+    * ROCm 7.0 or newer
+    * Linux kernel 5.6 or newer
+    * TCP Bootstrap-based initialization (not compatible with MPI-based initialization)
+
+    This allocator is experimental and primarily intended for advanced use cases requiring fine-grained control over GPU memory management and IPC mechanisms.
+
+These options are mutually exclusive. To use a non-default allocator, pass the corresponding flag to the build configuration scripts. For example:
+
+.. code-block:: bash
+
+  cd projects/rocshmem/build
+  cmake .. -DUSE_HEAP_DEVICE_COARSEGRAIN=ON -DUSE_HEAP_DEVICE_FINEGRAIN=OFF
+  cmake --build . --parallel 8
+
+All backends build
+^^^^^^^^^^^^^^^^^^
+
+To build and install rocSHMEM with all three backends, run:
+
+.. code-block:: bash
+
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
+  mkdir build
+  cd build
+  ../scripts/build_configs/all_backends
+
+The build script passes configuration options to CMake to set up a canonical build.
+
+.. note::
+
+ This builds rocSHMEM with all backends. You can select IPC, RO, GDA, or any combination at runtime by setting an environment variable (see :doc:`Environment variables <./env_variables>` for more details). However, this portability can reduce performance, so the other build scripts are recommended if you need maximum performance. If no specific backend is requested by the user, the library will use the IPC backend if all PEs are on a single node. If the job spans multiple nodes, rocSHMEM will try to use the various GDA backends first, and fall back to the RO backend if neither of the GDA backends can be used.
+
+GDA backend build
+^^^^^^^^^^^^^^^^^
+
+To build and install rocSHMEM with the GDA backends, run:
+
+
+.. code-block:: bash
+
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
+  mkdir build
+  cd build
+
+  # Choose one of the following scripts for your NIC vendor:
+  ../scripts/build_configs/gda_bnxt  # Broadcom
+  ../scripts/build_configs/gda_ionic # AMD Pollara
+  ../scripts/build_configs/gda_mlx5  # Mellanox
+
+
+The build script passes configuration options to CMake to set up a canonical build.
+
+RO and IPC backend build
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+To build and install rocSHMEM with the hybrid RO (off-node) and IPC (on-node) backends, run:
+
+
+.. code-block:: bash
+
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
+  mkdir build
+  cd build
+  ../scripts/build_configs/ro_ipc
+
+The build script passes configuration options to CMake to set up a canonical build.
+
+.. note::
+
+  The only officially supported configuration for the RO backend uses Open MPI and UCX with a CX7 InfiniBand adapter. For more information, see :ref:`install-dependencies`. Other configurations, such as MPI implementations that are thread-safe and support GPU buffers, might work but are considered experimental.
+
+
+IPC only backend build
+^^^^^^^^^^^^^^^^^^^^^^
+
+To build and install rocSHMEM with the IPC on-node, GPU-to-GPU backend, run:
+
+.. code-block:: bash
+
+  git clone --no-checkout --filter=blob:none git@github.com:ROCm/rocm-systems.git
+  cd rocm-systems
+  git sparse-checkout set --cone projects/rocshmem
+  git checkout develop
+  cd projects/rocshmem
+  mkdir build
+  cd build
+  ../scripts/build_configs/ipc_single
+
+The build script passes configuration options to CMake to setup a single-node build.
+This is similar to the default build in ROCm 6.4.
+
+.. note::
+
+  The default configuration changed from IPC only in ROCm 6.4 (built with the ``ipc_single`` script) to RO and IPC in ROCm 7.0 (built with the ``ro_ipc`` script), and then to GDA and RO and IPC in ROCm 7.1 (built with the ``all_backends`` script).
+  Other experimental configuration scripts are available in ``./scripts/build_configs``, but only ``all_backends``, ``ipc_single`` and ``ro_ipc``
+  are officially supported.
+
+Installation prefix
+^^^^^^^^^^^^^^^^^^^
+
+By default, the build scripts install the library to ``~/rocshmem``. You can customize the installation path by adding
+the desired path through the ``INSTALL_PREFIX`` environment variable. For example, to relocate the default configuration:
+
+.. code-block:: bash
+
+  INSTALL_PREFIX=/path/to/install ../scripts/build_configs/all_backends
+
