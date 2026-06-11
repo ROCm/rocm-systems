@@ -9,10 +9,6 @@
 #   1. Create/reuse a venv.
 #   2. Install torch + the ROCm SDK (which ships rocjitsu) from the
 #      gfx950-dcgpu nightly index.
-#   3. Point mirage at the rocjitsu KMD interposer that lives *inside the
-#      venv* via ROCJITSU_KMD_LIB (the highest-priority entry in mirage's
-#      library discovery search), so it does not fall back to an in-tree
-#      or system build.
 #   4. Run tiny_torch.py via `mirage run --profile rocjitsu-MI350X` with
 #      the venv's python3, and assert it prints `tiny_torch_ok`.
 #
@@ -49,7 +45,7 @@ VENV_PY="$VENV/bin/python3"
 if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
   log "installing torch + ROCm SDK from $INDEX_URL"
   "$VENV_PY" -m pip install --upgrade pip
-  "$VENV_PY" -m pip install --index-url "$INDEX_URL" "rocm[libraries,devel]" torch
+  "$VENV_PY" -m pip install --index-url "$INDEX_URL" "rocm[libraries,devel]" torch numpy
 else
   log "SKIP_INSTALL=1: reusing existing venv packages"
 fi
@@ -62,24 +58,7 @@ if [[ -x "$VENV/bin/rocm-sdk" ]]; then
   "$VENV/bin/rocm-sdk" init
 fi
 
-# 3. Make mirage pick up rocjitsu from the active venv.
-#    mirage searches ROCJITSU_KMD_LIB (an absolute .so path) first, so this
-#    wins over any in-tree (`emulation/rocjitsu/build/...`) or system build.
-log "locating librocjitsu_kmd.so inside the venv"
-KMD_LIB="$(find "$VENV" -name librocjitsu_kmd.so -print -quit 2>/dev/null || true)"
-[[ -n "$KMD_LIB" ]] || fail \
-  "librocjitsu_kmd.so not found under $VENV — the gfx950-dcgpu nightly must ship rocjitsu for mirage to emulate MI350X."
-export ROCJITSU_KMD_LIB="$KMD_LIB"
-# The interposer is LD_PRELOAD'd next to the *devel* ROCm runtime
-# (`libhsa-runtime64.so` in the same lib dir). That ROCr build is the
-# one whose sysfs/topology reads the interposer synthesises; pulling in
-# the separate `_rocm_sdk_libraries*/lib` runtime instead breaks the
-# topology probe, so expose ONLY the devel lib dir.
-KMD_DIR="$(dirname "$KMD_LIB")"
-export LD_LIBRARY_PATH="${KMD_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-log "ROCJITSU_KMD_LIB=$ROCJITSU_KMD_LIB"
-
-# 4. Run the fixture through mirage on the emulated MI350X. Use the venv's
+# 3. Run the fixture through mirage on the emulated MI350X. Use the venv's
 #    python3 explicitly so the workload imports the nightly torch. Build &
 #    run mirage from the workspace (cargo run) so its own rocjitsu KMD
 #    discovery and preload wiring work; the first `--` ends cargo's args.
@@ -87,7 +66,6 @@ cd "$MIRAGE_DIR"
 log "running tiny_torch.py via mirage --profile $PROFILE"
 set +e
 OUTPUT="$(cargo run --quiet -- run --profile "$PROFILE" \
-  --env "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" \
   -- "$VENV_PY" "$FIXTURE" 2>&1)"
 STATUS=$?
 set -e
