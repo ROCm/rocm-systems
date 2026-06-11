@@ -38,6 +38,27 @@ TEST(output_format, json_selects_timemory_json)
     EXPECT_FALSE(sel.rocpd);
 }
 
+TEST(output_format, text_selects_timemory_text)
+{
+    const auto sel = resolve_output_format(strset_t{ "text" });
+    EXPECT_TRUE(sel.profile());
+    EXPECT_TRUE(sel.text);
+    EXPECT_FALSE(sel.json);
+    EXPECT_FALSE(sel.perfetto);
+    EXPECT_FALSE(sel.rocpd);
+}
+
+TEST(output_format, json_and_text_both_enable_profile)
+{
+    // two profile sub-formats together; profile() stays true, both flags set
+    const auto sel = resolve_output_format(strset_t{ "json", "text" });
+    EXPECT_TRUE(sel.json);
+    EXPECT_TRUE(sel.text);
+    EXPECT_TRUE(sel.profile());
+    EXPECT_FALSE(sel.perfetto);
+    EXPECT_FALSE(sel.rocpd);
+}
+
 TEST(output_format, txt_aliases_text)
 {
     const auto from_txt  = resolve_output_format(strset_t{ "txt" });
