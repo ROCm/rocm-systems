@@ -245,7 +245,7 @@ bool extractByteCodeBinary(const comgr_helper::ComgrDataSetUniqueHandle& inDataS
 
   std::vector<char> temp_bin;
   temp_bin.assign(binary, binary + binarySize);
-  bin = temp_bin;
+  bin = std::move(temp_bin);
   delete[] binary;
 
   return true;
