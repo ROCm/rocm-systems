@@ -4081,7 +4081,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) assert(!"Unimplemented");
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) assert(!"Unimplemented");
 
     /* Remap the CPU mapping back to anonymous, freeing the DRM FD while retaining VA reservation */
     bool result = rocr::os::UncommitMemory(va, size);
@@ -4099,7 +4099,7 @@ Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
 
 hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permission_t perms) {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
-    if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+    if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
     core::Agent* agent = nullptr;
     int mmap_fd = -1;
@@ -4133,7 +4133,7 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
 hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) {
     if (permissions != HSA_ACCESS_PERMISSION_NONE) {
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return HSA_STATUS_ERROR;
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return HSA_STATUS_ERROR;
 
       hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
       if (!rocr::os::ProtectMemory(va, size, PermissionsToMemProt(perms))) {
@@ -4152,7 +4152,7 @@ Runtime::MappedHandle::MappedHandle(MemoryHandle *mem_handle, AddressHandle *add
   : mem_handle(mem_handle), address_handle(address_handle), offset(offset),
     size(size) {
   /* Create a CPU mapping with PROT_NONE */
-  if (core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg()) return;
+  if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return;
 
   if (!mem_handle->imported) {
     /*
