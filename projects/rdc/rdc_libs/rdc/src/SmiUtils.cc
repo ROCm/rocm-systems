@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -77,6 +78,11 @@ rdc_status_t Smi2RdcError(amdsmi_status_t rsmi) {
   }
 }
 
+// Dual index semantics for gpu_id:
+//   Physical/instance-0: device_index is a flat index into s_flat_gpu_table.
+//   Partition-instance:  device_index is a socket index, instance_index the per-socket proc.
+// These coincide in SPX but diverge in CPX (multiple procs per socket), so don't pass a
+// flat index where a socket index is expected.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
   const auto& table = get_flat_gpu_table();
@@ -271,10 +277,14 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   return ret;
 }
 
+// Flat (0-based) index -> AMD GPU handle, built lazily and cached for the process lifetime.
+// Goes stale if the partition mode changes at runtime; a daemon restart is the supported fix.
+static std::mutex s_flat_gpu_table_mutex;
 static std::vector<GpuHandleEntry> s_flat_gpu_table;
 static bool s_flat_gpu_table_initialized = false;
 
-static void build_flat_gpu_table() {
+// Caller must hold s_flat_gpu_table_mutex.
+static void build_flat_gpu_table_locked() {
   s_flat_gpu_table.clear();
 
   uint32_t socket_count = 0;
@@ -314,13 +324,16 @@ static void build_flat_gpu_table() {
 }
 
 const std::vector<GpuHandleEntry>& get_flat_gpu_table() {
+  std::lock_guard<std::mutex> lock(s_flat_gpu_table_mutex);
   if (!s_flat_gpu_table_initialized) {
-    build_flat_gpu_table();
+    build_flat_gpu_table_locked();
   }
   return s_flat_gpu_table;
 }
 
+// Invalidates the cache; previously returned references are dangling afterward.
 void reset_flat_gpu_table() {
+  std::lock_guard<std::mutex> lock(s_flat_gpu_table_mutex);
   s_flat_gpu_table.clear();
   s_flat_gpu_table_initialized = false;
 }

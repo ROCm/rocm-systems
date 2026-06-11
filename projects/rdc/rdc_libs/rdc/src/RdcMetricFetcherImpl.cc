@@ -1343,11 +1343,15 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
     return RDC_ST_UNKNOWN_ERROR;
   }
 
-  // Always use the physical device handle (raw device index) for gpu_metrics,
-  // since xcp_stats[] is indexed by partition from the whole-GPU metrics table.
-  // Partition handles may not support amdsmi_get_gpu_metrics_info.
+  // gpu_metrics needs the socket-primary (whole-GPU) handle; xcp_stats[] is indexed by
+  // partition via info.instance_index below. Encode an instance-0 socket-path entity so the
+  // socket dispatch picks procs[0] (passing info.device_index raw would hit the wrong CPX GPU).
+  rdc_entity_info_t socket_primary_info = info;
+  socket_primary_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+  socket_primary_info.instance_index = 0;
+  uint32_t socket_primary_index = rdc_get_entity_index_from_info(socket_primary_info);
   amdsmi_processor_handle processor_handle = {};
-  amdsmi_status_t ret = get_processor_handle_from_id(info.device_index, &processor_handle);
+  amdsmi_status_t ret = get_processor_handle_from_id(socket_primary_index, &processor_handle);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_ERROR, "Cannot get processor handle for device " << info.device_index);
     return Smi2RdcError(ret);
@@ -1710,7 +1714,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
   rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
 
-  amdsmi_status_t ret = get_processor_handle_from_id(info.device_index, &processor_handle);
+  // Pass the full entity index, not info.device_index, so the flat/socket dispatch stays
+  // correct for CPU, physical-GPU, and partition entities (matters in CPX).
+  amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     std::string info_str;
     if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {

@@ -286,8 +286,13 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   // default type
   *type = DOUBLE;
 
-  // convert from entity to flat index
-  uint32_t agent_index = entity_to_prof_map[gpu_field.gpu_index];
+  // look up the profiler agent index for the given flat GPU index
+  auto entity_it = entity_to_prof_map.find(gpu_field.gpu_index);
+  if (entity_it == entity_to_prof_map.end()) {
+    RDC_LOG(RDC_ERROR, "gpu_index=" << gpu_field.gpu_index << " not found in entity_to_prof_map");
+    return RDC_ST_BAD_PARAMETER;
+  }
+  uint32_t agent_index = entity_it->second;
   const auto& field = gpu_field.field_id;
 
   if (data == nullptr) {
@@ -305,10 +310,7 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
     return status;
   }
 
-  // Eval fields are rates over the fixed collection window. Use the configured
-  // sample time instead of wall-clock elapsed so the value is deterministic and
-  // free of sampling overhead. run_profiler() samples eval fields for
-  // collection_duration_us_k.
+  // Divide eval-field rates by the fixed collection window, not wall-clock, for stable values.
   const double sample_time_ms = static_cast<double>(collection_duration_us_k) / 1000.0;
 
   // For OCC_ELAPSED, we need to read the occupancy metric as well
@@ -346,8 +348,14 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
   types.resize(fields.size());
   statuses.resize(fields.size());
 
-  // All fields should be for the same GPU
-  uint32_t agent_index = entity_to_prof_map[fields[0].gpu_index];
+  // All fields share one GPU; look up its profiler agent index (keyed by flat GPU index)
+  auto entity_it = entity_to_prof_map.find(fields[0].gpu_index);
+  if (entity_it == entity_to_prof_map.end()) {
+    RDC_LOG(RDC_ERROR, "gpu_index=" << fields[0].gpu_index << " not found in entity_to_prof_map");
+    statuses.assign(fields.size(), RDC_ST_BAD_PARAMETER);
+    return RDC_ST_BAD_PARAMETER;
+  }
+  uint32_t agent_index = entity_it->second;
 
   // Collect all unique metric names needed for sampling
   std::vector<std::string> metrics_to_sample;
@@ -420,10 +428,7 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
     }
   }
 
-  // Eval fields are rates over the fixed collection window. Divide by the actual
-  // sample window used for this batch (duration_us) instead of wall-clock
-  // elapsed, so the reported value is deterministic and free of sampling
-  // overhead.
+  // Divide eval-field rates by this batch's actual window (duration_us), not wall-clock.
   const double sample_time_ms = static_cast<double>(duration_us) / 1000.0;
 
   // Process results for each field

@@ -114,8 +114,7 @@ class RdcRocpBase {
 
   bool m_is_initialized = false;
 
-  // These fields are rates derived from counters sampled over the fixed
-  // collection window, so they are divided by the sample time (not wall clock).
+  // Rate fields: divided by the sample time (the fixed collection window, not wall clock).
   std::unordered_set<rdc_field_t> eval_fields = {
       RDC_FI_PROF_EVAL_MEM_R_BW,         RDC_FI_PROF_EVAL_MEM_W_BW,
       RDC_FI_PROF_EVAL_FLOPS_16,         RDC_FI_PROF_EVAL_FLOPS_32,
