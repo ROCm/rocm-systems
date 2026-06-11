@@ -124,7 +124,11 @@ def aggregate_pc_sample_records(
     for column in carried:
         aggregations[column] = (column, "first")
 
-    return records_df.groupby(group_by, as_index=False).agg(**aggregations)
+    # dropna=False keeps samples whose kernel_id is unmapped (None) instead of
+    # silently dropping them from the all-kernel view.
+    return records_df.groupby(group_by, as_index=False, dropna=False).agg(
+        **aggregations
+    )
 
 
 def enrich_with_metadata(
