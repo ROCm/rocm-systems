@@ -8,6 +8,6 @@
 namespace profiler_hub::data_storage
 {
 
-template class basic_sqlite_backend<sqlite_api_policy>;
+template class database_backend<sqlite_api_policy>;
 
 }  // namespace profiler_hub::data_storage

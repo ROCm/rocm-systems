@@ -16,7 +16,7 @@ namespace profiler_hub::data_storage
  * Production SQLite policy: forwards every operation to the sqlite3 C API.
  *
  * This struct is the compile-time seam that makes the SQLite C API swappable in
- * basic_sqlite_backend. It is the ONLY production translation unit that includes
+ * database_backend. It is the ONLY production translation unit that includes
  * <sqlite3.h>. Its member names, signatures, associated types, and status
  * constants mirror mocks::mock_sqlite3 exactly so the two are interchangeable as
  * the SqlitePolicy template argument.

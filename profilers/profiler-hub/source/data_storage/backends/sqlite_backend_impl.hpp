@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "basic_sqlite_backend.hpp"
+#include "database_backend.hpp"
 
 #include "debug.hpp"
 #include "directory.hpp"
@@ -151,13 +151,13 @@ namespace profiler_hub::data_storage
 {
 
 template <typename SqlitePolicy>
-std::shared_ptr<basic_sqlite_backend<SqlitePolicy>>
-basic_sqlite_backend<SqlitePolicy>::create(std::string    db_path,
-                                           std::string    uuid,
-                                           storage_mode_t mode)
+std::shared_ptr<database_backend<SqlitePolicy>>
+database_backend<SqlitePolicy>::create(std::string    db_path,
+                                       std::string    uuid,
+                                       storage_mode_t mode)
 {
-    auto backend = std::shared_ptr<basic_sqlite_backend>(
-        new basic_sqlite_backend(std::move(db_path), std::move(uuid), mode));
+    auto backend = std::shared_ptr<database_backend>(
+        new database_backend(std::move(db_path), std::move(uuid), mode));
 
     // discover_uuids() uses create_read_statement_executor which calls
     // shared_from_this(). This must happen after the shared_ptr is fully
@@ -176,9 +176,9 @@ basic_sqlite_backend<SqlitePolicy>::create(std::string    db_path,
 }
 
 template <typename SqlitePolicy>
-basic_sqlite_backend<SqlitePolicy>::basic_sqlite_backend(std::string    db_path,
-                                                         std::string    uuid,
-                                                         storage_mode_t mode)
+database_backend<SqlitePolicy>::database_backend(std::string    db_path,
+                                                 std::string    uuid,
+                                                 storage_mode_t mode)
 : m_db_path{ std::move(db_path) }
 , m_uuid{ std::move(uuid) }
 , m_mode{ mode }
@@ -221,7 +221,7 @@ basic_sqlite_backend<SqlitePolicy>::basic_sqlite_backend(std::string    db_path,
 }
 
 template <typename SqlitePolicy>
-basic_sqlite_backend<SqlitePolicy>::~basic_sqlite_backend()
+database_backend<SqlitePolicy>::~database_backend()
 {
     SqlitePolicy::finalize(m_begin_stmt);
     SqlitePolicy::finalize(m_commit_stmt);
@@ -231,7 +231,7 @@ basic_sqlite_backend<SqlitePolicy>::~basic_sqlite_backend()
 
 template <typename SqlitePolicy>
 std::vector<std::string>
-basic_sqlite_backend<SqlitePolicy>::discover_uuids()
+database_backend<SqlitePolicy>::discover_uuids()
 {
     struct uuid_result
     {
@@ -256,7 +256,7 @@ basic_sqlite_backend<SqlitePolicy>::discover_uuids()
 
 template <typename SqlitePolicy>
 void
-basic_sqlite_backend<SqlitePolicy>::initialize_schema()
+database_backend<SqlitePolicy>::initialize_schema()
 {
     if(m_initialized)
     {
@@ -292,7 +292,7 @@ basic_sqlite_backend<SqlitePolicy>::initialize_schema()
 
 template <typename SqlitePolicy>
 void
-basic_sqlite_backend<SqlitePolicy>::execute(const std::string& query)
+database_backend<SqlitePolicy>::execute(const std::string& query)
 {
     validate_sqlite3_result(
         SqlitePolicy::exec(m_sqlite3, query.c_str()), "Failed to execute query:", query);
@@ -300,7 +300,7 @@ basic_sqlite_backend<SqlitePolicy>::execute(const std::string& query)
 
 template <typename SqlitePolicy>
 void
-basic_sqlite_backend<SqlitePolicy>::flush()
+database_backend<SqlitePolicy>::flush()
 {
     if(m_mode != storage_mode_t::in_memory)
     {

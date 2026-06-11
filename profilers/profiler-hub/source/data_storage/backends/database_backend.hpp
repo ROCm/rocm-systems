@@ -42,8 +42,8 @@ struct bind_types
  * instantiate them directly.
  */
 template <typename SqlitePolicy>
-class basic_sqlite_backend
-: public std::enable_shared_from_this<basic_sqlite_backend<SqlitePolicy>>
+class database_backend
+: public std::enable_shared_from_this<database_backend<SqlitePolicy>>
 {
 public:
     using database_t  = typename SqlitePolicy::database_t;
@@ -55,19 +55,19 @@ public:
     // =========================================================================
     // Opaque statement handle
     //
-    // The deleter captures shared_ptr<basic_sqlite_backend> so the connection
+    // The deleter captures shared_ptr<database_backend> so the connection
     // stays alive until every statement referencing it is destroyed.
     // =========================================================================
     class statement_handle
     {
-        friend class basic_sqlite_backend;
+        friend class database_backend;
 
     public:
         statement_handle() = default;
         explicit operator bool() const noexcept { return m_stmt != nullptr; }
 
     private:
-        statement_handle(statement_t raw, std::shared_ptr<basic_sqlite_backend> owner)
+        statement_handle(statement_t raw, std::shared_ptr<database_backend> owner)
         : m_stmt{ raw, [db = std::move(owner)](statement_t s) {
                      if(db) SqlitePolicy::finalize(s);
                  } }
@@ -83,7 +83,7 @@ public:
     class transaction_guard
     {
     public:
-        explicit transaction_guard(std::shared_ptr<basic_sqlite_backend> backend) noexcept
+        explicit transaction_guard(std::shared_ptr<database_backend> backend) noexcept
         : m_backend{ std::move(backend) }
         , m_uncaught_on_entry{ std::uncaught_exceptions() }
         {
@@ -92,14 +92,10 @@ public:
 
         ~transaction_guard()
         {
-            if(std::uncaught_exceptions() > m_uncaught_on_entry)
-            {
-                run_prepared(m_backend->m_rollback_stmt);
-            }
-            else
-            {
-                run_prepared(m_backend->m_commit_stmt);
-            }
+            auto statement_handle = std::uncaught_exceptions() > m_uncaught_on_entry
+                                        ? m_backend->m_rollback_stmt
+                                        : m_backend->m_commit_stmt;
+            run_prepared(statement_handle);
         }
 
         transaction_guard(const transaction_guard&)            = delete;
@@ -121,8 +117,8 @@ public:
             SqlitePolicy::reset(stmt);
         }
 
-        std::shared_ptr<basic_sqlite_backend> m_backend;
-        int                                   m_uncaught_on_entry;
+        std::shared_ptr<database_backend> m_backend;
+        int                               m_uncaught_on_entry;
     };
 
     // =========================================================================
@@ -134,7 +130,7 @@ public:
     template <typename... Values>
     class prepared_insert_statement
     {
-        friend class basic_sqlite_backend;
+        friend class database_backend;
 
     public:
         prepared_insert_statement() = default;
@@ -154,23 +150,23 @@ public:
         }
 
     private:
-        prepared_insert_statement(std::shared_ptr<basic_sqlite_backend> backend,
-                                  statement_handle                      stmt,
-                                  std::string                           query)
+        prepared_insert_statement(std::shared_ptr<database_backend> backend,
+                                  statement_handle                  stmt,
+                                  std::string                       query)
         : m_backend(std::move(backend))
         , m_stmt(std::move(stmt))
         , m_query(std::move(query))
         {}
 
-        std::shared_ptr<basic_sqlite_backend> m_backend;
-        statement_handle                      m_stmt;
-        std::string                           m_query;
+        std::shared_ptr<database_backend> m_backend;
+        statement_handle                  m_stmt;
+        std::string                       m_query;
     };
 
     // =========================================================================
     // Result set -- replaces statement_result<T>
     //
-    // Captures shared_ptr<basic_sqlite_backend> for lifetime safety.
+    // Captures shared_ptr<database_backend> for lifetime safety.
     // Uses backend's extract_column() for type-safe reading.
     // =========================================================================
     template <typename T>
@@ -178,12 +174,12 @@ public:
     {
     public:
         template <typename... Members>
-        result_set(std::shared_ptr<basic_sqlite_backend> backend,
-                   statement_handle                      stmt,
-                   Members                               T::*... members)
+        result_set(std::shared_ptr<database_backend> backend,
+                   statement_handle                  stmt,
+                   Members                           T::*... members)
         : m_backend{ std::move(backend) }
         , m_stmt{ std::move(stmt) }
-        , m_extractor{ [members...](basic_sqlite_backend& be, statement_t raw, T& obj) {
+        , m_extractor{ [members...](database_backend& be, statement_t raw, T& obj) {
             int pos = 0;
             ((be.extract_column(raw, pos++, obj.*members)), ...);
         } }
@@ -202,9 +198,9 @@ public:
         }
 
     private:
-        std::shared_ptr<basic_sqlite_backend>                       m_backend;
-        statement_handle                                            m_stmt;
-        std::function<void(basic_sqlite_backend&, statement_t, T&)> m_extractor;
+        std::shared_ptr<database_backend>                       m_backend;
+        statement_handle                                        m_stmt;
+        std::function<void(database_backend&, statement_t, T&)> m_extractor;
     };
 
     // =========================================================================
@@ -222,18 +218,18 @@ public:
     // =========================================================================
     // Factory -- enforces shared_ptr creation for enable_shared_from_this
     // =========================================================================
-    static std::shared_ptr<basic_sqlite_backend> create(
+    static std::shared_ptr<database_backend> create(
         std::string    db_path,
         std::string    uuid,
         storage_mode_t mode = storage_mode_t::in_memory);
 
-    ~basic_sqlite_backend();
+    ~database_backend();
 
-    basic_sqlite_backend()                                       = delete;
-    basic_sqlite_backend(const basic_sqlite_backend&)            = delete;
-    basic_sqlite_backend& operator=(const basic_sqlite_backend&) = delete;
-    basic_sqlite_backend(basic_sqlite_backend&&)                 = delete;
-    basic_sqlite_backend& operator=(basic_sqlite_backend&&)      = delete;
+    database_backend()                                   = delete;
+    database_backend(const database_backend&)            = delete;
+    database_backend& operator=(const database_backend&) = delete;
+    database_backend(database_backend&&)                 = delete;
+    database_backend& operator=(database_backend&&)      = delete;
 
     // =========================================================================
     // Schema & admin
@@ -246,7 +242,7 @@ public:
     // =========================================================================
     // Write statement executor
     //
-    // The returned callable captures shared_ptr<basic_sqlite_backend> +
+    // The returned callable captures shared_ptr<database_backend> +
     // statement_handle. Connection stays alive as long as any statement does.
     // =========================================================================
     template <typename... Values>
@@ -281,7 +277,7 @@ private:
     // =========================================================================
     // Private constructor -- use create() factory
     // =========================================================================
-    basic_sqlite_backend(std::string db_path, std::string uuid, storage_mode_t mode);
+    database_backend(std::string db_path, std::string uuid, storage_mode_t mode);
 
     // =========================================================================
     // Statement preparation

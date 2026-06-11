@@ -79,7 +79,7 @@ public:
  * Compile-time SQLite policy backed by a sqlite3_recorder.
  *
  * Intended to be plugged into the templated backend in tests
- * (basic_sqlite_backend<mock_sqlite3>) in place of the production sqlite3
+ * (database_backend<mock_sqlite3>) in place of the production sqlite3
  * policy. Every operation forwards to the recorder bound by the active
  * scoped_bind on this thread; calling an operation with no bound recorder is a
  * test bug and fails fast.

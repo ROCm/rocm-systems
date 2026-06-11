@@ -27,7 +27,7 @@ using ::testing::Return;
 using ::testing::SetArgPointee;
 using ::testing::StrEq;
 
-using mock_backend = basic_sqlite_backend<mock_sqlite3>;
+using mock_backend = database_backend<mock_sqlite3>;
 
 class backend_over_mock_test : public ::testing::Test
 {

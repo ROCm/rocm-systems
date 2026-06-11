@@ -54,7 +54,7 @@ target_include_directories(
 )
 
 # backend_over_mock_test.cpp includes sqlite_backend_impl.hpp directly to
-# instantiate basic_sqlite_backend over the mock policy, so this target needs
+# instantiate database_backend over the mock policy, so this target needs
 # the same schema configuration as profiler-hub-objects (see top-level
 # CMakeLists.txt) for the impl header to resolve the correct branch.
 if(USE_SCHEMA_FROM_ROCPROFILER_SDK_ROCPD)
