@@ -94,7 +94,11 @@ HIP_TEST_CASE(Unit_hipMalloc3D_Basic) {
          << " Available memory before the hipMalloc3D() call (bytes): " << pavail
          << " Available memory after the call: " << iavail
          << " Available memory after hipFree(): " << avail);
+// With ASAN, the hipFree's refcounted release defers the actual release
+// hipMemGetInfo does not yet reflect the expected available memory
+#if !defined(ENABLE_ADDRESS_SANITIZER)
     REQUIRE(false);
+#endif
   }
 }
 
