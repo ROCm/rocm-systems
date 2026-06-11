@@ -68,6 +68,7 @@ def test_gfx1250_profile_enables_generator_backed_quirks():
     assert profile.use_hwreg_helpers
     assert profile.hwreg_wave_sched_mode_id == 26
     assert profile.generate_scaled_wmma_vop3px2
+    assert profile.smem_address_uses_access_size
 
 
 def test_rdna4_profile_keeps_gfx1250_quirks_disabled():
@@ -78,6 +79,7 @@ def test_rdna4_profile_keeps_gfx1250_quirks_disabled():
     assert not profile.use_hwreg_helpers
     assert profile.hwreg_wave_sched_mode_id is None
     assert not profile.generate_scaled_wmma_vop3px2
+    assert not profile.smem_address_uses_access_size
 
 
 def test_packed_16bit_source_gate_is_limited_to_e32_16bit_sources():

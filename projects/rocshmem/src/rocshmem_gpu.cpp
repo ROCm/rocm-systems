@@ -166,7 +166,7 @@ static int copy_device_symbol_to_module(Symbol &builtin_symbol,
   size_t symbol_size {0};
   err = hipModuleGetGlobal(&target, &symbol_size, module, module_symbol_name);
   if (err != hipSuccess) {
-    LOG_ERROR("Failed to get %s symbol from module: %s", 
+    LOG_ERROR("Failed to get %s symbol from module: %s",
               label, hipGetErrorString(err));
     return ROCSHMEM_ERROR;
   }
@@ -207,6 +207,18 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
                                    sizeof(rocshmem_team_t), module, stream,
                                    "ROCSHMEM_TEAM_SHARED") != ROCSHMEM_SUCCESS) {
     return ROCSHMEM_ERROR;
+  }
+  {
+    void *probe{nullptr}; size_t probe_size{0};
+    if (hipModuleGetGlobal(&probe, &probe_size, module,
+                           "_ZN8rocshmem8constmemE") == hipSuccess) {
+      copy_device_symbol_to_module(constmem, "_ZN8rocshmem8constmemE",
+                                   sizeof(constmem_t), module, stream,
+                                   "constmem");
+    } else {
+      LOG_WARN("constmem not in module — module does not use rocshmem "
+               "device APIs that read constmem directly");
+    }
   }
   return ROCSHMEM_SUCCESS;
 }
