@@ -19,7 +19,8 @@ DOCKER_IMAGE="gin-anvil:latest"
 # Derived sizes / shared docker+mpirun settings (expand on host, not inside container).
 MAX_BYTES=$((${NP} * ${MSG_SIZE}))
 # No -it: script is often run over non-interactive SSH.
-DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
+# DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v /boot/config-$(uname -r):/boot/config-$(uname -r):ro "
+DOCKER_GPU="--rm --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged --init "
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
 
@@ -46,7 +47,7 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
   # nm -D /workspace/rccl-tests/alltoall_perf 2>/dev/null | grep anvil || echo 'MISSING anvil symbols'
 "
 
-if [ 0 -eq 1 ]; then
+if [ 1 -eq 1 ]; then
 #####
 # rocSHMEM IPC alltoall (reference)
 echo "=== rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -78,6 +79,32 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
   -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 0 -D 0 -A 1
+fi
+
+if [ 1 -eq 1 ]; then
+#####
+# RCCL AlltoAll: -D 0, (host-initiated, inter-node capable)
+echo "=== RCCL AlltoAll: -D 0, non-GIN (inter-node capable) np=${NP} max_bytes=${MAX_BYTES} ==="
+docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
+  mpirun ${MPIRUN_BASE} \
+  -x ROCSHMEM_BACKEND=ipc \
+  -x ROCSHMEM_DISABLE_MIXED_IPC=1 \
+  -x ROCSHMEM_DEBUG_LEVEL=error:noversion \
+  -x RCCL_ROCSHMEM_ENABLE=0 \
+  -x ROCSHMEM_SDMA_ENABLED=0 \
+  -x ROCSHMEM_GDA_ENABLE_DMABUF=0 \
+  -x RCCL_ROCSHMEM_THRESHOLD=$((128*1024*1024)) \
+  -x NCCL_DEBUG=VERSION \
+  -x NCCL_GIN_ENABLE=1 \
+  -x NCCL_GIN_TYPE=2 \
+  -x NCCL_DEBUG_SUBSYS=INIT,NET \
+  -x NCCL_CUMEM_ENABLE=1 \
+  -x RCCL_ENABLE_INTRANET=0 \
+  -x NCCL_DMABUF_ENABLE=1 \
+  -x NCCL_MSCCL_ENABLE=0 \
+  -x HSA_NO_SCRATCH_RECLAIM=1 \
+  /workspace/rccl-tests/alltoall_perf \
+  -b 128 -e 128M -f 2 -g 1 -R 2 -D 0 -A 1 
 fi
 
 if [ 1 -eq 1 ]; then
