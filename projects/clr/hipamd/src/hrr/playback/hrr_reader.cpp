@@ -212,13 +212,6 @@ bool load_archive(const std::string& path, Archive& archive) {
     const uint16_t etype = ev.header().event_type;
     const uint16_t total = ev.header().payload_length;
 
-    // Clean-shutdown trailer: capture exited normally. It is always the last
-    // record, so stop here and do not add it to the replay event list.
-    if (etype == HRR_EOF_MARKER) {
-      complete = true;
-      break;
-    }
-
     if (total < hdr_size) {
       fprintf(stderr,
               "[HRR] Torn trailing record (payload_length %u < %u) — recovered %zu events\n",
@@ -233,6 +226,18 @@ bool load_archive(const std::string& path, Archive& archive) {
                 "[HRR] Truncated event payload (expected %u bytes) at tail — recovered %zu events\n",
                 pl_size, archive.events.size());
         truncated = true; break;
+      }
+    }
+
+    // Clean-shutdown trailer: full hrr_eof_record with valid magic only.
+    // event_type 0xFFFF alone is not enough — Unit_HRR_Format_UnknownEventType
+    // uses 0xFFFF with header-sized payload as an opaque unknown record.
+    if (etype == HRR_EOF_MARKER &&
+        total == static_cast<uint16_t>(sizeof(hrr_eof_record))) {
+      const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
+      if (er->eof_magic == HRR_EOF_MAGIC) {
+        complete = true;
+        continue;  // do not append trailer as a replay event
       }
     }
 

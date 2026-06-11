@@ -253,10 +253,27 @@ static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
       break;
     }
 
-    if (h.event_type == HRR_EOF_MARKER) {
-      r.had_trailer = true;
-      r.append_at = pos;
-      break;
+    // Valid trailer only if full hrr_eof_record + magic (same rule as hrr_reader).
+    if (h.event_type == HRR_EOF_MARKER &&
+        h.payload_length == static_cast<uint16_t>(sizeof(hrr_eof_record))) {
+      uint64_t total_events = 0;
+      uint32_t eof_magic    = 0;
+      if (fread(&total_events, sizeof(total_events), 1, f) != 1 ||
+          fread(&eof_magic, sizeof(eof_magic), 1, f) != 1) {
+        r.torn_tail = true;
+        r.append_at = pos;
+        break;
+      }
+      if (eof_magic == HRR_EOF_MAGIC) {
+        r.had_trailer = true;
+        r.append_at = pos;
+        break;
+      }
+      // Bogus EOF-shaped record: count it and skip past the bytes we read.
+      r.max_seq = (h.sequence_id > r.max_seq) ? h.sequence_id : r.max_seq;
+      r.count++;
+      r.append_at = static_cast<std::int64_t>(ftell(f));
+      continue;
     }
 
     if (h.payload_length < hdr_size) {
