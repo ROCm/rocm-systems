@@ -3252,11 +3252,7 @@ amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_
  *  @note Sockets are not supported on the @platform{host}.
  *
  *  @note On the @platform{host} this function currently supports only AMD GPUs. To enumerate other
- * devices, such as AMD NICs, use amdsmi_get_processor_handles_by_type().
- *
- *  The number of processor count is returned through @p processor_count
- *  if @p processor_handles is NULL. Then the number of @p processor_count can be pass
- *  as input to retrieval all processors on the socket to @p processor_handles.
+ *  devices, such as AMD NICs, use amdsmi_get_processor_handles_by_type().
  *
  *  @param[in] socket_handle The socket to query
  *
