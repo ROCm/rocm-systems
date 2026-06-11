@@ -11,4 +11,5 @@ Panel Config:
       id: 101
       title: System Info
       source: sysinfo.csv
+      columnwise: true
   metrics_description: {}
