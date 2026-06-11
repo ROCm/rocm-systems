@@ -62,7 +62,7 @@ Selecting single kernel stochastic PC sampling:
    :align: left
    :alt: Stochastic PC sampling snapshot
 
-If you don't filter by kernel, the output will fall back to the original data from ``rocprofiler-sdk`` csv output for all the kernels:
+If you don't filter by kernel, the output shows the aggregated data from ``rocprofiler-sdk`` for all the kernels:
 
 .. image:: ../data/pc_sampling/pc_sampling_no_kernel_filtering.png
    :align: left

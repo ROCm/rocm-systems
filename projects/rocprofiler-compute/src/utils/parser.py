@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import pandas as pd
 
 from utils import schema
-from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
@@ -394,42 +394,6 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     return df
 
 
-def find_key_recursively(
-    data: Union[dict, list], search_key: str
-) -> Union[list, dict, None]:
-    """
-    Recursively search for the search_key in the given data
-    (which can be a dict or list).
-    If the key is found, returns the value as a DataFrame.
-    """
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if key == search_key:
-                return value
-            elif isinstance(value, (dict, list)):
-                result = find_key_recursively(value, search_key)
-                if result:
-                    return result
-    elif isinstance(data, list):
-        for item in data:
-            result = find_key_recursively(item, search_key)
-            if result:
-                return result
-    return None  # Return None if the key was not found
-
-
-def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, None]:
-    # FIXME:
-    #   Load the entire JSON into memory.
-    #   Should not use for large file.
-    with open(file_path, encoding="utf-8") as file:
-        data = json.load(file)
-        found = find_key_recursively(data, search_key)
-        if found is None:
-            console_error(f'Key "{search_key}" not found in the JSON file.')
-        return found
-
-
 def search_pc_sampling_record(
     records: Union[list[dict], dict],
 ) -> Optional[list[tuple]]:
@@ -557,21 +521,19 @@ def search_pc_sampling_record(
 @demarcate
 def load_pc_sampling_data_per_kernel(
     method: str,
-    file_name: Path,
-    csv_file_name: Path,
+    tool_data: dict[str, Any],
     kernel_name: str,
     sorting_type: str,
 ) -> pd.DataFrame:
     """
-    Load PC sampling raw data from json file with given method and kernel name,
-    count pc sampling and sort it in the order of compiled asm and associate with
-    kernel source code if available,
-    then return df.
+    Count and sort PC sampling data for a single kernel from a parsed
+    ``rocprofiler-sdk-tool`` record, ordering by compiled asm and
+    associating with kernel source code if available, then return df.
 
     :param method: "host_trap" or "stochastic".
     :type method: str
-    :param file_name: The pc sampling json file.
-    :type file_name: Path
+    :param tool_data: The parsed ``rocprofiler-sdk-tool[0]`` dict.
+    :type tool_data: dict
     :param kernel_name: The kernel name to be filtered out.
     :type kernel_name: str
     :param sorting_type: "offset" or "count".
@@ -579,33 +541,32 @@ def load_pc_sampling_data_per_kernel(
     :return: The counted and reordering pc sampling info.
     :rtype: pd.DataFrame:
     """
-    # Load kernel trace CSV with kernel info
-    kernel_trace_df = pd.read_csv(
-        csv_file_name, usecols=["Dispatch_Id", "Kernel_Id", "Kernel_Name"]
-    )
-    console_debug(
-        f"PC sampling: loaded kernel trace with {len(kernel_trace_df)} entries"
-    )
+    buffer_records = tool_data["buffer_records"]
 
-    # Filter kernels matching requested kernel_name
-    matching_kernels = kernel_trace_df[kernel_trace_df["Kernel_Name"] == kernel_name]
-    if matching_kernels.empty:
-        console_warning(f"PC sampling: cannot find kernel '{kernel_name}' in CSV")
+    # Map dispatch_id -> kernel_id (kernel dispatch records) and
+    # kernel_id -> kernel name (kernel symbols). A single code object can
+    # hold many kernels, so dispatch_id is the reliable kernel attribution.
+    kernel_id_to_name = {
+        symbol["kernel_id"]: symbol["formatted_kernel_name"]
+        for symbol in tool_data["kernel_symbols"]
+    }
+    dispatch_to_kernel_id = {
+        dispatch["dispatch_info"]["dispatch_id"]: dispatch["dispatch_info"]["kernel_id"]
+        for dispatch in buffer_records["kernel_dispatch"]
+    }
+
+    if kernel_name not in kernel_id_to_name.values():
+        console_warning(f"PC sampling: cannot find kernel '{kernel_name}'")
         return pd.DataFrame()
 
-    # Extract raw PC sampling records from JSON
-    pc_sample_key_loc = (
-        search_key_in_json(file_name, "pc_sample_host_trap")
-        if method == "host_trap"
-        else search_key_in_json(file_name, "pc_sample_stochastic")
-    )
-
-    if not pc_sample_key_loc:
-        console_warning("PC sampling: can not find pc sample.")
-        return pd.DataFrame()
+    pc_samples = buffer_records[
+        "pc_sample_host_trap" if method == "host_trap" else "pc_sample_stochastic"
+    ]
+    if not pc_samples:
+        console_error("PC sampling: can not find pc sample.")
 
     # Get processed sampling data grouped by (code_object_id, offset, inst_index)
-    records = search_pc_sampling_record(pc_sample_key_loc)
+    records = search_pc_sampling_record(pc_samples)
     if not records:
         console_warning("PC sampling: no records found in PC sampling data.")
         return pd.DataFrame()
@@ -639,14 +600,9 @@ def load_pc_sampling_data_per_kernel(
         console_warning("PC sampling: no records found after flattening dispatch IDs.")
         return df
 
-    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
-    dispatch_to_kernel = kernel_trace_df.set_index("Dispatch_Id")[
-        ["Kernel_Id", "Kernel_Name"]
-    ]
-
-    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
-    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Id"])
-    df["kernel_name"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Name"])
+    # Map dispatch_id to kernel info (kernel_id and kernel_name)
+    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel_id)
+    df["kernel_name"] = df["kernel_id"].map(kernel_id_to_name)
 
     # Drop dispatch_id
     df.drop(columns=["dispatch_id"], inplace=True)
@@ -683,36 +639,21 @@ def load_pc_sampling_data_per_kernel(
     # Filter DataFrame to only include rows matching the requested kernel_name
     df = df[df["kernel_name"] == kernel_name]
 
-    # Convert offset column to hex string for display, keep original numeric for sorting
-    df["offset"] = df["offset"].apply(lambda x: hex(x))
+    # Instruction disassembly and source-line comments are indexed by inst_index.
+    instructions = tool_data["strings"]["pc_sample_instructions"]
+    comments = tool_data["strings"]["pc_sample_comments"]
+    if not instructions or not comments:
+        console_error("PC sampling: instruction or comment string table is empty.")
 
-    # Load PC sampling instructions from JSON (if available)
-    pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
-    df["instruction"] = (
-        df["inst_index"].apply(
-            lambda x: (
-                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
-            )
-        )
-        if pc_sample_instructions
-        else None
+    df["instruction"] = df["inst_index"].apply(
+        lambda x: instructions[x] if x < len(instructions) else None
+    )
+    df["source_line"] = df["inst_index"].apply(
+        lambda x: f".../{Path(comments[x]).name}" if x < len(comments) else None
     )
 
-    # Load source code comments (if available)
-    pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
-    df["source_line"] = (
-        df["inst_index"].apply(
-            lambda x: (
-                f".../{Path(pc_sample_comments[x]).name}"
-                if x < len(pc_sample_comments)
-                else None
-            )
-        )
-        if pc_sample_comments
-        else None
-    )
-
-    # Sorting and returning relevant columns depending on method and sorting_type
+    # Sort on the numeric offset (lexicographic hex order is wrong), then
+    # format offset as hex for display.
     if sorting_type == "offset":
         df_sorted = df.sort_values(by=["code_object_id", "offset"])
     elif sorting_type == "count":
@@ -722,6 +663,8 @@ def load_pc_sampling_data_per_kernel(
             'Error: pc sampling sorting_type must be either "offset" or "count".'
         )
         return pd.DataFrame()
+
+    df_sorted["offset"] = df_sorted["offset"].apply(hex)
 
     columns_to_return = (
         [
@@ -750,87 +693,38 @@ def load_pc_sampling_data_per_kernel(
 
 @demarcate
 def load_pc_sampling_data(
-    workload: schema.Workload, dir_path: str, file_prefix: str, sorting_type: str
+    workload: schema.Workload,
+    dir_path: str,
+    file_prefix: str,
+    sorting_type: str,
+    tool_data: Optional[dict[str, Any]] = None,
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data, filter and sort it by specified conditions,
     then return df.
+
+    *tool_data* is a parsed ``rocprofiler-sdk-tool[0]`` dict. When omitted
+    the (potentially multi-GB) results json is parsed from *dir_path*;
+    callers that already hold the parsed data should pass it to avoid
+    re-reading the file.
     """
 
     if not file_prefix or file_prefix.lower() == "none":
         return pd.DataFrame()
 
-    pc_sampling_method = None
+    if tool_data is None:
+        json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
+        if not json_file_path.exists():
+            console_warning(f"PC sampling: can not read {json_file_path}")
+            return pd.DataFrame()
+        with json_file_path.open(encoding="utf-8") as json_file:
+            tool_data = json.load(json_file)["rocprofiler-sdk-tool"][0]
 
-    # NB:
-    #  - The default file name is subject to changes from rocprofv3
-    #  - Prioritize stochastic
-    #  - Alternatively, we could check pc_sampling_method in json
-    stochastic_path = Path(dir_path) / f"{file_prefix}_pc_sampling_stochastic.csv"
-    host_trap_path = Path(dir_path) / f"{file_prefix}_pc_sampling_host_trap.csv"
-    json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
-    csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
-
-    if not csv_kernel_trace_file_path.exists():
-        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
-        return pd.DataFrame()
-
-    if stochastic_path.exists():
-        pc_sampling_method = "stochastic"
-        csv_file_path = stochastic_path
-    elif host_trap_path.exists():
-        pc_sampling_method = "host_trap"
-        csv_file_path = host_trap_path
-    else:
-        console_warning(
-            f"PC sampling: can not detect pc sampling method for {file_prefix}"
-        )
-        return pd.DataFrame()
-
-    # No kernel filter, return grouped and sorted csv dir_pathectly
+    # No kernel filter: aggregate samples across all kernels by source line.
     if not workload.filter_kernel_ids:
-        # Load instruction CSV
-        df = pd.read_csv(csv_file_path)
+        return _load_pc_sampling_no_filter_data(tool_data)
 
-        # Load kernel trace CSV
-        kernel_trace_df = pd.read_csv(csv_kernel_trace_file_path)
-
-        # Merge on Correlation_Id (instruction CSV) and Dispatch_Id (kernel trace CSV)
-        merged_df = df.merge(
-            kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
-            how="left",
-            left_on="Correlation_Id",
-            right_on="Dispatch_Id",
-        )
-
-        # Group by Instruction_Comment and aggregate
-        grouped_counts = (
-            merged_df
-            .groupby("Instruction_Comment")
-            .agg(
-                count=("Instruction_Comment", "count"),
-                instruction=("Instruction", "first"),
-                Kernel_Id=("Kernel_Id", "first"),
-                Kernel_Name=("Kernel_Name", "first"),
-            )
-            .reset_index()
-            .rename(columns={"Instruction_Comment": "source_line"})
-        )
-        grouped_counts = grouped_counts[
-            [
-                "source_line",
-                "Kernel_Name",
-                "instruction",
-                "count",
-            ]
-        ]
-        grouped_counts["source_line"] = grouped_counts["source_line"].apply(
-            lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
-        )
-
-        return grouped_counts.sort_values(by="count", ascending=False)
-
-    elif len(workload.filter_kernel_ids) > 1:
+    if len(workload.filter_kernel_ids) > 1:
         console_error(
             "PC sampling supports single kernel only! Please specify -k with "
             "single kernel.",
@@ -838,33 +732,113 @@ def load_pc_sampling_data(
         )
         return pd.DataFrame()
 
-    elif len(workload.filter_kernel_ids) == 1:
-        if not json_file_path.exists():
-            console_warning(f"PC sampling: can not read {json_file_path}")
-            return pd.DataFrame()
-        else:
-            kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-            kernel_index = workload.filter_kernel_ids[0]
-
-            if kernel_index >= len(kernel_top_df):
-                console_warning(
-                    f"Kernel index {kernel_index} is out of bounds. "
-                    f"kernel_top table has only {len(kernel_top_df)} rows."
-                )
-                return pd.DataFrame()
-
-            kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
-
-            return load_pc_sampling_data_per_kernel(
-                pc_sampling_method,
-                json_file_path,
-                csv_kernel_trace_file_path,
-                kernel_name,
-                sorting_type,
-            )
-    else:
-        console_warning("PC sampling: No data")
+    # Exactly one kernel filter.
+    kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+    kernel_index = workload.filter_kernel_ids[0]
+    if kernel_index >= len(kernel_top_df):
+        console_warning(
+            f"Kernel index {kernel_index} is out of bounds. "
+            f"kernel_top table has only {len(kernel_top_df)} rows."
+        )
         return pd.DataFrame()
+
+    pc_sampling_method = _detect_pc_sampling_method(tool_data)
+    if pc_sampling_method is None:
+        console_warning(
+            f"PC sampling: can not detect pc sampling method for {file_prefix}"
+        )
+        return pd.DataFrame()
+
+    kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
+    return load_pc_sampling_data_per_kernel(
+        pc_sampling_method,
+        tool_data,
+        kernel_name,
+        sorting_type,
+    )
+
+
+def _detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
+    """Detect the PC sampling method from the populated buffer record array.
+
+    Prioritizes stochastic over host_trap. Returns None when neither
+    array holds any samples.
+    """
+    buffer_records = tool_data["buffer_records"]
+    if buffer_records["pc_sample_stochastic"]:
+        return "stochastic"
+    if buffer_records["pc_sample_host_trap"]:
+        return "host_trap"
+    return None
+
+
+def _load_pc_sampling_no_filter_data(tool_data: dict[str, Any]) -> pd.DataFrame:
+    """Aggregate all-kernel PC samples by source line.
+
+    Kernel name is resolved per sample via dispatch_id (dispatch -> kernel_id
+    -> name), so kernels that share a code object are attributed correctly.
+    """
+    buffer_records = tool_data["buffer_records"]
+    samples = (
+        buffer_records["pc_sample_stochastic"] + buffer_records["pc_sample_host_trap"]
+    )
+    instructions = tool_data["strings"]["pc_sample_instructions"]
+    comments = tool_data["strings"]["pc_sample_comments"]
+    if not instructions or not comments:
+        console_error("PC sampling: instruction or comment string table is empty.")
+    kernel_id_to_name = {
+        symbol["kernel_id"]: symbol["formatted_kernel_name"]
+        for symbol in tool_data["kernel_symbols"]
+    }
+    dispatch_to_kernel_id = {
+        dispatch["dispatch_info"]["dispatch_id"]: dispatch["dispatch_info"]["kernel_id"]
+        for dispatch in buffer_records["kernel_dispatch"]
+    }
+
+    # Correlate each sample to its kernel through the dispatch it belongs to:
+    # record.dispatch_id -> kernel_id -> formatted name. code_object_id is not
+    # usable here because one code object can hold several kernels.
+    rows = [
+        {
+            "source_line": (
+                comments[sample["inst_index"]]
+                if sample["inst_index"] < len(comments)
+                else None
+            ),
+            "instruction": (
+                instructions[sample["inst_index"]]
+                if sample["inst_index"] < len(instructions)
+                else None
+            ),
+            "Kernel_Name": kernel_id_to_name.get(
+                dispatch_to_kernel_id.get(sample["record"]["dispatch_id"])
+            ),
+        }
+        for sample in samples
+    ]
+
+    # Aggregate per source line: count is the number of samples on that line.
+    # instruction and Kernel_Name take a representative (first) value, since one
+    # source line can map to several instructions.
+    df = pd.DataFrame(rows, columns=["source_line", "instruction", "Kernel_Name"])
+    grouped_counts = (
+        df
+        .groupby("source_line")
+        .agg(
+            count=("source_line", "count"),
+            instruction=("instruction", "first"),
+            Kernel_Name=("Kernel_Name", "first"),
+        )
+        .reset_index()
+    )
+    grouped_counts = grouped_counts[
+        ["source_line", "Kernel_Name", "instruction", "count"]
+    ]
+    grouped_counts["source_line"] = grouped_counts["source_line"].apply(
+        lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
+    )
+
+    return grouped_counts.sort_values(by="count", ascending=False)
 
 
 def nullify_unevaluated_metric_values(
@@ -892,7 +866,10 @@ def nullify_unevaluated_metric_values(
 
 @demarcate
 def load_non_mertrics_table(
-    workload: schema.Workload, dir_path: str, args: argparse.Namespace
+    workload: schema.Workload,
+    dir_path: str,
+    args: argparse.Namespace,
+    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
 ) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
@@ -936,6 +913,7 @@ def load_non_mertrics_table(
                 dir_path,
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
+                tool_data=pc_sampling_tool_data,
             )
 
     workload.dfs.update(tmp)
