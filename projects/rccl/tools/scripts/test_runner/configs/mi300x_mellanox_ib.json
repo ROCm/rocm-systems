@@ -1063,6 +1063,11 @@
             "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
             "NCCL_IB_MERGE_NICS": "1"
           }
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqSynthFatal",
+          "description": "CAST ops-overload: poll_cq shim synthesizes a non-whitelisted REM_ACCESS_ERR completion; fatal/non-recoverable",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqSynthFatal"
         }
       ]
     },
