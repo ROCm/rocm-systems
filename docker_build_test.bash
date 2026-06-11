@@ -22,7 +22,7 @@ DOCKER_IMAGE="gin-anvil:latest"
 MAX_BYTES=$((${NP} * ${MSG_SIZE}))
 # No -it: script is often run over non-interactive SSH.
 # --init: PID 1 reaps children so ranks exit more cleanly (reduces NCCL IPC/socket teardown WARNs).
-DOCKER_GPU="--rm --init --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v /boot/config-$(uname -r):/boot/config-$(uname -r):ro  -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so   -v /usr/include/infiniband/bnxt_re_dv.h:/usr/include/infiniband/bnxt_re_dv.h   -v /usr/include/infiniband/bnxt_re_hsi.h:/usr/include/infiniband/bnxt_re_hsi.h   -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so   -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/local/lib/libbnxt_re-rdmav34.so rccl-gingda713"
+DOCKER_GPU="--rm --init --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
 HFILE="my_hostfile"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
