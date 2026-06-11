@@ -76,6 +76,8 @@ struct agent_output_buffer_t
     std::condition_variable reorder_cv{};
     uint64_t                next_expected_chunk{0};
 
+    std::vector<size_t> end_chunks{};
+
     static constexpr size_t BUFFER_SIZE = 256ul << 20;
 };
 
@@ -142,6 +144,9 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
         {
             auto lk = std::unique_lock{agent_output_buffer->reorder_mut};
             agent_output_buffer->next_expected_chunk = chunk_index + 1;
+
+            if (shader_data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
+                agent_output_buffer->end_chunks.push_back(location + data_size);
         }
         agent_output_buffer->reorder_cv.notify_all();
     };
@@ -266,20 +271,24 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         size_t total_size = 0;
         for(auto& output_buffer : *agent_buffers)
         {
-            uint32_t current_sdata = 0;
+            auto     lk            = std::unique_lock{output_buffer.reorder_mut};
             auto&    buffer        = output_buffer.output_buffer;
             size_t   output_size   = std::min(output_buffer.output_size.exchange(0), buffer.size());
-            rocprofiler_trace_decode(decoder, parse, buffer.data(), output_size, &current_sdata);
+
+            size_t current_byte = 0;
+            for (auto& end_byte : output_buffer.end_chunks)
+            {
+                uint32_t current_sdata = 0;
+                char*    ptr           = buffer.data() + current_byte;
+                size_t   cur_size      = std::min(end_byte, output_size) - current_byte;
+
+                rocprofiler_trace_decode(decoder, parse, ptr, cur_size, &current_sdata);
+                current_byte = end_byte;
+            }
             total_size += output_size;
 
-            // Reset reorder state so the next start_context cycle (whose
-            // chunk_index restarts at 0) lands in the correct slot. The
-            // producer/consumer threads have been stopped above, so no
-            // callback can be in flight here.
-            {
-                std::lock_guard<std::mutex> lk(output_buffer.reorder_mut);
-                output_buffer.next_expected_chunk = 0;
-            }
+            output_buffer.next_expected_chunk = 0;
+            output_buffer.end_chunks = {};
         }
 
         static bool ignore_size = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
