@@ -4,7 +4,6 @@
 #pragma once
 
 #include "backends/rocprofiler_sdk/types.hpp"
-#include "common/defines.h"
 #include <cstdint>
 
 #include <cstddef>

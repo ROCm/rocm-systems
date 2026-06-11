@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "backends/rocprofiler_sdk/tests/mock_backend.hpp"
 #include "library/pmc/collectors/base/collector.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/gpu_perf_counter_traits.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/device_providers/rocprofiler_sdk/provider.hpp"
+#include "mock_backend.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

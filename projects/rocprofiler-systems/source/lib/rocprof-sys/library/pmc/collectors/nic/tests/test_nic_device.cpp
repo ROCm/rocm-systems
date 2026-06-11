@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "backends/amd_smi/tests/mock_nic_backend.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
+#include "mock_nic_backend.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

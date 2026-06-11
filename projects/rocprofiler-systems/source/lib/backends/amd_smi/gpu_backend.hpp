@@ -4,7 +4,7 @@
 #pragma once
 
 #include "backends/amd_smi/gpu_types.hpp"
-#include "core/sdma_feature.hpp"
+#include "backends/amd_smi/sdma_feature.hpp"
 
 #include <algorithm>
 #include <cstdint>

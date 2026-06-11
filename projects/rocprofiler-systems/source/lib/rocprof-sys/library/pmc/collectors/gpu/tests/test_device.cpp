@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "backends/amd_smi/tests/mock_gpu_backend.hpp"
 #include "library/pmc/collectors/gpu/device.hpp"
+#include "mock_gpu_backend.hpp"
 #include <cstdint>
 
 #include <gmock/gmock.h>

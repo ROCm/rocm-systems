@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "backends/procfs/tests/mock_backend.hpp"
 #include "library/pmc/collectors/cpu/device.hpp"
+#include "mock_backend.hpp"
 #include <cstdint>
 
 #include <gmock/gmock.h>

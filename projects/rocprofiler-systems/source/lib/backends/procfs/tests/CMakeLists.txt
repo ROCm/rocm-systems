@@ -5,10 +5,7 @@ add_library(procfs-backend-tests OBJECT test_backend.cpp test_backend_parsing.cp
 
 target_link_libraries(
     procfs-backend-tests
-    PUBLIC
-        rocprofiler-systems::rocprofiler-systems-procfs-backend
-        rocprofiler-systems-googletest-library
-        rocprofiler-systems-logger
+    PUBLIC rocprofiler-systems-googletest-library rocprofiler-systems-logger
 )
 
 target_include_directories(

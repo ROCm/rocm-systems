@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/sdma_feature.hpp"
+#include "backends/amd_smi/sdma_feature.hpp"
 
 #include <concepts>
 #include <cstdint>
