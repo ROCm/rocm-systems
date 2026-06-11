@@ -55,8 +55,6 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
         "21",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     workload_dir = common.get_output_dir()
@@ -182,8 +180,6 @@ def test_multi_rank_warning_pc_sampling_with_counters(
         "2",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
@@ -317,8 +313,6 @@ def test_pc_sampling_with_sol_block(
         "2",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     workload_dir = common.get_output_dir()
