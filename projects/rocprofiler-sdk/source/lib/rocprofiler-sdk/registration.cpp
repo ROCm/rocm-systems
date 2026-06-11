@@ -1561,6 +1561,26 @@ rocprofiler_set_api_table(const char* name,
         auto* roctx_ctrl = static_cast<roctxControlApiTable_t*>(tables[1]);
         auto* roctx_name = static_cast<roctxNameApiTable_t*>(tables[2]);
 
+        // needed for anytime initialization. If this is the first time the dispatch table is passed
+        // to rocprofiler-sdk, this is a no-op. If a tool late initializes after another tool has
+        // already initialized, this restores the dispatch table to the original function pointers
+        // so the ensuing modifications based one the new and existing contexts are made. In this
+        // late initialization scenario, after this function runs, any function calls to this API
+        // happening on a background thread will be lost. We expect this to be a very rare scenario
+        // but the alternatives are quite complex or problematic: (A) we always instrument every
+        // layer of the dispatch table even if there are no (current) tools requesting those
+        // services, (B) we allow the layering to be in different orders, or (C) we have a very
+        // complex system which maintains the consistent ordering of the layers but only does
+        // restoration on the functions which are layered. Solution A has overhead implications,
+        // especially at the HSA layer; Solution B has unknown side-effects and cannot be adequately
+        // tested due to the sheer number of possible permutations; and Solution C has complexity
+        // and maintainability implications. Given the expected rarity of late initialization while
+        // another tool is active and making API calls on a background thread, we chose to accept
+        // the potential loss of some API calls.
+        rocprofiler::marker::restore_table(roctx_core, lib_instance);
+        rocprofiler::marker::restore_table(roctx_ctrl, lib_instance);
+        rocprofiler::marker::restore_table(roctx_name, lib_instance);
+
         // any internal modifications to the roctxApiTable_t need to be done before we make
         // the copy or else those modifications will be lost when ROCTx tracing is enabled because
         // the ROCTx tracing invokes the function pointers from the copy below
@@ -1645,6 +1665,25 @@ rocprofiler_set_api_table(const char* name,
 #endif
         if(is_valid_rccl_dispatch_table)
         {
+            // needed for anytime initialization. If this is the first time the dispatch table is
+            // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+            // tool has already initialized, this restores the dispatch table to the original
+            // function pointers so the ensuing modifications based one the new and existing
+            // contexts are made. In this late initialization scenario, after this function runs,
+            // any function calls to this API happening on a background thread will be lost. We
+            // expect this to be a very rare scenario but the alternatives are quite complex or
+            // problematic: (A) we always instrument every layer of the dispatch table even if there
+            // are no (current) tools requesting those services, (B) we allow the layering to be in
+            // different orders, or (C) we have a very complex system which maintains the consistent
+            // ordering of the layers but only does restoration on the functions which are layered.
+            // Solution A has overhead implications, especially at the HSA layer; Solution B has
+            // unknown side-effects and cannot be adequately tested due to the sheer number of
+            // possible permutations; and Solution C has complexity and maintainability
+            // implications. Given the expected rarity of late initialization while another tool is
+            // active and making API calls on a background thread, we chose to accept the potential
+            // loss of some API calls.
+            rocprofiler::rccl::restore_table(rccl_api, lib_instance);
+
             // any internal modifications to the rcclApiFuncTable need to be done before we make
             // the copy or else those modifications will be lost when RCCL API tracing is
             // enabled because the RCCL API tracing invokes the function pointers from the copy
@@ -1675,6 +1714,25 @@ rocprofiler_set_api_table(const char* name,
 
         auto* rocdecode_api = static_cast<RocDecodeDispatchTable*>(tables[0]);
 
+        // needed for anytime initialization. If this is the first time the dispatch table is
+        // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+        // tool has already initialized, this restores the dispatch table to the original
+        // function pointers so the ensuing modifications based one the new and existing
+        // contexts are made. In this late initialization scenario, after this function runs,
+        // any function calls to this API happening on a background thread will be lost. We
+        // expect this to be a very rare scenario but the alternatives are quite complex or
+        // problematic: (A) we always instrument every layer of the dispatch table even if there
+        // are no (current) tools requesting those services, (B) we allow the layering to be in
+        // different orders, or (C) we have a very complex system which maintains the consistent
+        // ordering of the layers but only does restoration on the functions which are layered.
+        // Solution A has overhead implications, especially at the HSA layer; Solution B has
+        // unknown side-effects and cannot be adequately tested due to the sheer number of
+        // possible permutations; and Solution C has complexity and maintainability
+        // implications. Given the expected rarity of late initialization while another tool is
+        // active and making API calls on a background thread, we chose to accept the potential
+        // loss of some API calls.
+        rocprofiler::rocdecode::restore_table(rocdecode_api, lib_instance);
+
         // any internal modifications to the rocdecodeApiFuncTable need to be done before we make
         // the copy or else those modifications will be lost when ROCDecode API tracing is enabled
         // because the ROCDecode API tracing invokes the function pointers from the copy below
@@ -1697,6 +1755,25 @@ rocprofiler_set_api_table(const char* name,
             << "rocprofiler expected rocJPEG library to pass 1 API table, not " << num_tables;
 
         auto* rocjpeg_api = static_cast<RocJpegDispatchTable*>(tables[0]);
+
+        // needed for anytime initialization. If this is the first time the dispatch table is
+        // passed to rocprofiler-sdk, this is a no-op. If a tool late initializes after another
+        // tool has already initialized, this restores the dispatch table to the original
+        // function pointers so the ensuing modifications based one the new and existing
+        // contexts are made. In this late initialization scenario, after this function runs,
+        // any function calls to this API happening on a background thread will be lost. We
+        // expect this to be a very rare scenario but the alternatives are quite complex or
+        // problematic: (A) we always instrument every layer of the dispatch table even if there
+        // are no (current) tools requesting those services, (B) we allow the layering to be in
+        // different orders, or (C) we have a very complex system which maintains the consistent
+        // ordering of the layers but only does restoration on the functions which are layered.
+        // Solution A has overhead implications, especially at the HSA layer; Solution B has
+        // unknown side-effects and cannot be adequately tested due to the sheer number of
+        // possible permutations; and Solution C has complexity and maintainability
+        // implications. Given the expected rarity of late initialization while another tool is
+        // active and making API calls on a background thread, we chose to accept the potential
+        // loss of some API calls.
+        rocprofiler::rocjpeg::restore_table(rocjpeg_api, lib_instance);
 
         // any internal modifications to the rocjpegApiFuncTable need to be done before we make
         // the copy or else those modifications will be lost when rocJPEG API tracing is enabled
