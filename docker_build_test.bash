@@ -20,9 +20,13 @@ DOCKER_IMAGE="gin-anvil:latest"
 
 # Derived sizes / shared docker+mpirun settings (expand on host, not inside container).
 MAX_BYTES=$((${NP} * ${MSG_SIZE}))
+# rocSHMEM symmetric heap is per PE (GPU). Large -v MAX_BYTES needs headroom (default heap is 1 GiB/pe).
+ROCSHMEM_HEAP_BYTES=$(( MAX_BYTES * 3 ))
+if (( ROCSHMEM_HEAP_BYTES < 2147483648 )); then ROCSHMEM_HEAP_BYTES=2147483648; fi   # min 2 GiB/pe
+if (( ROCSHMEM_HEAP_BYTES > 6442450944 )); then ROCSHMEM_HEAP_BYTES=6442450944; fi   # cap 6 GiB/pe
 # No -it: script is often run over non-interactive SSH.
 # --init: PID 1 reaps children so ranks exit more cleanly (reduces NCCL IPC/socket teardown WARNs).
-DOCKER_GPU="--rm --init --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
+DOCKER_GPU="--rm --init --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged "
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
 HFILE="my_hostfile"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
@@ -63,7 +67,7 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
   echo '=== workspace ==='
   pwd
   ls -la /workspace 2>/dev/null || true
-  cat /workspace/my_hostfile 
+  cat /workspace/my_hostfile 2>/dev/null || true
   ls -la /workspace/rocshmem/bin 2>/dev/null || true
   ls -la /workspace/rccl/lib 2>/dev/null || true
   ls -la /workspace/rccl-tests/alltoall_perf 2>/dev/null || true
@@ -74,13 +78,13 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
 if [ 1 -eq 1 ]; then
 #####
 # rocSHMEM IPC alltoall (reference)
-echo "=== rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ==="
+echo "=== rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
   -x ROCSHMEM_TEST_UUID=1 \
   -x ROCSHMEM_BACKEND=ipc \
   -x ROCSHMEM_SDMA_ENABLED=1 \
-  -x ROCSHMEM_HEAP_SIZE=$((1*1024*1024*1024)) \
+  -x ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} \
   -x ROCSHMEM_DEBUG_LEVEL=info:noversion \
   /workspace/rocshmem/bin/rocshmem_functional_tests \
   -a 19 -w 1 -z 256 -v ${MAX_BYTES} -n 100 -noverif
@@ -137,7 +141,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x ROCSHMEM_BACKEND=ipc \
-  -x ROCSHMEM_HEAP_SIZE=1073741824 \
+  -x ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} \
   -x ROCSHMEM_SDMA_ENABLED=1 \
   -x NCCL_GIN_TYPE=4 \
   -x NCCL_DEBUG=VERSION \
@@ -162,7 +166,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x ROCSHMEM_BACKEND=ipc \
-  -x ROCSHMEM_HEAP_SIZE=1073741824 \
+  -x ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} \
   -x ROCSHMEM_SDMA_ENABLED=1 \
   -x NCCL_GIN_TYPE=4 \
   -x NCCL_DEBUG_SUBSYS=INIT \
