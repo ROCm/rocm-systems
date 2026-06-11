@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -47,10 +48,8 @@
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
@@ -220,7 +219,7 @@ void
 metadata_initialize_thread_info(size_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -237,7 +236,7 @@ void
 metadata_initialize_track(std::int64_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
@@ -295,7 +294,7 @@ cache_sampling_data(std::int64_t                               _tid,
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
@@ -567,6 +566,19 @@ start_duration_thread()
                 }
                 else if(_finalized)
                 {
+                    if(_premature)
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds was "
+                                 "interrupted by finalization. Shutting down "
+                                 "sampling...",
+                                 config::get_sampling_duration());
+                    }
+                    else
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds has "
+                                 "elapsed. Shutting down sampling...",
+                                 config::get_sampling_duration());
+                    }
                     break;
                 }
                 else
@@ -597,7 +609,7 @@ get_offload_file()
         if(get_use_tmp_files())
         {
             auto _success = _tmp_v->open();
-            if(get_is_continuous_integration() && !_success)
+            if(!_success)
             {
                 LOG_CRITICAL("Error opening sampling offload temporary file '{}'",
                              _tmp_v->filename);
@@ -1202,8 +1214,7 @@ post_process()
                       _raw_data.size());
         }
 
-        if(get_is_continuous_integration() &&
-           _sampler->get_sample_count() != _raw_data.size())
+        if(_sampler->get_sample_count() != _raw_data.size())
         {
             throw std::runtime_error(fmt::format(
                 "Error! sampler recorded {} samples but {} samples were returned",
@@ -1412,7 +1423,7 @@ post_process_perfetto(std::int64_t                               _tid,
     }
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", _tid));
     }
@@ -1927,15 +1938,40 @@ struct sampling_initialization
 void
 postfork_parent_reinit()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_parent_reinit();
+    }
 }
 
 void
 postfork_child_cleanup()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_child_cleanup();
+    }
+}
+
+void
+prefork_lock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::prefork_lock_sampler();
+}
+
+void
+postfork_parent_unlock_pmc_sampler()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_parent_unlock_sampler();
+}
+
+void
+postfork_child_reset_pmc_sampler_lock()
+{
+    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+        pmc::postfork_child_reset_sampler_lock();
 }
 
 void

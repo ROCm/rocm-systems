@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2022-2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include <stdlib.h>
 #include <string.h>
@@ -15,14 +16,14 @@
 
 #define MAX_STR_LEN 255
 
-#define NUM_LIBS 3
+#define NUM_LIBS 5
 static char* libNames[NUM_LIBS];
 char* ncclPluginLibPaths[NUM_LIBS];
 static void *libHandles[NUM_LIBS];
-static const char *pluginNames[NUM_LIBS] = { "NET", "TUNER", "PROFILER" };
-static const char *pluginPrefix[NUM_LIBS] = { "librccl-net", "libnccl-tuner", "librccl-profiler" };
-static const char *pluginFallback[NUM_LIBS] = { "", "Using internal tuner plugin.", "" };
-static unsigned long subsys[NUM_LIBS] = { NCCL_INIT|NCCL_NET, NCCL_INIT|NCCL_TUNING, NCCL_INIT };
+static const char *pluginNames[NUM_LIBS] = { "NET", "GIN", "TUNER", "PROFILER", "ENV" };
+static const char *pluginPrefix[NUM_LIBS] = { "librccl-net", "libnccl-gin", "libnccl-tuner", "libnccl-profiler", "libnccl-env" };
+static const char *pluginFallback[NUM_LIBS] = { "", "", "", "", "" };
+static unsigned long subsys[NUM_LIBS] = { NCCL_INIT|NCCL_NET, NCCL_INIT|NCCL_NET, NCCL_INIT|NCCL_TUNING, NCCL_INIT, NCCL_INIT|NCCL_ENV };
 
 static void* tryOpenLib(char* name, int* err, char* errStr) {
   *err = 0;
@@ -116,12 +117,20 @@ void* ncclOpenNetPluginLib(const char* name) {
   return openPluginLib(ncclPluginTypeNet, name);
 }
 
+void* ncclOpenGinPluginLib(const char* name) {
+  return openPluginLib(ncclPluginTypeGin, name);
+}
+
 void* ncclOpenTunerPluginLib(const char* name) {
   return openPluginLib(ncclPluginTypeTuner, name);
 }
 
 void* ncclOpenProfilerPluginLib(const char* name) {
   return openPluginLib(ncclPluginTypeProfiler, name);
+}
+
+void* ncclOpenEnvPluginLib(const char* name) {
+  return openPluginLib(ncclPluginTypeEnv, name);
 }
 
 void* ncclGetNetPluginLib(enum ncclPluginType type) {

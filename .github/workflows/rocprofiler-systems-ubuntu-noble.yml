@@ -64,6 +64,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
     - &sparse-checkout
@@ -72,6 +73,24 @@ jobs:
         sparse-checkout: |
           projects/rocprofiler-systems/
           .gitmodules
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-ubuntu-noble-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}
+        restore-keys: |
+          ccache-ubuntu-noble-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-
+          ccache-ubuntu-noble-${{ github.job }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-
+
+    - &configure-ccache
+      name: Configure ccache
+      run: |
+        mkdir -p "${CCACHE_DIR}"
+        ccache --max-size=1G
+        ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+        ccache -z
+        ccache -p | head -20
 
     - name: Install Python Test Dependencies
       timeout-minutes: 10
@@ -98,6 +117,8 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       env:
         GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD}
@@ -117,7 +138,6 @@ jobs:
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
-          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
@@ -130,6 +150,15 @@ jobs:
           -DUSE_CLANG_OMP=OFF \
           -- \
           -LE "network|gpu"
+
+    - &ccache-stats
+      name: ccache stats
+      if: always()
+      run: |
+        echo "=== ccache stats ==="
+        ccache -s -v || true
+        echo "=== ccache dir size ==="
+        du -sh "${CCACHE_DIR}" || true
 
     - name: Check for Leftover Buffered Files
       timeout-minutes: 5
@@ -221,6 +250,7 @@ jobs:
       ROCPROFSYS_CI: 'ON'
       ROCPROFSYS_MAX_THREADS: '64'
       ROCPROFSYS_KEEP_TEST_OUTPUT: '0'
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
     - *sparse-checkout
@@ -248,6 +278,16 @@ jobs:
             libdw-dev libdwarf-dev libelf-dev libiberty-dev &&
           apt-get autoclean
 
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.ccache
+        key: ccache-ubuntu-noble-system-deps-${{ github.job }}-${{ matrix.compiler }}-${{ github.sha }}
+        restore-keys: |
+          ccache-ubuntu-noble-system-deps-${{ github.job }}-${{ matrix.compiler }}-
+
+    - *configure-ccache
+
     - name: Install Python Test Dependencies
       timeout-minutes: 10
       shell: bash
@@ -270,6 +310,9 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        CMAKE_C_COMPILER_LAUNCHER: ccache
+        CMAKE_CXX_COMPILER_LAUNCHER: ccache
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE}
         git config --global --add safe.directory ${PWD}
@@ -288,9 +331,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_PYTHON=ON \
-          -DROCPROFSYS_USE_MPI_HEADERS=OFF \
           -DROCPROFSYS_BUILD_DYNINST=ON \
-          -DROCPROFSYS_BUILD_BOOST=OFF \
           -DROCPROFSYS_BUILD_TBB=OFF \
           -DROCPROFSYS_BUILD_ELFUTILS=OFF \
           -DROCPROFSYS_BUILD_LIBIBERTY=OFF \
@@ -304,6 +345,8 @@ jobs:
           -DUSE_CLANG_OMP=${{ matrix.use-clang-omp }} \
           -- \
           -LE "network|gpu"
+
+    - *ccache-stats
 
     - name: Install
       timeout-minutes: 10

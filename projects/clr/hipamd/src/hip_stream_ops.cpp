@@ -53,7 +53,7 @@ hipError_t ihipStreamOperation(hipStream_t stream, cl_command_type cmdType, void
     return hipErrorContextIsDestroyed;
   }
 
-  amd::Memory* memory = getMemoryObject(ptr, offset);
+  amd::Memory* memory = getMemoryObject(hip::getCurrentDevice(), ptr, offset);
   if (!memory) {
     return hipErrorInvalidValue;
   }

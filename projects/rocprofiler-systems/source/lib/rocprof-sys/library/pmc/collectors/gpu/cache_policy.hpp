@@ -9,8 +9,6 @@
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 
-#include <timemory/units.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -130,6 +128,13 @@ struct cache_policy
               thread_id, "{}" });
 
         trace_cache::get_metadata_registry().add_track(
+            { trace_cache::info::format_track_name<category::amd_smi_gfx_clock>(),
+              thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { trace_cache::info::format_track_name<category::amd_smi_mem_clock>(),
+              thread_id, "{}" });
+
+        trace_cache::get_metadata_registry().add_track(
             { trace_cache::info::format_track_name<category::amd_smi_pcie_link_width>(),
               thread_id, "{}" });
         trace_cache::get_metadata_registry().add_track(
@@ -174,7 +179,7 @@ struct cache_policy
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_umc_busy>::value, "UMC Busy",
+              trait::name<category::amd_smi_umc_busy>::value, "UMC Avg. Busy",
               trait::name<category::amd_smi_umc_busy>::description, LONG_DESCRIPTION,
               COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
@@ -204,8 +209,8 @@ struct cache_policy
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
               trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
-              COMPONENT, tim::units::mem_repr(tim::units::megabyte),
-              rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+              COMPONENT, "MB", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+              "{}" });
 
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
@@ -259,6 +264,20 @@ struct cache_policy
               trait::name<category::amd_smi_sdma_usage>::description, LONG_DESCRIPTION,
               COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_gfx_clock>::value, "GFX Clock",
+              trait::name<category::amd_smi_gfx_clock>::description, LONG_DESCRIPTION,
+              COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+              0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_mem_clock>::value, "Mem Clock",
+              trait::name<category::amd_smi_mem_clock>::description, LONG_DESCRIPTION,
+              COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+              0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,

@@ -30,6 +30,7 @@
 #include "gda/nic_policy.hpp"
 
 #include "backend_bc.hpp"
+#include "gda_enums.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp" //TODO useless?
 #include "memory/hip_allocator.hpp"
@@ -47,13 +48,6 @@ class GDAContext;
 class GDAHostContext;
 class QueuePair;
 class HostInterface;
-
-enum GDAProvider {
-  UNSET,
-  IONIC,
-  BNXT,
-  MLX5
-};
 
 inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
 inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
@@ -88,7 +82,7 @@ class GDABackend : public Backend {
     union ibv_gid gid;
   } dest_info_t;
 
-  enum GDAProvider gda_provider = GDAProvider::UNSET;
+  GDAProvider gda_provider = GDAProvider::UNSET;
 
   uint32_t *heap_rkey = nullptr;
 
@@ -146,7 +140,7 @@ class GDABackend : public Backend {
    *        Populates nic_devices_ (always at least 1 entry).
    */
   void select_nics();
-  
+
   void configure_nic_policy();
   void log_ctx_nics(unsigned int ctx_id, size_t qps_per_pe, int qp_offset);
 
@@ -168,6 +162,8 @@ class GDABackend : public Backend {
   static GDAProvider requested_provider();
 
  public:
+  GDAProvider get_gda_provider() const { return gda_provider; }
+
   friend GDAContext;
 
   /**
@@ -243,6 +239,11 @@ class GDABackend : public Backend {
   int buffer_unregister(void *addr) override;
 
   /**
+   * @brief Unregister all previously registered user buffers.
+   */
+  void buffer_unregister_all() override;
+
+  /**
    * @brief Abort the application.
    *
    * @param[in] status Exit code.
@@ -259,7 +260,7 @@ class GDABackend : public Backend {
   void create_new_team(Team *parent_team,
                        const TeamInfo& team_info_wrt_parent,
                        const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm team_comm,
+                       int my_pe_in_new_team, MPI_Comm new_team_comm,
                        rocshmem_team_t *new_team) override;
 
   /**
@@ -588,7 +589,9 @@ class GDABackend : public Backend {
   /**
    * @brief rte allreduce for teams
    */
-  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes, Team *team);
+  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
+                            const TeamInfo& new_team_info_wrt_world,
+                            int num_pes, int my_pe_in_new_team);
 
   /**
    * @brief rte barrier for initialization

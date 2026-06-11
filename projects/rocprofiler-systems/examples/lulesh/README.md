@@ -42,7 +42,7 @@ cmake --build <build_dir> --target lulesh
 **Targets:**
 
 | Target | Description |
-|--------|-------------|
+| -------- | ------------- |
 | `lulesh` | Standard build with debug symbols |
 | `lulesh-rocprofsys` | Linked with rocprofiler-systems user library |
 | `lulesh-coz` | Linked with COZ profiler (if available) |
@@ -69,7 +69,7 @@ mpirun -np 8 ./lulesh -i 35 -s 30 -p
 **Arguments:**
 
 | Flag | Description |
-|------|-------------|
+| ------ | ------------- |
 | `-i` | Number of iterations |
 | `-s` | Problem size (elements per edge) |
 | `-p` | Print progress |
@@ -89,7 +89,7 @@ rocprof-sys-causal -- ./lulesh-rocprofsys -i 35 -s 50 -p
 ### Recommended Configuration
 
 | Variable | Value | Purpose |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | `ROCPROFSYS_TRACE` | `true` | Generate Perfetto trace |
 | `ROCPROFSYS_PROFILE` | `true` | Generate call-stack profile |
 | `ROCPROFSYS_USE_SAMPLING` | `ON` | Enable statistical sampling |

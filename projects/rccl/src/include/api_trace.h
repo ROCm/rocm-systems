@@ -31,7 +31,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 3
+#define RCCL_API_TRACE_VERSION_PATCH 5
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
@@ -122,6 +122,8 @@ typedef ncclResult_t (*ncclCommDestroy_fn_t)(ncclComm_t comm);
 
 typedef ncclResult_t (*ncclCommAbort_fn_t)(ncclComm_t comm);
 
+typedef ncclResult_t (*ncclCommRevoke_fn_t)(ncclComm_t comm, int revokeFlags);
+
 typedef ncclResult_t (*ncclCommShrink_fn_t)(ncclComm_t comm, int* excludeRanksList,
                                             int excludeRanksCount, ncclComm_t *newcomm, 
                                             ncclConfig_t* config, int shrinkFlags);
@@ -165,6 +167,19 @@ typedef ncclResult_t (*ncclCommDeregister_fn_t)(const ncclComm_t comm, void* han
 typedef ncclResult_t (*ncclCommWindowRegister_fn_t)(ncclComm_t comm, void* userPtr, size_t userSize, ncclWindow_t* outWinDev, int winFlags);
 
 typedef ncclResult_t (*ncclCommWindowDeregister_fn_t)(ncclComm_t comm, ncclWindow_t win);
+
+typedef ncclResult_t (*ncclCommSuspend_fn_t)(ncclComm_t comm, int flags);
+
+typedef ncclResult_t (*ncclCommResume_fn_t)(ncclComm_t comm);
+
+typedef ncclResult_t (*ncclCommMemStats_fn_t)(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+typedef ncclResult_t (*ncclPutSignal_fn_t)(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset,
+    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+typedef ncclResult_t (*ncclSignal_fn_t)(int peer, int sigIdx, int ctx, unsigned int flags,
+    ncclComm_t comm, cudaStream_t stream);
+typedef ncclResult_t (*ncclWaitSignal_fn_t)(int nDesc, ncclWaitSignalDesc_t* signalDescs,
+    ncclComm_t comm, cudaStream_t stream);
 
 typedef struct rcclApiFuncTable
 {
@@ -213,6 +228,13 @@ typedef struct rcclApiFuncTable
     ncclCommWindowDeregister_fn_t ncclCommWindowDeregister_fn;
     ncclAlltoAll_fn_t             ncclAlltoAll_fn;
     ncclAlltoAllv_fn_t            ncclAlltoAllv_fn;
+    ncclCommRevoke_fn_t           ncclCommRevoke_fn;
+    ncclCommSuspend_fn_t          ncclCommSuspend_fn;
+    ncclCommResume_fn_t           ncclCommResume_fn;
+    ncclCommMemStats_fn_t         ncclCommMemStats_fn;
+    ncclPutSignal_fn_t            ncclPutSignal_fn;
+    ncclSignal_fn_t               ncclSignal_fn;
+    ncclWaitSignal_fn_t           ncclWaitSignal_fn;
     // ADD NEW FUNCTIONS HERE ONLY
 } rcclApiFuncTable;
 

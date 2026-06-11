@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/units.hpp"
 #include "core/perfetto.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/thread_info.hpp"
@@ -10,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <spdlog/fmt/fmt.h>
-#include <timemory/units.hpp>
 
 #include <vector>
 
@@ -54,13 +54,15 @@ const auto JPEG_BUSY_VALUE     = make_metric_value({ 11 });    // jpeg_busy (MI3
 const auto XGMI_VALUE          = make_metric_value({ 12 });    // xgmi
 const auto PCIE_VALUE          = make_metric_value({ 13 });    // pcie
 const auto SDMA_USAGE_VALUE    = make_metric_value({ 14 });    // sdma_usage
+const auto GFX_CLOCK_VALUE     = make_metric_value({ 15 });    // gfx_clock
+const auto MEM_CLOCK_VALUE     = make_metric_value({ 16 });    // mem_clock
 
 inline std::unordered_map<std::uint32_t, track_description>
 make_default_tracks()
 {
     return {
         { GFX_BUSY_VALUE, { "GFX Busy", "%", {} } },
-        { UMC_BUSY_VALUE, { "UMC Busy", "%", {} } },
+        { UMC_BUSY_VALUE, { "UMC Avg. Busy", "%", {} } },
         { MM_BUSY_VALUE, { "MM Busy", "%", {} } },
         { TEMPERATURE_VALUE, { "Temperature", "deg C", {} } },
         { CURRENT_POWER_VALUE, { "Current Power", "watts", {} } },
@@ -72,6 +74,8 @@ make_default_tracks()
         { XGMI_VALUE, { "XGMI", "", {} } },
         { PCIE_VALUE, { "PCIe", "", {} } },
         { SDMA_USAGE_VALUE, { "SDMA Usage", "%", {} } },
+        { GFX_CLOCK_VALUE, { "GFX Clock", "MHz", {} } },
+        { MEM_CLOCK_VALUE, { "Memory Clock", "MHz", {} } },
     };
 }
 
@@ -243,8 +247,18 @@ struct perfetto_policy
             }
             else
             {
+                const char* track_name = description.track_name;
+                if(num == detail::CURRENT_POWER_VALUE)
+                {
+                    // Label reflects the reading actually emitted (current vs. average),
+                    // based on what this device supports and the user enabled.
+                    enabled_metrics effective_power{};
+                    effective_power.value =
+                        enabled_metric_config.value & device_data.supported_metrics.value;
+                    track_name = socket_power_track_label(effective_power);
+                }
                 description.track_indexes.emplace_back(counter_track::emplace(
-                    device_index, addendum(description.track_name), description.units));
+                    device_index, addendum(track_name), description.units));
             }
         }
 
@@ -421,9 +435,7 @@ private:
             effective_metrics.bits.current_socket_power) &&
            power_it != tracks.end() && !power_it->second.track_indexes.empty())
         {
-            const double power = effective_metrics.bits.average_socket_power
-                                     ? metric_values.average_socket_power
-                                     : metric_values.current_socket_power;
+            const double power = select_socket_power(effective_metrics, metric_values);
             TRACE_COUNTER(
                 "device_power",
                 counter_track::at(device_index, power_it->second.track_indexes[0]), ts,
@@ -435,7 +447,7 @@ private:
            !memory_it->second.track_indexes.empty())
         {
             const double usage =
-                metric_values.memory_usage / static_cast<double>(tim::units::megabyte);
+                metric_values.memory_usage / static_cast<double>(units::megabyte);
             TRACE_COUNTER(
                 "device_memory_usage",
                 counter_track::at(device_index, memory_it->second.track_indexes[0]), ts,
@@ -450,6 +462,26 @@ private:
                 "device_sdma_usage",
                 counter_track::at(device_index, sdma_it->second.track_indexes[0]), ts,
                 static_cast<double>(metric_values.sdma_usage));
+        }
+
+        auto gfx_clock_it = tracks.find(detail::GFX_CLOCK_VALUE);
+        if(effective_metrics.bits.gfx_clock && gfx_clock_it != tracks.end() &&
+           !gfx_clock_it->second.track_indexes.empty())
+        {
+            TRACE_COUNTER(
+                "device_gfx_clock",
+                counter_track::at(device_index, gfx_clock_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.gfx_clock_mhz));
+        }
+
+        auto mem_clock_it = tracks.find(detail::MEM_CLOCK_VALUE);
+        if(effective_metrics.bits.mem_clock && mem_clock_it != tracks.end() &&
+           !mem_clock_it->second.track_indexes.empty())
+        {
+            TRACE_COUNTER(
+                "device_mem_clock",
+                counter_track::at(device_index, mem_clock_it->second.track_indexes[0]),
+                ts, static_cast<double>(metric_values.mem_clock_mhz));
         }
     }
 

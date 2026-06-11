@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_metrics.hpp"
+#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -35,9 +36,7 @@
 #include <timemory/mpl/types.hpp>
 #include <timemory/operations.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
@@ -177,7 +176,7 @@ apply_for_all_thread_names(std::int64_t                            _tid,
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            if(get_is_continuous_integration() && _desc.empty())
+            if(_desc.empty())
             {
                 throw std::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
@@ -394,7 +393,7 @@ backtrace_metrics::init_perfetto(std::int64_t _tid, valid_array_t _valid)
         {
             std::string _desc = tim::papi::get_event_info(itr).short_descr;
             if(_desc.empty()) _desc = itr;
-            if(get_is_continuous_integration() && _desc.empty())
+            if(_desc.empty())
             {
                 throw std::runtime_error(
                     fmt::format("Empty description for {}", itr.c_str()));
@@ -411,7 +410,7 @@ backtrace_metrics::fini_perfetto(std::int64_t _tid, valid_array_t _valid)
     auto        _hw_cnt_labels = *get_papi_labels(_tid);
     const auto& _thread_info   = thread_info::get(_tid, SequentTID);
 
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
         throw std::runtime_error(
             fmt::format("Error! missing thread info for tid={}", _tid));

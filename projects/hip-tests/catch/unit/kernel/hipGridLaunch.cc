@@ -93,7 +93,7 @@ int test_triple_chevron(size_t N) {
  */
 
 HIP_TEST_CASE(Unit_hipGridLaunch) {
-  size_t N = 4 * 1024 * 1024;
+  size_t N = isQuickLevel() ? 100 * 1024 : 4 * 1024 * 1024;
   SECTION("Test test_gl2") { test_gl2(N); }
 
 #if __HIP__
@@ -181,7 +181,7 @@ TEST_CASE("Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute") {
   }
 }
 
-TEST_CASE("Unit_hipGridLaunch_ExceedMaxGridDim_Negative") {
+HIP_TEST_CASE(Unit_hipGridLaunch_ExceedMaxGridDim_Negative) {
   const unsigned int maxGridX = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0);
   const unsigned int maxGridY = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0);
   const unsigned int maxGridZ = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0);

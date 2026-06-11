@@ -579,19 +579,22 @@ async_copy_impl(Args... args)
                 else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
                 {
                     // When both agents are GPU type, the HSA agent handles alone are not
-                    // sufficient to determine the true transfer direction. OpenMP RTL (libomptarget)
-                    // pins host memory and registers it under a GPU agent, causing HSA to report
-                    // src_agent == dst_agent (both GPU) even for HOST<->DEVICE transfers.
-                    // Use hsa_amd_pointer_info to inspect the actual memory type of each pointer:
-                    //   HSA_EXT_POINTER_TYPE_UNKNOWN (0) = unregistered host memory (e.g. MI300X APU)
-                    //   HSA_EXT_POINTER_TYPE_LOCKED  (2) = pinned host memory (discrete GPU)
+                    // sufficient to determine the true transfer direction. OpenMP RTL
+                    // (libomptarget) pins host memory and registers it under a GPU agent, causing
+                    // HSA to report src_agent == dst_agent (both GPU) even for HOST<->DEVICE
+                    // transfers. Use hsa_amd_pointer_info to inspect the actual memory type of each
+                    // pointer:
+                    //   HSA_EXT_POINTER_TYPE_UNKNOWN (0) = unregistered host memory (e.g. MI300X
+                    //   APU) HSA_EXT_POINTER_TYPE_LOCKED  (2) = pinned host memory (discrete GPU)
                     //   HSA_EXT_POINTER_TYPE_HSA     (1) = true device (GPU) memory
                     // This fixes ROCM-9863: OpenMP offload transfers incorrectly reported as
                     // MEMORY_COPY_DEVICE_TO_DEVICE instead of HOST_TO_DEVICE / DEVICE_TO_HOST.
                     constexpr auto dst_addr_idx_inner = arg_indices<OpIdx>::dst_address_idx;
                     constexpr auto src_addr_idx_inner = arg_indices<OpIdx>::src_address_idx;
-                    const void* _src_ptr = compute_address(std::get<src_addr_idx_inner>(_tied_args)).ptr;
-                    const void* _dst_ptr = compute_address(std::get<dst_addr_idx_inner>(_tied_args)).ptr;
+                    const void*    _src_ptr =
+                        compute_address(std::get<src_addr_idx_inner>(_tied_args)).ptr;
+                    const void* _dst_ptr =
+                        compute_address(std::get<dst_addr_idx_inner>(_tied_args)).ptr;
 
                     auto _src_info = hsa_amd_pointer_info_t{};
                     auto _dst_info = hsa_amd_pointer_info_t{};
@@ -601,9 +604,9 @@ async_copy_impl(Args... args)
                     auto* _ptr_info_fn = get_amd_ext_table()->hsa_amd_pointer_info_fn;
 
                     // When both HSA agents are GPU type, the agent handles alone are not
-                    // sufficient to determine the true transfer direction. OpenMP RTL (libomptarget)
-                    // allocates a host-accessible staging buffer and registers it under the GPU
-                    // agent, making both src and dst appear as GPU-type agents.
+                    // sufficient to determine the true transfer direction. OpenMP RTL
+                    // (libomptarget) allocates a host-accessible staging buffer and registers it
+                    // under the GPU agent, making both src and dst appear as GPU-type agents.
                     //
                     // The hsa_amd_pointer_info_t::agentOwner field reveals which HSA agent
                     // actually owns each allocation. Pinned host buffers created by OpenMP RTL
@@ -614,18 +617,20 @@ async_copy_impl(Args... args)
                     bool _src_query_ok = false, _dst_query_ok = false;
                     if(_ptr_info_fn)
                     {
-                        _src_query_ok = (_ptr_info_fn(_src_ptr, &_src_info, nullptr, nullptr, nullptr)
-                                         == HSA_STATUS_SUCCESS);
-                        _dst_query_ok = (_ptr_info_fn(_dst_ptr, &_dst_info, nullptr, nullptr, nullptr)
-                                         == HSA_STATUS_SUCCESS);
+                        _src_query_ok =
+                            (_ptr_info_fn(_src_ptr, &_src_info, nullptr, nullptr, nullptr) ==
+                             HSA_STATUS_SUCCESS);
+                        _dst_query_ok =
+                            (_ptr_info_fn(_dst_ptr, &_dst_info, nullptr, nullptr, nullptr) ==
+                             HSA_STATUS_SUCCESS);
                     }
 
                     // A pointer is considered GPU device memory if its agentOwner matches
                     // the GPU agent handle passed to the copy operation.
-                    const bool _src_is_device = _src_query_ok &&
-                        (_src_info.agentOwner == _hsa_dst_agent);
-                    const bool _dst_is_device = _dst_query_ok &&
-                        (_dst_info.agentOwner == _hsa_dst_agent);
+                    const bool _src_is_device =
+                        _src_query_ok && (_src_info.agentOwner == _hsa_dst_agent);
+                    const bool _dst_is_device =
+                        _dst_query_ok && (_dst_info.agentOwner == _hsa_dst_agent);
 
                     if(!_src_is_device && _dst_is_device)
                         _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;

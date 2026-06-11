@@ -7,6 +7,7 @@ add_library(
     test_preset_registry.cpp
     test_json_config.cpp
     test_help_system.cpp
+    test_print_output.cpp
 )
 
 target_include_directories(bin-common-tests PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../..)

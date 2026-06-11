@@ -2,14 +2,12 @@
 #
 # SPDX-License-Identifier: MIT
 
+include_guard(GLOBAL)
+
 #-----------------------------------------------------------------------------
-# Option to build the hipFile documentation
-#
-# TODO: Consider turning this into two options, one of which just requires
-#       Doxygen and produces API docs, the other produces Sphinx/Breathe
-#       output
+# Option to build the hipFile API documentation
 #-----------------------------------------------------------------------------
-option(AIS_BUILD_DOCS "Build the hipFile docs (requires Doxygen, Sphinx, and Breathe)" OFF)
+option(AIS_BUILD_DOCS "Build hipFile API docs (requires Doxygen)" OFF)
 
 if(AIS_BUILD_DOCS)
     find_package(Doxygen REQUIRED)
