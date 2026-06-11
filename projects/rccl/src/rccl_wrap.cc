@@ -339,6 +339,49 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   int nRanks;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   size_t msgSize = count * ncclTypeSize(dataType) * nRanks;
+  if (coll == ncclFuncAllGather && rcclUseHierarchicalAllGather(comm, msgSize)) {
+    *algo = rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER;
+    ncclComm* interComm = comm->hierarchicalInterComm;
+    ncclComm* intraComm = comm->hierarchicalIntraComm;
+    int nNodes = interComm->nRanks;
+
+    size_t interMsgSize = count * ncclTypeSize(dataType) * nNodes;
+    if (nNodes <= 16 && rcclUseAllGatherDirect(interComm, interMsgSize)) {
+      *protocol = NCCL_PROTO_SIMPLE;
+      *maxChannels = interComm->p2pnChannels;
+    } else {
+      struct ncclTaskColl task;
+      task.func = ncclFuncAllGather;
+      task.count = count;
+      task.datatype = dataType;
+      NCCLCHECK(getAlgoInfo(interComm, &task, 0, 0, 1));
+      *protocol = task.protocol;
+      *maxChannels = task.nMaxChannels;
+    }
+
+    int intraProto, intraChan;
+    size_t intraCount = count * nNodes;
+    size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
+    if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
+      intraProto = NCCL_PROTO_SIMPLE;
+      intraChan = intraComm->p2pnChannels;
+    } else {
+      struct ncclTaskColl task;
+      task.func = ncclFuncAllGather;
+      task.count = intraCount;
+      task.datatype = dataType;
+      NCCLCHECK(getAlgoInfo(intraComm, &task, 0, 0, 1));
+      intraProto = task.protocol;
+      intraChan = task.nMaxChannels;
+    }
+
+    // For hierarchical algorithm, only the inter-comm protocol/channels are
+    // reported in rccl-tests -A output.
+    // The intra-comm values are logged below for debugging purposes
+    INFO(NCCL_COLL, "Hierarchical AG inter: proto=%d channels=%d, intra: proto=%d channels=%d",
+        *protocol, *maxChannels, intraProto, intraChan);
+    return ncclSuccess;
+  }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
     *protocol = NCCL_PROTO_SIMPLE; // TODO: consider LL for small messages
@@ -361,6 +404,38 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   return ncclSuccess;
 }
 
+static int symkHostRedOpToDev(ncclRedOp_t op) {
+  switch ((int)op) {
+  case ncclSum:  return (int)ncclDevSum;
+  case ncclProd: return (int)ncclDevProd;
+  case ncclMin:
+  case ncclMax:  return (int)ncclDevMinMax;
+  default:       return -1;
+  }
+}
+
+ncclResult_t rcclSymKGetInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType, ncclRedOp_t op,
+    int* algo, int* protocol, int* maxChannels) {
+  RCCL_STATIC_EXPOSE_CHECK();
+  if (algo == nullptr || protocol == nullptr || maxChannels == nullptr) return ncclInvalidArgument;
+  if (coll != ncclFuncAllReduce && coll != ncclFuncAllGather && coll != ncclFuncReduceScatter)
+    return ncclInvalidArgument;
+  int devOp = (coll == ncclFuncAllGather) ? (int)ncclDevSum : symkHostRedOpToDev(op);
+  if (devOp < 0) return ncclInvalidArgument;
+  NCCLCHECK(ncclSymkInitOnce(comm));
+  if (!ncclSymkAvailable(comm, coll, devOp, dataType, (size_t)count)) return ncclInvalidArgument;
+  float estTimeUs;
+  ncclSymkKernelId kernelId;
+  int nWarps;
+  bool forced = false;
+  NCCLCHECK(ncclSymkPickKernel(comm, coll, devOp, dataType, (size_t)count, (size_t)count, 1, (ncclSymRegType_t)0, &estTimeUs, &kernelId, maxChannels, &nWarps, &forced));
+  if (kernelId == ncclSymkKernelId_Count) return ncclInvalidArgument;
+  *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
+  *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+
+  return ncclSuccess;
+}
+
 ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
   if (algo < 0 || algo >= RCCL_ALGO_COUNT) {
     WARN("Invalid algorithm value: %d", algo);
@@ -371,11 +446,17 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
       case rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER:
         *algoName = "Direct";
         break;
+      case rcclAddonAlgos_t::RCCL_HIERARCHICAL_ALLGATHER:
+        *algoName = "Hier";
+        break;
 #ifdef ENABLE_WARP_SPEED
       case rcclAddonAlgos_t::RCCL_WARP_SPEED:
         *algoName = "RING*"; // WarpSpeed (*) uses RING algorithm
         break;
 #endif
+      case rcclAddonAlgos_t::RCCL_SYMMETRIC:
+        *algoName = "SYM";
+        break;
       default:
         WARN("Invalid algorithm value: %d", algo);
         return ncclInvalidArgument;
@@ -406,6 +487,23 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm) {
   return false;
 }
 
+RCCL_PARAM(HierarchicalAllGather, "HIERARCHICAL_ALLGATHER", 1);
+
+bool rcclUseHierarchicalAllGather(struct ncclComm* comm, size_t msgSize) {
+  if (comm->nNodes < 8) return false;
+  if (rcclParamHierarchicalAllGather() != 1) return false;
+  if (!comm->hierarchicalCommsInitialized) return false;
+
+  size_t threshold = 0;
+  if (comm->nNodes >= 16) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE;
+  } else if (comm->nNodes >= 8) {
+    threshold = HIERARCHICAL_AG_TEMP_BUFFER_SIZE / 2;
+  }
+
+  return threshold > 0 && msgSize <= threshold;
+}
+
 bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   // Check if user explicitly disabled direct AllGather
   static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
@@ -416,12 +514,6 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 
   // Direct AllGather incompatible with UBR
   if (ncclParamLocalRegister()) {
-    return false;
-  }
-
-  // Multi-node Direct AllGather requires PXN
-  if (comm->nNodes > 1 && ncclPxnDisable(comm) != 0) {
-    INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER disabled on multi-node due to PXN being disabled.");
     return false;
   }
 
@@ -510,45 +602,50 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
 
 
 void rcclSetPxn(struct ncclComm* comm,  int& rcclPxnDisable) {
-  static int pxnDisable = RCCL_VALUE_UNSET;
-  comm->enableCustColl = false;
-  if(pxnDisable == RCCL_VALUE_UNSET) {
-    const char *inputStr = getenv("NCCL_PXN_DISABLE");
-    const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
-    const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
-    comm->enableCustColl = (archGfx942 || archGfx950) && (inputStr && !atoi(inputStr));
-
-    if((!archGfx942 && !archGfx950) || inputStr) {
-      rcclPxnDisable = pxnDisable = RCCL_VALUE_INVALID;
-      return;
-    }
-    const int ranksThreshold = (archGfx942)? 64 : 32;
-    pxnDisable = (comm->nRanks >= ranksThreshold)? 0 : 1;
-    INFO(NCCL_INIT, "RCCL PXN set as %s", !pxnDisable? "enabled" : "disabled");
+  if (comm->pxnDisable != RCCL_VALUE_UNSET) {
+    rcclPxnDisable = comm->pxnDisable;
+    return;
   }
-  rcclPxnDisable = pxnDisable;
+  const char *inputStr = getenv("NCCL_PXN_DISABLE");
+  const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  comm->enableCustColl = (archGfx942 || archGfx950) && (inputStr && !atoi(inputStr));
+
+  if((!archGfx942 && !archGfx950) || inputStr) {
+    rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;
+    return;
+  }
+  const int ranksThreshold = (archGfx942)? 64 : 32;
+  int pxnDisable = (comm->nRanks >= ranksThreshold)? 0 : 1;
+  INFO(NCCL_INIT, "RCCL PXN set as %s (nRanks=%d threshold=%d)",
+       !pxnDisable ? "enabled" : "disabled", comm->nRanks, ranksThreshold);
   comm->enableCustColl = !pxnDisable;
+  rcclPxnDisable = comm->pxnDisable = pxnDisable;
 }
 
 void rcclSetP2pNetChunkSize(struct ncclComm* comm,  int& rcclP2pNetChunkSize) {
-  static int p2pNetChunkSize = RCCL_VALUE_UNSET;
-  if(p2pNetChunkSize == RCCL_VALUE_UNSET) {
-    const char *inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
-    const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
-    const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
-    if((!archGfx942 && !archGfx950) || inputStr) {
-      rcclP2pNetChunkSize = p2pNetChunkSize = RCCL_VALUE_INVALID;
-      return;
-    }
-
-    if(archGfx942)
-      p2pNetChunkSize = (comm->nRanks >= 64)? (1 << 19) : (1 << 17);
-    else  if(archGfx950)
-      p2pNetChunkSize = (comm->nRanks >= 32) ? (1 << 19) : (comm->nRanks >= 16 ? (1 << 18) : (1 << 17));
-    else
-      WARN("RCCL P2P attempt to set P2P net chunk size for unsupported arch: %s", comm->topo->nodes[GPU].nodes[0].gpu.gcn);
-    INFO(NCCL_INIT, "RCCL P2P net chunk size default set to: %d", p2pNetChunkSize);
+  if (comm->p2pNetChunkSize != RCCL_VALUE_UNSET) {
+    rcclP2pNetChunkSize = comm->p2pNetChunkSize;
+    return;
   }
+  const char *inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
+  const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  if((!archGfx942 && !archGfx950) || inputStr) {
+    rcclP2pNetChunkSize = comm->p2pNetChunkSize = RCCL_VALUE_INVALID;
+    return;
+  }
+
+  int p2pNetChunkSize = RCCL_VALUE_UNSET;
+  if(archGfx942)
+    p2pNetChunkSize = (comm->nRanks >= 64)? (1 << 19) : (1 << 17);
+  else if(archGfx950)
+    p2pNetChunkSize = (comm->nRanks >= 32) ? (1 << 19) : (comm->nRanks >= 16 ? (1 << 18) : (1 << 17));
+  else
+    WARN("RCCL P2P attempt to set P2P net chunk size for unsupported arch: %s", comm->topo->nodes[GPU].nodes[0].gpu.gcn);
+  INFO(NCCL_INIT, "RCCL P2P net chunk size default set to: %d (nRanks=%d)",
+       p2pNetChunkSize, comm->nRanks);
+  comm->p2pNetChunkSize = p2pNetChunkSize;
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
 #ifdef ENABLE_WARP_SPEED

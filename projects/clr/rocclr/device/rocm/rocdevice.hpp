@@ -490,11 +490,17 @@ class Device : public NullDevice {
   virtual void RetainGlobalSignal(void* signal) const override;
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
+  virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
+
+  virtual bool importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                  amd::ExternalSemaphoreHandleType sem_handle_type) override;
+  virtual void DestroyExtSemaphore(void* extSemaphore) override;
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
@@ -779,12 +785,6 @@ class Device : public NullDevice {
   friend void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 
  public:
-
-  //! Count of schedulerQueue_ instances per device
-  //! Windows AQL device-enqueue path.
-  std::atomic<uint32_t> hasSchedulerQueue_{0};
-  static std::atomic<bool> skipHsaShutdown_;
-
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.

@@ -847,13 +847,13 @@ TEST_F(ShmMPITest, ShmCleanup_DoubleCleanup)
     if(connector->transportResources)
     {
         const auto result1
-            = is_sender ? shmTransport.send.free(connector) : shmTransport.recv.free(connector);
+            = is_sender ? shmTransport.send.free(nullptr, connector) : shmTransport.recv.free(nullptr, connector);
         EXPECT_EQ(ncclSuccess, result1) << "Rank " << config.world_rank << ": First cleanup failed";
     }
 
     // Second cleanup (should handle gracefully since resources are already freed)
     [[maybe_unused]] const auto result2
-        = is_sender ? shmTransport.send.free(connector) : shmTransport.recv.free(connector);
+        = is_sender ? shmTransport.send.free(nullptr, connector) : shmTransport.recv.free(nullptr, connector);
 
     // Mark as cleaned up
     connector->transportResources = nullptr;
@@ -971,7 +971,7 @@ TEST_F(ShmMPITest, ShmConnect_CorruptedConnectInfo)
     if(connector->transportResources)
     {
         const auto cleanup_result
-            = is_sender ? shmTransport.send.free(connector) : shmTransport.recv.free(connector);
+            = is_sender ? shmTransport.send.free(nullptr, connector) : shmTransport.recv.free(nullptr, connector);
         (void)cleanup_result; // Ignore result as we're in error path
         connector->transportResources = nullptr;
     }
