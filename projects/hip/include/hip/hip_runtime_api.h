@@ -4779,7 +4779,22 @@ hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
  */
 hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
                             hipMemAllocationType type);
-// Doxygen end of ordered memory allocator
+
+/**
+ * @brief Returns the default memory pool for a given location and allocation type
+ *
+ * @param [out] memPool Returned memory pool
+ * @param [in] location location type for which to get the default memory pool,
+ * currently only hipMemLocationTypeDevice is supported
+ * @param [in] type allocation type for which to get the default memory pool,
+ * currently only hipMemAllocationTypePinned & hipMemAllocationTypeManaged are supported
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ */
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type);
+
+// Doxygen end of Stream Ordered Memory Allocator
 /**
  * @}
  */
