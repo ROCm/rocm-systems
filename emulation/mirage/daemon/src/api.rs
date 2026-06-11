@@ -446,7 +446,6 @@ async fn create_session(
                     mounts,
                     devices: Vec::new(),
                     groups: Vec::new(),
-                    host_gpus: false,
                 });
             }
         }

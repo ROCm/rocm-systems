@@ -46,11 +46,6 @@ pub fn profiles() -> Vec<(&'static str, ProfileDef)> {
 
 /// Build a single-GPU, containerised builtin profile pinning `agent`.
 fn profile(name: &str, emulator: EmulatorKind, agent: &str) -> ProfileDef {
-    // HotSwap retargets device code onto a *physical* GPU, so its nodes
-    // need host GPU access (the supplementary groups that own the
-    // passed-through device nodes). rocjitsu is a pure software emulator
-    // and needs none.
-    let host_gpus = matches!(emulator, EmulatorKind::Hotswap);
     ProfileDef {
         name: name.to_string(),
         description: None,
@@ -71,7 +66,6 @@ fn profile(name: &str, emulator: EmulatorKind, agent: &str) -> ProfileDef {
             mounts: Vec::new(),
             devices: Vec::new(),
             groups: Vec::new(),
-            host_gpus,
         }),
     }
 }
@@ -109,17 +103,6 @@ mod tests {
         for (_, p) in profiles() {
             let c = p.containerize.expect("builtin profiles are containerised");
             assert_eq!(c.image, DEFAULT_IMAGE);
-        }
-    }
-
-    #[test]
-    fn hotswap_requests_host_gpus_but_rocjitsu_does_not() {
-        for (_, p) in profiles() {
-            let c = p.containerize.expect("builtin profiles are containerised");
-            match p.emulator.emulator {
-                EmulatorKind::Hotswap => assert!(c.host_gpus, "hotswap needs host GPUs"),
-                _ => assert!(!c.host_gpus, "software emulators need no host GPUs"),
-            }
         }
     }
 }

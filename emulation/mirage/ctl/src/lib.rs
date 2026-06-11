@@ -883,7 +883,6 @@ fn build_containerize(
             mounts: parse_mounts(mounts)?,
             devices: Vec::new(),
             groups: Vec::new(),
-            host_gpus: false,
         })),
         None => {
             if !mounts.is_empty() || provider.is_some() {
@@ -1140,7 +1139,6 @@ fn apply_container_overrides(
                 mounts: parsed,
                 devices: Vec::new(),
                 groups: Vec::new(),
-                host_gpus: false,
             });
         }
     }

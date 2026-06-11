@@ -72,6 +72,27 @@ fn provider_is_podman(provider: &str) -> bool {
         .contains("podman")
 }
 
+/// Host AMD GPU device nodes to expose to a node container (`--device`)
+/// when host GPU access is requested: the KFD compute device
+/// (`/dev/kfd`) and the DRM render nodes (`/dev/dri`). Only paths that
+/// actually exist on the host are returned, so a host missing one simply
+/// omits it.
+fn host_gpu_devices() -> Vec<String> {
+    ["/dev/kfd", "/dev/dri"]
+        .iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .map(|p| (*p).to_string())
+        .collect()
+}
+
+/// Supplementary groups that own the host GPU device nodes
+/// (`--group-add`). `video` and `render` are the conventional owners of
+/// `/dev/kfd` and the `/dev/dri/render*` nodes on ROCm hosts; docker is
+/// given these explicitly (podman inherits them via `keep-groups`).
+fn host_gpu_groups() -> Vec<String> {
+    vec!["video".to_string(), "render".to_string()]
+}
+
 /// A phase of container bring-up, reported to the `progress` callback of
 /// [`Engine::bring_up`] so the host can surface detailed, live status to
 /// clients as a session starts.
@@ -408,6 +429,11 @@ impl Engine {
     /// rank, returning the [`ContainerState`] the host should persist
     /// plus the per-rank container ids (the trimmed stdout of `run -d`).
     ///
+    /// `host_gpus` requests host GPU access for every node container
+    /// (the provider-specific group passthrough described on
+    /// [`Self::run_argv`]); the emulator decides whether its workload
+    /// needs it.
+    ///
     /// `node_env(rank)` yields the environment for the node of that rank
     /// (mirage injects `MIRAGE_RANK`/`MIRAGE_HEAD_ADDR`/`MIRAGE_HEAD_PORT`
     /// there). `node_command(rank)` yields the container's foreground
@@ -417,10 +443,12 @@ impl Engine {
     /// On any failure the partially-created containers and network are
     /// torn down before returning the error, so a failed bring-up never
     /// leaks resources.
+    #[allow(clippy::too_many_arguments)]
     pub fn bring_up<F, G, P>(
         &self,
         session: &mirage_core::session::SessionId,
         def: &ContainerizedDef,
+        host_gpus: bool,
         node_count: u32,
         head_port: u16,
         mut node_env: F,
@@ -478,6 +506,21 @@ impl Engine {
             self.ensure_network(&network)?;
         }
 
+        // When the emulator requested host GPU access, expose the host's
+        // GPU device nodes and the groups that own them on top of any
+        // devices/groups the profile already configured. The group
+        // passthrough mechanism itself is provider-specific and handled
+        // in `run_argv`.
+        let (devices, groups) = if host_gpus {
+            let mut devices = def.devices.clone();
+            devices.extend(host_gpu_devices());
+            let mut groups = def.groups.clone();
+            groups.extend(host_gpu_groups());
+            (devices, groups)
+        } else {
+            (def.devices.clone(), def.groups.clone())
+        };
+
         for rank in 0..node_count {
             let name = mirage_core::container::container_name(session, rank);
             progress(BringUpPhase::LaunchingNode {
@@ -491,10 +534,10 @@ impl Engine {
                 &name,
                 &def.image,
                 Some(&network),
-                def.host_gpus,
+                host_gpus,
                 &def.mounts,
-                &def.devices,
-                &def.groups,
+                &devices,
+                &groups,
                 &env,
                 &command,
             ) {
@@ -750,7 +793,6 @@ mod tests {
             mounts: vec![],
             devices: vec![],
             groups: vec![],
-            host_gpus: false,
         };
         let engine = Engine::resolve(&def).unwrap();
         assert_eq!(engine.provider(), "docker");
@@ -835,7 +877,6 @@ mod tests {
             mounts: vec![],
             devices: vec![],
             groups: vec![],
-            host_gpus: false,
         };
 
         let mut phases: Vec<BringUpPhase> = Vec::new();
@@ -843,6 +884,7 @@ mod tests {
             .bring_up(
                 &session,
                 &def,
+                false,
                 2,
                 6000,
                 |rank| vec![("MIRAGE_RANK".to_string(), rank.to_string())],

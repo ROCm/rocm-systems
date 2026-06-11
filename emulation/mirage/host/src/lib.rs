@@ -388,8 +388,11 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
     // `LD_PRELOAD`/env paths resolve and the workload can reach the GPU.
     let injection = resolve_injection(session)?;
     def.mounts.extend(injection.mounts.iter().cloned());
-    def.devices.extend(injection.devices.iter().cloned());
-    def.groups.extend(injection.groups.iter().cloned());
+
+    // The emulator decides whether its workload needs host GPU access
+    // (e.g. HotSwap runs the retargeted code on the real GPU). The
+    // provider-specific group handling lives in the container engine.
+    let host_gpus = injection.host_gpus;
 
     // Each container hosts itself: its entrypoint is `mirage host`, run
     // from the mirage binary bind-mounted in read-only, against the
@@ -487,6 +490,7 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         .bring_up(
             session,
             &def,
+            host_gpus,
             node_count,
             head_port,
             |rank| {

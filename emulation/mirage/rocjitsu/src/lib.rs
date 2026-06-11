@@ -35,8 +35,9 @@ use mirage_core::session::{SessionHealth, SessionId};
 use mirage_core::topology::TopologyDef;
 
 /// rocjitsu [`Emulator`] implementation. Bundles the rocjitsu-specific
-/// injection (the KMD `LD_PRELOAD` plus the `RJ_CONFIG`/`RJ_SCHEMA` env
-/// vars) and profile validation so callers dispatch generically on
+/// injection (the KMD `LD_PRELOAD` plus the `ROCJITSU_RUNTIME_DIR` env
+/// var and the `config_path` discovery file it points at) and profile
+/// validation so callers dispatch generically on
 /// [`mirage_core::emulator::EmulatorKind`].
 pub struct Rocjitsu {
     profile: ProfileDef,
@@ -115,9 +116,39 @@ impl Emulator for Rocjitsu {
                  cannot emulate workload"
             ))
         })?;
+
+        // The KMD interposer discovers its `SimulationConfig` by reading a
+        // `config_path` file from its per-user runtime directory (resolved
+        // as `$ROCJITSU_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/rocjitsu`, else
+        // `/tmp/rocjitsu-<uid>`); the file's contents are the path to the
+        // config JSON it then loads via `rj_vm_create`. It does *not* read
+        // any `RJ_CONFIG`/`RJ_SCHEMA` environment variable. We therefore
+        // point it at a per-session runtime directory and write that
+        // discovery file ourselves. Without it the interposer finds no
+        // config, never stands up the emulated device, and the workload
+        // fails with "Unable to open /dev/kfd ... No such device".
+        //
+        // `config` is already resolved for whichever filesystem view this
+        // injection is computed in — host paths on the orchestrator, and
+        // container paths (`/mnt/mirage/...`) when the per-node host
+        // re-resolves this injection inside its container — so both the
+        // runtime directory and the path written into `config_path` are
+        // correct in either context.
+        let runtime_dir = config
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(ASSET_SUBDIR);
+        let config_path_file = runtime_dir.join("config_path");
+        mirage_core::state::write_bytes(
+            &config_path_file,
+            format!("{}\n", config.display()).as_bytes(),
+        )?;
+
         let mut env = std::collections::BTreeMap::new();
-        env.insert("RJ_CONFIG".to_string(), config.display().to_string());
-        env.insert("RJ_SCHEMA".to_string(), schema.display().to_string());
+        env.insert(
+            "ROCJITSU_RUNTIME_DIR".to_string(),
+            runtime_dir.display().to_string(),
+        );
 
         // For a containerised session the workload runs inside a node
         // container that does *not* share the host filesystem, so the
@@ -151,7 +182,10 @@ impl Emulator for Rocjitsu {
                     read_only: true,
                 });
             }
-            // The flatbuffer schema (`RJ_SCHEMA`).
+            // The flatbuffer schema. The interposer validates against its
+            // own embedded schema, but mounting the extracted copy keeps
+            // the in-container asset directory complete and matches what
+            // `ensure_assets` lays down on the host.
             mounts.push(FileMount {
                 host_path: schema.display().to_string(),
                 container_path: format!("{container_asset_dir}/{SCHEMA_FBS_NAME}"),
@@ -168,8 +202,7 @@ impl Emulator for Rocjitsu {
             files: Default::default(),
             env,
             mounts,
-            devices: Default::default(),
-            groups: Default::default(),
+            host_gpus: false,
         })
     }
 }
@@ -297,9 +330,9 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
 }
 
 /// Synthesise a rocjitsu `SimulationConfig` JSON file from the given
-/// [`EmulatorDef`] and return `(config_path, schema_path)` ready to
-/// be passed to the LD_PRELOAD'd workload as `RJ_CONFIG` /
-/// `RJ_SCHEMA`.
+/// [`EmulatorDef`] and return `(config_path, schema_path)`. The config
+/// path is what gets recorded in the rocjitsu `config_path` discovery
+/// file so the LD_PRELOAD'd interposer loads it.
 ///
 /// The agent JSON under `<MIRAGE_CONFIG>/agent/` only stores the
 /// `vm` + `topology` subset that mirage owns. rocjitsu's KMD shim
