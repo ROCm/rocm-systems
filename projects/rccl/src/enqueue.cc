@@ -48,8 +48,7 @@ struct ncclKernelMatch {
 
 #  ifdef ENABLE_COLLTRACE
 #  define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? NCCL_NUM_UNROLLS : 0))
-static ncclKernelMatch const ncclKerns[12] = {
-  {(void *)ncclDevKernel_Generic_1, true},
+static ncclKernelMatch const ncclKerns[2*NCCL_NUM_UNROLLS] = {
   {(void *)ncclDevKernel_Generic_2, true},
   {(void *)ncclDevKernel_Generic_4, true},
   {(void *)ncclDevKernel_Generic_8, true},
