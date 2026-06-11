@@ -58,4 +58,4 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 120
     LABELS "integration-tests;pause-resume;counter-collection;selected-regions"
     FIXTURES_REQUIRED rocprofv3-test-counter-collection-pmc-selected-regions
-    FAIL_REGULAR_EXPRESSION "AssertionError")
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
