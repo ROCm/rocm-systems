@@ -9694,104 +9694,6 @@ inline void execute_v_cvt_off_f32_i4_vop3([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
-inline void execute_v_cvt_pk_bf8_f32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    uint32_t lo = util::f32_to_bf8_e5m2_rne(s0);
-    uint32_t hi = util::f32_to_bf8_e5m2_rne(s1);
-    inst.vdst.write_lane(wf, lane, lo | (hi << 8));
-  }
-}
-
-template <typename Inst>
-inline void execute_v_cvt_pk_f32_bf8_vop1([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw = inst.src0.read_lane(wf, lane);
-    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
-    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
-    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
-    inst.vdst.write_lane64(wf, lane,
-                           static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
-  }
-}
-
-template <typename Inst>
-inline void execute_v_cvt_pk_f32_bf8_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw = inst.src0.read_lane(wf, lane);
-    float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
-    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
-    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
-    inst.vdst.write_lane64(wf, lane,
-                           static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
-  }
-}
-
-template <typename Inst>
-inline void execute_v_cvt_pk_f32_fp8_vop1([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw = inst.src0.read_lane(wf, lane);
-    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
-    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
-    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
-    inst.vdst.write_lane64(wf, lane,
-                           static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
-  }
-}
-
-template <typename Inst>
-inline void execute_v_cvt_pk_f32_fp8_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t raw = inst.src0.read_lane(wf, lane);
-    float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(raw & 0xFFu));
-    float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw >> 8) & 0xFFu));
-    uint32_t lo_bits = std::bit_cast<uint32_t>(lo);
-    uint32_t hi_bits = std::bit_cast<uint32_t>(hi);
-    inst.vdst.write_lane64(wf, lane,
-                           static_cast<uint64_t>(lo_bits) | (static_cast<uint64_t>(hi_bits) << 32));
-  }
-}
-
-template <typename Inst>
-inline void execute_v_cvt_pk_fp8_f32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float s0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float s1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    uint32_t lo = util::f32_to_fp8_e4m3_rne(s0);
-    uint32_t hi = util::f32_to_fp8_e4m3_rne(s1);
-    inst.vdst.write_lane(wf, lane, lo | (hi << 8));
-  }
-}
-
-template <typename Inst>
 inline void execute_v_cvt_pk_i16_f32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
@@ -9810,10 +9712,10 @@ inline void execute_v_cvt_pk_i16_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));
-    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));
+    float f0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+    float f1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+    int16_t lo = static_cast<int16_t>(std::clamp(f0, -32768.0f, 32767.0f));
+    int16_t hi = static_cast<int16_t>(std::clamp(f1, -32768.0f, 32767.0f));
     inst.vdst.write_lane(wf, lane,
                          (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
                              static_cast<uint32_t>(static_cast<uint16_t>(lo)));
@@ -10012,10 +9914,10 @@ inline void execute_v_cvt_pk_u16_f32_vop3([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = inst.src0.read_lane(wf, lane);
-    uint32_t s1 = inst.src1.read_lane(wf, lane);
-    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));
-    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));
+    float f0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
+    float f1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
+    uint16_t lo = static_cast<uint16_t>(std::clamp(f0, 0.0f, 65535.0f));
+    uint16_t hi = static_cast<uint16_t>(std::clamp(f1, 0.0f, 65535.0f));
     inst.vdst.write_lane(wf, lane,
                          (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
                              static_cast<uint32_t>(static_cast<uint16_t>(lo)));
@@ -14526,7 +14428,7 @@ inline void execute_v_max_num_f16_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_max_num_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
     return util::f32_to_f16_simd(
         util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
   });
@@ -16214,7 +16116,7 @@ inline void execute_v_min_num_f16_vop2([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_min_num_f16_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
+  ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(uint32_t, [](auto a, auto b) {
     return util::f32_to_f16_simd(
         util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b)));
   });
