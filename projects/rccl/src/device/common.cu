@@ -29,13 +29,13 @@ __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_4(
   ncclKernelMain<-1, RunWorkNop, /*Unroll*/4>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/8>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/8>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/16>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/16>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/32>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/32>(&argsStorage.args);
 }
 
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
