@@ -198,7 +198,7 @@ void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                    size_t size) {
   size_t shared_bytes = 0;
 
-  CHECK_HIP(hipMemset(grid_psync, 0, sizeof(int)));
+  CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
   hipLaunchKernelGGL(PrimitiveTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, source, dest,
                      size, _type, _shmem_context, wf_size,
