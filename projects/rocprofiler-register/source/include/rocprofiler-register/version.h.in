@@ -85,23 +85,22 @@
 #if defined(rocprofiler_register_EXPORTS) || defined(ROCPROFILER_REGISTER_EXPORTS)
 // only defined in build tree
 #    if defined(_WIN32)
+// WINDOWS-DIVERGENCE: PE/COFF visibility is controlled by dllexport/dllimport
+// (ROCPROFILER_REGISTER_EXPORT_DECL above); GCC-style visibility attributes
+// are not needed and are left empty.
 #        define ROCPROFILER_REGISTER_VISIBILITY(MODE)
-#        define ROCPROFILER_REGISTER_PUBLIC_API
-#        define ROCPROFILER_REGISTER_HIDDEN_API
-#        define ROCPROFILER_REGISTER_INTERNAL_API
 #    else
 #        define ROCPROFILER_REGISTER_VISIBILITY(MODE)                                    \
             ROCPROFILER_REGISTER_ATTRIBUTE(visibility(MODE))
-#        define ROCPROFILER_REGISTER_PUBLIC_API                                          \
-            ROCPROFILER_REGISTER_VISIBILITY("default")
-#        define ROCPROFILER_REGISTER_HIDDEN_API                                          \
-            ROCPROFILER_REGISTER_VISIBILITY("hidden")
-#        define ROCPROFILER_REGISTER_INTERNAL_API                                        \
-            ROCPROFILER_REGISTER_VISIBILITY("internal")
 #    endif
+#    define ROCPROFILER_REGISTER_PUBLIC_API   ROCPROFILER_REGISTER_VISIBILITY("default")
+#    define ROCPROFILER_REGISTER_HIDDEN_API   ROCPROFILER_REGISTER_VISIBILITY("hidden")
+#    define ROCPROFILER_REGISTER_INTERNAL_API ROCPROFILER_REGISTER_VISIBILITY("internal")
 
 #    if defined(_MSC_VER) && !defined(__clang__)
-// MSVC has no GCC-style hot/cold/packed; provide reasonable substitutes.
+// MSVC has no GCC-style function attributes. Map each to the nearest MSVC
+// equivalent (__declspec(noinline), __declspec(align)) or leave empty where
+// there is no meaningful substitute (hot, cold, const, pure, weak, packed).
 #        define ROCPROFILER_REGISTER_INLINE             inline
 #        define ROCPROFILER_REGISTER_NOINLINE           __declspec(noinline)
 #        define ROCPROFILER_REGISTER_HOT

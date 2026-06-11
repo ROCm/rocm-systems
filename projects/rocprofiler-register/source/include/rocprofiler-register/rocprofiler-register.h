@@ -221,7 +221,7 @@ rocprofiler_register_iterate_registration_info(
 #if defined(_WIN32)
 #    define ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT __declspec(dllexport)
 #else
-#    define ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT
+#    define ROCPROFILER_REGISTER_IMPORT_FUNC_EXPORT __attribute__((visibility("default")))
 #endif
 
 /// @def ROCPROFILER_REGISTER_DEFINE_IMPORT(NAME, VERSION)

@@ -84,8 +84,7 @@ if(MSVC)
     # -Wextra) are filtered out by check_{c,cxx}_compiler_flag inside
     # rocprofiler_register_target_compile_options on MSVC, but spending
     # a full configure cycle probing each one is wasteful. Skip the GCC
-    # block entirely on MSVC and apply the documented MSVC equivalents
-    # instead. Plan §Phase-0/Phase-10.
+    # block entirely on MSVC and apply the MSVC equivalents instead.
     rocprofiler_register_target_compile_options(
         rocprofiler-register-build-flags
         LANGUAGES C CXX
