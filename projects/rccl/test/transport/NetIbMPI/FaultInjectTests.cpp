@@ -3159,4 +3159,69 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPollCqInjectCountFinite) {
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
+// =============================================================================
+// Test: FaultInjCastOpsApiInvalidArgs
+//
+// Unit-style coverage of the ops-fault API guard branches: NULL comm and the
+// install/registration lookups that the functional tests never hit (they always
+// pass a live, shimmed connection). Calls each API with NULL, then re-arms/clears
+// on a live connection to confirm the success guards.
+//
+// Verifies: each API returns ncclInvalidArgument on NULL comm and ncclSuccess
+//           on a live connection.
+// Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); no data transfer.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsApiInvalidArgs) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    static constexpr int kEagain = EAGAIN;
+
+    // ---- NULL comm: every Ops API must reject with ncclInvalidArgument ----
+    EXPECT_EQ(ncclIbCastFaultOpsSetPostSendError(nullptr, 0, kEagain), ncclInvalidArgument);
+    EXPECT_EQ(ncclIbCastFaultOpsSetPostRecvError(nullptr, 0, kEagain), ncclInvalidArgument);
+    EXPECT_EQ(ncclIbCastFaultOpsSetPollCqError(nullptr, 0, kWcWrFlushErr, -1, false),
+              ncclInvalidArgument);
+    EXPECT_EQ(ncclIbCastFaultOpsClear(nullptr), ncclInvalidArgument);
+
+    // ---- Live connection: success guards (registered context) ----
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> buf(kMsgSize, 0);
+    void* comm    = (MPIEnvironment::world_rank == 0) ? recvComm : sendComm;
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf.data(), kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Establish QPs so the context is shimmed/registered.
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf.data(), kMsgSize,
+                                         /*tag=*/750, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    if (MPIEnvironment::world_rank == 1) {
+        // Arm then clear on a registered context: both must succeed.
+        EXPECT_EQ(ncclIbCastFaultOpsSetPostSendError(sendComm, 0, kEagain), ncclSuccess);
+        EXPECT_EQ(ncclIbCastFaultOpsSetPollCqError(sendComm, 0, kWcWrFlushErr, 1, false),
+                  ncclSuccess);
+        EXPECT_EQ(ncclIbCastFaultOpsClear(sendComm), ncclSuccess);
+        // Clear again (already cleared) must still succeed (idempotent).
+        EXPECT_EQ(ncclIbCastFaultOpsClear(sendComm), ncclSuccess);
+    } else {
+        EXPECT_EQ(ncclIbCastFaultOpsSetPostRecvError(recvComm, 0, kEagain), ncclSuccess);
+        EXPECT_EQ(ncclIbCastFaultOpsClear(recvComm), ncclSuccess);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
