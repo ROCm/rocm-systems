@@ -2600,4 +2600,147 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPostSendErrno) {
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
+// =============================================================================
+// Test: FaultInjCastOpsPollCqFlushNonFatal
+//
+// Ops-overload path, poll_cq STATUS-REWRITE mode: rewrites real completions on
+// sender QP 0 to the whitelisted (recoverable) IBV_WC_WR_FLUSH_ERR, so the
+// resiliency layer fails over to the surviving device.
+//
+// Verifies: transfer fails over to the surviving device with fatalErrorCount == 0
+//           and data intact.
+// Requires: NCCL_IB_RESILIENCY_PORT_FAILOVER=1 and NIC Fusion ndevs >= 2 (else SKIP).
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsPollCqFlushNonFatal) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    const char* failoverEnv = getenv("NCCL_IB_RESILIENCY_PORT_FAILOVER");
+    if (!failoverEnv || strcmp(failoverEnv, "1") != 0) {
+        GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
+    }
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    int totalDevs = 0;
+    AssertInitAndGetDevices(&totalDevs);
+
+    int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
+    if (mergedDev < 0) {
+        GTEST_SKIP() << "Failover requires NIC Fusion (ndevs >= 2). "
+                     << "Found " << totalDevs << " physical devices.";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/mergedDev, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 8192;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>((i * 13 + 7) & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/710, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    struct ncclIbCastResiliencyState resState = {};
+    struct FailoverResult {
+        int sendRet;
+        int fatalCount;
+        int devState0;
+        int armRet;
+        int clearRet;
+    };
+    static constexpr int kOpsFailoverMpiTag = 9887;
+    FailoverResult fr = {};
+
+    bool recvDone = false;
+    void* recvReq = nullptr;
+
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {711};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    if (rank == 1) {
+        // Rewrite mode: status of real completions on QP 0 becomes WR_FLUSH_ERR.
+        ncclResult_t armRet = ncclIbCastFaultOpsSetPollCqError(
+            sendComm, /*qpIdx=*/0, kWcWrFlushErr, /*injectCount=*/-1, /*injectWhenIdle=*/false);
+        fr.armRet = static_cast<int>(armRet);
+
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 711, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 500; poll++) {
+                int done = 0, sz = 0;
+                ncclResult_t testRet = TestRequest(sendReq, &done, &sz);
+                if (testRet != ncclSuccess) { sendRet = testRet; break; }
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+
+        int fatalCount = 0;
+        ncclIbCastFaultGetFatalCount(sendComm, &fatalCount);
+        ncclIbCastGetResiliencyState(sendComm, &resState);
+
+        fr.sendRet    = static_cast<int>(sendRet);
+        fr.fatalCount = fatalCount;
+        fr.devState0  = resState.devState[0];
+        fr.clearRet   = static_cast<int>(ncclIbCastFaultOpsClear(sendComm));
+        MPI_Send(&fr, sizeof(fr), MPI_BYTE, 0, kOpsFailoverMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        for (int poll = 0; poll < 1500; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+            if (done) { recvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+
+        MPI_Recv(&fr, sizeof(fr), MPI_BYTE, 1, kOpsFailoverMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        EXPECT_EQ(fr.armRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsSetPollCqError failed with " << fr.armRet;
+        EXPECT_EQ(fr.clearRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsClear failed with " << fr.clearRet;
+        EXPECT_EQ(fr.sendRet, static_cast<int>(ncclSuccess))
+            << "Send should complete via surviving device after ops-level CQE rewrite";
+        EXPECT_EQ(fr.fatalCount, 0)
+            << "WR_FLUSH_ERR is whitelisted — no fatal error expected";
+        EXPECT_NE(fr.devState0, 0)
+            << "Device 0 should not be Ok after the injected flush error (got "
+            << fr.devState0 << ")";
+        if (recvDone) {
+            EXPECT_EQ(memcmp(recvBuf.data(), sendBuf.data(), kMsgSize), 0)
+                << "Data corruption after ops-level failover";
+        }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !recvDone)
+        DrainRecvRequest(recvReq);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */

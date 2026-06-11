@@ -1054,6 +1054,15 @@
           "name": "FaultInj_Cast_OpsPostSendErrno",
           "description": "CAST ops-overload: real ibv_post_send forced to return EAGAIN via shimmed ops table; isend fails or fatalCount > 0",
           "test_filter": "NetIbMPITest.FaultInjCastOpsPostSendErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
+          "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal",
+          "env_variables": {
+            "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+            "NCCL_IB_MERGE_NICS": "1"
+          }
         }
       ]
     },
