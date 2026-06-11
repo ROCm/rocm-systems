@@ -35,7 +35,7 @@ Configuration::fallback() const noexcept
         bool allow_compat = Environment::allow_compat_mode().value_or(true);
         if (force_compat && !allow_compat) {
             // TODO: replace with logging
-            fprintf(stderr, "hipFile: HIPFILE_FORCE_COMPAT_MODE=1 and HIPFILE_ALLOW_COMPAT_MODE=0 "
+            fprintf(stderr, "hipFile: HIPFILE_FORCE_COMPAT_MODE=true and HIPFILE_ALLOW_COMPAT_MODE=false "
                             "would disable all I/O backends; enabling the fallback path to avoid "
                             "failing all I/O.\n");
             return true;

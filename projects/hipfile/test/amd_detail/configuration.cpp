@@ -181,7 +181,7 @@ TEST_F(HipFileConfiguration, OverrideDisabledFallbackBackend)
 
 TEST_F(HipFileConfiguration, FallbackForcedOnWhenForceCompatTrueAndAllowCompatFalse)
 {
-    // FORCE_COMPAT_MODE=1 + ALLOW_COMPAT_MODE=0 would disable both backends.
+    // HIPFILE_FORCE_COMPAT_MODE=true + HIPFILE_ALLOW_COMPAT_MODE=false would disable both backends.
     // The guard must force the fallback path back on.
     expect_configuration_fallback("true", "false");
     ASSERT_TRUE(Configuration().fallback());
