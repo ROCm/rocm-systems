@@ -1176,15 +1176,22 @@ ncclResult_t ncclCommWindowDeregister_impl(struct ncclComm* comm, struct ncclWin
   if (!comm->symmetricSupport) {
     if (comm->hostRmaSupport) {
       struct ncclDevrWindow* win = reinterpret_cast<struct ncclDevrWindow*>(winDev);
+      struct ncclDevrState* devr = &comm->devrState;
+      int winIdx = -1;
+      for (int i = 0; i < devr->winSortedCount; i++) {
+        if (devr->winSorted[i].win == win) {
+          winIdx = i;
+          break;
+        }
+      }
+      if (winIdx < 0) {
+        WARN("ncclCommWindowDeregister: window %p is not registered (already deregistered?)", (void*)winDev);
+        ret = ncclInvalidArgument;
+        goto exit;
+      }
       NCCLCHECKGOTO(ncclRmaProxyDeregister(comm, win->rmaHostWins), ret, fail);
       NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
-      {
-        struct ncclDevrState* devr = &comm->devrState;
-        int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted, devr->winSortedCount,
-                                   reinterpret_cast<uintptr_t>(win->userPtr));
-        if (i>0) i -= 1;
-        listRemove(devr->winSorted, &devr->winSortedCount, i);
-      }
+      listRemove(devr->winSorted, &devr->winSortedCount, winIdx);
       free(win);
     } else {
       NCCLCHECKGOTO(ncclCommDeregister(comm, winDev), ret, fail);
