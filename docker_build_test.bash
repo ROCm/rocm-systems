@@ -20,13 +20,9 @@ DOCKER_IMAGE="gin-anvil:latest"
 
 # Derived sizes / shared docker+mpirun settings (expand on host, not inside container).
 MAX_BYTES=$((${NP} * ${MSG_SIZE}))
-# rocSHMEM symmetric heap is per PE (GPU). Large -v MAX_BYTES needs headroom (default heap is 1 GiB/pe).
-ROCSHMEM_HEAP_BYTES=$(( MAX_BYTES * 3 ))
-if (( ROCSHMEM_HEAP_BYTES < 2147483648 )); then ROCSHMEM_HEAP_BYTES=2147483648; fi   # min 2 GiB/pe
-if (( ROCSHMEM_HEAP_BYTES > 6442450944 )); then ROCSHMEM_HEAP_BYTES=6442450944; fi   # cap 6 GiB/pe
 # No -it: script is often run over non-interactive SSH.
 # --init: PID 1 reaps children so ranks exit more cleanly (reduces NCCL IPC/socket teardown WARNs).
-DOCKER_GPU="--rm --init --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged "
+DOCKER_GPU="--rm --init --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v /boot/config-$(uname -r):/boot/config-$(uname -r):ro  -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so   -v /usr/include/infiniband/bnxt_re_dv.h:/usr/include/infiniband/bnxt_re_dv.h   -v /usr/include/infiniband/bnxt_re_hsi.h:/usr/include/infiniband/bnxt_re_hsi.h   -v /usr/local/lib/libbnxt_re.so:/usr/local/lib/libbnxt_re.so   -v /usr/local/lib/libbnxt_re-rdmav34.so:/usr/local/lib/libbnxt_re-rdmav34.so rccl-gingda713"
 RCCL_LD_PATH="/workspace/rocshmem/lib:/workspace/rccl/lib:/opt/ucx/lib:/opt/ompi/lib:/opt/rocm/lib:/opt/rocm/core/lib/rocm_sysdeps/lib"
 HFILE="my_hostfile"
 MPIRUN_BASE="-n ${NP} --allow-run-as-root -mca pml ob1 -mca btl ^openib"
@@ -78,13 +74,12 @@ docker run --rm ${DOCKER_IMAGE} bash -lc "
 if [ 1 -eq 1 ]; then
 #####
 # rocSHMEM IPC alltoall (reference)
-echo "=== rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} ==="
+echo "=== rocSHMEM IPC alltoall np=${NP} max_bytes=${MAX_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
   -x ROCSHMEM_TEST_UUID=1 \
   -x ROCSHMEM_BACKEND=ipc \
   -x ROCSHMEM_SDMA_ENABLED=1 \
-  -x ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} \
   -x ROCSHMEM_DEBUG_LEVEL=info:noversion \
   /workspace/rocshmem/bin/rocshmem_functional_tests \
   -a 19 -w 1 -z 256 -v ${MAX_BYTES} -n 100 -noverif
@@ -141,7 +136,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x ROCSHMEM_BACKEND=ipc \
-  -x ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} \
+  -x ROCSHMEM_HEAP_SIZE=1073741824 \
   -x ROCSHMEM_SDMA_ENABLED=1 \
   -x NCCL_GIN_TYPE=4 \
   -x NCCL_DEBUG=VERSION \
@@ -166,7 +161,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x ROCSHMEM_BACKEND=ipc \
-  -x ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_BYTES} \
+  -x ROCSHMEM_HEAP_SIZE=1073741824 \
   -x ROCSHMEM_SDMA_ENABLED=1 \
   -x NCCL_GIN_TYPE=4 \
   -x NCCL_DEBUG_SUBSYS=INIT \
@@ -224,8 +219,8 @@ fi
 if [ 1 -eq 1 ]; then
 # --- RCCL AlltoAll with GIN_ANVIL (NCCL_GIN_TYPE=5, intra-node MI300 xGMI SDMA)
 # Symmetric collective windows (-R 2) are required for -D 5 and feed ncclGinAnvilRegister LSA resolution.
-# Tuning: larger SDMA host chunks + more device CTAs (-V) and rccl-tests pipeline chunk (alltoall.cu)
-# reduce round-trips vs legacy 1 MiB / 16 MiB defaults; override env on the mpirun line if needed.
+# Single-node -D 5 uses cooperative AlltoAllLsaCopy for large slices; do not raise -V beyond defaults
+# without matching devComm barrier counts — oversubscribing CTAs regresses badly on MI355-class nodes.
 # Matches Dockerfile-rccl-gin-anvil example; single-node only (no IB device required).
 echo "=== RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) np=${NP} max_bytes=${MAX_BYTES} ==="
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
@@ -234,8 +229,8 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=5 \
-  -x NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=6 \
-  -x NCCL_GIN_ANVIL_SDMA_CHUNK_MB=32 \
+  -x NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=4 \
+  -x NCCL_GIN_ANVIL_SDMA_CHUNK_MB=16 \
   -x NCCL_DEBUG_SUBSYS=INIT \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
@@ -244,7 +239,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -V 24 -D 5 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 5 -A 1
 fi
 
 if [ 0 -eq 1 ]; then
@@ -263,7 +258,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -V 24 -D 5 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 5 -A 1
 fi
 
 #
@@ -297,8 +292,8 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=5 \
-  -x NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=6 \
-  -x NCCL_GIN_ANVIL_SDMA_CHUNK_MB=32 \
+  -x NCCL_GIN_ANVIL_SDMA_NUM_CHANNELS=4 \
+  -x NCCL_GIN_ANVIL_SDMA_CHUNK_MB=16 \
   -x NCCL_DEBUG_SUBSYS=INIT \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
@@ -307,7 +302,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -V 24 -D 5 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 5 -A 1
 fi
 fi
 

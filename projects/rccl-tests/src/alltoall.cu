@@ -282,15 +282,16 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
 }
 
 // Message slice size above which CTAs stripe peers (not offsets) for xGMI link parallelism
-// (AlltoAllNvlCopySelect). Same constant bounds the NVL-only fast path in AlltoAllGinAdaptiveLocalCopy:
-// small slices use AlltoAllNvlCopyOptimized; large + multi-CTA uses NvlCopySelect; else LsaCopy.
+// (AlltoAllNvlCopySelect). Same constant bounds the NVL fast path in AlltoAllGinAdaptiveLocalCopy:
+// per-rank slices smaller than this use AlltoAllNvlCopyOptimized; larger slices use AlltoAllLsaCopy.
 constexpr size_t kAlltoAllPeerParallelByteThreshold = 128 * 1024;
 // Rank-slice bytes below which GinAdaptiveAlltoAllKernel uses one CTA (latency); larger uses
 // deviceCtaCount CTAs (see alltoall_perf -V).
 static constexpr size_t kAlltoAllSmallMessageRankSliceBytes = 128 * 1024;
 
-// Hybrid GIN path: pipeline remote SDMA puts with local LSA copy.
-constexpr size_t kAlltoAllGinPipelineChunkBytes = 8 << 20;
+// Hybrid GIN path: pipeline remote SDMA puts with local LSA copy. Larger chunks reduce
+// signal/wait rounds vs 1 MiB while keeping pipelining for overlap (tune with Anvil SDMA chunk env).
+constexpr size_t kAlltoAllGinPipelineChunkBytes = 4 << 20;
 
 // Vectorized copy of one rank-slice to one peer (used by peer-parallel alltoall).
 template <typename T>
@@ -360,7 +361,7 @@ __device__ __forceinline__ void AlltoAllNvlCopyOptimized(ncclWindow_t sendwin, s
   using TN = typename VectorTypeMapping<T>::Type;
   constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
   constexpr int UNROLL_FACTOR = 128/sizeof(TN);
-  constexpr int PEER_UNROLL = 4;
+  constexpr int PEER_UNROLL = 2;
 
   T* sendPtr = (T*)ncclGetLsaPointer(sendwin, sendoffset, rank);
 
@@ -473,7 +474,7 @@ __device__ __forceinline__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sen
   using TN = typename VectorTypeMapping<T>::Type;
   constexpr int VECTOR_FACTOR = sizeof(TN) / sizeof(T);
   constexpr int UNROLL_FACTOR = 128/sizeof(TN);
-  constexpr int PEER_UNROLL = 4;
+  constexpr int PEER_UNROLL = 2;
 
   T* sendLocal = (T*)ncclGetLocalPointer(sendwin, sendoffset);
 
@@ -536,8 +537,9 @@ __device__ __forceinline__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sen
   }
 }
 
-// Gin-anvil single-node: small slices use NVL vectorized copy; large + multi-CTA uses
-// AlltoAllNvlCopySelect (peer striping like -D 2); single-CTA large slices use LsaCopy.
+// Gin-anvil single-node fast path: below the peer-parallel threshold, use the same NVL
+// vectorized copy as GIN host proxy (-D 1). At larger per-rank slices, keep LSA copy
+// (AlltoAllNvlCopyPeerParallel regressed large-message bandwidth when selected blindly).
 template <typename T>
 __device__ __forceinline__ void AlltoAllGinAdaptiveLocalCopy(ncclWindow_t sendwin, size_t sendoffset,
     ncclWindow_t recvwin, size_t recvoffset, size_t count, int recvRank, int startLsa,
@@ -545,9 +547,6 @@ __device__ __forceinline__ void AlltoAllGinAdaptiveLocalCopy(ncclWindow_t sendwi
   if (count * sizeof(T) < kAlltoAllPeerParallelByteThreshold) {
     AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
                                 tid, nthreads);
-  } else if (nBlocks > 1) {
-    AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
-                             blockId, nBlocks, tid, nthreads);
   } else {
     AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, recvRank, startLsa,
                        lsaSize, tid, nthreads);
