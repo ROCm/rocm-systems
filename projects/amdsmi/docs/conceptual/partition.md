@@ -99,6 +99,12 @@ System
       ├── Processor 1  (XCP 1 / logical GPU)  ← amdsmi_processor_handle
       └── ...  (count depends on active partition mode)
  └── Socket 1  (physical GPU / OAM)
+System
+ └── Socket 0  (physical GPU / OAM)      ← amdsmi_socket_handle
+      ├── Processor 0  (XCP 0 / logical GPU / primary)  ← amdsmi_processor_handle: gpu_metrics + xcp_metrics (e.g. renderD128)
+      ├── Processor 1  (XCP 1 / logical GPU / secondary)  ← amdsmi_processor_handle: xcp_metrics only         (e.g. renderD129)
+      └── ...  (count depends on active partition mode)
+ └── Socket 1  (physical GPU / OAM)
       └── ...
 ```
 
