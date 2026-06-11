@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <mutex>
 #include <span>
 #include <thread>
@@ -100,6 +101,7 @@ public:
     {
       std::lock_guard<std::mutex> lock(mutex_);
       tasks_.assign(tasks.begin(), tasks.end());
+      job_ = [this](size_t i) { tasks_[i]->run_quantum(); };
       task_count_ = tasks_.size();
       next_task_.store(0, std::memory_order_relaxed);
       remaining_.store(task_count_, std::memory_order_relaxed);
@@ -132,6 +134,42 @@ public:
     task_count_ = 0;
   }
 
+  /// @brief Run @p n indexed jobs across the pool (calling thread + workers).
+  ///
+  /// @details Generic fork-join used by the intra-CU path, where one "job" is a
+  /// shard of a single CU's wavefronts rather than a whole CU. Shares the same
+  /// lock-free hand-out as run(); does not record the CU/wavefront stats (the
+  /// job index has no single owning CU).
+  void run_jobs(size_t n, uint32_t threads, std::function<void(size_t)> fn) {
+    if (n == 0)
+      return;
+    threads = std::clamp<uint32_t>(threads, 1, static_cast<uint32_t>(n));
+    uint32_t worker_goal =
+        std::min<uint32_t>(threads > 1 ? threads - 1 : 0, static_cast<uint32_t>(workers_.size()));
+    if (worker_goal == 0) {
+      for (size_t i = 0; i < n; ++i)
+        fn(i);
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      tasks_.clear();
+      job_ = std::move(fn);
+      task_count_ = n;
+      next_task_.store(0, std::memory_order_relaxed);
+      remaining_.store(task_count_, std::memory_order_relaxed);
+      run_work_ns_.store(0, std::memory_order_relaxed);
+      run_max_ns_.store(0, std::memory_order_relaxed);
+      ++generation_;
+    }
+    for (uint32_t i = 0; i < worker_goal; ++i)
+      work_cv_.notify_one();
+    drain_tasks();
+    std::unique_lock<std::mutex> lock(mutex_);
+    done_cv_.wait(lock, [this]() { return remaining_.load(std::memory_order_acquire) == 0; });
+    task_count_ = 0;
+  }
+
 private:
   /// @brief Claim and execute CUs until the task queue is drained.
   ///
@@ -145,7 +183,7 @@ private:
         return;
       if (timed) {
         auto t0 = std::chrono::steady_clock::now();
-        tasks_[i]->run_quantum();
+        job_(i);
         uint64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                           std::chrono::steady_clock::now() - t0)
                           .count();
@@ -154,7 +192,7 @@ private:
         while (ns > prev && !run_max_ns_.compare_exchange_weak(prev, ns, std::memory_order_relaxed))
           ;
       } else {
-        tasks_[i]->run_quantum();
+        job_(i);
       }
       if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -186,6 +224,7 @@ private:
   std::condition_variable done_cv_;
   std::vector<std::jthread> workers_;
   std::vector<ComputeUnitCore *> tasks_;
+  std::function<void(size_t)> job_; // executes one task index (CU or wf-shard)
   size_t task_count_ = 0;
   std::atomic<size_t> next_task_ = 0;
   std::atomic<size_t> remaining_ = 0;

@@ -35,6 +35,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <functional>
 #include <memory>
 #include <string>
@@ -145,6 +146,39 @@ public:
     }
     return ran;
   }
+
+  /// @brief Execute a shard of this CU's wavefronts on one host thread.
+  ///
+  /// @details Intra-CU parallelism: when spare host threads exist (active CUs <
+  /// dispatch threads), several threads co-run one CU, each owning the active
+  /// wavefronts whose index satisfies (idx % shard_count == shard_idx). Each
+  /// wavefront is touched by exactly one shard, so per-wavefront register files
+  /// and state need no locking; the per-CU caches are kept thread-local to this
+  /// call, and the shared memory subsystem (L1/LDS) is serialized by the per-CU
+  /// memory mutex while VALU runs fully parallel. Does NOT retire wavefronts —
+  /// the command processor retires after the fork-join joins.
+  ///
+  /// Only valid for barrier-free workgroups (see uses_lds()); a wavefront that
+  /// parks in BARRIER here is left for the serial fallback to resolve.
+  /// @returns true if any instruction was issued.
+  bool run_quantum_shard(uint32_t shard_idx, uint32_t shard_count);
+
+  /// @brief Whether any resident workgroup has allocated LDS. Used as a safe
+  /// proxy for "may contain cross-wavefront barriers" — such CUs stay on the
+  /// single-threaded path.
+  bool uses_lds() const { return next_lds_alloc_ > 0; }
+
+  /// @brief Number of active (allocated) wavefronts resident on this CU.
+  uint32_t active_wf_count() const {
+    uint32_t n = 0;
+    for (const auto &w : wfs_)
+      if (w->sgpr_alloc().count > 0)
+        ++n;
+    return n;
+  }
+
+  /// @brief Toggle parallel-execution mode (enables per-CU memory locking).
+  void set_parallel_exec(bool on) { parallel_exec_ = on; }
 
   /// @brief Signal that work has been dispatched; begin processing.
   ///
@@ -586,6 +620,24 @@ protected:
     std::unique_ptr<Instruction> inst; // non-memory decoded instruction, or null
   };
   std::array<DecodeCacheLine, kInstFetchCacheLines> decode_cache_{};
+
+  // Intra-CU parallel variants: execute using caller-supplied (thread-local)
+  // fetch/decode caches instead of the per-CU members, so several host threads
+  // can issue instructions for different wavefronts of this CU concurrently
+  // without racing on the shared caches. The single-argument overloads above
+  // delegate here with the per-CU caches for the serial path.
+  void issue_instruction(Wavefront *wf, InstFetchCacheLine *fetch_cache,
+                         DecodeCacheLine *decode_cache);
+  void fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4],
+                               InstFetchCacheLine *fetch_cache);
+
+  // Serializes the shared per-CU memory subsystem (L1 V$/S$, LDS) while multiple
+  // threads co-run this CU's wavefronts. VALU touches only per-wavefront state
+  // and runs lock-free; only memory ops (route_memory_inst) take this lock.
+  // Atomics already serialize inside L2. Unused on the single-threaded path.
+  std::mutex parallel_mem_mutex_;
+  bool parallel_exec_ = false;
+
   // Dispatch id whose arrival last triggered per-CU cache invalidation, so the
   // invalidation happens once per dispatch (in begin_workgroup) rather than per
   // wavefront. UINT32_MAX = none yet.

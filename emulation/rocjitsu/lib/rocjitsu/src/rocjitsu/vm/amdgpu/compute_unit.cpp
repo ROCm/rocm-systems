@@ -449,6 +449,14 @@ void ComputeUnitCore::tick_pipelines() {
 }
 
 void ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+  // When several host threads co-run this CU's wavefronts (intra-CU parallel
+  // mode), the shared per-CU memory subsystem (L1 V$/S$, LDS) must be serialized.
+  // VALU never reaches here, so it stays lock-free; this guard is a no-op on the
+  // single-threaded path.
+  std::unique_lock<std::mutex> mem_lock;
+  if (parallel_exec_)
+    mem_lock = std::unique_lock<std::mutex>(parallel_mem_mutex_);
+
   if (plugin_hooks_enabled_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
 
@@ -531,10 +539,15 @@ void ComputeUnitCore::update_wf_states() {
 }
 
 void ComputeUnitCore::issue_instruction(Wavefront *active) {
+  issue_instruction(active, inst_fetch_cache_.data(), decode_cache_.data());
+}
+
+void ComputeUnitCore::issue_instruction(Wavefront *active, InstFetchCacheLine *fetch_cache,
+                                        DecodeCacheLine *decode_cache) {
   uint32_t vmid = active->process_id();
 
   rj_code_binary_inst_t words[4];
-  fetch_instruction_words(active->pc, vmid, words);
+  fetch_instruction_words(active->pc, vmid, words, fetch_cache);
 
   active->trace_inst_count_++;
 
@@ -545,7 +558,7 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   const uint64_t decode_idx =
       ((issue_pc >> 2) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL)) &
       (kInstFetchCacheLines - 1);
-  DecodeCacheLine &dline = decode_cache_[decode_idx];
+  DecodeCacheLine &dline = decode_cache[decode_idx];
 
   Instruction *inst = nullptr;
   bool owns_inst = false;
@@ -661,14 +674,21 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 }
 
 void ComputeUnitCore::fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4]) {
+  fetch_instruction_words(pc, vmid, words, inst_fetch_cache_.data());
+}
+
+void ComputeUnitCore::fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4],
+                                              InstFetchCacheLine *fetch_cache) {
   static_assert((kInstFetchCacheLines & (kInstFetchCacheLines - 1)) == 0);
   const uint64_t mixed = (pc >> 2) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL);
-  auto &line = inst_fetch_cache_[mixed & (kInstFetchCacheLines - 1)];
+  auto &line = fetch_cache[mixed & (kInstFetchCacheLines - 1)];
   if (line.valid && line.pc == pc && line.vmid == vmid) {
     std::memcpy(words, line.words.data(), sizeof(line.words));
     return;
   }
 
+  // memory_->read_block goes through the striped, thread-safe memory-side cache,
+  // so concurrent fetches from co-running shards are safe.
   memory_->read_block(pc, reinterpret_cast<uint8_t *>(words), sizeof(line.words), vmid);
   line.pc = pc;
   line.vmid = vmid;
@@ -681,6 +701,56 @@ void ComputeUnitCore::invalidate_inst_fetch_cache() {
     line.valid = false;
   for (auto &line : decode_cache_)
     line.inst.reset();
+}
+
+bool ComputeUnitCore::run_quantum_shard(uint32_t shard_idx, uint32_t shard_count) {
+  // Thread-local fetch/decode caches: each co-running shard owns its own so the
+  // per-CU caches are never written concurrently. Allocated per call; for the
+  // small, low-occupancy kernels that trigger intra-CU parallelism the whole
+  // kernel typically completes in one quantum, so the cache warms within it.
+  std::array<InstFetchCacheLine, kInstFetchCacheLines> fetch_cache{};
+  std::array<DecodeCacheLine, kInstFetchCacheLines> decode_cache{};
+
+  bool ran = false;
+  for (uint32_t iter = 0, quantum = functional_quantum(); iter < quantum; ++iter) {
+    bool any_running = false;
+    uint32_t active_idx = 0;
+    for (auto &w : wfs_) {
+      if (w->sgpr_alloc().count == 0)
+        continue; // unused slot
+      // Stable partition: each active wavefront belongs to exactly one shard, so
+      // its register file and state are touched by a single thread (no locking).
+      const bool mine = (active_idx % shard_count) == shard_idx;
+      ++active_idx;
+      if (!mine)
+        continue;
+      switch (w->state()) {
+      case WfState::RUNNING:
+        issue_instruction(w.get(), fetch_cache.data(), decode_cache.data());
+        any_running = true;
+        ran = true;
+        break;
+      case WfState::WAITCNT:
+        if (w->wait_satisfied()) {
+          w->set_state(WfState::RUNNING);
+          any_running = true;
+        }
+        break;
+      case WfState::ENDING:
+        if (w->wait_counters().empty())
+          w->halt();
+        break;
+      default:
+        // HALTED: done. BARRIER: this path is only used for barrier-free
+        // workgroups (uses_lds()==false gate); a parked BARRIER is left for the
+        // serial fallback to resolve.
+        break;
+      }
+    }
+    if (!any_running)
+      break;
+  }
+  return ran;
 }
 
 bool ComputeUnitCore::step() {

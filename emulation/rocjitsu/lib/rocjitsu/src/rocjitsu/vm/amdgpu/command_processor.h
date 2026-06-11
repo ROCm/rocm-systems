@@ -249,6 +249,15 @@ private:
   std::unique_ptr<CpuDispatchPool> dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;
 
+  // Intra-CU parallel scheduling scratch: one entry per (CU, wavefront-shard)
+  // when spare host threads co-run a single CU (see run_active_cus()).
+  struct IntraCuJob {
+    ComputeUnitCore *cu;
+    uint32_t shard_idx;
+    uint32_t shard_count;
+  };
+  std::vector<IntraCuJob> intra_cu_jobs_;
+
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;
 

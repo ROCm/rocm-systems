@@ -199,7 +199,54 @@ bool CommandProcessor::run_active_cus(uint32_t threads) {
   if (active_cu_scratch_.empty())
     return false;
 
-  uint32_t effective = std::min<uint32_t>(threads, active_cu_scratch_.size());
+  const uint32_t num_cus = static_cast<uint32_t>(active_cu_scratch_.size());
+
+  // Intra-CU parallelism (opt-in via RJ_INTRA_CU_THREADS): when there are more
+  // host threads than active CUs, low-occupancy kernels leave threads idle (one
+  // CU per thread, the rest unused). Let spare threads co-run a single CU's
+  // wavefronts. Only barrier-free CUs (no LDS allocated) are eligible; LDS /
+  // reduction kernels stay on the one-thread-per-CU path until the cross-thread
+  // counting barrier lands.
+  static const bool intra_cu_enabled = []() {
+    const char *e = std::getenv("RJ_INTRA_CU_THREADS");
+    return e && std::atoi(e) != 0;
+  }();
+  if (intra_cu_enabled && threads > num_cus && num_cus > 0) {
+    intra_cu_jobs_.clear();
+    const uint32_t per_cu = std::max<uint32_t>(1, threads / num_cus);
+    for (auto *cu : active_cu_scratch_) {
+      uint32_t shards = 1;
+      if (!cu->uses_lds()) {
+        uint32_t wfn = cu->active_wf_count();
+        shards = std::min<uint32_t>(std::max<uint32_t>(wfn, 1), per_cu);
+      }
+      cu->set_parallel_exec(shards > 1);
+      for (uint32_t s = 0; s < shards; ++s)
+        intra_cu_jobs_.push_back({cu, s, shards});
+    }
+    const uint32_t job_threads =
+        std::min<uint32_t>(threads, static_cast<uint32_t>(intra_cu_jobs_.size()));
+    if (job_threads > 1) {
+      if (!dispatch_pool_ || dispatch_pool_->thread_count() < job_threads)
+        dispatch_pool_ = std::make_unique<CpuDispatchPool>(job_threads);
+      auto *jobs = &intra_cu_jobs_;
+      dispatch_pool_->run_jobs(jobs->size(), job_threads, [jobs](size_t i) {
+        const auto &j = (*jobs)[i];
+        if (j.shard_count > 1)
+          j.cu->run_quantum_shard(j.shard_idx, j.shard_count);
+        else
+          j.cu->run_quantum();
+      });
+    } else {
+      for (auto *cu : active_cu_scratch_)
+        cu->run_quantum();
+    }
+    for (auto *cu : active_cu_scratch_)
+      cu->set_parallel_exec(false);
+    return true;
+  }
+
+  uint32_t effective = std::min<uint32_t>(threads, num_cus);
   if (effective > 1) {
     if (!dispatch_pool_ || dispatch_pool_->thread_count() < effective)
       dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective);
