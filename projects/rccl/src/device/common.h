@@ -683,9 +683,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       SpecializedRunWorkBatch().run();
     } else {
 #ifndef RCCL_DEVICE_TABLE_OMIT
-#define _RCCL_PASTE2(a,b) a##b
-#define _RCCL_FUNC_TABLE(N) _RCCL_PASTE2(ncclDevFuncTable_,N)
-#define _RCCL_CALL_FUNCS(N) _RCCL_PASTE2(NCCL_CALL_FUNCTIONS_,N)
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
