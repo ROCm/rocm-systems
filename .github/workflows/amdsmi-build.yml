@@ -106,6 +106,28 @@ jobs:
             --os-label "${{ matrix.os }}" \
             --test-results-dir "/tmp/test-results-${{ matrix.os }}"
 
+      # DEBUG (experiment only): dump --help for every base subcommand whose
+      # CLI test failed, to see which args (notably --nic) are advertised on
+      # this runner and how the CLI behaves when invoked with no NIC hardware.
+      - name: DEBUG amd-smi subcommand help
+        if: always()
+        run: |
+          set +e
+          echo "===== amd-smi version ====="
+          amd-smi version
+          echo "===== amd-smi list ====="
+          amd-smi list
+          for sub in bad-pages fabric firmware list metric monitor partition process static topology xgmi node; do
+            echo "======================================================"
+            echo "===== amd-smi $sub --help ====="
+            echo "======================================================"
+            amd-smi "$sub" --help
+            echo "----- exit: $? -----"
+            echo "===== amd-smi $sub --nic (if applicable) ====="
+            amd-smi "$sub" --nic
+            echo "----- amd-smi $sub --nic exit: $? -----"
+          done
+
       # The previous step exits non-zero if any build/install/wheel-verify
       # stage failed; on failure we dump the per-stage result files for
       # quick triage in the GitHub Actions log. Full logs are still
