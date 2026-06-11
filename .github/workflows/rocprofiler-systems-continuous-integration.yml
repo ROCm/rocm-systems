@@ -114,9 +114,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           sparse-checkout: |
-            projects/rocprofiler-systems/
-            projects/rocdecode/
-            projects/rocjpeg/
+            projects/rocprofiler-systems
             .gitmodules
           submodules: recursive
 
@@ -158,30 +156,6 @@ jobs:
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"
-
-      - name: Build and Install ROCDecode
-        working-directory: projects/rocdecode
-        run: |
-          echo "Building & Installing ROCDecode..."
-          cmake -B build-rocdecode \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
-          cmake --build build-rocdecode --target all --parallel 16
-          cmake --build build-rocdecode --target install
-          echo "✅ ROCDecode Installation complete!"
-
-      - name: Build and Install ROCJPEG
-        working-directory: projects/rocjpeg
-        run: |
-          echo "Building & Installing ROCJPEG..."
-          cmake -B build-rocjpeg \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} \
-            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
-          cmake --build build-rocjpeg --target all --parallel 16
-          cmake --build build-rocjpeg --target install
-          echo "✅ ROCJPEG Installation complete!"
 
       - name: Install Python Test Dependencies
         timeout-minutes: 10
