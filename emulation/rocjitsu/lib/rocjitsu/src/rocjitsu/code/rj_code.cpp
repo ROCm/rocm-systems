@@ -15,6 +15,7 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
   static thread_local std::unique_ptr<Decoder> cdna3_decoder;
   static thread_local std::unique_ptr<Decoder> cdna4_decoder;
   static thread_local std::unique_ptr<Decoder> rdna4_decoder;
+  static thread_local std::unique_ptr<Decoder> gfx1250_decoder;
 
   switch (target) {
   case ROCJITSU_CODE_TARGET_GFX942:
@@ -30,6 +31,10 @@ Decoder *create_decoder_for_target(rj_code_target_id_t target) {
     if (!rdna4_decoder)
       rdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
     return rdna4_decoder.get();
+  case ROCJITSU_CODE_TARGET_GFX1250:
+    if (!gfx1250_decoder)
+      gfx1250_decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+    return gfx1250_decoder.get();
   default:
     return nullptr;
   }

@@ -209,6 +209,11 @@ class Backend {
   virtual int buffer_unregister(void *addr);
 
   /**
+   * @brief Unregister all previously registered user buffers.
+   */
+  virtual void buffer_unregister_all();
+
+  /**
    * @brief High level device stats that do not depend on backend type.
    */
   ROCStats globalStats{};
@@ -293,7 +298,7 @@ class Backend {
    */
   TeamTracker team_tracker{};
 
-  BackendType get_backend_type() { return type; }
+  BackendType get_type() { return type; }
 
   /**
    * Fine grained memory allocator for buffers used in collectives Routines

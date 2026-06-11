@@ -1328,6 +1328,17 @@ hsa_status_t HSA_API hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_
   return amdExtTable->hsa_amd_vmem_retain_alloc_handle_fn(handle, addr);
 }
 
+hsa_status_t HSA_API hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,
+                                                       hsa_amd_vmem_alloc_handle_t handle,
+                                                       uint64_t flags) {
+  return amdExtTable->hsa_amd_vmem_export_fabric_handle_fn(fabric_handle, handle, flags);
+}
+
+hsa_status_t HSA_API hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle) {
+  return amdExtTable->hsa_amd_vmem_import_fabric_handle_fn(fabric_handle, handle);
+}
+
 hsa_status_t HSA_API hsa_amd_vmem_get_alloc_properties_from_handle(
     hsa_amd_vmem_alloc_handle_t alloc_handle, hsa_amd_memory_pool_t* pool,
     hsa_amd_memory_type_t* type) {
