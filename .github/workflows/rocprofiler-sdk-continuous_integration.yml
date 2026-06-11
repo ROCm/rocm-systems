@@ -463,7 +463,10 @@ jobs:
 
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:22.04-systems-ci-${{ matrix.system.gpu-target }}
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
