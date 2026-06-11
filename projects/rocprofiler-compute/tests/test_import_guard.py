@@ -69,24 +69,41 @@ def test_import_guard_blocks_non_stdlib():
             "ProfileModeImportGuard requires Python 3.10+ (sys.stdlib_module_names)"
         )
 
-    # Test blocking non-stdlib imports
-    # Note: Must clear from sys.modules first since import hooks only
-    # run for uncached modules
     test_packages = ["pandas", "yaml", "numpy"]
 
     for package in test_packages:
-        # Clear from cache if present
-        if package in sys.modules:
-            del sys.modules[package]
-
         # Should block the import
         with pytest.raises(ImportError, match="PROFILE MODE DEPENDENCY VIOLATION"):
             with ProfileModeImportGuard():
                 __import__(package)
 
         # Verify error message mentions the forbidden package
-        if package in sys.modules:
-            del sys.modules[package]
         with pytest.raises(ImportError, match=package):
             with ProfileModeImportGuard():
                 __import__(package)
+
+
+def test_import_guard_catches_already_cached_package():
+    """Verify the guard flags a forbidden import even when the package is
+    already in sys.modules.
+
+    Python checks sys.modules before sys.meta_path, so a meta_path finder alone
+    never sees a cached import. pandas is cached for the whole session (conftest
+    imports it via common.py at collection), which is exactly the real scenario:
+    a profile-mode `import pandas` must still be caught.
+    """
+    from conftest import ProfileModeImportGuard
+
+    if sys.version_info < (3, 10):
+        pytest.skip(
+            "ProfileModeImportGuard requires Python 3.10+ (sys.stdlib_module_names)"
+        )
+
+    # Ensure the package is cached, then confirm the guard still raises.
+    import pandas  # noqa: F401
+
+    assert "pandas" in sys.modules
+
+    with pytest.raises(ImportError, match="PROFILE MODE DEPENDENCY VIOLATION"):
+        with ProfileModeImportGuard():
+            import pandas as pd  # noqa: F401, F811

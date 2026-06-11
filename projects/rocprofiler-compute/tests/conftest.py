@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import builtins
 import importlib.util
 import os
 import random
@@ -25,7 +26,14 @@ rocprof_compute_script_path = str(rocprof_compute_script_path)
 
 class ProfileModeImportGuard:
     """
-    Import guard using sys.meta_path to enforce stdlib-only imports in profile mode.
+    Import guard enforcing stdlib-only imports in profile mode.
+
+    Uses two hooks so a violation is caught regardless of cache state:
+        - builtins.__import__ wrapper: runs for every import statement, even when
+          the target is already in sys.modules (Python checks sys.modules before
+          sys.meta_path, so a cached package would otherwise slip past).
+        - sys.meta_path finder: catches dynamic, uncached imports done via
+          importlib that bypass builtins.__import__.
 
     Python Version Compatibility:
         - Python 3.10+: Full enforcement (uses sys.stdlib_module_names)
@@ -37,9 +45,11 @@ class ProfileModeImportGuard:
             # Python 3.8-3.9: No-op, all imports allowed (with warning)
 
     Context Manager Protocol:
-        __enter__: Registers guard with Python's import system (sys.meta_path)
-        __exit__: Unregisters guard after code execution completes
+        __enter__: Registers both hooks with Python's import system
+        __exit__: Unregisters both hooks after code execution completes
     """
+
+    _real_import = None
 
     # Project modules that are allowed (non-stdlib)
     ALLOWED_PROJECT_MODULES = frozenset([
@@ -68,14 +78,16 @@ class ProfileModeImportGuard:
 
     def __enter__(self):
         """
-        Register import guard with Python's import system.
+        Register both import hooks with Python's import system.
 
-        Called automatically when entering 'with' block.
-        Adds this object to sys.meta_path so Python calls our find_spec()
-        for every import during the with block.
+        Called automatically when entering 'with' block. Installs the
+        builtins.__import__ wrapper (catches cached imports) and the
+        sys.meta_path finder (catches dynamic uncached imports).
         """
         if sys.version_info >= (3, 10):
             sys.meta_path.insert(0, self)
+            self._real_import = builtins.__import__
+            builtins.__import__ = self._guarded_import
         else:
             print(
                 "\n" + "=" * 70 + "\n"
@@ -88,36 +100,63 @@ class ProfileModeImportGuard:
 
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
         """
-        Unregister import guard from Python's import system.
+        Unregister both import hooks from Python's import system.
 
-        Called automatically when exiting 'with' block.
-        Removes this object from sys.meta_path, disabling import checking.
+        Called automatically when exiting 'with' block. Restores the original
+        builtins.__import__ and removes the sys.meta_path finder.
         """
-        if sys.version_info >= (3, 10) and self in sys.meta_path:
-            sys.meta_path.remove(self)
+        if sys.version_info >= (3, 10):
+            if self._real_import is not None:
+                builtins.__import__ = self._real_import
+                self._real_import = None
+            if self in sys.meta_path:
+                sys.meta_path.remove(self)
+
+    def _guarded_import(self, name, *args, **kwargs):
+        """
+        Hook 1: replaces builtins.__import__ for the with block.
+
+        Runs for every import statement before the sys.modules lookup, so it
+        catches forbidden imports even when the package is already cached.
+        Only absolute imports (level == 0) are checked here: a relative import's
+        name is unresolved and always lands inside its already-checked parent
+        package, and hook 2 sees the fully-resolved submodule name anyway.
+        Delegates to the real importer once the check passes.
+        """
+        level = args[3] if len(args) > 3 else kwargs.get("level", 0)
+        if level == 0:
+            self._raise_if_forbidden(name)
+        return self._real_import(name, *args, **kwargs)
 
     def find_spec(self, fullname, path, target=None):
         """
-        PEP 451 import hook - called automatically by Python during imports.
+        Hook 2: PEP 451 sys.meta_path finder.
 
-        Python's import system calls this method for every import statement.
-        We check if the module is allowed, and raise ImportError if not.
+        Python consults meta_path only on a cache miss, so this covers dynamic
+        uncached imports (e.g. importlib.import_module) that bypass
+        builtins.__import__. Returns None for allowed modules to let normal
+        resolution proceed.
         """
+        self._raise_if_forbidden(fullname)
+        return None
+
+    def _raise_if_forbidden(self, fullname):
+        """Raise ImportError if the top-level package is not allowed."""
         top_level = fullname.split(".")[0]
 
         # Check stdlib
         if top_level in sys.stdlib_module_names:
-            return None
+            return
 
         # Check ROCm modules
         if top_level in self.ALLOWED_ROCM_MODULES:
-            return None
+            return
 
         # Check project modules (validate origin to prevent third-party modules
         # with same name, e.g., "utils" from site-packages)
         if top_level in self.ALLOWED_PROJECT_MODULES:
             if self._is_from_project(top_level):
-                return None
+                return
 
         # Forbidden module
         raise ImportError(
