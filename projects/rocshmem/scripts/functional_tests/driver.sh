@@ -1,3 +1,4 @@
+#!/bin/bash
 ###############################################################################
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
@@ -21,8 +22,6 @@
 # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 # IN THE SOFTWARE.
 ###############################################################################
-
-#!/bin/bash
 if true || tty -s; then
   PRETTY_FAILED="\033[1;31mFAILED\033[0m"
   PRETTY_PASSED="\033[1;32mPASSED\033[0m"
@@ -72,7 +71,7 @@ declare -A TEST_NUMBERS=(
   ["teamctxput"]="36"
   ["teamctxputnbi"]="37"
   ["teamctxinfra"]="38"
-  ["putnbimr"]="39"
+  # 39: putnbimr removed, use putnbi with -b instead
   ["amo_set"]="40"
   ["amo_swap"]="41"
   ["amo_fetchand"]="42"
@@ -150,6 +149,9 @@ declare -A TEST_NUMBERS=(
   ["tile_get_rowmajor"]="114"
   ["tile_get_colmajor"]="115"
   ["tile_get_arbitrary"]="116"
+  ["reduce_on_stream"]="117"
+  ["host_ctx_create"]="118"
+  ["teamsplit2d"]="119"
 )
 
 ExecTest() {
@@ -210,7 +212,8 @@ ExecTest() {
         -mca osc "${OMPI_MCA_osc:-ucx}"
         -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-        -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+        -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
+        ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
         ${TIMEOUT:+--timeout "$TIMEOUT"}
@@ -219,7 +222,7 @@ ExecTest() {
       )
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} )
+  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
     # Check if in volume mode
@@ -576,6 +579,11 @@ TestOnStream() {
   ExecTest  "sync_all_on_stream"     2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
+  export ROCSHMEM_MAX_NUM_CONTEXTS=1024
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  ExecTest  "reduce_on_stream"       2  1           64        1048576
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
 }
 
 TestOther() {
@@ -630,8 +638,13 @@ TestOther() {
   ExecTest  "teamctxsharedinfra"  5       1            1
   ExecTest  "teamctxsubsetparentinfra" 4  1            1
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
+  export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
+  ExecTest  "host_ctx_create"          2       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
-
+  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
+  
+  ExecTest  "teamsplit2d"              4  1            1
+  
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
@@ -687,6 +700,8 @@ TestTiles() {
 TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
+  # Batch rotation allocates volume*batch*2 = 20 GiB; use 22 GiB to leave headroom
+  ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((22*1024*1024*1024))}
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################

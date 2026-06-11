@@ -13,11 +13,18 @@
    * `rocshmem_barrier`
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
+   * `rocshmem_align`
+   * `rocshmem_calloc`
    * `rocshmem_buffer_register`
    * `rocshmem_buffer_unregister`
+   * `rocshmem_buffer_unregister_all`
    * `rocshmem_info_get_version`
    * `rocshmem_info_get_name`
    * `rocshmem_vendor_get_version_info`
+* Exposed memory-management APIs (`rocshmem_malloc`, `rocshmem_free`,
+  `rocshmem_align`, `rocshmem_calloc`, `rocshmem_buffer_register`,
+  `rocshmem_buffer_unregister`, `rocshmem_buffer_unregister_all`) in the
+  `rocshmem4py` Python bindings
 * Added library constants: `ROCSHMEM_MAJOR_VERSION`, `ROCSHMEM_MINOR_VERSION`,
   `ROCSHMEM_MAX_NAME_LEN`, `ROCSHMEM_VENDOR_STRING`, `ROCSHMEM_VERSION`,
   `ROCSHMEM_VENDOR_MAJOR_VERSION`, `ROCSHMEM_VENDOR_MINOR_VERSION`,

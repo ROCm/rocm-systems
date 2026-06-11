@@ -717,14 +717,24 @@ class MetricCommands:
                     frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
                         args.gpu, amdsmi_interface.AmdSmiClkType.DF
                     )
-                    current_fclk_clock = frequency_dict["frequency"][frequency_dict["current"]]
+                    # The C library reports current = (uint32_t)-1 when the
+                    # kernel exposes pp_dpm_fclk without a '*' current-level
+                    # marker (e.g. SMU power-gated DF on gfx1151 APUs at idle).
+                    # Treat that as "no current frequency" so we don't index
+                    # out of range.
+                    current_fclk_index = frequency_dict["current"]
+                    if current_fclk_index == 0xFFFFFFFF or current_fclk_index >= len(
+                        frequency_dict["frequency"]
+                    ):
+                        raise IndexError("no current fclk level reported by kernel")
+                    current_fclk_clock = frequency_dict["frequency"][current_fclk_index]
                     current_fclk_clock = self.helpers.convert_SI_unit(
                         current_fclk_clock, self.helpers.SI_Unit.MICRO
                     )
                     clocks["fclk_0"]["clk"] = self.helpers.unit_format(
                         self.logger, current_fclk_clock, clock_unit
                     )
-                except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
+                except (KeyError, IndexError, amdsmi_exception.AmdSmiLibraryException) as e:
                     logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
 
                 # Populate SOCCLK clock value
