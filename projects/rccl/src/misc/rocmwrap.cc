@@ -189,10 +189,12 @@ static void initOnceFunc() {
    */
   char path[1024];
   char *ncclCudaPath = getenv("RCCL_ROCR_PATH");
+  // dlopen the SONAME, not the unversioned dev symlink: the .so.1 ships in
+  // every runtime tree, the bare .so only in -devel packages.
   if (ncclCudaPath == NULL)
-    snprintf(path, 1024, "%s", "libhsa-runtime64.so");
+    snprintf(path, 1024, "%s", "libhsa-runtime64.so.1");
   else
-    snprintf(path, 1024, "%s%s", ncclCudaPath, "libhsa-runtime64.so");
+    snprintf(path, 1024, "%s%s", ncclCudaPath, "libhsa-runtime64.so.1");
 
   hsaLib = dlopen(path, RTLD_LAZY);
   if (hsaLib == NULL) {
