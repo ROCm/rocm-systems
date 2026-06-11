@@ -8,12 +8,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from conftest import ProfileModeImportGuard
 
 
 def test_import_guard_allows_stdlib_and_project():
     """Verify ProfileModeImportGuard allows stdlib and project imports."""
-    from conftest import ProfileModeImportGuard
-
     with ProfileModeImportGuard():
         # 1. Stdlib imports (must succeed - these are always available)
         import argparse
@@ -34,8 +33,6 @@ def test_import_guard_allows_stdlib_and_project():
 
 def test_import_guard_allows_rocm_modules():
     """Verify ProfileModeImportGuard allows ROCm system libraries."""
-    from conftest import ProfileModeImportGuard
-
     # Add amdsmi to sys.path (same as profile code does)
     amdsmi_path = Path(os.getenv("ROCM_PATH", "/opt/rocm")) / "share/amd_smi"
     if not amdsmi_path.exists():
@@ -62,8 +59,6 @@ def test_import_guard_allows_rocm_modules():
 
 def test_import_guard_blocks_non_stdlib():
     """Verify ProfileModeImportGuard blocks non-stdlib imports."""
-    from conftest import ProfileModeImportGuard
-
     test_packages = ["pandas", "yaml", "numpy"]
 
     for package in test_packages:
@@ -80,8 +75,6 @@ def test_import_guard_blocks_non_stdlib():
 
 def test_import_guard_catches_already_cached_package():
     """Guard must flag a forbidden import even when it is already cached."""
-    from conftest import ProfileModeImportGuard
-
     # pandas is cached session-wide (conftest imports it via common.py); a
     # meta_path finder alone never sees a cached import.
     assert "pandas" in sys.modules
