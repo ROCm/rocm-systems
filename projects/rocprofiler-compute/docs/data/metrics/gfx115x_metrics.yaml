@@ -172,6 +172,9 @@ Roofline Performance Rates:
   GL2 Cache BW:
     rst: Achieved bandwidth between the GL1 and GL2 caches. This represents GL1 miss traffic that must be serviced by GL2. High bandwidth relative to peak may indicate GL1 cache pressure or poor data locality at the GL1 level.
     unit: Bytes/s
+  GL1 Cache BW:
+    rst: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches. This represents GL0 miss traffic. High bandwidth relative to peak may indicate cache pressure at the GL0 level or memory access patterns with poor locality.
+    unit: Bytes/s
   GL0 Cache BW:
     rst: Achieved bandwidth at the GL0 vector cache (TCP Cache). This represents total data requested by shader cores from the memory hierarchy. Compare against peak to assess memory subsystem utilization.
     unit: Bytes/s
@@ -181,6 +184,9 @@ Roofline Performance Rates:
 Roofline Plot Points:
   AI L2:
     rst: Arithmetic Intensity relative to the L2 cache. This metric shows compute density relative to L2 cache traffic. Higher values indicate better data reuse upstream of L2, while lower values suggest heavy traffic into L2.
+    unit: FLOPs/Byte
+  AI L1:
+    rst: Arithmetic Intensity relative to the L1 cache. This metric shows compute density relative to L1 cache traffic. Higher values indicate better data reuse upstream of L1, while lower values suggest heavy traffic into L1.
     unit: FLOPs/Byte
   AI L0:
     rst: Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate more compute operations per byte of data loaded, suggesting compute-bound behavior. Lower values suggest memory-bound behavior limited by L0 bandwidth.

@@ -86,6 +86,7 @@ class MIGPUSpecs:
                         | -- physical_aid (CDNA)
                         | -- logical_partitions_per_die (CDNA)
                         | -- memory_die (RDNA/navi3)
+                        | -- memory_levels
         """
 
         current_dir = Path(__file__).parent
@@ -383,6 +384,13 @@ class MIGPUSpecs:
             return design.get("physical_aid", 1) * design.get(
                 "logical_partitions_per_die", 1
             )
+
+    @classmethod
+    def get_memory_levels(cls, gpu_model: str) -> list[str]:
+        """
+        Return a list of the cache and memory levels supported by the specific gpu model
+        """
+        return cls._gpu_design[gpu_model.lower()].get("memory_levels", [])
 
     @classmethod
     def get_chip_id_dict(cls) -> dict[int, str]:
