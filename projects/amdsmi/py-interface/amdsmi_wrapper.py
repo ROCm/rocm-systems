@@ -194,7 +194,7 @@ def find_smi_library():
         rocm_sdk_libamd_smi_path = rocm_sdk.find_libraries("amd_smi")
         if rocm_sdk_libamd_smi_path and len(rocm_sdk_libamd_smi_path) > 0:
             possible_locations.append(rocm_sdk_libamd_smi_path[0])
-    except:  # If rocm_sdk is not installed or library is not found, skip
+    except ModuleNotFoundError:  # If rocm_sdk is not installed or library is not found, skip
         pass
     # 2.
     rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
