@@ -286,7 +286,14 @@ static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
     r.count++;
 
     long body = static_cast<long>(h.payload_length) - static_cast<long>(hdr_size);
-    if (fseek(f, body, SEEK_CUR) != 0) {
+    // fseek past EOF "succeeds" on most platforms (it only fails to read on the
+    // next fread), so a record claiming e.g. 65535 bytes of body in a 100-byte
+    // file would otherwise be accepted and leave append_at pointing past EOF —
+    // corrupting the resuming capture's offset and sequence IDs. Validate that
+    // the full record body actually fits in the file before trusting it.
+    if (fseek(f, body, SEEK_CUR) != 0 ||
+        ftell(f) < 0 ||
+        static_cast<std::int64_t>(ftell(f)) > file_size) {
       r.torn_tail = true;
       r.append_at = pos;
       break;
@@ -392,8 +399,14 @@ static void atfork_child() {
     // pid-<pid> sub-archive (mirrors the spawn path).
     dir = g_base_dir;
   }
+  // NOTE: this is hrr_cap::writer::open(const char*) — the writer's archive-open
+  // routine — NOT POSIX ::open(). It runs fs::create_directories / fopen / flock,
+  // which are not async-signal-safe in general, but pthread_atfork's child
+  // handler runs in the (single-threaded) child immediately after fork() with no
+  // mutex held, so these calls are safe here. We deliberately do NOT call this
+  // from any async-signal context.
   if (!dir.empty())
-    (void)open(dir.c_str());
+    (void)writer::open(dir.c_str());
 }
 
 static void install_atfork_handlers_once() {
@@ -596,15 +609,10 @@ void flush(const char* /*output_dir*/) {
     std::lock_guard<std::mutex> lk(g_file_mu);
     out_dir = g_output_dir;
     if (g_events_fd >= 0 && !g_trailer_written) {
-      hrr_eof_record rec;
-      memset(&rec, 0, sizeof(rec));
-      rec.hdr.event_type     = HRR_EOF_MARKER;
-      rec.hdr.sequence_id    = g_seq_id.fetch_add(1, std::memory_order_relaxed);
-      rec.hdr.timestamp_ns   = amd::Os::timeNanos();
-      rec.hdr.thread_id      = current_thread_id();
-      rec.hdr.payload_length = static_cast<uint16_t>(sizeof(rec));
-      rec.total_events       = g_event_count.load();
-      rec.eof_magic          = HRR_EOF_MAGIC;
+      hrr_eof_record rec = hrr_make_eof_record(
+          g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+      rec.hdr.timestamp_ns = amd::Os::timeNanos();
+      rec.hdr.thread_id    = current_thread_id();
       buffer_append_locked(&rec, sizeof(rec));
       flush_buffer_locked();
       HRR_FSYNC(g_events_fd);
@@ -647,7 +655,7 @@ static size_t append_lit(char* out, size_t off, const char* s) {
   return off + i;
 }
 
-void emergency_finalize() {
+void emergency_finalize(bool clean_shutdown) {
   if (g_events_fd < 0) return;
 
   // Flush the in-memory buffer only if we can take the lock without blocking.
@@ -656,12 +664,27 @@ void emergency_finalize() {
   bool locked = g_file_mu.try_lock();
   if (locked) {
     flush_buffer_locked();
+    // Clean-termination signals (SIGTERM/SIGINT) are NOT crashes: the recorded
+    // process is being asked to exit, so the archive is complete up to the last
+    // record. Append the clean-shutdown trailer (raw write of a fixed-size
+    // record — no stdio, no allocation) so the reader does not mistake an
+    // orderly `kill -TERM` for a crash. We can only do this when the lock was
+    // free (no torn record in flight); otherwise we fall back to the crash path.
+    if (clean_shutdown && !g_trailer_written) {
+      hrr_eof_record rec = hrr_make_eof_record(
+          g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+      write_all_fd(g_events_fd, &rec, sizeof(rec));
+      g_trailer_written = true;
+    }
     g_file_mu.unlock();
   }
   HRR_FSYNC(g_events_fd);
 
-  // Best-effort crash manifest (complete:false) via raw open/write only.
+  // Best-effort manifest via raw open/write only (async-signal-safe). A clean
+  // termination writes complete:true (the trailer is present); a crash writes
+  // complete:false — its absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
+  bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
   if (mfd < 0) return;
   char buf[256];
@@ -670,8 +693,9 @@ void emergency_finalize() {
                  "{\n"
                  "  \"version\": 1,\n"
                  "  \"capture_mode\": \"in-tree\",\n"
-                 "  \"complete\": false,\n"
-                 "  \"event_count\": ");
+                 "  \"complete\": ");
+  p = append_lit(buf, p, complete ? "true" : "false");
+  p = append_lit(buf, p, ",\n  \"event_count\": ");
   p += u64_to_dec(g_event_count.load(), buf + p);
   p = append_lit(buf, p, ",\n  \"blob_count\": ");
   p += u64_to_dec(g_blob_count.load(), buf + p);
@@ -702,7 +726,13 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_le
   // only consumed for events that are actually written. A full record is always
   // appended under the lock, so the buffer never holds a torn record — which is
   // what makes the signal-handler flush in emergency_finalize() safe.
-  bool do_checkpoint = false;
+  //
+  // The checkpoint flush+fsync happens inside this single lock scope. An earlier
+  // version released the lock and re-acquired it for the fsync, which let two
+  // threads that both crossed the kCheckpointEvents boundary race into back-to-
+  // back fsyncs (a thundering herd at every 4096-event boundary). Doing the
+  // fsync under the lock blocks other writers for the duration of the syscall,
+  // but guarantees exactly one fsync per checkpoint and removes the race.
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0) return;
@@ -711,14 +741,9 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_le
     g_event_count.fetch_add(1, std::memory_order_relaxed);
     if (++g_events_since_ckpt >= kCheckpointEvents) {
       flush_buffer_locked();
-      do_checkpoint = true;
+      HRR_FSYNC(g_events_fd);
       g_events_since_ckpt = 0;
     }
-  }
-  // fsync outside the lock to avoid blocking other writers on the syscall.
-  if (do_checkpoint) {
-    std::lock_guard<std::mutex> lk(g_file_mu);
-    if (g_events_fd >= 0) HRR_FSYNC(g_events_fd);
   }
 }
 

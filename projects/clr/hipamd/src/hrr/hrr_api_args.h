@@ -44,6 +44,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 /* ---- Archive format constants ---- */
 #define HRR_MAGIC   ((uint32_t)0x52524845u)  /* "HRRE" */
@@ -100,6 +101,22 @@ typedef struct {
 #ifdef __cplusplus
 static_assert(sizeof(hrr_eof_record) == 44, "hrr_eof_record must be 44 bytes");
 #endif
+
+/* Build a clean-shutdown trailer record. Single source of truth for the trailer
+ * layout, shared by the capture writer (writer::flush) and the offline repair
+ * tool (hrr-playback --repair) so the two cannot drift. The caller may overwrite
+ * hdr.timestamp_ns / hdr.thread_id afterwards; the offline tool leaves them 0. */
+static inline hrr_eof_record hrr_make_eof_record(uint64_t sequence_id,
+                                                 uint64_t total_events) {
+    hrr_eof_record rec;
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.event_type     = HRR_EOF_MARKER;
+    rec.hdr.sequence_id    = sequence_id;
+    rec.hdr.payload_length = (uint16_t)sizeof(hrr_eof_record);
+    rec.total_events       = total_events;
+    rec.eof_magic          = HRR_EOF_MAGIC;
+    return rec;
+}
 
 
 /* ---- Compiler dispatch stubs ---- */

@@ -35,6 +35,7 @@
 
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -624,19 +625,20 @@ static int repair_archive(const hrr::Archive& archive) {
   uint64_t max_seq = 0;
   for (const auto& ev : archive.events) {
     if (!ok) break;
+    // load_archive only ever stores complete records, so raw_payload always
+    // holds at least a full header. Assert it before ev.header() casts the
+    // bytes, so a future reader bug surfaces here instead of as silent UB.
+    assert(ev.raw_payload.size() >= sizeof(hrr_event_header) &&
+           "repair: event raw_payload smaller than hrr_event_header");
     ok = write_u(out, ev.raw_payload.data(), ev.raw_payload.size());
     if (ev.header().sequence_id > max_seq) max_seq = ev.header().sequence_id;
   }
 
-  // Clean-shutdown trailer (mirrors hip_capture_writer flush()).
+  // Clean-shutdown trailer. Built via the shared hrr_make_eof_record() helper so
+  // the trailer layout cannot drift from the capture writer (writer::flush()).
+  // The offline tool leaves timestamp_ns / thread_id at 0.
   if (ok) {
-    hrr_eof_record rec;
-    memset(&rec, 0, sizeof(rec));
-    rec.hdr.event_type     = HRR_EOF_MARKER;
-    rec.hdr.sequence_id    = max_seq + 1;
-    rec.hdr.payload_length = static_cast<uint16_t>(sizeof(rec));
-    rec.total_events       = archive.events.size();
-    rec.eof_magic          = HRR_EOF_MAGIC;
+    hrr_eof_record rec = hrr_make_eof_record(max_seq + 1, archive.events.size());
     ok = write_u(out, &rec, sizeof(rec));
   }
   fflush(out);

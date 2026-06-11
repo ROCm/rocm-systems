@@ -1038,16 +1038,26 @@ struct HrrEarlyInstall {
 // The archive is normally finalized from std::atexit(hip_capture_shutdown). If
 // the recorded process dies on a fatal signal (e.g. a GPU memory fault aborts
 // the host, or a host SIGSEGV), atexit never runs. These handlers best-effort
-// flush events.bin and write a crash manifest, then CHAIN to the previously
-// installed handler so ROCr still emits its GPU coredump (gpucore.<pid>) and the
-// kernel still produces the host core. They do NOT write the clean trailer — its
-// absence is exactly how the reader detects a crash-truncated archive.
+// flush events.bin and write a manifest, then CHAIN to the previously installed
+// handler so ROCr still emits its GPU coredump (gpucore.<pid>) and the kernel
+// still produces the host core.
+//
+// Crash signals (SIGSEGV/SIGABRT/SIGBUS/SIGILL/SIGFPE) do NOT write the clean
+// trailer: its absence is exactly how the reader detects a crash-truncated
+// archive. Orderly-termination signals (SIGTERM/SIGINT) DO write the clean
+// trailer and a complete manifest, so killing a capture run with `kill -TERM`
+// is not misreported as a crash (see emergency_finalize's clean_shutdown path).
 //
 // POSIX only; on Windows the writer's periodic checkpoint still bounds loss.
 // ---------------------------------------------------------------------------
 #ifndef _WIN32
 namespace {
 
+// Crash signals: the process is in an undefined state — the archive trailer is
+// deliberately NOT written so its absence flags a crash-truncated archive.
+// Clean-termination signals (SIGTERM/SIGINT): the process is being asked to exit
+// in an orderly fashion — write the clean trailer so a `kill -TERM` of a capture
+// run is not misreported as a crash (see hrr_signal_is_clean).
 constexpr int    kHrrFatalSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE, SIGTERM, SIGINT};
 constexpr size_t kHrrNumSignals     = sizeof(kHrrFatalSignals) / sizeof(kHrrFatalSignals[0]);
 
@@ -1056,10 +1066,15 @@ std::atomic_flag g_hrr_in_handler = ATOMIC_FLAG_INIT;
 // Dedicated stack so a SIGSEGV from stack overflow can still run the handler.
 char             g_hrr_altstack_mem[65536];
 
+// SIGTERM/SIGINT are orderly-termination requests, not crashes.
+inline bool hrr_signal_is_clean(int signo) {
+  return signo == SIGTERM || signo == SIGINT;
+}
+
 void hrr_fatal_signal_handler(int signo, siginfo_t* info, void* uctx) {
   // Only the first thread into the handler finalizes the archive.
   if (!g_hrr_in_handler.test_and_set(std::memory_order_acq_rel)) {
-    hrr_cap::writer::emergency_finalize();
+    hrr_cap::writer::emergency_finalize(/*clean_shutdown=*/hrr_signal_is_clean(signo));
   }
 
   // Chain to the handler that was installed before us (e.g. ROCr's GPU-coredump
@@ -1132,6 +1147,16 @@ void hip_capture_init() {
   std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
 }
 
+// Internal explicit-flush hook for multi-process hosts (e.g. a vLLM server
+// shutdown callback). This is deliberately NOT a public ABI symbol: it has
+// hidden visibility on Linux and is not exported on Windows, has no declaration
+// in any public HIP header, and carries no stability contract. Normal shutdown
+// is covered by the atexit(hip_capture_shutdown) hook; the periodic checkpoint
+// bounds crash loss. Appends the clean trailer and manifest without uninstalling
+// the capture shims so capture can continue afterwards.
+#ifndef _WIN32
+extern "C" __attribute__((visibility("hidden"))) void hipHrrCaptureFlush();
+#endif
 extern "C" void hipHrrCaptureFlush() {
   if (!hip_capture_enabled() || !hrr_cap::writer::is_open()) return;
   hrr_cap::writer::flush(hip_capture_output_dir());

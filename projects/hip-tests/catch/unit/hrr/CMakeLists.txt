@@ -4,9 +4,11 @@
 
 # HRR (HIP Record & Replay) tests
 #
-# Three source files compiled into HrrTest:
+# Source files compiled into HrrTest:
 #
 #   hrr_format.cc        — CPU-only: archive format I/O unit tests (no GPU).
+#   hrr_recovery.cc      — CPU-only: crash-truncation recovery unit tests for
+#                          the archive reader (no GPU).
 #   hrr_workload.cc      — Hidden ([.][hrr-direct]) GPU test cases invoked as
 #                          subprocesses by hrr_roundtrip.cc; provides clean
 #                          Windows process context for HIP + capture layer.
@@ -31,6 +33,7 @@ endif()
 
 set(TEST_SRC
     hrr_format.cc
+    hrr_recovery.cc
     hrr_workload.cc
     hrr_roundtrip.cc
     ${HRR_CLR_DIR}/playback/hrr_reader.cpp

@@ -33,12 +33,19 @@ void checkpoint();
 
 // Best-effort, async-signal-safe finalize for use from a fatal-signal handler.
 // Flushes the in-memory event buffer with raw write()+fsync (only when the
-// writer lock can be taken without blocking, so no torn record is emitted) and
-// writes a minimal manifest.json with "complete": false using raw open/write.
-// It deliberately does NOT append the clean trailer — the trailer's absence is
-// how the reader detects a crash-truncated archive. Never allocates, never uses
-// stdio. Safe to call from SIGSEGV/SIGABRT/etc.
-void emergency_finalize();
+// writer lock can be taken without blocking, so no torn record is emitted).
+// Never allocates, never uses stdio. Safe to call from SIGSEGV/SIGABRT/etc.
+//
+// clean_shutdown distinguishes orderly termination (SIGTERM/SIGINT) from a crash
+// (SIGSEGV/SIGABRT/...):
+//   - crash (false): writes manifest "complete": false and does NOT append the
+//     trailer — its absence is how the reader detects a crash-truncated archive.
+//   - clean (true): appends the clean-shutdown trailer (raw write of a fixed
+//     hrr_eof_record) and writes manifest "complete": true, so an orderly
+//     `kill -TERM` is not misreported as a crash. The trailer is only written
+//     when the writer lock was free (no torn record in flight); otherwise it
+//     degrades to the crash path.
+void emergency_finalize(bool clean_shutdown = false);
 
 // Close and free resources.
 void close();

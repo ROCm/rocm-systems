@@ -31,11 +31,14 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
+#include <hip/hiprtc.h>
 #include "hrr_reader.h"
 #include "hrr_api_args.h"
 
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -663,3 +666,178 @@ HIP_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   run_mt_playback("");               // single-thread
   run_mt_playback("--multi-thread"); // MT dispatch path
 }
+
+// ---------------------------------------------------------------------------
+// --replace-kernel tests
+//
+// The capture layer records each kernel by its device symbol name (mangled C++
+// name, e.g. _Z14hrr_vectorAddPKfS0_Pfi). hrr-playback's --replace-kernel N=PATH
+// matches N as a substring of the recorded name and, on a match, loads PATH
+// (.hsaco) and resolves the SAME recorded symbol from it, substituting the
+// function at launch time. These tests exercise:
+//   1. Happy path: a functionally identical replacement CO (same hrr_vectorAdd)
+//      is loaded and used (stdout reports "Replacing kernel"), and because the
+//      replacement is byte-identical in behaviour the D2H validation still
+//      passes (exit 0).
+//   2. Missing CO: a non-existent path matches the pattern but cannot be read,
+//      so playback falls back to the recorded kernel — no crash, D2H still
+//      passes (exit 0), and the fallback is reported on stderr/stdout.
+//   3. Bad spec: a NAME=PATH argument with no '=' is rejected by the parser
+//      (exit 1) before any GPU work.
+//
+// Note: hrr-playback validates D2H against the *recorded* blobs, so it cannot
+// by construction validate that a *behaviourally different* replacement produced
+// the replacement's output (there is no recorded ground truth for that). The
+// happy-path test therefore uses an identical kernel and asserts the replacement
+// code path ran via the "Replacing kernel" log line.
+// ---------------------------------------------------------------------------
+
+#ifndef _WIN32  // hiprtc replacement CO build + load is exercised on Linux CI
+#define HRR_HIPRTC_CHECK(expr)                                                  \
+  do {                                                                          \
+    hiprtcResult _r = (expr);                                                   \
+    if (_r != HIPRTC_SUCCESS) {                                                 \
+      FAIL("HIPRTC error " << static_cast<int>(_r) << " at " #expr);            \
+    }                                                                           \
+  } while (0)
+
+// Compile a code object that exports a kernel byte-identical to the workload's
+// hrr_vectorAdd (so the mangled symbol matches the recorded name) and write it
+// to <dir>/replacement.hsaco. Returns the path.
+static const char* k_replace_vectoradd_src = R"(
+__global__ void hrr_vectorAdd(const float* a, const float* b, float* c, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) c[i] = a[i] + b[i];
+}
+)";
+
+static std::string build_replacement_co(const fs::path& dir) {
+  hiprtcProgram prog = nullptr;
+  HRR_HIPRTC_CHECK(hiprtcCreateProgram(&prog, k_replace_vectoradd_src,
+                                       "hrr_replace.hip", 0, nullptr, nullptr));
+  hiprtcResult compile_rc = hiprtcCompileProgram(prog, 0, nullptr);
+  if (compile_rc != HIPRTC_SUCCESS) {
+    size_t log_sz = 0;
+    (void)hiprtcGetProgramLogSize(prog, &log_sz);
+    std::string log(log_sz, '\0');
+    (void)hiprtcGetProgramLog(prog, log.data());
+    (void)hiprtcDestroyProgram(&prog);
+    FAIL("hiprtcCompileProgram failed: " + log);
+  }
+  size_t co_size = 0;
+  HRR_HIPRTC_CHECK(hiprtcGetCodeSize(prog, &co_size));
+  std::vector<char> co(co_size);
+  HRR_HIPRTC_CHECK(hiprtcGetCode(prog, co.data()));
+  HRR_HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
+
+  fs::create_directories(dir);
+  std::string co_path = (dir / "replacement.hsaco").string();
+  std::ofstream out(co_path, std::ios::binary);
+  out.write(co.data(), static_cast<std::streamsize>(co.size()));
+  out.close();
+  return co_path;
+}
+
+// Spawn hrr-playback with arbitrary extra args; return {exit_code, stdout}.
+static std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
+                                                    const std::string& extra_args) {
+  hip::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
+  set_proc_search_path(proc);
+  std::string path_arg = cap_path.string();
+  int ret = proc.run(path_arg + (extra_args.empty() ? "" : " " + extra_args));
+  return {ret, proc.getOutput()};
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture the GPU workload, build a functionally identical replacement code
+ *     object for hrr_vectorAdd via HIPRTC, and replay with --replace-kernel.
+ *   - The replacement symbol matches the recorded mangled name, so playback
+ *     loads it and reports "Replacing kernel". Because behaviour is identical,
+ *     the D2H validation still passes (exit 0).
+ */
+HIP_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_replace_happy"};
+  ScopedDir co_dir{fs::temp_directory_path() / "hrr_replace_co"};
+
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    INFO("Capture exit: " << ret);
+    REQUIRE(ret == 0);
+  }
+  REQUIRE(fs::exists(cap.path / "events.bin"));
+
+  std::string co_path = build_replacement_co(co_dir.path);
+  REQUIRE(fs::exists(co_path));
+
+  auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel hrr_vectorAdd=" + co_path);
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+  // Identical replacement → D2H still matches the recorded output.
+  REQUIRE(ret == 0);
+  // Confirm the replacement code path actually ran (not a silent fallback).
+  CHECK(out.find("Replacing kernel") != std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Replay a captured workload with --replace-kernel pointing at a path that
+ *     does not exist. The pattern matches the recorded kernel, but the file
+ *     cannot be read, so playback must gracefully fall back to the recorded
+ *     kernel: no crash, D2H still passes (exit 0), and a fallback message is
+ *     emitted.
+ */
+HIP_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_replace_missing"};
+
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    INFO("Capture exit: " << ret);
+    REQUIRE(ret == 0);
+  }
+  REQUIRE(fs::exists(cap.path / "events.bin"));
+
+  std::string missing =
+      (fs::temp_directory_path() / "hrr_no_such_replacement.hsaco").string();
+  fs::remove(missing);  // ensure it really does not exist
+
+  auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel hrr_vectorAdd=" + missing);
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+  // Graceful fallback to the recorded kernel — must not crash and D2H must pass.
+  REQUIRE(ret == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A --replace-kernel argument that is not in NAME=PATH form (no '=') must be
+ *     rejected by the argument parser with a non-zero exit before any GPU work.
+ */
+HIP_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_replace_badspec"};
+
+  {
+    hip::SpawnProc proc(HRR_TEST_EXE);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    REQUIRE(ret == 0);
+  }
+  REQUIRE(fs::exists(cap.path / "events.bin"));
+
+  auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel noequalshere");
+  INFO("Playback stdout:\n" << out);
+  INFO("Playback exit code: " << ret);
+  REQUIRE(ret != 0);   // parser rejects malformed spec
+  REQUIRE(ret < 128);  // ...with a clean error, not a crash
+}
+#endif  // !_WIN32
