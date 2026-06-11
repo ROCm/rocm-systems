@@ -179,7 +179,7 @@ namespace impl {
     if constexpr (isPrimitiveType && (sizeof(Val) == 2 || sizeof(Val) == 4)) {
       result = val;
     } else {
-      __builtin_memcpy(result, &val, sizeof(result));
+      __builtin_memcpy(result, &val, sizeof(Val));
     }
 
     // the number of iterations needs to be at least log2(number of bits on)
@@ -232,9 +232,9 @@ namespace impl {
           Val tmp;
           unsigned long long rhs =
               (static_cast<unsigned long long>(permuteResult[1]) << 32) | permuteResult[0];
-          __builtin_memcpy(&tmp, result, sizeof(result));
+          __builtin_memcpy(&tmp, result, sizeof(Val));
           tmp = op(tmp, *reinterpret_cast<Val*>(&rhs));
-          __builtin_memcpy(result, &tmp, sizeof(result));
+          __builtin_memcpy(result, &tmp, sizeof(Val));
         }
       }
 
