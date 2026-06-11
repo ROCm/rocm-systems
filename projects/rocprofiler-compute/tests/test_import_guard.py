@@ -9,11 +9,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    sys.version_info < (3, 10),
-    reason="ProfileModeImportGuard requires Python 3.10+ (sys.stdlib_module_names)",
-)
-
 
 def test_import_guard_allows_stdlib_and_project():
     """Verify ProfileModeImportGuard allows stdlib and project imports."""

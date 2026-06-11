@@ -695,9 +695,10 @@ class RocProfCompute:
 
     @demarcate
     def run_analysis(self) -> None:
-        # Lazy import file_io since its only used in analysis mode
-        # This will prevent analysis dependencies
-        # leakage into profile mode path
+        # Lazy import pandas and file_io since they are only used in analysis
+        # mode. This keeps analysis deps out of the profile path.
+        import pandas as pd
+
         from utils import file_io
 
         self.print_graphic()
@@ -727,10 +728,6 @@ class RocProfCompute:
         # run analysis workflow
         # -----------------------
         analyzer.sanitize()
-
-        # pandas is only used in analysis mode; import locally to keep the
-        # profile path free of it.
-        import pandas as pd
 
         # Load required SoC(s) from input
         for path_list in analyzer.get_args().path:
