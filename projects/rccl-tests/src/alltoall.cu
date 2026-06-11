@@ -60,7 +60,7 @@ static RocshmemTestPolicy rocshmemTestPolicy() {
     return none;
   }
 
-  // GIN proxy and other RCCL GIN tests: librccl owns rocSHMEM init/finalize.
+    // GIN proxy and other RCCL GIN tests: librccl owns rocSHMEM init/finalize.
   const char* ginEnable = getenv("NCCL_GIN_ENABLE");
   if (ginEnable && ginEnable[0] == '1') return none;
 
@@ -281,13 +281,17 @@ __global__ void NvlAlltoAllKernel(ncclWindow_t sendwin, size_t sendoffset, ncclW
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
-// Message slice size above which CTAs stripe peers (not offsets) for xGMI link parallelism.
-constexpr size_t kAlltoAllPeerParallelByteThreshold = 64 * 1024;
-// Host-side mirror of kAlltoAllPeerParallelByteThreshold (device constant).
-static constexpr size_t kAlltoAllSmallMessageRankSliceBytes = 64 * 1024;
+// Message slice size above which CTAs stripe peers (not offsets) for xGMI link parallelism
+// (AlltoAllNvlCopySelect). Same constant bounds the NVL fast path in AlltoAllGinAdaptiveLocalCopy:
+// per-rank slices smaller than this use AlltoAllNvlCopyOptimized; larger slices use AlltoAllLsaCopy.
+constexpr size_t kAlltoAllPeerParallelByteThreshold = 128 * 1024;
+// Rank-slice bytes below which GinAdaptiveAlltoAllKernel uses one CTA (latency); larger uses
+// deviceCtaCount CTAs (see alltoall_perf -V).
+static constexpr size_t kAlltoAllSmallMessageRankSliceBytes = 128 * 1024;
 
-// Hybrid GIN path: pipeline remote SDMA puts with local LSA copy in 1 MiB chunks.
-constexpr size_t kAlltoAllGinPipelineChunkBytes = 1 << 20;
+// Hybrid GIN path: pipeline remote SDMA puts with local LSA copy. Larger chunks reduce
+// signal/wait rounds vs 1 MiB while keeping pipelining for overlap (tune with Anvil SDMA chunk env).
+constexpr size_t kAlltoAllGinPipelineChunkBytes = 4 << 20;
 
 // Vectorized copy of one rank-slice to one peer (used by peer-parallel alltoall).
 template <typename T>

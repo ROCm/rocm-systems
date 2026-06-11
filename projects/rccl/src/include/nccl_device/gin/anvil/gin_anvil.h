@@ -19,8 +19,8 @@ NCCL_DEVICE_INLINE static uintptr_t ncclGinAnvilRankPtr(uintptr_t rank0Base, uin
 // Match ROCSHMEM IPC SDMA policy (see ROCSHMEM_SDMA_THRESHOLD, default 256): below this
 // size, GPU load/store to peer-mapped LSA memory beats SDMA queue submit latency.
 constexpr size_t ncclGinAnvilSdmaThresholdBytes = 256;
-// Split large SDMA puts into chunks to pipeline ring-buffer reuse and spread load across channels.
-constexpr size_t ncclGinAnvilSdmaChunkBytes = 4 * 1024 * 1024;
+// Fallback chunk size (bytes) when aCtx->sdmaChunkBytes is 0 (host normally sets via NCCL_GIN_ANVIL_SDMA_CHUNK_MB).
+constexpr uint32_t ncclGinAnvilSdmaChunkBytesDefault = 8 * 1024 * 1024;
 
 NCCL_DEVICE_INLINE static int ncclGinAnvilSelectSdmaChannel(ncclGinCtx ctx, ncclGinAnvilGPUContext* aCtx) {
   using nccl::utility::loadConst;
@@ -47,16 +47,20 @@ NCCL_DEVICE_INLINE static void ncclGinAnvilMarkSdmaDirty(ncclGinAnvilGPUContext*
 }
 
 // Enqueue one or more SDMA COPY_LINEAR packets; signal is issued separately by the caller.
+// Chunk size mirrors classic RCCL pipelining: fewer tiny SDMA submissions on multi-GB alltoall.
 NCCL_DEVICE_INLINE static void ncclGinAnvilSdmaPutChunks(rocshmem::anvil::SdmaQueueDeviceHandle* q,
-                                                         void* dst, void* src, size_t bytes) {
+                                                         void* dst, void* src, size_t bytes,
+                                                         size_t chunkBytes) {
   if (bytes == 0) return;
+  if (chunkBytes == 0) chunkBytes = ncclGinAnvilSdmaChunkBytesDefault;
+  if (chunkBytes < 65536) chunkBytes = 65536;
   char* d = (char*)dst;
   char* s = (char*)src;
-  while (bytes > ncclGinAnvilSdmaChunkBytes) {
-    rocshmem::anvil::put(*q, d, s, ncclGinAnvilSdmaChunkBytes);
-    d += ncclGinAnvilSdmaChunkBytes;
-    s += ncclGinAnvilSdmaChunkBytes;
-    bytes -= ncclGinAnvilSdmaChunkBytes;
+  while (bytes > chunkBytes) {
+    rocshmem::anvil::put(*q, d, s, chunkBytes);
+    d += chunkBytes;
+    s += chunkBytes;
+    bytes -= chunkBytes;
   }
   rocshmem::anvil::put(*q, d, s, bytes);
 }
@@ -221,15 +225,16 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL> {
       return;
     }
 
+    size_t chunkBytes = (size_t)loadConst(&aCtx->sdmaChunkBytes);
     if (hasSignal) {
-      ncclGinAnvilSdmaPutChunks(q, dst, src, bytes);
+      ncclGinAnvilSdmaPutChunks(q, dst, src, bytes, chunkBytes);
       ncclGinAnvilRemoteGpuSignalOp(sigPtr, signalOp, signalOpArg);
       if (hasCounter) atomicAdd((unsigned long long*)counterPtr, 1ULL);
     } else if (hasCounter) {
       // putCounter does not support chunking; use single packet when counter is required.
       rocshmem::anvil::putCounter(*q, dst, src, bytes, counterPtr);
     } else {
-      ncclGinAnvilSdmaPutChunks(q, dst, src, bytes);
+      ncclGinAnvilSdmaPutChunks(q, dst, src, bytes, chunkBytes);
     }
     ncclGinAnvilMarkSdmaDirty(aCtx, peer);
   }

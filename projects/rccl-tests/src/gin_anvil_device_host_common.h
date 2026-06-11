@@ -9,7 +9,7 @@
 
 #include <stdint.h>
 
-#define NCCL_GIN_ANVIL_VERSION 100
+#define NCCL_GIN_ANVIL_VERSION 101
 
 // Device-resident context handle for Anvil-SDMA based GIN.
 // - queues[peer] points to an SDMA queue handle for issuing ops to that peer.
@@ -25,6 +25,8 @@ struct ncclGinAnvilGPUContext {
   uint32_t signalsContextOffset; // cell offset of this context within each rank's signal alloc
   uint32_t nSignals;
   uint32_t nCounters;
+  uint32_t numSdmaChannels;   // SDMA queues per peer (1..8); queues[] is [nRanks * numSdmaChannels]
+  uint32_t sdmaChunkBytes;    // chunk size for large SDMA puts (host: NCCL_GIN_ANVIL_SDMA_CHUNK_MB)
   uint32_t sdmaDirtyMask;     // peers that issued SDMA puts since last flush (device-maintained)
   int nRanks;
   int rank;

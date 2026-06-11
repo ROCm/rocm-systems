@@ -31,6 +31,16 @@ static int ginAnvilParseNumSdmaChannels() {
   return numChannels;
 }
 
+// Large-message SDMA chunk size (bytes). Env NCCL_GIN_ANVIL_SDMA_CHUNK_MB (1..128), default 8 MiB.
+static uint32_t ginAnvilParseSdmaChunkBytes() {
+  const char* env = getenv("NCCL_GIN_ANVIL_SDMA_CHUNK_MB");
+  unsigned long mb = 8;
+  if (env != nullptr && env[0] != '\0') mb = strtoul(env, nullptr, 0);
+  if (mb < 1) mb = 1;
+  if (mb > 128) mb = 128;
+  return (uint32_t)(mb << 20);
+}
+
 // Signal buffers must be pinned (cached) device memory: SDMA putSignal atomics fault on
 // uncached cuMem imports (MI355X). LSA/window memory uses uncached separately via devr.
 static size_t ginAnvilAlignSignalCuMemBytes(size_t bytes, int cudaDev) {
@@ -271,6 +281,7 @@ ncclResult_t ncclGinAnvilCreateContext(struct ncclComm* comm, void* collComm, in
     h->nSignals = nSignals;
     h->nCounters = nCounters;
     h->numSdmaChannels = (uint32_t)ctx->numSdmaChannels;
+    h->sdmaChunkBytes = ginAnvilParseSdmaChunkBytes();
     h->nRanks = comm->nRanks;
     h->rank = comm->rank;
     h->myNode = comm->rankToNode[comm->rank];
@@ -344,6 +355,8 @@ ncclResult_t ncclGinAnvilDestroyContext(ncclGin_t*, void* ginCtx) {
   return ncclSuccess;
 }
 
+// User buffers for Anvil SDMA must be resolvable in the devr LSA layout. Callers should register symmetric
+// collective windows (e.g. ncclCommWindowRegister with NCCL_WIN_COLL_SYMMETRIC; rccl-tests alltoall_perf -R 2).
 ncclResult_t ncclGinAnvilRegister(ncclGin_t*, void* ginCtx, void* addr, size_t size,
                                   int, int, void** mhandle, void** ginHandle) {
   ginAnvilCtx* ctx = (ginAnvilCtx*)ginCtx;
