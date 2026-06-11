@@ -147,8 +147,8 @@ jobs:
         run: |
           logs_dir="${{ github.workspace }}/.ci-out/device-api-logs"
           shopt -s nullglob
-          for f in "${logs_dir}"/rccl-device-api-*.out "${logs_dir}"/rccl-device-api-*.err; do
-            echo "==> ${f} <=="
+          for f in "${logs_dir}"/rccl-device-api-*.err "${logs_dir}"/rccl-device-api-*.out; do
+            echo "::group::${f}"
             cat "${f}" || true
-            echo
+            echo "::endgroup::"
           done

@@ -128,4 +128,5 @@ rccl_tests_dir="${workdir}/projects/rccl-tests"
 
 # 5) Benchmarks.
 echo "==> [5/5] run benchmarks"
+export RCCL_CI_DEBUG="${RCCL_CI_DEBUG:-1}"
 "${ci_dir}/run-device-api-ci.sh"
