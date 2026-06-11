@@ -643,15 +643,27 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // SPI selects the CU based on resource availability.
     ComputeUnitCore *cu = nullptr;
     if (!spis_.empty()) {
-      // Round-robin across SEs so consecutive WGs land on different SEs; this
-      // keeps all SEs' CUs simultaneously active, exposing more parallel work
-      // to the dispatch pool (vs. saturating SE0 before touching SE1).
-      for (size_t k = 0; k < spis_.size(); ++k) {
-        size_t si = (next_spi_ + k) % spis_.size();
-        cu = spis_[si]->dispatch_workgroup(entry);
-        if (cu) {
-          next_spi_ = (si + 1) % spis_.size();
-          break;
+      // Spreading WGs round-robin across SEs keeps every SE's CUs active at
+      // once, which exposes more parallel work to the dispatch pool — but it
+      // costs locality and only helps when there are more host threads than a
+      // single SE has CUs. Below that threshold, fill SE0 first (fill-first)
+      // so a small pool stays on a cache-warm subset.
+      size_t cus_per_se = cus_.size() / spis_.size();
+      bool spread = dispatch_threads_ > cus_per_se;
+      if (spread) {
+        for (size_t k = 0; k < spis_.size(); ++k) {
+          size_t si = (next_spi_ + k) % spis_.size();
+          cu = spis_[si]->dispatch_workgroup(entry);
+          if (cu) {
+            next_spi_ = (si + 1) % spis_.size();
+            break;
+          }
+        }
+      } else {
+        for (auto *spi : spis_) {
+          cu = spi->dispatch_workgroup(entry);
+          if (cu)
+            break;
         }
       }
     } else {
