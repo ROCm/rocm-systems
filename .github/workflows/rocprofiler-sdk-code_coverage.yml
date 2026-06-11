@@ -43,6 +43,7 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocr-runtime projects/clr projects/hip"
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
   ## A task should be assigned directly to fix the issue
   ## Scratch memory tests need to be fixed for ROCm 7.0 release
@@ -119,25 +120,25 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+        git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
+        awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
         echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-        # collect submodule paths for cache 'path'
-        git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+        # cache scoped submodule working trees plus their .git/modules gitdirs
+        awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+        for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
       uses: actions/cache@v4
       with:
         path: |
-          .git/modules
           ${{ steps.submods.outputs.paths }}
-        key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+        key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
         restore-keys: |
-          submods-${{ runner.os }}-
-          submods-
+          submods-scoped-v1-${{ runner.os }}-
 
     - name: Init/Update submodules
-      run: git submodule update --init --recursive --jobs 16
+      run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     - name: Clone ROCDecode
       uses: actions/checkout@v6

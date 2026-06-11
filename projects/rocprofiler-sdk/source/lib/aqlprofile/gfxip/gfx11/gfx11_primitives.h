@@ -467,6 +467,8 @@ public:
         select_value(SPI_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TA_PERFCOUNTER0_SELECT =
         select_value(TA_PERFCOUNTER0_SELECT);
+    static auto constexpr select_value_TD_PERFCOUNTER0_SELECT =
+        select_value(TD_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_TCP_PERFCOUNTER0_SELECT =
         select_value(TCP_PERFCOUNTER0_SELECT);
     static auto constexpr select_value_SX_PERFCOUNTER0_SELECT =

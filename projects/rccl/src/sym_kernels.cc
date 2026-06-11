@@ -126,7 +126,88 @@ static uint32_t kernelMask_user() {
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
-NCCL_PARAM(SymLL, "SYM_LL", 1)
+RCCL_PARAM(SymModel, "SYM_MODEL", 0)
+
+enum rcclSymkColl { rcclSymkColl_AllReduce = 0, rcclSymkColl_AllGather = 1, rcclSymkColl_ReduceScatter = 2, rcclSymkColl_Count = 3 };
+enum rcclSymkProto { rcclSymkProto_LL = 0, rcclSymkProto_Simple = 1, rcclSymkProto_Count = 2 };
+
+struct rcclSymkTuningModel {
+  double baseLat[rcclSymkColl_Count][rcclSymkProto_Count];
+  double smBw[rcclSymkColl_Count][rcclSymkProto_Count];
+  double peakBw[rcclSymkColl_Count];
+  double llBusFactor[rcclSymkColl_Count];
+  double withinPeakFactor[rcclSymkColl_Count][rcclSymkProto_Count];
+};
+
+static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
+  .baseLat = {
+             //         LL     Simple
+             /* AR */ { 11.0,  19.5 },
+             /* AG */ { 8.5,   13.0 },
+             /* RS */ { 11.0,  15.0 },
+  },
+  .smBw = {
+                      { 25.0,   5.0  },
+                      { 22.0,   5.0  },
+                      { 10.0,   20.0 }
+  },
+  .peakBw =           { 800.0, 1200.0, 1200.0 },
+  // The higher, the more conservative the model (less LL usage, more ST usage)
+  .llBusFactor =      { 12.0,  4.0,   3.0 },
+  // The higher, the more conservative the model (less CTAs)
+  .withinPeakFactor = {
+                      { 1.100, 1.005 },
+                      { 1.015, 1.015 },
+                      { 1.025, 1.005 }
+  }
+};
+
+static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_1 = {
+  .baseLat = {
+             //         LL     Simple
+             /* AR */ { 11.0,  19.5 },
+             /* AG */ { 8.5,   13.0 },
+             /* RS */ { 11.0,  13.0 },
+  },
+  .smBw = {
+                      { 25.0,   5.0  },
+                      { 22.0,   5.0  },
+                      { 25.0,   20.0 }
+  },
+  .peakBw =           { 800.0, 1200.0, 1200.0 },
+  // The higher, the more conservative the model (less LL usage, more ST usage)
+  .llBusFactor =      { 12.0,  4.0,   9.0 },
+  // The higher, the more conservative the model (less CTAs)
+  .withinPeakFactor = {
+                      { 1.100, 1.005 },
+                      { 1.015, 1.015 },
+                      { 1.025, 1.025 }
+  }
+};
+
+static constexpr struct rcclSymkTuningModel rcclSymkTuningModels[] = {
+  rcclSymkTuningModel_0,
+  rcclSymkTuningModel_1 
+};
+static constexpr int rcclSymkTuningModelCount = int(sizeof(rcclSymkTuningModels) / sizeof(rcclSymkTuningModels[0]));
+
+static int rcclSymkTuningModelIndex() {
+  static int s_cache = -1;
+  if (s_cache < 0) {
+    int64_t env = rcclParamSymModel();
+    if (env < 0 || env >= rcclSymkTuningModelCount) {
+      INFO(NCCL_ENV, "RCCL_SYM_MODEL %ld is out of range [0, %d); using RCCL_SYM_MODEL 0",
+            (long)env, rcclSymkTuningModelCount);
+      // Use default model
+      // We can have model selection logic here in the future
+      s_cache = 0;
+    } else {
+      // Respect user setting
+      s_cache = (int)env;
+    }
+  }
+  return s_cache;
+}
 
 static double softmin(double x, double ceiling, double softness) {
   // looks like a smooth version of: min(x, ceiling)
@@ -372,6 +453,21 @@ static void queryModel_lsa(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
   bool isAR = kernelMask_AR>>k & 1;
   constexpr double GBps = (1<<30)/1.e6;
   double baseLat, smBw, peakBw;
+  double withinPeakFactor = 1.025;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  {
+    int c = isAR   ? rcclSymkColl_AllReduce
+        : isAG   ? rcclSymkColl_AllGather
+                 : rcclSymkColl_ReduceScatter;
+    int p = isLL ? rcclSymkProto_LL : rcclSymkProto_Simple;
+    const struct rcclSymkTuningModel& m = rcclSymkTuningModels[rcclSymkTuningModelIndex()];
+    baseLat = m.baseLat[c][p];
+    smBw = m.smBw[c][p] * GBps;
+    peakBw = m.peakBw[c] * GBps;
+    withinPeakFactor = m.withinPeakFactor[c][p];
+    if (isLL) busBytes *= m.llBusFactor[c] / LL_BusFactor;
+  }
+#else
   if (comm->cudaArch < 1000) {
     baseLat = isLL ? 4.5 : 7.8;
     smBw = isAR ? 65*GBps : 44*GBps;
@@ -381,12 +477,13 @@ static void queryModel_lsa(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
     smBw = 55*GBps;
     peakBw = k == ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC ? 1000*GBps : 600*GBps;
   }
+#endif
   *nBlocks = nMaxBlocks;
   *timeUs = model(busBytes, baseLat, nMaxBlocks, smBw, busMultiplier, peakBw);
   // Use least number of blocks that puts us within a tolerance of peak performance.
   for (int bn = nMinBlocks; bn < nMaxBlocks; bn++) {
     double time = model(busBytes, baseLat, bn, smBw, busMultiplier, peakBw);
-    if (time <= 1.025*(*timeUs)) {
+    if (time <= withinPeakFactor*(*timeUs)) {
       *nBlocks = bn;
       *timeUs = time;
       break;
@@ -531,8 +628,6 @@ static uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int/*ncclDe
   if (!hasSTMC) kmask &= ~kernelMask_STMC;
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
 
-  if (ncclParamSymLL() == 0) kmask &= ~kernelMask_LL;
-
   size_t nBytes = nElts*ncclTypeSize(ty);
   size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks)*nBytes;
   // LL kernels use 32-bit ints to track element counts and indices.
@@ -602,7 +697,7 @@ ncclResult_t ncclSymkPickKernel(
   *estTimeUs = kmask==0 || kernelMask_user() == (1<<ncclSymkKernelId_Count)-1 ? bestTime : 0.0f;
   *nBlocks = bestBlocks;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  *nWarps = 256/comm->WarpSize;
+  *nWarps = ncclSymkMaxThreads/comm->WarpSize;
 #else
   *nWarps = 16;
 #endif
@@ -654,6 +749,11 @@ ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWi
     *winRegType = ncclSymSendRegRecvReg;
   }
   return ncclSuccess;
+}
+
+bool rcclSymkKernelIdIsLL(int kernelId) {
+  if (kernelId < 0 || kernelId >= (int)ncclSymkKernelId_Count) return false;
+  return (kernelMask_LL >> kernelId) & 1;
 }
 
 #ifndef GENERATE_SYM_KERNELS
