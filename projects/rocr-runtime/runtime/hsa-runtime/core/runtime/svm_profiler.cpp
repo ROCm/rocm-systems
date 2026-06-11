@@ -226,6 +226,7 @@ void SvmProfileControl::PollSmi() {
             assert(args == 3 && "Parsing error!");
 
             std::string detail;
+            bool restore_rescheduled = false;
             cursor += offset + 1;
             switch (event_id) {
               //@addr(size) from->to prefetch_location:preferred_location
@@ -311,11 +312,22 @@ void SvmProfileControl::PollSmi() {
                 detail = cause + " " + agent;
                 break;
               }
-              // gpu_id
+              // gpu_id [rescheduled]
+              // The kernel emits both real queue restores and
+              // svm_range_restore_work reschedule retries under this same
+              // event ID, distinguished only by a trailing discriminator
+              // byte: '0' for an actual resume, 'R' when the restore work
+              // failed validation and was requeued. Decode that byte so a
+              // high QUEUE_RESTORE count caused by MMU-notifier eviction
+              // churn (reschedule retries) can be told apart from genuine
+              // queue resumes. The trailing byte is optional: kernels that
+              // do not emit it simply parse as a non-rescheduled restore.
               case HSA_SMI_EVENT_QUEUE_RESTORE: {
                 uint32_t gpuid;
-                args = sscanf(cursor, "%x", &gpuid);
-                assert(args == 1 && "Parsing error!");
+                char tag = '0';
+                args = sscanf(cursor, "%x %c", &gpuid, &tag);
+                assert(args >= 1 && "Parsing error!");
+                restore_rescheduled = (args == 2 && tag == 'R');
                 std::string agent = format_agent(gpuid);
                 detail = agent;
                 break;
@@ -341,8 +353,10 @@ void SvmProfileControl::PollSmi() {
               default:;
             }
 
+            const char* event_name = restore_rescheduled ? "QUEUE_RESTORE_RESCHEDULED"
+                                                          : smi_event_string(event_id);
             std::string record = std::string("ROCr HMM event: ") + std::to_string(time) + " " +
-                smi_event_string(event_id) + " " + detail;
+                event_name + " " + detail;
             // printf("%s\n", record.c_str());
             fprintf(logFile, "%s\n", record.c_str());
           }
