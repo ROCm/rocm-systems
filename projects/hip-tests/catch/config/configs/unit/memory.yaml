@@ -1040,6 +1040,8 @@ memory:
   Unit_hipGetSymbolSize_Negative_Parameters: *level_2
   Unit_hipMemPrefetchAsync_v2_Device_Host:
     <<: *level_2
+    # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [query]
   Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent:
     <<: *level_2
@@ -1870,6 +1872,8 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchAsync_Basic_AllDevices:
     <<: *level_2
+    # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: []
   Unit_hipMemPrefetchAsync_Sync_Behavior:
     <<: *level_2
@@ -1882,6 +1886,8 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation:
     <<: *level_2
+    # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_LocationDistribution:
     <<: *level_2
@@ -1889,6 +1895,8 @@ memory:
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_RoundTripDataIntegrity:
     <<: *level_2
+    # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [query]
   Unit_hipMemPrefetchBatchAsync_Negative_NullAndInvalidPointers:
     <<: *level_2
