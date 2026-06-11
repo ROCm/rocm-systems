@@ -145,6 +145,20 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   char *remote = (char *) alloc_test_buffer(buff_size);
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
 
+  int max_co_resident_wgs_per_cu = 0;
+  CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &max_co_resident_wgs_per_cu, PrimitiveTest, args.wg_size, 0));
+  hipDeviceProp_t device_prop;
+  CHECK_HIP(hipGetDeviceProperties(&device_prop, 0));
+  const int max_sustainable_wgs =
+      max_co_resident_wgs_per_cu * device_prop.multiProcessorCount;
+  if (args.num_wgs > max_sustainable_wgs) {
+    std::cout << "Warning: Number of work-groups (" << args.num_wgs
+              << ") exceeds max sustainable work-groups ("
+              << max_sustainable_wgs << "). grid_barrier may deadlock."
+              << std::endl;
+  }
+
   switch (_type) {
     case PutTestType:
     case PutNBITestType:
@@ -191,14 +205,14 @@ PrimitiveTester::~PrimitiveTester() {
 
 void PrimitiveTester::resetBuffers(size_t size) {
   size_t buff_size = size * batch_size * args.wg_size * args.num_wgs;
-  CHECK_HIP(hipMemset(dest, '1', buff_size));
+  CHECK_HIP(hipMemsetAsync(dest, '1', buff_size, stream));
+  CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
 }
 
 void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                    size_t size) {
   size_t shared_bytes = 0;
 
-  CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
   hipLaunchKernelGGL(PrimitiveTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, source, dest,
                      size, _type, _shmem_context, wf_size,
