@@ -824,12 +824,13 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 "Select output format(s); only the listed formats are produced: "
                 "proto (Perfetto trace), rocpd (RocPD database), json/text (Timemory "
                 "profile; txt aliases text). Space- or comma-separated, e.g. "
-                "--output-format proto rocpd. See also --trace, --profile, "
-                "--profile-format.")
+                "--output-format proto rocpd. Cannot be combined with --trace, "
+                "--profile, --flat-profile, or --profile-format.")
             .min_count(1)
             .max_count(5)
             .dtype("[format...]")
             .choices({ "proto", "rocpd", "json", "text", "txt" })
+            .conflicts({ "trace", "profile", "flat-profile", "profile-format", "use-rocpd" })
             .action([&](parser_t& p) {
                 const auto _sel = resolve_output_format(p.get<strset_t>("output-format"));
                 update_env(_data, "ROCPROFSYS_TRACE", _sel.perfetto);
