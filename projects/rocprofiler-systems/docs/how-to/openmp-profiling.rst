@@ -86,7 +86,7 @@ Callback APIs, such as OMPT, can be traced using ``rocprof-sys-run`` with the ``
    .. note::
 
        ``--preset=trace-openmp`` requires ROCm 7.13.0 or later. On earlier
-       versions, use the :ref:`openmp-env-var-config`).
+       versions, use the :ref:`openmp-env-var-config`.
 
 #. Once the command completes, an output directory will be generated:
 
