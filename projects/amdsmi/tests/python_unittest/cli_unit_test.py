@@ -45,8 +45,8 @@ class TestAmdSmiCli(unittest.TestCase):
     TMP_FILENAME = "_tmp.log"
     TMP_FOLDER = "_tmp"
 
-    amd_smi_exe = "amd-smi"
     amd_smi_exe = "amdsmi_cli/amdsmi_cli.py"
+    amd_smi_exe = "amd-smi"
 
     @classmethod
     def setUpClass(cls):
