@@ -181,17 +181,17 @@ rdc_status_t RdcRocpBase::map_entity_to_profiler() {
     amdsmi_kfd_info_t kfd_info;
     auto amdsmi_status = amdsmi_get_gpu_kfd_info(processor, &kfd_info);
     if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "Failed to get KFD info for flat GPU " << flat_idx
-                             << " (socket " << flat_table[flat_idx].socket_index
-                             << ", proc " << flat_table[flat_idx].proc_index << "): "
-                             << amdsmi_status);
+      RDC_LOG(RDC_ERROR, "Failed to get KFD info for flat GPU "
+                             << flat_idx << " (socket " << flat_table[flat_idx].socket_index
+                             << ", proc " << flat_table[flat_idx].proc_index
+                             << "): " << amdsmi_status);
       continue;
     }
 
     for (const auto& [prof_index, prof_id] : prof_kfd_map) {
       if (std::memcmp(&kfd_info.kfd_id, &prof_id, sizeof(kfd_id_t)) == 0) {
-        RDC_LOG(RDC_DEBUG, "Flat[" << flat_idx << "] <-> Profiler[" << prof_index
-                                   << "] = KFD_ID[" << prof_id << "]");
+        RDC_LOG(RDC_DEBUG, "Flat[" << flat_idx << "] <-> Profiler[" << prof_index << "] = KFD_ID["
+                                   << prof_id << "]");
         entity_to_prof_map.insert({flat_idx, prof_index});
         break;
       }

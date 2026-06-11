@@ -45,14 +45,13 @@ amdsmi_status_t get_metrics_info(amdsmi_processor_handle proc, amdsmi_gpu_metric
 amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition);
 
 struct GpuHandleEntry {
-    amdsmi_processor_handle handle;
-    uint32_t socket_index;
-    uint32_t proc_index;
+  amdsmi_processor_handle handle;
+  uint32_t socket_index;
+  uint32_t proc_index;
 };
 
 const std::vector<GpuHandleEntry>& get_flat_gpu_table();
 void reset_flat_gpu_table();
-
 
 }  // namespace rdc
 }  // namespace amd
