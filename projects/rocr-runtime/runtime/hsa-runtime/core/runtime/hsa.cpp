@@ -55,7 +55,7 @@
 #include "core/inc/queue.h"
 #include "core/inc/signal.h"
 #include "core/inc/cache.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 #include "core/inc/amd_elf_image.hpp"
 #include "core/inc/amd_hsa_loader.hpp"
 #include "core/inc/amd_loader_context.hpp"
@@ -724,9 +724,9 @@ hsa_status_t hsa_queue_create(
     void* data, uint32_t private_segment_size, uint32_t group_segment_size,
     hsa_queue_t** queue) {
   TRY;
-  ROCR_TRACE_ENTER(ROCR_LOG_QUEUE | ROCR_LOG_API,
-    "agent=0x%lx size=%u type=%u private_seg=%u group_seg=%u",
-    agent_handle.handle, size, type, private_segment_size, group_segment_size);
+  ROCR_TRACE_ENTER(rocr::LOG_QUEUE | rocr::LOG_INFO_CAT,
+                   "agent=0x%lx size=%u type=%u private_seg=%u group_seg=%u", agent_handle.handle,
+                   size, type, private_segment_size, group_segment_size);
   IS_OPEN();
 
   if ((queue == nullptr) || (size == 0) || (!IsPowerOfTwo(size)) ||
@@ -762,10 +762,10 @@ hsa_status_t hsa_queue_create(
   assert(cmd_queue != nullptr && "Queue not returned but status was success.\n");
   *queue = core::Queue::Convert(cmd_queue);
 
-  RocrLogDebug(ROCR_LOG_QUEUE, "hsa_queue_create: agent=0x%lx size=%u type=%u queue=%p",
+  LogDebug(rocr::LOG_QUEUE, "hsa_queue_create: agent=0x%lx size=%u type=%u queue=%p",
                agent_handle.handle, size, type, *queue);
 
-  ROCR_TRACE_EXIT_STATUS(ROCR_LOG_QUEUE | ROCR_LOG_API, status);
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_QUEUE | rocr::LOG_INFO_CAT, status);
   return status;
 
   CATCH;
@@ -817,7 +817,7 @@ hsa_status_t hsa_queue_destroy(hsa_queue_t* queue) {
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
-  RocrLogDebug(ROCR_LOG_QUEUE, "hsa_queue_destroy: queue=%p", queue);
+  LogDebug(rocr::LOG_QUEUE, "hsa_queue_destroy: queue=%p", queue);
 
   cmd_queue->Destroy();
   return HSA_STATUS_SUCCESS;
@@ -1137,8 +1137,7 @@ hsa_status_t hsa_memory_deregister(void* address, size_t size) {
 hsa_status_t
     hsa_memory_allocate(hsa_region_t region, size_t size, void** ptr) {
   TRY;
-  ROCR_TRACE_ENTER(ROCR_LOG_MEM | ROCR_LOG_API, "region=0x%lx size=%zu",
-                   region.handle, size);
+  ROCR_TRACE_ENTER(rocr::LOG_MEM | rocr::LOG_INFO_CAT, "region=0x%lx size=%zu", region.handle, size);
   IS_OPEN();
 
   core::MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateNoFlags;
@@ -1150,30 +1149,31 @@ hsa_status_t
   const core::MemoryRegion* mem_region = core::MemoryRegion::Convert(region);
   IS_VALID(mem_region);
 
-  hsa_status_t status = core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
+  hsa_status_t status =
+      core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
 
-  RocrLogDebug(ROCR_LOG_MEM, "hsa_memory_allocate: region=0x%lx size=%zu ptr=%p status=0x%x",
+  LogDebug(rocr::LOG_MEM, "hsa_memory_allocate: region=0x%lx size=%zu ptr=%p status=0x%x",
                region.handle, size, ptr ? *ptr : nullptr, status);
 
-  ROCR_TRACE_EXIT_STATUS(ROCR_LOG_MEM | ROCR_LOG_API, status);
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_MEM | rocr::LOG_INFO_CAT, status);
   return status;
   CATCH;
 }
 
 hsa_status_t hsa_memory_free(void* ptr) {
   TRY;
-  ROCR_TRACE_ENTER(ROCR_LOG_MEM | ROCR_LOG_API, "ptr=%p", ptr);
+  ROCR_TRACE_ENTER(rocr::LOG_MEM | rocr::LOG_INFO_CAT, "ptr=%p", ptr);
   IS_OPEN();
 
   if (ptr == NULL) {
-    ROCR_TRACE_EXIT(ROCR_LOG_MEM | ROCR_LOG_API, " -> HSA_STATUS_SUCCESS (null)");
+    ROCR_TRACE_EXIT(rocr::LOG_MEM | rocr::LOG_INFO_CAT, " -> HSA_STATUS_SUCCESS (null)");
     return HSA_STATUS_SUCCESS;
   }
 
-  RocrLogDebug(ROCR_LOG_MEM, "hsa_memory_free: ptr=%p", ptr);
+  LogDebug(rocr::LOG_MEM, "hsa_memory_free: ptr=%p", ptr);
 
   hsa_status_t status = core::Runtime::runtime_singleton_->FreeMemory(ptr);
-  ROCR_TRACE_EXIT_STATUS(ROCR_LOG_MEM | ROCR_LOG_API, status);
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_MEM | rocr::LOG_INFO_CAT, status);
   return status;
   CATCH;
 }
@@ -1219,28 +1219,30 @@ hsa_status_t hsa_memory_copy(void* dst, const void* src, size_t size) {
 hsa_status_t
     hsa_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
                       const hsa_agent_t* consumers, hsa_signal_t* hsa_signal) {
-  ROCR_TRACE_ENTER(ROCR_LOG_SIGNAL | ROCR_LOG_API, "initial=%ld num_consumers=%u",
-                   initial_value, num_consumers);
+  ROCR_TRACE_ENTER(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, "initial=%ld num_consumers=%u", initial_value,
+                   num_consumers);
 
-  hsa_status_t status = AMD::hsa_amd_signal_create(initial_value, num_consumers, consumers, 0, hsa_signal);
+  hsa_status_t status =
+      AMD::hsa_amd_signal_create(initial_value, num_consumers, consumers, 0, hsa_signal);
 
-  RocrLogDebug(ROCR_LOG_SIGNAL, "hsa_signal_create: initial=%ld num_consumers=%u signal=0x%lx status=0x%x",
+  LogDebug(rocr::LOG_SIGNAL,
+               "hsa_signal_create: initial=%ld num_consumers=%u signal=0x%lx status=0x%x",
                initial_value, num_consumers, hsa_signal ? hsa_signal->handle : 0, status);
 
-  ROCR_TRACE_EXIT_STATUS(ROCR_LOG_SIGNAL | ROCR_LOG_API, status);
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, status);
   return status;
 }
 
 hsa_status_t hsa_signal_destroy(hsa_signal_t hsa_signal) {
   TRY;
-  ROCR_TRACE_ENTER(ROCR_LOG_SIGNAL | ROCR_LOG_API, "signal=0x%lx", hsa_signal.handle);
+  ROCR_TRACE_ENTER(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, "signal=0x%lx", hsa_signal.handle);
   IS_OPEN();
 
-  RocrLogDebug(ROCR_LOG_SIGNAL, "hsa_signal_destroy: signal=0x%lx", hsa_signal.handle);
+  LogDebug(rocr::LOG_SIGNAL, "hsa_signal_destroy: signal=0x%lx", hsa_signal.handle);
 
   core::Signal* signal = core::Signal::Convert(hsa_signal);
   signal->DestroySignal();
-  ROCR_TRACE_EXIT(ROCR_LOG_SIGNAL | ROCR_LOG_API, " -> HSA_STATUS_SUCCESS");
+  ROCR_TRACE_EXIT(rocr::LOG_SIGNAL | rocr::LOG_INFO_CAT, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
@@ -1303,22 +1305,22 @@ hsa_signal_value_t hsa_signal_wait_scacquire(hsa_signal_t hsa_signal,
 
   // Track wait start time for timeout detection
   uint64_t start_time = 0;
-  bool should_track = ROCR_LOG_ENABLED(rocr::ROCR_LOG_DEBUG, rocr::ROCR_LOG_WAIT) &&
-                      timeout_hint > 0 && timeout_hint != UINT64_MAX;
+  bool should_track = LOG_ENABLED(rocr::LOG_DEBUG, rocr::LOG_WAIT) &&
+      timeout_hint > 0 && timeout_hint != UINT64_MAX;
   if (should_track) {
-    start_time = rocr::rocr_get_timestamp_us();
+    start_time = rocr::get_timestamp_us();
   }
 
-  hsa_signal_value_t result = signal->WaitAcquire(condition, compare_value, timeout_hint,
-                                                   wait_state_hint);
+  hsa_signal_value_t result =
+      signal->WaitAcquire(condition, compare_value, timeout_hint, wait_state_hint);
 
   // Warn on long waits (>1 second)
   if (should_track) {
-    uint64_t elapsed = rocr::rocr_get_timestamp_us() - start_time;
+    uint64_t elapsed = rocr::get_timestamp_us() - start_time;
     if (elapsed > 1000000) {  // >1 second
-      RocrLogWarning(ROCR_LOG_WAIT | ROCR_LOG_HANG,
-        "Signal wait slow: handle=0x%lx expect=%ld got=%ld elapsed=%llu us",
-        hsa_signal.handle, compare_value, result, (unsigned long long)elapsed);
+      LogWarning(rocr::LOG_WAIT | rocr::LOG_HANG,
+                     "Signal wait slow: handle=0x%lx expect=%ld got=%ld elapsed=%llu us",
+                     hsa_signal.handle, compare_value, result, (unsigned long long)elapsed);
     }
   }
 

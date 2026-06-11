@@ -67,7 +67,7 @@
 #include "intrin.h"
 #endif
 
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 
 namespace rocr {
 
@@ -185,36 +185,40 @@ static __forceinline unsigned long long int strtoull(const char* str,
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
 // Legacy LogPrint macro - redirects to new logging system
-// Maps legacy flags to new RocrLog categories
+// Maps legacy flags to new Log categories
 #define LogPrint(flag, format, ...)                                                                \
   do {                                                                                             \
     uint64_t _mask = 0;                                                                            \
     switch (flag) {                                                                                \
-      case 0: _mask = rocr::ROCR_LOG_AQL; break;      /* HSA_AMD_LOG_FLAG_AQL */                   \
-      case 1: _mask = rocr::ROCR_LOG_SDMA; break;     /* HSA_AMD_LOG_FLAG_SDMA */                  \
-      case 2: _mask = rocr::ROCR_LOG_INIT; break;     /* HSA_AMD_LOG_FLAG_INFO */                  \
-      case 3: _mask = rocr::ROCR_LOG_QUEUE; break;    /* HSA_AMD_LOG_FLAG_QUEUE */                 \
-      case 4: _mask = rocr::ROCR_LOG_MEM; break;      /* HSA_AMD_LOG_FLAG_MEM */                   \
-      case 5: _mask = rocr::ROCR_LOG_SIGNAL; break;   /* HSA_AMD_LOG_FLAG_SIGNAL */                \
-      case 6: _mask = rocr::ROCR_LOG_IPC; break;      /* HSA_AMD_LOG_FLAG_IPC */                   \
-      case 7: _mask = rocr::ROCR_LOG_AGENT; break;    /* HSA_AMD_LOG_FLAG_AGENT */                 \
-      case 8: _mask = rocr::ROCR_LOG_COPY; break;     /* HSA_AMD_LOG_FLAG_COPY */                  \
-      case 9: _mask = rocr::ROCR_LOG_SCRATCH; break;  /* HSA_AMD_LOG_FLAG_SCRATCH */               \
-      case 10: _mask = rocr::ROCR_LOG_POOL; break;    /* HSA_AMD_LOG_FLAG_POOL */                  \
-      case 11: _mask = rocr::ROCR_LOG_FAULT; break;   /* HSA_AMD_LOG_FLAG_FAULT */                 \
-      case 12: _mask = rocr::ROCR_LOG_EXCEPT; break;  /* HSA_AMD_LOG_FLAG_EXCEPT */                \
-      default: _mask = rocr::ROCR_LOG_INIT; break;                                                 \
+      case HSA_AMD_LOG_FLAG_AQL:                                                                   \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_SDMA:                                                                  \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_INFO:                                                                  \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_MEM:                                                                   \
+        _mask = rocr::LOG_MEM;                                                                     \
+        break;                                                                                     \
+      case HSA_AMD_LOG_FLAG_ERROR:                                                                 \
+        _mask = rocr::LOG_ERROR_CAT;                                                               \
+        break;                                                                                     \
+      default:                                                                                     \
+        _mask = rocr::LOG_INFO_CAT;                                                                \
+        break;                                                                                     \
     }                                                                                              \
-    RocrLogInfo(_mask, format, ##__VA_ARGS__);                                                     \
+    LogInfo(_mask, format, ##__VA_ARGS__);                                                     \
   } while (false)
 
 #define LogSignalDuration(flag, signal, msg)                                                       \
   do {                                                                                             \
     amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(signal.handle);                     \
-    RocrLogInfo(rocr::ROCR_LOG_SIGNAL,                                                             \
-      "%s Signal = (0x%lx), ticks start/end = %lu / %lu, Ticks elapsed = %lu", msg,                \
-      (unsigned long)signal.handle, amd_signal->start_ts, amd_signal->end_ts,                      \
-      amd_signal->end_ts - amd_signal->start_ts);                                                  \
+    LogInfo(rocr::LOG_SIGNAL,                                                             \
+                "%s Signal = (0x%lx), ticks start/end = %lu / %lu, Ticks elapsed = %lu", msg,      \
+                (unsigned long)signal.handle, amd_signal->start_ts, amd_signal->end_ts,            \
+                amd_signal->end_ts - amd_signal->start_ts);                                        \
   } while (false)
 
 // A macro to remove unused variable warnings

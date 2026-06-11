@@ -349,9 +349,9 @@ class Flag {
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
     sdma_linear_b2b_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
-    // Note: Logging configuration is handled by rocr_log_init() in rocr_logging.cpp.
+    // Note: Logging configuration is handled by log_init() in logging.cpp.
     // The Flag members below are kept for backward compatibility and query-only access.
-    // The authoritative logging state is in g_rocr_log_state (rocr_logging.h).
+    // The authoritative logging state is in g_log_state (logging.h).
     var = os::GetEnvVar("HSA_LOG_LEVEL");
     hsa_log_level_ = var.empty() ? 0 : atoi(var.c_str());
 
@@ -365,7 +365,6 @@ class Flag {
 
     var = os::GetEnvVar("HSA_LOG_ASYNC");
     hsa_log_async_ = (var == "1");
-
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -644,11 +643,11 @@ class Flag {
   bool enable_sdma_fastpath_debug_;
 
   // Logging configuration
-  int hsa_log_level_ = 0;           // Log level (0=none, 1-6=error through verbose)
+  int hsa_log_level_ = 0;               // Log level (0=none, 1-6=error through verbose)
   uint64_t hsa_log_mask_ = 0x7FFFFFFF;  // Log category bitmask
-  std::string hsa_log_file_;        // Log file path (empty = stderr)
-  size_t hsa_log_size_ = 2048;      // Max log file size in MB
-  bool hsa_log_async_ = false;      // Enable async ring buffer logging
+  std::string hsa_log_file_;            // Log file path (empty = stderr)
+  size_t hsa_log_size_ = 2048;          // Max log file size in MB
+  bool hsa_log_async_ = false;          // Enable async ring buffer logging
 
   void parse_masks(std::string& args, uint32_t maxGpu, uint32_t maxCU);
 

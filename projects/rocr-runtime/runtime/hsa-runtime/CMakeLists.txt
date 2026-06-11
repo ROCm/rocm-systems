@@ -218,7 +218,7 @@ set ( SRCS core/driver/driver.cpp
            core/util/small_heap.cpp
            core/util/timer.cpp
            core/util/flag.cpp
-           core/util/rocr_logging.cpp
+           core/util/logging.cpp
            core/runtime/amd_blit_kernel.cpp
            core/runtime/amd_blit_sdma.cpp
            core/runtime/amd_cpu_agent.cpp

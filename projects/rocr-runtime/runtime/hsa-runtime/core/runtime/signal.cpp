@@ -51,7 +51,7 @@
 
 #include "core/util/timer.h"
 #include "core/inc/runtime.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 #if defined(_WIN32)
 #include "malloc.h"
 #endif
@@ -104,8 +104,8 @@ SharedSignal* SharedSignalPool_t::alloc() {
   new (ret) SharedSignal();
   free_list_.pop_back();
 
-  RocrLogTrace(ROCR_LOG_POOL, "SharedSignalPool::alloc: ptr=%p pool_size=%zu",
-               ret, free_list_.size());
+  LogTrace(rocr::LOG_POOL, "SharedSignalPool::alloc: ptr=%p pool_size=%zu", ret,
+               free_list_.size());
 
   return ret;
 }
@@ -130,18 +130,18 @@ void SharedSignalPool_t::free(SharedSignal* ptr) {
 
   free_list_.push_back(ptr);
 
-  RocrLogTrace(ROCR_LOG_POOL, "SharedSignalPool::free: ptr=%p pool_size=%zu",
-               ptr, free_list_.size());
+  LogTrace(rocr::LOG_POOL, "SharedSignalPool::free: ptr=%p pool_size=%zu", ptr,
+               free_list_.size());
 }
 
 LocalSignal::LocalSignal(hsa_signal_value_t initial_value, bool exportable)
     : local_signal_(exportable ? nullptr
                                : core::Runtime::runtime_singleton_->GetSharedSignalPool(),
                     exportable ? core::MemoryRegion::AllocateIPC : 0) {
-  ROCR_TRACE_ENTER(ROCR_LOG_SIGNAL, "initial=%lld exportable=%d",
-                   (long long)initial_value, exportable ? 1 : 0);
+  ROCR_TRACE_ENTER(rocr::LOG_SIGNAL, "initial=%lld exportable=%d", (long long)initial_value,
+                   exportable ? 1 : 0);
   local_signal_.shared_object()->amd_signal.value = initial_value;
-  RocrLogVerbose(ROCR_LOG_SIGNAL, "EXIT LocalSignal() -> signal=%p",
+  LogVerbose(rocr::LOG_SIGNAL, "EXIT LocalSignal() -> signal=%p",
                  &local_signal_.shared_object()->amd_signal);
 }
 
@@ -152,7 +152,7 @@ void Signal::registerIpc() {
          "Can't register the same IPC signal twice.");
   ipcMap_[handle.handle] = this;
 
-  RocrLogDebug(ROCR_LOG_SIGNAL | ROCR_LOG_IPC, "Signal::registerIpc: handle=0x%llx",
+  LogDebug(rocr::LOG_SIGNAL | rocr::LOG_IPC, "Signal::registerIpc: handle=0x%llx",
                (unsigned long long)handle.handle);
 }
 
@@ -164,7 +164,7 @@ bool Signal::deregisterIpc() {
   assert(it != ipcMap_.end() && "Deregister on non-IPC signal.");
   ipcMap_.erase(it);
 
-  RocrLogDebug(ROCR_LOG_SIGNAL | ROCR_LOG_IPC, "Signal::deregisterIpc: handle=0x%llx",
+  LogDebug(rocr::LOG_SIGNAL | rocr::LOG_IPC, "Signal::deregisterIpc: handle=0x%llx",
                (unsigned long long)handle.handle);
 
   return true;

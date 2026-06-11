@@ -50,7 +50,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 
 namespace rocr {
 namespace AMD {
@@ -633,15 +633,6 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
     return HSA_STATUS_ERROR;
   }
 
-  if(agent_->profiling_enabled()) {
-    amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(completion_signal_.handle);
-    RocrLogInfo(ROCR_LOG_BLIT, "BlitKernel::SubmitLinearCopyCommand Signal=0x%llx ticks=%llu/%llu elapsed=%llu",
-                 (unsigned long long)completion_signal_.handle,
-                 (unsigned long long)amd_signal->start_ts,
-                 (unsigned long long)amd_signal->end_ts,
-                 (unsigned long long)(amd_signal->end_ts - amd_signal->start_ts));
-  }
-
   return HSA_STATUS_SUCCESS;
 }
 
@@ -685,28 +676,25 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
       std::atomic_thread_fence(std::memory_order_release);
       queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
 
-      RocrLogDebug(ROCR_LOG_AQL,
-      "HWq=%p, id=%lu, Barrier Header = "
-      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-      "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
-      "rptr=%lu, wptr=%lu",
-      queue_->public_handle()->base_address, queue_->public_handle()->id,
-      kBarrierPacketHeader,
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-      barrier_packet.dep_signal[0].handle,
-      barrier_packet.dep_signal[1].handle,
-      barrier_packet.dep_signal[2].handle,
-      barrier_packet.dep_signal[3].handle,
-      barrier_packet.dep_signal[4].handle,
-      barrier_packet.completion_signal.handle,
-      queue_->LoadReadIndexRelaxed(), write_index);
+      LogDebug(rocr::LOG_AQL,
+                   "HWq=%p, id=%lu, Barrier Header = "
+                   "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+                   "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
+                   "rptr=%lu, wptr=%lu",
+                   queue_->public_handle()->base_address, queue_->public_handle()->id,
+                   kBarrierPacketHeader,
+                   extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_TYPE,
+                                  HSA_PACKET_HEADER_WIDTH_TYPE),
+                   extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_BARRIER,
+                                  HSA_PACKET_HEADER_WIDTH_BARRIER),
+                   extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                                  HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+                   extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                                  HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+                   barrier_packet.dep_signal[0].handle, barrier_packet.dep_signal[1].handle,
+                   barrier_packet.dep_signal[2].handle, barrier_packet.dep_signal[3].handle,
+                   barrier_packet.dep_signal[4].handle, barrier_packet.completion_signal.handle,
+                   queue_->LoadReadIndexRelaxed(), write_index);
 
       ++write_index;
 
@@ -911,27 +899,29 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_ref<uint32_t> atomic_header(queue_buffer[index & queue_bitmask_].full_header);
   atomic_header.store(kDispatchPacketHeader | packet.setup << 16, std::memory_order_release);
 #endif
-  RocrLogDebug(ROCR_LOG_AQL,
-    "HWq=%p, id=%lu, Dispatch Header = "
-    "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-    "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "
-    "group_seg_size=%zu, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx "
-    "rptr=%lu, wptr=%lu",
-    queue_->public_handle()->base_address, queue_->public_handle()->id,
-    kDispatchPacketHeader,
-    extractAqlBits(kDispatchPacketHeader,
-                   HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
-    extractAqlBits(kDispatchPacketHeader,
-                   HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
-    extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                   HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-    extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                   HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-    packet.setup, static_cast<size_t>(packet.grid_size_x), static_cast<size_t>(packet.grid_size_y), static_cast<size_t>(packet.grid_size_z),
-    static_cast<size_t>(packet.workgroup_size_x), static_cast<size_t>(packet.workgroup_size_y), static_cast<size_t>(packet.workgroup_size_z),
-    static_cast<size_t>(packet.private_segment_size), static_cast<size_t>(packet.group_segment_size),
-    packet.kernel_object,reinterpret_cast<uintptr_t>(packet.kernarg_address),
-    completion_signal.handle, queue_->LoadReadIndexRelaxed(), index);
+  LogDebug(
+      rocr::LOG_AQL,
+      "HWq=%p, id=%lu, Dispatch Header = "
+      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+      "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "
+      "group_seg_size=%zu, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx "
+      "rptr=%lu, wptr=%lu",
+      queue_->public_handle()->base_address, queue_->public_handle()->id, kDispatchPacketHeader,
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_BARRIER,
+                     HSA_PACKET_HEADER_WIDTH_BARRIER),
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                     HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+      packet.setup, static_cast<size_t>(packet.grid_size_x),
+      static_cast<size_t>(packet.grid_size_y), static_cast<size_t>(packet.grid_size_z),
+      static_cast<size_t>(packet.workgroup_size_x), static_cast<size_t>(packet.workgroup_size_y),
+      static_cast<size_t>(packet.workgroup_size_z),
+      static_cast<size_t>(packet.private_segment_size),
+      static_cast<size_t>(packet.group_segment_size), packet.kernel_object,
+      reinterpret_cast<uintptr_t>(packet.kernarg_address), completion_signal.handle,
+      queue_->LoadReadIndexRelaxed(), index);
 }
 
 BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg() {

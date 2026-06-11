@@ -79,8 +79,14 @@
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
 #include "core/util/os.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
+
+// libhsakmt (thunk) debug level for unified logging integration.
+// When CLR calls hsa_amd_enable_logging(), we also configure thunk logging
+// so users only need to set AMD_LOG_LEVEL for all three layers.
+// Levels: ERR=3, WARNING=4, INFO=6, DEBUG=7
+extern "C" int hsakmt_debug_level;
 
 #ifndef HSA_VERSION_MAJOR
 #define HSA_VERSION_MAJOR 1
@@ -115,20 +121,20 @@ namespace core {
 // File-scope metrics for memory and IPC tracking (fixes thread-safety bug)
 // ============================================================================
 namespace {
-  // Memory allocation metrics for pressure/fragmentation tracking
-  struct MemoryMetrics {
-    std::atomic<size_t> total_allocated{0};
-    std::atomic<size_t> peak_allocated{0};
-    std::atomic<uint64_t> allocation_count{0};
-  };
-  static MemoryMetrics g_mem_metrics;
+// Memory allocation metrics for pressure/fragmentation tracking
+struct MemoryMetrics {
+  std::atomic<size_t> total_allocated{0};
+  std::atomic<size_t> peak_allocated{0};
+  std::atomic<uint64_t> allocation_count{0};
+};
+static MemoryMetrics g_mem_metrics;
 
-  // IPC attachment metrics for leak detection
-  struct IPCMetrics {
-    std::atomic<uint64_t> attach_count{0};   // Total attachments ever
-    std::atomic<uint64_t> active_count{0};   // Currently active attachments
-  };
-  static IPCMetrics g_ipc_metrics;
+// IPC attachment metrics for leak detection
+struct IPCMetrics {
+  std::atomic<uint64_t> attach_count{0};  // Total attachments ever
+  std::atomic<uint64_t> active_count{0};  // Currently active attachments
+};
+static IPCMetrics g_ipc_metrics;
 }  // anonymous namespace
 
 bool g_use_interrupt_wait;
@@ -344,8 +350,8 @@ hsa_status_t Runtime::IterateAgent(hsa_status_t (*callback)(hsa_agent_t agent,
 hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
                                      MemoryRegion::AllocateFlags alloc_flags,
                                      void** address, int agent_node_id) {
-  ROCR_TRACE_ENTER(ROCR_LOG_MEM, "region=%p size=%zu flags=0x%x node=%d",
-                   region, size, alloc_flags, agent_node_id);
+  ROCR_TRACE_ENTER(rocr::LOG_MEM, "region=%p size=%zu flags=0x%x node=%d", region, size, alloc_flags,
+                   agent_node_id);
 
   size_t size_requested = size;  // region->Allocate(...) may align-up size to granularity
   hsa_status_t status = region->Allocate(size, alloc_flags, address, agent_node_id);
@@ -355,10 +361,14 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
     allocation_map_[*address] = AllocationRegion(region, size, size_requested, alloc_flags);
 
     // Update memory pressure metrics using file-scope atomics
-    size_t current = g_mem_metrics.total_allocated.fetch_add(size_requested, std::memory_order_relaxed) + size_requested;
+    size_t current =
+        g_mem_metrics.total_allocated.fetch_add(size_requested, std::memory_order_relaxed) +
+        size_requested;
     size_t peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
-    while (current > peak && !g_mem_metrics.peak_allocated.compare_exchange_weak(peak, current,
-           std::memory_order_release, std::memory_order_relaxed));
+    while (current > peak &&
+           !g_mem_metrics.peak_allocated.compare_exchange_weak(
+               peak, current, std::memory_order_release, std::memory_order_relaxed))
+      ;
     // Note: After CAS loop, 'peak' is updated to the final value stored
     uint64_t alloc_num = g_mem_metrics.allocation_count.fetch_add(1, std::memory_order_relaxed) + 1;
 
@@ -366,35 +376,38 @@ hsa_status_t Runtime::AllocateMemory(const MemoryRegion* region, size_t size,
     if (size_requested > 256 * 1024 * 1024) {  // >256MB
       // Re-read peak after CAS loop to get current accurate value
       size_t current_peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
-      RocrLogInfo(ROCR_LOG_MEM | ROCR_LOG_PERF,
-        "Large allocation: ptr=%p size=%zu total_live=%zu peak=%zu num_allocations=%llu node=%d",
-        *address, size_requested, current, current_peak, (unsigned long long)alloc_num, agent_node_id);
+      LogInfo(
+          rocr::LOG_MEM | rocr::LOG_INFO_CAT,
+          "Large allocation: ptr=%p size=%zu total_live=%zu peak=%zu num_allocations=%llu node=%d",
+          *address, size_requested, current, current_peak, (unsigned long long)alloc_num,
+          agent_node_id);
     }
 
     // Warn on memory pressure (>90% of peak) - use current value for accurate check
     size_t current_peak = g_mem_metrics.peak_allocated.load(std::memory_order_relaxed);
     if (current_peak > 0 && current > current_peak * 9 / 10) {
-      RocrLogWarning(ROCR_LOG_MEM | ROCR_LOG_HEALTH,
-        "Memory pressure HIGH: current=%zu peak=%zu utilization=%.1f%% num_allocations=%zu",
-        current, current_peak, (float)current / current_peak * 100.0f, allocation_map_.size());
+      LogWarning(
+          rocr::LOG_MEM | rocr::LOG_HEALTH,
+          "Memory pressure HIGH: current=%zu peak=%zu utilization=%.1f%% num_allocations=%zu",
+          current, current_peak, (float)current / current_peak * 100.0f, allocation_map_.size());
     }
 
-    RocrLogDebug(ROCR_LOG_MEM, "AllocateMemory: ptr=%p size=%zu flags=0x%x node=%d total=%zu",
+    LogDebug(rocr::LOG_MEM, "AllocateMemory: ptr=%p size=%zu flags=0x%x node=%d total=%zu",
                  *address, size_requested, alloc_flags, agent_node_id, current);
   } else {
-    RocrLogWarning(ROCR_LOG_MEM, "AllocateMemory failed: size=%zu flags=0x%x node=%d status=%d",
+    LogWarning(rocr::LOG_MEM, "AllocateMemory failed: size=%zu flags=0x%x node=%d status=%d",
                    size_requested, alloc_flags, agent_node_id, status);
   }
 
-  ROCR_TRACE_EXIT_STATUS(ROCR_LOG_MEM, status);
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_MEM, status);
   return status;
 }
 
 hsa_status_t Runtime::FreeMemory(void* ptr) {
-  ROCR_TRACE_ENTER(ROCR_LOG_MEM, "ptr=%p", ptr);
+  ROCR_TRACE_ENTER(rocr::LOG_MEM, "ptr=%p", ptr);
 
   if (ptr == nullptr) {
-    ROCR_TRACE_EXIT(ROCR_LOG_MEM, " -> HSA_STATUS_SUCCESS (null ptr)");
+    ROCR_TRACE_EXIT(rocr::LOG_MEM, " -> HSA_STATUS_SUCCESS (null ptr)");
     return HSA_STATUS_SUCCESS;
   }
 
@@ -522,11 +535,12 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   // Update memory metrics - decrement total allocated
-  size_t remaining = g_mem_metrics.total_allocated.fetch_sub(size, std::memory_order_relaxed) - size;
+  size_t remaining =
+      g_mem_metrics.total_allocated.fetch_sub(size, std::memory_order_relaxed) - size;
 
-  RocrLogDebug(ROCR_LOG_MEM, "FreeMemory: ptr=%p size=%zu remaining=%zu", ptr, size, remaining);
+  LogDebug(rocr::LOG_MEM, "FreeMemory: ptr=%p size=%zu remaining=%zu", ptr, size, remaining);
 
-  ROCR_TRACE_EXIT(ROCR_LOG_MEM, " -> HSA_STATUS_SUCCESS");
+  ROCR_TRACE_EXIT(rocr::LOG_MEM, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1423,7 +1437,7 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
 }
 
 hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* handle) {
-  ROCR_TRACE_ENTER(ROCR_LOG_IPC, "ptr=%p len=%zu handle=%p", ptr, len, handle);
+  ROCR_TRACE_ENTER(rocr::LOG_IPC, "ptr=%p len=%zu handle=%p", ptr, len, handle);
 
   static_assert(sizeof(hsa_amd_ipc_memory_t) == sizeof(HsaSharedMemoryHandle),
                 "Thunk IPC mismatch.");
@@ -1591,10 +1605,10 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // TODO: fragment block discard for better memory performance causes memory violations
   // with DMABuf export even when synchronously called. Bypass for now.
 
-  RocrLogDebug(ROCR_LOG_IPC, "IPCCreate: ptr=%p len=%zu handle[0:3]={0x%x,0x%x,0x%x,0x%x}",
-               ptr, len, handle->handle[0], handle->handle[1], handle->handle[2], handle->handle[3]);
+  LogDebug(rocr::LOG_IPC, "IPCCreate: ptr=%p len=%zu handle[0:3]={0x%x,0x%x,0x%x,0x%x}", ptr,
+               len, handle->handle[0], handle->handle[1], handle->handle[2], handle->handle[3]);
 
-  ROCR_TRACE_EXIT(ROCR_LOG_IPC, " -> HSA_STATUS_SUCCESS");
+  ROCR_TRACE_EXIT(rocr::LOG_IPC, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1686,7 +1700,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
 
 hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, uint32_t num_agents,
                                 Agent** agents, void** mapped_ptr) {
-  ROCR_TRACE_ENTER(ROCR_LOG_IPC, "handle=%p len=%zu num_agents=%u", handle, len, num_agents);
+  ROCR_TRACE_ENTER(rocr::LOG_IPC, "handle=%p len=%zu num_agents=%u", handle, len, num_agents);
 
   static const int tinyArraySize = 8;
   void* importAddress;
@@ -1829,8 +1843,8 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
   hsa_status_t err = importMemory(num_agents, nodes, false);
   if (err != HSA_STATUS_SUCCESS) {
-    RocrLogWarning(ROCR_LOG_IPC, "IPCAttach failed: len=%zu num_agents=%u status=%d",
-                   len, num_agents, err);
+    LogWarning(rocr::LOG_IPC, "IPCAttach failed: len=%zu num_agents=%u status=%d", len,
+                   num_agents, err);
     return err;
   }
 
@@ -1841,22 +1855,23 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     uint64_t attach_num = g_ipc_metrics.attach_count.fetch_add(1, std::memory_order_relaxed) + 1;
     uint64_t active = g_ipc_metrics.active_count.fetch_add(1, std::memory_order_relaxed) + 1;
 
-    RocrLogDebug(ROCR_LOG_IPC, "IPCAttach: mapped=%p len=%zu num_agents=%u attach_id=%llu active=%llu",
-                 *mapped_ptr, len, num_agents, (unsigned long long)attach_num, (unsigned long long)active);
+    LogDebug(
+        rocr::LOG_IPC, "IPCAttach: mapped=%p len=%zu num_agents=%u attach_id=%llu active=%llu",
+        *mapped_ptr, len, num_agents, (unsigned long long)attach_num, (unsigned long long)active);
 
     // Warn on high IPC attachment count (potential leak)
     if (active > 100) {
-      RocrLogWarning(ROCR_LOG_IPC | ROCR_LOG_HEALTH,
-        "High IPC attachment count: active=%llu total=%llu POTENTIAL_LEAK ptr=%p",
-        (unsigned long long)active, (unsigned long long)attach_num, *mapped_ptr);
+      LogWarning(rocr::LOG_IPC | rocr::LOG_HEALTH,
+                     "High IPC attachment count: active=%llu total=%llu POTENTIAL_LEAK ptr=%p",
+                     (unsigned long long)active, (unsigned long long)attach_num, *mapped_ptr);
     }
   }
-  ROCR_TRACE_EXIT_STATUS(ROCR_LOG_IPC, err);
+  ROCR_TRACE_EXIT_STATUS(rocr::LOG_IPC, err);
   return err;
 }
 
 hsa_status_t Runtime::IPCDetach(void* ptr) {
-  ROCR_TRACE_ENTER(ROCR_LOG_IPC, "ptr=%p", ptr);
+  ROCR_TRACE_ENTER(rocr::LOG_IPC, "ptr=%p", ptr);
 
   bool ldrmImportCleaned = false;
   {  // Handle imported fragments.
@@ -1900,9 +1915,10 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   // Track IPC detachment using file-scope metrics (fixes counter mismatch bug)
   uint64_t remaining = g_ipc_metrics.active_count.fetch_sub(1, std::memory_order_relaxed) - 1;
 
-  RocrLogDebug(ROCR_LOG_IPC, "IPCDetach: ptr=%p remaining_active=%llu", ptr, (unsigned long long)remaining);
+  LogDebug(rocr::LOG_IPC, "IPCDetach: ptr=%p remaining_active=%llu", ptr,
+               (unsigned long long)remaining);
 
-  ROCR_TRACE_EXIT(ROCR_LOG_IPC, " -> HSA_STATUS_SUCCESS");
+  ROCR_TRACE_EXIT(rocr::LOG_IPC, " -> HSA_STATUS_SUCCESS");
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2594,9 +2610,9 @@ hsa_status_t Runtime::Load() {
   flag_.Refresh();
 
   // Initialize logging system after flags are parsed
-  rocr_log_init();
+  rocr::log_init();
 
-  RocrLogInfo(ROCR_LOG_INIT, "Runtime::Load() starting");
+  LogInfo(rocr::LOG_INIT, "Runtime::Load() starting");
 
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
@@ -2659,14 +2675,14 @@ hsa_status_t Runtime::Load() {
   // Load svm profiler
   svm_profile_.reset(new AMD::SvmProfileControl);
 
-  RocrLogInfo(ROCR_LOG_INIT, "Runtime::Load() completed: %zu GPU agents, %zu CPU agents",
+  LogInfo(rocr::LOG_INIT, "Runtime::Load() completed: %zu GPU agents, %zu CPU agents",
               gpu_agents_.size(), cpu_agents_.size());
 
   return HSA_STATUS_SUCCESS;
 }
 
 void Runtime::Unload() {
-  RocrLogInfo(ROCR_LOG_INIT, "Runtime::Unload() starting");
+  LogInfo(rocr::LOG_INIT, "Runtime::Unload() starting");
 
   // Close IPC socket server. Capture thread handle under lock to avoid race
   // with IPCCreate which may be restarting the server concurrently.
@@ -2748,10 +2764,10 @@ void Runtime::Unload() {
     thunkLoader_ = nullptr;
   }
 
-  RocrLogInfo(ROCR_LOG_INIT, "Runtime::Unload() completed");
+  LogInfo(rocr::LOG_INIT, "Runtime::Unload() completed");
 
   // Shutdown logging system last
-  rocr_log_shutdown();
+  rocr::log_shutdown();
 }
 
 void Runtime::LoadExtensions() {
@@ -4551,9 +4567,9 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
 
 hsa_status_t Runtime::EnableLogging(uint8_t* flags, void* file) {
   // Public API: hsa_amd_enable_logging()
-  // Maps legacy flag bits to new logging system categories
+  // Called by CLR when AMD_LOG_LEVEL >= 6
 
-  // Determine output file
+  // Determine output file - caller owns this handle, we must not close it
   FILE* log_file = file ? reinterpret_cast<FILE*>(file) : stderr;
 
   // Check if any flag is set
@@ -4566,31 +4582,33 @@ hsa_status_t Runtime::EnableLogging(uint8_t* flags, void* file) {
   }
 
   if (any_flag_set) {
-    // Map legacy flags to new mask categories
+    // Map legacy flags to simplified categories (MEM/INFO/ERROR)
     uint64_t mask = 0;
-    if (hsa_flag_isset64(flags, 0))  mask |= rocr::ROCR_LOG_AQL;      // HSA_AMD_LOG_FLAG_AQL
-    if (hsa_flag_isset64(flags, 1))  mask |= rocr::ROCR_LOG_SDMA;     // HSA_AMD_LOG_FLAG_SDMA
-    if (hsa_flag_isset64(flags, 2))  mask |= rocr::ROCR_LOG_INIT;     // HSA_AMD_LOG_FLAG_INFO
-    if (hsa_flag_isset64(flags, 3))  mask |= rocr::ROCR_LOG_QUEUE;    // HSA_AMD_LOG_FLAG_QUEUE
-    if (hsa_flag_isset64(flags, 4))  mask |= rocr::ROCR_LOG_MEM;      // HSA_AMD_LOG_FLAG_MEM
-    if (hsa_flag_isset64(flags, 5))  mask |= rocr::ROCR_LOG_SIGNAL;   // HSA_AMD_LOG_FLAG_SIGNAL
-    if (hsa_flag_isset64(flags, 6))  mask |= rocr::ROCR_LOG_IPC;      // HSA_AMD_LOG_FLAG_IPC
-    if (hsa_flag_isset64(flags, 7))  mask |= rocr::ROCR_LOG_AGENT;    // HSA_AMD_LOG_FLAG_AGENT
-    if (hsa_flag_isset64(flags, 8))  mask |= rocr::ROCR_LOG_COPY;     // HSA_AMD_LOG_FLAG_COPY
-    if (hsa_flag_isset64(flags, 9))  mask |= rocr::ROCR_LOG_SCRATCH;  // HSA_AMD_LOG_FLAG_SCRATCH
-    if (hsa_flag_isset64(flags, 10)) mask |= rocr::ROCR_LOG_POOL;     // HSA_AMD_LOG_FLAG_POOL
-    if (hsa_flag_isset64(flags, 11)) mask |= rocr::ROCR_LOG_FAULT;    // HSA_AMD_LOG_FLAG_FAULT
-    if (hsa_flag_isset64(flags, 12)) mask |= rocr::ROCR_LOG_EXCEPT;   // HSA_AMD_LOG_FLAG_EXCEPT
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_AQL)) mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_SDMA)) mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_INFO)) mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_MEM)) mask |= rocr::LOG_MEM;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_ERROR)) mask |= rocr::LOG_ERROR_CAT;
 
-    rocr::g_rocr_log_state.log_level = rocr::ROCR_LOG_INFO;
-    rocr::g_rocr_log_state.log_mask = mask;
-    rocr::g_rocr_log_state.log_file = log_file;
-    // Caller owns this file handle - we must not close it on shutdown
-    rocr::g_rocr_log_state.owns_log_file = false;
-    // Update fd for async-signal-safe crash handler
-    rocr::g_rocr_log_state.log_file_fd = (log_file == stderr) ? STDERR_FILENO : fileno(log_file);
+    // Close any file we own before overwriting (prevents file handle leak)
+    if (rocr::g_log_state.owns_log_file && rocr::g_log_state.log_file &&
+        rocr::g_log_state.log_file != stderr && rocr::g_log_state.log_file != stdout) {
+      fclose(rocr::g_log_state.log_file);
+    }
+
+    rocr::g_log_state.log_level = rocr::LOG_INFO;
+    rocr::g_log_state.log_mask = mask;
+    rocr::g_log_state.log_file = log_file;
+    rocr::g_log_state.owns_log_file = false;  // Caller owns file handle
+    rocr::g_log_state.clr_controlled = true;
+
+    // Enable thunk (libhsakmt) logging for unified logging.
+    // When CLR enables ROCR logging via this API, also enable thunk logging
+    // so users only need AMD_LOG_LEVEL for all three layers (CLR, ROCR, Thunk).
+    hsakmt_debug_level = 6;  // HSAKMT_DEBUG_LEVEL_INFO
   } else {
-    rocr::g_rocr_log_state.log_level = rocr::ROCR_LOG_NONE;
+    rocr::g_log_state.log_level = rocr::LOG_NONE;
+    hsakmt_debug_level = -1;  // HSAKMT_DEBUG_LEVEL_DEFAULT (disabled)
   }
 
   return HSA_STATUS_SUCCESS;

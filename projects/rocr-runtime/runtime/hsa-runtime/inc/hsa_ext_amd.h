@@ -4935,28 +4935,25 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
 hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 /**
- * @brief logging types (legacy flags for hsa_amd_enable_logging)
- * For comprehensive logging, use HSA_LOG_LEVEL and HSA_LOG_MASK environment variables.
+ * @brief Logging flag bit positions for hsa_amd_enable_logging().
+ *
+ * These are bit positions used with hsa_flag_set64/hsa_flag_isset64 macros
+ * when calling hsa_amd_enable_logging(). They are NOT bitmask values.
+ *
+ * For HIP applications, use AMD_LOG_LEVEL for unified CLR+ROCR+Thunk logging.
+ * For standalone HSA applications, use HSA_LOG_LEVEL environment variable.
  */
 typedef enum hsa_amd_log_flag_s {
   /* Log AQL packets internally enqueued by ROCr */
-  HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS = 0,
   HSA_AMD_LOG_FLAG_AQL = 0,
   /* Log SDMA packets */
   HSA_AMD_LOG_FLAG_SDMA = 1,
-  /* Log INFO */
+  /* Log general INFO messages */
   HSA_AMD_LOG_FLAG_INFO = 2,
-  /* Extended logging flags (bit positions for hsa_amd_enable_logging flags array) */
-  HSA_AMD_LOG_FLAG_QUEUE = 3,
-  HSA_AMD_LOG_FLAG_MEM = 4,
-  HSA_AMD_LOG_FLAG_SIGNAL = 5,
-  HSA_AMD_LOG_FLAG_IPC = 6,
-  HSA_AMD_LOG_FLAG_AGENT = 7,
-  HSA_AMD_LOG_FLAG_COPY = 8,
-  HSA_AMD_LOG_FLAG_SCRATCH = 9,
-  HSA_AMD_LOG_FLAG_POOL = 10,
-  HSA_AMD_LOG_FLAG_FAULT = 11,
-  HSA_AMD_LOG_FLAG_EXCEPT = 12,
+  /* Log memory allocation/free (MEM category) */
+  HSA_AMD_LOG_FLAG_MEM = 3,
+  /* Log error conditions (ERROR category) */
+  HSA_AMD_LOG_FLAG_ERROR = 4,
 } hsa_amd_log_flag_t;
 
 /**

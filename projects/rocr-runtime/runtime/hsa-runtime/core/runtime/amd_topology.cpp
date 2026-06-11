@@ -66,7 +66,7 @@
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/util/utils.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 #ifdef HSAKMT_VIRTIO_ENABLED
 #include "core/inc/amd_virtio_driver.h"
 #endif
@@ -546,17 +546,11 @@ bool BuildTopology() {
 }  // Anonymous namespace
 
 bool Load() {
-  RocrLogInfo(ROCR_LOG_AGENT, "Topology: discovering drivers");
-
   DiscoverDrivers();
 
   if (core::Runtime::runtime_singleton_->AgentDrivers().empty()) {
-    RocrLogWarning(ROCR_LOG_AGENT, "Topology: no drivers found");
     return false;
   }
-
-  RocrLogInfo(ROCR_LOG_AGENT, "Topology: found %zu drivers",
-              core::Runtime::runtime_singleton_->AgentDrivers().size());
 
   for (auto& d : core::Runtime::runtime_singleton_->AgentDrivers()) {
     bool is_model_enabled = false;
@@ -565,30 +559,7 @@ bool Load() {
     if (!InitializeDriver(d)) return false;
   }
 
-  bool result = BuildTopology();
-  if (result) {
-    size_t gpu_count = core::Runtime::runtime_singleton_->gpu_agents().size();
-    size_t cpu_count = core::Runtime::runtime_singleton_->cpu_agents().size();
-
-    RocrLogInfo(ROCR_LOG_AGENT | ROCR_LOG_TOPOLOGY,
-      "Topology: built successfully - %zu GPU agents, %zu CPU agents",
-      gpu_count, cpu_count);
-
-    // Log per-GPU info at DEBUG level
-    if (ROCR_LOG_ENABLED(rocr::ROCR_LOG_DEBUG, rocr::ROCR_LOG_TOPOLOGY)) {
-      for (const auto* agent : core::Runtime::runtime_singleton_->gpu_agents()) {
-        char name[64] = "";
-        agent->GetInfo(HSA_AGENT_INFO_NAME, name);
-        uint32_t node_id = 0;
-        agent->GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, &node_id);
-        RocrLogDebug(ROCR_LOG_TOPOLOGY, "GPU agent: name=%s node_id=%u handle=0x%lx",
-                     name, node_id, agent->public_handle().handle);
-      }
-    }
-  } else {
-    RocrLogError(ROCR_LOG_AGENT | ROCR_LOG_TOPOLOGY, "Topology: build FAILED");
-  }
-  return result;
+  return BuildTopology();
 }
 
 bool Unload() {
