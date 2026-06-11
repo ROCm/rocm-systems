@@ -738,110 +738,11 @@ add_custom_target(nccl_device_header_symlinks DEPENDS ${NCCL_DEVICE_HEADER_SYMLI
 add_dependencies(copy_nccl_device_headers nccl_device_header_symlinks)
 
 
-# Generate device/host tables and all the collective functions that are going to be in librccl.so
-#==================================================================================================
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-if (NOT Python3_FOUND)
-  message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
-endif()
-
-set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
-set(GEN_CE_REDUCE_DIR "${GEN_DIR}/ce_reduce")
-
-if(ONLY_FUNCS)
-  message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
-endif()
-
-# Execute the python script to generate required collective functions
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
-    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
-    RESULT_VARIABLE gen_py_result
-    ERROR_VARIABLE gen_py_error
-)
-if (gen_py_result)
-  message(SEND_ERROR "Error: ${gen_py_error}")
-  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/generate.py failed")
-endif()
-
-if (GENERATE_SYM_KERNELS)
-  # Execute the python script to generate required symmetric memory kernels
-  execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py ${GEN_SYM_DIR}
-    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
-    RESULT_VARIABLE gen_sym_py_result
-    ERROR_VARIABLE gen_sym_py_error
-  )
-  if (gen_sym_py_result)
-    message(SEND_ERROR "Error: ${gen_sym_py_error}")
-    message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py failed")
-  endif()
-endif()
-
-# Execute the python script to generate one TU per CE-reduce kernel
-# instantiation (see src/device/ce_reduce/generate.py for why this is split
-# out instead of living in a single ce_reduce.cc).
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py ${GEN_CE_REDUCE_DIR}
-    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
-    RESULT_VARIABLE gen_ce_reduce_py_result
-    ERROR_VARIABLE gen_ce_reduce_py_error
-)
-if (gen_ce_reduce_py_result)
-  message(SEND_ERROR "Error: ${gen_ce_reduce_py_error}")
-  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/ce_reduce/generate.py failed")
-endif()
-
-# Find the generated files in the output directory
-file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
-
 # Append all found generated files to the list
-foreach(file ${GENERATED_FILES})
-  list(APPEND HIP_SOURCES ${file})
+list(APPEND HIP_SOURCES ${DEVICE_GEN_SOURCES})
+foreach(HIP_FILE ${DEVICE_REMOVED_SOURCES})
+  list(REMOVE_ITEM HIP_SOURCES ${HIP_FILE})
 endforeach()
-
-# Specialized kernels are only used by the device linker pipeline;
-# always exclude them from the normal HIP compilation to avoid
-# duplicate symbols with the aggregate per-collective .cpp files.
-list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/specialized/")
-
-# Device Linker: filter out device sources that are built by the pipeline
-#==================================================================================================
-if(ENABLE_DEVICE_LINKER)
-  # Remove per-collective .cpp files from gensrc/ and any subdirs (replaced by specialized/symmetric pipelines)
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "gensrc/.*\\.cpp$")
-  # Add back host-only generated files
-  list(APPEND HIP_SOURCES "${GEN_DIR}/host_table.cpp")
-  if(EXISTS "${GEN_DIR}/device_table.cpp")
-    list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")
-  endif()
-  # Remove files compiled separately by the device pipeline
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "collectives\\.cc$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_ipc\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_reduce_fabric_ll128\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric_ll\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_fabric_ll128\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_fabric_ll128\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_fabric_ll128\\.cu\\.cpp$")
-  # ce_reduce.cc is now pure host code (a dispatcher calling into the
-  # per-instantiation launchers generated under gensrc/ce_reduce/, which are
-  # excluded above by the "gensrc/.*\\.cpp$" filter and compiled separately
-  # by cmake/DeviceLinker.cmake). It stays in the main target and is
-  # compiled --offload-host-only like ce_coll.cc.
-  message(STATUS "Device Linker: filtered HIP_SOURCES (removed device .cpp under gensrc/ + subdirs, common.cu, onerank.cu, collectives.cc, dda_all_reduce_ipc.cu.cpp, dda_reduce_scatter_ipc.cu.cpp, dda_all_gather_ipc.cu.cpp, dda_alltoall_ipc.cu.cpp, dda_all_reduce_fabric.cu.cpp, dda_all_reduce_fabric_ll.cu.cpp, dda_reduce_scatter_fabric.cu.cpp, dda_all_gather_fabric.cu.cpp, dda_all_gather_fabric_ll.cu.cpp, dda_alltoall_fabric.cu.cpp)")
-endif()
 
 # [NCCL src/CMakeLists.txt L132-142] Generate git version (NCCL: generate_git_version.py ->
 # nccl_git_version.h). RCCL generates git_version.cpp via the update_git_version target.

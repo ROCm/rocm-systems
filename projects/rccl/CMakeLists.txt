@@ -289,6 +289,8 @@ set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FO
 
 # Check for required dependencies
 #==================================================================================================
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
 ## Check for Threads
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
