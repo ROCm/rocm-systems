@@ -21,6 +21,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 #include <sys/ioctl.h>
 
 using namespace rocjitsu;
@@ -40,10 +41,20 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   auto s = std::make_unique<rj_vm_t>();
   s->soc = loaded.soc();
   auto num_xcds = s->soc->num_xcds();
-  uint32_t cpu_dispatch_threads = std::max(loaded.engine_config.num_threads, 1u);
-  // Optional override for the per-CP CU dispatch-pool thread count (otherwise the
-  // config's num_threads). Useful with RJ_SOC_DISPATCH, where the primary CP owns
-  // every XCD's CUs and benefits from a wider pool spread across the separate L2s.
+  // Per-CP CU dispatch-pool thread count. Precedence:
+  //   1. RJ_DISPATCH_THREADS env (explicit; uncapped; set to 1 to force serial)
+  //   2. config num_threads, when the config explicitly raises it above 1 (uncapped)
+  //   3. default: all hardware threads, capped at kDispatchThreadCap (parallel out
+  //      of the box without oversubscribing small hosts or paying SMT/turbo costs)
+  // Results are thread-count-invariant, so this only affects speed, not output.
+  constexpr uint32_t kDispatchThreadCap = 32;
+  uint32_t cpu_dispatch_threads;
+  if (loaded.engine_config.num_threads > 1) {
+    cpu_dispatch_threads = loaded.engine_config.num_threads;
+  } else {
+    unsigned hw = std::thread::hardware_concurrency();
+    cpu_dispatch_threads = std::min<uint32_t>(hw ? hw : 1u, kDispatchThreadCap);
+  }
   if (const char *e = std::getenv("RJ_DISPATCH_THREADS"); e && e[0]) {
     long v = std::strtol(e, nullptr, 10);
     if (v > 0)
