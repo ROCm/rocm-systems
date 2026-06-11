@@ -22,9 +22,6 @@
 #include "argcheck.h"
 #include "device.h"
 #include "collectives.h"
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit.h"
-#endif
 #include "tuner.h"
 #include "ras.h"
 #include "profiler.h"
@@ -70,7 +67,6 @@
 #include <rocshmem/rocshmem.hpp>
 #define NUM_SYM_BUF 2
 #endif
-
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
@@ -174,7 +170,6 @@ static void getEnvCtaPolicyOnce(){
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 ncclResult_t commReclaim(ncclComm_t comm);
 
-
 #ifdef ENABLE_ROCSHMEM
 RCCL_PARAM(RocshmemThreshold, "ROCSHMEM_THRESHOLD", (size_t)(262144));
 RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
@@ -201,7 +196,6 @@ ncclResult_t initGdrCopy() {
   }
   return ncclSuccess;
 }
-
 
 // [RCCL] Upstream NCCL 2.29 moved the CPU stack-size handling into
 // ncclOsInitialize() (see src/os/linux.cc); we delegate to that here so the
@@ -366,7 +360,6 @@ extern int64_t ncclParamLaunchOrderImplicit();
 
 #undef NCCL_NO_OPTIMIZE
 
-
 static ncclResult_t ncclDestructorFnFree(struct ncclDestructor* dtor) {
   free(dtor->obj);
   return ncclSuccess;
@@ -490,7 +483,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
     }
   }
 
-
   free(comm->peerInfo);
   if (comm->topo)
     ncclTopoFree(comm->topo);
@@ -596,7 +588,6 @@ NCCL_PARAM(GdrCopyFifoEnable, "GDRCOPY_FIFO_ENABLE", 1);
 NCCL_PARAM(WorkFifoBytes, "WORK_FIFO_BYTES", NCCL_WORK_FIFO_BYTES_DEFAULT);
 NCCL_PARAM(WorkArgsBytes, "WORK_ARGS_BYTES", INT64_MAX);
 enum ncclLaunchMode ncclParamLaunchMode;
-
 
 // Detect DMA-BUF support
 static ncclResult_t dmaBufSupported(struct ncclComm* comm) {
@@ -909,14 +900,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
       NCCLCHECKGOTO(ncclCudaMemcpyAsync(tmpCommAndChans.channels[c].ring.userRanks, comm->channels[c].ring.userRanks, nRanks, deviceStream), ret, fail);
     }
   }
-
-#if defined(ENABLE_NPKIT)
-  WARN("NPKIT is deprecated, please use Profiler Plugin instead!");
-  // Init NPKit
-  NCCLCHECK(NpKit::Init(comm->rank));
-  tmpCommAndChans.comm.npKitEventCollectContexts = NpKit::GetGpuEventCollectContexts();
-  tmpCommAndChans.comm.cpuTimestamp = NpKit::GetCpuTimestamp();
-#endif
 
 #ifdef ENABLE_FAULT_INJECTION
   tmpCommAndChans.comm.faults = comm->faults;
@@ -1413,13 +1396,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       ret = ncclInternalError;
       goto fail;
     }
-    #if defined(ENABLE_NPKIT)
-    if (intraProcRanks != 1) {
-      WARN("NPKit currently does not support more than 1 device per process");
-      ret = ncclInternalError;
-      goto fail;
-    }
-    #endif
     struct ncclComm* comm0 = comm->peerInfo[intraProcRank0].comm;
     assert(intraProcRank==0 ? comm==comm0 : true);
     comm->intraComm0 = comm0;
@@ -2724,7 +2700,6 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
     comm->config.CTAPolicy &= ~NCCL_CTA_POLICY_EFFICIENCY;
   }
 
-
   // read non-config env settings
   comm->checkMode = ncclCheckModeDefault;
   if (ncclParamCheckPointers() == 1) { // @deprecated: use NCCL_CHECK_MODE instead
@@ -3234,23 +3209,6 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
     NCCLCHECK(ncclTunerPluginUnload(comm));
   }
   NCCLCHECK(commFree(comm));
-
-#if defined(ENABLE_NPKIT)
-  // Dump NPKit events and shutdown
-  const char* npkitDumpDir = getenv("NPKIT_DUMP_DIR");
-  if (npkitDumpDir == nullptr) {
-    npkitDumpDir = "./npkit_dump";
-    INFO(NCCL_INIT, "NPKIT_DUMP_DIR is not set, using default directory: %s", npkitDumpDir);
-  }
-  struct stat st;
-  if (stat(npkitDumpDir, &st) != 0) {
-    if (mkdir(npkitDumpDir, 0755) != 0) {
-      WARN("Failed to create NPKIT_DUMP_DIR directory: %s", npkitDumpDir);
-    }
-  }
-  NCCLCHECK(NpKit::Dump(npkitDumpDir));
-  NCCLCHECK(NpKit::Shutdown());
-#endif
 
   return ncclSuccess;
 }
