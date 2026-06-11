@@ -217,13 +217,13 @@ TraceArch DetectArch_internal(const uint8_t* buffer, uint64_t buffer_size)
 // template — visitor inlines into the loop). DetectArch_internal above is
 // the dispatch helper it shares with this TU.
 
-pcinfo_t ToPcV2(const CodeobjTableTranslator& table, uint64_t pc)
+pcinfo_t ToPcV2(const CachedTable& table, uint64_t pc)
 {
     pcinfo_t pcinfo{.address = pc, .code_object_id = 0};
     try
     {
         address_range_t codeobj;
-        if (table.find_codeobj_in_range(pc, codeobj))
+        if (table.find(pc, codeobj))
         {
             pcinfo.code_object_id = codeobj.id;
             pcinfo.address = pc - codeobj.addr;

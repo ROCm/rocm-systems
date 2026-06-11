@@ -341,8 +341,8 @@ public:
     int userdata_state{};
 
     CowPtr<std::vector<address_range_t>> active_codeobjs{};
-    CowPtr<CodeobjTableTranslator> table{};
-    CowPtr<CodeobjTableTranslator> table_from_start{};
+    CachedTable table{};
+    CachedTable table_from_start{};
 
     std::vector<att_decoder_realtime_t> realtime{};
 
@@ -531,12 +531,8 @@ public:
 
         uint64_t pc = (wave_start_addr.at(me & 0x1).at(pipe) << 8) & BITMASK;
         event.entry_point = pcinfo_t{.address = pc, .code_object_id = 0};
-        for (const auto& co : active_codeobjs.read())
-            if (co.inrange(pc))
-            {
-                event.entry_point = {pc - co.addr, co.id};
-                break;
-            }
+        address_range_t co;
+        if (table.find(pc, co)) event.entry_point = {pc - co.addr, co.id};
 
         event.thread_dim_x = num_thread_x;
         event.thread_dim_y = num_thread_y;
@@ -566,10 +562,10 @@ public:
 
     template <typename TokenType> pcinfo_t get_wave_start(const TokenType& token)
     {
-        return ToPcV2(table.read(), (wave_start_addr.at_reg(token) << 8) & BITMASK);
+        return ToPcV2(table, (wave_start_addr.at_reg(token) << 8) & BITMASK);
     }
 
-    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start.read(), addr); }
+    pcinfo_t get_wave_start_delayed(uint64_t addr) { return ToPcV2(table_from_start, addr); }
 };
 
 template <typename WaveArray> struct AnalysisReturnData

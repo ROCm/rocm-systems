@@ -79,7 +79,7 @@ uint64_t load_header_word(const void* data)
 rocprofiler_thread_trace_decoder_status_t process_events_none(
     CSRegisterHandler& csregister,
     const std::vector<QuickToken>& raw,
-    int n,
+    size_t n,
     uint64_t header_skip,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     void* userdata
@@ -236,7 +236,7 @@ inline int extract_gfxip(uint64_t header)
 template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_events_gfx9(
     CSRegisterHandler& csregister,
     const std::vector<quick_scan::QuickToken>& raw,
-    int n,
+    size_t n,
     uint64_t header_skip,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     void* userdata
@@ -313,7 +313,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
 template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_events_gfx12(
     CSRegisterHandler& csregister,
     const std::vector<quick_scan::QuickToken>& raw,
-    int n,
+    size_t n,
     uint64_t header_skip,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     void* userdata

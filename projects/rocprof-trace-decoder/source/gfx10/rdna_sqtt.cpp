@@ -457,7 +457,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx10::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
                 break;
             }
             case RdnaType::NEW_PC_GFX12:
@@ -465,7 +465,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx12::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
                 break;
             }
             case RdnaType::REG:

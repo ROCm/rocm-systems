@@ -560,7 +560,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
             {
                 auto& sm = SIMD[token.fields.inst_pc.simd][token.fields.inst_pc.wave];
                 empty_wave_check(sm.size());
-                sm.back().apply_pc(token, csregister.table.write());
+                sm.back().apply_pc(token, csregister.table);
                 break;
             }
             case TOKEN_REG_CS:
@@ -677,7 +677,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
             for (auto& wave : slot) stitch.stitch(wave);
 }
 
-void wave_t::apply_pc(Token& token, CodeobjTableTranslator& table)
+void wave_t::apply_pc(Token& token, const CachedTable& table)
 {
     if (!pc_infos.size() || trap_status != WaveTrapStatus::TRAP_RESTORED) return;
 
