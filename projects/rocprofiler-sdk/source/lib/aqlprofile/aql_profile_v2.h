@@ -98,11 +98,11 @@ typedef enum
     AQLPROFILE_BLOCK_NAME_GRBMH,
     AQLPROFILE_BLOCK_NAME_SQG,
 
-    // Blocks reserved for NPI support
-    AQLPROFILE_BLOCK_NAME_RESERVED_6,
-    AQLPROFILE_BLOCK_NAME_RESERVED_7,
-    AQLPROFILE_BLOCK_NAME_RESERVED_8,
-    AQLPROFILE_BLOCK_NAME_RESERVED_9,
+    // New blocks for gc_12_1_x
+    AQLPROFILE_BLOCK_NAME_GLARBA,
+    AQLPROFILE_BLOCK_NAME_GLARBC,
+    AQLPROFILE_BLOCK_NAME_GRBMA,
+    AQLPROFILE_BLOCK_NAME_GC_NHTTLB,
 
     // Add new blocks above
     AQLPROFILE_BLOCKS_NUMBER
@@ -539,6 +539,7 @@ typedef struct aqlprofile_att_buffer_status_t
     bool     needs_swap;  // If buffer requires swap
     bool     is_too_late;
     bool     error;
+    uint64_t read_offset;
 } aqlprofile_att_buffer_status_t;
 
 /**

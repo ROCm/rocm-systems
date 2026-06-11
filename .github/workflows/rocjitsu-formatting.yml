@@ -1,0 +1,54 @@
+# Formatting checks for emulation/rocjitsu/.
+name: "rocjitsu-formatting"
+
+on:
+  pull_request:
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-*.yml"
+      - ".pre-commit-config.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Sparse checkout controls which files are on disk, and therefore
+          # which files pre-commit can check. To add a new project to this
+          # CI job, add its path here. That's the only change needed.
+          sparse-checkout: |
+            emulation/rocjitsu
+            .github
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pre-commit
+
+      - name: Run pre-commit on changed files
+        run: |
+          # Find the common ancestor between the PR base and head.
+          MERGE_BASE=$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})
+
+          # List files that were added, copied, modified, or renamed in
+          # the PR, then keep only those present on disk. The sparse
+          # checkout determines which files are on disk, so this is how
+          # we scope the check to the projects listed above.
+          FILES=$(git diff --name-only --diff-filter=ACMR "$MERGE_BASE" HEAD \
+            | while IFS= read -r f; do if [ -f "$f" ]; then echo "$f"; fi; done)
+
+          if [ -z "$FILES" ]; then
+            echo "No checked-in files changed in sparse checkout, skipping."
+            exit 0
+          fi
+
+          echo "Checking files:"
+          echo "$FILES"
+          pre-commit run --files $FILES

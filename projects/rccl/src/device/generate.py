@@ -76,15 +76,13 @@ def paste(sep, *args):
   return sep.join(x for x in args if x is not None)
 
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
-is_colltrace       = 1 if sys.argv[3] == "ON" else 0
-# sys.argv[4] reserved (was ENABLE_MSCCL_KERNEL; MSCCL device kernels removed)
-is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
-is_rocshmem        = 1 if sys.argv[6] == "ON" else 0
+is_local_arch_only = 1 if sys.argv[4] == "ON" else 0
+is_rocshmem        = 1 if sys.argv[5] == "ON" else 0
 
-# build all 6 unroll factors when --all-unrolls passed (argv[7] == "ALL"); default is arch-specific
-build_all_unrolls = len(sys.argv) > 7 and sys.argv[7] == "ALL"
+# build all 6 unroll factors when --all-unrolls passed (argv[6] == "ALL"); default is arch-specific
+build_all_unrolls = len(sys.argv) > 6 and sys.argv[6] == "ALL"
 
-func_pattern = sys.argv[8:9]
+func_pattern = sys.argv[7:8]
 
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
@@ -461,26 +459,6 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out("}\n\n")
 
   out("#endif // RCCL_DEVICE_TABLE_OMIT\n")
-
-# Generate <gensrc>/device_table.cpp
-if is_colltrace:
-  with open(os.path.join(gensrc, "device_table.cpp"), "w") as f:
-    print("-- Generating %s" % os.path.join(gensrc, "device_table.cpp"))
-
-    out = f.write
-    out('#include "nccl_common.h"\n#include "device.h"\n')
-    out("\n")
-
-    seen_fns = set()
-    out("const char* funcNames[] = {\n")
-    for fn in primary_funcs:
-      fn_no_unroll = (fn.coll, fn.algo, fn.proto, fn.redop, fn.ty, fn.acc, fn.pipeline)
-      if fn_no_unroll not in seen_fns:
-        out('   "%s",\n' % paste("_", "ncclDevFunc", *fn_no_unroll))
-        seen_fns.add(fn_no_unroll)
-    for ty in all_tys:
-      out(f'   "ncclDevFunc_OneRankReduce_PreMulSum_{ty}",\n')
-    out("};\n")
 
 # Generate <gensrc>/host_table.cpp
 with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:

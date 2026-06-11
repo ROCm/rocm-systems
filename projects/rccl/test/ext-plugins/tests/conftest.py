@@ -19,16 +19,16 @@ RCCL_INSTALL_DIR = os.environ.get("RCCL_INSTALL_DIR", "path/to/rccl")
 OMPI_INSTALL_DIR = os.environ.get("OMPI_INSTALL_DIR", "path/to/ompi/install")
 RCCL_TESTS_DIR = os.environ.get("RCCL_TESTS_DIR", "path/to/rccl-tests")
 
-# Ext-Tuner Paths
-PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/ext-tuner/example"
+# Tuner plugin paths (renamed from ext-tuner/ in NCCL 2.29 sync)
+PLUGIN_DIR = f"{RCCL_INSTALL_DIR}/plugins/tuner/example"
 PLUGIN_SO = f"{PLUGIN_DIR}/libnccl-tuner-example.so"
 
-# Ext-Profiler Paths
-PROFILER_DIR = f"{RCCL_INSTALL_DIR}/ext-profiler/example"
+# Profiler plugin paths (renamed from ext-profiler/ in NCCL 2.29 sync)
+PROFILER_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/example"
 PROFILER_SO = f"{PROFILER_DIR}/librccl-profiler-example.so"
 
-# Ext-Inspector Paths
-INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/ext-profiler/inspector"
+# Inspector plugin paths (renamed from ext-profiler/inspector/ in NCCL 2.29 sync)
+INSPECTOR_DIR = f"{RCCL_INSTALL_DIR}/plugins/profiler/inspector"
 INSPECTOR_SO = f"{INSPECTOR_DIR}/librccl-profiler-inspector.so"
 
 # CSV Configs 
@@ -204,7 +204,11 @@ def pytest_runtest_setup(item):
     """Check plugin availability before running each test"""
     # Check for ext_tuner marker
     if item.get_closest_marker("ext_tuner"):
-        if not os.path.exists(PLUGIN_SO):
+        # The native thread-safety regression builds its own binary from source
+        # and does not use the prebuilt plugin .so, so don't skip it on its absence.
+        test_name = getattr(item, "originalname", item.name)
+        needs_plugin_so = test_name != "test_config_parser_thread_safety"
+        if needs_plugin_so and not os.path.exists(PLUGIN_SO):
             pytest.skip(f"Tuner plugin library not found at: {PLUGIN_SO}")
     
     # Check for ext_profiler marker

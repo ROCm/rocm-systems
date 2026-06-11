@@ -20,13 +20,13 @@ struct RunWorkNop {
 };
 
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/1>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/1>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/2>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/2>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/4>(&argsStorage.args);
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/4>(&argsStorage.args);
 }
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/8>(&argsStorage.args);
@@ -37,26 +37,6 @@ __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_16
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/32>(&argsStorage.args);
 }
-#ifdef ENABLE_COLLTRACE
-__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/1>(&argsStorage.args);
-}
-__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/2>(&argsStorage.args);
-}
-__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/4>(&argsStorage.args);
-}
-__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/8>(&argsStorage.args);
-}
-__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/16>(&argsStorage.args);
-}
-__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
-  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/32>(&argsStorage.args);
-}
-#endif
 
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
 __device__ void ncclDevFunc_Nop();
