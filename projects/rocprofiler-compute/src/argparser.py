@@ -574,6 +574,7 @@ Examples:
         metavar="",
         dest="pc_sampling_method",
         default="stochastic",
+        choices=["stochastic", "host_trap"],
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
