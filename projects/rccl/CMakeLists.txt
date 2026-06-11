@@ -95,7 +95,7 @@ option(QUIET_WARNINGS                          "Supress compiler warnings"      
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
-set(RCCL_BUILD_UNROLL "" CACHE STRING "Build only this unroll factor (empty = all: 1/2/4/8/16/32)")
+option(RCCL_BUILD_ALL_UNROLLS                  "Build all 6 unroll factors (1/2/4/8/16/32); default is arch-specific" OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
