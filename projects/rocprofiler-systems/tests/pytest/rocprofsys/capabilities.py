@@ -135,7 +135,7 @@ class SystemCapabilities:
                 if "netdev" in line.lower():
                     colon_idx = line.find(":")
                     if colon_idx != -1:
-                        name = line[colon_idx + 1:].strip()
+                        name = line[colon_idx + 1 :].strip()
                         if name and name not in seen:
                             seen.add(name)
                             devices.append(name)
