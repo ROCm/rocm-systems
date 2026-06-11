@@ -838,6 +838,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 update_env(_data, "ROCPROFSYS_PROFILE", _sel.profile);
                 update_env(_data, "ROCPROFSYS_JSON_OUTPUT", _sel.json);
                 update_env(_data, "ROCPROFSYS_TEXT_OUTPUT", _sel.text);
+                update_env(_data, "ROCPROFSYS_COUT_OUTPUT", false);
             });
 
         _data.reg.processed_environs.emplace("output_format");
