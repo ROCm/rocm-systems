@@ -1,3 +1,12 @@
+# ---------------------------------------------------------------------------
+# Custom CI workflow for AMD-SMI self-hosted runners.
+#
+# Covers test scenarios outside TheRock CI's scope: TheRock CI runs everything
+# in a container, while these runners are able to handle Baremetal and VMs.
+#
+# Aims to follow TheRock CI conventions as closely as possible.
+# ---------------------------------------------------------------------------
+
 name: AMDSMI Manylinux Wheels
 
 on:
@@ -24,9 +33,9 @@ permissions:
 
 jobs:
   build-amdsmi-wheels:
-    name: ${{ matrix.target.name }}
-    runs-on: ${{ matrix.target.runs-on }}
-    container: ${{ matrix.target.container }}
+    name: ${{matrix.target.name}}
+    runs-on: ${{matrix.target.runs-on}}
+    container: ${{matrix.target.container}}
 
     strategy:
       fail-fast: false
@@ -69,12 +78,12 @@ jobs:
 
       - name: Build wheels
         run: |
-          ${{ matrix.target.python-bin }} \
+          ${{matrix.target.python-bin}} \
             "$GITHUB_WORKSPACE/projects/amdsmi/tools/build_wheel.py" \
             --project-dir "$GITHUB_WORKSPACE/projects/amdsmi" \
             --output-dir "$GITHUB_WORKSPACE/wheels" \
-            --os-variant ${{ matrix.target.os-variant }} \
-            ${{ matrix.target.repair-flag }}
+            --os-variant ${{matrix.target.os-variant}} \
+            ${{matrix.target.repair-flag}}
 
       - name: Verify wheels exist
         run: |
@@ -86,22 +95,22 @@ jobs:
 
       - name: Smoke test (install + import)
         run: |
-          ${{ matrix.target.python-bin }} -m pip install --upgrade pip
-          ${{ matrix.target.python-bin }} -m pip install "$GITHUB_WORKSPACE"/wheels/*.whl
-          ${{ matrix.target.python-bin }} -c "import amdsmi; print('amdsmi import OK')"
+          ${{matrix.target.python-bin}} -m pip install --upgrade pip
+          ${{matrix.target.python-bin}} -m pip install "$GITHUB_WORKSPACE"/wheels/*.whl
+          ${{matrix.target.python-bin}} -c "import amdsmi; print('amdsmi import OK')"
 
       - name: Upload wheels (by SHA)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ${{ matrix.target.artifact-prefix }}-${{ github.sha }}
-          path: ${{ github.workspace }}/wheels/*.whl
+          name: ${{matrix.target.artifact-prefix}}-${{github.sha}}
+          path: ${{github.workspace}}/wheels/*.whl
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload wheels (downloadable)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ${{ matrix.target.artifact-prefix }}
-          path: ${{ github.workspace }}/wheels/*.whl
+          name: ${{matrix.target.artifact-prefix}}
+          path: ${{github.workspace}}/wheels/*.whl
           if-no-files-found: warn
           retention-days: 90
