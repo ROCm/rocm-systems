@@ -135,13 +135,6 @@ jobs:
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
-      # TODO: Move to Dockerfile.ubuntu.ci
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt install -y libdw-dev pkg-config
-          echo "✅ ROCm dependencies Installed!"
-
       - name: Install MPI
         run: |
           apt install -y libopenmpi-dev
