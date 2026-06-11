@@ -4,10 +4,10 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include "dda_all_reduce_ipc.h"
+#include "dda_reduce_scatter_ipc.h"
 
 #include "algorithms/CollCommon.h"
-#include "algorithms/all_reduce/all_reduce_dda.h"
+#include "algorithms/reduce_scatter/reduce_scatter_dda.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -27,47 +27,31 @@ using nccl_dda_ipc_detail::DdaIpcBarrierState;
 using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_ipc_detail::kDdaNranks;
 
-/** Flat below this size; tree above (see ddaAllReduceFlatIpc / ddaAllReduceTreeIpc). */
-constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
-
 template <typename T>
-static ncclResult_t ncclAllReduceDdaIpcTyped(
+static ncclResult_t ncclReduceScatterDdaIpcTyped(
     const void* sendbuff,
     void* recvbuff,
-    size_t count,
+    size_t recvcount,
     ncclComm* comm,
     cudaStream_t stream) {
   if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr ||
       comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
   }
-  if (count * sizeof(T) > comm->ddaIpcScratchBytes) {
+
+  const size_t totalCount = recvcount * comm->nRanks;
+  if (totalCount * sizeof(T) > comm->ddaIpcScratchBytes) {
     WARN(
-        "DDA IPC allreduce: element count %zu needs %zu bytes; comm scratch is %zu bytes",
-        count,
-        count * sizeof(T),
+        "DDA IPC reduce-scatter: total element count %zu needs %zu bytes; comm scratch is %zu bytes",
+        totalCount,
+        totalCount * sizeof(T),
         comm->ddaIpcScratchBytes);
     return ncclInvalidArgument;
   }
 
-  const size_t sizeBytes = count * sizeof(T);
-  const unsigned threads = 512;
-  const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
-  const bool treeOk =
-      wantTree && (count % static_cast<size_t>(kDdaNranks) == 0);
-
-  if (wantTree && !treeOk) {
-    INFO(
-        NCCL_ALL,
-        "DDA IPC: size %zu B > 256KB but count %zu not divisible by %d; using flat kernel",
-        sizeBytes,
-        count,
-        kDdaNranks);
-  }
-
- 
-  const int nBlocksMax = ddaMaxNBlocksForScratch(); 
-  auto gridBlock = meta::comms::getGridAndBlockDims(count, sizeof(T), nBlocksMax);
+  const int nBlocksMax = ddaMaxNBlocksForScratch();
+  // For reduce-scatter, we use recvcount for grid calculation since each rank processes its portion
+  auto gridBlock = meta::comms::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
@@ -78,34 +62,20 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
   void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  if (treeOk) {
-    CUDACHECK(cudaMemcpyAsync(
+  CUDACHECK(cudaMemcpyAsync(
         comm->ddaIpcScratch,
         sendbuff,
-        count * sizeof(T),
+        totalCount * sizeof(T),
         cudaMemcpyDeviceToDevice,
         stream));
-    meta::comms::ddaAllReduceTreeIpc<T, kDdaNranks, false>
-        <<<grid, block, 0, stream>>>(
-            d_ipcbuffs,
-            static_cast<T*>(recvbuff),
-            count,
-            static_cast<const T*>(sendbuff),
-            comm->rank,
-            barrierHost,
-            nullptr);
-  } else {
-    meta::comms::ddaAllReduceFlatIpc<T, kDdaNranks, false>
-        <<<grid, block, 0, stream>>>(
-            d_ipcbuffs,
-            static_cast<T*>(recvbuff),
-            count,
-            static_cast<const T*>(sendbuff),
-            comm->rank,
-            barrierHost,
-            nullptr);
-  }
-
+  meta::comms::ddaReduceScatterIpc<T, kDdaNranks, false>
+      <<<grid, block, 0, stream>>>(
+          d_ipcbuffs,
+          static_cast<T*>(recvbuff),
+          recvcount,
+          static_cast<const T*>(sendbuff),
+          comm->rank,
+          barrierHost);
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
@@ -113,11 +83,11 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(
 
 } // namespace
 
-bool ncclAllReduceDdaIpcEligible(
+bool ncclReduceScatterDdaIpcEligible(
     ncclComm* comm,
     const void* sendbuff,
     void* recvbuff,
-    size_t count,
+    size_t recvcount,
     ncclDataType_t datatype,
     ncclRedOp_t op) {
   if (comm == nullptr || comm->bootstrap == nullptr) {
@@ -127,7 +97,7 @@ bool ncclAllReduceDdaIpcEligible(
       comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
     return false;
   }
-  if (count == 0) {
+  if (recvcount == 0) {
     return false;
   }
   if (comm->nNodes != 1) {
@@ -143,32 +113,30 @@ bool ncclAllReduceDdaIpcEligible(
       datatype != ncclBfloat16) {
     return false;
   }
-  size_t need = count * 4;
-  if (datatype == ncclFloat16 || datatype == ncclBfloat16) {
-    need = count * 2;
-  }
+
+  size_t totalCount = recvcount * comm->nRanks;
+  size_t need = totalCount * ncclTypeSize(datatype);
   if (need > comm->ddaIpcScratchBytes) {
     return false;
   }
-  if ((count *  ncclTypeSize(datatype)) % 16) {
-    // 16 byte alignment as we do 16-byte loads in DDA kernel
+
+  // Check 16-byte alignment for total data
+  if ((totalCount * ncclTypeSize(datatype)) % 16) {
     return false;
   }
-  if ((count *  ncclTypeSize(datatype)) > kDdaFlatTreeThresholdBytes) {
-    if (count % comm->nRanks || ((count / comm->nRanks * ncclTypeSize(datatype)) % 16)) {
-      // In two-shot algo, each rank is reduces count/nRanks_ elements so we
-      // need to make sure that is 16-byte aligned
-      return false;
-    }	
+
+  // Check per-rank byte alignment
+  if ((recvcount * ncclTypeSize(datatype)) % 16) {
+    return false;
   }
 
   return true;
 }
 
-ncclResult_t ncclAllReduceDdaIpc(
+ncclResult_t ncclReduceScatterDdaIpc(
     const void* sendbuff,
     void* recvbuff,
-    size_t count,
+    size_t recvcount,
     ncclDataType_t datatype,
     ncclRedOp_t op,
     ncclComm* comm,
@@ -176,15 +144,16 @@ ncclResult_t ncclAllReduceDdaIpc(
   (void)op;
   switch (datatype) {
   case ncclFloat32:
-    return ncclAllReduceDdaIpcTyped<float>(
-        sendbuff, recvbuff, count, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<float>(
+        sendbuff, recvbuff, recvcount, comm, stream);
   case ncclFloat16:
-    return ncclAllReduceDdaIpcTyped<half>(
-        sendbuff, recvbuff, count, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<half>(
+        sendbuff, recvbuff, recvcount, comm, stream);
   case ncclBfloat16:
-    return ncclAllReduceDdaIpcTyped<bf16>(
-        sendbuff, recvbuff, count, comm, stream);
+    return ncclReduceScatterDdaIpcTyped<bf16>(
+        sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }
 }
+

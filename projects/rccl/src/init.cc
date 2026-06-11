@@ -675,6 +675,7 @@ skip_profiling:
       CUDACHECK(cudaEventDestroy(comm->sharedRes->launchEvent));
       CUDACHECK(cudaEventDestroy(comm->sharedRes->scratchEvent));
       NCCLCHECK(ncclProxyDestroy(comm));
+      NCCLCHECK(ncclGinFinalize(comm));
       delete comm->sharedRes;
     }
   }
@@ -2732,7 +2733,9 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
-  NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+  if (!job->parent && comm->nNodes == 1 && comm->nRanks == 8) {
+  	NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
+  }
   // update communicator state
   comm->initState = ncclSuccess;
 

@@ -13,11 +13,13 @@
 #include "rma/rma.h"
 
 static bool isLsaAccessible(struct ncclComm* comm, int rank) {
+#ifdef RCCL_RMA_CU_PATH_ENABLED
   for (int i = 0; i < comm->devrState.lsaSize; i++) {
     if (comm->devrState.lsaRankList[i] == rank) {
       return true;
     }
   }
+#endif
   return false;
 }
 
@@ -25,6 +27,7 @@ ncclResult_t ncclRmaWaitSignal(struct ncclComm* comm, struct ncclKernelPlan* pla
   ncclResult_t ret = ncclSuccess;
 
   // If we have both proxy and CE tasks, execute them in parallel
+#ifdef RCCL_RMA_CU_PATH_ENABLED
   if (plan->rmaArgs->nRmaTasksProxy > 0 && plan->rmaArgs->nRmaTasksCe > 0) {
     cudaStream_t ceStream = comm->rmaState.rmaCeState.ceStream;
     cudaEvent_t ceEvent = comm->rmaState.rmaCeState.ceEvent;
@@ -49,6 +52,11 @@ ncclResult_t ncclRmaWaitSignal(struct ncclComm* comm, struct ncclKernelPlan* pla
   else if (plan->rmaArgs->nRmaTasksCe > 0) {
     NCCLCHECKGOTO(ncclRmaCeWaitLaunch(comm, plan, stream), ret, fail);
   }
+#else 
+  if (plan->rmaArgs->nRmaTasksProxy > 0) {
+    NCCLCHECKGOTO(ncclRmaProxyWaitLaunch(comm, plan, stream), ret, fail);
+  }
+#endif
 
 exit:
   return ret;
@@ -61,6 +69,7 @@ ncclResult_t ncclRmaPut(struct ncclComm* comm, struct ncclKernelPlan* plan, cuda
   ncclResult_t ret = ncclSuccess;
 
   // If we have both proxy and CE tasks, execute them in parallel
+#ifdef RCCL_RMA_CU_PATH_ENABLED
   if (plan->rmaArgs->nRmaTasksProxy > 0 && plan->rmaArgs->nRmaTasksCe > 0) {
     cudaStream_t ceStream = comm->rmaState.rmaCeState.ceStream;
     cudaEvent_t ceEvent = comm->rmaState.rmaCeState.ceEvent;
@@ -85,6 +94,11 @@ ncclResult_t ncclRmaPut(struct ncclComm* comm, struct ncclKernelPlan* plan, cuda
   else if (plan->rmaArgs->nRmaTasksCe > 0) {
     NCCLCHECKGOTO(ncclRmaCePutLaunch(comm, plan, stream), ret, fail);
   }
+#else
+  if (plan->rmaArgs->nRmaTasksProxy > 0) {
+    NCCLCHECKGOTO(ncclRmaProxyPutLaunch(comm, plan, stream), ret, fail);
+  }
+#endif
 
 exit:
   return ret;
@@ -170,13 +184,17 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
   plan->rmaArgs->func = firstTask->func;
   plan->rmaArgs->nRmaTasks = 0;
   plan->rmaArgs->nRmaTasksProxy = 0;
+#ifdef RCCL_RMA_CU_PATH_ENABLED
   plan->rmaArgs->nRmaTasksCe = 0;
+#endif
 
   // WaitSignal tasks
   if (firstTask->func == ncclFuncWaitSignal) {
     // Allocate temporary arrays to hold peers and nsignals for both proxy and CE paths
+#ifdef RCCL_RMA_CU_PATH_ENABLED
     int* peersCe = ncclMemoryStackAlloc<int>(&comm->memScoped, firstTask->npeers);
     int* nsignalsCe = ncclMemoryStackAlloc<int>(&comm->memScoped, firstTask->npeers);
+#endif
     NCCLCHECKGOTO(ncclCalloc(&peersProxy, firstTask->npeers), ret, fail);
     NCCLCHECKGOTO(ncclCalloc(&nsignalsProxy, firstTask->npeers), ret, fail);
 
@@ -190,9 +208,11 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
 
       if (lsaAccessible) {
         // Add to CE list
+#ifdef RCCL_RMA_CU_PATH_ENABLED
         peersCe[npeersCe] = peerRank;
         nsignalsCe[npeersCe] = firstTask->nsignals[i];
         npeersCe++;
+#endif
       } else {
         // Add to Proxy list
         peersProxy[npeersProxy] = peerRank;
@@ -202,6 +222,7 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
     }
 
     // Initialize the CE task if there are CE peers
+#ifdef RCCL_RMA_CU_PATH_ENABLED
     if (npeersCe > 0) {
       struct ncclTaskRma* waitSignalTaskCe = ncclMemoryPoolAlloc<struct ncclTaskRma>(&comm->memPool_ncclTaskRma, &comm->memPermanent);
       waitSignalTaskCe->func = ncclFuncWaitSignal;
@@ -215,6 +236,7 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
     } else {
       plan->rmaArgs->nRmaTasksCe = 0;
     }
+#endif
 
     // Initialize the Proxy task if there are Proxy peers
     if (npeersProxy > 0) {
@@ -247,10 +269,14 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
 
     plan->rmaArgs->nRmaTasks = 1;
     plan->rmaArgs->nRmaTasksProxy = lsaAccessible ? 0 : 1;
+#ifdef RCCL_RMA_CU_PATH_ENABLED
     plan->rmaArgs->nRmaTasksCe = lsaAccessible ? 1 : 0;
+#endif
 
     if (lsaAccessible) {
+#ifdef RCCL_RMA_CU_PATH_ENABLED
       ncclIntruQueueEnqueue(&plan->rmaTaskQueueCe, firstTask);
+#endif
     } else {
       ncclIntruQueueEnqueue(&plan->rmaTaskQueueProxy, firstTask);
     }
@@ -271,8 +297,10 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
       // If the task can be batched, remove from context queue and add to plan
       ncclIntruQueueDequeue(ctxQueue);
       if (lsaAccessible) {
+#ifdef RCCL_RMA_CU_PATH_ENABLED
         ncclIntruQueueEnqueue(&plan->rmaTaskQueueCe, task);
         plan->rmaArgs->nRmaTasksCe++;
+#endif
       } else {
         ncclIntruQueueEnqueue(&plan->rmaTaskQueueProxy, task);
         plan->rmaArgs->nRmaTasksProxy++;
@@ -283,7 +311,12 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
   }
 
   INFO(NCCL_COLL, "scheduleRmaTasksToPlan: rank=%d ctx=%d func=%d nRmaTasks=%d nRmaTasksProxy=%d nRmaTasksCe=%d",
-    comm->rank, ctx, plan->rmaArgs->func, plan->rmaArgs->nRmaTasks, plan->rmaArgs->nRmaTasksProxy, plan->rmaArgs->nRmaTasksCe);
+    comm->rank, ctx, plan->rmaArgs->func, plan->rmaArgs->nRmaTasks, plan->rmaArgs->nRmaTasksProxy,
+#ifdef RCCL_RMA_CU_PATH_ENABLED
+    plan->rmaArgs->nRmaTasksCe);
+#else 
+    -1);
+#endif
 
 exit:
   return ret;

@@ -23,16 +23,12 @@ extern getNcclGin_t getNcclGin_v12;
 extern getNcclGin_t getNcclGin_v13;
 extern getNcclGin_t getNcclRma_v13;
 NCCL_PARAM(GinPluginRefCount, "GIN_PLUGIN_REF_COUNT", 0);
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-// RCCL: src/transport/net_ib_cast/gin.cc (which normally defines this param upstream)
-// is excluded from the ROCm build because it depends on CUDA/NCCL-only headers.
-// Provide ncclParamGinType() here so plugin/net.cc and rma/rma_proxy.cc can link.
-NCCL_PARAM(GinType, "GIN_TYPE", -1);
-#endif
 #define NCCL_GIN_VERSION_COUNT 3
 int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {13, 12, 11};
 getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v13, getNcclGin_v12, getNcclGin_v11};
 getNcclGin_t* getNcclRma[NCCL_GIN_VERSION_COUNT] = {getNcclRma_v13, getNcclGin_v12, getNcclGin_v11};
+
+extern ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12);
 
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
 
@@ -232,13 +228,27 @@ static void initPluginLibsOnceFunc() {
   }
 
   // Add internal ib plugin
-  ginPluginLibs[pluginCounter].ncclGin = &ncclGinIb;
+  const char* envNet = ncclGetEnv("NCCL_NET");
+  if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
+    ginPluginLibs[pluginCounter].ncclGin = &IbCastGinIb;
+    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
+    ginPluginLibs[pluginCounter].ncclRma = &IbCastGinIbProxy;
+    ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
+    ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
+    pluginCounter++;
+  }
+
+  ginPluginLibs[pluginCounter].ncclGin = &ncclGinIbProxy;
   ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
   ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
-  ginPluginLibs[pluginCounter].ncclRma = &ncclGinIbProxy;
+  ginPluginLibs[pluginCounter].ncclRma = ginPluginLibs[pluginCounter].ncclGin;
   ginPluginLibs[pluginCounter].ncclRmaPluginState = ncclGinPluginStateInitReady;
   ginPluginLibs[pluginCounter].ncclGinVersion = ncclGinVersion[0];
+
   pluginCounter++;
+
+
   pluginCount = pluginCounter;
 }
 
