@@ -21,10 +21,15 @@ namespace perfetto
 class TracingSession;
 }
 
-namespace rocprofsys
+namespace rocprofsys::core
 {
-namespace core
+struct tracing_session_deleter
 {
+    void operator()(::perfetto::TracingSession* session) const noexcept;
+};
+
+using tracing_session_ptr =
+    std::unique_ptr<::perfetto::TracingSession, tracing_session_deleter>;
 
 // POD snapshot of the perfetto-relevant configuration. Built once at engine
 // construction by build_engine_config_from_settings(); the engine never reads
@@ -155,8 +160,7 @@ public:
 
 private:
     [[nodiscard]] bool is_system_backend() const noexcept;
-    void               start_session(pid_t pid, int fd);
-    void               build_trace_config(mode m);
+    void               start_session(pid_t pid, int fd, mode m);
 
     engine_config m_cfg{};
     pid_t         m_active_pid{ 0 };
@@ -173,11 +177,10 @@ private:
 
     static std::once_flag s_sdk_init_flag;
 
-    // Narrowed PIMPL: holds the only members whose definitions force
-    // <perfetto.h> into the TU. Keeps the compile firewall while the
-    // engine's own state lives in this class directly.
-    struct perfetto_state;
-    std::unique_ptr<perfetto_state> m_perfetto;
+    // The header only needs the opaque TracingSession handle; TraceConfig and
+    // SDK setup details stay local to engine.cpp while session ownership remains
+    // explicit in the engine state.
+    std::unordered_map<pid_t, tracing_session_ptr> m_sessions{};
 };
 
 // Thread-local pid tag consumed by the cached-mode interceptor TLS to key
@@ -191,5 +194,4 @@ set_emitting_pid(int pid) noexcept;
 
 int
 get_emitting_pid() noexcept;
-}  // namespace core
-}  // namespace rocprofsys
+}  // namespace rocprofsys::core

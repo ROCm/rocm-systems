@@ -6,20 +6,16 @@
 
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
+#include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
-#include <cerrno>
 #include <cstdio>
-#include <cstring>
-#include <fcntl.h>
 #include <fstream>
 #include <ios>
 #include <string>
-#include <sys/file.h>
-#include <unistd.h>
 #include <utility>
 
 namespace rocprofsys
@@ -161,72 +157,6 @@ void
 per_pid_file_sink::finalize()
 {}
 
-namespace
-{
-// Append the entire payload to the file at `filename` under an exclusive
-// flock that lives only for the duration of the write. flock auto-releases
-// on process exit, so a crash mid-write leaves the partial bytes in place
-// without holding the lock; the next process gets the lock immediately.
-// The lock serializes writers; concurrent readers (e.g. a future merge
-// inspection tool) see whatever flushed bytes existed at their read point.
-bool
-append_with_flock(const std::string& filename, const char* data, std::size_t size,
-                  output_file_registry* registry)
-{
-    // TIME_OUTPUT=ON puts the merged file under a timestamped subdirectory
-    // that no other code may have created yet on this process; ensure the
-    // parent exists before O_CREAT, matching filepath::open()'s behavior for
-    // the ofstream-based writers.
-    auto parent = filepath::dirname(filename);
-    if(!parent.empty()) filepath::makedir(parent);
-
-    int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if(fd < 0)
-    {
-        emit_open_error_line(filename);
-        return false;
-    }
-
-    if(::flock(fd, LOCK_EX) != 0)
-    {
-        const int err = errno;
-        ::close(fd);
-        LOG_ERROR("single_file_sink: flock(LOCK_EX) failed on '{}': {}", filename,
-                  std::strerror(err));
-        return false;
-    }
-
-    bool        ok     = true;
-    const char* ptr    = data;
-    std::size_t remain = size;
-    while(remain > 0)
-    {
-        const ssize_t n = ::write(fd, ptr, remain);
-        if(n < 0)
-        {
-            const int err = errno;
-            if(err == EINTR) continue;
-            LOG_ERROR("single_file_sink: write to '{}' failed: {}", filename,
-                      std::strerror(err));
-            ok = false;
-            break;
-        }
-        ptr += n;
-        remain -= static_cast<std::size_t>(n);
-    }
-
-    ::flock(fd, LOCK_UN);
-    ::close(fd);
-
-    if(ok)
-    {
-        emit_size_line(filename, size);
-        if(registry) registry->register_file(filename, output_format::perfetto);
-    }
-    return ok;
-}
-}  // namespace
-
 // ----------------------------------------------------------------------------
 // single_file_sink
 // ----------------------------------------------------------------------------
@@ -336,9 +266,19 @@ single_file_sink::finalize()
 
     if(m_append_mode)
     {
-        if(!append_with_flock(filename, m_buffer.data(), m_buffer.size(), m_registry))
+        const auto status =
+            append_with_file_lock(filename, m_buffer.data(), m_buffer.size());
+        if(status == locked_append_status::success)
         {
-            LOG_ERROR("single_file_sink: append-with-flock failed for '{}'", filename);
+            emit_size_line(filename, m_buffer.size());
+            if(m_registry) m_registry->register_file(filename, output_format::perfetto);
+        }
+        else
+        {
+            if(status == locked_append_status::open_failed)
+                emit_open_error_line(filename);
+            LOG_ERROR("single_file_sink: append-with-flock failed for {} ({})", filename,
+                      status_name(status));
         }
     }
     else if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry))

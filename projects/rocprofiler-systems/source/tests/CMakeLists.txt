@@ -8,6 +8,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
     $<TARGET_OBJECTS:perfetto-engine-tests>
+    $<TARGET_OBJECTS:perfetto-output-layout-tests>
     $<TARGET_OBJECTS:perfetto-sinks-tests>
     $<TARGET_OBJECTS:emission-handshake-tls-contract-tests>
     $<TARGET_OBJECTS:progress-tests>

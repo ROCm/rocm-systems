@@ -6,7 +6,6 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/perfetto/driver.hpp"
 #include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/perf.hpp"

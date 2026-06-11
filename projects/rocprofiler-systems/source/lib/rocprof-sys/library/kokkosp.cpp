@@ -12,7 +12,7 @@
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
-#include "core/perfetto/driver.hpp"
+#include "core/perfetto/category_registry.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"

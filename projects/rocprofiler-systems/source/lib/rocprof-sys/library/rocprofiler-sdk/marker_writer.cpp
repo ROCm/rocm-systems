@@ -4,7 +4,7 @@
 #include "library/rocprofiler-sdk/marker_writer.hpp"
 
 #include "core/categories.hpp"
-#include "core/perfetto/driver.hpp"
+#include "core/perfetto/category_registry.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"

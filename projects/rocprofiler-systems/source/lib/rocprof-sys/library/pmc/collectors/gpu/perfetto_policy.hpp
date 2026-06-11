@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/perfetto/driver.hpp"
+#include "core/perfetto/counter_track.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/thread_info.hpp"
 

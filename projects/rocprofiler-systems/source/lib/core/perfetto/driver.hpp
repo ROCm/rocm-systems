@@ -3,24 +3,8 @@
 
 #pragma once
 
-#include "core/categories.hpp"
-#include "core/common.hpp"
-#include "core/config.hpp"
-#include "core/perfetto/counter_track.hpp"
-
-#include <atomic>
 #include <memory>
-
-#include "logger/debug.hpp"
-
-#if defined(TIMEMORY_USE_PERFETTO)
-#    include <timemory/components/perfetto/backends.hpp>
-#else
-#    include <perfetto.h>
-PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
-#endif
-
-#include <timemory/process/process.hpp>
+#include <sys/types.h>
 
 namespace rocprofsys
 {

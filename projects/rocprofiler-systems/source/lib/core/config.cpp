@@ -11,7 +11,7 @@
 #include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
-#include "perfetto/driver.hpp"
+#include "perfetto/category_registry.hpp"
 #include "rocprofiler-sdk.hpp"
 #include "utility.hpp"
 
@@ -2143,11 +2143,12 @@ get_perfetto_fill_policy()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
-std::string
+core::perfetto_output_layout
 get_perfetto_output_layout()
 {
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT");
-    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    return core::parse_perfetto_output_layout(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get());
 }
 
 namespace

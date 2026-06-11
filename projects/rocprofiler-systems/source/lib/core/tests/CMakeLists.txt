@@ -30,6 +30,18 @@ target_include_directories(packet-framing-tests PRIVATE ${PROJECT_SOURCE_DIR}/so
 
 add_library(perfetto-engine-tests OBJECT test_perfetto_engine.cpp)
 
+add_library(perfetto-output-layout-tests OBJECT test_perfetto_output_layout.cpp)
+
+target_link_libraries(
+    perfetto-output-layout-tests
+    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+)
+
+target_include_directories(
+    perfetto-output-layout-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
+)
+
 target_link_libraries(
     perfetto-engine-tests
     PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library

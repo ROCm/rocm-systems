@@ -1,14 +1,18 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 #include "core/perfetto/engine.hpp"
 #include "core/perfetto/packet_framing.hpp"
+#include "core/perfetto/session_backend.hpp"
 #include "core/perfetto/sinks.hpp"
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -27,6 +31,84 @@ make_test_config()
     return cfg;
 }
 }  // namespace
+
+namespace
+{
+class mock_trace_session
+{
+public:
+    virtual ~mock_trace_session() = default;
+
+    MOCK_METHOD(void, SetOnErrorCallback, (std::function<void(int)>) );
+    MOCK_METHOD(void, Setup, (const int&, int) );
+    MOCK_METHOD(void, StartBlocking, ());
+    MOCK_METHOD(void, FlushBlocking, ());
+    MOCK_METHOD(void, StopBlocking, ());
+};
+
+class mock_session_backend_delegate
+{
+public:
+    MOCK_METHOD(std::unique_ptr<mock_trace_session>, new_trace, ());
+    MOCK_METHOD(void, flush_track_events, ());
+};
+
+std::unique_ptr<mock_session_backend_delegate> g_mock_session_backend;
+
+struct mock_session_backend
+{
+    [[nodiscard]] std::unique_ptr<mock_trace_session> new_trace()
+    {
+        return g_mock_session_backend->new_trace();
+    }
+
+    void flush_track_events() { g_mock_session_backend->flush_track_events(); }
+};
+
+class session_backend_policy_test : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        g_mock_session_backend =
+            std::make_unique<::testing::StrictMock<mock_session_backend_delegate>>();
+    }
+
+    void TearDown() override { g_mock_session_backend.reset(); }
+};
+}  // namespace
+
+TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
+{
+    int                  trace_cfg = 0;
+    mock_session_backend backend{};
+
+    auto session = std::unique_ptr<mock_trace_session>{
+        new ::testing::StrictMock<mock_trace_session>{}
+    };
+    auto* session_ptr = session.get();
+
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(*g_mock_session_backend, new_trace())
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(session))));
+        EXPECT_CALL(*session_ptr, SetOnErrorCallback(::testing::_));
+        EXPECT_CALL(*session_ptr, Setup(::testing::_, 17));
+        EXPECT_CALL(*session_ptr, StartBlocking());
+    }
+
+    auto started =
+        rocprofsys::core::start_tracing_session(backend, trace_cfg, 17, [](auto) {});
+
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(*g_mock_session_backend, flush_track_events());
+        EXPECT_CALL(*session_ptr, FlushBlocking());
+        EXPECT_CALL(*session_ptr, StopBlocking());
+    }
+
+    rocprofsys::core::flush_and_stop_session(backend, *started);
+}
 
 TEST(perfetto_engine, construct_from_config_literal_no_config_access)
 {

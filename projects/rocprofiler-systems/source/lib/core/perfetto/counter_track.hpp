@@ -3,13 +3,7 @@
 
 #pragma once
 
-#include "core/categories.hpp"
-
-#if defined(TIMEMORY_USE_PERFETTO)
-#    include <timemory/components/perfetto/backends.hpp>
-#else
-#    include <perfetto.h>
-#endif
+#include "core/perfetto/category_registry.hpp"
 
 #include <cstdint>
 #include <cstring>

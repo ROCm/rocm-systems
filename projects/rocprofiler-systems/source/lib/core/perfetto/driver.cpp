@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/perfetto/driver.hpp"
+#include "core/perfetto/category_registry.hpp"
 
 #include "core/config.hpp"
 #include "core/mpi.hpp"
@@ -171,8 +172,8 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
     m_engine->destroy_session(pid);
 
     const auto layout        = config::get_perfetto_output_layout();
-    const bool want_per_rank = (layout != "single_file_only");
-    const bool want_merged   = (layout != "per_process_only");
+    const bool want_per_rank = core::writes_per_process_files(layout);
+    const bool want_merged   = core::writes_merged_file(layout);
 
     if(want_per_rank)
     {

@@ -5,8 +5,9 @@
 #include <cstdint>
 
 #include "core/config.hpp"
-#include "core/perfetto/driver.hpp"  // brings ROCPROFSYS_PERFETTO_CATEGORIES (TrackEvent type)
+#include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/packet_framing.hpp"
+#include "core/perfetto/session_backend.hpp"
 #include "core/perfetto/sinks.hpp"
 #include "logger/debug.hpp"
 
@@ -23,9 +24,7 @@
 
 #include <unistd.h>
 
-namespace rocprofsys
-{
-namespace core
+namespace rocprofsys::core
 {
 namespace
 {
@@ -53,52 +52,18 @@ std::atomic<perfetto_engine*> g_active_cached_engine{ nullptr };
 // emission path stays branch-free.
 std::mutex                               g_pid_owner_mutex{};
 std::unordered_map<int, std::thread::id> g_pid_owner_tids{};
-}  // namespace
-
-engine_config
-build_engine_config_from_settings()
-{
-    engine_config out{};
-
-    out.buffer_size_kb = static_cast<std::uint32_t>(config::get_perfetto_buffer_size());
-    out.shmem_size_hint_kb =
-        static_cast<std::uint32_t>(config::get_perfetto_shmem_size_hint());
-    out.flush_period_ms = config::get_perfetto_flush_period();
-
-    out.fill_policy = (config::get_perfetto_fill_policy() == "discard")
-                          ? engine_config::fill_policy_t::discard
-                          : engine_config::fill_policy_t::ring_buffer;
-
-    const auto& backend = config::get_perfetto_backend();
-    if(backend == "system")
-        out.backend = engine_config::backend_t::system;
-    else if(backend == "all")
-        out.backend = engine_config::backend_t::all;
-    else
-        out.backend = engine_config::backend_t::inprocess;
-
-    const auto& disabled = config::get_disabled_categories();
-    out.disabled_categories.assign(disabled.begin(), disabled.end());
-
-    out.suppress_sdk_log_output =
-        !config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
-
-    return out;
-}
 
 // ----------------------------------------------------------------------------
 // Cached-mode Interceptor
 // ----------------------------------------------------------------------------
 
-namespace
-{
 // Perfetto SDK keeps interceptors experimental: TracingMuxerImpl::
 // RegisterInterceptor (perfetto.cc:~37265) silently rejects descriptors
 // whose name is not one of {"test_interceptor", "console", "etwexport"}.
 // The check predates upstreamable knobs and lives inside vendored
 // submodule code we don't fork; using "test_interceptor" keeps the
 // engine wired up without patching the SDK. The name is an internal
-// binding key only — registration side and TraceConfig.interceptor_config
+// binding key only -- registration side and TraceConfig.interceptor_config
 // must agree, and that's its only effect.
 constexpr const char* CACHED_INTERCEPTOR_NAME = "test_interceptor";
 
@@ -137,25 +102,110 @@ public:
     }
 };
 
-}  // namespace
-
 // ----------------------------------------------------------------------------
-// perfetto_engine::perfetto_state — narrowed PIMPL
+// Perfetto SDK helpers
 // ----------------------------------------------------------------------------
 
-// Holds the only members whose definitions force the heavy <perfetto.h>
-// dependency into the TU. All other engine state lives directly in
-// perfetto_engine so the public API doesn't pay an unnecessary indirection.
-struct perfetto_engine::perfetto_state
+::perfetto::TraceConfig
+make_trace_config(const engine_config& cfg, perfetto_engine::mode m)
 {
     ::perfetto::TraceConfig trace_cfg{};
 
-    // Cached-mode per-pid byte collector lives in the engine class itself;
-    // this map only holds the perfetto-typed session handles.
-    std::unordered_map<pid_t, std::unique_ptr<::perfetto::TracingSession>> sessions{};
-};
+    const auto policy =
+        (cfg.fill_policy == engine_config::fill_policy_t::discard)
+            ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
+            : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
+    auto* buffer_config = trace_cfg.add_buffers();
+    buffer_config->set_size_kb(cfg.buffer_size_kb);
+    buffer_config->set_fill_policy(policy);
+
+    ::perfetto::protos::gen::TrackEventConfig track_event_cfg{};
+    for(const auto& name : cfg.disabled_categories)
+    {
+        LOG_DEBUG("Disabling perfetto track event category: {}", name);
+        track_event_cfg.add_disabled_categories(name);
+    }
+
+    trace_cfg.set_flush_period_ms(cfg.flush_period_ms);
+
+    auto* ds_cfg = trace_cfg.add_data_sources()->mutable_config();
+    ds_cfg->set_name("track_event");
+    ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
+
+    if(m == perfetto_engine::mode::cached_interceptor)
+    {
+        ds_cfg->mutable_interceptor_config()->set_name(CACHED_INTERCEPTOR_NAME);
+    }
+    return trace_cfg;
+}
+
+auto
+make_tracing_error_callback()
+{
+    return [](::perfetto::TracingError err) {
+        if(err.code == ::perfetto::TracingError::kTracingFailed)
+            LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
+    };
+}
+
+// 8 MiB up-front reservation per pid lets the hot path append packets with
+// amortized O(1) push_back while typically avoiding any reallocation --
+// each parser thread emits ~1-10 MiB of framed bytes for a non-trivial
+// workload. Sized to dominate the typical case; larger traces still grow
+// geometrically thereafter.
+constexpr std::size_t COLLECTED_BYTES_SLAB_SIZE = std::size_t{ 8 } * 1024 * 1024;
+}  // namespace
+
+engine_config
+build_engine_config_from_settings()
+{
+    engine_config out{};
+
+    out.buffer_size_kb = static_cast<std::uint32_t>(config::get_perfetto_buffer_size());
+    out.shmem_size_hint_kb =
+        static_cast<std::uint32_t>(config::get_perfetto_shmem_size_hint());
+    out.flush_period_ms = config::get_perfetto_flush_period();
+
+    out.fill_policy = (config::get_perfetto_fill_policy() == "discard")
+                          ? engine_config::fill_policy_t::discard
+                          : engine_config::fill_policy_t::ring_buffer;
+
+    const auto& backend = config::get_perfetto_backend();
+    if(backend == "system")
+        out.backend = engine_config::backend_t::system;
+    else if(backend == "all")
+        out.backend = engine_config::backend_t::all;
+    else
+        out.backend = engine_config::backend_t::inprocess;
+
+    const auto& disabled = config::get_disabled_categories();
+    out.disabled_categories.assign(disabled.begin(), disabled.end());
+
+    out.suppress_sdk_log_output =
+        !config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
+
+    return out;
+}
 
 std::once_flag perfetto_engine::s_sdk_init_flag;
+
+std::unique_ptr<::perfetto::TracingSession>
+session_backend::new_trace() const
+{
+    return ::perfetto::Tracing::NewTrace();
+}
+
+void
+session_backend::flush_track_events() const
+{
+    ::perfetto::TrackEvent::Flush();
+}
+
+void
+tracing_session_deleter::operator()(::perfetto::TracingSession* session) const noexcept
+{
+    delete session;
+}
 
 bool
 perfetto_engine::is_system_backend() const noexcept
@@ -163,63 +213,29 @@ perfetto_engine::is_system_backend() const noexcept
     return m_cfg.backend != engine_config::backend_t::inprocess;
 }
 
-// Builds a fresh TracingSession in m_perfetto->sessions[pid], wires the error
+// Builds a fresh TracingSession in m_sessions[pid], wires the error
 // callback, runs Setup(trace_cfg, fd), and StartBlocking. Takes
-// m_sessions_mutex internally — callers must NOT hold it. fd=-1 disables
+// m_sessions_mutex internally -- callers must NOT hold it. fd=-1 disables
 // per-Perfetto-default fd output (cached-mode path).
 void
-perfetto_engine::start_session(pid_t pid, int fd)
+perfetto_engine::start_session(pid_t pid, int fd, mode m)
 {
+    auto trace_cfg = make_trace_config(m_cfg, m);
+
     std::lock_guard<std::mutex> lk{ m_sessions_mutex };
-    auto&                       slot = m_perfetto->sessions[pid];
-    slot                             = ::perfetto::Tracing::NewTrace();
-    slot->SetOnErrorCallback([](::perfetto::TracingError err) {
-        if(err.code == ::perfetto::TracingError::kTracingFailed)
-            LOG_WARNING("Perfetto encountered a tracing error: {}", err.message);
-    });
-    slot->Setup(m_perfetto->trace_cfg, fd);
-    slot->StartBlocking();
-}
-
-void
-perfetto_engine::build_trace_config(mode m)
-{
-    m_perfetto->trace_cfg = ::perfetto::TraceConfig{};
-
-    const auto policy =
-        (m_cfg.fill_policy == engine_config::fill_policy_t::discard)
-            ? ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD
-            : ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER;
-    auto* buffer_config = m_perfetto->trace_cfg.add_buffers();
-    buffer_config->set_size_kb(m_cfg.buffer_size_kb);
-    buffer_config->set_fill_policy(policy);
-
-    ::perfetto::protos::gen::TrackEventConfig track_event_cfg{};
-    for(const auto& name : m_cfg.disabled_categories)
-    {
-        LOG_DEBUG("Disabling perfetto track event category: {}", name);
-        track_event_cfg.add_disabled_categories(name);
-    }
-
-    m_perfetto->trace_cfg.set_flush_period_ms(m_cfg.flush_period_ms);
-
-    auto* ds_cfg = m_perfetto->trace_cfg.add_data_sources()->mutable_config();
-    ds_cfg->set_name("track_event");
-    ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
-
-    if(m == mode::cached_interceptor)
-    {
-        ds_cfg->mutable_interceptor_config()->set_name(CACHED_INTERCEPTOR_NAME);
-    }
+    auto&                       slot = m_sessions[pid];
+    session_backend             backend{};
+    auto                        session =
+        start_tracing_session(backend, trace_cfg, fd, make_tracing_error_callback());
+    slot = tracing_session_ptr{ session.release() };
 }
 
 // ----------------------------------------------------------------------------
-// perfetto_engine — public API
+// perfetto_engine -- public API
 // ----------------------------------------------------------------------------
 
 perfetto_engine::perfetto_engine(engine_config cfg)
 : m_cfg{ std::move(cfg) }
-, m_perfetto{ std::make_unique<perfetto_state>() }
 {}
 
 perfetto_engine::~perfetto_engine() noexcept
@@ -227,12 +243,18 @@ perfetto_engine::~perfetto_engine() noexcept
     if(m_running)
     {
         // Last-ditch teardown so the engine never outlives its
-        // TracingSession. Destructors must not throw — swallow.
+        // TracingSession. Destructors must not throw.
         try
         {
             stop();
+        } catch(const std::exception& e)
+        {
+            LOG_ERROR("perfetto_engine destructor ignored stop() exception: {}",
+                      e.what());
         } catch(...)
-        {}
+        {
+            LOG_ERROR("perfetto_engine destructor ignored unknown stop() exception");
+        }
     }
 }
 
@@ -293,10 +315,8 @@ perfetto_engine::start(mode m, int fd)
                     "already active; replacing it");
     }
 
-    build_trace_config(mode::live_fd);
-
     const auto pid = static_cast<pid_t>(::getpid());
-    start_session(pid, fd);
+    start_session(pid, fd, mode::live_fd);
 
     m_active_pid   = pid;
     m_running      = true;
@@ -327,10 +347,8 @@ perfetto_engine::start(mode m, trace_sink& sink)
                     "already active; replacing it");
     }
 
-    build_trace_config(mode::cached_interceptor);
-
     const auto pid = static_cast<pid_t>(::getpid());
-    start_session(pid, /*fd=*/-1);
+    start_session(pid, /*fd=*/-1, mode::cached_interceptor);
 
     {
         std::lock_guard<std::mutex> lk{ m_collector_mutex };
@@ -371,14 +389,14 @@ perfetto_engine::stop()
     ::perfetto::TracingSession* session = nullptr;
     {
         std::lock_guard<std::mutex> lk{ m_sessions_mutex };
-        auto                        it = m_perfetto->sessions.find(pid);
-        if(it != m_perfetto->sessions.end()) session = it->second.get();
+        auto                        it = m_sessions.find(pid);
+        if(it != m_sessions.end()) session = it->second.get();
     }
 
     // Clear the active-engine pointer only if we are still the active engine;
     // a sibling engine that took over via start() owns its own slot. Surface
     // the lifecycle violation when a sibling clobbered the global between
-    // our start() and stop() — silent degradation here ends in UAF in the
+    // our start() and stop() -- silent degradation here ends in UAF in the
     // interceptor TLS reader.
     if(current_mode == mode::cached_interceptor)
     {
@@ -389,7 +407,7 @@ perfetto_engine::stop()
         {
             LOG_WARNING(
                 "perfetto_engine::stop() saw g_active_cached_engine pointing at a "
-                "different instance ({} vs this={}) — overlapping cached engines "
+                "different instance ({} vs this={}) -- overlapping cached engines "
                 "are not supported and worker threads attached to the prior engine "
                 "may emit into stale state until they exit",
                 static_cast<const void*>(expected), static_cast<const void*>(this));
@@ -414,11 +432,9 @@ perfetto_engine::stop()
     std::exception_ptr first_exc{};
     try
     {
-        ::perfetto::TrackEvent::Flush();
-        session->FlushBlocking();
-
         LOG_DEBUG("Stopping the perfetto trace session (blocking)...");
-        session->StopBlocking();
+        session_backend backend{};
+        flush_and_stop_session(backend, *session);
     } catch(...)
     {
         // Capture but proceed so cached-mode owners still get drain + finalize;
@@ -499,8 +515,8 @@ perfetto_engine::read_trace(pid_t pid)
     ::perfetto::TracingSession* session = nullptr;
     {
         std::lock_guard<std::mutex> lk{ m_sessions_mutex };
-        auto                        it = m_perfetto->sessions.find(pid);
-        if(it != m_perfetto->sessions.end()) session = it->second.get();
+        auto                        it = m_sessions.find(pid);
+        if(it != m_sessions.end()) session = it->second.get();
     }
 
     if(session == nullptr) return {};
@@ -511,8 +527,8 @@ void
 perfetto_engine::destroy_session(pid_t pid)
 {
     std::lock_guard<std::mutex> lk{ m_sessions_mutex };
-    auto                        it = m_perfetto->sessions.find(pid);
-    if(it != m_perfetto->sessions.end()) it->second.reset();
+    auto                        it = m_sessions.find(pid);
+    if(it != m_sessions.end()) it->second.reset();
 }
 
 bool
@@ -525,8 +541,8 @@ void
 perfetto_engine::forget_session(pid_t pid)
 {
     std::lock_guard<std::mutex> lk{ m_sessions_mutex };
-    auto                        it = m_perfetto->sessions.find(pid);
-    if(it != m_perfetto->sessions.end())
+    auto                        it = m_sessions.find(pid);
+    if(it != m_sessions.end())
     {
         // Deliberate leak: the parent process owns the underlying
         // TracingSession after fork; calling unique_ptr::reset() in the
@@ -574,16 +590,6 @@ get_emitting_pid() noexcept
     return t_emitting_pid;
 }
 
-// 8 MiB up-front reservation per pid lets the hot path append packets with
-// amortized O(1) push_back while typically avoiding any reallocation —
-// each parser thread emits ~1-10 MiB of framed bytes for a non-trivial
-// workload. Sized to dominate the typical case; larger traces still grow
-// geometrically thereafter.
-namespace
-{
-constexpr std::size_t COLLECTED_BYTES_SLAB_SIZE = std::size_t{ 8 } * 1024 * 1024;
-}
-
 void
 perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
 {
@@ -605,7 +611,7 @@ perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
 
     // Release publishes every collector_mutex-guarded map write above to any
     // worker thread that observes the frozen flag via acquire in
-    // collect_packet_bytes — the hot path then runs lock-free safely.
+    // collect_packet_bytes -- the hot path then runs lock-free safely.
     m_collected_bytes_frozen.store(true, std::memory_order_release);
 }
 
@@ -620,7 +626,7 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data,
     // "frozen by convention" comment relied on.
     if(!m_collected_bytes_frozen.load(std::memory_order_acquire))
     {
-        LOG_ERROR("perfetto cached collector dropped packet for pid {} — "
+        LOG_ERROR("perfetto cached collector dropped packet for pid {} -- "
                   "preregister_pids has not run yet",
                   pid);
         return;
@@ -641,7 +647,7 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data,
         // vector has exactly one writer thread (the parser owning this pid).
         // The framing wraps each raw TracePacket in a length-delimited
         // Trace.packets field so concatenation forms a valid Trace proto.
-        // Per-call reserve() is deliberately omitted — the 8 MiB slab from
+        // Per-call reserve() is deliberately omitted -- the 8 MiB slab from
         // preregister_pids absorbs typical traces and vector's geometric
         // growth handles overruns without the O(N^2) re-copy cost that a
         // per-call exact-fit reserve would incur.
@@ -665,5 +671,4 @@ perfetto_engine::collect_packet_bytes(int pid, const void* data,
     }
 }
 
-}  // namespace core
-}  // namespace rocprofsys
+}  // namespace rocprofsys::core

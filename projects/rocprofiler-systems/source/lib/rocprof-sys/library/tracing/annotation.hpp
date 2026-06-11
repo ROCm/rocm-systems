@@ -6,7 +6,7 @@
 #include "common/defines.h"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
-#include "core/perfetto/driver.hpp"
+#include "core/perfetto/category_registry.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user

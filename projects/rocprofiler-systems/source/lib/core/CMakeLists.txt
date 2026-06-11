@@ -19,6 +19,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/driver.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto/locked_file_append.cpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/sinks.cpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
@@ -51,9 +52,12 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
     ${CMAKE_CURRENT_LIST_DIR}/output_file_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto/category_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/driver.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/fwd.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto/locked_file_append.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto/output_layout.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/sinks.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.hpp
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp

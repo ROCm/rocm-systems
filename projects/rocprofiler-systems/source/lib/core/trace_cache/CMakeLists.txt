@@ -3,6 +3,7 @@
 
 set(trace_cache_sources
     ${CMAKE_CURRENT_LIST_DIR}/cache_manager.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/cached_perfetto_session.cpp
     ${CMAKE_CURRENT_LIST_DIR}/buffer_storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/data_types.cpp
     ${CMAKE_CURRENT_LIST_DIR}/discovery.cpp
@@ -15,6 +16,7 @@ set(trace_cache_sources
 
 set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/cache_manager.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/cached_perfetto_session.hpp
     ${CMAKE_CURRENT_LIST_DIR}/data_types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/discovery.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_parser.hpp

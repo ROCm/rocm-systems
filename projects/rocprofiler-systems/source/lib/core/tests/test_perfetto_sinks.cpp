@@ -4,10 +4,15 @@
 #include "gtest/gtest.h"
 
 #include "core/output_file_registry.hpp"
+#include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/sinks.hpp"
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
 
 TEST(recording_sink, default_state_is_empty_and_unfinalized)
@@ -50,6 +55,31 @@ TEST(recording_sink, finalize_without_drain_is_safe)
     EXPECT_NO_THROW(sink.finalize());
     EXPECT_TRUE(sink.finalized());
     EXPECT_TRUE(sink.records().empty());
+}
+
+// ----------------------------------------------------------------------------
+// locked_file_append
+// ----------------------------------------------------------------------------
+
+TEST(locked_file_append, creates_parent_directory_and_appends_in_order)
+{
+    const auto root = std::filesystem::path{ ::testing::TempDir() } /
+                      "rocprofsys-locked-file-append-test";
+    const auto path = root / "nested" / "merged.proto";
+
+    std::filesystem::remove_all(root);
+
+    EXPECT_EQ(rocprofsys::core::append_with_file_lock(path.string(), "abc", 3),
+              rocprofsys::core::locked_append_status::success);
+    EXPECT_EQ(rocprofsys::core::append_with_file_lock(path.string(), "def", 3),
+              rocprofsys::core::locked_append_status::success);
+
+    std::ifstream     ifs{ path, std::ios::binary };
+    const std::string contents{ std::istreambuf_iterator<char>{ ifs },
+                                std::istreambuf_iterator<char>{} };
+    EXPECT_EQ(contents, "abcdef");
+
+    std::filesystem::remove_all(root);
 }
 
 // ----------------------------------------------------------------------------

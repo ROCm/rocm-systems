@@ -247,7 +247,10 @@ The only difference between these two modes is whether or not the results collec
 via Timemory and/or Perfetto can be aggregated into a single
 output file during finalization. When full MPI support is enabled, combining the
 Timemory results always occurs, whereas combining the Perfetto
-results is configurable via the ``ROCPROFSYS_PERFETTO_COMBINE_TRACES`` setting.
+results is configurable via the ``ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT`` setting.
+Use ``full`` for both per-rank files and ``merged.proto``,
+``single_file_only`` for only ``merged.proto``, or ``per_process_only``
+for only per-rank files.
 
 The primary benefits of partial or full MPI support are the automatic wrapping
 of MPI functions and the ability

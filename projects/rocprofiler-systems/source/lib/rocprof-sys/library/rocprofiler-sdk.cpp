@@ -12,6 +12,7 @@
 #include "core/demangler.hpp"
 #include "core/gpu.hpp"
 #include "core/output_file_registry.hpp"
+#include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/driver.hpp"
 #include "core/perfetto/fwd.hpp"
 #include "core/state.hpp"

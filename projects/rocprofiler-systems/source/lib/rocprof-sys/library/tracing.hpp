@@ -8,7 +8,7 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
-#include "core/perfetto/driver.hpp"
+#include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"

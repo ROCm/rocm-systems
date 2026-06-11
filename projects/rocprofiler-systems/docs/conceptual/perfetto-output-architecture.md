@@ -105,9 +105,9 @@ Track-descriptor and category-name management are extracted out
 of the live driver's translation unit into a standalone track
 registry that the engine publishes through a thread-local pointer.
 Cross-rank aggregation no longer requires a shell helper: it is
-performed in-process by the live driver, which appends each rank's
-bytes verbatim to a shared merged-file path under an exclusive file
-lock.
+performed in-process by the live driver through the same single-file
+sink used by cached aggregation. Each rank appends rewritten bytes to
+a shared merged-file path under an exclusive file lock.
 
 ```mermaid
 flowchart LR
@@ -133,7 +133,7 @@ flowchart LR
     end
 
     subgraph EngineMerge["Cross-rank merge (in-process)"]
-        E_merged[merged.proto via O_APPEND + flock]
+        E_merged[merged.proto via single_file_sink<br/>O_APPEND + flock]
     end
 
     E_emit -.thread-local pointer.-> E_reg
@@ -301,9 +301,10 @@ hands them to a live_fd_sink. The same shutdown then consults
 ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT to decide whether to also
 contribute the per-rank bytes to a cross-rank merged file. If the
 layout requests merged output, the driver invokes its in-process
-append helper, which opens the shared merged-file path in append
-mode, takes an exclusive file lock, writes the per-rank bytes
-verbatim, releases the lock, and closes.
+single_file_sink, which rewrites the rank's packet sequence ids into a
+disjoint range, opens the shared merged-file path in append mode, takes
+an exclusive file lock, writes the rewritten bytes, releases the lock,
+and closes.
 
 ```mermaid
 sequenceDiagram
@@ -332,7 +333,8 @@ sequenceDiagram
         sink->>fs: write per-rank perfetto-trace.proto
     end
     alt layout includes merged output
-        drv->>fs: append_raw_bytes_with_flock(<br/>merged.proto, bytes)
+        drv->>sink: single_file_sink append mode<br/>rewrite seq ids
+        sink->>fs: append_with_file_lock(<br/>merged.proto, rewritten bytes)
     end
 ```
 
@@ -663,15 +665,16 @@ In the engine-based pipeline cross-rank aggregation is performed by
 the runtime itself. Each rank's live driver, during its normal
 shutdown, writes its per-rank file as before. If the configured
 output layout requests a merged output (either single_file_only or
-the default full), the same shutdown then appends the same per-rank
-bytes verbatim to a shared merged-file path under an exclusive
-file lock. The lock serialises concurrent ranks: whichever rank
+the default full), the same shutdown feeds the per-rank bytes through
+single_file_sink append mode. The sink rewrites each rank into a
+disjoint packet-sequence-id range and appends the rewritten bytes to a
+shared merged-file path under an exclusive file lock. The lock serialises
+concurrent ranks: whichever rank
 acquires it first writes its bytes first, the next rank queues
-behind, and so on. The merged file is a literal concatenation of
-all ranks' bytes, in flock-arrival order rather than rank-id
-order, but Perfetto traces are not order-sensitive at the
-concatenation boundary (each rank's seq_id namespace is independent
-and survives the splice). The shell helper is no longer present.
+behind, and so on. The merged file is built in flock-arrival order rather than rank-id
+order. Because each rank is rewritten into a disjoint sequence-id
+range before append, interned-data references remain isolated across
+ranks. The shell helper is no longer present.
 
 ```mermaid
 flowchart LR
@@ -693,7 +696,7 @@ flowchart LR
         R1_file[perfetto-trace-1.proto]
         RN_file[perfetto-trace-N.proto]
         Lock{{exclusive flock<br/>on merged.proto}}
-        Merged[merged.proto<br/>literal append concatenation]
+        Merged[merged.proto<br/>rewritten append output]
     end
 
     R0_drv --> R0_pp --> R0_file
@@ -725,24 +728,22 @@ Cached-mode single-file aggregation is a different mechanism - it
 runs inside one host process across many pids, uses the
 single_file_sink described in Chapter 3, and applies per-source
 seq_id offsetting because all pids share one logical SDK namespace
-in cached mode. Live cross-rank merge does not need the per-source
-seq_id offset because each rank is a fully independent process with
-its own SDK state; concatenating two ranks' Perfetto bytes verbatim
-produces a valid combined trace.
+in cached mode. Live cross-rank merge uses the same per-source
+seq_id offsetting as cached single-file aggregation. This keeps the merged file independent
+of assumptions about how Perfetto assigns trusted packet sequence ids
+inside each process.
 
 The table below distinguishes the two cases.
 
 | Aggregation case                 | Where it runs                  | Bytes from each source                  |
 |----------------------------------|--------------------------------|-----------------------------------------|
-| Cross-rank merge (live)          | One write per rank, in-process | Appended verbatim under flock           |
+| Cross-rank merge (live)          | One write per rank, in-process | Rewritten with per-rank seq_id offset   |
 | Single-file aggregation (cached) | One host process, many pids    | Rewritten with per-source seq_id offset |
 
-The cross-rank live case can append bytes verbatim because each rank
-is an independent OS process with an independent Perfetto SDK state
-and seq_id namespace, so the concatenated bytes do not collide on
-any cross-rank identifier. The cached single-file case must rewrite
-seq_ids because all pids share one cached-mode SDK interceptor and
-therefore share one seq_id namespace inside the host process.
+Both live cross-rank merge and cached single-file aggregation rewrite
+seq_ids before appending. The difference is the source identity used
+for the offset: live mode uses the rank-derived source id, while
+cached mode uses each reconstructed pid.
 
 ### How OUTPUT_LAYOUT replaces the old boolean knobs
 

@@ -451,7 +451,7 @@ Generating a default configuration file
    ROCPROFSYS_PAPI_EVENTS                              = PAPI_TOT_CYC
    ROCPROFSYS_PERFETTO_BACKEND                         = inprocess
    ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB                  = 1024000
-   ROCPROFSYS_PERFETTO_COMBINE_TRACES                  = false
+   ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT                    = full
    ROCPROFSYS_PERFETTO_FILE                            = perfetto-trace.proto
    ROCPROFSYS_PERFETTO_FILL_POLICY                     = discard
    ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB              = 4096
@@ -563,7 +563,7 @@ Viewing the setting descriptions
    | ROCPROFSYS_PAPI_THREADING                | Enable multithreading support when u... |
    | ROCPROFSYS_PERFETTO_BACKEND              | Specify the perfetto backend to acti... |
    | ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB       | Size of perfetto buffer (in KB)         |
-   | ROCPROFSYS_PERFETTO_COMBINE_TRACES       | Combine Perfetto traces. If not expl... |
+   | ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT         | Perfetto output layout: full, single... |
    | ROCPROFSYS_PERFETTO_FILL_POLICY          | Behavior when perfetto buffer is ful... |
    | ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
    | ROCPROFSYS_PRECISION                     | Set the global output precision for ... |

@@ -4,7 +4,6 @@
 #pragma once
 
 #include "core/perfetto/counter_track.hpp"
-#include "core/perfetto/driver.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
