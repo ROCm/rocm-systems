@@ -517,7 +517,6 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
       }
       // for AINIC IbUseInline is enabled by default always
       IbCastUseInline = true;
-      // for AINIC GDR flush is disabled by default
 
       INFO(NCCL_INIT|NCCL_NET, "NET/IB : AINIC RoCEv2 optimizations enabled: CTS Inline Data: %s; CTS Offload: %s; "
            "IB Use Inline: enabled; GDR Flush: disabled", IbCastUseInline ? "Enabled": "Disabled",
