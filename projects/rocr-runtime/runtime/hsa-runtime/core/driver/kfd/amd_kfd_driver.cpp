@@ -486,8 +486,8 @@ hsa_status_t KfdDriver::DestroyImportedShareableHandle(core::ShareableHandle* ha
   return DestroyShareableHandle(handle);
 }
 
-hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
-                            hsa_access_permission_t perms, uint32_t node_id) {
+hsa_status_t KfdDriver::Map(uint32_t node_id, core::ShareableHandle handle, void* mem, size_t offset, size_t size,
+                            hsa_access_permission_t perms) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(node_id, memhandle,
                                      static_cast<HSAuint64>(offset),
@@ -499,8 +499,8 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void* mem, size_t offs
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
-                              size_t offset, size_t size, uint32_t node_id) {
+hsa_status_t KfdDriver::Unmap(uint32_t node_id, core::ShareableHandle handle, void *mem,
+                              size_t offset, size_t size) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(node_id, memhandle,
                                      static_cast<HSAuint64>(offset),

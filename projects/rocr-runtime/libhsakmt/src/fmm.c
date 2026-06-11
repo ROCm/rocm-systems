@@ -3220,11 +3220,11 @@ void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 }
 
 HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
-			HSAuint32 gpu_id, int *drm_render_fd,
+			HSAuint32 node_id, int *drm_render_fd,
 			uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point)
 {
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
-	int32_t index = gpu_mem_find_by_gpu_id(fmm_ctx, gpu_id);
+	int32_t index = gpu_mem_find_by_node_id(fmm_ctx, node_id);
 
 	if (index < 0)
 		return HSAKMT_STATUS_INVALID_PARAMETER;

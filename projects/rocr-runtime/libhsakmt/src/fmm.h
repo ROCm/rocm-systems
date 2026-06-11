@@ -152,7 +152,7 @@ HSAKMT_STATUS hsakmt_fmm_get_aperture_base_and_limit(HsaKFDContext *ctx,
 		HSAuint64 *aperture_base, HSAuint64 *aperture_limit);
 
 HSAKMT_STATUS hsakmt_fmm_advance_vm_timeline(HsaKFDContext *ctx,
-		HSAuint32 gpu_id, int *drm_render_fd,
+		HSAuint32 node_id, int *drm_render_fd,
 		uint32_t *vm_timeline_syncobj, uint64_t *vm_timeline_point);
 
 int hsakmt_open_drm_render_device(HsaKFDContext *ctx, int minor);

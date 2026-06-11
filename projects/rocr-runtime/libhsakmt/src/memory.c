@@ -1013,14 +1013,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
     	return HSAKMT_STATUS_ERROR;
 	}
 
-	uint32_t gpu_id;
-	hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
-
 	int drm_fd = -1;
 	uint32_t vm_timeline_syncobj = 0;
 	uint64_t vm_timeline_seqnum = 0;
 
-	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
+	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, NodeId,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;
@@ -1076,14 +1073,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
     	return HSAKMT_STATUS_ERROR;
 	}
 
-	uint32_t gpu_id;
-	hsakmt_validate_nodeid(&hsakmt_primary_kfd_ctx, NodeId, &gpu_id);
-
 	int drm_fd = -1;
 	uint32_t vm_timeline_syncobj = 0;
 	uint64_t vm_timeline_seqnum = 0;
 
-	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, gpu_id,
+	HSAKMT_STATUS result = hsakmt_fmm_advance_vm_timeline(&hsakmt_primary_kfd_ctx, NodeId,
 				&drm_fd, &vm_timeline_syncobj, &vm_timeline_seqnum);
 	if (result != HSAKMT_STATUS_SUCCESS)
 		return result;

@@ -3987,8 +3987,8 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::EnableAccess(hsa_access_permissi
       return HSA_STATUS_ERROR;
     }
   } else {
-    hsa_status_t status = targetAgent->driver().Map(
-        shareable_handle, va, mappedHandle->offset, size, perms, targetAgent->node_id());
+    hsa_status_t status = targetAgent->driver().Map(targetAgent->node_id(),
+        shareable_handle, va, mappedHandle->offset, size, perms);
     if (status != HSA_STATUS_SUCCESS)
       return status;
   }
@@ -4009,8 +4009,8 @@ hsa_status_t Runtime::MappedHandleAllowedAgent::RemoveAccess() {
       permissions = perms;
     }
   } else {
-    return targetAgent->driver().Unmap(
-        shareable_handle, va, mappedHandle->offset, mappedHandle->size, targetAgent->node_id());
+    return targetAgent->driver().Unmap(targetAgent->node_id(),
+        shareable_handle, va, mappedHandle->offset, mappedHandle->size);
   }
   return HSA_STATUS_SUCCESS;
 }
