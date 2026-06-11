@@ -3775,6 +3775,93 @@ static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   return ncclSuccess;
 }
 
+static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
+  struct ncclCommRevokeAsyncJob* job = (struct ncclCommRevokeAsyncJob*) job_;
+  ncclComm_t comm = job->comm;
+  ncclResult_t res = ncclSuccess;
+
+  NCCLCHECKGOTO(PtrCheck(comm, "CommRevokeAsync", "comm"), res, exit);
+  INFO(NCCL_DESTROY, "CommRevokeAsync START comm %p rank %d nRanks %d nNodes %d localRank %d cudaDev %d",
+      comm, comm->rank, comm->nRanks, comm->nNodes, comm->localRank, comm->cudaDev);
+
+  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->hostStream),   res, exit);
+  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
+
+  NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, /*waitSome=*/true),  res, exit);
+  NCCLCHECKGOTO(ncclCommPollCallbacks(comm,      /*waitSome=*/false), res, exit);
+
+  (void) ncclProxyStop(comm);
+  if (comm->proxyState && comm->proxyRefCountOld == 0) {
+    if (comm->proxyState->thread.joinable()) {
+      comm->proxyState->thread.join();
+    }
+    if (comm->proxyState->threadUDS.joinable()) {
+      comm->proxyState->threadUDS.join();
+    }
+  }
+
+  NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+
+exit:
+  (void) ncclCommSetAsyncError(comm, res);
+  INFO(NCCL_DESTROY, "CommRevokeAsync END comm %p result %d", comm, res);
+  return res;
+}
+
+NCCL_API(ncclResult_t, ncclCommRevoke, ncclComm_t comm, int revokeFlags);
+ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
+  NCCLCHECK(Recorder::instance().record(rrOtherCall, comm));
+  NVTX3_RANGE(NcclNvtxParamsCommRevoke);
+
+  ncclResult_t ret = ncclSuccess;
+  struct ncclCommRevokeAsyncJob* job = NULL;
+
+  // For now only NCCL_REVOKE_DEFAULT (0) is supported
+  if (revokeFlags != NCCL_REVOKE_DEFAULT) {
+    return ncclInvalidArgument;
+  }
+  if (comm == NULL) {
+    return ncclInvalidArgument;
+  }
+  // Disallow revoke if destroy/finalize in progress
+  if (comm->destroyFlag || comm->finalizeCalled) {
+    return ncclInvalidArgument;
+  }
+  // Disallow revoke if revoke in progress
+  if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
+    return ncclInvalidArgument;
+  }
+
+  NCCLCHECK(ncclGroupStartInternal());
+
+  // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
+  // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).
+  (void)setCommAbortFlags(comm, 1);
+  comm->revokedFlag = 1;
+  (void)ncclCommEnsureReady(comm);
+  comm->finalizeCalled = true;
+
+  INFO(NCCL_DESTROY, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke START",
+       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId);
+
+  NCCLCHECKGOTO(ncclCalloc(&job, 1), ret, fail);
+  job->comm = comm;
+  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commRevokeAsync, NULL, free, comm), ret, fail);
+
+exit:
+  ncclGroupErrCheck(ret);
+  NCCLCHECK(ncclGroupEndInternal());
+  if (comm && !comm->config.blocking) {
+    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
+  }
+  INFO(NCCL_DESTROY, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke COMPLETE, result %d",
+       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId, ret);
+  return ret;
+fail:
+  if (comm && !comm->config.blocking) (void) ncclCommSetAsyncError(comm, ret);
+  goto exit;
+}
+
 NCCL_API(ncclResult_t, ncclCommAbort, ncclComm_t comm);
 ncclResult_t ncclCommAbort_impl(ncclComm_t comm) {
   NCCLCHECK(Recorder::instance().record(rrCommAbort, comm));
@@ -3814,89 +3901,6 @@ exit:
   NCCLCHECK(ncclGroupEndInternal());
   return res;
 fail:
-  goto exit;
-}
-
-static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
-  struct ncclCommRevokeAsyncJob* job = (struct ncclCommRevokeAsyncJob*) job_;
-  ncclComm_t comm = job->comm;
-  ncclResult_t res = ncclSuccess;
-
-  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->hostStream),   res, exit);
-  NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
-
-  NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, /*waitSome=*/true),  res, exit);
-  NCCLCHECKGOTO(ncclCommPollCallbacks(comm,      /*waitSome=*/false), res, exit);
-
-  (void) ncclProxyStop(comm);
-  if (comm->proxyState && comm->proxyRefCountOld == 0) {
-    if (comm->proxyState->thread.joinable()) {
-      comm->proxyState->thread.join();
-    }
-    if (comm->proxyState->threadUDS.joinable()) {
-      comm->proxyState->threadUDS.join();
-    }
-  }
-
-  NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
-
-exit:
-  (void) ncclCommSetAsyncError(comm, res);
-  INFO(NCCL_INIT, "CommRevokeAsync END comm %p result %d", comm, res);
-  return res;
-}
-
-NCCL_API(ncclResult_t, ncclCommRevoke, ncclComm_t comm, int revokeFlags);
-ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
-  NCCLCHECK(Recorder::instance().record(rrOtherCall, comm));
-  NVTX3_RANGE(NcclNvtxParamsCommRevoke);
-
-  ncclResult_t ret = ncclSuccess;
-  struct ncclCommRevokeAsyncJob* job = NULL;
-
-  // For now only NCCL_REVOKE_DEFAULT (0) is supported
-  if (revokeFlags != NCCL_REVOKE_DEFAULT) {
-    return ncclInvalidArgument;
-  }
-  if (comm == NULL) {
-    return ncclInvalidArgument;
-  }
-  // Disallow revoke if destroy/finalize in progress
-  if (comm->destroyFlag || comm->finalizeCalled) {
-    return ncclInvalidArgument;
-  }
-  // Disallow revoke if revoke in progress
-  if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) {
-    return ncclInvalidArgument;
-  }
-
-  NCCLCHECK(ncclGroupStartInternal());
-
-  // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
-  // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).
-  (void)setCommAbortFlags(comm, 1);
-  comm->revokedFlag = 1;
-  (void)ncclCommEnsureReady(comm);
-  comm->finalizeCalled = true;
-
-  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke START",
-       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId);
-
-  NCCLCHECKGOTO(ncclCalloc(&job, 1), ret, fail);
-  job->comm = comm;
-  NCCLCHECKGOTO(ncclAsyncLaunch((struct ncclAsyncJob*)job, commRevokeAsync, NULL, free, comm), ret, fail);
-
-exit:
-  ncclGroupErrCheck(ret);
-  NCCLCHECK(ncclGroupEndInternal());
-  if (comm && !comm->config.blocking) {
-    NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
-  }
-  INFO(NCCL_INIT, "comm %p rank %d nRanks %d cudaDev %d busId %lx - Revoke COMPLETE, result %d",
-       comm, comm->rank, comm->nRanks, comm->cudaDev, comm->busId, ret);
-  return ret;
-fail:
-  if (comm && !comm->config.blocking) (void) ncclCommSetAsyncError(comm, ret);
   goto exit;
 }
 

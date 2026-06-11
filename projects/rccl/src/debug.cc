@@ -399,7 +399,7 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   // Add level specific formatting.
   if (level == NCCL_LOG_WARN) {
     len += snprintf(buffer+len, sizeof(buffer)-len, "[%d] %s:%d NCCL WARN ", cudaDev, filefunc, line);
-    if (ncclWarnSetDebugInfo) COMPILER_ATOMIC_STORE(&ncclDebugLevel, NCCL_LOG_INFO, std::memory_order_release);
+    if (ncclWarnSetDebugInfo) COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_LOG_INFO), std::memory_order_release);
   } else if (level == NCCL_LOG_INFO) {
     len += snprintf(buffer+len, sizeof(buffer)-len, "[%d] NCCL INFO ", cudaDev);
   } else if (level == NCCL_LOG_TRACE && flags == NCCL_CALL) {
@@ -429,14 +429,42 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags, const char *file
   pthread_mutex_unlock(&ncclDebugLock);
 }
 
-NCCL_API(void, ncclResetDebugInit);
-void ncclResetDebugInit() {
+// Non-deprecated version for internal use.
+extern "C"
+#if !defined(NCCL_OS_WINDOWS)
+__attribute__ ((visibility("default")))
+#endif
+void ncclResetDebugInitInternal() {
   // Cleans up from a previous ncclDebugInit() and reruns.
   // Use this after changing NCCL_DEBUG and related parameters in the environment.
   pthread_mutex_lock(&ncclDebugLock);
   // Let ncclDebugInit() know to complete the reset.
-  COMPILER_ATOMIC_STORE(&ncclDebugLevel, NCCL_DEBUG_RESET_TRIGGERED, std::memory_order_release);
+  COMPILER_ATOMIC_STORE(&ncclDebugLevel, static_cast<int>(NCCL_DEBUG_RESET_TRIGGERED), std::memory_order_release);
   pthread_mutex_unlock(&ncclDebugLock);
+}
+
+// In place of: NCCL_API(void, ncclResetDebugInit);
+#ifdef pncclResetDebugInit
+#undef pncclResetDebugInit
+#endif
+#if defined(NCCL_OS_LINUX)
+__attribute__ ((visibility("default")))
+__attribute__ ((alias("ncclResetDebugInit")))
+#endif
+void pncclResetDebugInit();
+extern "C"
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__ ((visibility("default")))
+__attribute__ ((weak))
+__attribute__ ((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be removed in the future")))
+#endif
+void ncclResetDebugInit();
+
+extern "C" void ncclResetDebugInit() {
+  // This is now deprecated as part of the NCCL API. It will be removed
+  // from the API in the future. It is still available as an
+  // exported symbol.
+  ncclResetDebugInitInternal();
 }
 
 

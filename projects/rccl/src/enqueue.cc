@@ -2648,8 +2648,6 @@ void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
 }
 
-NCCL_PARAM(NvlsTreeMaxChunkSize, "NVLSTREE_MAX_CHUNKSIZE", -2);
-
 static ncclResult_t calcCollChunking(
     struct ncclComm* comm, struct ncclTaskColl* info, int nChannels, size_t nBytes,
     /*outputs*/uint32_t* outChunkSize, uint32_t* outDirectFlags, struct ncclProxyOp* proxyOp
