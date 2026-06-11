@@ -179,6 +179,21 @@ TEST_F(HipFileConfiguration, OverrideDisabledFallbackBackend)
     ASSERT_TRUE(config.fallback());
 }
 
+TEST_F(HipFileConfiguration, FallbackForcedOnWhenForceCompatTrueAndAllowCompatFalse)
+{
+    // FORCE_COMPAT_MODE=1 + ALLOW_COMPAT_MODE=0 would disable both backends.
+    // The guard must force the fallback path back on.
+    expect_configuration_fallback("true", "false");
+    ASSERT_TRUE(Configuration().fallback());
+}
+
+TEST_F(HipFileConfiguration, FallbackEnabledWhenForceCompatTrueAndAllowCompatTrue)
+{
+    // FORCE=true + ALLOW=true: forced fallback, unchanged behavior.
+    expect_configuration_fallback("true", "true");
+    ASSERT_TRUE(Configuration().fallback());
+}
+
 TEST_F(HipFileConfiguration, StatsLevelEnvironmentVariableIsNotSet)
 {
     expect_configuration_statslevel(nullptr);
