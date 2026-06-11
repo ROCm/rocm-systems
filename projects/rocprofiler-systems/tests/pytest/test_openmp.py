@@ -268,8 +268,6 @@ class TestOpenMPFortran(RocprofsysTest):
     def test_host(self, mode, ompt_base_env):
         env = ompt_base_env.copy()
         env["OMP_NUM_THREADS"] = str(self.WORKER_THREADS + 1)
-        if mode == "runtime_instrument":
-            env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
 
         result = self.run_test(
             mode,
@@ -344,8 +342,6 @@ class TestOpenMPFortran(RocprofsysTest):
     def test_offload(self, mode, ompt_target_env):
         env = ompt_target_env.copy()
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
-        if mode == "runtime_instrument":
-            env["ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK"] = "ON"
 
         result = self.run_test(
             mode,

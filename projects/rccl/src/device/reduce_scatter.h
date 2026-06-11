@@ -87,7 +87,9 @@ namespace {
     } else {
   #ifdef ENABLE_WARP_SPEED
       int warp = threadIdx.x / WARP_SIZE;
-      ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+      ncclRing *ring = ncclShmem.warpComm
+          ? &ncclShmem.warpChannel[warp].ring
+          : &ncclShmem.channel.ring;
   #else
       ncclRing *ring = &ncclShmem.channel.ring;
   #endif

@@ -146,6 +146,13 @@ rocprofsys_push_category_region_hidden(rocprofsys_category_t _category, const ch
 }
 
 extern "C" void
+rocprofsys_push_trace_with_args_hidden(const char* name, const char* serialized_args)
+{
+    rocprofsys::component::category_region<rocprofsys::category::host>::start_with_args(
+        name, serialized_args ? serialized_args : "");
+}
+
+extern "C" void
 rocprofsys_pop_category_region_hidden(rocprofsys_category_t _category, const char* name,
                                       rocprofsys_annotation_t* _annotations,
                                       size_t                   _annotation_count)

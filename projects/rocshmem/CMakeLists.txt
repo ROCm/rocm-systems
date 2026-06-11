@@ -78,6 +78,15 @@ option(BUILD_DEBUG_DEVICE "Compile in device-side logging (LOGD_WARN/INFO and GD
 option(GDA_IONIC "Build for AMD Pensando IONIC RDMA provider" OFF)
 option(GDA_BNXT "Build for Broadcom RDMA provider" OFF)
 option(GDA_MLX5 "Build for Mellanox MLX5 RDMA provider" OFF)
+option(ASAN "Enable AddressSanitizer" ${ASAN})
+
+if (ASAN)
+  execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libclang_rt.asan-x86_64.so
+    OUTPUT_VARIABLE ASAN_RUNTIME_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  get_filename_component(ASAN_RUNTIME_DIR "${ASAN_RUNTIME_PATH}" DIRECTORY)
+  message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
+endif()
 
 set(USE_EXTERNAL_MPI AUTO CACHE STRING "Link with an external MPI (required if used MPI is ABI incompatible with Open MPI v5)")
 set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
@@ -332,6 +341,7 @@ if (NOT BUILD_TESTS_ONLY)
     ${PROJECT_NAME}
     PUBLIC
       -fgpu-rdc
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g>
     PRIVATE
       -Wall
       -Wextra
@@ -361,6 +371,24 @@ if (NOT BUILD_TESTS_ONLY)
       $<$<NOT:$<BOOL:${FILESYSTEM_NO_LINK_NEEDED}>>:stdc++fs>
       $<$<BOOL:${USE_SDMA}>:hsakmt::hsakmt>
   )
+
+  target_link_options(
+    ${PROJECT_NAME}
+    PUBLIC
+      $<$<BOOL:${ASAN}>:-fsanitize=address -g -shared-libsan>
+  )
+
+  if (ASAN)
+    message(STATUS "Removing xnack- from GPU_TARGET as these are invalid with ASAN address sanitizer")
+    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
+
+    # Add ASAN runtime directory to RPATH so executables can find libclang_rt.asan at runtime
+    target_link_options(
+      ${PROJECT_NAME}
+      PUBLIC
+        -Wl,-rpath,${ASAN_RUNTIME_DIR}
+    )
+  endif()
 
   if(${ROCM_MAJOR_VERSION} LESS 7)
     # ROCm 6.x requires us to explicitly enable warp sync builtins

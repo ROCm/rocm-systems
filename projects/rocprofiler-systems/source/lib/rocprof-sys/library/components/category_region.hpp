@@ -55,11 +55,17 @@ struct entry_key
 
 using timestamp_t = std::uint64_t;
 
-/// Per-thread stack of region begin timestamps
+struct pending_cache_entry
+{
+    timestamp_t start_ts = 0;
+    std::string args     = {};
+};
+
+/// Per-thread stack of outstanding region pushes
 struct pending_region_storage_t
 {
-    std::uint64_t                                 thread_id        = 0;
-    std::map<entry_key, std::vector<timestamp_t>> map_name_to_args = {};
+    std::uint64_t                                         thread_id        = 0;
+    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args = {};
     // Only contended during flush_all_pending_cached_entries(), which may drain this
     // storage while its owning thread is still in cache_start/cache_stop
     std::mutex mutex = {};
@@ -146,20 +152,20 @@ current_region_thread_id()
 
 void
 cache_region(std::uint64_t thread_id, const std::string& name, std::uint64_t start_ts,
-             std::uint64_t end_ts, const std::string& category)
+             std::uint64_t end_ts, const std::string& category,
+             const std::string& args_str = {})
 {
     constexpr size_t      NO_CORRELATION_ID = 0;
     constexpr const char* CALLSTACK         = "{}";
-    constexpr const char* ARGUMENTS         = "";
     rocprofsys::trace_cache::get_buffer_storage().store(
         rocprofsys::trace_cache::region_sample{
             thread_id, name.c_str(), NO_CORRELATION_ID, NO_CORRELATION_ID, start_ts,
-            end_ts, CALLSTACK, ARGUMENTS, category.c_str() });
+            end_ts, CALLSTACK, args_str.c_str(), category.c_str() });
 }
 
 template <typename CategoryT, typename... Args>
 void
-cache_start(const char* name)
+cache_start(const char* name, std::string args_str = {})
 {
     const auto start_ts =
         static_cast<timestamp_t>(rocprofsys::comp::wall_clock::record());
@@ -167,7 +173,7 @@ cache_start(const char* name)
     std::lock_guard<std::mutex> _lk{ _storage.mutex };
     if(_storage.thread_id == 0) _storage.thread_id = current_region_thread_id();
     _storage.map_name_to_args[{ name, rocprofsys::trait::name<CategoryT>::value }]
-        .push_back(start_ts);
+        .push_back(pending_cache_entry{ start_ts, std::move(args_str) });
 }
 
 template <typename CategoryT>
@@ -180,7 +186,7 @@ cache_stop(const char* name)
     auto                        x = _storage.map_name_to_args.find(key);
     if(x != _storage.map_name_to_args.end() && !x->second.empty())
     {
-        auto timestamp = x->second.back();
+        auto entry = std::move(x->second.back());
         x->second.pop_back();
         if(x->second.empty()) _storage.map_name_to_args.erase(x);
 
@@ -189,8 +195,8 @@ cache_stop(const char* name)
         const auto thread_id = current_region_thread_id();
         if(_storage.thread_id == 0) _storage.thread_id = thread_id;
 
-        cache_region(thread_id, name, timestamp, end_ts,
-                     rocprofsys::trait::name<CategoryT>::value);
+        cache_region(thread_id, name, entry.start_ts, end_ts,
+                     rocprofsys::trait::name<CategoryT>::value, entry.args);
     }
 }
 
@@ -205,14 +211,15 @@ flush_pending_storage(pending_region_storage_t& _storage, timestamp_t end_ts)
     // always open at finalization by design. It should not be tagged as incomplete
     const auto&                 _exe_name = rocprofsys::config::get_exe_name();
     std::lock_guard<std::mutex> _lk{ _storage.mutex };
-    for(const auto& [key, start_ts_stack] : _storage.map_name_to_args)
+    for(const auto& [key, entry_stack] : _storage.map_name_to_args)
     {
         const auto _name = (key.name == _exe_name)
                                ? key.name
                                : fmt::format("{} [{}]", key.name, incomplete_suffix);
-        for(const auto& start_ts : start_ts_stack)
+        for(const auto& entry : entry_stack)
         {
-            cache_region(_storage.thread_id, _name, start_ts, end_ts, key.category);
+            cache_region(_storage.thread_id, _name, entry.start_ts, end_ts, key.category,
+                         entry.args);
         }
     }
     _storage.map_name_to_args.clear();
@@ -268,8 +275,6 @@ using tim::type_list;
 // they should ALWAYS be popped if they were pushed
 // Note: There is a known imbalance in the push/pop counts for category::host when using
 //       OpenMP Tools (OMPT).
-//       In general, for known imbalances, add ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK=ON to the
-//       ctest environment to avoid the CI_THROW check.
 using tracing_count_categories_t =
     type_list<category::host, category::mpi, category::pthread, category::rocm_hip_api,
               category::rocm_hsa_api, category::rocm_rccl>;
@@ -328,12 +333,28 @@ struct category_region : comp::base<category_region<CategoryT>, void>
 
     template <typename... OptsT, typename... Args>
     static void audit(quirk::config<OptsT...>, Args&&...);
+
+    static void start_with_args(std::string_view name, std::string serialized_args);
+
+private:
+    // Shared implementation for start() / start_with_args()
+    template <typename... OptsT, typename... Args>
+    static void start_impl(std::string_view name, std::string cache_args, Args&&...);
 };
 
 template <typename CategoryT>
 template <typename... OptsT, typename... Args>
 void
 category_region<CategoryT>::start(std::string_view name, Args&&... args)
+{
+    start_impl<OptsT...>(name, std::string{}, std::forward<Args>(args)...);
+}
+
+template <typename CategoryT>
+template <typename... OptsT, typename... Args>
+void
+category_region<CategoryT>::start_impl(std::string_view name, std::string cache_args,
+                                       Args&&... args)
 {
     // skip if category is disabled
     if(tracing::category_push_disabled<CategoryT>()) return;
@@ -401,7 +422,20 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         }
     }
 
-    cache_start<CategoryT>(name.data());
+    cache_start<CategoryT>(name.data(), std::move(cache_args));
+}
+
+// Starts a region and attaches the pre-serialized args to it in a single push.
+// The args ride through start_impl() into the lone cache_start() call, so the
+// name is hashed and the per-thread map is touched exactly once. Because the
+// args are a plain function argument (not a thread-local), there is no
+// re-entrancy/misattribution window and no cross-call ordering contract.
+template <typename CategoryT>
+void
+category_region<CategoryT>::start_with_args(std::string_view name,
+                                            std::string      serialized_args)
+{
+    start_impl(name, std::move(serialized_args));
 }
 
 template <typename CategoryT>
