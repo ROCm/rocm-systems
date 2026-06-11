@@ -6,10 +6,34 @@
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
 
+#include <cstdlib>
 #include <memory>
 #include <string>
 
 namespace rocjitsu {
+
+void SoC::consolidate_dispatch_to_primary() {
+  if (soc_dispatch_ || xcds_.size() <= 1)
+    return;
+  auto *primary = xcds_[0]->command_processor();
+  if (!primary)
+    return;
+  // Register every other XCD's SPIs and CUs with the primary CP. add_compute_unit
+  // repoints each CU's command processor to the primary, so workgroup-completion
+  // notifications route to the single dispatcher's completion tracker. Each CU
+  // keeps its own XCD's L2, so spreading a dispatch across them spreads load
+  // across all separate L2s.
+  for (size_t i = 1; i < xcds_.size(); ++i) {
+    auto *x = xcds_[i];
+    for (uint32_t s = 0; s < x->num_shader_engines(); ++s) {
+      auto *se = x->shader_engine(s);
+      for (uint32_t c = 0; c < se->num_compute_units(); ++c)
+        primary->add_compute_unit(se->compute_unit(c));
+      primary->add_spi(&se->spi());
+    }
+  }
+  soc_dispatch_ = true;
+}
 
 void SoC::set_memory(amdgpu::GpuMemory *m) {
   memory_ = m;
@@ -104,6 +128,9 @@ void SoC::flush_all() {
 }
 
 void SoC::initialize() {
+  if (const char *e = std::getenv("RJ_SOC_DISPATCH"); e && e[0] && e[0] != '0')
+    consolidate_dispatch_to_primary();
+
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
     // Create the HBM controller lazily if set_memory() was called but the

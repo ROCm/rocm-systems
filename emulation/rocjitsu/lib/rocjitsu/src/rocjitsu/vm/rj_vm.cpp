@@ -41,6 +41,14 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->soc = loaded.soc();
   auto num_xcds = s->soc->num_xcds();
   uint32_t cpu_dispatch_threads = std::max(loaded.engine_config.num_threads, 1u);
+  // Optional override for the per-CP CU dispatch-pool thread count (otherwise the
+  // config's num_threads). Useful with RJ_SOC_DISPATCH, where the primary CP owns
+  // every XCD's CUs and benefits from a wider pool spread across the separate L2s.
+  if (const char *e = std::getenv("RJ_DISPATCH_THREADS"); e && e[0]) {
+    long v = std::strtol(e, nullptr, 10);
+    if (v > 0)
+      cpu_dispatch_threads = static_cast<uint32_t>(v);
+  }
   uint32_t xcd_partitions = 1;
   if (const char *e = std::getenv("RJ_XCD_PARTITIONS"); e && e[0]) {
     long v = std::strtol(e, nullptr, 10);
