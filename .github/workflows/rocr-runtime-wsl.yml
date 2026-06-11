@@ -51,7 +51,7 @@ jobs:
         shell: powershell
         run: |
           cd ${{ github.workspace }}
-          dvc pull shared/amdgpu-windows-interop/wkmi
+          dvc pull shared/amdgpu-windows-interop/wkmi/lnx/lib/libwkmi.a.dvc
 
       - name: Detect Windows SDK version
         id: detect-sdk
