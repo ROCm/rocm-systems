@@ -193,6 +193,12 @@ iterate_args(uint32_t                                         id,
 using ompt_update_func = void (*)(const char* cbname, ompt_callback_t* cbf, int cbnum);
 void update_table(ompt_update_func);
 
+// True iff some registered client subscribes to an OMPT operation (call only
+// after registration::initialize()). Drives the ompt_start_tool() keep-vs-defer
+// decision.
+bool
+ompt_service_requested();
+
 void
 update_callback(rocprofiler_ompt_callback_functions_t& cb_functions);
 

@@ -1062,14 +1062,28 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 
     auto& forced_config = rocprofiler::registration::get_forced_configure();
 
-    // init status may be -1 (currently initializing) or 1 (already initialized).
-    // if either case, we want to ignore this function call but if this is
+    // init_status may be -1 (currently initializing) or 1 (already initialized).
+    // In either case the configuration window is already closed, so we ignore
+    // this call and return CONFIGURATION_LOCKED with an explanatory warning.
     if(rocprofiler::registration::get_init_status() != 0)
+    {
+        ROCP_WARNING << "rocprofiler_force_configure() ignored (CONFIGURATION_LOCKED): "
+                        "rocprofiler-sdk is already initialized (init_status="
+                     << rocprofiler::registration::get_init_status()
+                     << "). The configuration window is closed; this commonly occurs when the "
+                        "OpenMP runtime invoked the SDK's ompt_start_tool() before the application "
+                        "called rocprofiler_force_configure().";
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
 
     // if another tool forced configure, the init status should be 1, but
     // let's just make sure that the forced configure function is a nullptr
-    if(forced_config) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    if(forced_config)
+    {
+        ROCP_WARNING << "rocprofiler_force_configure() ignored (CONFIGURATION_LOCKED): another "
+                        "tool has already forced configuration.";
+        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+    }
 
     rocprofiler::common::set_env("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
     rocprofiler::registration::set_rocprofiler_register_library();
