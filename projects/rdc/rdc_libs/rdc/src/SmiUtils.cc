@@ -271,7 +271,6 @@ amdsmi_status_t get_num_partition(uint32_t index, uint16_t* num_partition) {
   return ret;
 }
 
-
 static std::vector<GpuHandleEntry> s_flat_gpu_table;
 static bool s_flat_gpu_table_initialized = false;
 
@@ -293,7 +292,8 @@ static void build_flat_gpu_table() {
       continue;
     }
     std::vector<amdsmi_processor_handle> procs(proc_count);
-    if (amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data()) != AMDSMI_STATUS_SUCCESS) {
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, procs.data()) !=
+        AMDSMI_STATUS_SUCCESS) {
       continue;
     }
     for (uint32_t p = 0; p < proc_count; p++) {
