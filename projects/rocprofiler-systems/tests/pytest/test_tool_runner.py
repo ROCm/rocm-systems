@@ -124,3 +124,26 @@ class TestOutputFormatSelection(RocprofsysTest):
                 r"ROCPROFSYS_PROFILE=false",
             ],
         )
+
+    @pytest.mark.parametrize(
+        "legacy_args",
+        [
+            ["--trace"],
+            ["--profile"],
+            ["--flat-profile"],
+            ["--profile-format", "text"],
+        ],
+    )
+    @pytest.mark.parametrize("target", TARGETS)
+    def test_conflicts_with_legacy_flags(self, target, legacy_args):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--output-format", "rocpd", *legacy_args, "--", "ls"],
+            fail_on_not_found=True,
+            fail_on_pass=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[r"--output-format.*conflicts.*"],
+        )

@@ -151,11 +151,10 @@ output_format_selection
 resolve_output_format(const strset_t& tokens)
 {
     output_format_selection _sel;
-    _sel.perfetto = tokens.count("proto") != 0;
-    _sel.rocpd    = tokens.count("rocpd") != 0;
-    _sel.json     = tokens.count("json") != 0;
-    _sel.text     = tokens.count("text") != 0 || tokens.count("txt") != 0;
-    _sel.profile  = _sel.json || _sel.text;
+    _sel.perfetto = tokens.contains("proto");
+    _sel.rocpd    = tokens.contains("rocpd");
+    _sel.json     = tokens.contains("json");
+    _sel.text     = tokens.contains("text") || tokens.contains("txt");
     return _sel;
 }
 
@@ -824,19 +823,22 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 "Select output format(s); only the listed formats are produced: "
                 "proto (Perfetto trace), rocpd (RocPD database), json/text (Timemory "
                 "profile; txt aliases text). Space- or comma-separated, e.g. "
-                "--output-format proto rocpd. See also --trace, --profile, "
-                "--profile-format.")
+                "--output-format proto rocpd. Cannot be combined with --trace, "
+                "--profile, --flat-profile, or --profile-format.")
             .min_count(1)
             .max_count(5)
             .dtype("[format...]")
             .choices({ "proto", "rocpd", "json", "text", "txt" })
+            .conflicts(
+                { "trace", "profile", "flat-profile", "profile-format", "use-rocpd" })
             .action([&](parser_t& p) {
                 const auto _sel = resolve_output_format(p.get<strset_t>("output-format"));
                 update_env(_data, "ROCPROFSYS_TRACE", _sel.perfetto);
                 update_env(_data, "ROCPROFSYS_USE_ROCPD", _sel.rocpd);
-                update_env(_data, "ROCPROFSYS_PROFILE", _sel.profile);
+                update_env(_data, "ROCPROFSYS_PROFILE", _sel.profile());
                 update_env(_data, "ROCPROFSYS_JSON_OUTPUT", _sel.json);
                 update_env(_data, "ROCPROFSYS_TEXT_OUTPUT", _sel.text);
+                update_env(_data, "ROCPROFSYS_COUT_OUTPUT", false);
             });
 
         _data.reg.processed_environs.emplace("output_format");

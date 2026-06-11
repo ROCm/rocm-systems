@@ -236,7 +236,7 @@ Tokens are space- or comma-separated and can be combined, for example:
 
    rocprof-sys-run --output-format proto rocpd -- ./myapp
 
-The ``--trace``, ``--profile``, and ``--profile-format`` flags and their environment variables remain available; ``--output-format`` is a convenience umbrella over the same settings.
+The ``--trace``, ``--profile``, ``--flat-profile``, and ``--profile-format`` flags and their environment variables remain available, but cannot be combined with ``--output-format`` on the same command line: because ``--output-format`` is authoritative over the same settings, mixing it with those flags is rejected to avoid an ambiguous result. Use either ``--output-format`` or the individual flags, not both.
 
 Sampling mode
 ^^^^^^^^^^^^^^^^^^^^^^^^

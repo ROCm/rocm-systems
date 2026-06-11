@@ -44,9 +44,11 @@ struct output_format_selection
 {
     bool perfetto = false;  // ROCPROFSYS_TRACE
     bool rocpd    = false;  // ROCPROFSYS_USE_ROCPD
-    bool profile  = false;  // ROCPROFSYS_PROFILE
     bool json     = false;  // ROCPROFSYS_JSON_OUTPUT
     bool text     = false;  // ROCPROFSYS_TEXT_OUTPUT
+
+    // ROCPROFSYS_PROFILE: derived — any Timemory profile sub-format implies profiling.
+    [[nodiscard]] bool profile() const { return json || text; }
 };
 
 /**

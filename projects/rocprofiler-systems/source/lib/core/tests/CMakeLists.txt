@@ -18,10 +18,7 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-core-library
         rocprofiler-systems-logger
-        rocprofiler-systems-ghc-filesystem
         rocprofiler-systems-headers
-        rocprofiler-systems-rocm
-        rocprofiler-systems-json
         rocprofiler-systems-timemory
 )
 
