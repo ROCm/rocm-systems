@@ -40,16 +40,21 @@ void convertCollTaskToSymmetricTask(struct ncclComm* comm,struct ncclTaskColl* t
     };
     u64 = 0;
     switch (task->datatype) {
-      // 16-bit floats use float accumulator; bf16 reduces in float on HIP.
+      // 16-bit floats use a float accumulator; bf16 reduces in float on HIP, and
+      // on HIP fp8 also reduces in float (see ncclSymkAccumType in primitives.cuh).
       case ncclFloat16:
 #if defined(__CUDA_BF16_TYPES_EXIST__) || defined(__HIP_PLATFORM_AMD__)
       case ncclBfloat16:
 #endif
+#if defined(__HIP_PLATFORM_AMD__)
+      case ncclFloat8e4m3:
+      case ncclFloat8e5m2:
+#endif
         f32 = float(1.0/comm->nRanks);  // ncclDevSumPostDiv actually multiplies by the scalar, not divides.
         task->opDev.scalarArg = u64;
         return;
-      // fp8 reduces in a half accumulator; pack the scalar as half.
-#if defined(__CUDA_FP8_TYPES_EXIST__) || defined(__HIP_PLATFORM_AMD__)
+      // CUDA: fp8 reduces in a half accumulator; pack the scalar as half.
+#if defined(__CUDA_FP8_TYPES_EXIST__)
       case ncclFloat8e4m3:
       case ncclFloat8e5m2:
         f16 = __float2half(float(1.0/comm->nRanks));
