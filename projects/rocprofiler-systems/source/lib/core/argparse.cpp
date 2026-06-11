@@ -155,7 +155,6 @@ resolve_output_format(const strset_t& tokens)
     _sel.rocpd    = tokens.contains("rocpd");
     _sel.json     = tokens.contains("json");
     _sel.text     = tokens.contains("text") || tokens.contains("txt");
-    _sel.profile  = _sel.json || _sel.text;
     return _sel;
 }
 
@@ -835,7 +834,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 const auto _sel = resolve_output_format(p.get<strset_t>("output-format"));
                 update_env(_data, "ROCPROFSYS_TRACE", _sel.perfetto);
                 update_env(_data, "ROCPROFSYS_USE_ROCPD", _sel.rocpd);
-                update_env(_data, "ROCPROFSYS_PROFILE", _sel.profile);
+                update_env(_data, "ROCPROFSYS_PROFILE", _sel.profile());
                 update_env(_data, "ROCPROFSYS_JSON_OUTPUT", _sel.json);
                 update_env(_data, "ROCPROFSYS_TEXT_OUTPUT", _sel.text);
                 update_env(_data, "ROCPROFSYS_COUT_OUTPUT", false);
