@@ -3144,10 +3144,9 @@ typedef struct {
  *  Singleton Design, requires the same number of inits as shutdowns.
  *
  *  The @p init_flags decides which type of processor
- *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
- *  sockets with AMD GPUS, and AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS returns
- *  sockets with either AMD GPUS or CPUS.
- *  Both AMDSMI_INIT_AMD_GPUS and AMDSMI_INIT_AMD_CPUS flags are supported.
+ *  can be discovered by ::amdsmi_get_socket_handles(). ::AMDSMI_INIT_AMD_GPUS returns
+ *  sockets with AMD GPUs, and ::AMDSMI_INIT_AMD_APUS returns sockets with either AMD GPUs or CPUs.
+ *  ::AMDSMI_INIT_ALL_PROCESSORS initializes all supported processor types.
  *
  *  @param[in] init_flags Bit flags that tell SMI how to initialize. Values of
  *  ::amdsmi_init_flags_t may be OR'd together and passed through @p init_flags
@@ -3189,9 +3188,9 @@ amdsmi_status_t amdsmi_shut_down(void);
  *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
  *  @platform{guest_mvf} @platform{guest_windows}
  *
- *  @details Depends on what flag is passed to ::amdsmi_init.  AMDSMI_INIT_AMD_GPUS
- *  returns sockets with AMD GPUS, and AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS returns
- *  sockets with either AMD GPUS or CPUS.
+ *  @details Depends on what flag is passed to ::amdsmi_init. ::AMDSMI_INIT_AMD_GPUS
+ *  returns sockets with AMD GPUs, and ::AMDSMI_INIT_AMD_APUS returns sockets with either
+ *  AMD GPUs or CPUs.
  *  The socket handles can be used to query the processor handles in that socket, which
  *  will be used in other APIs to get processor detail information or telemetries.
  *
