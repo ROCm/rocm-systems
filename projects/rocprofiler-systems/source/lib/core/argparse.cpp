@@ -151,10 +151,10 @@ output_format_selection
 resolve_output_format(const strset_t& tokens)
 {
     output_format_selection _sel;
-    _sel.perfetto = tokens.count("proto") != 0;
-    _sel.rocpd    = tokens.count("rocpd") != 0;
-    _sel.json     = tokens.count("json") != 0;
-    _sel.text     = tokens.count("text") != 0 || tokens.count("txt") != 0;
+    _sel.perfetto = tokens.contains("proto");
+    _sel.rocpd    = tokens.contains("rocpd");
+    _sel.json     = tokens.contains("json");
+    _sel.text     = tokens.contains("text") || tokens.contains("txt");
     _sel.profile  = _sel.json || _sel.text;
     return _sel;
 }
