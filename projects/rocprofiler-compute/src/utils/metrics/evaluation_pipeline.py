@@ -73,7 +73,6 @@ def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
 
     sys_vars_config = [
         ("se_per_gpu", int, "se_per_gpu"),
-        ("sa_per_se", int, "sa_per_se"),
         ("pipes_per_gpu", int, "pipes_per_gpu"),
         ("cu_per_gpu", int, "cu_per_gpu"),
         ("simd_per_cu", int, "simd_per_cu"),
