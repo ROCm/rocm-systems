@@ -8,6 +8,10 @@
 # When RCCL is included as a subproject (e.g. rocm-systems), CMAKE_SOURCE_DIR points to the
 # super-repo root. Use PROJECT_SOURCE_DIR for RCCL-relative paths.
 set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+# Use PROJECT_BINARY_DIR to keep hipify at project root level
+set(HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
+set(HIPIFY_SRC "${HIPIFY_DIR}/src")
+set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 
 # [NCCL src/CMakeLists.txt L1-18] Source files (LIBSRCFILES). NCCL lists only the top-level
 # src/*.cc here and pulls per-subdir files in via add_subdirectory; RCCL inlines the full file
@@ -518,7 +522,6 @@ set(SRC_FILES
 #  unconditionally in SRC_FILES -- see the L1-18 marker above.)
 
 # Prepend src/ to all source files for proper paths from root
-list(TRANSFORM SRC_FILES PREPEND "src/")
 
 # [NCCL src/CMakeLists.txt L30-35] UNMAPPED in this file -- implemented in the RCCL top-level
 # projects/rccl/CMakeLists.txt (RCCL configures rccl.h/nccl.h from src/nccl.h.in; there is no
@@ -541,9 +544,11 @@ add_subdirectory(devcomm)
 
 # [NCCL src/CMakeLists.txt L51-53] UNMAPPED -- NCCL-only. RCCL does not set a macro-prefix map.
 # Verbatim NCCL block kept for merge reference:
-# | if(NCCL_OS_LINUX)
-# |     add_compile_options(-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=)
-# | endif()
+#[[
+if(NCCL_OS_LINUX)
+    add_compile_options(-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=)
+endif()
+]]
 
 # [NCCL src/CMakeLists.txt L55-69] Append the subdirectory-collected source lists to the master
 # list. RCCL's equivalent is appending SMI_SOURCES and NET_IB_CAST_SOURCES below (the rest of
@@ -562,18 +567,22 @@ endif()
 
 if(USE_AMDSMI)
   set(SMI_SOURCES
-    src/include/amdsmi_wrap.h
-    src/misc/amdsmi_wrap.cc
+    include/amdsmi_wrap.h
+    misc/amdsmi_wrap.cc
   )
 else()
   set(SMI_SOURCES
-    src/include/amdsmi_wrap.h
-    src/misc/amdsmi_wrap.cc
-    src/include/rocm_smi_wrap.h
-    src/misc/rocm_smi_wrap.cc
+    include/amdsmi_wrap.h
+    misc/amdsmi_wrap.cc
+    include/rocm_smi_wrap.h
+    misc/rocm_smi_wrap.cc
   )
 endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
+
+# Prepend src/ to all source files for proper paths from root
+list(TRANSFORM SRC_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+
 # NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
 # DEVCOMM_SOURCES already carry the src/ prefix (set by devcomm/CMakeLists.txt)
@@ -585,16 +594,16 @@ find_program(hipify-perl_executable hipify-perl)
 if(NOT hipify-perl_executable)
   message(FATAL_ERROR "hipify-perl not found")
 endif()
-# Use PROJECT_BINARY_DIR to keep hipify at project root level
-set(HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
 set(NCCL_DEVICE_HIP_FILES "")
 
 ## Loop over each source file to hipify
-foreach(SRC_FILE ${SRC_FILES})
+foreach(FULL_SRC_FILE ${SRC_FILES})
   # Check that file exists
-  if (NOT EXISTS ${RCCL_SOURCE_DIR}/${SRC_FILE})
-    message(FATAL_ERROR "Unable to find file listed in CMakeLists.txt: ${RCCL_SOURCE_DIR}/${SRC_FILE}")
+  if (NOT EXISTS ${FULL_SRC_FILE})
+    message(FATAL_ERROR "Unable to find file listed in CMakeLists.txt: ${FULL_SRC_FILE}")
   endif()
+
+  file(RELATIVE_PATH SRC_FILE ${RCCL_SOURCE_DIR} ${FULL_SRC_FILE})
 
   # Establish hipified copy of the source file
   set(HIP_FILE "${HIPIFY_DIR}/${SRC_FILE}")
@@ -617,19 +626,19 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -experimental -quiet-warnings ${RCCL_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${FULL_SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
-      MAIN_DEPENDENCY ${RCCL_SOURCE_DIR}/${SRC_FILE}
+      MAIN_DEPENDENCY ${FULL_SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
     )
   else()
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -experimental -quiet-warnings ${RCCL_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${FULL_SRC_FILE} -o ${HIP_FILE}
               && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
-      MAIN_DEPENDENCY ${RCCL_SOURCE_DIR}/${SRC_FILE}
+      MAIN_DEPENDENCY ${FULL_SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
     )
   endif()
@@ -642,8 +651,8 @@ endforeach()
 set(NCCL_DEVICE_HEADER "${PROJECT_BINARY_DIR}/include/nccl_device.h")
 set(NCCL_DEVICE_HEADER_STAMP "${PROJECT_BINARY_DIR}/include/.nccl_device_headers.stamp")
 # Copy hip_compat.h as-is (no hipification — contains both CUDA and HIP paths)
-set(HIP_COMPAT_SRC "${RCCL_SOURCE_DIR}/src/include/nccl_device/hip_compat.h")
-set(HIP_COMPAT_DST "${HIPIFY_DIR}/src/include/nccl_device/hip_compat.h")
+set(HIP_COMPAT_SRC "${CMAKE_CURRENT_SOURCE_DIR}/include/nccl_device/hip_compat.h")
+set(HIP_COMPAT_DST "${HIPIFY_SRC}/include/nccl_device/hip_compat.h")
 add_custom_command(
   OUTPUT ${HIP_COMPAT_DST}
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${HIP_COMPAT_SRC} ${HIP_COMPAT_DST}
@@ -656,10 +665,10 @@ list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
 # proxy_trace headers are not produced by hipify-perl; copy from src so the
 # hipify include tree matches (unit tests search hipify paths before src/include).
 set(PROXY_TRACE_HDR_SRC "${RCCL_SOURCE_DIR}/src/include/proxy_trace/proxy_trace.h")
-set(PROXY_TRACE_HDR_DST "${HIPIFY_DIR}/src/include/proxy_trace/proxy_trace.h")
+set(PROXY_TRACE_HDR_DST "${HIPIFY_SRC}/include/proxy_trace/proxy_trace.h")
 add_custom_command(
   OUTPUT ${PROXY_TRACE_HDR_DST}
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPIFY_DIR}/src/include/proxy_trace"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPIFY_SRC}/include/proxy_trace"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PROXY_TRACE_HDR_SRC} ${PROXY_TRACE_HDR_DST}
   MAIN_DEPENDENCY ${PROXY_TRACE_HDR_SRC}
   COMMENT "Copying proxy_trace/proxy_trace.h (no hipification)"
@@ -671,8 +680,8 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
   add_custom_command(
     OUTPUT ${NCCL_DEVICE_HEADER}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_SRC}/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${HIPIFY_SRC}/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
     VERBATIM
   )
@@ -683,8 +692,8 @@ else()
   add_custom_command(
     OUTPUT ${NCCL_DEVICE_HEADER_STAMP}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_SRC}/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_SRC}/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
     COMMAND ${CMAKE_COMMAND} -E touch "${NCCL_DEVICE_HEADER_STAMP}"
     DEPENDS ${NCCL_DEVICE_HIP_FILES}
     COMMENT "Staging nccl_device headers into include/"
@@ -706,7 +715,7 @@ add_dependencies(copy_nccl_device_headers hipify_all)
 # net_ib/ headers collide with other basenames (common.h, gin.h, p2p.h) and are hipified
 # with _tmp suffixes. Create symlinks so that #include "common.h" etc. resolve correctly
 # when compiling files in hipify/src/transport/net_ib/.
-set(NET_IB_HIPIFY_DIR "${HIPIFY_DIR}/src/transport/net_ib")
+set(NET_IB_HIPIFY_DIR "${HIPIFY_SRC}/transport/net_ib")
 set(NET_IB_HEADER_SYMLINKS "")
 foreach(_hdr common gin p2p)
   add_custom_command(
@@ -774,7 +783,6 @@ if (NOT Python3_FOUND)
   message(FATAL_ERROR "RCCL requires Python3 for generating host/device tables")
 endif()
 
-set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 set(GEN_SYM_DIR "${GEN_DIR}/symmetric")
 set(GEN_CE_REDUCE_DIR "${GEN_DIR}/ce_reduce")
 
@@ -924,20 +932,20 @@ add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_
 # the hipify/ tree and ROCm/SMI paths instead of the CUDA toolkit paths.
 ## Set RCCL include directories
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src)                    # for hipified headers
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device/network/unpack)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/mlx5)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC})                    # for hipified headers
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/device)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/device/network/unpack)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/include)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/include)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/include/mlx5)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/include/nccl_device)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/include/ionic)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/include/plugin)
 target_include_directories(rccl PRIVATE ${NET_IB_CAST_INCLUDE_DIRS})
 target_include_directories(rccl PRIVATE ${DEVCOMM_INCLUDE_DIRS})
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/transport)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/transport/net_ib)
-target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/transport)
+target_include_directories(rccl PRIVATE ${HIPIFY_SRC}/transport/net_ib)
+target_include_directories(rccl PRIVATE ${GEN_DIR})
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
 target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
 target_include_directories(rccl PRIVATE ${ROCMCORE_PATH}/include)
