@@ -1616,14 +1616,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &corr_id_retire_buffer),
                      "buffer creation");
 
-    ROCPROFILER_CALL(rocprofiler_create_buffer(counter_collection_ctx,
-                                               buffer_size,
-                                               watermark,
-                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                               tool_tracing_buffered,
-                                               tool_data,
-                                               &counter_collection_buffer),
-                     "buffer creation");
+    if(getenv("ROCPROF_COUNTERS"))
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(counter_collection_ctx,
+                                                   buffer_size,
+                                                   watermark,
+                                                   ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                   tool_tracing_buffered,
+                                                   tool_data,
+                                                   &counter_collection_buffer),
+                         "buffer creation");
+    }
 
     ROCPROFILER_CALL(rocprofiler_create_buffer(rccl_api_buffered_ctx,
                                                buffer_size,
@@ -2020,10 +2023,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ompt_buffered_ctx, ROCPROFILER_BUFFER_TRACING_OMPT, nullptr, 0, ompt_buffered_buffer),
         "buffer tracing service for ompt configure");
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_buffer_dispatch_counting_service(
-            counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
-        "setup buffered service");
+    if(getenv("ROCPROF_COUNTERS"))
+    {
+        ROCPROFILER_CALL(
+            rocprofiler_configure_buffer_dispatch_counting_service(
+                counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
+            "setup buffered service");
+    }
 
     for(auto* itr : buffers)
     {

@@ -109,7 +109,10 @@ inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_
 /// off the resolved (loop-invariant) object with no further dispatch and no raw
 /// pointer in the kernel body — the storage pointer never escapes `VgprStorage`.
 template <typename Op> inline const VgprStorage *simd_src_reg(const Op &op, const Wavefront &wf) {
-  return SimdAccess::vgpr_storage(op, wf);
+  const VgprStorage *r = SimdAccess::vgpr_storage(op, wf);
+  if (r)
+    SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
+  return r;
 }
 
 /// Mutable counterpart of `simd_src_reg` for the dst write path (single
@@ -125,7 +128,10 @@ template <typename Op> inline VgprStorage *simd_dst_reg(const Op &op, Wavefront 
 /// `lo->simd_load64<T>(*hi, base)` — no raw pointer in the kernel body.
 template <typename Op>
 inline ConstVgprStoragePair64 simd_src_reg64(const Op &op, const Wavefront &wf) {
-  return SimdAccess::vgpr_storage64(op, wf);
+  ConstVgprStoragePair64 p = SimdAccess::vgpr_storage64(op, wf);
+  if (p.lo)
+    SimdAccess::notify_read(op, wf, 0, wf.wf_size(), 0xF);
+  return p;
 }
 
 /// Mutable counterpart of `simd_src_reg64` for the 64-bit dst write path
@@ -441,7 +447,7 @@ inline SimdCarry<Value, Mask> make_simd_carry(Value value, Mask carry) {
 /// where `cin` carries the incoming VCC bit (0/1 per lane); ops without a
 /// carry-in ignore it. The result is masked-stored to vdst and the carry mask
 /// is merged into VCC at the chunk's bit offset for active EXEC lanes only —
-/// inactive-lane VCC bits are preserved, matching the scalar bodies.
+/// inactive-lane VCC bits are zeroed, matching the scalar bodies.
 template <typename Inst, typename CarryOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop2_carry_simd(Inst &inst, Wavefront &wf,
@@ -453,11 +459,10 @@ template <typename Inst, typename CarryOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  // Carry-in reads the incoming VCC; the result accumulates into a copy. Each
-  // lane touches only its own VCC bit, so the snapshot/copy split mirrors the
-  // scalar body, which reads wf.vcc() for carry-in and writes set_vcc() once.
+  // Carry-in reads the incoming VCC; the result accumulates from zero so that
+  // inactive lanes are zeroed (matching hardware and the scalar bodies).
   const uint64_t vcc_in = wf.vcc();
-  uint64_t vcc_out = vcc_in;
+  uint64_t vcc_out = 0;
   // Resolve operand base pointers once; see try_execute_binary_vop2_simd.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.vsrc1, wf);
@@ -651,8 +656,11 @@ template <typename T, typename Op>
   requires(util::has_stdx_simd)
 inline util::narrow32<T> read_narrow(const Op &op, const Wavefront &wf, uint32_t lane_base) {
   static_assert(sizeof(T) == sizeof(uint32_t), "read_narrow: T must be a 32-bit lane type");
-  if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf))
+  if (const VgprStorage *r = SimdAccess::vgpr_storage(op, wf)) {
+    constexpr auto W = static_cast<uint32_t>(util::native_width64);
+    SimdAccess::notify_read(op, wf, lane_base, lane_base + W, 0xF);
     return r->template simd_load_narrow<T>(lane_base);
+  }
   return util::broadcast_narrow<T>(op.read_scalar(wf));
 }
 
@@ -895,7 +903,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
   // writes only the VCC mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -928,7 +936,7 @@ template <typename T, typename Inst, typename CmpOp>
 /// 64-bit-lane VOPC compare SIMD fast path (f64/i64/u64 relations). Identical to
 /// try_execute_vopc_simd but reads each operand as `native<T>` (T = double /
 /// int64_t / uint64_t) through the split lo/hi VGPR-pair path (read_simd64), so
-/// it processes `native_width64` lanes per chunk. Same VCC merge / preservation.
+/// it processes `native_width64` lanes per chunk. Same VCC merge.
 template <typename T, typename Inst, typename CmpOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopc64_simd(Inst &inst, Wavefront &wf, CmpOp cmp_op) {
@@ -937,7 +945,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
   // writes only the VCC mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -986,7 +994,7 @@ template <typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t vcc = wf.vcc();
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. VOPC
   // writes only the VCC mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -1042,7 +1050,7 @@ template <typename Inst, typename CmpOp>
   const bool do_abs = (inst.inst_.abs & (1u << 0)) != 0;
   const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
   const auto sm = util::broadcast<T>(signmask);
-  uint64_t vcc = inst.vdst.read_scalar64(wf);
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // class test writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1094,7 +1102,7 @@ template <typename Inst, typename CmpOp>
   const bool do_abs = (inst.inst_.abs & (1u << 0)) != 0;
   const bool do_neg = (inst.inst_.neg & (1u << 0)) != 0;
   const auto sm = util::broadcast64<uint64_t>(signmask);
-  uint64_t vcc = inst.vdst.read_scalar64(wf);
+  uint64_t vcc = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // class test writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -1171,6 +1179,21 @@ template <typename T, typename Inst, typename BinOp>
   return false;
 }
 
+/// VOP3 f16 binary fast path. The packed-f16 binary functors widen f16->f32
+/// inside `bin_op` and narrow back, but do NOT apply the VOP3 abs/neg/omod/clamp
+/// modifiers (there is no fp16 binary modifier glue, unlike the f32 path). The
+/// generated scalar body DOES apply them around the f16<->f32 round trip, so bail
+/// to scalar whenever any modifier field is set; the (common) unmodified case
+/// still takes the integer fast path.
+template <typename T, typename Inst, typename BinOp>
+[[nodiscard]] inline bool try_execute_binary_vop3_f16_simd(Inst &inst, Wavefront &wf,
+                                                           BinOp bin_op) {
+  if (inst.inst_.abs != 0u || inst.inst_.neg != 0u || inst.inst_.omod != 0u ||
+      inst.inst_.clamp != 0u)
+    return false;
+  return try_execute_binary_vop3_simd<T>(inst, wf, bin_op);
+}
+
 /// VOP3 f32 binary SIMD fast path. Reads `src0`/`src1`, applies the per-source
 /// abs/neg modifiers, runs `bin_op`, then applies the result omod/clamp — the
 /// exact order of the generated scalar body (abs->neg per source, op,
@@ -1230,7 +1253,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1274,7 +1297,7 @@ template <typename T, typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -1325,7 +1348,7 @@ template <typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1374,7 +1397,7 @@ template <typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
@@ -1426,7 +1449,7 @@ template <typename Inst, typename CmpOp>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t dst = inst.vdst.read_scalar64(wf);
+  uint64_t dst = 0;
   // Resolve source base pointers once; see try_execute_binary_vop2_simd. The
   // compare writes only the SGPR-pair mask, so there is no dst pointer to hoist.
   const ConstVgprStoragePair64 rs0 = simd_src_reg64(inst.src0, wf);
@@ -2357,7 +2380,7 @@ template <typename Inst, typename CarryOp>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
-  uint64_t carry_out = wf.vcc();
+  uint64_t carry_out = 0;
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
@@ -2401,7 +2424,7 @@ template <typename Inst, typename CarryOp>
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = wf.exec();
   const uint64_t cin_all = inst.src2.read_scalar64(wf);
-  uint64_t carry_out = wf.vcc();
+  uint64_t carry_out = 0;
   const VgprStorage *r0 = simd_src_reg(inst.src0, wf);
   const VgprStorage *r1 = simd_src_reg(inst.src1, wf);
   const auto a_bcast = r0 ? util::native<T>{} : util::broadcast<T>(inst.src0.read_scalar(wf));
@@ -3028,6 +3051,13 @@ template <typename Inst>
 /// `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(T, ...)                                                  \
   if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__))                  \
+  return
+
+/// VOP3 f16 binary counterpart: same packed path as the integer form, but bails
+/// to the (modifier-applying) scalar body when any abs/neg/omod/clamp field is
+/// set. `T` is the 32-bit packed lane type; variadic in the functor.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_F16(T, ...)                                                  \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<T>(inst, wf, __VA_ARGS__))              \
   return
 
 /// VOP3 f32 binary counterpart (reads src0/src1, applies abs/neg/omod/clamp).
