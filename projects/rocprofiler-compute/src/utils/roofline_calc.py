@@ -12,6 +12,8 @@ import pandas as pd
 from utils import schema
 from utils.logger import console_debug, console_error, console_warning
 from utils.metrics.evaluation_pipeline import eval_metric
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.specs import MachineSpecs
 
 ################################################
 # Global vars
@@ -95,17 +97,7 @@ SUPPORTED_DATATYPES: dict[str, list[str]] = {
     ],  # Unsupported: F4, F6, F8
 }
 
-# CACHE_HIERARCHY lists the cache levels per arch available within the hardware
-CACHE_HIERARCHY: dict[str, list[str]] = {
-    "gfx90a": ["HBM", "L1", "L2", "LDS"],
-    "gfx940": ["HBM", "L1", "L2", "LDS"],
-    "gfx941": ["HBM", "L1", "L2", "LDS"],
-    "gfx942": ["HBM", "L1", "L2", "LDS"],
-    "gfx950": ["HBM", "L1", "L2", "LDS"],
-    "gfx1151": ["L0", "L2", "LDS"],
-}
-
-CACHE_LEVELS = ["ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
+CACHE_LEVELS = ["ai_l0", "ai_l1", "ai_l2", "ai_hbm", "ai_lds"]
 
 
 ################################################
@@ -209,7 +201,7 @@ def sanitize_ai_value(value: float) -> float:
     return value if value and value not in excluded_values else 0
 
 
-def sanitize_mem_level(mem_level: Union[list, str], gpu_arch: str) -> list:
+def sanitize_mem_level(mem_level: Union[list, str], gpu_model: str) -> list:
     """
     Ensure cache level requests through --mem-level roofline analysis option
     are supported on the architecture, and have been normalized."
@@ -220,20 +212,25 @@ def sanitize_mem_level(mem_level: Union[list, str], gpu_arch: str) -> list:
     # Normalize user-facing "vL1D" to CSV column name "L1" before filtering
     levels_raw = [("L1" if m == "vL1D" else m) for m in levels_raw]
 
+    model_memory_levels = mi_gpu_specs.get_memory_levels(gpu_model)
+
     # Remove any requested mem levels not supported in the profiled arch
-    levels = [m for m in levels_raw if m in CACHE_HIERARCHY[gpu_arch]]
+    levels = [m for m in levels_raw if m in model_memory_levels]
 
     if levels_raw != ["ALL"] and levels != levels_raw:
         console_warning(
             "roofline",
-            f"Cache levels requested with --mem-level for {gpu_arch} are not valid- "
+            f"Cache levels requested with --mem-level for {gpu_model} are not valid- "
             "unsupported cache levels will not be displayed.",
         )
 
     # Step above removes all mem levels, including "ALL" which is the default.
     # An empty list means the mem_level was originally ALL, or the user requested
     # only unsupported levels and we should default back to ALL.
-    levels = CACHE_HIERARCHY[gpu_arch] if levels == [] else levels
+    levels = model_memory_levels if levels == [] else levels
+
+    # Skip MALL since we do not benchmark for this at this time
+    levels = [m for m in levels if m != "MALL"]
 
     return levels
 
@@ -245,6 +242,7 @@ def calc_ceilings(
     roofline_parameters: dict[str, Any],
     dtype: str,
     benchmark_data: dict[str, list[str]],
+    mspec: MachineSpecs,
     ai_data: Optional[dict] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
     """Given benchmarking data, calculate ceilings (or peak performance) for
@@ -273,7 +271,7 @@ def calc_ceilings(
     }
 
     cache_hierarchy = sanitize_mem_level(
-        roofline_parameters["mem_level"], roofline_parameters["gpu_arch"]
+        roofline_parameters["mem_level"], mspec.gpu_model
     )
 
     x1 = y1 = x2 = y2 = -1
@@ -546,7 +544,10 @@ def calc_ai_analyze(
 
 
 def construct_roof(
-    roofline_parameters: dict[str, Any], dtype: str, ai_data: Optional[dict] = None
+    roofline_parameters: dict[str, Any],
+    dtype: str,
+    mspec: MachineSpecs,
+    ai_data: Optional[dict] = None,
 ) -> dict[str, list[Union[list[float], float, None]]]:
     workload_dir = roofline_parameters.get("workload_dir")
 
@@ -599,7 +600,7 @@ def construct_roof(
         expected_columns.append(f"{dtype}{ops_flops}")
 
     cache_hierarchy = sanitize_mem_level(
-        roofline_parameters["mem_level"], roofline_parameters["gpu_arch"]
+        roofline_parameters["mem_level"], mspec.gpu_model
     )
 
     for cache_level in cache_hierarchy:
@@ -624,4 +625,4 @@ def construct_roof(
     # ------------------
     #  Generate Roofline
     # ------------------
-    return calc_ceilings(roofline_parameters, dtype, benchmark_data, ai_data)
+    return calc_ceilings(roofline_parameters, dtype, benchmark_data, mspec, ai_data)

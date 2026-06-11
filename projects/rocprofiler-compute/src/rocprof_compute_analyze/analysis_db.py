@@ -49,7 +49,6 @@ from utils.metrics.noise_clamper import (
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.pc_sampling_analysis import load_aggregated_pc_sampling
 from utils.roofline_calc import (
-    CACHE_HIERARCHY,
     MATRIX_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
@@ -366,7 +365,7 @@ class db_analysis(OmniAnalyze_Base):
 
             matrix_ops_type = utils_analysis.get_matrix_ops_type(sys_row["gpu_series"])
 
-            for mem_level in CACHE_HIERARCHY[gpu_arch]:
+            for mem_level in mi_gpu_specs.get_memory_levels(sys_row["gpu_model"]):
                 keys.append(f"{mem_level}Bw")
             for dtype in SUPPORTED_DATATYPES[gpu_arch]:
                 if dtype in PEAK_OPS_DATATYPES:

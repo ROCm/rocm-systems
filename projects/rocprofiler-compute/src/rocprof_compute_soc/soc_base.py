@@ -204,6 +204,11 @@ class OmniSoC_Base:
                 self._mspec.se_per_gpu = key
                 continue
 
+            key = search(r"^\s*Shader Arrs. per Eng.:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key is not None:
+                self._mspec.sa_per_se = key
+                continue
+
             key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key is not None:
                 self._mspec.wave_size = key

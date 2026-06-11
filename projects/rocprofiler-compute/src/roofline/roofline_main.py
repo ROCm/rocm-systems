@@ -360,8 +360,7 @@ class Roofline:
         total_figure_height = 600  # default height
 
         sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"],
-            self.__run_parameters["gpu_arch"],
+            self.__run_parameters["mem_level"], self.__mspec.gpu_model
         )
 
         if is_new_figure:
@@ -376,6 +375,7 @@ class Roofline:
                 temp_ceiling_data = construct_roof(
                     roofline_parameters=self.__run_parameters,
                     dtype=dtype,
+                    mspec=self.__mspec,
                     ai_data=self.__ai_data,
                 )
 
@@ -486,6 +486,7 @@ class Roofline:
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
+            mspec=self.__mspec,
             ai_data=self.__ai_data,
         )
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
@@ -1069,6 +1070,7 @@ class Roofline:
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
+            mspec=self.__mspec,
         )
 
         self.roof_setup()
@@ -1078,8 +1080,7 @@ class Roofline:
             console_error("Unsupported datatype input - must be str")
 
         sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"],
-            self.__run_parameters["gpu_arch"],
+            self.__run_parameters["mem_level"], self.__mspec.gpu_model
         )
 
         kernel_markers = {
