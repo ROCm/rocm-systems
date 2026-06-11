@@ -160,8 +160,9 @@ struct nic_traits
             }
             else
             {
-                LOG_DEBUG("NIC device [{}] ({}) excluded by ROCPROFSYS_SAMPLING_AINICS filter",
-                          device->get_index(), device->get_name());
+                LOG_DEBUG(
+                    "NIC device [{}] ({}) excluded by ROCPROFSYS_SAMPLING_AINICS filter",
+                    device->get_index(), device->get_name());
             }
         }
 
@@ -171,8 +172,8 @@ struct nic_traits
         return entries;
     }
 
-    static void warn_invalid_names(const nic_device_filter&      filter,
-                                   const std::set<std::string>&  available_names)
+    static void warn_invalid_names(const nic_device_filter&     filter,
+                                   const std::set<std::string>& available_names)
     {
         if(filter.mode != device_selection_mode::SPECIFIC) return;
         if(available_names.empty())
@@ -184,10 +185,9 @@ struct nic_traits
         {
             if(available_names.find(requested) == available_names.end())
             {
-                LOG_WARNING(
-                    "Requested AI NIC device '{}' not found. "
-                    "Available device(s): [{}]",
-                    requested, fmt::join(available_names, ", "));
+                LOG_WARNING("Requested AI NIC device '{}' not found. "
+                            "Available device(s): [{}]",
+                            requested, fmt::join(available_names, ", "));
             }
         }
     }

@@ -811,7 +811,6 @@ def ainic_unavailable_reason(rocprof_config: RocprofsysConfig) -> Optional[str]:
     """
     if not rocprof_config.capabilities.ai_nic_devices:
         return "No AI NIC devices found (amd-smi static reports no NETDEV entries)"
-        )
     return None
 
 
