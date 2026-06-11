@@ -1,26 +1,26 @@
 # Transport sources (paths relative to PROJECT_SOURCE_DIR to match SRC_FILES convention)
 set(NET_IB_CAST_SOURCES
-    src/transport/net_ib_limits.h
-    src/transport/net_ib_cast/net_ib_cast_inspect.h
-    src/transport/net_ib_cast/common_cast.h
-    src/transport/net_ib_cast/connect_cast.h
-    src/transport/net_ib_cast/gin_cast.h
-    src/transport/net_ib_cast/p2p_cast.h
-    src/transport/net_ib_cast/p2p_resiliency_cast.h
-    src/transport/net_ib_cast/p2p_resiliency_recovery_cast.h
-    src/transport/net_ib_cast/p2p_resiliency_recovery_internal.h
-    src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.h
-    src/transport/net_ib_cast/common.cc
-    src/transport/net_ib_cast/connect.cc
-    src/transport/net_ib_cast/gdr.cc
-    src/transport/net_ib_cast/init.cc
-    src/transport/net_ib_cast/p2p.cc
-    src/transport/net_ib_cast/p2p_resiliency.cc
-    src/transport/net_ib_cast/p2p_resiliency_recovery.cc
-    src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc
-    src/transport/net_ib_cast/reg.cc
-    src/transport/net_ib_cast/scheduler.cc
-    src/transport/net_ib_cast/gin.cc
+    #src/transport/net_ib_limits.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_cast_inspect.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/common_cast.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/connect_cast.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/gin_cast.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_cast.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_cast.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_recovery_cast.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_recovery_internal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_recovery_ainic.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/common.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/connect.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/gdr.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/init.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_recovery.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_recovery_ainic.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/scheduler.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/gin.cc
 )
 
 # The cast headers (common_cast.h, p2p_cast.h, etc.) live in this directory.
@@ -28,8 +28,8 @@ set(NET_IB_CAST_SOURCES
 # we pass that path via NET_IB_CAST_INCLUDE_DIRS to the parent scope where it
 # is forwarded to target_include_directories(rccl ...).
 set(NET_IB_CAST_INCLUDE_DIRS
-    "${CMAKE_BINARY_DIR}/hipify/src/transport/net_ib_cast"
-    "${CMAKE_BINARY_DIR}/hipify/src/transport"
+    "${HIPIFY_SRC}/transport/net_ib_cast"
+    "${HIPIFY_SRC}/transport"
     PARENT_SCOPE)
 
 # Propagate sources to parent scope so src/CMakeLists.txt can use ${NET_IB_CAST_SOURCES}
