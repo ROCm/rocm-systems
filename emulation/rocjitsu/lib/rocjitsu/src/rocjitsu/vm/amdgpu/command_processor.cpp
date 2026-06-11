@@ -156,8 +156,30 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
   if (dispatch_threads_ == threads)
     return;
   dispatch_threads_ = threads;
+  dispatch_pool_.reset();
   for (auto *spi : spis_)
     spi->reset_dispatch_pool();
+}
+
+bool CommandProcessor::run_active_cus(uint32_t threads) {
+  // Gather every active CU across all SEs into one task set so a single
+  // fork-join balances them across host threads (vs one barrier per SE).
+  active_cu_scratch_.clear();
+  for (auto *spi : spis_)
+    spi->collect_active_cus(active_cu_scratch_);
+  if (active_cu_scratch_.empty())
+    return false;
+
+  uint32_t effective = std::min<uint32_t>(threads, active_cu_scratch_.size());
+  if (effective > 1) {
+    if (!dispatch_pool_ || dispatch_pool_->thread_count() < effective)
+      dispatch_pool_ = std::make_unique<CpuDispatchPool>(effective);
+    dispatch_pool_->run(active_cu_scratch_, effective);
+  } else {
+    for (auto *cu : active_cu_scratch_)
+      cu->run_quantum();
+  }
+  return true;
 }
 
 void CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavefront *wf,
@@ -1182,8 +1204,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
     // the CUs directly.
     bool ran = false;
     if (!spis_.empty()) {
-      for (auto *spi : spis_)
-        ran |= spi->run_active_cus_once(dispatch_threads_);
+      ran = run_active_cus(dispatch_threads_);
     } else {
       for (auto *cu : cus_) {
         if (cu->has_active_wfs()) {

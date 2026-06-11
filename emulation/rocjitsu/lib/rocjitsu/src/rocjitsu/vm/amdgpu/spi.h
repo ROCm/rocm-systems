@@ -131,6 +131,18 @@ public:
     return count;
   }
 
+  /// @brief Append this SE's active CUs to @p out for CP-wide co-scheduling.
+  ///
+  /// @details Lets the command processor gather every active CU across all of
+  /// its SEs into a single dispatch-pool fork-join, instead of one (often
+  /// under-filled) fork-join per SE. Larger task sets balance better across
+  /// host threads and cut the number of barriers per CP step.
+  void collect_active_cus(std::vector<ComputeUnitCore *> &out) const {
+    for (auto *cu : cus_)
+      if (cu->has_active_wfs())
+        out.push_back(cu);
+  }
+
   /// @brief Execute one functional quantum on each active CU.
   ///
   /// @details Drives wavefront execution for this SE's CUs, fanning out

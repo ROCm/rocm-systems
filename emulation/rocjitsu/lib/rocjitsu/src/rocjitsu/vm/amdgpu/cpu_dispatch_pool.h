@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -26,6 +27,12 @@ namespace amdgpu {
 /// across the calling thread plus up to N-1 workers. Each CU is executed by
 /// exactly one thread per run() (no intra-CU parallelism). run() returns when
 /// all CUs have completed their quantum.
+///
+/// Task hand-out is lock-free: workers and the calling thread claim CUs with a
+/// single atomic fetch_add on @ref next_task_, and signal completion by
+/// decrementing @ref remaining_. The mutex is held only for the wakeup/teardown
+/// condition-variable predicates, never on the per-CU hot path. This keeps
+/// scaling from collapsing into lock contention when many short quanta retire.
 class CpuDispatchPool {
 public:
   explicit CpuDispatchPool(uint32_t threads) {
@@ -63,40 +70,39 @@ public:
     {
       std::lock_guard<std::mutex> lock(mutex_);
       tasks_.assign(tasks.begin(), tasks.end());
-      next_task_ = 0;
-      active_workers_ = 0;
-      started_workers_ = 0;
-      target_workers_ = worker_goal;
+      task_count_ = tasks_.size();
+      next_task_.store(0, std::memory_order_relaxed);
+      remaining_.store(task_count_, std::memory_order_relaxed);
       ++generation_;
     }
     for (uint32_t i = 0; i < worker_goal; ++i)
       work_cv_.notify_one();
 
-    while (auto *cu = take_task()) {
-      cu->run_quantum();
-      finish_task();
-    }
+    // The calling thread participates as one of the workers.
+    drain_tasks();
 
     std::unique_lock<std::mutex> lock(mutex_);
-    done_cv_.wait(lock, [this]() { return next_task_ >= tasks_.size() && active_workers_ == 0; });
+    done_cv_.wait(lock, [this]() { return remaining_.load(std::memory_order_acquire) == 0; });
     tasks_.clear();
-    target_workers_ = 0;
+    task_count_ = 0;
   }
 
 private:
-  ComputeUnitCore *take_task() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (next_task_ >= tasks_.size())
-      return nullptr;
-    ++active_workers_;
-    return tasks_[next_task_++];
-  }
-
-  void finish_task() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    --active_workers_;
-    if (next_task_ >= tasks_.size() && active_workers_ == 0)
-      done_cv_.notify_one();
+  /// @brief Claim and execute CUs until the task queue is drained.
+  ///
+  /// Lock-free: each claim is one atomic fetch_add; the last completion wakes
+  /// the thread blocked in run() via done_cv_.
+  void drain_tasks() {
+    while (true) {
+      size_t i = next_task_.fetch_add(1, std::memory_order_relaxed);
+      if (i >= task_count_)
+        return;
+      tasks_[i]->run_quantum();
+      if (remaining_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        done_cv_.notify_one();
+      }
+    }
   }
 
   void worker_loop(std::stop_token stop) {
@@ -109,19 +115,11 @@ private:
       if (stopping_ || stop.stop_requested())
         return;
       seen_generation = generation_;
-      if (started_workers_ >= target_workers_)
-        continue;
-      ++started_workers_;
       lock.unlock();
 
-      // Same task-grab/accounting protocol as the main thread in run();
-      // finish_task() notifies done_cv_ when the last task retires.
-      while (auto *cu = take_task()) {
-        cu->run_quantum();
-        finish_task();
-      }
-
-      lock.lock();
+      // Lock-free task draining; extra woken workers simply observe an empty
+      // queue and loop back to wait.
+      drain_tasks();
     }
   }
 
@@ -130,10 +128,9 @@ private:
   std::condition_variable done_cv_;
   std::vector<std::jthread> workers_;
   std::vector<ComputeUnitCore *> tasks_;
-  size_t next_task_ = 0;
-  size_t active_workers_ = 0;
-  uint32_t started_workers_ = 0;
-  uint32_t target_workers_ = 0;
+  size_t task_count_ = 0;
+  std::atomic<size_t> next_task_ = 0;
+  std::atomic<size_t> remaining_ = 0;
   uint64_t generation_ = 0;
   bool stopping_ = false;
 };

@@ -22,6 +22,7 @@
 
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -96,6 +97,9 @@ public:
   SdmaPacketDialect sdma_packet_dialect() const { return sdma_packet_dialect_; }
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }
+  /// @brief Run one quantum on every active CU across all SEs in a single
+  /// fork-join across up to @p threads host threads. Returns true if any ran.
+  bool run_active_cus(uint32_t threads);
   /// @brief Update doorbell_base for all queues belonging to a process.
   /// @details Called when the doorbell page is mmap'd after queue creation.
   void set_doorbell_base(uint32_t process_id, void *base);
@@ -236,6 +240,11 @@ private:
   uint32_t next_dispatch_id_ = 1;
   size_t total_dispatched_ = 0;
   uint32_t dispatch_threads_ = 1;
+
+  // CP-wide worker pool: fork-joins every active CU across all SEs in one
+  // barrier per step (see run_active_cus()), replacing per-SE pools.
+  std::unique_ptr<CpuDispatchPool> dispatch_pool_;
+  std::vector<ComputeUnitCore *> active_cu_scratch_;
 
   simdojo::Event doorbell_event_{this, simdojo::EventType::TIMER_CALLBACK};
   std::recursive_mutex hw_queue_mutex_;
