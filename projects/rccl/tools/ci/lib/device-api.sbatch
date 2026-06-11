@@ -7,6 +7,7 @@
 #SBATCH --time=02:00:00
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
+#SBATCH --propagate=NONE
 #
 # Compute-node orchestrator for the RCCL device-API CI job, invoked from
 # .github/workflows/rccl-device-api.yml via `sbatch --wait`. On one 8-GPU node:
@@ -128,5 +129,8 @@ rccl_tests_dir="${workdir}/projects/rccl-tests"
 
 # 5) Benchmarks.
 echo "==> [5/5] run benchmarks"
+# GIN/RoCE QP creation pins memory; a low memlock limit makes ibv_create_qp fail with ENOMEM. Raise it for the mpirun ranks and log it.
+ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
+echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"
 export RCCL_CI_DEBUG="${RCCL_CI_DEBUG:-1}"
 "${ci_dir}/run-device-api-ci.sh"

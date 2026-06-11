@@ -13,7 +13,7 @@
 
   "base_env": ["NCCL_CUMEM_ENABLE=1", "HSA_FORCE_FINE_GRAIN_PCIE=1"],
 
-  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET,TUNING"],
+  "debug_env": ["NCCL_DEBUG=INFO", "NCCL_DEBUG_SUBSYS=INIT,NET"],
 
   "suites": [
     {
