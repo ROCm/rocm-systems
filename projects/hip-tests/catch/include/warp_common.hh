@@ -446,13 +446,17 @@ T calculateExpected(T* output,
 
   if constexpr (std::is_same<Op, MinOp<T>>::value) {
     if constexpr (std::is_same<T, __half>::value) {
-      id = 65504;
+      id = HIPRT_INF_FP16;
+    } else if (std::is_floating_point<T>::value) {
+      id = std::numeric_limits<T>::infinity();
     } else {
       id = std::numeric_limits<T>::max();
     }
   } else if constexpr (std::is_same<Op, MaxOp<T>>::value) {
     if constexpr (std::is_same<T, __half>::value) {
-      id = -65504;
+      id = -HIPRT_INF_FP16;
+    } else if (std::is_floating_point<T>::value) {
+      id = -std::numeric_limits<T>::infinity();
     } else {
       id = std::numeric_limits<T>::lowest();
     }

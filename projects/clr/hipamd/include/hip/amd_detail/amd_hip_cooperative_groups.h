@@ -1423,7 +1423,9 @@ template <class T>
 struct CGIdentity<T, cooperative_groups::less<T>> {
   __CG_QUALIFIER__ T operator()()
   {
-    return __hip_internal::NumericLimits<T>::maximum();
+    // CUDA would return 0 in this case. But in our case we mimic what __ockl_wfscan_*
+    // would do
+    return __hip_internal::NumericLimits<T>::infinity();
   }
 };
 
@@ -1431,7 +1433,7 @@ template <class T>
 struct CGIdentity<T, cooperative_groups::greater<T>> {
   __CG_QUALIFIER__ T operator()()
   {
-    return __hip_internal::NumericLimits<T>::lowest();
+    return -__hip_internal::NumericLimits<T>::infinity();
   }
 };
 
