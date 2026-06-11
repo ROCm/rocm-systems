@@ -7,6 +7,7 @@
 #include "util/bit.h"
 
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -419,6 +420,31 @@ inline native<double> floor_simd(native<double> a) {
 inline native<double> rndne_simd(native<double> a) {
   return round_fixup_simd<double>(a, [](native<double> x) { return stdx::nearbyint(x); });
 }
+
+/// Scalar round-to-integer matching the round_fixup_simd / AMD-hardware NaN
+/// behavior on every compiler. clang lowers std::floor/ceil/trunc to the
+/// roundss/roundsd instruction, which quiets a signaling NaN (sign + payload
+/// preserved, quiet bit set) — exactly what the SIMD fast paths and the GPU
+/// produce. gcc's glibc floorf/floor/ceil/trunc instead pass an sNaN through
+/// verbatim, so the generated scalar body would disagree with its own SIMD
+/// fast path (and with hardware) under gcc. Quiet explicitly there; on clang
+/// this is an idempotent no-op left to the compiler. (std::nearbyint already
+/// quiets under glibc, so rndne needs no fixup.)
+#if defined(__GNUC__) && !defined(__clang__)
+template <class F> inline F quiet_snan_scalar(F a, F r) {
+  using U = std::conditional_t<sizeof(F) == 4, uint32_t, uint64_t>;
+  constexpr U kQuiet = U(1) << (sizeof(F) == 4 ? 22 : 51);
+  return std::isnan(a) ? std::bit_cast<F>(std::bit_cast<U>(a) | kQuiet) : r;
+}
+#else
+template <class F> inline F quiet_snan_scalar(F /*a*/, F r) { return r; }
+#endif
+inline float floor_scalar(float a) { return quiet_snan_scalar(a, std::floor(a)); }
+inline double floor_scalar(double a) { return quiet_snan_scalar(a, std::floor(a)); }
+inline float ceil_scalar(float a) { return quiet_snan_scalar(a, std::ceil(a)); }
+inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a)); }
+inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
+inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
 /// Flush f32 denormals to sign-preserving zero (FTZ). Branchless vector port of
 /// `amdgpu::transcendental::flush_denorm_f32`: a lane with biased exponent 0 and

@@ -1632,14 +1632,15 @@ inline void execute_s_flbit_i32_i64_sop1([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_s_floor_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  float result = std::floor(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
+  float result =
+      util::floor_scalar(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, util::f32_to_f16(result));
   wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_floor_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  float result = std::floor(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
+  float result = util::floor_scalar(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
   inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
   wf.write_scc((result != 0.0f));
 }
@@ -2510,14 +2511,15 @@ inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wa
 
 template <typename Inst>
 inline void execute_s_trunc_f16_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  float result = std::trunc(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
+  float result =
+      util::trunc_scalar(util::f16_to_f32(static_cast<uint16_t>(inst.ssrc0.read_scalar(wf))));
   inst.sdst.write_scalar(wf, util::f32_to_f16(result));
   wf.write_scc((result != 0));
 }
 
 template <typename Inst>
 inline void execute_s_trunc_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  float result = std::trunc(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
+  float result = util::trunc_scalar(std::bit_cast<float>(inst.ssrc0.read_scalar(wf)));
   inst.sdst.write_scalar(wf, std::bit_cast<uint32_t>(result));
   wf.write_scc((result != 0.0f));
 }
@@ -3525,7 +3527,7 @@ inline void execute_v_ceil_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         util::f32_to_f16(std::ceil(util::f16_to_f32(
+                         util::f32_to_f16(util::ceil_scalar(util::f16_to_f32(
                              static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
@@ -3539,7 +3541,7 @@ inline void execute_v_ceil_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
                            float v = [&]() {
-                             float v = std::ceil([&]() {
+                             float v = util::ceil_scalar([&]() {
                                float sv = util::f16_to_f32(
                                    static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
                                if (inst.inst_.abs & (1u << 0))
@@ -3570,9 +3572,9 @@ inline void execute_v_ceil_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(std::ceil(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(util::ceil_scalar(
+                             std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -3585,7 +3587,7 @@ inline void execute_v_ceil_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
                            float v = [&]() {
-                             float v = std::ceil([&]() {
+                             float v = util::ceil_scalar([&]() {
                                float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
                                if (inst.inst_.abs & (1u << 0))
                                  sv = std::fabs(sv);
@@ -3615,9 +3617,9 @@ inline void execute_v_ceil_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane64(
-        wf, lane,
-        std::bit_cast<uint64_t>(std::ceil(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
+    inst.vdst.write_lane64(wf, lane,
+                           std::bit_cast<uint64_t>(util::ceil_scalar(
+                               std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -3630,7 +3632,7 @@ inline void execute_v_ceil_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]
       continue;
     inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
                              double v = [&]() {
-                               double v = std::ceil([&]() {
+                               double v = util::ceil_scalar([&]() {
                                  double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
                                  if (inst.inst_.abs & (1u << 0))
                                    sv = std::fabs(sv);
@@ -11390,7 +11392,7 @@ inline void execute_v_floor_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         util::f32_to_f16(std::floor(util::f16_to_f32(
+                         util::f32_to_f16(util::floor_scalar(util::f16_to_f32(
                              static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
@@ -11404,7 +11406,7 @@ inline void execute_v_floor_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
                            float v = [&]() {
-                             float v = std::floor([&]() {
+                             float v = util::floor_scalar([&]() {
                                float sv = util::f16_to_f32(
                                    static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
                                if (inst.inst_.abs & (1u << 0))
@@ -11435,9 +11437,9 @@ inline void execute_v_floor_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(std::floor(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(util::floor_scalar(
+                             std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -11450,7 +11452,7 @@ inline void execute_v_floor_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
                            float v = [&]() {
-                             float v = std::floor([&]() {
+                             float v = util::floor_scalar([&]() {
                                float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
                                if (inst.inst_.abs & (1u << 0))
                                  sv = std::fabs(sv);
@@ -11481,8 +11483,8 @@ inline void execute_v_floor_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane64(wf, lane,
-                           std::bit_cast<uint64_t>(
-                               std::floor(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
+                           std::bit_cast<uint64_t>(util::floor_scalar(
+                               std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -11495,7 +11497,7 @@ inline void execute_v_floor_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
                              double v = [&]() {
-                               double v = std::floor([&]() {
+                               double v = util::floor_scalar([&]() {
                                  double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
                                  if (inst.inst_.abs & (1u << 0))
                                    sv = std::fabs(sv);
@@ -20247,7 +20249,7 @@ inline void execute_v_trunc_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane(wf, lane,
-                         util::f32_to_f16(std::trunc(util::f16_to_f32(
+                         util::f32_to_f16(util::trunc_scalar(util::f16_to_f32(
                              static_cast<uint16_t>(inst.src0.read_lane(wf, lane))))));
   }
 }
@@ -20261,7 +20263,7 @@ inline void execute_v_trunc_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     inst.vdst.write_lane(wf, lane, util::f32_to_f16([&]() {
                            float v = [&]() {
-                             float v = std::trunc([&]() {
+                             float v = util::trunc_scalar([&]() {
                                float sv = util::f16_to_f32(
                                    static_cast<uint16_t>(inst.src0.read_lane(wf, lane)));
                                if (inst.inst_.abs & (1u << 0))
@@ -20292,9 +20294,9 @@ inline void execute_v_trunc_f32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    inst.vdst.write_lane(
-        wf, lane,
-        std::bit_cast<uint32_t>(std::trunc(std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
+    inst.vdst.write_lane(wf, lane,
+                         std::bit_cast<uint32_t>(util::trunc_scalar(
+                             std::bit_cast<float>(inst.src0.read_lane(wf, lane)))));
   }
 }
 
@@ -20307,7 +20309,7 @@ inline void execute_v_trunc_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     inst.vdst.write_lane(wf, lane, std::bit_cast<uint32_t>([&]() {
                            float v = [&]() {
-                             float v = std::trunc([&]() {
+                             float v = util::trunc_scalar([&]() {
                                float sv = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
                                if (inst.inst_.abs & (1u << 0))
                                  sv = std::fabs(sv);
@@ -20338,8 +20340,8 @@ inline void execute_v_trunc_f64_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
     if (!(exec & (1ULL << lane)))
       continue;
     inst.vdst.write_lane64(wf, lane,
-                           std::bit_cast<uint64_t>(
-                               std::trunc(std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
+                           std::bit_cast<uint64_t>(util::trunc_scalar(
+                               std::bit_cast<double>(inst.src0.read_lane64(wf, lane)))));
   }
 }
 
@@ -20352,7 +20354,7 @@ inline void execute_v_trunc_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
       continue;
     inst.vdst.write_lane64(wf, lane, std::bit_cast<uint64_t>([&]() {
                              double v = [&]() {
-                               double v = std::trunc([&]() {
+                               double v = util::trunc_scalar([&]() {
                                  double sv = std::bit_cast<double>(inst.src0.read_lane64(wf, lane));
                                  if (inst.inst_.abs & (1u << 0))
                                    sv = std::fabs(sv);
