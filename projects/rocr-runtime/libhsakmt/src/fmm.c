@@ -43,6 +43,7 @@
 #include <numaif.h>
 #include "rbtree.h"
 #include <amdgpu.h>
+#include "xf86drm.h"
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>

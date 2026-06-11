@@ -1155,6 +1155,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HSAuint32 NodeId,
 	if (ret) {
 		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after MAP: %d\n", __func__, ret);
 		return HSAKMT_STATUS_ERROR;
+	}
 
 	return HSAKMT_STATUS_SUCCESS;
 }
@@ -1213,6 +1214,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HSAuint32 NodeId,
 	if (ret) {
 		pr_err("[%s] DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT failed after UNMAP: %d\n", __func__, ret);
 		return HSAKMT_STATUS_ERROR;
+	}
 
 	return HSAKMT_STATUS_SUCCESS;
 }
