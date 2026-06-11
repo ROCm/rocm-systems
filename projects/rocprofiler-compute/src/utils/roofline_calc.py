@@ -201,7 +201,7 @@ def sanitize_ai_value(value: float) -> float:
     return value if value and value not in excluded_values else 0
 
 
-def sanitize_mem_level(mem_level: Union[list, str], gpu_model: str) -> list:
+def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list[str]:
     """
     Ensure cache level requests through --mem-level roofline analysis option
     are supported on the architecture, and have been normalized."
