@@ -635,21 +635,25 @@ class RocProfCompute:
         if not getattr(args, "pc_sampling", False):
             return
 
-        interval_defaults = {"stochastic": 1048576, "host_trap": 512}
-        stochastic_min_interval = 65536
+        stochastic_default_interval_in_cycles = 1048576
+        stochastic_min_interval_in_cycles = 65536
+        host_trap_default_interval_in_microseconds = 512
 
         method = args.pc_sampling_method
         if args.pc_sampling_interval is None:
-            args.pc_sampling_interval = interval_defaults[method]
+            if method == "stochastic":
+                args.pc_sampling_interval = stochastic_default_interval_in_cycles
+            else:
+                args.pc_sampling_interval = host_trap_default_interval_in_microseconds
             return
 
         interval = args.pc_sampling_interval
         if method == "stochastic":
             is_power_of_two = interval > 0 and interval & (interval - 1) == 0
-            if not is_power_of_two or interval < stochastic_min_interval:
+            if not is_power_of_two or interval < stochastic_min_interval_in_cycles:
                 console_error(
                     "--pc-sampling-interval for stochastic sampling must be a "
-                    f"power of 2 and at least {stochastic_min_interval} "
+                    f"power of 2 and at least {stochastic_min_interval_in_cycles} "
                     f"(got {interval})."
                 )
         elif interval <= 0:
