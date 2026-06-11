@@ -2988,4 +2988,175 @@ TEST_F(NetIbMPITest, FaultInjCastOpsPostRecvErrno) {
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
+// =============================================================================
+// Test: FaultInjCastOpsPollCqInjectCountFinite
+//
+// Ops-overload path, poll_cq REWRITE mode with a FINITE injectCount: arms a
+// bounded budget of whitelisted WR_FLUSH_ERR per QP, exercising the shim's
+// "pollInjectCount > 0 → decrement" branch (the unlimited/idle tests miss it).
+// CAST rotates QP per request as (id + qpIndex) % nqps, so Phase 1 drives
+// actualNqps+1 transfers to drain every armed QP before Phase 2 checks recovery.
+//
+// Verifies: the fault stops after the per-QP budget is spent and a follow-up
+//           transfer completes cleanly with no new fatal error.
+// Requires: WRR scheduler env vars (CAST_ENV_CHECK_OR_SKIP); arms all QPs.
+// =============================================================================
+TEST_F(NetIbMPITest, FaultInjCastOpsPollCqInjectCountFinite) {
+    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit))
+        << "Test requires exactly " << kExactTwoProcesses << " processes";
+
+    CAST_ENV_CHECK_OR_SKIP();
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 1024;
+    std::vector<char> sendBuf(kMsgSize), recvBuf(kMsgSize);
+    for (size_t i = 0; i < kMsgSize; i++) sendBuf[i] = static_cast<char>(i & 0xFF);
+    memset(recvBuf.data(), 0, kMsgSize);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf.data())
+                                : static_cast<void*>(sendBuf.data());
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    const int actualNqps = GetActualNqps(sendComm, recvComm, buf, kMsgSize, /*tag=*/740, mhandle);
+    ASSERT_GT(actualNqps, 0);
+
+    FaultInjectResult r1 = {};
+    r1.actualNqps = actualNqps;
+    if (rank == 1) {
+        // Rewrite mode, FINITE budget per QP, whitelisted status so the connection
+        // survives and we can verify the post-budget clean path. Arm EVERY QP (not
+        // just QP 0): a small message rides a single WRR-chosen QP that may not be
+        // QP 0, so arming all QPs guarantees a real completion gets its status
+        // rewritten and the finite pollInjectCount>0 decrement branch is exercised.
+        r1.setErrRet = static_cast<int>(ncclSuccess);
+        for (int q = 0; q < actualNqps; ++q) {
+            ncclResult_t ret = ncclIbCastFaultOpsSetPollCqError(
+                sendComm, q, kWcWrFlushErr, /*injectCount=*/1, /*injectWhenIdle=*/false);
+            if (ret != ncclSuccess && r1.setErrRet == static_cast<int>(ncclSuccess))
+                r1.setErrRet = static_cast<int>(ret);
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // ---- Phase 1: drain the per-QP fault budget on EVERY QP ----
+    // CAST selects the QP per request as (req->id + qpIndex) % nqps
+    // (IbCastCommBaseGetQpForRequest in common_cast.h), so a single transfer
+    // spends only ONE QP's injectCount=1 budget. We armed every QP, so we must
+    // drive at least actualNqps sequential transfers — their rotating request
+    // ids hit each QP at least once — before the budget is fully exhausted.
+    // Driving fewer would leave some QPs armed, and Phase 2 could still land on
+    // an unspent QP and see another injected WR_FLUSH_ERR (the flakiness this
+    // structure removes). The extra round guards against a transfer that splits
+    // across two QPs and leaves one budget unspent.
+    const int drainRounds = actualNqps + 1;
+    for (int i = 0; i < drainRounds; ++i) {
+        const int tag = 741 + i;
+        if (rank == 0) {
+            void*  bufs[1]    = {buf};
+            size_t sizes[1]   = {kMsgSize};
+            int    tags[1]    = {tag};
+            void*  handles[1] = {mhandle};
+            void*  recvReq    = nullptr;
+            ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq), ncclSuccess);
+            bool done1 = false;
+            for (int poll = 0; poll < 300; poll++) {
+                int done = 0, sz = 0;
+                if (TestRequest(recvReq, &done, &sz) != ncclSuccess) break;
+                if (done) { done1 = true; break; }
+                usleep(kPollIntervalUs);
+            }
+            if (!done1) DrainRecvRequest(recvReq);
+        } else {
+            void* sendReq = nullptr;
+            ncclResult_t sendRet = ncclSuccess;
+            for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+                sendRet = PostSend(sendComm, buf, kMsgSize, tag, mhandle, &sendReq);
+                if (sendRet != ncclSuccess || sendReq != nullptr) break;
+                usleep(kPollIntervalUs);
+            }
+            if (sendRet == ncclSuccess && sendReq != nullptr) {
+                for (int poll = 0; poll < 300; poll++) {
+                    int done = 0, sz = 0;
+                    if (TestRequest(sendReq, &done, &sz) != ncclSuccess) break;
+                    if (done) break;
+                    usleep(kPollIntervalUs);
+                }
+            }
+            if (sendRet != ncclSuccess && r1.sendRet == static_cast<int>(ncclSuccess))
+                r1.sendRet = static_cast<int>(sendRet);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    // ---- Phase 2: after the budget is spent, a clean transfer must pass ----
+    bool phase2RecvDone = false;
+    void* recvReq2 = nullptr;
+    int phase2Fatal = 0;
+    if (rank == 0) {
+        void*  bufs[1]    = {buf};
+        size_t sizes[1]   = {kMsgSize};
+        int    tags[1]    = {800};
+        void*  handles[1] = {mhandle};
+        ASSERT_EQ(PostRecv(recvComm, 1, bufs, sizes, tags, handles, &recvReq2), ncclSuccess);
+        for (int poll = 0; poll < 300; poll++) {
+            int done = 0, sz = 0;
+            if (TestRequest(recvReq2, &done, &sz) != ncclSuccess) break;
+            if (done) { phase2RecvDone = true; break; }
+            usleep(kPollIntervalUs);
+        }
+    } else {
+        void* sendReq = nullptr;
+        ncclResult_t sendRet = ncclSuccess;
+        for (int attempt = 0; attempt < kMaxRetryAttempts; attempt++) {
+            sendRet = PostSend(sendComm, buf, kMsgSize, 800, mhandle, &sendReq);
+            if (sendRet != ncclSuccess || sendReq != nullptr) break;
+            usleep(kPollIntervalUs);
+        }
+        if (sendRet == ncclSuccess && sendReq != nullptr) {
+            for (int poll = 0; poll < 300; poll++) {
+                int done = 0, sz = 0;
+                if (TestRequest(sendReq, &done, &sz) != ncclSuccess) break;
+                if (done) break;
+                usleep(kPollIntervalUs);
+            }
+        }
+        ncclIbCastFaultGetFatalCount(sendComm, &phase2Fatal);
+        r1.phase2FatalCount = phase2Fatal;
+        r1.clearRet = static_cast<int>(ncclIbCastFaultOpsClear(sendComm));
+        MPI_Send(&r1, sizeof(r1), MPI_BYTE, 0, kFaultResultMpiTag, MPI_COMM_WORLD);
+    }
+
+    if (rank == 0) {
+        MPI_Recv(&r1, sizeof(r1), MPI_BYTE, 1, kFaultResultMpiTag, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+        EXPECT_EQ(r1.setErrRet, static_cast<int>(ncclSuccess))
+            << "rank 1: arming finite-count poll_cq fault failed with " << r1.setErrRet;
+        // Phase 2 (after the per-QP injectCount=1 budget is spent) must be clean:
+        // the receive completes and no fatal error is recorded on the sender.
+        EXPECT_TRUE(phase2RecvDone)
+            << "phase 2 receive did not complete after the finite fault budget was spent";
+        EXPECT_EQ(r1.phase2FatalCount, 0)
+            << "phase 2 sender saw fatalCount=" << r1.phase2FatalCount
+            << " after the finite WR_FLUSH_ERR budget should have been exhausted";
+        EXPECT_EQ(r1.clearRet, static_cast<int>(ncclSuccess))
+            << "rank 1: ncclIbCastFaultOpsClear failed with " << r1.clearRet;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0 && !phase2RecvDone) DrainRecvRequest(recvReq2);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */

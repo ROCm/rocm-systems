@@ -1073,6 +1073,11 @@
           "name": "FaultInj_Cast_OpsPostRecvErrno",
           "description": "CAST ops-overload: real ibv_post_recv forced to return EAGAIN via shimmed ops table on all receiver QPs; recv errors or never completes",
           "test_filter": "NetIbMPITest.FaultInjCastOpsPostRecvErrno"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqInjectCountFinite",
+          "description": "CAST ops-overload: poll_cq rewrite with finite injectCount=1 per QP (WR_FLUSH_ERR); fault fires then stops, post-budget transfer is clean",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqInjectCountFinite"
         }
       ]
     },
