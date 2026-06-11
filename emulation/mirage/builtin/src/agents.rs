@@ -1,8 +1,8 @@
 //! Strongly-typed builtin [`AgentDef`]s.
 //!
 //! Each agent mirrors one of the rocjitsu `configs/*.json` files:
-//! `MI300X` follows `amdgpu_cdna4.json`, `MI350X` follows
-//! `amdgpu_cdna3.json`, and `MI450X` follows `amdgpu_gfx1250.json`.
+//! `MI300X` follows `amdgpu_cdna3.json`, `MI350X` follows
+//! `amdgpu_cdna4.json`, and `MI450X` follows `amdgpu_gfx1250.json`.
 //! All three share the same `soc -> {vram, iod, xcd -> {l2, cp,
 //! se -> cu}}` component tree and six link patterns; they differ
 //! only in their device identity, the IOD fan-out, and the per-CU
@@ -23,59 +23,10 @@ pub fn agents() -> Vec<(&'static str, AgentDef)> {
 }
 
 /// `MI300X` builtin agent (registry key `MI300X`), mirroring the
-/// rocjitsu `amdgpu_cdna4.json` config: `arch = cdna4`, marketing
-/// name "AMD Instinct MI350X", and an 8-XCD / 4-SE / 8-CU shader
-/// fabric over a 2-IOD memory tier.
-pub fn mi300x() -> AgentDef {
-    AgentDef {
-        vm: VirtualMachineConfig {
-            arch: "cdna4".to_string(),
-            gpu: AmdgpuConfig {
-                num_xcds: 0,
-                num_iods: 0,
-                memory: None,
-                device: KfdDeviceInfo {
-                    gpu_id: 38144,
-                    gfx_target_version: 90500,
-                    vendor_id: 4098,
-                    device_id: 5892,
-                    family_id: 160,
-                    unique_id: 5929628898254127105,
-                    marketing_name: "AMD Instinct MI350X".to_string(),
-                    // First DRM render node (`/dev/dri/renderD128`); the
-                    // rocjitsu schema defaults this to 128 and a 0 here
-                    // maps the emulated GPU onto a non-existent render
-                    // node, so HSA aborts with OUT_OF_RESOURCES.
-                    drm_render_minor: 128,
-                    simd_count: 1024,
-                    max_waves_per_simd: 8,
-                    num_shader_engines: 4,
-                    num_shader_arrays_per_engine: 2,
-                    num_cu_per_sh: 4,
-                    simd_per_cu: 4,
-                    wave_front_size: 64,
-                    local_mem_size: 309237645312,
-                    lds_size_kb: 160,
-                    mem_width: 8192,
-                    mem_clk_max: 1600,
-                    l2_size_kb: 4096,
-                    num_sdma_engines: 5,
-                    num_sdma_xgmi_engines: 12,
-                    num_cp_queues: 128,
-                    max_engine_clk_fcompute: 2700,
-                    ..Default::default()
-                },
-            },
-        },
-        topology: topology(2, "4", "32", "104", "512", "160"),
-    }
-}
-
-/// `MI350X` builtin agent (registry key `MI350X`), mirroring the
 /// rocjitsu `amdgpu_cdna3.json` config: `arch = cdna3`, marketing
 /// name "AMD Instinct MI300X", and an 8-XCD / 4-SE / 8-CU shader
 /// fabric over a 4-IOD memory tier.
-pub fn mi350x() -> AgentDef {
+pub fn mi300x() -> AgentDef {
     AgentDef {
         vm: VirtualMachineConfig {
             arch: "cdna3".to_string(),
@@ -117,6 +68,55 @@ pub fn mi350x() -> AgentDef {
             },
         },
         topology: topology(4, "2", "32", "104", "512", "64"),
+    }
+}
+
+/// `MI350X` builtin agent (registry key `MI350X`), mirroring the
+/// rocjitsu `amdgpu_cdna4.json` config: `arch = cdna4`, marketing
+/// name "AMD Instinct MI350X", and an 8-XCD / 4-SE / 8-CU shader
+/// fabric over a 2-IOD memory tier.
+pub fn mi350x() -> AgentDef {
+    AgentDef {
+        vm: VirtualMachineConfig {
+            arch: "cdna4".to_string(),
+            gpu: AmdgpuConfig {
+                num_xcds: 0,
+                num_iods: 0,
+                memory: None,
+                device: KfdDeviceInfo {
+                    gpu_id: 38144,
+                    gfx_target_version: 90500,
+                    vendor_id: 4098,
+                    device_id: 5892,
+                    family_id: 160,
+                    unique_id: 5929628898254127105,
+                    marketing_name: "AMD Instinct MI350X".to_string(),
+                    // First DRM render node (`/dev/dri/renderD128`); the
+                    // rocjitsu schema defaults this to 128 and a 0 here
+                    // maps the emulated GPU onto a non-existent render
+                    // node, so HSA aborts with OUT_OF_RESOURCES.
+                    drm_render_minor: 128,
+                    simd_count: 1024,
+                    max_waves_per_simd: 8,
+                    num_shader_engines: 4,
+                    num_shader_arrays_per_engine: 2,
+                    num_cu_per_sh: 4,
+                    simd_per_cu: 4,
+                    wave_front_size: 64,
+                    local_mem_size: 309237645312,
+                    lds_size_kb: 160,
+                    mem_width: 8192,
+                    mem_clk_max: 1600,
+                    l2_size_kb: 4096,
+                    num_sdma_engines: 5,
+                    num_sdma_xgmi_engines: 12,
+                    num_cp_queues: 128,
+                    max_engine_clk_fcompute: 2700,
+                    ..Default::default()
+                },
+            },
+        },
+        topology: topology(2, "4", "32", "104", "512", "160"),
     }
 }
 
@@ -312,17 +312,18 @@ mod tests {
     fn mi300x_identity() {
         let a = mi300x();
         let d = &a.vm.gpu.device;
-        assert_eq!(d.marketing_name, "AMD Instinct MI350X");
+        assert_eq!(d.marketing_name, "AMD Instinct MI300X");
         assert_eq!(d.num_shader_engines, 4);
+        assert_eq!(d.simd_count, 1216);
         assert_eq!(a.topology.links.len(), 6);
     }
 
     #[test]
     fn mi350x_identity() {
         let d = mi350x().vm.gpu.device;
-        assert_eq!(d.marketing_name, "AMD Instinct MI300X");
+        assert_eq!(d.marketing_name, "AMD Instinct MI350X");
         assert_eq!(d.num_shader_engines, 4);
-        assert_eq!(d.simd_count, 1216);
+        assert_eq!(d.simd_count, 1024);
     }
 
     #[test]
