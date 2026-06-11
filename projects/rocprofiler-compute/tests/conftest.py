@@ -28,25 +28,8 @@ class ProfileModeImportGuard:
     """
     Import guard enforcing stdlib-only imports in profile mode.
 
-    Uses two hooks so a violation is caught regardless of cache state:
-        - builtins.__import__ wrapper: runs for every import statement, even when
-          the target is already in sys.modules (Python checks sys.modules before
-          sys.meta_path, so a cached package would otherwise slip past).
-        - sys.meta_path finder: catches dynamic, uncached imports done via
-          importlib that bypass builtins.__import__.
-
-    Python Version Compatibility:
-        - Python 3.10+: Full enforcement (uses sys.stdlib_module_names)
-        - Python 3.8-3.9: No-op mode (enforcement disabled, warning issued)
-
-    Usage:
-        with ProfileModeImportGuard():
-            # Python 3.10+: Import checking active, non-stdlib imports raise ImportError
-            # Python 3.8-3.9: No-op, all imports allowed (with warning)
-
-    Context Manager Protocol:
-        __enter__: Registers both hooks with Python's import system
-        __exit__: Unregisters both hooks after code execution completes
+    Full enforcement on Python 3.10+ (uses sys.stdlib_module_names); no-op with
+    a warning on 3.8-3.9.
     """
 
     _real_import = None
@@ -77,13 +60,7 @@ class ProfileModeImportGuard:
     ])
 
     def __enter__(self):
-        """
-        Register both import hooks with Python's import system.
-
-        Called automatically when entering 'with' block. Installs the
-        builtins.__import__ wrapper (catches cached imports) and the
-        sys.meta_path finder (catches dynamic uncached imports).
-        """
+        """Install both import hooks (Python 3.10+ only)."""
         if sys.version_info >= (3, 10):
             sys.meta_path.insert(0, self)
             self._real_import = builtins.__import__
@@ -99,12 +76,7 @@ class ProfileModeImportGuard:
         return self
 
     def __exit__(self, _exc_type, _exc_val, _exc_tb):
-        """
-        Unregister both import hooks from Python's import system.
-
-        Called automatically when exiting 'with' block. Restores the original
-        builtins.__import__ and removes the sys.meta_path finder.
-        """
+        """Restore builtins.__import__ and remove the meta_path finder."""
         if sys.version_info >= (3, 10):
             if self._real_import is not None:
                 builtins.__import__ = self._real_import
@@ -113,30 +85,16 @@ class ProfileModeImportGuard:
                 sys.meta_path.remove(self)
 
     def _guarded_import(self, name, *args, **kwargs):
-        """
-        Hook 1: replaces builtins.__import__ for the with block.
-
-        Runs for every import statement before the sys.modules lookup, so it
-        catches forbidden imports even when the package is already cached.
-        Only absolute imports (level == 0) are checked here: a relative import's
-        name is unresolved and always lands inside its already-checked parent
-        package, and hook 2 sees the fully-resolved submodule name anyway.
-        Delegates to the real importer once the check passes.
-        """
+        """Hook 1: builtins.__import__ wrapper; catches cached imports."""
+        # Relative imports (level > 0) resolve within their already-checked
+        # parent; hook 2 catches the resolved submodule, so only check absolute.
         level = args[3] if len(args) > 3 else kwargs.get("level", 0)
         if level == 0:
             self._raise_if_forbidden(name)
         return self._real_import(name, *args, **kwargs)
 
     def find_spec(self, fullname, path, target=None):
-        """
-        Hook 2: PEP 451 sys.meta_path finder.
-
-        Python consults meta_path only on a cache miss, so this covers dynamic
-        uncached imports (e.g. importlib.import_module) that bypass
-        builtins.__import__. Returns None for allowed modules to let normal
-        resolution proceed.
-        """
+        """Hook 2: meta_path finder; catches dynamic uncached imports."""
         self._raise_if_forbidden(fullname)
         return None
 

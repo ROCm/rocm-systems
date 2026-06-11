@@ -9,6 +9,11 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(
+    sys.version_info < (3, 10),
+    reason="ProfileModeImportGuard requires Python 3.10+ (sys.stdlib_module_names)",
+)
+
 
 def test_import_guard_allows_stdlib_and_project():
     """Verify ProfileModeImportGuard allows stdlib and project imports."""
@@ -64,11 +69,6 @@ def test_import_guard_blocks_non_stdlib():
     """Verify ProfileModeImportGuard blocks non-stdlib imports."""
     from conftest import ProfileModeImportGuard
 
-    if sys.version_info < (3, 10):
-        pytest.skip(
-            "ProfileModeImportGuard requires Python 3.10+ (sys.stdlib_module_names)"
-        )
-
     test_packages = ["pandas", "yaml", "numpy"]
 
     for package in test_packages:
@@ -84,26 +84,12 @@ def test_import_guard_blocks_non_stdlib():
 
 
 def test_import_guard_catches_already_cached_package():
-    """Verify the guard flags a forbidden import even when the package is
-    already in sys.modules.
-
-    Python checks sys.modules before sys.meta_path, so a meta_path finder alone
-    never sees a cached import. pandas is cached for the whole session (conftest
-    imports it via common.py at collection), which is exactly the real scenario:
-    a profile-mode `import pandas` must still be caught.
-    """
+    """Guard must flag a forbidden import even when it is already cached."""
     from conftest import ProfileModeImportGuard
 
-    if sys.version_info < (3, 10):
-        pytest.skip(
-            "ProfileModeImportGuard requires Python 3.10+ (sys.stdlib_module_names)"
-        )
-
-    # Ensure the package is cached, then confirm the guard still raises.
-    import pandas  # noqa: F401
-
+    # pandas is cached session-wide (conftest imports it via common.py); a
+    # meta_path finder alone never sees a cached import.
     assert "pandas" in sys.modules
-
     with pytest.raises(ImportError, match="PROFILE MODE DEPENDENCY VIOLATION"):
         with ProfileModeImportGuard():
-            import pandas as pd  # noqa: F401, F811
+            __import__("pandas")
