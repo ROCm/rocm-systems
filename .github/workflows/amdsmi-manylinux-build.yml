@@ -1,10 +1,11 @@
 # ---------------------------------------------------------------------------
-# Custom CI workflow for AMD-SMI self-hosted runners.
+# AMD-SMI manylinux Python wheel build.
 #
-# Covers test scenarios outside TheRock CI's scope: TheRock CI runs everything
-# in a container, while these runners are able to handle Baremetal and VMs.
+# Builds portable AMD-SMI Python wheels (manylinux_2_28, RPM + Debian) and
+# smoke-tests the import.
 #
-# Aims to follow TheRock CI conventions as closely as possible.
+# Unlike TheRock CI, which builds native rpm/deb packages, this produces
+# pip-installable wheels. No GPU required.
 # ---------------------------------------------------------------------------
 
 name: AMDSMI Manylinux Wheels
