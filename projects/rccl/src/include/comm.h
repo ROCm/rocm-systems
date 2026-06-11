@@ -812,13 +812,6 @@ struct ncclComm {
   bool lastStreamValid;
   latency_profiler::CollTrace* ctrace;
 
-#ifdef ENABLE_COLLTRACE
-  struct ncclCollTrace* collTrace;
-  union ncclCollTraceTail *collTraceTail;
-  pthread_t collTraceThread;
-  volatile bool collTraceExit;
-  bool collTraceEnabled;
-#endif
 #ifdef ENABLE_WARP_SPEED
   int warpSpeedChannelMultiplier;
 #endif
