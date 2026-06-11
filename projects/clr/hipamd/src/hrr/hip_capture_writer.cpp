@@ -29,6 +29,7 @@
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
 
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cerrno>
@@ -43,10 +44,26 @@
 #  include <io.h>
 #  include <fcntl.h>
 #  include <sys/stat.h>
-#  define HRR_OPEN(p)        _open((p), _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
-#  define HRR_WRITE(fd,b,n)  _write((fd), (b), (unsigned)(n))
-#  define HRR_CLOSE(fd)      _close((fd))
-#  define HRR_FSYNC(fd)      _commit((fd))
+// Truncate: new archive. Append: resume into existing events.bin (must NOT use _O_TRUNC).
+#  define HRR_OPEN(p)          _open((p), _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
+#  define HRR_OPEN_APPEND(p)   _open((p), _O_RDWR | _O_CREAT | _O_BINARY, _S_IREAD | _S_IWRITE)
+#  define HRR_WRITE(fd,b,n)    _write((fd), (b), (unsigned)(n))
+#  define HRR_CLOSE(fd)        _close((fd))
+#  define HRR_FSYNC(fd)        _commit((fd))
+
+using hrr_stat_t = struct _stat64;
+static int hrr_stat_file(const char* path, hrr_stat_t* st) { return _stat64(path, st); }
+static int hrr_fstat_file(int fd, hrr_stat_t* st) { return _fstati64(fd, st); }
+static std::int64_t hrr_stat_size(const hrr_stat_t& st) { return st.st_size; }
+
+static int hrr_ftruncate_fd(int fd, std::int64_t len) {
+  return _chsize_s(fd, len) == 0 ? 0 : -1;
+}
+
+static std::int64_t hrr_seek_end(int fd) {
+  return static_cast<std::int64_t>(_lseeki64(fd, 0, SEEK_END));
+}
+
 static inline uint64_t current_thread_id() {
   static thread_local uint64_t cached = static_cast<uint64_t>(GetCurrentThreadId());
   return cached;
@@ -63,6 +80,22 @@ static inline uint64_t current_thread_id() {
 #  define HRR_WRITE(fd,b,n)  ::write((fd), (b), (n))
 #  define HRR_CLOSE(fd)      ::close((fd))
 #  define HRR_FSYNC(fd)      ::fsync((fd))
+
+using hrr_stat_t = struct stat;
+static int hrr_stat_file(const char* path, hrr_stat_t* st) { return stat(path, st); }
+static int hrr_fstat_file(int fd, hrr_stat_t* st) { return fstat(fd, st); }
+static std::int64_t hrr_stat_size(const hrr_stat_t& st) {
+  return static_cast<std::int64_t>(st.st_size);
+}
+
+static int hrr_ftruncate_fd(int fd, std::int64_t len) {
+  return ftruncate(fd, static_cast<off_t>(len));
+}
+
+static std::int64_t hrr_seek_end(int fd) {
+  return static_cast<std::int64_t>(lseek(fd, 0, SEEK_END));
+}
+
 static inline uint64_t current_thread_id() {
   static thread_local uint64_t cached = static_cast<uint64_t>(syscall(SYS_gettid));
   return cached;
@@ -197,12 +230,12 @@ static void ensure_dir(const std::string& path) {
 struct ScanResult {
   uint64_t max_seq   = 0;
   uint64_t count     = 0;
-  off_t    append_at = 0;
+  std::int64_t append_at = 0;
   bool     had_trailer = false;
   bool     torn_tail   = false;
 };
 
-static ScanResult scan_events_for_resume(FILE* f, off_t file_size) {
+static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
   ScanResult r;
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   if (fseek(f, static_cast<long>(sizeof(hrr_file_header)), SEEK_SET) != 0)
@@ -211,7 +244,7 @@ static ScanResult scan_events_for_resume(FILE* f, off_t file_size) {
   r.append_at = sizeof(hrr_file_header);
   while (true) {
     long pos = ftell(f);
-    if (pos < 0 || static_cast<off_t>(pos) >= file_size) break;
+    if (pos < 0 || static_cast<std::int64_t>(pos) >= file_size) break;
 
     hrr_event_header h{};
     if (fread(&h, hdr_size, 1, f) != 1) {
@@ -241,7 +274,7 @@ static ScanResult scan_events_for_resume(FILE* f, off_t file_size) {
       r.append_at = pos;
       break;
     }
-    r.append_at = ftell(f);
+    r.append_at = static_cast<std::int64_t>(ftell(f));
   }
 
   if (!r.had_trailer && !r.torn_tail)
@@ -249,7 +282,7 @@ static ScanResult scan_events_for_resume(FILE* f, off_t file_size) {
   return r;
 }
 
-static bool try_load_writer_state(const std::string& path, off_t file_size,
+static bool try_load_writer_state(const std::string& path, std::int64_t file_size,
                                   uint64_t* next_seq, uint64_t* ev_count,
                                   uint64_t* bl_count) {
   FILE* f = fopen(path.c_str(), "r");
@@ -268,7 +301,7 @@ static bool try_load_writer_state(const std::string& path, off_t file_size,
   }
   fclose(f);
 
-  if (stored_size != static_cast<long long>(file_size))
+  if (stored_size != file_size)
     return false;
   *next_seq = ns;
   *ev_count = ec;
@@ -278,7 +311,7 @@ static bool try_load_writer_state(const std::string& path, off_t file_size,
 
 static void save_writer_state_locked() {
   if (g_output_dir.empty() || g_events_fd < 0) return;
-  off_t sz = lseek(g_events_fd, 0, SEEK_END);
+  std::int64_t sz = hrr_seek_end(g_events_fd);
   if (sz < 0) return;
 
   std::string path = g_output_dir + "/writer_state.json";
@@ -440,22 +473,18 @@ bool open(const char* output_dir) {
   std::string manifest_path = g_output_dir + "/manifest.json";
   snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
 
-  struct stat st{};
+  hrr_stat_t st{};
   bool exists = false;
   if (g_events_fd >= 0) {
     // We already hold the locked base events.bin fd.
-    exists = (fstat(g_events_fd, &st) == 0 && st.st_size > 0);
+    exists = (hrr_fstat_file(g_events_fd, &st) == 0 && hrr_stat_size(st) > 0);
   } else {
-    exists = (stat(events_path.c_str(), &st) == 0 && st.st_size > 0);
+    exists = (hrr_stat_file(events_path.c_str(), &st) == 0 && hrr_stat_size(st) > 0);
   }
 
   if (exists) {
     if (g_events_fd < 0) {
-#ifndef _WIN32
       g_events_fd = HRR_OPEN_APPEND(events_path.c_str());
-#else
-      g_events_fd = HRR_OPEN(events_path.c_str());
-#endif
     }
     if (g_events_fd < 0) {
       LogPrintfError("[HRR capture] Failed to open %s for append", events_path.c_str());
@@ -464,32 +493,32 @@ bool open(const char* output_dir) {
 
     uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
     const std::string state_path = g_output_dir + "/writer_state.json";
-    const bool fast = try_load_writer_state(state_path, st.st_size,
+    const bool fast = try_load_writer_state(state_path, hrr_stat_size(st),
                                             &next_seq, &ev_count, &bl_count);
 
     ScanResult scan{};
     if (!fast) {
       FILE* rf = fopen(events_path.c_str(), "rb");
       if (rf) {
-        scan = scan_events_for_resume(rf, st.st_size);
+        scan = scan_events_for_resume(rf, hrr_stat_size(st));
         fclose(rf);
       }
       next_seq = (scan.count > 0) ? (scan.max_seq + 1) : 0;
       ev_count = scan.count;
-    } else if (stat(events_path.c_str(), &st) == 0) {
+    } else if (hrr_stat_file(events_path.c_str(), &st) == 0) {
       FILE* rf = fopen(events_path.c_str(), "rb");
       if (rf) {
-        scan = scan_events_for_resume(rf, st.st_size);
+        scan = scan_events_for_resume(rf, hrr_stat_size(st));
         fclose(rf);
       }
     }
 
     if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail)) {
-      if (ftruncate(g_events_fd, scan.append_at) != 0) {
+      if (hrr_ftruncate_fd(g_events_fd, scan.append_at) != 0) {
         LogPrintfWarning("[HRR capture] ftruncate resume at %lld failed", (long long)scan.append_at);
       }
     }
-    if (lseek(g_events_fd, 0, SEEK_END) < 0) {
+    if (hrr_seek_end(g_events_fd) < 0) {
       LogPrintfError("[HRR capture] seek end of %s failed", events_path.c_str());
       HRR_CLOSE(g_events_fd);
       g_events_fd = -1;
