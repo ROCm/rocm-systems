@@ -229,6 +229,9 @@ private:
   std::vector<simdojo::Port *> dispatch_ports_;
 
   size_t next_cu_ = 0;
+  // Round-robin starting SE for WG placement so workgroups spread across all
+  // SEs (activating more CUs per dispatch) instead of filling SE0 first.
+  size_t next_spi_ = 0;
   size_t next_queue_idx_ = 0;
   bool is_primary_ = false;
   uint32_t workgroup_id_offset_ = 0;

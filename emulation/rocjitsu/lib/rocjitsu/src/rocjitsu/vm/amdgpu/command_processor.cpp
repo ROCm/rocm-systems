@@ -161,12 +161,41 @@ void CommandProcessor::set_dispatch_threads(uint32_t threads) {
     spi->reset_dispatch_pool();
 }
 
+namespace {
+// Opt-in diagnostics (RJ_DISPATCH_STATS=1): how many CUs are available to a
+// single fork-join on average? If this is small, adding host threads cannot
+// help — the parallelism ceiling is work availability, not thread count.
+struct DispatchStats {
+  uint64_t calls = 0, total_active = 0, max_active = 0, calls_gt1 = 0;
+  bool enabled = std::getenv("RJ_DISPATCH_STATS") != nullptr;
+  void record(size_t n) {
+    if (!enabled)
+      return;
+    ++calls;
+    total_active += n;
+    if (n > 1)
+      ++calls_gt1;
+    if (n > max_active)
+      max_active = n;
+  }
+  ~DispatchStats() {
+    if (enabled && calls)
+      std::fprintf(stderr,
+                   "[dispatch-stats] fork-joins=%llu avg_active_cus=%.2f max=%llu (%.0f%% had >1)\n",
+                   (unsigned long long)calls, (double)total_active / calls,
+                   (unsigned long long)max_active, 100.0 * calls_gt1 / calls);
+  }
+};
+DispatchStats g_dispatch_stats;
+} // namespace
+
 bool CommandProcessor::run_active_cus(uint32_t threads) {
   // Gather every active CU across all SEs into one task set so a single
   // fork-join balances them across host threads (vs one barrier per SE).
   active_cu_scratch_.clear();
   for (auto *spi : spis_)
     spi->collect_active_cus(active_cu_scratch_);
+  g_dispatch_stats.record(active_cu_scratch_.size());
   if (active_cu_scratch_.empty())
     return false;
 
@@ -614,10 +643,16 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     // SPI selects the CU based on resource availability.
     ComputeUnitCore *cu = nullptr;
     if (!spis_.empty()) {
-      for (auto *spi : spis_) {
-        cu = spi->dispatch_workgroup(entry);
-        if (cu)
+      // Round-robin across SEs so consecutive WGs land on different SEs; this
+      // keeps all SEs' CUs simultaneously active, exposing more parallel work
+      // to the dispatch pool (vs. saturating SE0 before touching SE1).
+      for (size_t k = 0; k < spis_.size(); ++k) {
+        size_t si = (next_spi_ + k) % spis_.size();
+        cu = spis_[si]->dispatch_workgroup(entry);
+        if (cu) {
+          next_spi_ = (si + 1) % spis_.size();
           break;
+        }
       }
     } else {
       for (size_t attempt = 0; attempt < cus_.size(); ++attempt) {
