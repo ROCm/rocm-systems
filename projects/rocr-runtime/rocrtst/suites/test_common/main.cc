@@ -103,6 +103,7 @@
 #include "suites/functional/queue_create.h"
 #include "suites/functional/cuid.h"
 #include "suites/functional/trap_handler_test.h"
+#include "suites/functional/generic_blit_codeobj.h"
 #include "common/os.h"
 #include "common/platform_filter.h"
 #include "common/base_rocr_utils.h"
@@ -386,6 +387,21 @@ TEST(rocrtstFunc, Heap_Reservation) {
     if (!RunCustomTestProlog(&hr)) return;
     hr.HeapReservationSurvivesConstrainedAddressSpace();
     RunCustomTestEpilog(&hr);
+}
+
+TEST(rocrtstFunc, Generic_Blit_AsyncCopy) {
+  RUN_IF_NOT_EMU_MODE(GenericBlitCodeObjTest gbt; RunCustomTestProlog(&gbt);
+                      gbt.AsyncMemoryCopyTest(); RunCustomTestEpilog(&gbt););
+}
+
+TEST(rocrtstFunc, Generic_Blit_MemoryFill) {
+  RUN_IF_NOT_EMU_MODE(GenericBlitCodeObjTest gbt; RunCustomTestProlog(&gbt); gbt.MemoryFillTest();
+                      RunCustomTestEpilog(&gbt););
+}
+
+TEST(rocrtstFunc, Generic_Blit_VariousSizes) {
+  RUN_IF_NOT_EMU_MODE(GenericBlitCodeObjTest gbt; RunCustomTestProlog(&gbt);
+                      gbt.VariousCopySizesTest(); RunCustomTestEpilog(&gbt););
 }
 
 TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
