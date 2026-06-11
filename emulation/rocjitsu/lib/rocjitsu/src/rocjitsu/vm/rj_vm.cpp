@@ -7,6 +7,7 @@
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -16,6 +17,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 RJ_DIAGNOSTIC_POP
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -39,7 +41,13 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->soc = loaded.soc();
   auto num_xcds = s->soc->num_xcds();
   uint32_t cpu_dispatch_threads = std::max(loaded.engine_config.num_threads, 1u);
-  loaded.engine_config.num_threads = 1;
+  uint32_t xcd_partitions = 1;
+  if (const char *e = std::getenv("RJ_XCD_PARTITIONS"); e && e[0]) {
+    long v = std::strtol(e, nullptr, 10);
+    if (v > 1)
+      xcd_partitions = std::min<uint32_t>(static_cast<uint32_t>(v), std::max(num_xcds, 1u));
+  }
+  loaded.engine_config.num_threads = xcd_partitions;
 
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);
   bool daemon = (mode == RJ_VM_MODE_DAEMON);
@@ -96,6 +104,8 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     s->soc->wire_backing(s->engine->topology());
     set_cpu_dispatch_threads(s->soc, cpu_dispatch_threads);
   }
+  if (xcd_partitions > 1)
+    amdgpu::partition_topology_by_xcds(s->engine->topology(), s->soc, xcd_partitions);
   s->engine->build();
 
   if (serve) {
