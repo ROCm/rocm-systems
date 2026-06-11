@@ -172,6 +172,65 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     return mod;
 }
 
+hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_name) {
+    // Fast path: nothing to do if no replacements were requested.
+    if (kernel_replacements.empty()) return nullptr;
+
+    // Cache hit — already resolved (or already resolved to "no replacement").
+    {
+        std::shared_lock lk(map_mutex);
+        auto it = replacement_funcs.find(kernel_name);
+        if (it != replacement_funcs.end()) return it->second;
+    }
+
+    // Find the first replacement whose pattern is a substring of the recorded
+    // name (same matching rule as kernel_filter at the launch site).
+    const std::string* path = nullptr;
+    for (auto& [pattern, p] : kernel_replacements) {
+        if (kernel_name.find(pattern) != std::string::npos) { path = &p; break; }
+    }
+    // No pattern matched: cache the negative result so we don't re-scan every launch.
+    if (!path) {
+        std::unique_lock lk(map_mutex);
+        replacement_funcs.emplace(kernel_name, nullptr);
+        return nullptr;
+    }
+
+    // Load the replacement code object from the filesystem path and resolve the
+    // function by the recorded (same) symbol name. Mirrors load_module()'s
+    // hipModuleLoadData + hipModuleGetFunction pattern; the input here is a path,
+    // not an archive hash, so we read the file directly.
+    auto data = read_file(*path);
+    hipFunction_t func = nullptr;
+    if (data.empty()) {
+        fprintf(stderr, "[HRR] --replace-kernel: cannot read '%s' for kernel '%s' — "
+                "using recorded kernel\n", path->c_str(), kernel_name.c_str());
+    } else {
+        hipModule_t mod = nullptr;
+        hipError_t err = hipModuleLoadData(&mod, data.data());
+        if (err != hipSuccess) {
+            fprintf(stderr, "[HRR] --replace-kernel: failed to load '%s': %d (%s) — "
+                    "using recorded kernel\n", path->c_str(), err, hipGetErrorString(err));
+        } else if (hipModuleGetFunction(&func, mod, kernel_name.c_str()) != hipSuccess
+                   || !func) {
+            fprintf(stderr, "[HRR] --replace-kernel: symbol '%s' not found in '%s' — "
+                    "using recorded kernel\n", kernel_name.c_str(), path->c_str());
+            func = nullptr;
+            (void)hipModuleUnload(mod);
+        } else {
+            std::unique_lock lk(map_mutex);
+            replacement_modules.push_back(mod);
+            fprintf(stderr, "[HRR] Replacing kernel '%s' with %s (symbol %s)\n",
+                    kernel_name.c_str(), path->c_str(), kernel_name.c_str());
+        }
+    }
+
+    // Cache result (func or nullptr-on-failure) so each kernel is resolved once.
+    std::unique_lock lk(map_mutex);
+    replacement_funcs[kernel_name] = func;
+    return func;
+}
+
 // ---------------------------------------------------------------------------
 // Kernel launch — shared implementation used by all four launch APIs
 // ---------------------------------------------------------------------------
@@ -228,7 +287,16 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
     // searches. Locked because multiple threads can now be in kernel launch
     // preparation concurrently (only the HIP call itself is serialized).
     hipFunction_t func = nullptr;
-    {
+
+    // Playback-time kernel override: if this kernel matches a --replace-kernel
+    // pattern, launch the user-supplied code object instead of the recorded one.
+    // All recorded inputs (grid/block/shared/args/pointers) are still used below.
+    // resolve_replacement returns nullptr when no replacement applies (or it
+    // failed to load), in which case we fall through to the recorded kernel.
+    if (!ctx.kernel_replacements.empty())
+        func = ctx.resolve_replacement(kernel_name);
+
+    if (!func) {
         std::shared_lock lk(ctx.map_mutex);
         auto it = ctx.func_cache.find(kernel_name);
         if (it != ctx.func_cache.end())

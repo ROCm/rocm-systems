@@ -22,6 +22,9 @@
 //   --timing              Report wall time and total GPU kernel time
 //   --kernel-filter STR   Only launch kernels whose name contains STR
 //                         (full warm-up pass runs first to set up GPU state)
+//   --replace-kernel N=P  Launch kernels matching N from code object P (.hsaco)
+//                         instead of the recorded one (repeatable). Recorded
+//                         args/grid/block are reused; the archive is untouched.
 //   --sync-after-launch   hipDeviceSynchronize() after every kernel (debug)
 //   --help                Show this message
 //
@@ -685,6 +688,10 @@ static void print_usage(const char* argv0) {
     "  --timing              Report wall time and total GPU kernel time\n"
     "  --kernel-filter STR   Only launch kernels whose name contains STR\n"
     "                        (silent full warm-up pass runs first)\n"
+    "  --replace-kernel N=P  Launch kernels whose name contains N from code\n"
+    "                        object P (.hsaco) instead of the recorded one.\n"
+    "                        Repeatable. Recorded args/grid/block are reused;\n"
+    "                        the archive is not modified.\n"
     "  --sync-after-launch   hipDeviceSynchronize after every kernel launch\n"
     "  --sync-after-event    hipDeviceSynchronize after EVERY event (slowest, most precise)\n"
     "  --help                Show this message\n"
@@ -717,6 +724,19 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--sync-after-event"))  ctx.sync_after_event   = true;
     else if (!strcmp(argv[i], "--kernel-filter") && i + 1 < argc)
       ctx.kernel_filter = argv[++i];
+    else if (!strcmp(argv[i], "--replace-kernel") && i + 1 < argc) {
+      // Split "NAME=path" on the LAST '=' so paths containing '=' (or a
+      // Windows drive letter) stay intact. Both sides must be non-empty.
+      std::string spec = argv[++i];
+      size_t eq = spec.rfind('=');
+      if (eq == std::string::npos || eq == 0 || eq + 1 >= spec.size()) {
+        fprintf(stderr, "[HRR] --replace-kernel expects NAME=PATH, got '%s'\n",
+                spec.c_str());
+        print_usage(argv[0]);
+        return 1;
+      }
+      ctx.kernel_replacements.emplace_back(spec.substr(0, eq), spec.substr(eq + 1));
+    }
     else if (!strcmp(argv[i], "--help")) { print_usage(argv[0]); return 0; }
     else if (argv[i][0] != '-') archive_path = argv[i];
   }
@@ -881,6 +901,7 @@ int main(int argc, char** argv) {
     std::unordered_set<hipModule_t> mods;
     for (auto& [hex, mod] : ctx.co_modules) mods.insert(mod);
     for (auto& [rec, mod] : ctx.module_map) mods.insert(mod);
+    for (hipModule_t m : ctx.replacement_modules) mods.insert(m);
     for (hipModule_t m : mods) (void)hipModuleUnload(m);
   }
 

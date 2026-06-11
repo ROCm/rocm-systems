@@ -66,6 +66,18 @@ struct PlaybackContext {
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
     std::string kernel_filter;
 
+    // ---- Kernel replacement (playback-time override) ----
+    // Parsed "NAME=path" pairs from --replace-kernel. A recorded kernel whose
+    // name contains NAME (substring, same rule as kernel_filter) launches from
+    // the replacement code object at `path` instead of the recorded one, while
+    // grid/block/shared/args/pointers still come from the recording. The archive
+    // is never modified. Empty => feature disabled (no overhead on the hot path).
+    std::vector<std::pair<std::string, std::string>> kernel_replacements;
+    // Resolved replacement functions, keyed by the recorded kernel name.
+    // Guarded by map_mutex. Modules backing them are owned in replacement_modules.
+    std::unordered_map<std::string, hipFunction_t> replacement_funcs;
+    std::vector<hipModule_t> replacement_modules;  // unloaded at teardown
+
     // Set true between hipStreamBeginCapture and hipStreamEndCapture.
     // HIP event timing must be skipped during graph capture: recording an
     // event on a captured stream inserts it into the graph and invalidates
@@ -272,6 +284,13 @@ struct PlaybackContext {
                                  size_t* sz_out) const;
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
+
+    // Resolve a playback-time replacement function for a recorded kernel name.
+    // Returns a hipFunction_t loaded from a user-supplied .hsaco if `kernel_name`
+    // matches a --replace-kernel pattern, or nullptr if no replacement applies
+    // (or the replacement failed to load — caller then falls back to the recorded
+    // kernel). Lazily loads + caches the replacement module on first match.
+    hipFunction_t resolve_replacement(const std::string& kernel_name);
 
 private:
     mutable std::unordered_map<std::string, std::vector<uint8_t>> blob_cache_;
