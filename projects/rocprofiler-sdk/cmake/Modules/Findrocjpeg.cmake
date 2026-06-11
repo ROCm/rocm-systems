@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024 - 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2024 - 2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,13 +23,28 @@
 
 include_guard(DIRECTORY)
 
+# Prefer the upstream rocjpeg CONFIG package (installed lowercase as `rocjpeg`). Fall back
+# to manual path/library discovery for older install layouts. Re-read the version header
+# only when CONFIG did not supply a version.
 find_package(rocjpeg CONFIG QUIET)
+
+# handle the case where CONFIG is found but does not specify an include directory (which
+# generally shouldn't happen)
+if(rocjpeg_FOUND AND NOT rocjpeg_INCLUDE_DIR)
+    message(
+        WARNING
+            "Found rocjpeg CONFIG package but it did not specify an include directory. Ignoring CONFIG results."
+        )
+    set(rocjpeg_FOUND OFF)
+endif()
 
 if(rocjpeg_FOUND)
     set(_rocjpeg_FOUND_CONFIG ON)
     # for backwards compatibility, set the root dir to the parent of the include dir
     get_filename_component(_rocjpeg_ROOT_DIR ${rocjpeg_INCLUDE_DIR} DIRECTORY)
-    set(rocjpeg_ROOT_DIR ${_rocjpeg_ROOT_DIR} CACHE PATH "Root directory of rocjpeg installation" FORCE)
+    set(rocjpeg_ROOT_DIR
+        ${_rocjpeg_ROOT_DIR}
+        CACHE INTERNAL "Root directory of rocjpeg installation")
 else()
     set(_rocjpeg_FOUND_CONFIG OFF)
     # find rocjpeg - library and headers
@@ -56,25 +71,32 @@ else()
         PATH_SUFFIXES lib)
 endif()
 
+# if rocjpeg_VERSION is not set by CONFIG or manual discovery, read it from the version
+# header
 if(NOT rocjpeg_VERSION OR NOT _rocjpeg_FOUND_CONFIG)
     function(_rocjpeg_read_version_header _VERSION_VAR)
-        if(rocjpeg_INCLUDE_DIR AND EXISTS "${rocjpeg_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h")
+        if(rocjpeg_INCLUDE_DIR AND EXISTS
+                                   "${rocjpeg_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h")
             file(READ "${rocjpeg_INCLUDE_DIR}/rocjpeg/rocjpeg_version.h" _rocjpeg_version)
             macro(_rocjpeg_get_version_num _VAR)
                 foreach(_NAME ${ARGN})
                     string(REGEX MATCH "define([ \t]+)${_NAME}([ \t]+)([0-9]+)" _tmp
-                                "${_rocjpeg_version}")
+                                 "${_rocjpeg_version}")
                     set(${_VAR} 0)
                     if(_tmp MATCHES "([0-9]+)")
-                        string(REGEX REPLACE "(.*${_NAME}[ ]+)([0-9]+)" "\\2" ${_VAR} "${_tmp}")
+                        string(REGEX REPLACE "(.*${_NAME}[ ]+)([0-9]+)" "\\2" ${_VAR}
+                                             "${_tmp}")
                         break()
                     endif()
                 endforeach()
             endmacro()
 
-            _rocjpeg_get_version_num(_major "ROCJPEG_VERSION_MAJOR" "ROCJPEG_MAJOR_VERSION")
-            _rocjpeg_get_version_num(_minor "ROCJPEG_VERSION_MINOR" "ROCJPEG_MINOR_VERSION")
-            _rocjpeg_get_version_num(_patch "ROCJPEG_VERSION_PATCH" "ROCJPEG_MICRO_VERSION")
+            _rocjpeg_get_version_num(_major "ROCJPEG_VERSION_MAJOR"
+                                     "ROCJPEG_MAJOR_VERSION")
+            _rocjpeg_get_version_num(_minor "ROCJPEG_VERSION_MINOR"
+                                     "ROCJPEG_MINOR_VERSION")
+            _rocjpeg_get_version_num(_patch "ROCJPEG_VERSION_PATCH"
+                                     "ROCJPEG_MICRO_VERSION")
             set(${_VERSION_VAR}
                 ${_major}.${_minor}.${_patch}
                 PARENT_SCOPE)

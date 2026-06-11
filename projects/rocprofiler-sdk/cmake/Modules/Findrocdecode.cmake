@@ -1,5 +1,5 @@
 ################################################################################
-# Copyright (c) 2024 - 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2024 - 2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,13 +23,29 @@
 
 include_guard(DIRECTORY)
 
+# Prefer the upstream rocdecode CONFIG package (installed lowercase as `rocdecode`). Fall
+# back to manual path/library discovery for older install layouts. Re-read the version
+# header only when CONFIG did not supply a version.
+
 find_package(rocdecode CONFIG QUIET)
+
+# handle the case where CONFIG is found but does not specify an include directory (which
+# generally shouldn't happen)
+if(rocdecode_FOUND AND NOT rocdecode_INCLUDE_DIR)
+    message(
+        WARNING
+            "Found rocdecode CONFIG package but it did not specify an include directory. Ignoring CONFIG results."
+        )
+    set(rocdecode_FOUND OFF)
+endif()
 
 if(rocdecode_FOUND)
     set(_rocdecode_FOUND_CONFIG ON)
     # for backwards compatibility, set the root dir to the parent of the include dir
     get_filename_component(_rocdecode_ROOT_DIR ${rocdecode_INCLUDE_DIR} DIRECTORY)
-    set(rocdecode_ROOT_DIR ${_rocdecode_ROOT_DIR} CACHE PATH "Root directory of rocdecode installation" FORCE)
+    set(rocdecode_ROOT_DIR
+        ${_rocdecode_ROOT_DIR}
+        CACHE INTERNAL "Root directory of rocdecode installation")
 else()
     set(_rocdecode_FOUND_CONFIG OFF)
     # find rocdecode - library and headers
@@ -57,28 +73,34 @@ else()
 
 endif()
 
+# if rocdecode_VERSION is not set by CONFIG or manual discovery, read it from the version
+# header
 if(NOT rocdecode_VERSION OR NOT _rocdecode_FOUND_CONFIG)
     function(_rocdecode_read_version_header _VERSION_VAR)
-        if(rocdecode_INCLUDE_DIR AND EXISTS
-                                    "${rocdecode_INCLUDE_DIR}/rocdecode/rocdecode_version.h")
+        if(rocdecode_INCLUDE_DIR
+           AND EXISTS "${rocdecode_INCLUDE_DIR}/rocdecode/rocdecode_version.h")
             file(READ "${rocdecode_INCLUDE_DIR}/rocdecode/rocdecode_version.h"
-                _rocdecode_version)
-            macro(_rocdecode_get_version_num _VAR _NAME)
+                 _rocdecode_version)
+            macro(_rocdecode_get_version_num _VAR)
                 foreach(_NAME ${ARGN})
                     string(REGEX MATCH "define([ \t]+)${_NAME}([ \t]+)([0-9]+)" _tmp
-                        "${_rocdecode_version}")
+                                 "${_rocdecode_version}")
                     set(${_VAR} 0)
 
                     if(_tmp MATCHES "([0-9]+)")
-                        string(REGEX REPLACE "(.*${_NAME}[ ]+)([0-9]+)" "\\2" ${_VAR} "${_tmp}")
+                        string(REGEX REPLACE "(.*${_NAME}[ ]+)([0-9]+)" "\\2" ${_VAR}
+                                             "${_tmp}")
                         break()
                     endif()
                 endforeach()
             endmacro()
 
-            _rocdecode_get_version_num(_major "ROCDECODE_VERSION_MAJOR" "ROCDECODE_MAJOR_VERSION")
-            _rocdecode_get_version_num(_minor "ROCDECODE_VERSION_MINOR" "ROCDECODE_MINOR_VERSION")
-            _rocdecode_get_version_num(_patch "ROCDECODE_VERSION_PATCH" "ROCDECODE_MICRO_VERSION")
+            _rocdecode_get_version_num(_major "ROCDECODE_VERSION_MAJOR"
+                                       "ROCDECODE_MAJOR_VERSION")
+            _rocdecode_get_version_num(_minor "ROCDECODE_VERSION_MINOR"
+                                       "ROCDECODE_MINOR_VERSION")
+            _rocdecode_get_version_num(_patch "ROCDECODE_VERSION_PATCH"
+                                       "ROCDECODE_MICRO_VERSION")
             set(${_VERSION_VAR}
                 ${_major}.${_minor}.${_patch}
                 PARENT_SCOPE)
