@@ -320,11 +320,8 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   std::memset(vgpr_data(static_cast<uint32_t>(vgpr_base)), 0,
               vgpr_allocation_block_size() * wf_size_ * sizeof(uint32_t));
 
-  // Invalidate the L1 scalar cache so this wavefront reads fresh kernel
-  // arguments from L2/memory rather than stale lines from a prior kernel.
-  // On real hardware, the driver issues s_dcache_inv at kernel launch.
-  l1_scalar_.invalidate_all();
-  invalidate_inst_fetch_cache();
+  // Per-CU cache invalidation (L1 scalar + instruction-fetch + decoded-inst)
+  // is done once per dispatch in begin_workgroup(), not per wavefront here.
 
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;

@@ -493,25 +493,17 @@ void CommandProcessor::stop_doorbell_monitor() {
 }
 
 uint64_t CommandProcessor::read_gpu_u64(uint64_t va, uint32_t vmid) const {
-  uint64_t val = 0;
-  auto *dst = reinterpret_cast<uint8_t *>(&val);
-  for (uint32_t i = 0; i < sizeof(val); ++i)
-    dst[i] = memory_->read8(va + i, vmid);
-  return val;
+  // Block read (one translate per page) instead of 8 per-byte read8 calls.
+  return memory_->read64(va, vmid);
 }
 
 uint32_t CommandProcessor::read_gpu_u32(uint64_t va, uint32_t vmid) const {
-  uint32_t val = 0;
-  auto *dst = reinterpret_cast<uint8_t *>(&val);
-  for (uint32_t i = 0; i < sizeof(val); ++i)
-    dst[i] = memory_->read8(va + i, vmid);
-  return val;
+  // Block read (one translate per page) instead of 4 per-byte read8 calls.
+  return memory_->read32(va, vmid);
 }
 
 void CommandProcessor::read_gpu_block(uint64_t va, void *dst, size_t size, uint32_t vmid) const {
-  auto *p = static_cast<uint8_t *>(dst);
-  for (size_t i = 0; i < size; ++i)
-    p[i] = memory_->read8(va + i, vmid);
+  memory_->read_block(va, static_cast<uint8_t *>(dst), static_cast<uint32_t>(size), vmid);
 }
 
 void CommandProcessor::write_gpu_block(uint64_t va, const void *src, size_t size, uint32_t vmid) {

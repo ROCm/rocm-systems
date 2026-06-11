@@ -172,6 +172,16 @@ public:
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so retire_halted_wfs() can detect WG completion.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count) {
+    // Invalidate per-CU caches once per dispatch (when a new kernel's first WG
+    // lands on this CU), not once per wavefront. The L1 scalar cache must be
+    // flushed so wavefronts read fresh kernargs; the instruction-fetch and
+    // decoded-instruction caches must drop any prior kernel's code. Doing this
+    // per wavefront (in dispatch_wf) repeated the work ~wfs_per_dispatch times.
+    if (dispatch_id != last_invalidated_dispatch_id_) {
+      last_invalidated_dispatch_id_ = dispatch_id;
+      l1_scalar_.invalidate_all();
+      invalidate_inst_fetch_cache();
+    }
     active_wgs_[wg_key(dispatch_id, wg_id)] = wf_count;
   }
 
@@ -567,6 +577,10 @@ protected:
     std::unique_ptr<Instruction> inst; // non-memory decoded instruction, or null
   };
   std::array<DecodeCacheLine, kInstFetchCacheLines> decode_cache_{};
+  // Dispatch id whose arrival last triggered per-CU cache invalidation, so the
+  // invalidation happens once per dispatch (in begin_workgroup) rather than per
+  // wavefront. UINT32_MAX = none yet.
+  uint32_t last_invalidated_dispatch_id_ = UINT32_MAX;
 
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".
