@@ -90,7 +90,7 @@ struct kfd_svm_args_header
 // ---------------------------------------------------------------------------
 
 __global__ void
-kern_write_pattern(std::uint64_t* data, size_t n, std::uint64_t pattern)
+kern_write_pattern(uint64_t* data, size_t n, uint64_t pattern)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
@@ -99,12 +99,12 @@ kern_write_pattern(std::uint64_t* data, size_t n, std::uint64_t pattern)
 }
 
 __global__ void
-kern_read_reduce(const std::uint64_t* data, size_t n, std::uint64_t* result)
+kern_read_reduce(const uint64_t* data, size_t n, uint64_t* result)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
 
-    std::uint64_t local_sum = 0;
+    uint64_t local_sum = 0;
     for(size_t i = idx; i < n; i += stride)
         local_sum += data[i];
 
@@ -112,7 +112,7 @@ kern_read_reduce(const std::uint64_t* data, size_t n, std::uint64_t* result)
 }
 
 __global__ void
-kern_read_write_stencil(std::uint64_t* dst, const std::uint64_t* src, size_t n)
+kern_read_write_stencil(uint64_t* dst, const uint64_t* src, size_t n)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
@@ -130,7 +130,7 @@ kern_saxpy(float* y, const float* x, float a, size_t n)
 }
 
 __global__ void
-kern_touch_pages(std::uint64_t* data, size_t n, size_t page_stride)
+kern_touch_pages(uint64_t* data, size_t n, size_t page_stride)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
