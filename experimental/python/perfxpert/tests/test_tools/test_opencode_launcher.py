@@ -1,6 +1,7 @@
 """Unit tests for perfxpert.cli.opencode_launcher."""
 
 import os
+from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
 
@@ -23,6 +24,7 @@ def test_version_flag_short_circuit(capsys):
     assert rc == 0
     captured = capsys.readouterr()
     assert "AMD" in captured.out
+    assert version("perfxpert") in captured.out
 
 
 def test_v_short_flag(capsys):

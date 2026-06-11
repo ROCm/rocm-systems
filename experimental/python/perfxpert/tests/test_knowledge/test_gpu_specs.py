@@ -36,7 +36,7 @@ def test_gpu_specs_validates_against_schema():
 
 
 def test_mi300x_fp64_peak_is_corrected():
-    """CLAUDE.md correction: MI300X FP64 = 81.7 TFLOPS (NOT 163.4 which is FP32)."""
+    """AMD product specs: MI300X FP64 = 81.7 TFLOPS, not the FP32 value."""
     specs = load_yaml("gpu_specs")
     mi300x = specs["gfx942"]
     fp64 = mi300x["peak_fp64_tflops"]
@@ -44,10 +44,62 @@ def test_mi300x_fp64_peak_is_corrected():
 
 
 def test_cdna4_has_160kb_lds():
-    """CDNA4 (gfx950) doubled LDS to 160 KB/CU per CLAUDE.md."""
+    """ROCm hardware specs list CDNA4 gfx950 LDS as 160 KiB."""
     specs = load_yaml("gpu_specs")
     mi350 = specs["gfx950"]
     assert mi350["lds_kb"] == 160, f"CDNA4 LDS expected 160 KB/CU, got {mi350['lds_kb']}"
+
+
+def test_mi300x_occupancy_caps_match_rocm_rocminfo_example():
+    """ROCm's MI300X rocminfo example reports 32 waves/CU and 4 SIMDs/CU."""
+    specs = load_yaml("gpu_specs")
+    mi300x = specs["gfx942"]
+    assert mi300x["simds_per_cu"] == 4
+    assert mi300x["max_waves_per_simd"] == 8
+    assert mi300x["simds_per_cu"] * mi300x["max_waves_per_simd"] == 32
+
+
+def test_mi350x_public_peaks_match_amd_product_specs():
+    specs = load_yaml("gpu_specs")
+    mi350 = specs["gfx950"]
+    assert mi350["peak_fp64_tflops"] == pytest.approx(72.1)
+    assert mi350["peak_fp32_tflops"] == pytest.approx(144.2)
+    assert mi350["peak_fp16_tflops"] == pytest.approx(2300.0)
+    assert mi350["peak_fp8_tflops"] == pytest.approx(4600.0)
+    assert mi350["memory_bandwidth_tbs"] == pytest.approx(8.0)
+    assert mi350["ridge_point"] == pytest.approx(18.0)
+
+
+def test_mi100_int8_peak_matches_amd_product_specs():
+    specs = load_yaml("gpu_specs")
+    mi100 = specs["gfx908"]
+    assert mi100["peak_int8_tops"] == pytest.approx(92.3)
+    assert mi100["vgprs_per_simd"] == 256
+
+
+def test_radeon_product_page_peaks_match_amd_product_specs():
+    specs = load_yaml("gpu_specs")
+
+    rx6900 = specs["gfx1030"]
+    assert rx6900["peak_fp32_tflops"] == pytest.approx(23.04)
+    assert rx6900["peak_fp16_tflops"] == pytest.approx(46.08)
+    assert rx6900["memory_bandwidth_tbs"] == pytest.approx(0.512)
+    assert rx6900["ridge_point"] == pytest.approx(45.0)
+
+    rx7900 = specs["gfx1100"]
+    assert rx7900["peak_fp32_tflops"] == pytest.approx(61.4)
+    assert rx7900["peak_fp16_tflops"] == pytest.approx(123.0)
+    assert rx7900["peak_int8_tops"] == pytest.approx(123.0)
+    assert rx7900["memory_bandwidth_tbs"] == pytest.approx(0.960)
+    assert rx7900["ridge_point"] == pytest.approx(64.0)
+
+
+def test_cdna_fp8_mfma_is_zero_when_arch_has_no_fp8_peak():
+    specs = load_yaml("gpu_specs")
+    for gfx_id in ("gfx908", "gfx90a"):
+        spec = specs[gfx_id]
+        assert spec["peak_fp8_tflops"] == 0.0
+        assert spec["mfma_flops_per_inst"]["fp8"] == 0
 
 
 def test_default_ridge_matches_fp32_peak_over_bandwidth():

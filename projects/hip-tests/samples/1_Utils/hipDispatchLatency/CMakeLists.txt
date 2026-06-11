@@ -65,9 +65,6 @@ if(UNIX)
   )
 endif()
 
-set_property(TARGET hipDispatchLatency PROPERTY CXX_STANDARD 11)
-set_property(TARGET hipDispatchEnqueueRateMT PROPERTY CXX_STANDARD 11)
-
 if(TARGET build_utils)
 add_dependencies(build_utils hipDispatchLatency hipDispatchEnqueueRateMT)
 endif()

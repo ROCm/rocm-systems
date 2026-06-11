@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -146,6 +146,7 @@ public:
                                       void **mem, size_t size,
                                       uint32_t node_id) = 0;
 
+  /// @brief Free memory allocated by @ref AllocateMemory.
   virtual hsa_status_t FreeMemory(void *mem, size_t size) = 0;
 
   /// @brief Create an agent dispatch queue with user-mode access rights.
@@ -157,7 +158,6 @@ public:
   /// if @p type is one of the SDMA queue types.
   /// @param[in] queue_addr Address of the queue's ring buffer.
   /// @param[in] queue_size_bytes Size of the queue's ring buffer in bytes.
-  /// @param[in] queue_metadata_addr Address of the queue's metadata ring buffer.
   /// @param[in] queue_metadata_size_bytes Size of the queue's metadata ring buffer in bytes.
   /// @param[in] event HsaEvent for event-driven callbacks.
   /// @param[out] queue_resource Queue resource information populated by the driver.
@@ -293,6 +293,31 @@ public:
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  /// @brief Imports an OS-native external semaphore handle (e.g. a
+  /// Vulkan-exported NT handle on Windows) into the kernel-mode driver
+  /// and returns an opaque hsa_amd_external_semaphore_t whose lifecycle
+  /// the runtime owns.
+  /// @param[in] node_id Node ID of the agent that will use the semaphore.
+  /// @param[in] nt_handle OS-native handle (NT handle for Win32 types).
+  /// @param[in] type Handle type from the public hsa_amd extension.
+  /// @param[out] out_sem On success, the imported semaphore.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the agent's driver does
+  /// not support external semaphore import.
+  virtual hsa_status_t ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
+                                               hsa_amd_external_semaphore_handle_type_t type,
+                                               hsa_amd_external_semaphore_t* out_sem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Releases an external semaphore handle previously returned by
+  /// @ref ImportExternalSemaphore.
+  /// @param[in] sem Semaphore to release.
+  /// @retval HSA_STATUS_ERROR_INVALID_AGENT if the driver does not support
+  /// external semaphores.
+  virtual hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// @brief Sets trap handler and trap buffer to be used for all queues associated
   /// with the specified NodeId within this process context
   /// @param[in] node_id Node ID of the agent
@@ -303,6 +328,15 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully sets the trap handler.
   virtual hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                                       const void* buffer_base, uint64_t buffer_base_size) const = 0;
+
+  /// @brief Forward the RAS-poison SIGBUS delay to the kernel driver for a node.
+  /// @param[in] node_id  Node ID of the agent.
+  /// @param[in] delay_ms Delay in ms (UINT32_MAX disables the opt-in).
+  /// @return HSA_STATUS_SUCCESS, or HSA_STATUS_ERROR if the kernel/driver does
+  ///         not support the opt-in (callers may treat as non-fatal).
+  virtual hsa_status_t SetSigbusDelay(uint32_t /*node_id*/, uint32_t /*delay_ms*/) const {
+    return HSA_STATUS_ERROR;
+  }
 
   /// @brief Gets the device handle for a specific node.
   /// @param node_id Node ID of the agent

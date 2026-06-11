@@ -3,6 +3,7 @@
 
 #include "library/components/backtrace_timestamp.hpp"
 #include "library/thread_info.hpp"
+#include <cstdint>
 
 #include <timemory/components/timing/backends.hpp>
 
@@ -27,7 +28,7 @@ void
 backtrace_timestamp::sample(int)
 {
     m_tid  = tim::threading::get_id();
-    m_real = tim::get_clock_real_now<uint64_t, std::nano>();
+    m_real = tim::get_clock_real_now<std::uint64_t, std::nano>();
 }
 }  // namespace component
 }  // namespace rocprofsys

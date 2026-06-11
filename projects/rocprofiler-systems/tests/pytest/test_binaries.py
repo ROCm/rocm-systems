@@ -30,6 +30,7 @@ EXCLUDED_FROM_JSON_SCHEMA: frozenset[str] = frozenset(
         "ROCPROFSYS_CI",
         "ROCPROFSYS_CONFIG_FILE",
         "ROCPROFSYS_ENABLED",
+        "ROCPROFSYS_LOG_LEVEL",
         "ROCPROFSYS_OUTPUT_PREFIX",
         "ROCPROFSYS_SUPPRESS_CONFIG",
         "ROCPROFSYS_SUPPRESS_PARSING",
@@ -65,6 +66,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_USE_AMD_SMI": "domains.gpu.enabled",
     "ROCPROFSYS_AMD_SMI_METRICS": "domains.gpu.metrics",
     "ROCPROFSYS_USE_AINIC": "domains.gpu.ainic",
+    "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "domains.gpu.unified_memory_profiling",
     "ROCPROFSYS_USE_PROCESS_SAMPLING": "domains.gpu.process_sampling",
     "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
     "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",
@@ -90,6 +92,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_ROCM_EVENTS": "hardware_counters.rocm_events",
     "ROCPROFSYS_PAPI_EVENTS": "hardware_counters.papi_events",
     "ROCPROFSYS_PAPI_MULTIPLEXING": "hardware_counters.papi_multiplexing",
+    "ROCPROFSYS_GPU_PERF_COUNTERS": "hardware_counters.gpu_perf_counters",
     # --- Causal ---
     "ROCPROFSYS_USE_CAUSAL": "causal.enabled",
     "ROCPROFSYS_CAUSAL_MODE": "causal.mode",
@@ -473,7 +476,6 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     def test_regex_negation(self):
         pass_regex = [
             r"ENVIRONMENT VARIABLE,[\s\S]*"
-            r"ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[\s\S]*"
             r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
             r"ROCPROFSYS_USE_PID,"
         ]
@@ -691,6 +693,50 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
             "baseline",
             target=self.target,
             run_args=["-c", "core"],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+    @pytest.mark.timeout(45)
+    def test_list_domains(self):
+        """Test that list-domains command works."""
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--list-domains"],
+        )
+        self.assert_regex(
+            result,
+            pass_regex=["Available ROCm domains with operations:", "scratch_memory"],
+        )
+
+    @pytest.mark.timeout(45)
+    @pytest.mark.parametrize(
+        "run_args, pass_regex",
+        [
+            pytest.param(
+                ["--list-operations"],
+                ["Error: '--list-operations' requires a domain name."],
+                id="no-domain",
+            ),
+            pytest.param(
+                ["--list-operations", "scratch_memory"],
+                ["SCRATCH_MEMORY_ALLOC"],
+                id="found",
+            ),
+            pytest.param(
+                ["--list-operations", "megaman"],
+                ["Error: Domain 'megaman' not found."],
+                id="error",
+            ),
+        ],
+    )
+    def test_list_operations(self, run_args, pass_regex):
+        """Test that list-operations command works."""
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=run_args,
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)

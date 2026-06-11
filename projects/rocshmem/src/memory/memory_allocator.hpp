@@ -38,6 +38,22 @@
 
 namespace rocshmem {
 
+/**
+ * @brief Type of allocator
+ *
+ * Used to identify the memory allocation strategy at runtime.
+ */
+enum AllocatorType {
+  AllocatorTypeCoarsegrained = 0,
+  AllocatorTypeFinegrained,
+  AllocatorTypeUncached,
+  AllocatorTypeVMMPosix,
+  AllocatorTypeVMMFabric,
+  AllocatorTypeHost,
+  AllocatorTypePosix,
+  AllocatorTypeLast
+};
+
 class MemoryAllocator {
  public:
   /**
@@ -102,12 +118,24 @@ class MemoryAllocator {
    */
   void deallocate(void* ptr);
 
+  /**
+   * @brief Get allocator type
+   *
+   * @return AllocatorType identifying the allocator strategy
+   */
+  AllocatorType get_type() const { return type_; }
+
  public:
  protected:
   /**
    * @brief is this memory allocated using managed memory
    */
   bool _managed{false};
+
+  /**
+   * @brief Type of allocator for runtime identification
+   */
+  AllocatorType type_{AllocatorTypeCoarsegrained};
 
  private:
   /**

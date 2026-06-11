@@ -156,7 +156,38 @@ def test_adapter_conforms_to_protocol() -> None:
 
 
 def test_tool_name_template() -> None:
-    assert CodexAdapter.tool_name_template == "mcp_perfxpert_{tool}"
+    assert CodexAdapter.tool_name_template == "mcp__perfxpert__{tool}"
+
+
+def test_codex_prompt_forbids_ssh_fallback_without_gate_tools() -> None:
+    rendered = CodexAdapter()._render_prompt_for_codex()
+    assert "SSH or another remote host" in rendered
+    assert "never bypasses the PerfXpert MCP gate" in rendered
+    assert "mcp__perfxpert__intent_classify" in rendered
+    assert "mcp__perfxpert__workflow_next_step" in rendered
+    assert "mcp_perfxpert_intent_classify" not in rendered
+    assert "not exposed in the backend session" in rendered
+    assert "native SSH/build/profile" in rendered
+    assert "fallback path" in rendered
+
+
+def test_codex_prompt_allows_only_tool_search_for_deferred_gate_tool() -> None:
+    rendered = CodexAdapter()._render_prompt_for_codex()
+    assert "tool_search" in rendered
+    assert "tool_search_tool" in rendered
+    assert "discovery-only metadata tools" in rendered
+    assert "perfxpert intent_classify" in rendered
+    assert "Do NOT use shell, SSH," in rendered
+    assert "build, edit, or profiling tools as a discovery fallback" in rendered
+
+
+def test_codex_prompt_requires_consent_before_installing_missing_remote_tooling() -> None:
+    rendered = CodexAdapter()._render_prompt_for_codex()
+    assert "sqlite3" in rendered
+    assert "SSH remote host" in rendered
+    assert "Ask the user for explicit permission" in rendered
+    assert "install command" in rendered
+    assert "leave the artifact uninspected" in rendered
 
 
 def test_spawn_strategy_is_execvpe() -> None:
@@ -508,6 +539,79 @@ def test_structured_edit_fallback_uses_tomlkit(
     text = cfg.read_text()
     assert "[mcp_servers.perfxpert]" in text or "perfxpert" in text
     assert "perfxpert-mcp" in text
+
+
+def test_register_project_scope_writes_project_config_without_codex_mcp_add(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list] = []
+
+    def _run(cmd, *args, **kwargs):
+        calls.append(list(cmd))
+
+        class _R:
+            returncode = 0
+            stdout = b"perfxpert\n"
+            stderr = b""
+
+        return _R()
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("perfxpert.cli._backend.codex.subprocess.run", _run)
+
+    project_cwd = tmp_path / "proj"
+    project_cwd.mkdir()
+    cfg = project_cwd / ".codex" / "config.toml"
+    CodexAdapter()._register_mcp(project_cwd, cfg, "project")
+
+    assert cfg.is_file()
+    text = cfg.read_text()
+    assert "[mcp_servers.perfxpert]" in text or "perfxpert" in text
+    assert 'command = "perfxpert-mcp"' in text
+    assert "required = true" in text
+    assert "enabled_tools" not in text
+    assert "disabled_tools" not in text
+    assert not [c for c in calls if "mcp" in c and "add" in c]
+
+
+def test_structured_edit_refreshes_stale_perfxpert_filters(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "proj"
+    project_cwd.mkdir()
+    cfg = project_cwd / ".codex" / "config.toml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(
+        '[mcp_servers.perfxpert]\n'
+        'command = "perfxpert-mcp"\n'
+        "args = []\n"
+        "enabled = false\n"
+        'enabled_tools = ["report"]\n'
+        'disabled_tools = ["intent_classify"]\n'
+    )
+
+    CodexAdapter()._structured_edit_config_toml(cfg)
+
+    text = cfg.read_text()
+    assert 'command = "perfxpert-mcp"' in text
+    assert "enabled = true" in text
+    assert "required = true" in text
+    assert "enabled_tools" not in text
+    assert "disabled_tools" not in text
+
+
+def test_structured_edit_reports_file_at_codex_config_dir(
+    tmp_path: Path,
+) -> None:
+    project_cwd = tmp_path / "proj"
+    project_cwd.mkdir()
+    (project_cwd / ".codex").write_text("not a directory\n")
+
+    with pytest.raises(ConfigClobber, match="exists but is not a directory"):
+        CodexAdapter()._structured_edit_config_toml(
+            project_cwd / ".codex" / "config.toml"
+        )
 
 
 # ---------------------------------------------------------------------------

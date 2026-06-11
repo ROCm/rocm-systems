@@ -13,6 +13,7 @@ target_include_directories(
     rocprofiler-sdk-headers
     INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/include>
+              $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
@@ -200,7 +201,7 @@ target_link_libraries(rocprofiler-sdk-ptl INTERFACE PTL::ptl-static)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(LibElf)
+find_package(LibElf QUIET)
 if(LibElf_FOUND)
     target_link_libraries(rocprofiler-sdk-elf INTERFACE elf::elf)
 else()
@@ -223,13 +224,18 @@ target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
 #
 # ----------------------------------------------------------------------------------------#
 
-find_library(
-    hsa-amd-aqlprofile64_library
-    NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
-    HINTS ${rocm_version_DIR} ${ROCM_PATH}
-    PATHS ${rocm_version_DIR} ${ROCM_PATH})
+if(NOT ROCPROFILER_BUILD_AQLPROFILE)
+    find_library(
+        hsa-amd-aqlprofile64_library
+        NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile REQUIRED
+        HINTS ${rocm_version_DIR} ${ROCM_PATH}
+        PATHS ${rocm_version_DIR} ${ROCM_PATH})
 
-target_link_libraries(rocprofiler-sdk-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_library})
+    target_compile_definitions(rocprofiler-sdk-aqlprofile-external
+                               INTERFACE ROCPROFILER_EXTERNAL_AQLPROFILE=1)
+    target_link_libraries(rocprofiler-sdk-aqlprofile-external
+                          INTERFACE ${hsa-amd-aqlprofile64_library})
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #

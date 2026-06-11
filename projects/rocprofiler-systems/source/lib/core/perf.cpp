@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
-
-#include <timemory/units.hpp>
+#include "common/units.hpp"
 
 #include "logger/debug.hpp"
+
+#include <cstdint>
 
 namespace rocprofsys
 {
 namespace perf
 {
-namespace units = ::tim::units;
 
 event_type
 get_event_type(std::string_view _v)
@@ -189,11 +189,11 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
     if(_pe.type == PERF_TYPE_SOFTWARE &&
        (_pe.config == PERF_COUNT_SW_CPU_CLOCK || _pe.config == PERF_COUNT_SW_TASK_CLOCK))
     {
-        _pe.sample_period = static_cast<uint64_t>(_period);
+        _pe.sample_period = static_cast<std::uint64_t>(_period);
     }
     else
     {
-        _pe.sample_period = static_cast<uint64_t>(_freq);
+        _pe.sample_period = static_cast<std::uint64_t>(_freq);
     }
 }
 }  // namespace perf

@@ -9,8 +9,6 @@
 #include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 
-#include <timemory/units.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -67,7 +65,7 @@ struct cache_policy
               thread_id, "{}" });
 
         auto add_vcn_track = [&](std::optional<int> xcp_idx) {
-            for(int clk = 0; clk < AMDSMI_MAX_NUM_VCN; ++clk)
+            for(size_t clk = 0; clk < MAX_NUM_VCN; ++clk)
             {
                 auto name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
@@ -78,7 +76,7 @@ struct cache_policy
         };
 
         auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
-            for(size_t clk = 0; clk < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++clk)
+            for(size_t clk = 0; clk < MAX_NUM_JPEG_V1; ++clk)
             {
                 auto name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
@@ -88,7 +86,7 @@ struct cache_policy
             }
         };
 
-        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
         {
             add_vcn_track(xcp);
             add_jpeg_track(xcp);
@@ -101,7 +99,7 @@ struct cache_policy
             { trace_cache::info::format_track_name<category::amd_smi_xgmi_link_speed>(),
               thread_id, "{}" });
 
-        for(int vcn = 0; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
+        for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             auto vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
@@ -110,7 +108,7 @@ struct cache_policy
                 { vcn_name.c_str(), thread_id, "{}" });
         }
 
-        for(int link = 0; link < AMDSMI_MAX_NUM_XGMI_LINKS; ++link)
+        for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
         {
             auto read_name =
                 trace_cache::info::format_track_name<category::amd_smi_xgmi_read_data>(
@@ -127,6 +125,13 @@ struct cache_policy
 
         trace_cache::get_metadata_registry().add_track(
             { trace_cache::info::format_track_name<category::amd_smi_sdma_usage>(),
+              thread_id, "{}" });
+
+        trace_cache::get_metadata_registry().add_track(
+            { trace_cache::info::format_track_name<category::amd_smi_gfx_clock>(),
+              thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { trace_cache::info::format_track_name<category::amd_smi_mem_clock>(),
               thread_id, "{}" });
 
         trace_cache::get_metadata_registry().add_track(
@@ -174,7 +179,7 @@ struct cache_policy
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              trait::name<category::amd_smi_umc_busy>::value, "UMC Busy",
+              trait::name<category::amd_smi_umc_busy>::value, "UMC Avg. Busy",
               trait::name<category::amd_smi_umc_busy>::description, LONG_DESCRIPTION,
               COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
@@ -204,10 +209,10 @@ struct cache_policy
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
               trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
-              COMPONENT, tim::units::mem_repr(tim::units::megabyte),
-              rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0, "{}" });
+              COMPONENT, "MB", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0,
+              "{}" });
 
-        for(int vcn = 0; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
+        for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
             auto vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(vcn);
@@ -220,9 +225,9 @@ struct cache_policy
                   EXPRESSION, 0, 0, "{}" });
         }
 
-        for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
         {
-            for(int vcn = 0; vcn < AMDSMI_MAX_NUM_VCN; ++vcn)
+            for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
             {
                 auto vcn_name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
@@ -237,9 +242,9 @@ struct cache_policy
             }
         }
 
-        for(size_t xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
+        for(size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
         {
-            for(size_t jpeg = 0; jpeg < ROCPROFSYS_AMDSMI_JPEG_ENGINE_COUNT; ++jpeg)
+            for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
             {
                 auto jpeg_name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
@@ -259,6 +264,20 @@ struct cache_policy
               trait::name<category::amd_smi_sdma_usage>::description, LONG_DESCRIPTION,
               COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE,
               BLOCK, EXPRESSION, 0, 0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_gfx_clock>::value, "GFX Clock",
+              trait::name<category::amd_smi_gfx_clock>::description, LONG_DESCRIPTION,
+              COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+              0, "{}" });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_mem_clock>::value, "Mem Clock",
+              trait::name<category::amd_smi_mem_clock>::description, LONG_DESCRIPTION,
+              COMPONENT, "MHz", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+              0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
@@ -330,13 +349,13 @@ struct cache_policy
     static void store_sample(size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_metrics_cfg,
                              const enabled_metrics& supported_metrics,
-                             const metrics& metric_values, uint64_t timestamp)
+                             const metrics& metric_values, std::uint64_t timestamp)
     {
         enabled_metrics _enabled_metrics;
         _enabled_metrics.value = enabled_metrics_cfg.value & supported_metrics.value;
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_pmc_sample{
-            _enabled_metrics, static_cast<uint32_t>(device_id), timestamp,
+            _enabled_metrics, static_cast<std::uint32_t>(device_id), timestamp,
             metric_values });
     }
 };

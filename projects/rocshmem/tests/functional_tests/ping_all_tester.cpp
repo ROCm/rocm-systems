@@ -70,10 +70,10 @@ __global__ void PingAllTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 PingAllTester::PingAllTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
-  r_buf = (int *)rocshmem_malloc(sizeof(int) * args.num_wgs * num_pes);
+  r_buf = (int *)alloc_test_buffer(sizeof(int) * args.num_wgs * num_pes);
 }
 
-PingAllTester::~PingAllTester() { rocshmem_free(r_buf); }
+PingAllTester::~PingAllTester() { free_test_buffer(r_buf); }
 
 void PingAllTester::resetBuffers([[maybe_unused]] size_t size) {
   int num_pes {rocshmem_n_pes()};

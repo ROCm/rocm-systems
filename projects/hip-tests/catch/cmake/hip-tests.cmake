@@ -55,11 +55,11 @@ function(hip_gen_exe_target)
     "${args}"
     "${list_args}"
   )
-  foreach(SRC_NAME ${TEST_SRC})
+  foreach(SRC_NAME ${_TEST_SRC})
 
     if(NOT _STANDALONE_FLAG EQUAL "1")
       set(_EXE_NAME ${_NAME})
-      set(SRC_NAME ${TEST_SRC})
+      set(SRC_NAME ${_TEST_SRC})
     else()
       # strip extension of src and use exe name as src name
       get_filename_component(_EXE_NAME ${SRC_NAME} NAME_WLE)
@@ -119,9 +119,7 @@ function(hip_gen_exe_target)
     endforeach()
     # add binary to global list of binaries to install
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
-    set(_DISCOVER_PROPERTIES
-      SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST"
-    )
+    set(_DISCOVER_PROPERTIES "")
     if (DEFINED HIP_TEST_LABELS)
       list(APPEND _DISCOVER_PROPERTIES LABELS "${HIP_TEST_LABELS}")
     endif()

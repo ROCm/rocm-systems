@@ -26,7 +26,7 @@ namespace component
 struct progress_point : comp::base<progress_point, void>
 {
     using base_type     = comp::base<progress_point, void>;
-    using value_type    = int64_t;
+    using value_type    = std::int64_t;
     using hash_type     = tim::hash_value_t;
     using iterator_type = progress_point*;
 
@@ -36,7 +36,7 @@ struct progress_point : comp::base<progress_point, void>
     void            start();
     void            stop();
     void            mark();
-    void            set_value(int64_t);
+    void            set_value(std::int64_t);
     progress_point& operator+=(const progress_point&);
     progress_point& operator-=(const progress_point&);
 
@@ -44,15 +44,15 @@ struct progress_point : comp::base<progress_point, void>
     bool is_latency_point() const;
     void print(std::ostream& os) const;
 
-    void    set_hash(hash_type _v) { m_hash = _v; }
-    void    set_iterator(iterator_type _v) { m_iterator = _v; }
-    auto    get_iterator() const { return m_iterator; }
-    auto    get_hash() const { return m_hash; }
-    int64_t get_delta() const;
-    int64_t get_arrival() const;
-    int64_t get_departure() const;
-    int64_t get_latency_delta() const;
-    int64_t get_laps() const;
+    void         set_hash(hash_type _v) { m_hash = _v; }
+    void         set_iterator(iterator_type _v) { m_iterator = _v; }
+    auto         get_iterator() const { return m_iterator; }
+    auto         get_hash() const { return m_hash; }
+    std::int64_t get_delta() const;
+    std::int64_t get_arrival() const;
+    std::int64_t get_departure() const;
+    std::int64_t get_latency_delta() const;
+    std::int64_t get_laps() const;
 
     template <typename ArchiveT>
     void load(ArchiveT& ar, const unsigned)
@@ -82,9 +82,9 @@ struct progress_point : comp::base<progress_point, void>
 
 private:
     hash_type       m_hash      = 0;
-    int64_t         m_delta     = 0;
-    int64_t         m_arrival   = 0;
-    int64_t         m_departure = 0;
+    std::int64_t    m_delta     = 0;
+    std::int64_t    m_arrival   = 0;
+    std::int64_t    m_departure = 0;
     progress_point* m_iterator  = nullptr;
 };
 }  // namespace component
@@ -110,13 +110,13 @@ struct push_node<rocprofsys::causal::component::progress_point>
     using type = rocprofsys::causal::component::progress_point;
 
     push_node(type& _obj, scope::config _scope, hash_value_t _hash,
-              int64_t _tid = threading::get_id())
+              std::int64_t _tid = threading::get_id())
     {
         (*this)(_obj, _scope, _hash, _tid);
     }
 
     void operator()(type& _obj, scope::config, hash_value_t _hash,
-                    int64_t _tid = threading::get_id()) const;
+                    std::int64_t _tid = threading::get_id()) const;
 };
 
 template <>
@@ -124,9 +124,9 @@ struct pop_node<rocprofsys::causal::component::progress_point>
 {
     using type = rocprofsys::causal::component::progress_point;
 
-    pop_node(type& _obj, int64_t _tid = threading::get_id()) { (*this)(_obj, _tid); }
+    pop_node(type& _obj, std::int64_t _tid = threading::get_id()) { (*this)(_obj, _tid); }
 
-    void operator()(type& _obj, int64_t _tid = threading::get_id()) const;
+    void operator()(type& _obj, std::int64_t _tid = threading::get_id()) const;
 };
 }  // namespace operation
 }  // namespace tim

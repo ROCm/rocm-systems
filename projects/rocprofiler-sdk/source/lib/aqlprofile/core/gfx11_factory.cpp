@@ -20,11 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/gfx11_factory.h"
-#include "def/gfx11_def.h"
-#include "pm4/gfx11_cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/gfx11_factory.h"
+#include "lib/aqlprofile/def/gfx11_def.h"
+#include "lib/aqlprofile/pm4/gfx11_cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
 
 namespace aql_profile
 {
@@ -59,6 +59,10 @@ Gfx11Factory::Init(const AgentInfo* agent_info)
     if(Pm4Factory::sqtt_builder_ == NULL)
         throw aql_profile_exc_msg("SqttBuilder allocation failed");
 
+    // Register blocks whose enum value lies beyond HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER and
+    // therefore cannot be initialized by the static positional initializer below.
+    block_table_[AQLPROFILE_BLOCK_NAME_SQG] = &SqgCounterBlockInfo;
+
     agent_info_ = agent_info;
 }
 
@@ -78,7 +82,7 @@ const GpuBlockInfo* Gfx11Factory::block_table_[AQLPROFILE_BLOCKS_NUMBER] = {
     NULL /*&TcaCounterBlockInfo*/,
     NULL /*&TccCounterBlockInfo*/,
     &TcpCounterBlockInfo,
-    NULL /*&TdCounterBlockInfo*/,
+    &TdCounterBlockInfo,
     // MC blocks
     NULL /*MC_ARB*/,
     NULL /*MC_HUB*/,

@@ -81,7 +81,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-hip "HIP library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsa-runtime "HSA runtime library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-amd-comgr "AMD comgr library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-sdk-hsa-aql "AQL library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-aqlprofile-external
+                                  "(External) AQL library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-hsakmt
                                   "HSAKMT library for AMD KFD support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INTERNAL)

@@ -84,6 +84,20 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   one-liner still works for users who want it.
 
 ### Changed
+- **Codex gate discovery.** Codex-rendered gate prompts now allow only
+  `tool_search` / `tool_search_tool` as a discovery-only prelude when
+  the required PerfXpert MCP gate tools are deferred out of the initial
+  tool inventory; shell, SSH, build, edit, and profiling fallbacks
+  remain blocked until `perfxpert_intent_classify` returns.
+- **Breaking: non-text `perfxpert analyze` formats now write report
+  files by default.** `--format json`, `--format markdown`, and
+  `--format webview` synthesize a report filename when `-o/-d` are
+  omitted. Use `-o -` to preserve stdout for shell pipelines.
+- **Git install hardening.** The GitHub wrapper no longer runs
+  apt/dnf/zypper/sudo unless `PERFXPERT_AUTO_INSTALL_PREREQS=1` or
+  `--auto-install-prereqs` is explicitly supplied. The bundled
+  opencode build no longer bootstraps bun unless
+  `PERFXPERT_AUTO_INSTALL_BUN=1` is explicitly supplied.
 - **`--llm` providers.** All five providers —
   `anthropic`, `openai`, `ollama`, `private`, `opencode` — are
   selectable from the CLI **and** from `perfxpert.api.agent_root(...,

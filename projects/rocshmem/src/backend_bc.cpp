@@ -40,6 +40,7 @@
 #include "log.hpp"
 
 #include <cassert>
+#include <cstdint>
 
 namespace rocshmem {
 
@@ -149,6 +150,10 @@ void Backend::destroy_remaining_ctxs() {
 Backend::~Backend() {
   if (backend_comm != MPI_COMM_NULL)
     NET_CHECK(mpilib_ftable_.Comm_free(&backend_comm));
+
+  if (done_init) {
+    CHECK_HIP(hipHostFree(done_init));
+  }
 }
 
 void Backend::dump_stats() {
@@ -210,6 +215,7 @@ void Backend::dump_stats() {
   printf("Sync %llu\n", device_stats.getStat(NUM_SYNC));
   printf("WAVE_Sync %llu\n", device_stats.getStat(NUM_SYNC_WAVE));
   printf("WG_Sync %llu\n", device_stats.getStat(NUM_SYNC_WG));
+  printf("Reduce %llu\n", device_stats.getStat(NUM_REDUCE));
 
   const auto& host_stats{globalHostStats};
   printf("HOST STATS\n");
@@ -246,6 +252,7 @@ void Backend::dump_stats() {
   printf("Tests %llu\n", host_stats.getStat(NUM_HOST_TEST));
   printf("SHMEM_PTR %llu\n", host_stats.getStat(NUM_HOST_SHMEM_PTR));
   printf("SyncAll %llu\n", host_stats.getStat(NUM_HOST_SYNC_ALL));
+  printf("Reduce %llu\n", host_stats.getStat(NUM_HOST_REDUCE));
 
   dump_backend_stats();
 }
@@ -255,6 +262,74 @@ void Backend::reset_stats() {
   globalHostStats.resetStats();
 
   reset_backend_stats();
+}
+
+int Backend::buffer_register(void *addr, size_t length) {
+  if (addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  if (length == 0) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t start = reinterpret_cast<uintptr_t>(addr);
+
+  // Check for overflow when computing end address
+  if (start > UINTPTR_MAX - length) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t end = start + length;
+
+  // Find first entry with start >= our start
+  auto it = user_buffer_regions.lower_bound(start);
+
+  // Check entry at or after our start for overlap
+  if (it != user_buffer_regions.end() && it->first < end) {
+    return ROCSHMEM_ERROR;
+  }
+
+  // Check entry just before our start for overlap
+  if (it != user_buffer_regions.begin()) {
+    auto prev = std::prev(it);
+    uintptr_t prev_end = prev->first + prev->second;
+    if (prev_end > start) {
+      return ROCSHMEM_ERROR;
+    }
+  }
+
+  user_buffer_regions[start] = length;
+  return ROCSHMEM_SUCCESS;
+}
+
+int Backend::buffer_unregister(void *addr) {
+  if (addr == nullptr) {
+    return ROCSHMEM_ERROR;
+  }
+
+  uintptr_t target = reinterpret_cast<uintptr_t>(addr);
+
+  // Find first entry with start > target
+  auto it = user_buffer_regions.upper_bound(target);
+
+  if (it != user_buffer_regions.begin()) {
+    auto prev = std::prev(it);
+    uintptr_t start = prev->first;
+    uintptr_t end = start + prev->second;
+
+    // Check if target falls within [start, end)
+    if (target < end) {
+      user_buffer_regions.erase(prev);
+      return ROCSHMEM_SUCCESS;
+    }
+  }
+
+  return ROCSHMEM_ERROR;
+}
+
+void Backend::buffer_unregister_all() {
+  user_buffer_regions.clear();
 }
 
 }  // namespace rocshmem

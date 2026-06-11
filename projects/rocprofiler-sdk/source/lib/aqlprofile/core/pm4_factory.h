@@ -24,7 +24,7 @@
 #define SRC_CORE_PM4_FACTORY_H_
 
 #include <assert.h>
-#include "hsa_includes.h"
+#include "lib/aqlprofile/hsa_includes.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -34,15 +34,16 @@
 #include <sstream>
 #include <string>
 
-#include "aqlprofile-sdk/aql_profile_v2.h"
-#include "core/aql_profile.hpp"
-#include "core/aql_profile_exception.h"
-#include "def/gpu_block_info.h"
-#include "pm4/cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/spm_builder.h"
-#include "pm4/sqtt_builder.h"
-#include "util/hsa_rsrc_factory.h"
+#include "lib/aqlprofile/aqlprofile.hpp"
+#include "lib/aqlprofile/core/aql_profile.hpp"
+#include "lib/aqlprofile/core/aql_profile_exception.h"
+#include "lib/aqlprofile/def/gpu_block_info.h"
+#include "lib/common/environment.hpp"
+#include "lib/aqlprofile/pm4/cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/spm_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
+#include "lib/aqlprofile/util/hsa_rsrc_factory.h"
 
 namespace aql_profile
 {
@@ -61,6 +62,9 @@ GetAgentInfo(aqlprofile_agent_handle_t agent_id);
 aqlprofile_agent_handle_t
 RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info);
 
+aqlprofile_agent_handle_t
+RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info);
+
 // GPU enumeration
 enum gpu_id_t
 {
@@ -74,6 +78,7 @@ enum gpu_id_t
     GFX11_GPU_ID,    // generic Gfx11 id
     GFX115X_GPU_ID,  // Gfx11.5x id
     GFX12_GPU_ID,    // generic Gfx12 id
+    MI450_GPU_ID,    // Mi450 GPU id
 };
 
 // Block info map class
@@ -92,7 +97,7 @@ public:
     // Get block info for a given block id
     const GpuBlockInfo* Get(const uint32_t& block_id) const
     {
-        return (block_id < block_count_) ? block_table_[block_id] : NULL;
+        return (block_id < block_count_) ? block_table_[block_id] : nullptr;
     }
 
     // Find block by name
@@ -167,6 +172,8 @@ public:
     virtual bool IsGFX12() const { return false; }
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
+    // Return number of XCC per AID
+    uint32_t GetXccPerAid() const { return agent_info_->xcc_per_aid; }
 
     // SPM specific
     virtual uint32_t GetSpmSampleDelayMax() { return 0; }
@@ -174,7 +181,7 @@ public:
     const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const
     {
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
-        if(info == NULL) throw std::runtime_error("Bad Block");
+        if(info == nullptr) throw std::runtime_error("Bad Block");
         // Checking that the block index is in proper range
         if(event->block_index >= info->instance_count) throw std::runtime_error("Bad Index");
             // Checking that the counter event index is in proper range
@@ -189,7 +196,7 @@ public:
     const GpuBlockInfo* GetBlockInfo(const event_t* event) const
     {
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
-        if(info == NULL) throw event_exception(std::string("Bad block, "), *event);
+        if(info == nullptr) throw event_exception(std::string("Bad block, "), *event);
         // Checking that the block index is in proper range
         if(event->block_index >= info->instance_count)
             throw event_exception(std::string("Bad block index, "), *event);
@@ -238,14 +245,17 @@ public:
     virtual int GetAccumLowID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
     virtual int GetAccumHiID() const { throw HSA_STATUS_ERROR_INVALID_ARGUMENT; };
 
+    // Return GPU id for a given gfxip string. Pure mapping function; the
+    // instance-side GetGpuId() above returns the cached value resolved by
+    // this lookup at factory-construction time. Exposed for callers that
+    // need chip-family dispatch before a Pm4Factory exists -- e.g.
+    // populate_cu_bitmap_from_drm() gating the GFX11+ DRM bitmap fetch in
+    // pm4_factory.cpp without re-implementing the gfxip -> gpu_id_t table.
+    static gpu_id_t GetGpuId(std::string_view);
+
 protected:
     explicit Pm4Factory(const BlockInfoMap& map)
-    : cmd_builder_(NULL)
-    , pmc_builder_(NULL)
-    , spm_builder_(NULL)
-    , sqtt_builder_(NULL)
-    , agent_info_(NULL)
-    , concurrent_mode_(concurrent_create_mode_)
+    : concurrent_mode_(concurrent_create_mode_)
     , block_map_(map)
     {}
 
@@ -258,20 +268,20 @@ protected:
     }
 
     // PM4 command builder
-    pm4_builder::CmdBuilder* cmd_builder_;
+    pm4_builder::CmdBuilder* cmd_builder_ = nullptr;
     // PMC PM4 packets builder
-    pm4_builder::PmcBuilder* pmc_builder_;
+    pm4_builder::PmcBuilder* pmc_builder_ = nullptr;
     // SPM PM4 packets builder
-    pm4_builder::SpmBuilder* spm_builder_;
+    pm4_builder::SpmBuilder* spm_builder_ = nullptr;
     // SQTT PM4 packets builder
-    pm4_builder::SqttBuilder* sqtt_builder_;
+    pm4_builder::SqttBuilder* sqtt_builder_ = nullptr;
     // agent info
-    const AgentInfo* agent_info_;
-    gpu_id_t         gpu_id_;
+    const AgentInfo* agent_info_ = nullptr;
+    gpu_id_t         gpu_id_     = INVAL_GPU_ID;
     // Concurrent mode
     static bool concurrent_create_mode_;
     static bool spm_kfd_mode_;
-    bool        concurrent_mode_;
+    bool        concurrent_mode_ = false;
 
 private:
     // PM4 factory instance map type
@@ -309,8 +319,8 @@ private:
     static Pm4Factory* Mi300Create(const AgentInfo* agent_info);
     // Create MI350 factory
     static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
-    // Return GPU id for a given agent
-    static gpu_id_t GetGpuId(std::string_view);
+    // Create MI450 factory
+    static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
 
     static bool CheckConcurrent(const profile_t* profile);
 
@@ -326,13 +336,14 @@ inline Pm4Factory*
 Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent)
 {
     // Check if we have the instance already created
-    if(instances_ == NULL) instances_ = new instances_t;
-    const auto            ret = instances_->insert({*agent_info, NULL});
+    if(instances_ == nullptr) instances_ = new instances_t;
+    const auto            ret = instances_->insert({*agent_info, nullptr});
     instances_t::iterator it  = ret.first;
 
     concurrent_create_mode_ = concurrent;
-    static bool spm_kfd     = getenv("ROCP_SPM_KFD_MODE") != NULL;
-    spm_kfd_mode_           = spm_kfd;
+    // Check presence, not value (even empty string means "enabled")
+    static bool spm_kfd = rocprofiler::common::get_env_optional("ROCP_SPM_KFD_MODE").has_value();
+    spm_kfd_mode_       = spm_kfd;
 
     // Create a factory implementation for the GPU id
     if(ret.second)
@@ -353,11 +364,12 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
             case MI200_GPU_ID: it->second = Mi200Create(agent_info); break;
             case MI300_GPU_ID: it->second = Mi300Create(agent_info); break;
             case MI350_GPU_ID: it->second = Mi350Create(agent_info); break;
+            case MI450_GPU_ID: it->second = Mi450Create(agent_info); break;
             default: throw aql_profile_exc_val<gpu_id_t>("GPU id error", gpu_id);
         }
     }
 
-    if(it->second == NULL) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
+    if(it->second == nullptr) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
     it->second->gpu_id_ = gpu_id;
     return it->second;
 }
@@ -376,12 +388,14 @@ Pm4Factory::Create(const hsa_agent_t agent, bool concurrent)
     uint32_t device_id = 0;
 
     // Getting GfxIP name
-    status = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name.data());
+    status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+        agent, HSA_AGENT_INFO_NAME, agent_name.data());
     if(status == HSA_STATUS_SUCCESS)
     {
         // Getting DeviceId
         hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID);
-        status                     = hsa_agent_get_info(agent, attribute, &device_id);
+        status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
+            agent, attribute, &device_id);
     }
     if(status != HSA_STATUS_SUCCESS)
     {
@@ -396,7 +410,7 @@ inline Pm4Factory*
 Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool concurrent)
 {
     const auto* info = GetAgentInfo(agent_info);
-    if(info == NULL) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
+    if(info == nullptr) throw aql_profile_exc_val<uint64_t>("Bad agent handle", agent_info.handle);
     const gpu_id_t gpu_id = GetGpuId(info->gfxip);
     return Pm4Factory::Create(info, gpu_id, concurrent);
 }
@@ -407,12 +421,12 @@ Pm4Factory::Destroy()
 {
     std::lock_guard<mutex_t> lck(mutex_);
 
-    if(instances_ != NULL)
+    if(instances_ != nullptr)
     {
         for(auto& item : *instances_)
             delete item.second;
         delete instances_;
-        instances_ = NULL;
+        instances_ = nullptr;
     }
 }
 
@@ -446,6 +460,7 @@ Pm4Factory::GetGpuId(std::string_view gfx_ip)
         {"gfx10", GFX10_GPU_ID},
         {"gfx115", GFX115X_GPU_ID},
         {"gfx11", GFX11_GPU_ID},
+        {"gfx125", MI450_GPU_ID},
         {"gfx12", GFX12_GPU_ID},
     };
 

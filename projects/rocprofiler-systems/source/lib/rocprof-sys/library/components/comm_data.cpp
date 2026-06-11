@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/comm_data.hpp"
+#include "common/units.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/node_info.hpp"
@@ -9,8 +10,7 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
-
-#include <timemory/units.hpp>
+#include <cstdint>
 
 namespace rocprofsys
 {
@@ -20,7 +20,7 @@ namespace
 {
 template <typename Tp, typename... Args>
 void
-write_perfetto_counter_track(uint64_t _val)
+write_perfetto_counter_track(std::uint64_t _val)
 {
     using counter_track = rocprofsys::perfetto_counter_track<Tp>;
 
@@ -40,12 +40,12 @@ write_perfetto_counter_track(uint64_t _val)
         static std::once_flag _once{};
         std::call_once(_once, _emplace, _idx);
 
-        static std::mutex _mutex{};
-        static uint64_t   value = 0;
-        uint64_t          _now  = 0;
+        static std::mutex    _mutex{};
+        static std::uint64_t value = 0;
+        std::uint64_t        _now  = 0;
         {
             std::unique_lock<std::mutex> _lk{ _mutex };
-            _now = rocprofsys::tracing::now<uint64_t>();
+            _now = rocprofsys::tracing::now<std::uint64_t>();
             _val = (value += _val);
         }
 
@@ -123,14 +123,14 @@ metadata_initialize_comm_data_pmc()
 
 template <typename Track>
 void
-cache_comm_data_events(const uint32_t device_id, int bytes)
+cache_comm_data_events(const std::uint32_t device_id, int bytes)
 {
-    static std::mutex _mutex{};
-    static uint64_t   value = 0;
-    uint64_t          _now  = 0;
+    static std::mutex    _mutex{};
+    static std::uint64_t value = 0;
+    std::uint64_t        _now  = 0;
     {
         std::unique_lock<std::mutex> _lk{ _mutex };
-        _now  = rocprofsys::tracing::now<uint64_t>();
+        _now  = rocprofsys::tracing::now<std::uint64_t>();
         bytes = (value += bytes);
     }
     const std::string track_name      = Track::label;
@@ -146,7 +146,7 @@ cache_comm_data_events(const uint32_t device_id, int bytes)
         static_cast<size_t>(category_enum_id<category::comm_data>::value),
         track_name.c_str(), timestamp_ns, event_metadata.c_str(), stack_id,
         parent_stack_id, correlation_id, call_stack.c_str(), line_info.c_str(), device_id,
-        static_cast<uint8_t>(agent_type::CPU), track_name.c_str(),
+        static_cast<std::uint8_t>(agent_type::CPU), track_name.c_str(),
         static_cast<double>(value), std::nullopt });
 }
 
@@ -376,7 +376,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
             add(_b, sendcount * _send_size);
             tracker_t _c{ fmt::format("{}/send={}", _name, dst) };
             add(_b, sendcount * _send_size);
-            add(fmt::format("{}/send={}/tag={}", _name, sendtag), sendcount * _send_size);
+            add(fmt::format("{}/send/tag={}", _name, sendtag), sendcount * _send_size);
             add(fmt::format("{}/send={}/tag={}", _name, dst, sendtag),
                 sendcount * _send_size);
         }
@@ -385,7 +385,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
             add(_b, recvcount * _recv_size);
             tracker_t _c{ fmt::format("{}/recv={}", _name, src) };
             add(_b, recvcount * _recv_size);
-            add(fmt::format("{}/recv={}/tag={}", _name, recvtag), recvcount * _recv_size);
+            add(fmt::format("{}/recv/tag={}", _name, recvtag), recvcount * _recv_size);
             add(fmt::format("{}/recv={}/tag={}", _name, src, recvtag),
                 recvcount * _recv_size);
         }
@@ -460,11 +460,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
 
 // UCX communication tracking implementations
 
-// ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, uint64_t tag, const
+// ucp_tag_send_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t tag, const
 // void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t count, uint64_t tag, const void*)
+                 size_t count, std::uint64_t tag, const void*)
 {
     if(count == 0) return;
 
@@ -483,11 +483,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     }
 }
 
-// ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, uint64_t tag, uint64_t
-// tag_mask, const void* param)
+// ucp_tag_recv_nbx: (void* worker, void* buffer, size_t count, std::uint64_t tag,
+// std::uint64_t tag_mask, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 uint64_t tag, uint64_t tag_mask, const void*)
+                 std::uint64_t tag, std::uint64_t tag_mask, const void*)
 {
     if(count == 0) return;
 
@@ -507,11 +507,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
     }
 }
 
-// ucp_put_nbx: (void* ep, const void* buffer, size_t count, uint64_t remote_addr, void*
-// rkey, const void* param)
+// ucp_put_nbx: (void* ep, const void* buffer, size_t count, std::uint64_t remote_addr,
+// void* rkey, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
-                 size_t count, uint64_t remote_addr, void*, const void*)
+                 size_t count, std::uint64_t remote_addr, void*, const void*)
 {
     if(count == 0) return;
 
@@ -530,11 +530,11 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
     }
 }
 
-// ucp_get_nbx: (void* ep, void* buffer, size_t count, uint64_t remote_addr, void* rkey,
-// const void* param)
+// ucp_get_nbx: (void* ep, void* buffer, size_t count, std::uint64_t remote_addr, void*
+// rkey, const void* param)
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t count,
-                 uint64_t remote_addr, void*, const void*)
+                 std::uint64_t remote_addr, void*, const void*)
 {
     if(count == 0) return;
 
@@ -666,7 +666,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
 // ucp_put/get operations - RMA
 void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length,
-                 uint64_t, void*, void*)
+                 std::uint64_t, void*, void*)
 {
     if(length == 0) return;
 

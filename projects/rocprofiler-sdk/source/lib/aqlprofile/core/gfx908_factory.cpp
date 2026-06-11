@@ -20,11 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "core/gfx9_factory.h"
-#include "def/gfx908_def.h"
-#include "pm4/gfx9_cmd_builder.h"
-#include "pm4/pmc_builder.h"
-#include "pm4/sqtt_builder.h"
+#include "lib/aqlprofile/core/gfx9_factory.h"
+#include "lib/aqlprofile/def/gfx908_def.h"
+#include "lib/aqlprofile/pm4/gfx9_cmd_builder.h"
+#include "lib/aqlprofile/pm4/pmc_builder.h"
+#include "lib/aqlprofile/pm4/sqtt_builder.h"
+#include "lib/common/logging.hpp"
 
 namespace aql_profile
 {
@@ -65,31 +66,31 @@ Mi100Factory::InitSpmBlockDelayTable()
     *p++ = GdsBlockDelayValue;  // GDS = 3
     *p++ = TccBlockDelayValue;  // TCC = 4
     *p++ = TcaBlockDelayValue;  // TCA = 5
-    *p++ = NULL;                // IA = 6
-    *p++ = NULL;                // TCS = 7
+    *p++ = nullptr;             // IA = 6
+    *p++ = nullptr;             // TCS = 7
     // SE Blocks
     p    = spm_block_delay_se;
-    *p++ = NULL;                // CB = 0
-    *p++ = NULL;                // DB = 1
-    *p++ = NULL;                // PA = 2
+    *p++ = nullptr;             // CB = 0
+    *p++ = nullptr;             // DB = 1
+    *p++ = nullptr;             // PA = 2
     *p++ = SxBlockDelayValue;   // SSX = 3
-    *p++ = NULL;                // SC = 4
+    *p++ = nullptr;             // SC = 4
     *p++ = TaBlockDelayValue;   // TA = 5
     *p++ = TaBlockDelayValue;   // TD = 6  - Same as TA
     *p++ = TaBlockDelayValue;   // TCP = 7 - Same as TA
     *p++ = SpiBlockDelayValue;  // SPI = 8
     *p++ = SqBlockDelayValue;   // SQG = 9
-    *p++ = NULL;                // VGT = 10
+    *p++ = nullptr;             // VGT = 10
 }
 
-Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
+Mi100Factory::Mi100Factory(const AgentInfo* agent_info, bool is_base)
 : Gfx9Factory(block_table_, sizeof(block_table_), agent_info)
 {
     InitSpmBlockDelayTable();
     for(unsigned i = 0; i < AQLPROFILE_BLOCKS_NUMBER; ++i)
     {
         const GpuBlockInfo* base_table_ptr = Gfx9Factory::block_table_[i];
-        if(base_table_ptr == NULL) continue;
+        if(base_table_ptr == nullptr) continue;
         GpuBlockInfo* block_info = nullptr;
         if(i == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_RPB)
             block_info = new GpuBlockInfo(RpbCounterBlockInfo);
@@ -104,8 +105,15 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
             case SqCounterBlockId: block_info->event_id_max = 303; break;
             case TcpCounterBlockId:
                 block_info->event_id_max = 87;
-                assert(agent_info->se_num * block_info->instance_count ==
-                       cu_block_delay_table_size);
+                ROCP_FATAL_IF(!is_base && agent_info->se_per_xcc() * block_info->instance_count !=
+                                              cu_block_delay_table_size)
+                    << fmt::format("Mismatch in CU block delay table size. Expected {}, got {}. "
+                                   "agent devid: {}. agent SE/XCC: {}, block instances: {}",
+                                   agent_info->se_per_xcc() * block_info->instance_count,
+                                   cu_block_delay_table_size,
+                                   agent_info->dev_index,
+                                   agent_info->se_per_xcc(),
+                                   block_info->instance_count);
                 break;
             case TccCounterBlockId:
                 block_info->instance_count = 32;
@@ -130,8 +138,8 @@ Mi100Factory::Mi100Factory(const AgentInfo* agent_info)
 Pm4Factory*
 Pm4Factory::Mi100Create(const AgentInfo* agent_info)
 {
-    auto p = new Mi100Factory(agent_info);
-    if(p == NULL) throw aql_profile_exc_msg("Mi100Factory allocation failed");
+    auto* p = new Mi100Factory(agent_info);
+    if(p == nullptr) throw aql_profile_exc_msg("Mi100Factory allocation failed");
     return p;
 }
 
