@@ -67,7 +67,7 @@ class CommandProcessor;
 /// to construct.
 class ComputeUnitCore : public simdojo::CompositeComponent {
 public:
-  static constexpr uint32_t kFunctionalQuantum = 1024;
+  static constexpr uint32_t kFunctionalQuantum = 16384;
 
   /// @brief Configuration for a compute unit.
   struct Config {
