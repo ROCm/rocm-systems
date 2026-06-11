@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "backends/amd_smi/nic_backend.hpp"
+#include "backends/amd_smi/device_backend.hpp"
 #include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
@@ -39,7 +39,7 @@ struct nic_traits
 {
     using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using backend_t         = ::rocprofsys::backends::amd_smi::nic_backend;
+    using backend_t         = ::rocprofsys::backends::amd_smi::device_backend;
     using device_t          = device<backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;

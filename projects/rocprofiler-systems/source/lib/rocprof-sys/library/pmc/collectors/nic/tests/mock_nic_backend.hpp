@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "backends/amd_smi/nic_backend.hpp"
+#include "backends/amd_smi/device_backend.hpp"
 
 #include <gmock/gmock.h>
 

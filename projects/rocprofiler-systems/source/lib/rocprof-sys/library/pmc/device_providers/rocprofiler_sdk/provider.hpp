@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "backends/rocprofiler_sdk/backend.hpp"
 #include "core/agent.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"

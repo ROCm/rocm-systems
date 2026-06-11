@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "backends/amd_smi/gpu_backend.hpp"
+#include "backends/amd_smi/device_backend.hpp"
 #include "core/config.hpp"
 #include "library/pmc/collectors/gpu/device.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
@@ -36,7 +36,7 @@ struct gpu_traits
     // Required type aliases for base::collector
     using metrics_t         = pmc::collectors::gpu::metrics;
     using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
-    using backend_t         = ::rocprofsys::backends::amd_smi::gpu_backend;
+    using backend_t         = ::rocprofsys::backends::amd_smi::device_backend;
     using device_t          = device<backend_t>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;
