@@ -538,3 +538,172 @@ def test_run_profiling_pc_sampling_gating(
         for call in mock_warning.call_args_list
     )
     assert multirank_warned is expect_multirank_warning
+
+
+# ---------------------------------------------------------------------------
+# run_profiling(): the shared native_tool_path reaches PCSamplingProfile
+# ---------------------------------------------------------------------------
+def _make_sdk_run_profiling_profiler(
+    tmp_path,
+    monkeypatch,
+    *,
+    filter_blocks,
+    perfmon_files=0,
+    rocm_version="7.0.0",
+    profiler_mode="rocprofiler-sdk",
+    no_native_tool=False,
+    attach_pid=None,
+    native_finder_raises=False,
+):
+    """Drive run_profiling() on the sdk native-tool path; returns (profiler, mocks)."""
+    if perfmon_files:
+        perfmon_dir = Path(tmp_path) / "perfmon"
+        perfmon_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(perfmon_files):
+            (perfmon_dir / f"pmc_perf_{i}.yaml").write_text("")
+
+    args = _make_sanitize_args(
+        ["./app"],
+        filter_blocks=filter_blocks,
+        output_directory=str(tmp_path),
+        no_native_tool=no_native_tool,
+        attach_pid=attach_pid,
+        pc_sampling_method="host_trap",
+        pc_sampling_interval=1000,
+    )
+    args.remaining = "-- ./app"
+    soc = SimpleNamespace(
+        _mspec=SimpleNamespace(gpu_model="MI300", rocm_version=rocm_version)
+    )
+    profiler = RocProfCompute_Base(args, profiler_mode=profiler_mode, soc=soc)
+    profiler._filter_blocks = filter_blocks
+
+    base = "rocprof_compute_profile.profiler_base"
+
+    mock_pc_cls = Mock()
+    mock_pc_cls.return_value.is_requested.return_value = any(
+        block in ("21", "pc_sampling") for block in filter_blocks
+    )
+
+    mock_finder_cls = Mock()
+    finder_instance = mock_finder_cls.return_value
+    if native_finder_raises:
+        finder_instance.get_collector_library_path.side_effect = RuntimeError("boom")
+    else:
+        finder_instance.get_collector_library_path.return_value = "/n/native.so"
+
+    mock_profile = Mock(return_value=0.0)
+
+    monkeypatch.setattr(f"{base}.PCSamplingProfile", mock_pc_cls)
+    monkeypatch.setattr(f"{base}.NativeToolFinder", mock_finder_cls)
+    monkeypatch.setattr(f"{base}.print_status", Mock())
+    monkeypatch.setattr(
+        f"{base}.get_job_rank_and_size", Mock(return_value=(None, None))
+    )
+    consoles = common.patch_console(
+        monkeypatch, base, "log", "debug", "warning", "error"
+    )
+    monkeypatch.setattr(RocProfCompute_Base, "profile", mock_profile)
+    # Base get_profiler_options ignores native_tool_path kwarg passed in sdk mode.
+    monkeypatch.setattr(
+        RocProfCompute_Base,
+        "get_profiler_options",
+        lambda self, *a, **k: {},
+    )
+
+    mocks = SimpleNamespace(
+        pc_cls=mock_pc_cls,
+        finder_cls=mock_finder_cls,
+        profile=mock_profile,
+        console_error=consoles["error"],
+    )
+    return profiler, mocks
+
+
+def _pc_native_tool_path(mock_pc_cls):
+    """native_tool_path passed to the PCSamplingProfile constructor (or None)."""
+    assert mock_pc_cls.called, "PCSamplingProfile was never constructed"
+    return mock_pc_cls.call_args.kwargs.get("native_tool_path")
+
+
+@pytest.mark.parametrize(
+    "kwargs, expect_native_path, expect_profile_called, expect_error",
+    [
+        # PC-sampling-only: native tool threaded, no counter pass.
+        pytest.param(
+            dict(filter_blocks=["21"], perfmon_files=0),
+            True,
+            False,
+            None,
+            id="pc_only_threads_path_no_counter_pass",
+        ),
+        # Mixed blocks: native tool threaded and the counter pass runs.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1),
+            True,
+            True,
+            None,
+            id="mixed_threads_and_runs_counter_pass",
+        ),
+        # --no-native-tool: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["21"], perfmon_files=0, no_native_tool=True),
+            False,
+            None,
+            None,
+            id="no_native_tool_threads_none",
+        ),
+        # Live attach: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, attach_pid="123"),
+            False,
+            None,
+            None,
+            id="attach_pid_threads_none",
+        ),
+        # ROCm major < 7: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, rocm_version="6.4.0"),
+            False,
+            None,
+            None,
+            id="rocm_major_lt_7_threads_none",
+        ),
+        # rocprofv3 backend: native tool not threaded.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, profiler_mode="rocprofv3"),
+            False,
+            None,
+            None,
+            id="rocprofv3_threads_none",
+        ),
+        # Native finder failure: console_error fires.
+        pytest.param(
+            dict(filter_blocks=["2", "21"], perfmon_files=1, native_finder_raises=True),
+            None,
+            None,
+            True,
+            id="native_resolution_failure_errors",
+        ),
+    ],
+)
+def test_run_profiling_native_tool_path(
+    tmp_path,
+    monkeypatch,
+    kwargs,
+    expect_native_path,
+    expect_profile_called,
+    expect_error,
+):
+    """run_profiling() threads native_tool_path only on the supported sdk path,
+    runs the counter pass for non-PC blocks, and errors on finder failure."""
+    profiler, mocks = _make_sdk_run_profiling_profiler(tmp_path, monkeypatch, **kwargs)
+    profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+
+    if expect_native_path is not None:
+        path = _pc_native_tool_path(mocks.pc_cls)
+        assert (path is not None) is expect_native_path
+    if expect_profile_called is not None:
+        assert mocks.profile.called is expect_profile_called
+    if expect_error is not None:
+        assert mocks.console_error.called is expect_error
