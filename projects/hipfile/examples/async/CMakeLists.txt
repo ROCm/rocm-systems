@@ -47,10 +47,10 @@ if(BUILD_TESTING)
     # checkouts don't collide on a shared path. Kept under AIS_CAPABLE_DIR
     # because the e2e tests need an O_DIRECT-capable local FS — the build
     # tree may live on overlay/nfs and isn't a safe default.
-    string(RANDOM
-        LENGTH 8
-        ALPHABET "abcdefghijklmnopqrstuvwxyz0123456789"
-        _async_scratch_token
+    execute_process(
+        COMMAND uuidgen
+        OUTPUT_VARIABLE _async_scratch_token
+        OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     set(ASYNC_TEST_DIR
         "${AIS_CAPABLE_DIR}/hipfile_async_tests_${_async_scratch_token}"
