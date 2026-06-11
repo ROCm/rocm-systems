@@ -18,17 +18,241 @@ class MockArgs:
             setattr(self, key, value)
 
 
-def _make_pc_sampling_profile(method, interval, workload_dir, profiler):
-    """Build a PCSamplingProfile with a minimal args namespace for launch tests."""
+def _make_pc_sampling_profile(
+    workload_dir,
+    *,
+    method="host_trap",
+    interval=1000,
+    profiler="rocprofiler-sdk",
+    native_tool_path=None,
+    filter_blocks=("21",),
+):
+    """Build a PCSamplingProfile; defaults target the sdk launch/cleanup case."""
     return PCSamplingProfile(
         args=MockArgs(
             pc_sampling_method=method,
             pc_sampling_interval=interval,
-            filter_blocks=["21"],
+            filter_blocks=list(filter_blocks),
         ),
         profiler=profiler,
         workload_dir=workload_dir,
+        native_tool_path=native_tool_path,
     )
+
+
+def _record_and_raise_console_error():
+    """Return a console_error stub that records messages and raises on exit."""
+    calls = []
+
+    def stub(msg, exit=True):
+        calls.append(msg)
+        if exit:
+            raise RuntimeError("console_error called")
+
+    return stub, calls
+
+
+def test_native_backend_dispatch_sets_env_and_ld_preload(tmp_path, monkeypatch):
+    """Native backend: .so on LD_PRELOAD, PC sampling env set, no sdk output vars."""
+    method = "host_trap"
+    interval = 1000
+    workload_dir = str(tmp_path)
+    native_tool_path = "/n/native.so"
+    options = {"APP_CMD": "my_app --arg"}
+
+    mock_capture = Mock(return_value=(True, "Success output"))
+    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
+    mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
+
+    profiler = _make_pc_sampling_profile(
+        workload_dir,
+        method=method,
+        interval=interval,
+        native_tool_path=native_tool_path,
+    )
+    profiler._launch(options)
+
+    assert mock_capture.called
+    called_env = mock_capture.call_args.kwargs.get("new_env", {})
+
+    assert native_tool_path in called_env["LD_PRELOAD"].split(":")
+    assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
+    assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "time"
+    assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
+    assert called_env["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] == "1"
+    assert called_env["ROCPROF_COUNTER_COLLECTION"] == "0"
+    assert "ROCPROF_OUTPUT_FILE_NAME" not in called_env
+    assert "ROCPROF_OUTPUT_FORMAT" not in called_env
+
+    mock_error.assert_not_called()
+
+
+def test_native_backend_preserves_existing_ld_preload(tmp_path, monkeypatch):
+    """The native .so is appended after the user's own LD_PRELOAD."""
+    native_tool_path = "/n/native.so"
+    options = {"APP_CMD": "my_app"}
+    monkeypatch.setenv("LD_PRELOAD", "/user/existing.so")
+
+    mock_capture = Mock(return_value=(True, "Success output"))
+    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
+    mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
+
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path), native_tool_path=native_tool_path
+    )
+    profiler._launch(options)
+
+    called_env = mock_capture.call_args.kwargs.get("new_env", {})
+    assert called_env["LD_PRELOAD"] == "/user/existing.so:/n/native.so"
+    mock_error.assert_not_called()
+
+
+@pytest.mark.parametrize("native_tool_path", [None, "/n/native.so"])
+def test_stochastic_method_maps_to_cycles_unit(tmp_path, monkeypatch, native_tool_path):
+    """A stochastic method maps to the cycles unit on both backends."""
+    method = "stochastic"
+    interval = 5000
+    options = {"APP_CMD": "my_app"}
+
+    mock_capture = Mock(return_value=(True, "Success output"))
+    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
+    mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
+
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path),
+        method=method,
+        interval=interval,
+        native_tool_path=native_tool_path,
+    )
+    profiler._launch(options)
+
+    called_env = mock_capture.call_args.kwargs.get("new_env", {})
+    assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
+    assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "cycles"
+    assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
+    mock_error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "native_tool_path", [None, "/n/native.so"], ids=["sdk", "native"]
+)
+def test_subprocess_failure_errors(tmp_path, monkeypatch, native_tool_path):
+    """A failed subprocess reports the standard PC sampling failure on both backends."""
+    mock_capture = Mock(return_value=(False, "Error output"))
+    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
+    mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
+
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path), native_tool_path=native_tool_path
+    )
+    profiler._launch({"APP_CMD": "my_app"})
+
+    assert mock_error.called
+    assert "PC sampling failed." in mock_error.call_args.args[0]
+
+
+@pytest.mark.parametrize(
+    "native_tool_path", [None, "/n/native.so"], ids=["sdk", "native"]
+)
+def test_env_log_excludes_user_env(tmp_path, monkeypatch, native_tool_path):
+    """The debug env log records the PC sampling vars but never the user's env."""
+    monkeypatch.setenv("LEAK_CANARY_TOKEN", "SHOULD_NOT_APPEAR")
+    mock_capture = Mock(return_value=(True, "Success output"))
+    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
+    _mocks = patch_console(monkeypatch, MODULE, "debug", "error")
+    mock_debug, mock_error = _mocks["debug"], _mocks["error"]
+
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path), native_tool_path=native_tool_path
+    )
+    profiler._launch({"APP_CMD": "my_app"})
+
+    logs = [str(call.args[0]) for call in mock_debug.call_args_list]
+    env_log_lines = [m for m in logs if "env vars" in m]
+    assert env_log_lines
+    assert any("ROCPROF_PC_SAMPLING_METHOD" in m for m in env_log_lines)
+    assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
+    mock_error.assert_not_called()
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_live_attach_performs_attach_detach(tmp_path, monkeypatch, native):
+    """Live-attach calls perform_attach_detach instead of launching, both backends."""
+    options = {
+        "ROCPROF_ATTACH_PID": "1234",
+        "ROCPROF_ATTACH_LIBRARY": "lib.so",
+    }
+
+    mock_capture = Mock()
+    mock_attach = Mock()
+    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
+    monkeypatch.setattr(f"{MODULE}.perform_attach_detach", mock_attach)
+    if native:
+        monkeypatch.setattr(f"{MODULE}.is_live_attach", Mock(return_value=True))
+    mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
+
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path),
+        interval=100,
+        native_tool_path="/n/native.so" if native else None,
+    )
+    profiler._launch(options)
+
+    mock_attach.assert_called_once()
+    mock_capture.assert_not_called()
+    mock_error.assert_not_called()
+
+
+def test_no_native_tool_path_uses_sdk_standard(tmp_path, monkeypatch):
+    """native_tool_path=None uses the sdk standard backend (no native .so forced on)."""
+    native_tool_path = "/n/native.so"
+    options = {"APP_CMD": "my_app"}
+
+    mock_capture = Mock(return_value=(True, "Success output"))
+    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
+    mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
+
+    profiler = _make_pc_sampling_profile(str(tmp_path), native_tool_path=None)
+    profiler._launch(options)
+
+    called_env = mock_capture.call_args.kwargs.get("new_env", {})
+    assert called_env["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
+    assert native_tool_path not in called_env.get("LD_PRELOAD", "").split(":")
+    mock_error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "filter_blocks, native_tool_path, expect_removed",
+    [
+        (["21"], "/n/native.so", True),
+        (["2", "21"], "/n/native.so", True),
+        (["2", "21"], None, False),
+    ],
+)
+def test_cleanup_native_artifacts(
+    tmp_path, monkeypatch, filter_blocks, native_tool_path, expect_removed
+):
+    """Native artifacts are purged iff native_tool_path is set."""
+    patch_console(monkeypatch, MODULE, "debug")
+
+    results = tmp_path / "1234_ps_file_results.json"
+    results.touch()
+    code_obj_info = tmp_path / "1234_code_obj_info.json"
+    code_obj_info.touch()
+    sources_dir = tmp_path / "code_obj_sources"
+    sources_dir.mkdir()
+    (sources_dir / "src.txt").touch()
+
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path),
+        native_tool_path=native_tool_path,
+        filter_blocks=filter_blocks,
+    )
+    profiler._cleanup_stale_output({"APP_CMD": "my_app"})
+
+    assert results.exists() is not expect_removed
+    assert code_obj_info.exists() is not expect_removed
+    assert sources_dir.exists() is not expect_removed
 
 
 def test_pc_sampling_profile_sdk_forwards_env_and_ld_preload(tmp_path, monkeypatch):
@@ -49,9 +273,7 @@ def test_pc_sampling_profile_sdk_forwards_env_and_ld_preload(tmp_path, monkeypat
     monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
     mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
 
-    profiler = _make_pc_sampling_profile(
-        method, interval, workload_dir, "rocprofiler-sdk"
-    )
+    profiler = _make_pc_sampling_profile(workload_dir, method=method, interval=interval)
     profiler._launch(options)
 
     assert mock_capture.called
@@ -65,109 +287,6 @@ def test_pc_sampling_profile_sdk_forwards_env_and_ld_preload(tmp_path, monkeypat
     assert called_env["ROCPROF_OUTPUT_FILE_NAME"] == "ps_file"
 
     mock_error.assert_not_called()
-
-
-def test_pc_sampling_profile_env_log_excludes_user_env(tmp_path, monkeypatch):
-    """The sdk launch must log only profiler-added env vars, never the user's
-    full environment, to avoid leaking secrets into shared workload logs."""
-    monkeypatch.setenv("LEAK_CANARY_TOKEN", "SHOULD_NOT_APPEAR")
-    mock_capture = Mock(return_value=(True, "Success output"))
-    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
-    _mocks = patch_console(monkeypatch, MODULE, "debug", "error")
-    mock_debug, mock_error = _mocks["debug"], _mocks["error"]
-
-    profiler = _make_pc_sampling_profile(
-        "host_trap", 1000, str(tmp_path), "rocprofiler-sdk"
-    )
-    profiler._launch({"APP_CMD": "my_app"})
-
-    logs = [str(call.args[0]) for call in mock_debug.call_args_list]
-    env_log_lines = [m for m in logs if "env vars" in m]
-    assert env_log_lines
-    assert any("ROCPROF_PC_SAMPLING_METHOD" in m for m in env_log_lines)
-    assert not any("SHOULD_NOT_APPEAR" in m for m in logs)
-
-    mock_error.assert_not_called()
-
-
-def test_pc_sampling_profile_sdk_stochastic_unit_is_cycles(tmp_path, monkeypatch):
-    """A non-host_trap (stochastic) method maps to the ``cycles`` sampling unit
-    in the forwarded sdk env."""
-    method = "stochastic"
-    interval = 5000
-    workload_dir = str(tmp_path)
-    options = {"APP_CMD": "my_app"}
-
-    mock_capture = Mock(return_value=(True, "Success output"))
-    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
-    mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
-
-    profiler = _make_pc_sampling_profile(
-        method, interval, workload_dir, "rocprofiler-sdk"
-    )
-    profiler._launch(options)
-
-    called_env = mock_capture.call_args.kwargs.get("new_env", {})
-    assert called_env["ROCPROF_PC_SAMPLING_METHOD"] == method
-    assert called_env["ROCPROF_PC_SAMPLING_UNIT"] == "cycles"
-    assert called_env["ROCPROF_PC_SAMPLING_INTERVAL"] == str(interval)
-
-    mock_error.assert_not_called()
-
-
-def test_pc_sampling_profile_subprocess_fails(tmp_path, monkeypatch):
-    """
-    Edge Case: The capture_subprocess_output returns success=False.
-    This should trigger the console_error("PC sampling failed.").
-    """
-    console_error_calls = []
-
-    def mock_console_error(msg, exit=True):
-        console_error_calls.append(msg)
-        if exit:
-            raise RuntimeError("console_error called")
-
-    mock_capture = Mock()
-    monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
-    patch_console(monkeypatch, MODULE, "debug", "error", error=mock_console_error)
-
-    method = "stochastic"
-    interval = 5000
-    workload_dir = str(tmp_path)
-    options = ["another_app"]
-
-    profiler = _make_pc_sampling_profile(method, interval, workload_dir, "rocprofv3")
-    with pytest.raises(RuntimeError, match="console_error called"):
-        profiler._launch(options)
-
-    mock_capture.assert_not_called()
-    assert console_error_calls == [
-        "APP_CMD, the workload's executable must be provided "
-        "when not in live attach mode"
-    ]
-
-    mock_capture.reset_mock()
-    console_error_calls.clear()
-    options = {"APP_CMD": "another_app"}
-    sdk_lib_dir = tmp_path / "rocm_sdk_fail" / "lib"
-    sdk_lib_dir.mkdir(parents=True, exist_ok=True)
-    rocprofiler_sdk_tool_path_sdk = str(sdk_lib_dir / "librocprofiler_sdk.so")
-    Path(rocprofiler_sdk_tool_path_sdk).touch()
-
-    tool_dir = sdk_lib_dir / "rocprofiler-sdk"
-    tool_dir.mkdir(parents=True, exist_ok=True)
-    (tool_dir / "librocprofiler-sdk-tool.so").touch()
-
-    mock_capture.return_value = (False, "Error output from SDK subprocess")
-
-    profiler = _make_pc_sampling_profile(
-        method, interval, workload_dir, "rocprofiler-sdk"
-    )
-    with pytest.raises(RuntimeError, match="console_error called"):
-        profiler._launch(options)
-
-    mock_capture.assert_called_once()
-    assert console_error_calls == ["PC sampling failed."]
 
 
 def test_pc_sampling_profile_empty_appcmd(tmp_path, monkeypatch):
@@ -185,7 +304,9 @@ def test_pc_sampling_profile_empty_appcmd(tmp_path, monkeypatch):
     monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
     mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
 
-    profiler = _make_pc_sampling_profile(method, interval, workload_dir, "rocprofv3")
+    profiler = _make_pc_sampling_profile(
+        workload_dir, method=method, interval=interval, profiler="rocprofv3"
+    )
     profiler._launch(options)
 
     assert mock_capture.called
@@ -206,9 +327,7 @@ def test_pc_sampling_profile_empty_appcmd(tmp_path, monkeypatch):
     mock_capture.return_value = (True, "Output with empty appcmd SDK")
     options = {"APP_CMD": ""}
 
-    profiler = _make_pc_sampling_profile(
-        method, interval, workload_dir, "rocprofiler-sdk"
-    )
+    profiler = _make_pc_sampling_profile(workload_dir, method=method, interval=interval)
     profiler._launch(options)
 
     assert mock_capture.called
@@ -229,7 +348,9 @@ def test_pc_sampling_profile_multiarg_appcmd(tmp_path, monkeypatch):
     monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
     mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
 
-    profiler = _make_pc_sampling_profile(method, interval, workload_dir, "rocprofv3")
+    profiler = _make_pc_sampling_profile(
+        workload_dir, method=method, interval=interval, profiler="rocprofv3"
+    )
     profiler._launch(options)
 
     assert mock_capture.called
@@ -243,17 +364,13 @@ def test_pc_sampling_profile_multiarg_appcmd(tmp_path, monkeypatch):
 def test_pc_sampling_profile_is_requested():
     workload_dir = "/tmp"
     for blocks in (["21"], ["pc_sampling"], ["2", "21"]):
-        profiler = PCSamplingProfile(
-            args=MockArgs(filter_blocks=blocks),
-            profiler="rocprofv3",
-            workload_dir=workload_dir,
+        profiler = _make_pc_sampling_profile(
+            workload_dir, profiler="rocprofv3", filter_blocks=blocks
         )
         assert profiler.is_requested() is True
 
-    profiler = PCSamplingProfile(
-        args=MockArgs(filter_blocks=["2"]),
-        profiler="rocprofv3",
-        workload_dir=workload_dir,
+    profiler = _make_pc_sampling_profile(
+        workload_dir, profiler="rocprofv3", filter_blocks=["2"]
     )
     assert profiler.is_requested() is False
 
@@ -265,11 +382,7 @@ def test_pc_sampling_profile_cleanup_stale_output_removes_dir(tmp_path, monkeypa
     stale.mkdir(parents=True, exist_ok=True)
     options = {"ROCPROF_OUTPUT_PATH": str(stale)}
 
-    profiler = PCSamplingProfile(
-        args=MockArgs(filter_blocks=["21"]),
-        profiler="rocprofiler-sdk",
-        workload_dir=str(tmp_path),
-    )
+    profiler = _make_pc_sampling_profile(str(tmp_path))
     profiler._cleanup_stale_output(options)
 
     assert not stale.exists()
@@ -278,38 +391,31 @@ def test_pc_sampling_profile_cleanup_stale_output_removes_dir(tmp_path, monkeypa
 def test_pc_sampling_profile_cleanup_stale_output_noop_cases(tmp_path, monkeypatch):
     """Cleanup is a no-op outside the exclusive-sdk-dict-with-key case."""
     patch_console(monkeypatch, MODULE, "debug")
-    sdk_args = MockArgs(filter_blocks=["21"])
 
     # Non-sdk profiler: no removal even when exclusive.
     stale = tmp_path / "non_sdk"
     stale.mkdir(parents=True, exist_ok=True)
-    PCSamplingProfile(
-        args=sdk_args, profiler="rocprofv3", workload_dir=str(tmp_path)
+    _make_pc_sampling_profile(
+        str(tmp_path), profiler="rocprofv3"
     )._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(stale)})
     assert stale.exists()
 
     # Non-exclusive: no removal.
     stale = tmp_path / "mixed"
     stale.mkdir(parents=True, exist_ok=True)
-    PCSamplingProfile(
-        args=MockArgs(filter_blocks=["2", "21"]),
-        profiler="rocprofiler-sdk",
-        workload_dir=str(tmp_path),
+    _make_pc_sampling_profile(
+        str(tmp_path), filter_blocks=["2", "21"]
     )._cleanup_stale_output({"ROCPROF_OUTPUT_PATH": str(stale)})
     assert stale.exists()
 
     # List options (v3): no removal.
     stale = tmp_path / "list_opts"
     stale.mkdir(parents=True, exist_ok=True)
-    PCSamplingProfile(
-        args=sdk_args, profiler="rocprofiler-sdk", workload_dir=str(tmp_path)
-    )._cleanup_stale_output(["--kernel-trace"])
+    _make_pc_sampling_profile(str(tmp_path))._cleanup_stale_output(["--kernel-trace"])
     assert stale.exists()
 
     # Missing key: no error, no removal.
-    PCSamplingProfile(
-        args=sdk_args, profiler="rocprofiler-sdk", workload_dir=str(tmp_path)
-    )._cleanup_stale_output({"APP_CMD": "app"})
+    _make_pc_sampling_profile(str(tmp_path))._cleanup_stale_output({"APP_CMD": "app"})
 
 
 def test_pc_sampling_profile_v3_live_attach(tmp_path, monkeypatch):
@@ -321,7 +427,9 @@ def test_pc_sampling_profile_v3_live_attach(tmp_path, monkeypatch):
     monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
     mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
 
-    profiler = _make_pc_sampling_profile("host_trap", 100, str(tmp_path), "rocprofv3")
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path), interval=100, profiler="rocprofv3"
+    )
     profiler._launch(options)
 
     assert mock_capture.called
@@ -337,18 +445,15 @@ def test_pc_sampling_profile_v3_live_attach(tmp_path, monkeypatch):
 
 def test_pc_sampling_profile_v3_live_attach_missing_pid_value(tmp_path, monkeypatch):
     """v3 live-attach with --pid but no trailing value triggers console_error."""
-    console_error_calls = []
-
-    def mock_console_error(msg, exit=True):
-        console_error_calls.append(msg)
-        if exit:
-            raise RuntimeError("console_error called")
+    stub, console_error_calls = _record_and_raise_console_error()
 
     mock_capture = Mock()
     monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
-    patch_console(monkeypatch, MODULE, "debug", "error", error=mock_console_error)
+    patch_console(monkeypatch, MODULE, "debug", "error", error=stub)
 
-    profiler = _make_pc_sampling_profile("host_trap", 100, str(tmp_path), "rocprofv3")
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path), interval=100, profiler="rocprofv3"
+    )
     with pytest.raises(RuntimeError, match="console_error called"):
         profiler._launch(["--pid"])
 
@@ -374,7 +479,7 @@ def test_pc_sampling_profile_sdk_live_attach(tmp_path, monkeypatch):
     mock_error = patch_console(monkeypatch, MODULE, "debug", "error")["error"]
 
     profiler = _make_pc_sampling_profile(
-        "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
+        str(tmp_path), method="host_trap", interval=100, profiler="rocprofiler-sdk"
     )
     profiler._launch(options)
 
@@ -388,20 +493,13 @@ def test_pc_sampling_profile_sdk_live_attach(tmp_path, monkeypatch):
 
 def test_pc_sampling_profile_sdk_missing_app_cmd(tmp_path, monkeypatch):
     """sdk non-live-attach without APP_CMD errors before launching."""
-    console_error_calls = []
-
-    def mock_console_error(msg, exit=True):
-        console_error_calls.append(msg)
-        if exit:
-            raise RuntimeError("console_error called")
+    stub, console_error_calls = _record_and_raise_console_error()
 
     mock_capture = Mock()
     monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
-    patch_console(monkeypatch, MODULE, "debug", "error", error=mock_console_error)
+    patch_console(monkeypatch, MODULE, "debug", "error", error=stub)
 
-    profiler = _make_pc_sampling_profile(
-        "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
-    )
+    profiler = _make_pc_sampling_profile(str(tmp_path), interval=100)
     with pytest.raises(RuntimeError, match="console_error called"):
         profiler._launch({"LD_PRELOAD": "x"})
 
@@ -414,18 +512,15 @@ def test_pc_sampling_profile_sdk_missing_app_cmd(tmp_path, monkeypatch):
 
 def test_pc_sampling_profile_v3_missing_separator(tmp_path, monkeypatch):
     """v3 non-live-attach without a '--' separator errors before launching."""
-    console_error_calls = []
-
-    def mock_console_error(msg, exit=True):
-        console_error_calls.append(msg)
-        if exit:
-            raise RuntimeError("console_error called")
+    stub, console_error_calls = _record_and_raise_console_error()
 
     mock_capture = Mock()
     monkeypatch.setattr(f"{MODULE}.capture_subprocess_output", mock_capture)
-    patch_console(monkeypatch, MODULE, "debug", "error", error=mock_console_error)
+    patch_console(monkeypatch, MODULE, "debug", "error", error=stub)
 
-    profiler = _make_pc_sampling_profile("host_trap", 100, str(tmp_path), "rocprofv3")
+    profiler = _make_pc_sampling_profile(
+        str(tmp_path), interval=100, profiler="rocprofv3"
+    )
     with pytest.raises(RuntimeError, match="console_error called"):
         profiler._launch(["--something"])
 
@@ -443,9 +538,7 @@ def test_pc_sampling_profile_run_cleanup_before_launch(tmp_path, monkeypatch):
     stale.mkdir(parents=True, exist_ok=True)
     options = {"ROCPROF_OUTPUT_PATH": str(stale), "APP_CMD": "my_app"}
 
-    profiler = _make_pc_sampling_profile(
-        "host_trap", 100, str(tmp_path), "rocprofiler-sdk"
-    )
+    profiler = _make_pc_sampling_profile(str(tmp_path), interval=100)
 
     stale_existed_at_launch = []
 
