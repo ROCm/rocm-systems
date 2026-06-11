@@ -65,6 +65,9 @@ class TestKFD(RocprofsysTest):
       - Unmap-from-GPU events (MMU notify, migrate, unmap from CPU)
     """
 
+    UM_DEFAULT_TEST_PASS_REGEX = ["9 tests completed"]
+    UM_ALL_TEST_PASS_REGEX = ["19 tests completed"]
+
     run_args = ["-s", "32", "-p", "256", "-i", "4"]
 
     @pytest.mark.timeout(120)
@@ -83,7 +86,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"9 tests completed"],
+            pass_regex=self.UM_DEFAULT_TEST_PASS_REGEX,
         )
 
         self.assert_perfetto(
@@ -107,6 +110,7 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation",
             categories=["rocm_kfd_queue"],
             print_output=True,
+            pass_regex=[r"QUEUE_EVICT_SVM"],
         )
 
         self.assert_perfetto(
@@ -145,7 +149,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"9 tests completed"],
+            pass_regex=self.UM_DEFAULT_TEST_PASS_REGEX,
         )
 
         self.assert_perfetto(
@@ -161,6 +165,7 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation",
             categories=["rocm_kfd_queue"],
             print_output=True,
+            pass_regex=[r"QUEUE_EVICT_SVM"],
         )
 
         self.assert_perfetto(
@@ -201,7 +206,7 @@ class TestKFD(RocprofsysTest):
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
-            pass_regex=[r"19 tests completed"],
+            pass_regex=self.UM_ALL_TEST_PASS_REGEX,
         )
 
         self.assert_perfetto(
@@ -225,6 +230,7 @@ class TestKFD(RocprofsysTest):
             subtest_name="Perfetto KFD queue validation (pressure)",
             categories=["rocm_kfd_queue"],
             print_output=True,
+            pass_regex=[r"QUEUE_EVICT_SVM"],
         )
 
         self.assert_perfetto(

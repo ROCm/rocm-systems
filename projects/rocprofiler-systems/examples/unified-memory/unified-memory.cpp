@@ -14,7 +14,7 @@
 //   -p, --pressure <MB>   Total managed memory for pressure test (default: 512)
 //   -d, --device <ID>     GPU device ID (default: 0)
 //   -i, --iterations <N>  Iterations for ping-pong tests (default: 8)
-//   -a, --all             Run all 19 tests (default: first 9 only)
+//   -a, --all             Run all tests (default: first NUM_DEFAULT_TESTS only)
 //   -h, --help            Show this help message
 
 #include <algorithm>
@@ -34,10 +34,10 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Minimal KFD SVM ioctl bindings (mirrors drivers/gpu/drm/amd/amdkfd/kfd_ioctl.h
-// fields used here; UAPI is stable across recent kernels w.r.t. SVM op 0x20).
-// Used by Test 7 to set KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED on a user range
-// so the QUEUE_EVICT_SVM emission path is reachable under HSA_XNACK=1.
+// Minimal KFD SVM ioctl bindings (mirrors drivers/gpu/drm/amd/amdkfd/kfd_ioctl.h is from
+// kernel source tree fields used here; UAPI is stable across recent kernels w.r.t. SVM op
+// 0x20). Used by Test 7 to set KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED on a user range so
+// the QUEUE_EVICT_SVM emission path is reachable under HSA_XNACK=1.
 // ---------------------------------------------------------------------------
 #ifndef KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED
 #    define KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED 0x00000040
@@ -90,7 +90,7 @@ struct kfd_svm_args_header
 // ---------------------------------------------------------------------------
 
 __global__ void
-kern_write_pattern(uint64_t* data, size_t n, uint64_t pattern)
+kern_write_pattern(std::uint64_t* data, size_t n, std::uint64_t pattern)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
@@ -99,12 +99,12 @@ kern_write_pattern(uint64_t* data, size_t n, uint64_t pattern)
 }
 
 __global__ void
-kern_read_reduce(const uint64_t* data, size_t n, uint64_t* result)
+kern_read_reduce(const std::uint64_t* data, size_t n, std::uint64_t* result)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
 
-    uint64_t local_sum = 0;
+    std::uint64_t local_sum = 0;
     for(size_t i = idx; i < n; i += stride)
         local_sum += data[i];
 
@@ -112,7 +112,7 @@ kern_read_reduce(const uint64_t* data, size_t n, uint64_t* result)
 }
 
 __global__ void
-kern_read_write_stencil(uint64_t* dst, const uint64_t* src, size_t n)
+kern_read_write_stencil(std::uint64_t* dst, const std::uint64_t* src, size_t n)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
@@ -130,7 +130,7 @@ kern_saxpy(float* y, const float* x, float a, size_t n)
 }
 
 __global__ void
-kern_touch_pages(uint64_t* data, size_t n, size_t page_stride)
+kern_touch_pages(std::uint64_t* data, size_t n, size_t page_stride)
 {
     size_t idx    = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
@@ -157,6 +157,10 @@ kern_compute_heavy(uint64_t* data, size_t n, uint64_t inner_iters)
 }
 
 // ---------------------------------------------------------------------------
+static constexpr int NUM_DEFAULT_TESTS = 9;
+static constexpr int NUM_ALL_TESTS     = 19;
+
+// ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
@@ -179,7 +183,8 @@ print_usage(const char* prog)
     printf("  -p, --pressure <MB>   Managed memory for pressure test (default: 512)\n");
     printf("  -d, --device <ID>     GPU device ID (default: 0)\n");
     printf("  -i, --iterations <N>  Ping-pong iterations (default: 8)\n");
-    printf("  -a, --all             Run all 19 tests (default: first 9 only)\n");
+    printf("  -a, --all             Run all %d tests (default: first %d only)\n",
+           NUM_ALL_TESTS, NUM_DEFAULT_TESTS);
     printf("  -h, --help            Show this help message\n");
 }
 
@@ -543,14 +548,16 @@ test_force_gpu_always_mapped(size_t bytes, int device, int iterations)
            "range.\n");
 
     long   pgsize_l = sysconf(_SC_PAGESIZE);
-    size_t pgsize   = (pgsize_l > 0) ? static_cast<size_t>(pgsize_l) : 4096;
-    void*  pg_addr  = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(managed) &
-                                              ~(static_cast<uintptr_t>(pgsize) - 1));
+    size_t pgsize   = (pgsize_l > 0) ? static_cast<size_t>(pgsize_l) : 4096UL;
+    auto   base     = reinterpret_cast<uintptr_t>(managed);
+    auto   pg_start = base & ~(pgsize - 1);                         // align start down
+    auto   pg_end   = (base + bytes + pgsize - 1) & ~(pgsize - 1);  // align end up
+    void*  mp_addr  = reinterpret_cast<void*>(pg_start);
+    size_t mp_len   = pg_end - pg_start;
 
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
-
-    constexpr uint64_t INNER_ITERS = 200000ULL;
+    constexpr uint64_t INNER_ITERS = 5000ULL;
     int                grid        = grid_size(n);
 
     int total_cycles = 0;
@@ -562,26 +569,28 @@ test_force_gpu_always_mapped(size_t bytes, int device, int iterations)
         // on the live SVM range. Because the range now has GPU_ALWAYS_MAPPED,
         // svm_range_evict() takes the quiesce branch and emits
         // KFD_QUEUE_EVICTION_TRIGGER_SVM (one QUEUE_EVICT_SVM event in rocpd).
-        constexpr int CYCLES_PER_IT = 8;
+        constexpr int CYCLES_PER_IT    = 8;
+        int           cycles_this_iter = 0;
         for(int c = 0; c < CYCLES_PER_IT; c++)
         {
-            if(mprotect(pg_addr, bytes, PROT_READ) != 0)
+            if(mprotect(mp_addr, mp_len, PROT_READ) != 0)
             {
                 printf("  mprotect(PROT_READ) failed: %s\n", strerror(errno));
                 break;
             }
-            if(mprotect(pg_addr, bytes, PROT_READ | PROT_WRITE) != 0)
+            if(mprotect(mp_addr, mp_len, PROT_READ | PROT_WRITE) != 0)
             {
                 printf("  mprotect(PROT_READ|PROT_WRITE) failed: %s\n", strerror(errno));
                 break;
             }
+            cycles_this_iter++;
             total_cycles++;
         }
 
         HIP_CHECK(hipStreamSynchronize(stream));
-        printf("  [iter %d] %d mprotect cycles on always-mapped range "
+        printf("  [iter %d] %d/%d mprotect cycles completed on always-mapped range "
                "while kernel in flight\n",
-               iter, CYCLES_PER_IT);
+               iter, cycles_this_iter, CYCLES_PER_IT);
     }
 
     // Clear the flag before freeing so the runtime can release the range
@@ -615,6 +624,14 @@ test_madvise_unmap_from_gpu(size_t bytes, int device)
     size_t    n       = bytes / sizeof(uint64_t);
     uint64_t* managed = nullptr;
     HIP_CHECK(hipMallocManaged(&managed, bytes));
+    if(reinterpret_cast<uintptr_t>(managed) % pgsize != 0)
+    {
+        printf("  SKIP: hipMallocManaged returned non-page-aligned pointer %p "
+               "(alignment %zu required for madvise).\n",
+               static_cast<void*>(managed), pgsize);
+        HIP_CHECK(hipFree(managed));
+        return;
+    }
 
     for(size_t i = 0; i < n; i++)
         managed[i] = i;
@@ -1313,7 +1330,7 @@ main(int argc, char** argv)
 
     auto t0 = std::chrono::steady_clock::now();
 
-    int n_tests = 9;
+    int n_tests = NUM_DEFAULT_TESTS;
 
     test_gpu_read_fault(alloc_bytes, cfg.device_id);
     test_gpu_write_fault(alloc_bytes, cfg.device_id);
@@ -1327,7 +1344,7 @@ main(int argc, char** argv)
 
     if(cfg.run_all)
     {
-        n_tests = 19;
+        n_tests = NUM_ALL_TESTS;
         test_mem_advise(alloc_bytes, cfg.device_id);
         test_read_mostly(alloc_bytes, cfg.device_id);
         test_stencil_pipeline(alloc_bytes, cfg.device_id, cfg.iterations);
