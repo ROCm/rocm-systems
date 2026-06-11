@@ -123,8 +123,8 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
   }
   auto bytes_read = read(fd, ctx.buffer.get(), ctx.file_size);
   if (bytes_read < 0) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to read file, read only  "
-       << bytes_read << " of " << ctx.file_size << " bytes";
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to read file: " << filepath
+       << ", errno:(" << errno << "): " << strerror(errno);
     LOG_ERROR(ss);
     close(fd);
     return ctx;
@@ -137,7 +137,7 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
   // Treat a zero read as success so callers report "no CPER records" instead of
   // AMDSMI_STATUS_FILE_ERROR.
   if (bytes_read == 0) {
-    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] CPER ring is empty (no records)";
+    ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] ring is empty (no records)";
     LOG_DEBUG(ss);
   }
 
