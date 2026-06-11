@@ -75,7 +75,6 @@ breathe_default_project = "rocprofiler-sdk"
 doxyfile = "rocprofiler-sdk.dox"
 
 external_projects_current_project = "rocprofiler-sdk"
-external_projects = []
 
 master_doc = "index"
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
