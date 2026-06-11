@@ -425,7 +425,10 @@ template <typename T>
 __device__ __forceinline__ void AlltoAllNvlCopySelect(ncclWindow_t sendwin, size_t sendoffset,
     ncclWindow_t recvwin, size_t recvoffset, size_t count, int rank, int nRanks, int blockId,
     int nBlocks, int tid, int nthreads) {
-  if (count * sizeof(T) >= kAlltoAllPeerParallelByteThreshold && nBlocks > 1 && nRanks > 1) {
+  // Peer striping assigns peers to CTAs (peer = blockId, blockId+nBlocks, ...). If nBlocks > nRanks,
+  // high-index CTAs copy nothing while still paying LSA barriers — avoid that (use full CTA grid).
+  if (count * sizeof(T) >= kAlltoAllPeerParallelByteThreshold && nBlocks > 1 && nRanks > 1 &&
+      nBlocks <= nRanks) {
     AlltoAllNvlCopyPeerParallel<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
                                    blockId, nBlocks, tid, nthreads);
   } else {
@@ -537,20 +540,19 @@ __device__ __forceinline__ void AlltoAllLsaCopy(ncclWindow_t sendwin, size_t sen
   }
 }
 
-// Gin-anvil single-node fast path: below the peer-parallel threshold, use the same NVL
-// vectorized copy as GIN host proxy (-D 1). At larger per-rank slices, keep LSA copy
-// (AlltoAllNvlCopyPeerParallel regressed large-message bandwidth when selected blindly).
+// Gin-anvil single-node (all LSA peers): match NvlAlltoAllKernelOptimized (-D 2). Reading the send
+// row via ncclGetLsaPointer (AlltoAllNvlCopyOptimized / peer striping) reaches ~bus line rate on
+// MI300-class xGMI; AlltoAllLsaCopy(ncclGetLocalPointer send) was measurably slower at multi-GiB.
+// AlltoAllNvlCopySelect avoids peer-parallel when nBlocks > nRanks so no CTA sits idle at barriers.
 template <typename T>
 __device__ __forceinline__ void AlltoAllGinAdaptiveLocalCopy(ncclWindow_t sendwin, size_t sendoffset,
     ncclWindow_t recvwin, size_t recvoffset, size_t count, int recvRank, int startLsa,
     int lsaSize, int rank, int nRanks, int blockId, int nBlocks, int tid, int nthreads) {
-  if (count * sizeof(T) < kAlltoAllPeerParallelByteThreshold) {
-    AlltoAllNvlCopyOptimized<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks,
-                                tid, nthreads);
-  } else {
-    AlltoAllLsaCopy<T>(sendwin, sendoffset, recvwin, recvoffset, count, recvRank, startLsa,
-                       lsaSize, tid, nthreads);
-  }
+  (void)recvRank;
+  (void)startLsa;
+  (void)lsaSize;
+  AlltoAllNvlCopySelect<T>(sendwin, sendoffset, recvwin, recvoffset, count, rank, nRanks, blockId,
+                           nBlocks, tid, nthreads);
 }
 
 // Element-range variant for pipelined hybrid alltoall chunks.

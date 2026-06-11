@@ -226,11 +226,34 @@ if(BUILD_TESTS)
       common/TestChecks.cpp
     )
 
+    # GIN_ANVIL device-header tests need rocshmem SDMA headers (RCCL rocshmem integration
+    # or mono-repo sibling ../rocshmem/src).
+    set(_gin_anvil_test_sdma "${ROCSHMEM_SDMA_SRC_DIR}")
+    if(NOT _gin_anvil_test_sdma)
+      get_filename_component(_gin_rs_try "${CMAKE_SOURCE_DIR}/../rocshmem/src" REALPATH)
+      if(EXISTS "${_gin_rs_try}/sdma/anvil_device.hpp")
+        set(_gin_anvil_test_sdma "${_gin_rs_try}")
+      endif()
+    endif()
+    if(_gin_anvil_test_sdma)
+      list(APPEND TEST_FIXTURE_SOURCE_FILES device/GinAnvilDeviceTests.cpp)
+    endif()
+
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
 
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device
     )
+    if(_gin_anvil_test_sdma)
+      target_include_directories(rccl-UnitTestsFixtures PRIVATE
+        "${_gin_anvil_test_sdma}"
+        "${CMAKE_SOURCE_DIR}/src/include"
+      )
+      set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilDeviceTests.cpp"
+        PROPERTIES COMPILE_DEFINITIONS ENABLE_ROCSHMEM_GIN
+      )
+    endif()
   endif()
 
   # rccl-UnitTestsFixturesDebug: Tests that access internal symbols compiled into
