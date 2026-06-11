@@ -721,7 +721,7 @@ typedef enum {
   AMDSMI_FW_ID_CP_PM4,      //!< Compute Processor Packet Processor 4 (processing command packets)
   AMDSMI_FW_ID_RLC_P,       //!< Rasterizier and L2 Cache Partition
   AMDSMI_FW_ID_SEC_POLICY_STAGE2,     //!< Security Policy Stage 2 (security features)
-  AMDSMI_FW_ID_REG_ACCESS_WHITELIST,  //!< Register Access Whitelist (Prevent unathorizied access)
+  AMDSMI_FW_ID_REG_ACCESS_WHITELIST,  //!< Register Access Whitelist (Prevent unauthorized access)
   AMDSMI_FW_ID_IMU_DRAM,              //!< Input/Output Memory Management Unit - Dynamic RAM
   AMDSMI_FW_ID_IMU_IRAM,              //!< Input/Output Memory Management Unit - Instruction RAM
   AMDSMI_FW_ID_SDMA_TH0,              //!< System Direct Memory Access - Thread Handler 0
@@ -1016,7 +1016,7 @@ typedef enum {
 } amdsmi_card_form_factor_t;
 
 /**
- * @brief pcie information
+ * @brief PCIe information
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
@@ -1148,7 +1148,7 @@ typedef struct {
   uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
   uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
   uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
-  uint32_t subsystem_id;             //!> The subsystem ID
+  uint32_t subsystem_id;             //!< The subsystem ID
   uint64_t flags;                    //!< Chip flags
   uint32_t reserved[18];
 } amdsmi_asic_info_t;
@@ -2078,7 +2078,7 @@ typedef struct {
 } amdsmi_freq_volt_region_t;
 
 /**
- * @brief OD Vold Curve
+ * @brief OD Volt Curve
  * ::AMDSMI_NUM_VOLTAGE_CURVE_POINTS number of ::amdsmi_od_vddc_point_t's
  *
  * @cond @tag{gpu_bm_linux} @endcond
@@ -3193,7 +3193,7 @@ amdsmi_status_t amdsmi_shut_down(void);
  *  returns sockets with AMD GPUS, and AMDSMI_INIT_AMD_GPUS | AMDSMI_INIT_AMD_CPUS returns
  *  sockets with either AMD GPUS or CPUS.
  *  The socket handles can be used to query the processor handles in that socket, which
- *  will be used in other APIs to get processor detail information or telemtries.
+ *  will be used in other APIs to get processor detail information or telemetries.
  *
  *  @param[in,out] socket_count As input, the value passed
  *  through this parameter is the number of ::amdsmi_socket_handle that
@@ -3601,7 +3601,7 @@ amdsmi_status_t amdsmi_get_gpu_revision(amdsmi_processor_handle processor_handle
                                         uint16_t* revision);
 
 /**
- *  @brief Get the name string for a give vendor ID
+ *  @brief Get the name string for a given vendor ID
  *
  *  @ingroup tagIdentQuery
  *
@@ -4970,7 +4970,7 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[inout] pm_metrics A pointerto an array to hold multiple PM metrics. On success,
+ *  @param[inout] pm_metrics A pointer to an array to hold multiple PM metrics. On success,
  *  the library will allocate memory of pm_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
@@ -5010,7 +5010,7 @@ amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(amdsmi_processor_handle processor
  *
  *  @param[in] reg_type The register type
  *
- *  @param[inout] reg_metrics A pointerto an array to hold multiple register metrics. On success,
+ *  @param[inout] reg_metrics A pointer to an array to hold multiple register metrics. On success,
  *  the library will allocate memory of reg_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
