@@ -22,9 +22,10 @@
 //   --timing              Report wall time and total GPU kernel time
 //   --kernel-filter STR   Only launch kernels whose name contains STR
 //                         (full warm-up pass runs first to set up GPU state)
-//   --replace-kernel N=P  Launch kernels matching N from code object P (.hsaco)
-//                         instead of the recorded one (repeatable). Recorded
-//                         args/grid/block are reused; the archive is untouched.
+//   --replace-kernel N=P  Launch the kernel whose recorded name is exactly N
+//                         from code object P (.hsaco) instead of the recorded
+//                         one (repeatable). Recorded args/grid/block are reused;
+//                         the archive is untouched.
 //   --sync-after-launch   hipDeviceSynchronize() after every kernel (debug)
 //   --help                Show this message
 //
@@ -690,9 +691,11 @@ static void print_usage(const char* argv0) {
     "  --timing              Report wall time and total GPU kernel time\n"
     "  --kernel-filter STR   Only launch kernels whose name contains STR\n"
     "                        (silent full warm-up pass runs first)\n"
-    "  --replace-kernel N=P  Launch kernels whose name contains N from code\n"
-    "                        object P (.hsaco) instead of the recorded one.\n"
-    "                        Repeatable. Recorded args/grid/block are reused;\n"
+    "  --replace-kernel N=P  Launch the kernel whose recorded name is exactly N\n"
+    "                        from code object P (.hsaco) instead of the recorded\n"
+    "                        one. N must be the full recorded symbol (see --info;\n"
+    "                        mangled for C++/chevron kernels). Repeatable for\n"
+    "                        multiple kernels. Recorded args/grid/block are reused;\n"
     "                        the archive is not modified.\n"
     "  --sync-after-launch   hipDeviceSynchronize after every kernel launch\n"
     "  --sync-after-event    hipDeviceSynchronize after EVERY event (slowest, most precise)\n"

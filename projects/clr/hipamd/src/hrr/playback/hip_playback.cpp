@@ -183,11 +183,15 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
         if (it != replacement_funcs.end()) return it->second;
     }
 
-    // Find the first replacement whose pattern is a substring of the recorded
-    // name (same matching rule as kernel_filter at the launch site).
+    // Find the replacement whose NAME exactly equals the recorded kernel name.
+    // Exact match (not substring) so a replacement can never accidentally apply
+    // to an unintended kernel; the NAME must be the full recorded symbol (the
+    // mangled C++ name for chevron/HIP-RTC kernels, or the module symbol for
+    // hipModuleGetFunction kernels) — the same string hipModuleGetFunction is
+    // called with below.
     const std::string* path = nullptr;
-    for (auto& [pattern, p] : kernel_replacements) {
-        if (kernel_name.find(pattern) != std::string::npos) { path = &p; break; }
+    for (auto& [name, p] : kernel_replacements) {
+        if (kernel_name == name) { path = &p; break; }
     }
     // No pattern matched: cache the negative result so we don't re-scan every launch.
     if (!path) {

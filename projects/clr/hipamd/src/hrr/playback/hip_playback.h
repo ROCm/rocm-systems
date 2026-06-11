@@ -67,10 +67,10 @@ struct PlaybackContext {
     std::string kernel_filter;
 
     // ---- Kernel replacement (playback-time override) ----
-    // Parsed "NAME=path" pairs from --replace-kernel. A recorded kernel whose
-    // name contains NAME (substring, same rule as kernel_filter) launches from
-    // the replacement code object at `path` instead of the recorded one, while
-    // grid/block/shared/args/pointers still come from the recording. The archive
+    // Parsed "NAME=path" pairs from --replace-kernel. The recorded kernel whose
+    // name is exactly NAME launches from the replacement code object at `path`
+    // instead of the recorded one, while grid/block/shared/args/pointers still
+    // come from the recording. NAME must be the full recorded symbol. The archive
     // is never modified. Empty => feature disabled (no overhead on the hot path).
     std::vector<std::pair<std::string, std::string>> kernel_replacements;
     // Resolved replacement functions, keyed by the recorded kernel name.

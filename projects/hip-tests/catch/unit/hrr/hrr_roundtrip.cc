@@ -748,14 +748,32 @@ static std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
   return {ret, proc.getOutput()};
 }
 
+// Return the full recorded name of the first kernel-launch event whose name
+// contains `needle`, or "" if none. --replace-kernel matches the recorded name
+// EXACTLY, and C++/chevron kernels are recorded under their mangled symbol
+// (e.g. _Z14hrr_vectorAddPKfS0_Pfi), so a test cannot hard-code the bare source
+// name — it must look up the exact recorded string from the archive.
+static std::string recorded_kernel_name(const fs::path& cap_path,
+                                        const std::string& needle) {
+  hrr::Archive arc;
+  if (!hrr::load_archive(cap_path.string(), arc)) return "";
+  for (const auto& ev : arc.events) {
+    if (ev.kernel_launch &&
+        ev.kernel_launch->kernel_name.find(needle) != std::string::npos)
+      return ev.kernel_launch->kernel_name;
+  }
+  return "";
+}
+
 /**
  * Test Description
  * ----------------
  *   - Capture the GPU workload, build a functionally identical replacement code
- *     object for hrr_vectorAdd via HIPRTC, and replay with --replace-kernel.
- *   - The replacement symbol matches the recorded mangled name, so playback
- *     loads it and reports "Replacing kernel". Because behaviour is identical,
- *     the D2H validation still passes (exit 0).
+ *     object for hrr_vectorAdd via HIPRTC, and replay with --replace-kernel
+ *     using the EXACT recorded (mangled) kernel name looked up from the archive.
+ *   - The replacement symbol matches the recorded name, so playback loads it and
+ *     reports "Replacing kernel". Because behaviour is identical, the D2H
+ *     validation still passes (exit 0).
  */
 HIP_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_happy"};
@@ -771,10 +789,16 @@ HIP_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   }
   REQUIRE(fs::exists(cap.path / "events.bin"));
 
+  // --replace-kernel matches the recorded name exactly; resolve the mangled
+  // symbol the capture stored for hrr_vectorAdd.
+  std::string kname = recorded_kernel_name(cap.path, "hrr_vectorAdd");
+  INFO("Recorded kernel name: " << kname);
+  REQUIRE_FALSE(kname.empty());
+
   std::string co_path = build_replacement_co(co_dir.path);
   REQUIRE(fs::exists(co_path));
 
-  auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel hrr_vectorAdd=" + co_path);
+  auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel " + kname + "=" + co_path);
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
   // Identical replacement → D2H still matches the recorded output.
@@ -786,11 +810,11 @@ HIP_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
 /**
  * Test Description
  * ----------------
- *   - Replay a captured workload with --replace-kernel pointing at a path that
- *     does not exist. The pattern matches the recorded kernel, but the file
- *     cannot be read, so playback must gracefully fall back to the recorded
- *     kernel: no crash, D2H still passes (exit 0), and a fallback message is
- *     emitted.
+ *   - Replay a captured workload with --replace-kernel naming the exact recorded
+ *     kernel but pointing at a path that does not exist. The name matches, but
+ *     the file cannot be read, so playback must gracefully fall back to the
+ *     recorded kernel: no crash, D2H still passes (exit 0), and a fallback
+ *     message is emitted.
  */
 HIP_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_missing"};
@@ -805,11 +829,15 @@ HIP_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
   }
   REQUIRE(fs::exists(cap.path / "events.bin"));
 
+  std::string kname = recorded_kernel_name(cap.path, "hrr_vectorAdd");
+  INFO("Recorded kernel name: " << kname);
+  REQUIRE_FALSE(kname.empty());
+
   std::string missing =
       (fs::temp_directory_path() / "hrr_no_such_replacement.hsaco").string();
   fs::remove(missing);  // ensure it really does not exist
 
-  auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel hrr_vectorAdd=" + missing);
+  auto [ret, out] = run_playback_raw(cap.path, "--replace-kernel " + kname + "=" + missing);
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
   // Graceful fallback to the recorded kernel — must not crash and D2H must pass.
