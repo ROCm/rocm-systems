@@ -916,7 +916,7 @@ def load_non_mertrics_table(
                 )
         # NB: Special case for sysinfo. Probably room for improvement in this whole
         # function design
-        elif "from_csv_columnwise" in df.columns and id == 101:
+        elif "from_csv_columnwise" in df.columns and df_id == 101:
             tmp[df_id] = workload.sys_info.transpose()
             # All transposed columns should be marked with a general header
             tmp[df_id].columns = ["Info"]

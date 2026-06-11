@@ -143,6 +143,29 @@ def get_table_string(
     )
 
 
+def _normalize_system_info_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Render System Info in a readable Field/Value form for CLI output."""
+    normalized = df.copy()
+
+    # Most readable case: one-row, many-columns sysinfo.csv -> Field/Value.
+    if len(normalized.index) == 1 and len(normalized.columns) > 1:
+        normalized = normalized.iloc[0].to_frame(name="Value")
+    # Columnwise sysinfo path -> rename the value column consistently.
+    elif list(normalized.columns) == ["Info"]:
+        normalized = normalized.rename(columns={"Info": "Value"})
+
+    if "Value" in normalized.columns:
+        wrap_width = max(shutil.get_terminal_size((120, 20)).columns - 40, 24)
+        wrap_width = min(wrap_width, 100)
+        normalized["Value"] = (
+            normalized["Value"]
+            .astype(str)
+            .apply(lambda x: textwrap.fill(x, width=wrap_width))
+        )
+
+    return normalized
+
+
 def convert_time_columns(df: pd.DataFrame, time_unit: str) -> pd.DataFrame:
     """
     Convert time column values based on the specified time unit.
@@ -744,6 +767,10 @@ def format_table_output(
     table_id_str = f"{table_config['id'] // 100}.{table_config['id'] % 100}"
     content = ""
 
+    # Keep System Info readable on narrow terminals.
+    if table_config["id"] == 101:
+        df = _normalize_system_info_df(df)
+
     # Check if any column in df is empty
     is_empty_columns_exist = any(
         df.replace(["", "N/A"], None).iloc[:, col_idx].isnull().all()
@@ -751,7 +778,9 @@ def format_table_output(
     )
 
     # Do not print the table if any column is empty
-    if is_empty_columns_exist:
+    # Exception: System Info (101) is display-only and should render if it has any data
+    is_system_info = table_config["id"] == 101
+    if is_empty_columns_exist and not is_system_info:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
