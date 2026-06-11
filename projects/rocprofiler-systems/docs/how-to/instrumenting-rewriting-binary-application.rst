@@ -478,6 +478,8 @@ the instrumented ``libfoo.so.2``:
          libfoo.so.2 => /home/user/libfoo.so.2 (...)
          ...
 
+.. _selective-instrumentation:
+
 Selective instrumentation
 ========================================
 

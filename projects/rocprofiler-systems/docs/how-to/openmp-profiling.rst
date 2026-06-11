@@ -235,7 +235,7 @@ The application can be instrumented with ``rocprof-sys-instrument`` to also capt
     .. important::
 
         With ``rocprof-sys-instrument``, data on user-defined functions can be gathered. However, default values on certain settings
-        may prevent the expected function from being instrumented. For details, see the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide (in particular, its "Selective instrumentation" section).
+        may prevent the expected function from being instrumented. For details, see :ref:`selective-instrumentation` section under the :doc:`Instrumenting and rewriting a binary application <instrumenting-rewriting-binary-application>` guide.
 
 For more details on ``rocprof-sys-instrument`` and the data it gathers, see :doc:`data collection modes <../conceptual/data-collection-modes>`. 
 
