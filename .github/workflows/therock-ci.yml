@@ -10,11 +10,17 @@ on:
       - opened
       - synchronize
       - reopened
+      - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       projects:
         type: string
         description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/clr projects/rocminfo'"
+      run_apu_ci:
+        type: boolean
+        description: "Run opt-in APU (gfx1151) build and test job"
+        default: false
 
 permissions:
   contents: read
@@ -39,6 +45,7 @@ jobs:
       linux_projects: ${{ steps.linux_projects.outputs.projects }}
       windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.linux_projects.outputs.run_linux_rccl_ci }}
+      run_apu_ci: ${{ steps.linux_projects.outputs.run_apu_ci }}
       package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
     steps:
       - name: Checkout code
@@ -76,12 +83,29 @@ jobs:
             --pr "${{ github.event.pull_request.number }}" \
             --config ".github/repos-config.json"
 
+      - name: Collect PR labels
+        id: pr_labels
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          labels=$(gh pr view "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --json labels \
+            --jq '[.labels[].name] | join(",")')
+          {
+            echo "labels<<LABELS_EOF"
+            echo "$labels"
+            echo "LABELS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Determine Linux projects to run
         id: linux_projects
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
           PLATFORM: "linux"
+          PR_LABELS: ${{ steps.pr_labels.outputs.labels }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -142,6 +166,20 @@ jobs:
         -DTHEROCK_ENABLE_ROCPROFV3=ON
         -DTHEROCK_ENABLE_MPI=ON
 
+  therock-ci-linux-apu:
+    name: Linux APU (gfx1151)
+    permissions:
+      contents: read
+      id-token: write
+    needs: setup
+    if: ${{ needs.setup.outputs.run_apu_ci == 'true' || inputs.run_apu_ci == true }}
+    uses: ./.github/workflows/therock-ci-linux-apu.yml
+    secrets: inherit
+    with:
+      cmake_options: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.linux_projects != '' && fromJSON(needs.setup.outputs.linux_projects)[0].cmake_options || '-DTHEROCK_ENABLE_CORE=ON' }}
+      projects_to_test: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.linux_projects != '' && fromJSON(needs.setup.outputs.linux_projects)[0].projects_to_test || '' }}
+      package_version: ${{ needs.setup.outputs.package_version }}
+
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }})
     permissions:
@@ -167,6 +205,7 @@ jobs:
       - setup
       - therock-ci-linux
       - therock-rccl-ci-linux
+      - therock-ci-linux-apu
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:

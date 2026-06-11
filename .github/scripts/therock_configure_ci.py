@@ -352,9 +352,22 @@ def retrieve_projects(args):
     ]
 
 
+def check_apu_test_label(pr_labels: list[str]) -> bool:
+    """Returns true if the PR has the 'ci:apu-test' opt-in label."""
+    return "ci:apu-test" in pr_labels
+
+
 def run(args):
     project_to_run = retrieve_projects(args)
     outputs = {"projects": json.dumps(project_to_run)}
+
+    # Emit APU opt-in flag (only meaningful for Linux platform on pull requests).
+    # The 'ci:apu-test' label triggers a separate build+test job against gfx1151 hardware.
+    if args.get("platform") == "linux":
+        pr_labels = args.get("pr_labels", [])
+        outputs["run_apu_ci"] = (
+            "true" if check_apu_test_label(pr_labels) else "false"
+        )
 
     # Determine if RCCL CI should run (only relevant for Linux platform)
     if args.get("platform") == "linux":
@@ -404,6 +417,10 @@ if __name__ == "__main__":
     args["platform"] = input_platform
 
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
+
+    # PR_LABELS is a comma-separated list of label names set by the workflow.
+    pr_labels_raw = os.getenv("PR_LABELS", "")
+    args["pr_labels"] = [l for l in pr_labels_raw.split(",") if l] if pr_labels_raw else []
 
     logging.info(f"Retrieved arguments {args}")
 
