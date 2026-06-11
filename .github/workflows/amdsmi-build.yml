@@ -106,6 +106,60 @@ jobs:
             --os-label "${{ matrix.os }}" \
             --test-results-dir "/tmp/test-results-${{ matrix.os }}"
 
+      # DEBUG (experiment only): show exactly what the NIC driver-detection
+      # checks in amdsmi_init.py can see on this runner. The checks gate the
+      # AMDSMI_INIT_AMD_NICS flag purely on module initstate (ionic / bnxt_en),
+      # while amdgpu additionally confirms a bound PCI device. This dumps the
+      # same sysfs the checkers read, plus the actual enumerated handle counts,
+      # so we can confirm "module live but zero NIC handles".
+      - name: DEBUG NIC driver detection
+        if: always()
+        run: |
+          set +e
+          echo "===== module initstate (what check_*_driver reads) ====="
+          for m in amdgpu ionic bnxt_en; do
+            f="/sys/module/$m/initstate"
+            if [ -e "$f" ]; then
+              printf "  %-8s initstate: %s\n" "$m" "$(cat "$f" 2>&1)"
+            else
+              printf "  %-8s initstate: <absent>\n" "$m"
+            fi
+          done
+          echo "===== bound PCI devices per driver (the check amdgpu does, NIC checks skip) ====="
+          for d in amdgpu ionic bnxt_en; do
+            dir="/sys/bus/pci/drivers/$d"
+            if [ -d "$dir" ]; then
+              bdfs=$(find "$dir" -maxdepth 1 -type l -printf '%f ' 2>/dev/null)
+              printf "  %-8s bound: %s\n" "$d" "${bdfs:-<none>}"
+            else
+              printf "  %-8s driver dir: <absent>\n" "$d"
+            fi
+          done
+          echo "===== lsmod (nic-related) ====="
+          lsmod 2>/dev/null | grep -iE 'ionic|bnxt|amdgpu' || echo "  (none)"
+          echo "===== enumerated handle counts (what get_*_handles return) ====="
+          python3 - <<'PY'
+          try:
+              import amdsmi
+              from amdsmi import amdsmi_init, amdsmi_shut_down, AmdSmiInitFlags
+              try:
+                  amdsmi_init(AmdSmiInitFlags.INIT_ALL_PROCESSORS)
+              except Exception as e:
+                  print(f"  amdsmi_init: {e}")
+              for fn in ("get_gpu_handles", "get_nic_handles", "get_ainic_handles", "get_switch_handles"):
+                  try:
+                      handles = getattr(amdsmi, fn)()
+                      print(f"  {fn}: {len(handles)}")
+                  except Exception as e:
+                      print(f"  {fn}: ERROR {e}")
+              try:
+                  amdsmi_shut_down()
+              except Exception:
+                  pass
+          except Exception as e:
+              print(f"  amdsmi import failed: {e}")
+          PY
+
       # DEBUG (experiment only): dump --help for every base subcommand whose
       # CLI test failed, to see which args (notably --nic) are advertised on
       # this runner and how the CLI behaves when invoked with no NIC hardware.
