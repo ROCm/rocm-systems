@@ -553,6 +553,8 @@ def test_run_profiling_pc_sampling_gating(
         pytest.param("stochastic", 12345, True, None, id="stochastic_not_pow2"),
         pytest.param("stochastic", 32768, True, None, id="stochastic_below_min"),
         pytest.param("host_trap", 100, False, 100, id="host_trap_positive_accepted"),
+        pytest.param("host_trap", 0, True, None, id="host_trap_zero_rejected"),
+        pytest.param("host_trap", -1, True, None, id="host_trap_negative_rejected"),
     ],
 )
 def test_sanitize_pc_sampling_interval(
