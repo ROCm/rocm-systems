@@ -134,4 +134,5 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
 
 .. note::
 
+  * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
   * To associate PC sampling info back to HIP source code, you need to build the profiling target app with ``-g`` to keep the symbols. Otherwise, PC sampling info will be only associated with assembly lines.
