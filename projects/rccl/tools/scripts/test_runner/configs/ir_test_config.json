@@ -1,0 +1,60 @@
+{
+  "system_configurations": {
+    "name": "RCCL-Tests-MI300X-Mellanox-IB",
+    "description": "Comprehensive RCCL Test Configuration - All Tests"
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_SOCKET_IFNAME": "eth0,eth1",
+    "NCCL_IB_HCA": "^mlx5_1,mlx5_6",
+    "NCCL_DEBUG": "INFO"
+  },
+  "build_configuration": {
+    "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942",
+    "parallel_jobs": 64
+  },
+  "test_configurations": {
+    "default": {
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+    "ir_device": {
+      "extends": "default",
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/ir-device",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "ARCH": "gfx942"
+      },
+      "tests": [
+        {
+          "name": "IR_Device_All",
+          "description": "Full IR device pytest harness (builds bitcode + gtest binary on demand, self-skips if prereqs missing)",
+          "test_filter": "ALL"
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "IR Device Tests",
+      "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
+      "config": "ir_device",
+      "enabled": true
+    }
+  ]
+}
