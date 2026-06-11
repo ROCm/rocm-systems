@@ -115,8 +115,8 @@ jobs:
         with:
           sparse-checkout: |
             projects/rocprofiler-systems/
-            projects/rocDecode/
-            projects/rocJPEG/
+            projects/rocdecode/
+            projects/rocjpeg/
             .gitmodules
           submodules: recursive
 
@@ -186,7 +186,7 @@ jobs:
       - name: Install Python Test Dependencies
         timeout-minutes: 10
         shell: bash
-        working-directory: projects/rocprofiler-systems/
+        working-directory: projects/rocprofiler-systems
         run: |
           python3 -m pip install --break-system-packages -r requirements.txt
 
