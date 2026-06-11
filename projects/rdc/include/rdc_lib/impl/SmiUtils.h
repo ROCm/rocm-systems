@@ -32,6 +32,9 @@ namespace amd {
 namespace rdc {
 
 rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
+
+// Physical/instance-0: gpu_id is a flat GPU index. Partition-instance: device_index is
+// a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,
@@ -50,7 +53,10 @@ struct GpuHandleEntry {
   uint32_t proc_index;
 };
 
+// Flat table of all AMD GPU handles, built on first use and cached. Thread-safe.
 const std::vector<GpuHandleEntry>& get_flat_gpu_table();
+
+// Invalidates the cache (thread-safe). Prefer a daemon restart after a partition-mode change.
 void reset_flat_gpu_table();
 
 }  // namespace rdc
