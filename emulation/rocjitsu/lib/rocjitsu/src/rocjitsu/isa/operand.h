@@ -13,11 +13,35 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
+
+namespace simdojo {
+template <size_t NUM_ELEMS, typename VecElem> class VectorReg;
+}
 
 namespace rocjitsu {
 namespace amdgpu {
 class Wavefront;
 struct SimdAccess;
+
+/// @brief Wave64 VGPR storage type — the register file element. Operands hand
+/// the SIMD glue a typed view of this (a `simdojo::VectorReg<64,uint32_t>`, no
+/// raw pointer) for the read/write fast path.
+using VgprStorage = simdojo::VectorReg<64, uint32_t>;
+
+/// @brief A `{lo, hi}` pair of typed per-register VGPR storage views for a
+/// 64-bit-lane operand. `lo` is the lower-numbered VGPR (reg N, bits [31:0]);
+/// `hi` is reg N+1 (bits [63:32]). Either both are valid or both are nullptr.
+struct VgprStoragePair64 {
+  VgprStorage *lo;
+  VgprStorage *hi;
+};
+
+/// @brief Read-only counterpart of `VgprStoragePair64`.
+struct ConstVgprStoragePair64 {
+  const VgprStorage *lo;
+  const VgprStorage *hi;
+};
 } // namespace amdgpu
 
 /// @brief Base class for an instruction operand with value resolution.
@@ -186,29 +210,37 @@ public:
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
 
 private:
-  /// @brief If this operand has contiguous per-lane uint32_t storage for the
-  /// lane range starting at `lane_base`, return a pointer to lane `lane_base`.
-  /// Otherwise return nullptr — the caller should fall back to a scalar
-  /// broadcast via `read_scalar` (for SGPR/imm/inline-const operands).
-  ///
-  /// @details Internal SIMD fast-path hook, reachable only through
-  /// `amdgpu::SimdAccess`. Plugins observing register reads should hook the
-  /// public `read_lane` / `read_lane_chunk` surface instead.
-  virtual const uint32_t *simd_lane_ptr(const amdgpu::Wavefront &wf, uint32_t lane_base) const {
+  /// @brief If this operand resolves to per-lane VGPR storage, return its
+  /// physical register index (`wf.vgpr_alloc().base + offset`). Otherwise
+  /// nullopt (SGPR/imm/inline-const/DPP) — the caller broadcasts a scalar. The
+  /// glue passes this index to the plugin read-notification hook with the full
+  /// register extent. Internal SIMD fast-path hook, reachable only through
+  /// `amdgpu::SimdAccess`; plugins observe register reads via the public
+  /// `read_lane` / `read_lane_chunk` surface.
+  virtual std::optional<uint32_t> simd_vgpr_base(const amdgpu::Wavefront &wf) const {
     if (delegate_)
-      return delegate_->simd_lane_ptr(wf, lane_base);
+      return delegate_->simd_vgpr_base(wf);
+    (void)wf;
+    return std::nullopt;
+  }
+
+  /// @brief If this operand resolves to per-lane VGPR storage, return a typed
+  /// const view of that register (the `VgprStorage` the file holds, a
+  /// `simdojo::VectorReg<64,uint32_t>&`). Otherwise nullptr — the caller falls
+  /// back to a scalar broadcast via `read_scalar`. Resolves the storage in a
+  /// SINGLE virtual dispatch — the SIMD hot path reads through this without a
+  /// raw pointer crossing the operand/glue API.
+  virtual const amdgpu::VgprStorage *simd_vgpr_storage(const amdgpu::Wavefront &wf) const {
+    if (delegate_)
+      return delegate_->simd_vgpr_storage(wf);
+    (void)wf;
     return nullptr;
   }
 
-  /// @brief If this operand's destination is contiguous per-lane uint32_t
-  /// storage (a VGPR), return a writable pointer to lane `lane_base`. Otherwise
-  /// return nullptr — the caller should fall back to `write_lane_chunk`.
-  ///
-  /// @details Internal SIMD fast-path hook; same access policy as
-  /// `simd_lane_ptr`.
-  virtual uint32_t *simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const {
+  /// @brief Mutable counterpart of `simd_vgpr_storage` for the dst write path
+  /// (no delegate — a dst is never DPP/SDWA).
+  virtual amdgpu::VgprStorage *simd_vgpr_storage_mut(amdgpu::Wavefront &wf) const {
     (void)wf;
-    (void)lane_base;
     return nullptr;
   }
 
@@ -216,6 +248,26 @@ private:
   /// for lanes [lane_begin, lane_end). No-op for non-VGPR operands.
   virtual void simd_notify_read(const amdgpu::Wavefront & /*wf*/, uint32_t /*lane_begin*/,
                                 uint32_t /*lane_end*/, uint8_t /*byte_mask*/) const {}
+
+  /// @brief 64-bit-lane counterpart of `simd_vgpr_storage`. A per-lane f64/i64
+  /// value occupies two consecutive VGPRs (reg N + reg N+1), so this returns a
+  /// `{lo, hi}` pair of typed register views (lo = reg N, hi = reg N+1) in a
+  /// SINGLE virtual dispatch. Returns `{nullptr, nullptr}` when the operand is
+  /// not contiguous VGPR storage — the caller broadcasts via `read_scalar64`.
+  virtual amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64(const amdgpu::Wavefront &wf) const {
+    if (delegate_)
+      return delegate_->simd_vgpr_storage64(wf);
+    (void)wf;
+    return {nullptr, nullptr};
+  }
+
+  /// @brief Mutable counterpart of `simd_vgpr_storage64` for the 64-bit dst
+  /// write path; returns writable `{lo, hi}` register views or
+  /// `{nullptr, nullptr}`.
+  virtual amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut(amdgpu::Wavefront &wf) const {
+    (void)wf;
+    return {nullptr, nullptr};
+  }
 
   Operand *delegate_ = nullptr;
 };
@@ -239,8 +291,9 @@ public:
 
 /// @brief AMDGPU-flavored `IsaOperand` that owns the SIMD fast-path
 /// overrides (`simd_capable`, `read_lane_chunk`, `write_lane_chunk`,
-/// `simd_lane_ptr`, `simd_dst_ptr`) so per-arch `Operand` subclasses do
-/// not duplicate the same body across AMDGPU ISAs. The implementations live
+/// `simd_vgpr_storage`, `simd_vgpr_storage_mut`, the 64-bit pair forms, and
+/// `simd_vgpr_base`) so per-arch `Operand` subclasses do
+/// not duplicate the same body across 9 ISAs. The implementations live
 /// in `isa_operand_simd_inl.h` and call into the per-arch `Isa::`
 /// traits struct (`resolved_vgpr_offset`, `is_immediate_type`,
 /// `can_resolve_src_scalar`, `resolve_src_scalar`). Non-AMDGPU arches
@@ -265,8 +318,11 @@ public:
                         const uint32_t *vals, uint64_t mask) const override;
 
 private:
-  const uint32_t *simd_lane_ptr(const amdgpu::Wavefront &wf, uint32_t lane_base) const override;
-  uint32_t *simd_dst_ptr(amdgpu::Wavefront &wf, uint32_t lane_base) const override;
+  std::optional<uint32_t> simd_vgpr_base(const amdgpu::Wavefront &wf) const override;
+  const amdgpu::VgprStorage *simd_vgpr_storage(const amdgpu::Wavefront &wf) const override;
+  amdgpu::VgprStorage *simd_vgpr_storage_mut(amdgpu::Wavefront &wf) const override;
+  amdgpu::ConstVgprStoragePair64 simd_vgpr_storage64(const amdgpu::Wavefront &wf) const override;
+  amdgpu::VgprStoragePair64 simd_vgpr_storage64_mut(amdgpu::Wavefront &wf) const override;
   void simd_notify_read(const amdgpu::Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
                         uint8_t byte_mask) const override;
 };
@@ -315,11 +371,17 @@ public:
   }
 
 private:
-  const uint32_t *simd_lane_ptr(const amdgpu::Wavefront & /*wf*/,
-                                uint32_t lane_base) const override {
-    if (static_cast<int>(lane_base) >= lane_count_)
-      return nullptr;
-    return &data_[lane_base];
+  /// The pre-permuted lane data is held in a `MAX_LANES`-wide `uint32_t` array
+  /// that is bit-layout-identical to `VgprStorage` (`simdojo::VectorReg<64,
+  /// uint32_t>` — a `std::array<uint32_t,64>` with the layout `static_assert`
+  /// enforced in `ComputeUnitCore::vgpr_reg`). Unused lanes are zero (the
+  /// EXEC mask gates them off in the glue), so the whole array is a valid
+  /// read-only register view. The cast targets the forward-declared
+  /// `VgprStorage`; the glue dereferences it where the full type is visible.
+  const amdgpu::VgprStorage *simd_vgpr_storage(const amdgpu::Wavefront & /*wf*/) const override {
+    static_assert(sizeof(data_) == MAX_LANES * sizeof(uint32_t),
+                  "DppOperand data_ must be layout-compatible with VgprStorage");
+    return reinterpret_cast<const amdgpu::VgprStorage *>(&data_);
   }
 
   uint32_t data_[MAX_LANES]{};
@@ -331,16 +393,32 @@ namespace amdgpu {
 ///
 /// Only the SIMD glue in `arch/amdgpu/shared/simd_glue.h` (and arch operand
 /// implementations that need to forward a delegate dispatch) reaches the
-/// private `simd_lane_ptr` / `simd_dst_ptr` virtuals through this struct.
+/// private `simd_vgpr_storage` / `simd_vgpr_base` virtuals through this struct.
 /// Plugin-visible register I/O stays on the public `read_lane` /
 /// `read_lane_chunk` / `write_lane` / `write_lane_chunk` surface.
 struct SimdAccess {
+  /// Physical register index for plugin read-notification (nullopt for
+  /// non-VGPR / DPP operands), resolved in one virtual dispatch.
   template <typename Op>
-  static const uint32_t *lane_ptr(const Op &op, const Wavefront &wf, uint32_t lane_base) {
-    return op.simd_lane_ptr(wf, lane_base);
+  static std::optional<uint32_t> vgpr_base(const Op &op, const Wavefront &wf) {
+    return op.simd_vgpr_base(wf);
   }
-  template <typename Op> static uint32_t *dst_ptr(const Op &op, Wavefront &wf, uint32_t lane_base) {
-    return op.simd_dst_ptr(wf, lane_base);
+  /// Typed const register view for the 32-bit read path (null for non-VGPR).
+  template <typename Op> static const VgprStorage *vgpr_storage(const Op &op, const Wavefront &wf) {
+    return op.simd_vgpr_storage(wf);
+  }
+  /// Typed mutable register view for the 32-bit write path (null for non-VGPR).
+  template <typename Op> static VgprStorage *vgpr_storage_mut(const Op &op, Wavefront &wf) {
+    return op.simd_vgpr_storage_mut(wf);
+  }
+  /// Typed `{lo, hi}` const register-view pair for the 64-bit read path.
+  template <typename Op>
+  static ConstVgprStoragePair64 vgpr_storage64(const Op &op, const Wavefront &wf) {
+    return op.simd_vgpr_storage64(wf);
+  }
+  /// Typed `{lo, hi}` mutable register-view pair for the 64-bit write path.
+  template <typename Op> static VgprStoragePair64 vgpr_storage64_mut(const Op &op, Wavefront &wf) {
+    return op.simd_vgpr_storage64_mut(wf);
   }
   template <typename Op>
   static void notify_read(const Op &op, const Wavefront &wf, uint32_t lane_begin, uint32_t lane_end,
