@@ -161,10 +161,13 @@ int main() {
 
   constexpr int RUNS = 1;
 
+  // The per-CP dispatch pool can productively use up to CUS_PER_XCD threads
+  // (each XCD has that many CUs), so allow the sweep past TOTAL_XCDS.
+  constexpr uint32_t kMaxThreads = CUS_PER_XCD;
   uint32_t min_threads = env_u32("RJ_SCALING_MIN_THREADS").value_or(1);
   uint32_t max_threads = env_u32("RJ_SCALING_MAX_THREADS").value_or(TOTAL_XCDS);
-  min_threads = std::clamp(min_threads, 1u, TOTAL_XCDS);
-  max_threads = std::clamp(max_threads, min_threads, TOTAL_XCDS);
+  min_threads = std::clamp(min_threads, 1u, kMaxThreads);
+  max_threads = std::clamp(max_threads, min_threads, kMaxThreads);
   std::string_view kernel_filter;
   if (const char *env = std::getenv("RJ_SCALING_KERNEL"))
     kernel_filter = env;
