@@ -48,40 +48,6 @@ set(SRC_FILES
   rccl_wrap.cc
   sym_kernels.cc
   transport.cc
-  device/all_gather.h
-  device/all_reduce.h
-  device/alltoall_pivot.h
-  device/alltoall_gda.h
-  device/alltoallv_gda.h
-  device/broadcast.h
-  device/common.h
-  device/common_kernel.h
-  device/op128.h
-  device/primitives.h
-  device/prims_ll128.h
-  device/prims_ll.h
-  device/prims_simple.h
-  device/reduce.h
-  device/reduce_kernel.h
-  device/reduce_scatter.h
-  device/rccl_metadata.h
-  device/sendrecv.h
-  device/hierarchical_ag_shuffle.h
-  device/common.cu
-  device/onerank.cu
-  device/network/unpack/unpack_defs.h
-  device/network/unpack/unpack.h
-  device/symmetric/all_gather.cuh
-  device/symmetric/all_gather_gin.cuh
-  device/symmetric/all_reduce.cuh
-  device/symmetric/data_ops.cuh
-  device/symmetric/gin_scratch.h
-  device/symmetric/gin_scratch__funcs.h
-  device/symmetric/gin_scratch__types.h
-  device/symmetric/kernel.cuh
-  device/symmetric/primitives.cuh
-  device/symmetric/reduce_scatter.cuh
-  device/symmetric/reduce_scatter_gin.cuh
   graph/connect.cc
   graph/paths.cc
   graph/rings.cc
@@ -386,7 +352,7 @@ set(SRC_FILES
   transport/net.cc
   transport/net_ib_limits.h
   transport/net_ib/common.cc
-  transport/net_ib/common.h
+  #transport/net_ib/common.h
   transport/net_ib/connect.cc
   transport/net_ib/connect.h
   transport/net_ib/gdr.cc
@@ -444,6 +410,7 @@ set(SRC_FILES
 # RCCL-specific net_ib_cast subdirectory here, placed right before the append block to mirror
 # NCCL's source-list -> add_subdirectory -> append ordering.
 # net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
+add_subdirectory(device)
 add_subdirectory(transport/net_ib_cast)
 
 # [NCCL src/CMakeLists.txt L51-53] UNMAPPED -- NCCL-only. RCCL does not set a macro-prefix map.
@@ -478,7 +445,8 @@ list(APPEND SRC_FILES ${SMI_SOURCES})
 # Prepend src/ to all source files for proper paths from root
 list(TRANSFORM SRC_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
-# NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
+list(APPEND SRC_FILES ${DEVICE_SOURCES})
+list(APPEND SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/transport/net_ib/common.h) # temporary
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
 
 # Hipify source files (copy of source generated into hipify directory)

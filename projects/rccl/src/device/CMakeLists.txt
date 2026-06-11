@@ -116,6 +116,8 @@ set(DEVICE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/rccl_metadata.h
   ${CMAKE_CURRENT_SOURCE_DIR}/sendrecv.h
   ${CMAKE_CURRENT_SOURCE_DIR}/hierarchical_ag_shuffle.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/common.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/onerank.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/network/unpack/unpack_defs.h
   ${CMAKE_CURRENT_SOURCE_DIR}/network/unpack/unpack.h
   ${CMAKE_CURRENT_SOURCE_DIR}/symmetric/all_gather.cuh
