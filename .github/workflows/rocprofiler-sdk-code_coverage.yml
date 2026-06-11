@@ -70,7 +70,6 @@ env:
   ENABLE_AQLPROFILE_BUILD: "true"
   ENABLE_ROCDECODE_BUILD: "true"
   ENABLE_ROCJPEG_BUILD: "true"
-  INSTALL_NIGHTLY_ROCM: "true"
 
 jobs:
   code-coverage:
@@ -216,7 +215,6 @@ jobs:
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
         enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
-        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
         ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 

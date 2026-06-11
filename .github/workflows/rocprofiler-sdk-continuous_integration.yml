@@ -80,7 +80,6 @@ env:
   ENABLE_AQLPROFILE_BUILD: "true"
   ENABLE_ROCDECODE_BUILD: "true"
   ENABLE_ROCJPEG_BUILD: "true"
-  INSTALL_NIGHTLY_ROCM: "true"
 
   CI_MODE: ${{ github.event_name == 'schedule' && 'Nightly' || 'Continuous' }}
 
@@ -90,6 +89,7 @@ jobs:
   # Ubuntu / DEB job(s)
   # -----------------------------------------------------------------------------
   core-deb:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
@@ -199,7 +199,6 @@ jobs:
           enable-rocdecode-build: ${{ env.ENABLE_ROCDECODE_BUILD }}
           enable-rocjpeg-build: ${{ env.ENABLE_ROCJPEG_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
-          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
           ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: ccache
 
@@ -318,6 +317,7 @@ jobs:
   # RHEL/SLES (RPM) job(s)
   # -----------------------------------------------------------------------------
   core-rpm:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
@@ -411,7 +411,6 @@ jobs:
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
-          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
           ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
@@ -451,6 +450,7 @@ jobs:
             -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
+    if: ${{ github.event_name == 'schedule' }}
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     strategy:
       fail-fast: false
@@ -557,7 +557,6 @@ jobs:
         enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
         enable-rocprof-trace-decoder-build: 'true'
-        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
         ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer}}
         ccache-variant: ccache
 
@@ -568,9 +567,11 @@ jobs:
       run:
         sudo sysctl -w vm.mmap_rnd_bits=28;
         export PATH="$HOME/.local/bin:$PATH";
+        if [[ -n "${HIP_VISIBLE_DEVICES:-}" ]]; then unset GPU_DEVICE_ORDINAL; fi;
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-${{ matrix.system.sanitizer }}
           --build-jobs 16
+          --mode ${CI_MODE}
           --site ${{ matrix.system.runner }}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --memcheck ${{ matrix.system.sanitizer }}
@@ -583,5 +584,6 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
+          --parallel 4
           -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
