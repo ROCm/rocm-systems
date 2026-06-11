@@ -8,16 +8,20 @@ Unified memory profiling
 
 ROCm Systems Profiler can generate unified-memory profiling reports from KFD
 page-fault and page-migration events. Use this feature when a HIP managed-memory
-workload uses ``hipMallocManaged`` or other unified-memory access patterns and
-you want to understand page faults, migration triggers, and effective migration
-throughput between host and device memory.
+workload uses ``hipMallocManaged`` for dynamic managed-memory allocation,
+``__managed__`` variables for static managed memory, or managed-memory
+abstractions built on those HIP features, and you want to understand page
+faults, migration triggers, and effective migration throughput between host and
+device memory.
 
 Unified memory profiling writes two summary files in addition to the usual trace
-or database outputs:
+or database outputs. By default, ROCm Systems Profiler appends the process ID to
+output filenames, so these reports are written as ``unified_memory-<pid>.txt``
+and ``unified_memory-<pid>.json``:
 
-* ``unified_memory.txt``: Human-readable per-GPU migration and page-fault
+* ``unified_memory-<pid>.txt``: Human-readable per-GPU migration and page-fault
   summary.
-* ``unified_memory.json``: Machine-readable equivalent for validation,
+* ``unified_memory-<pid>.json``: Machine-readable equivalent for validation,
   scripting, and dashboards.
 
 Prerequisites
@@ -27,7 +31,8 @@ Unified memory profiling requires:
 
 * An XNACK-capable AMD GPU.
 * ``HSA_XNACK=1`` in the target application's environment.
-* ROCProfiler-SDK 1.2.2 or later.
+* ROCm 7.13 or later. For standalone ROCProfiler-SDK installations,
+  ROCProfiler-SDK 1.2.2 or later is required.
 * A workload that produces KFD page-fault or page-migration events.
 
 Check XNACK support with ``rocminfo``:
@@ -53,8 +58,15 @@ Enable unified memory profiling with
 
    HSA_XNACK=1 \
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=true \
+   ROCPROFSYS_TRACE=ON \
    rocprof-sys-run -- ./my_managed_memory_app
+
+.. note::
+
+   ``ROCPROFSYS_TRACE=ON`` enables Perfetto trace generation so you can inspect
+   unified-memory page-fault and migration-throughput tracks on a timeline. The
+   ``unified_memory.txt`` and ``unified_memory.json`` summary reports are
+   enabled by ``ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON``.
 
 The unified-memory setting automatically enables the required KFD tracing
 domains for page faults and page migrations. You don't need to add
@@ -63,22 +75,33 @@ domains for page faults and page migrations. You don't need to add
 Example workload
 ================
 
-The repository includes a HIP managed-memory example under
-``examples/unified-memory``. It runs access patterns that can trigger
-host-to-device migrations, device-to-host migrations, prefetch-triggered
-migrations, memory-pressure behavior, and page faults.
+The ROCm Systems Profiler repository includes a HIP managed-memory example in
+`examples/unified-memory
+<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/unified-memory>`_.
+It runs access patterns that can trigger host-to-device migrations,
+device-to-host migrations, prefetch-driven migrations, memory-pressure
+behavior, and page faults.
 
-Build and run the example:
+If you don't already have a ``rocm-systems`` checkout, follow the sparse
+checkout instructions in the `unified-memory example README
+<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/unified-memory#readme>`_.
+The README also contains the build command and the example's runtime arguments.
+
+After building the example, profile it with unified memory profiling enabled:
 
 .. code-block:: shell
 
-   cmake -B build-unified-memory -S examples/unified-memory -DCMAKE_PREFIX_PATH=/opt/rocm
-   cmake --build build-unified-memory
-
    HSA_XNACK=1 \
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=true \
+   ROCPROFSYS_TRACE=ON \
    rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
+
+.. tip::
+
+   The ``-s``, ``-p``, and ``-i`` options are specific to the unified-memory
+   example workload. See the `unified-memory example README
+   <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/unified-memory#readme>`_
+   for the full option table and default values.
 
 Use ``ROCPROFSYS_OUTPUT_PATH`` when you want a predictable output directory:
 
@@ -86,8 +109,20 @@ Use ``ROCPROFSYS_OUTPUT_PATH`` when you want a predictable output directory:
 
    HSA_XNACK=1 \
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=true \
+   ROCPROFSYS_TRACE=ON \
    ROCPROFSYS_OUTPUT_PATH=ump-output \
+   rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
+
+Set ``ROCPROFSYS_USE_PID=NO`` if you want stable output filenames without the
+process ID suffix:
+
+.. code-block:: shell
+
+   HSA_XNACK=1 \
+   ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
+   ROCPROFSYS_TRACE=ON \
+   ROCPROFSYS_OUTPUT_PATH=ump-output \
+   ROCPROFSYS_USE_PID=NO \
    rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
 
 Output files
@@ -101,27 +136,36 @@ After a successful run, look in the ROCm Systems Profiler output directory for:
 
    * - File
      - Contents
-   * - ``unified_memory.txt``
+   * - ``unified_memory-<pid>.txt``
      - Text summary with per-device migration rows, total page faults, and
        migration trigger counts.
-   * - ``unified_memory.json``
+   * - ``unified_memory-<pid>.json``
      - Structured summary with ``devices`` and ``summary`` objects.
    * - ``perfetto-trace*.proto``
      - Perfetto trace with unified-memory page-fault counters and migration
        throughput counters when migration events are present.
-   * - ``rocpd-*.db``
-     - Optional ROCpd database output when ``ROCPROFSYS_USE_ROCPD=ON`` is set.
+
+When ``ROCPROFSYS_USE_PID=NO`` is set, the unified-memory report filenames are
+``unified_memory.txt`` and ``unified_memory.json``. The Perfetto trace filename
+is also written without a PID suffix as ``perfetto-trace.proto``.
+
+.. note::
+
+   ROCpd database output is optional and is generated only when
+   ``ROCPROFSYS_USE_ROCPD=ON`` is set. In that case, the output directory also
+   contains ``rocpd-*.db``.
 
 Sample text output
 ==================
 
 The following sample shows a discrete-memory system where KFD page-migration
-events were emitted:
+events were emitted. The ``12345`` value in the output prefix is a placeholder
+for the profiled process ID:
 
 .. code-block:: text
 
    ==12345== Unified Memory profiling result:
-    Device "gfx950 (0)"
+    Device "gfx950 (via AMD EPYC 9655 96-Core Processor) (2)"
        Count  Avg Size  Min Size  Max Size  Total Size  Total Time    Migration Throughput  Name
           36  11.4670MB  2.0000MB  173.4062MB  412.8125MB  827.8592ms       0.52 GB/s  Host To Device
           32   1.9375MB  4.0000KB   2.0000MB   62.0000MB   39.1353ms       1.66 GB/s  Device To Host
@@ -148,8 +192,8 @@ The JSON output uses the same information in a stable structure:
    {
      "devices": [
        {
-         "device_id": 0,
-         "device_name": "gfx950",
+         "device_id": 2,
+         "device_name": "gfx950 (via AMD EPYC 9655 96-Core Processor)",
          "migrations": {
            "host_to_device": {
              "count": 36,
@@ -197,7 +241,7 @@ The JSON output uses the same information in a stable structure:
 Perfetto trace output
 =====================
 
-When ``ROCPROFSYS_TRACE=true`` is set, the Perfetto trace can include:
+When ``ROCPROFSYS_TRACE=ON`` is set, the Perfetto trace can include:
 
 * ``Unified Memory Page Faults [Device N]`` counter tracks.
 * ``Unified Memory Migration Throughput [Device N]`` counter tracks when KFD
@@ -207,13 +251,22 @@ Open the generated ``perfetto-trace*.proto`` file in the Perfetto UI to compare
 page-fault activity, migration-throughput samples, HIP API calls, kernels, and
 memory copies on one timeline.
 
-Fault-only output on shared-HBM systems
-=======================================
+The following screenshot shows unified-memory migration-throughput and
+page-fault tracks in Perfetto:
+
+.. image:: ../data/rocprof-sys-unified-memory-perfetto.png
+   :alt: Perfetto trace showing unified-memory migration-throughput and page-fault tracks
+
+The migration-throughput track appears when KFD page-migration events are
+present. Fault-only systems might show only the page-fault track.
+
+Migration events absent on shared-HBM systems
+=============================================
 
 On MI300A and other systems where CPU and GPU agents point to the same physical
 HBM, page faults can occur without page migrations because there is no separate
 CPU memory and GPU memory to migrate between. In that topology, a valid
-unified-memory report can be fault-only:
+unified-memory report might not include page migration events:
 
 * ``total_page_faults`` can be nonzero.
 * ``devices`` can be empty, or migration direction buckets can have zero counts.
@@ -264,11 +317,12 @@ memory operations in the timeline or ROCpd database:
      - Traces asynchronous memory-copy operations. This is useful for comparing
        explicit copies with unified-memory page migrations.
    * - ``memory_allocation``
-     - Traces ROCm memory allocation and free operations, including virtual
-       memory allocation records when supported by the ROCProfiler-SDK version.
+     - Traces ROCm memory allocation and free operations. With the ROCm 7.13 or
+       later prerequisite for this page, this includes virtual memory allocation
+       and free records.
    * - ``scratch_memory``
-     - Traces kernel scratch-memory allocation activity and, on supported ROCm
-       versions, emits scratch allocation-size counter tracks.
+     - Traces kernel scratch-memory allocation activity. Scratch allocation-size
+       counter tracks are emitted in ROCm 7.0.2 and later.
 
 For a memory-focused trace, enable the related domains explicitly:
 
@@ -276,35 +330,36 @@ For a memory-focused trace, enable the related domains explicitly:
 
    HSA_XNACK=1 \
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
-   ROCPROFSYS_TRACE=true \
+   ROCPROFSYS_TRACE=ON \
    ROCPROFSYS_USE_ROCPD=ON \
-   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,scratch_memory \
+   ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,marker_api,kernel_dispatch,memory_copy,memory_allocation,scratch_memory \
    rocprof-sys-run -- ./my_managed_memory_app
 
 Troubleshooting
 ===============
 
-No ``unified_memory.txt`` or ``unified_memory.json`` file was generated
----------------------------------------------------------------------------
+No ``unified_memory-<pid>.txt`` or ``unified_memory-<pid>.json`` file was generated
+-----------------------------------------------------------------------------------
 
 Check that ``ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`` and ``HSA_XNACK=1``
-are set in the environment used to launch the target application. Also confirm
+are set in the environment used to launch the target application. Also, confirm
 that the workload actually uses managed memory and produces KFD page-fault or
 page-migration events.
 
 Only page faults are shown
 --------------------------
 
-Fault-only output can be expected on shared-HBM systems such as MI300A. If you
-expected migration rows on a discrete-memory system, confirm that XNACK is
-enabled and that the workload moves managed-memory pages between CPU and GPU
-accesses.
+On shared-HBM systems such as MI300A, the absence of migration events is
+expected. If you expected migration rows on a discrete-memory system, confirm
+that XNACK is enabled and that the workload moves managed-memory pages between
+CPU and GPU accesses.
 
 No migration-throughput track appears in Perfetto
 -------------------------------------------------
 
 The migration-throughput track is emitted only when KFD page-migration events
-are present. Fault-only output can still be valid.
+are present. A trace with page faults but no migration events can still be
+valid.
 
 Unexpected overhead
 -------------------
