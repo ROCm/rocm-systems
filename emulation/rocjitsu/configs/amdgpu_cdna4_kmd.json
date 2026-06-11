@@ -55,7 +55,7 @@
                 "name": "cu[0:8]", "type": "compute_unit",
                 "config": [
                   { "key": "num_wf_slots", "value": "32" },
-                  { "key": "sgprs_per_wf", "value": "104" },
+                  { "key": "sgprs_per_wf", "value": "128" },
                   { "key": "vgprs_per_wf", "value": "512" },
                   { "key": "lds_size_kb", "value": "160" }
                 ]

@@ -85,9 +85,12 @@ uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, con
 }
 
 uint32_t default_sgprs_per_wf(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250)
-    return 128;
-  return 104;
+  // CDNA wavefronts can be granted up to 112 SGPRs (granule-rounded); the
+  // register-file block must cover that or dispatch_wf() asserts when a real
+  // kernel (e.g. rocBLAS / torch GEMM) requests >104. Use 128 across the board
+  // for headroom; rdna4/gfx1250 already used 128.
+  (void)arch;
+  return 128;
 }
 
 uint32_t default_vgprs_per_wf(rj_code_arch_t arch) {
