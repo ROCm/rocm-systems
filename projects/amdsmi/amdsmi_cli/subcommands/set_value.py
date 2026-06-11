@@ -789,6 +789,7 @@ class SetValueCommands:
         ptl_status=None,
         ptl_format=None,
         mem_carveout=None,
+        compute_partition_mem_alloc_mode=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -808,6 +809,7 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
             ptl_status (int, optional): Value override for args.ptl_status. Defaults to None.
             ptl_format(string, optional): Value override for args.ptl_format. Defaults to None.
+            compute_partition_mem_alloc_mode (str, optional): Value override for args.compute_partition_mem_alloc_mode. Defaults to None.
         Raises:
             ValueError: Value error if no gpu value is provided
             IndexError: Index error if gpu list is empty
@@ -848,6 +850,8 @@ class SetValueCommands:
             args.ptl_format = ptl_format
         if mem_carveout is not None:
             args.mem_carveout = mem_carveout
+        if compute_partition_mem_alloc_mode is not None:
+            args.compute_partition_mem_alloc_mode = compute_partition_mem_alloc_mode
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -885,6 +889,7 @@ class SetValueCommands:
                     getattr(args, "ptl_format", None) is not None,
                     getattr(args, "process_isolation", None) is not None,
                     getattr(args, "mem_carveout", None) is not None,
+                    getattr(args, "compute_partition_mem_alloc_mode", None) is not None,
                 ]
             ):
                 command = " ".join(sys.argv[1:])
@@ -1764,7 +1769,9 @@ class SetValueCommands:
                 self.logger.store_output(
                     args.gpu,
                     "mem_carveout",
-                    f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. Reboot required for changes to take effect.",
+                    f"Successfully set VRAM carveout to [{args.mem_carveout}] {description}. "
+                    "Takes effect after the next reboot — "
+                    "current VRAM size still reflects the previous boot.",
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()
@@ -1793,6 +1800,40 @@ class SetValueCommands:
                     )
                 self.logger.print_output()
 
+            self.logger.clear_multiple_devices_output()
+            return
+
+        if getattr(args, "compute_partition_mem_alloc_mode", None):
+            try:
+                mode = amdsmi_interface.AmdSmiComputePartitionMemAllocModeType[
+                    args.compute_partition_mem_alloc_mode
+                ]
+                amdsmi_interface.amdsmi_set_gpu_compute_partition_mem_alloc_mode(args.gpu, mode)
+                out = f"Successfully set compute partition memory allocation mode to {args.compute_partition_mem_alloc_mode}"
+            except KeyError:
+                out = (
+                    "Invalid compute partition memory allocation mode "
+                    f"{args.compute_partition_mem_alloc_mode}"
+                )
+                self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                out = f"[{e.get_error_info(detailed=False)}] Unable to set compute partition memory allocation mode to {args.compute_partition_mem_alloc_mode}"
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    out = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
+                    self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    raise PermissionError("Command requires elevation") from e
+                else:
+                    self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+            self.logger.store_output(args.gpu, "compute_partition_mem_alloc_mode", out)
+            self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return
 
@@ -1914,7 +1955,9 @@ class SetValueCommands:
             try:
                 amdsmi_interface.amdsmi_set_ttm_pages_limit(pages)
                 self.logger.output["set_gtt"] = (
-                    f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). Reboot required for changes to take effect."
+                    f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). "
+                    "Takes effect after the next reboot — "
+                    "current values shown by 'amd-smi node --gtt' still reflect the previous boot."
                 )
                 self.logger.print_output()
                 self.helpers.prompt_reboot()
@@ -1946,6 +1989,7 @@ class SetValueCommands:
             "ptl_status",
             "ptl_format",
             "mem_carveout",
+            "compute_partition_mem_alloc_mode",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -2014,6 +2058,7 @@ class SetValueCommands:
                         args.ptl_format is not None,
                         args.process_isolation is not None,
                         args.mem_carveout is not None,
+                        args.compute_partition_mem_alloc_mode is not None,
                     ]
                 )
             except AttributeError:

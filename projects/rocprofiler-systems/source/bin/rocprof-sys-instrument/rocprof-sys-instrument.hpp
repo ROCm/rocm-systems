@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "core/common_types.hpp"
+#include "core/demangler.hpp"
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include "info.hpp"
@@ -15,7 +17,9 @@
 #include <dlfcn.h>
 #include <string>
 #include <sys/stat.h>
+#include <type_traits>
 #include <unistd.h>
+#include <utility>
 
 //======================================================================================//
 

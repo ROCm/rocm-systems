@@ -26,10 +26,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -71,9 +73,9 @@ using KfdProcSnapshot = std::set<std::string>;
 //=============================================================================
 // PID Namespace Detection for Container Support
 //=============================================================================
-// In containers with PID namespace isolation, fork() returns container-local
-// PIDs but KFD uses host PIDs. We detect containers and use baseline
-// comparison to find our child's host PID entry.
+// In containers with PID namespace isolation, the kernel returns
+// container-local PIDs but KFD uses host PIDs. We detect containers and
+// use baseline comparison to find our child's host PID entry.
 //
 // Shared namespace (baremetal/VM): Direct PID lookup
 // Isolated namespace (container):  Baseline diff to find new entry
@@ -428,9 +430,7 @@ bool IsInPidNamespace() {
     close(fd);
   }
 
-  // Note: Cannot log here - we're in forked child, must use only
-  // async-signal-safe functions. Write failure will cause parent
-  // to detect short read and report EIO.
+  // In child: AS-safe only, no logging. Short write -> parent sees EIO.
   static_cast<void>(write(write_fd, &result, sizeof(result)));
   close(write_fd);
   _exit(result.status ? 1 : 0);
@@ -449,9 +449,7 @@ bool IsInPidNamespace() {
       payload.results[i] = {gpu_ids[i], err, 0};
     }
     payload.count = limit;
-    // Note: Cannot log here - we're in forked child, must use only
-    // async-signal-safe functions. Write failure will cause parent
-    // to detect short read and report EIO.
+    // In child: AS-safe only, no logging. Short write -> parent sees EIO.
     static_cast<void>(write(write_fd, &payload, sizeof(payload)));
     close(write_fd);
     _exit(1);
@@ -481,9 +479,7 @@ bool IsInPidNamespace() {
   }
 
   close(fd);
-  // Note: Cannot log here - we're in forked child, must use only
-  // async-signal-safe functions. Write failure will cause parent
-  // to detect short read and report EIO.
+  // In child: AS-safe only, no logging. Short write -> parent sees EIO.
   static_cast<void>(write(write_fd, &payload, sizeof(payload)));
   close(write_fd);
   _exit(0);
@@ -508,15 +504,22 @@ void EnsureInitialized() {
   }
 }
 
-// Common fork/exec/wait logic to reduce code duplication
-struct ForkResult {
+// SIGCHLD-only clone() = fork() semantics without glibc's pthread_atfork
+// dispatch, avoiding recursion when callers invoke AMD-SMI from their own
+// atfork chain (ROCM-24163). No CLONE_VM/CLONE_VFORK: separate address space,
+// so none of vfork's shared-stack hazards apply.
+pid_t SpawnChild() {
+  return static_cast<pid_t>(syscall(SYS_clone, SIGCHLD, nullptr, nullptr, nullptr, 0));
+}
+
+struct SpawnResult {
   int err_code = 0;
   BatchIpcPayload payload{};
   bool success = false;
 };
 
-ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
-  ForkResult result;
+SpawnResult ExecuteBatchSpawn(OpType op, const std::vector<uint32_t>& gpu_ids) {
+  SpawnResult result;
 
   if (gpu_ids.empty()) {
     result.err_code = EINVAL;
@@ -524,9 +527,9 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
   }
 
   bool in_container = IsInPidNamespace();
-  KfdProcSnapshot pre_fork_snapshot;
+  KfdProcSnapshot pre_spawn_snapshot;
   if (in_container) {
-    pre_fork_snapshot = CaptureKfdProcEntries();
+    pre_spawn_snapshot = CaptureKfdProcEntries();
   }
 
   int pipe_fds[2];
@@ -538,13 +541,13 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
     return result;
   }
 
-  pid_t child_pid = fork();
+  pid_t child_pid = SpawnChild();
   if (child_pid < 0) {
     result.err_code = errno;
     close(pipe_fds[0]);
     close(pipe_fds[1]);
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | fork failed: " << strerror(errno);
+    ss << __PRETTY_FUNCTION__ << " | clone failed: " << strerror(errno);
     LOG_ERROR(ss);
     return result;
   }
@@ -592,7 +595,7 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
     // KNOWN RACE: Another process could create a KFD entry between our
     // snapshot and detection, causing us to wait for the wrong entry.
     // This is mitigated by:
-    //   1. Narrow window (snapshot taken immediately before fork)
+    //   1. Narrow window (snapshot taken immediately before spawn)
     //   2. Bounded wait (max_cleanup_wait_ms timeout)
     //   3. Kernel cleanup (child's entry disappears when child exits)
     // Worst case: we timeout waiting for wrong entry, but our child's
@@ -600,7 +603,7 @@ ForkResult ExecuteBatchFork(OpType op, const std::vector<uint32_t>& gpu_ids) {
     if (KfdProcEntryExists(direct_entry)) {
       WaitForEntryRemoval(direct_entry, poll_ms);
     } else {
-      std::string new_entry = DetectNewKfdProcEntry(pre_fork_snapshot);
+      std::string new_entry = DetectNewKfdProcEntry(pre_spawn_snapshot);
       if (!new_entry.empty()) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << " | Container PID translation: " << child_pid << " -> "
@@ -668,9 +671,9 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
   EnsureInitialized();
 
   bool in_container = IsInPidNamespace();
-  KfdProcSnapshot pre_fork_snapshot;
+  KfdProcSnapshot pre_spawn_snapshot;
   if (in_container) {
-    pre_fork_snapshot = CaptureKfdProcEntries();
+    pre_spawn_snapshot = CaptureKfdProcEntries();
   }
 
   int pipe_fds[2];
@@ -681,12 +684,12 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
     return out;
   }
 
-  pid_t child_pid = fork();
+  pid_t child_pid = SpawnChild();
   if (child_pid < 0) {
     out.err_code = errno;
     close(pipe_fds[0]);
     close(pipe_fds[1]);
-    ss << __PRETTY_FUNCTION__ << " | fork failed: " << strerror(errno);
+    ss << __PRETTY_FUNCTION__ << " | clone failed: " << strerror(errno);
     LOG_ERROR(ss);
     return out;
   }
@@ -732,7 +735,7 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
     // KNOWN RACE: Another process could create a KFD entry between our
     // snapshot and detection, causing us to wait for the wrong entry.
     // This is mitigated by:
-    //   1. Narrow window (snapshot taken immediately before fork)
+    //   1. Narrow window (snapshot taken immediately before spawn)
     //   2. Bounded wait (max_cleanup_wait_ms timeout)
     //   3. Kernel cleanup (child's entry disappears when child exits)
     // Worst case: we timeout waiting for wrong entry, but our child's
@@ -740,7 +743,7 @@ QueryResult ExecuteIsolatedQuery(OpType op, uint32_t gpu_id) {
     if (KfdProcEntryExists(direct_entry)) {
       WaitForEntryRemoval(direct_entry, poll_ms);
     } else {
-      std::string new_entry = DetectNewKfdProcEntry(pre_fork_snapshot);
+      std::string new_entry = DetectNewKfdProcEntry(pre_spawn_snapshot);
       if (!new_entry.empty()) {
         ss << __PRETTY_FUNCTION__ << " | Container PID translation: " << child_pid << " -> "
            << new_entry;
@@ -775,10 +778,10 @@ QueryResult ExecuteBatchQueryCached(OpType op, const std::vector<uint32_t>& gpu_
   }
 
   // TODO(optimization): Consider adding a "single-flight" / "coalescing"
-  // pattern. This avoids redundant forks when multiple threads have
-  // concurrent cache misses.
+  // pattern. This avoids redundant child spawns when multiple threads
+  // have concurrent cache misses.
   //
-  // Current behavior: both threads fork (safe but slightly inefficient).
+  // Current behavior: both threads spawn (safe but slightly inefficient).
   // Search: "singleflight pattern", "request coalescing", "call coalescing C++"
   //         or "deduplicate concurrent requests" folly Singleton
   //
@@ -786,24 +789,24 @@ QueryResult ExecuteBatchQueryCached(OpType op, const std::vector<uint32_t>& gpu_
   // "folly Singleton" or "folly futures coalescing"
   // or "C++ promise shared future" (to see  underlying mechanism)
 
-  // Cache miss - execute batch fork for all GPUs
-  auto fork_result = ExecuteBatchFork(op, gpu_ids);
+  // Cache miss - spawn batch child for all GPUs
+  auto spawn_result = ExecuteBatchSpawn(op, gpu_ids);
 
-  // On fork/pipe failure, purge cache (system state unreliable)
-  if (!fork_result.success) {
+  // On spawn/pipe failure, purge cache (system state unreliable)
+  if (!spawn_result.success) {
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | Fork failed (err=" << fork_result.err_code
+    ss << __PRETTY_FUNCTION__ << " | Spawn failed (err=" << spawn_result.err_code
        << "), purging cache for op=" << static_cast<uint32_t>(op);
     LOG_WARN(ss);
     GetGlobalCache().Purge(op, -1);
-    return QueryResult{fork_result.err_code, 0};
+    return QueryResult{spawn_result.err_code, 0};
   }
 
   // Store results and find target in single pass
-  auto store_result = GetGlobalCache().StoreBatch(op, fork_result.payload, target_gpu_id);
+  auto store_result = GetGlobalCache().StoreBatch(op, spawn_result.payload, target_gpu_id);
 
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | Refreshed " << fork_result.payload.count
+  ss << __PRETTY_FUNCTION__ << " | Refreshed " << spawn_result.payload.count
      << " GPUs, target_found=" << store_result.target_found
      << ", cache_updated=" << (store_result.success ? "yes" : "no (error)");
   LOG_DEBUG(ss);

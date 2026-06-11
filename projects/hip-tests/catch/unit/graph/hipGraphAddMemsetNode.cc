@@ -439,10 +439,7 @@ HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMalloc_1D) {
 }
 
 HIP_TEST_CASE(Unit_hipGraphAddMemsetNode_hipMallocManaged) {
-  int managed = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
-  INFO("hipDeviceAttributeManagedMemory: " << managed);
-  if (managed != 1) {
+  if (!HipTest::isManagedMemorySupportedOnDevice(0)) {
     WARN(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory attribute"
         "so defaulting to system memory.");
