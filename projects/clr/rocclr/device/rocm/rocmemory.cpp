@@ -719,9 +719,9 @@ void Buffer::destroy() {
       }
     }
 
-    // Not counted on alloc, so don't add it back on free.
+    // Not counted on alloc (e.g. arena and VA ranges), so don't add it back on free.
     if ((deviceMemory_ != nullptr) && (dev().settings().apuSystem_ || !isFineGrain) &&
-        !(memFlags & CL_MEM_VA_RANGE_AMD)) {
+        (kind_ != MEMORY_KIND_ARENA) && !(memFlags & CL_MEM_VA_RANGE_AMD)) {
       const_cast<Device&>(dev()).updateFreeMemory(size(), true);
     }
 
