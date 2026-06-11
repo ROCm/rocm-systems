@@ -36,6 +36,19 @@ from amdsmi_helpers import AMDSMIHelpers
 import amdsmi_cli_exceptions
 
 
+# Valid value ranges for CPU `set` arguments, defined by the HSMP protocol and
+# not queryable from the library. Update these if the supported range changes.
+CPU_XGMI_LINK_WIDTH_RANGE = range(0, 2)
+CPU_GMI3_LINK_WIDTH_RANGE = range(0, 3)
+CPU_LCLK_DPM_LEVEL_RANGE = range(0, 4)
+CPU_DISABLE_APB_RANGE = range(0, 4)
+
+
+def _cpu_set_range_label(value_range):
+    # Render a range like range(0, 2) as "0-1" for help text.
+    return f"{value_range.start}-{value_range[-1]}"
+
+
 # Custom Help Formatter for increasing the action max length
 class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
     def __init__(self, prog):
@@ -2464,18 +2477,16 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_cpu_pwr_limit_help = (
             "Set power limit for the given socket. Input parameter is power limit value."
         )
-        set_cpu_xgmi_link_width_help = "Set min and max linkwidth. Input parameters are min and max link width values (MAX >= MIN)"
-        set_cpu_lclk_dpm_level_help = "Sets the min and max dpm level on a given NBIO.\
-        \n Input parameters are die_index, min dpm, max dpm (MAX >= MIN)."
+        set_cpu_xgmi_link_width_help = f"Set min and max linkwidth. Input parameters are min and max link width values (MAX >= MIN, values {_cpu_set_range_label(CPU_XGMI_LINK_WIDTH_RANGE)})"
+        set_cpu_lclk_dpm_level_help = f"Sets the min and max dpm level on a given NBIO.\
+        \n Input parameters are die_index, min dpm, max dpm (MAX >= MIN, values {_cpu_set_range_label(CPU_LCLK_DPM_LEVEL_RANGE)})."
         set_cpu_pwr_eff_mode_help = "Sets the power efficiency mode policy. Input parameters,\
         \n MODE(0=HighPerformance, 1=PowerEfficiency, 2=IOPerformance, 3=BalancedMemory, 4=BalancedCore, 5=BalancedCoreMemory),\n For Family 1Ah Models 50h-57h onwards, UTIL(%%)(0-100) and PPT_limit (in mW) required if MODE= 4 or 5"
-        set_cpu_gmi3_link_width_help = "Sets min and max gmi3 link width range (MAX >= MIN)"
+        set_cpu_gmi3_link_width_help = f"Sets min and max gmi3 link width range (MAX >= MIN, values {_cpu_set_range_label(CPU_GMI3_LINK_WIDTH_RANGE)})"
         set_cpu_pcie_link_rate_help = "Sets pcie link rate"
         set_cpu_df_pstate_range_help = "Sets min and max df-pstates (MAX <= MIN)"
         set_cpu_enable_apb_help = "Enables the DF p-state performance boost algorithm"
-        set_cpu_disable_apb_help = (
-            "Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)"
-        )
+        set_cpu_disable_apb_help = f"Disables the DF p-state performance boost algorithm. Input parameter is DFPstate ({_cpu_set_range_label(CPU_DISABLE_APB_RANGE)})"
         set_soc_boost_limit_help = (
             "Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value"
         )
@@ -2699,6 +2710,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=2,
+                    choices=CPU_XGMI_LINK_WIDTH_RANGE,
                     metavar=("MIN_WIDTH", "MAX_WIDTH"),
                     help=set_cpu_xgmi_link_width_help,
                 )
@@ -2708,6 +2720,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=3,
+                    choices=CPU_LCLK_DPM_LEVEL_RANGE,
                     metavar=("NBIOID", "MIN_DPM", "MAX_DPM"),
                     help=set_cpu_lclk_dpm_level_help,
                 )
@@ -2726,6 +2739,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=2,
+                    choices=CPU_GMI3_LINK_WIDTH_RANGE,
                     metavar=("MIN_LW", "MAX_LW"),
                     help=set_cpu_gmi3_link_width_help,
                 )
@@ -2759,6 +2773,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     required=False,
                     type=self._not_negative_int,
                     nargs=1,
+                    choices=CPU_DISABLE_APB_RANGE,
                     metavar=("DF_PSTATE"),
                     help=set_cpu_disable_apb_help,
                 )
