@@ -28,7 +28,7 @@ Profiling options
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--pc-sampling-method``: Should be either ``stochastic`` or ``host_trap``, (DEFAULT: stochastic)
-* ``--pc-sampling-interval``: For ``stochastic`` sampling, the interval is in cycles; it must be a power of 2 and at least 65536 (DEFAULT: 1048576). For ``host_trap`` sampling, the interval is in microseconds and may be any positive integer (DEFAULT: 512). When omitted, the method-appropriate default is used.
+* ``--pc-sampling-interval``: For ``stochastic`` sampling, the interval is in cycles; it must be a power of 2 and at least 65536 (DEFAULT: 1048576). These are hardware limits reported by the driver. For ``host_trap`` sampling, the interval is in microseconds and may be any positive integer (DEFAULT: 512). When omitted, the method-appropriate default is used.
 
 **Sample command:**
 
