@@ -8,8 +8,8 @@
 //!
 //! Detection contract:
 //!
-//! * [`rocjitsu_env()`] — returns `Some((kmd, config, schema))`
-//!   when all three prerequisites for an interposed workload are
+//! * [`rocjitsu_env()`] — returns `Some((kmd, config))`
+//!   when both prerequisites for an interposed workload are
 //!   present on disk. Otherwise `None`.
 //! * [`torch_available()`] — runs `python -c "import torch"`.
 //! * [`hipcc_available()`] — checks for `hipcc` on `$PATH`.
@@ -26,9 +26,9 @@ use tempfile::TempDir;
 
 // ----- capability detection --------------------------------------------------
 
-/// Returns `Some((kmd_preload_so, simulation_config_json, schema_fbs))`
+/// Returns `Some((kmd_preload_so, simulation_config_json))`
 /// when the full rocjitsu KMD-interposer pipeline is present.
-fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
+fn rocjitsu_env() -> Option<(PathBuf, PathBuf)> {
     let kmd = mirage_rocjitsu::kmd_preload()?;
     // Build a minimal EmulatorDef referencing a builtin agent so
     // rocjitsu can synthesise the sim config.
@@ -46,8 +46,8 @@ fn rocjitsu_env() -> Option<(PathBuf, PathBuf, PathBuf)> {
             agent: mirage_core::common::MaybeRef::Ref(agent_name),
         }),
     };
-    let (cfg, schema) = mirage_rocjitsu::kmd_config(&def, None).ok()?;
-    Some((kmd, cfg, schema))
+    let cfg = mirage_rocjitsu::kmd_config(&def, None).ok()?;
+    Some((kmd, cfg))
 }
 
 fn torch_available() -> bool {
@@ -141,8 +141,8 @@ fn compile_tiny_hip(out_dir: &Path) -> PathBuf {
 
 #[test]
 fn hip_vector_add_runs_against_simulated_gpu() {
-    let Some((kmd, cfg, schema)) = rocjitsu_env() else {
-        eprintln!("skipping: rocjitsu KMD interposer / config / schema not all present");
+    let Some((kmd, cfg)) = rocjitsu_env() else {
+        eprintln!("skipping: rocjitsu KMD interposer / config not all present");
         return;
     };
     if !hipcc_available() {
@@ -154,7 +154,6 @@ fn hip_vector_add_runs_against_simulated_gpu() {
     let output = Command::new(&bin)
         .env("LD_PRELOAD", &kmd)
         .env("RJ_CONFIG", &cfg)
-        .env("RJ_SCHEMA", &schema)
         .output()
         .expect("failed to spawn tiny_hip");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -172,8 +171,8 @@ fn hip_vector_add_runs_against_simulated_gpu() {
 
 #[test]
 fn torch_runs_on_simulated_gpu_via_kmd_preload() {
-    let Some((kmd, cfg, schema)) = rocjitsu_env() else {
-        eprintln!("skipping: rocjitsu KMD interposer / config / schema not all present");
+    let Some((kmd, cfg)) = rocjitsu_env() else {
+        eprintln!("skipping: rocjitsu KMD interposer / config not all present");
         return;
     };
     if !torch_available() {
@@ -185,7 +184,6 @@ fn torch_runs_on_simulated_gpu_via_kmd_preload() {
         .arg(&script)
         .env("LD_PRELOAD", &kmd)
         .env("RJ_CONFIG", &cfg)
-        .env("RJ_SCHEMA", &schema)
         .output()
         .expect("failed to spawn python");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -210,8 +208,8 @@ fn torch_runs_on_simulated_gpu_via_kmd_preload() {
 
 #[test]
 fn mirage_run_drives_hip_kernel_under_kmd_preload() {
-    let Some((kmd, cfg, schema)) = rocjitsu_env() else {
-        eprintln!("skipping: rocjitsu KMD interposer / config / schema not all present");
+    let Some((kmd, cfg)) = rocjitsu_env() else {
+        eprintln!("skipping: rocjitsu KMD interposer / config not all present");
         return;
     };
     if !hipcc_available() {
@@ -235,8 +233,6 @@ fn mirage_run_drives_hip_kernel_under_kmd_preload() {
         .arg(format!("LD_PRELOAD={}", kmd.display()))
         .arg("--env")
         .arg(format!("RJ_CONFIG={}", cfg.display()))
-        .arg("--env")
-        .arg(format!("RJ_SCHEMA={}", schema.display()))
         .arg("--")
         .arg(&bin)
         .assert()
@@ -250,8 +246,8 @@ fn mirage_run_drives_hip_kernel_under_kmd_preload() {
 
 #[test]
 fn mirage_run_drives_torch_under_kmd_preload() {
-    let Some((kmd, cfg, schema)) = rocjitsu_env() else {
-        eprintln!("skipping: rocjitsu KMD interposer / config / schema not all present");
+    let Some((kmd, cfg)) = rocjitsu_env() else {
+        eprintln!("skipping: rocjitsu KMD interposer / config not all present");
         return;
     };
     if !torch_available() {
@@ -272,8 +268,6 @@ fn mirage_run_drives_torch_under_kmd_preload() {
         .arg(format!("LD_PRELOAD={}", kmd.display()))
         .arg("--env")
         .arg(format!("RJ_CONFIG={}", cfg.display()))
-        .arg("--env")
-        .arg(format!("RJ_SCHEMA={}", schema.display()))
         .arg("--")
         .arg("python")
         .arg(&script)
@@ -319,8 +313,8 @@ fn mirage_run_rejects_malformed_env_flag() {
 
 #[test]
 fn hip_kernel_runs_inside_container_with_kmd_preload() {
-    let Some((kmd, cfg, schema)) = rocjitsu_env() else {
-        eprintln!("skipping: rocjitsu KMD interposer / config / schema not all present");
+    let Some((kmd, cfg)) = rocjitsu_env() else {
+        eprintln!("skipping: rocjitsu KMD interposer / config not all present");
         return;
     };
     if !podman_available() {
@@ -346,11 +340,8 @@ fn hip_kernel_runs_inside_container_with_kmd_preload() {
         .arg(format!("{}:/work/kmd.so:ro", kmd.display()))
         .arg("-v")
         .arg(format!("{}:/work/cfg.json:ro", cfg.display()))
-        .arg("-v")
-        .arg(format!("{}:/work/schema.fbs:ro", schema.display()))
         .args(["-e", "LD_PRELOAD=/work/kmd.so"])
         .args(["-e", "RJ_CONFIG=/work/cfg.json"])
-        .args(["-e", "RJ_SCHEMA=/work/schema.fbs"])
         .arg(&image)
         .args(["/work/tiny_hip"])
         .output()
