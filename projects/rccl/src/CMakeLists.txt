@@ -50,6 +50,7 @@ set(SRC_FILES
   device/broadcast.h
   device/common.h
   device/common_kernel.h
+  device/nan_check.h
   device/op128.h
   device/primitives.h
   device/prims_ll128.h

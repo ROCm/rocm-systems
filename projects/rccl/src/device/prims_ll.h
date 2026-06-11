@@ -414,6 +414,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       if (RECV) {
         readLLBeginAll<1>(offset, line);
         peerData = readLL(offset, 0);
+        RCCL_NANCHECK_WORD(peerData, RCCL_NANCHECK_INPUT, (long long)offset*EltPerLine);  // opt-in NaN/Inf detector (offset is a fifo line, scale to elements)
       }
       if (SRC) {
         data = dl.loadFinish();
@@ -431,6 +432,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       }
 
       if (postOp) data = applyPostOp(redOp, data);
+      RCCL_NANCHECK_WORD(data, RCCL_NANCHECK_OUTPUT, (long long)offset*EltPerLine);  // opt-in NaN/Inf detector (reduced result; offset is a fifo line, scale to elements)
 
       // Send : inter-node, then intra-node, then local
       if (SEND) {

@@ -308,6 +308,21 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       }
     }
 
+#ifdef RCCL_ENABLE_NAN_CHECK
+    // opt-in NaN/Inf detector on the reduced LL128 result words. v[u] is data;
+    // on flagThread v[u+1] is replaced by the flag at store time, so skip it.
+    // The reported offset is the fifo wire-word index of the value (v[u] stores
+    // to ll128Offset + u*WARP_SIZE), not a user-buffer element index: the LL128
+    // wire layout interleaves flag words, so there is no cheap element mapping
+    // here. The value + (block,thread) coordinates are the actionable signal.
+    #pragma unroll
+    for (int u=0; u<ELEMS_PER_THREAD; u+=2) {
+      RCCL_NANCHECK_WORD(v[u], RCCL_NANCHECK_OUTPUT, (long long)ll128Offset + u*WARP_SIZE);
+      if (!flagThread)
+        RCCL_NANCHECK_WORD(v[u+1], RCCL_NANCHECK_OUTPUT, (long long)ll128Offset + u*WARP_SIZE + 1);
+    }
+#endif
+
 #if RCCL_USE_WBINVL1_VOL
     if (tid == 0) __builtin_amdgcn_buffer_wbinvl1();
 #endif

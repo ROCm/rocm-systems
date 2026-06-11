@@ -95,6 +95,23 @@ option(QUIET_WARNINGS                          "Supress compiler warnings"      
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
+option(RCCL_ENABLE_NAN_CHECK                   "Enable opt-in device-side NaN/Inf detector in reductions" OFF)
+option(RCCL_NANCHECK_ABORT                     "Abort (__trap) on first NaN/Inf detected (requires RCCL_ENABLE_NAN_CHECK)" OFF)
+
+# Opt-in device-side NaN/Inf detector. Zero overhead unless explicitly enabled.
+# Requesting abort implies the detector, so turn it on rather than silently no-op.
+if(RCCL_NANCHECK_ABORT AND NOT RCCL_ENABLE_NAN_CHECK)
+  message(STATUS "RCCL_NANCHECK_ABORT requested without RCCL_ENABLE_NAN_CHECK; enabling the detector")
+  set(RCCL_ENABLE_NAN_CHECK ON)
+endif()
+if(RCCL_ENABLE_NAN_CHECK)
+  message(STATUS "RCCL device-side NaN/Inf detector ENABLED (RCCL_ENABLE_NAN_CHECK)")
+  add_compile_definitions(RCCL_ENABLE_NAN_CHECK)
+  if(RCCL_NANCHECK_ABORT)
+    message(STATUS "RCCL NaN/Inf detector will __trap() on first hit (RCCL_NANCHECK_ABORT)")
+    add_compile_definitions(RCCL_NANCHECK_ABORT)
+  endif()
+endif()
 
 # Default GPU architectures to build
 #==================================================================================================

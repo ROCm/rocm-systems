@@ -11,6 +11,7 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
+#include "nan_check.h" // opt-in (RCCL_ENABLE_NAN_CHECK) device-side NaN/Inf detector; no-op otherwise
 #include <cstdio>
 #include <cstdint>
 
@@ -95,6 +96,10 @@ __device__ __forceinline__ static void reduceCopyPacks(
           acc[u] = ld_volatile_global<BytePerPack>(minSrcs[0]);
           if (0 < PreOpSrcs) acc[u] = applyPreOp(redFn, acc[u]);
         }
+        // RCCL NaN/Inf detector: inspect the first reduction operand as it is
+        // loaded. No-op unless built with RCCL_ENABLE_NAN_CHECK.
+        RCCL_NANCHECK(acc[u], RCCL_NANCHECK_INPUT,
+                      (threadBytesBehind + (IntBytes)u*WARP_SIZE*BytePerPack)/(IntBytes)sizeof(T));
         minSrcs[0] += WARP_SIZE*BytePerPack;
       }
     }
@@ -147,6 +152,15 @@ __device__ __forceinline__ static void reduceCopyPacks(
       #pragma unroll Unroll
       for (int u=0; u < Unroll; u++)
         acc[u] = applyPostOp(redFn, acc[u]);
+    }
+
+    // RCCL NaN/Inf detector: inspect the reduced result pack before it is
+    // stored. No-op unless built with RCCL_ENABLE_NAN_CHECK. The element offset
+    // hint is this thread's byte position converted to elements of T.
+    #pragma unroll Unroll
+    for (int u=0; u < Unroll; u++) {
+      RCCL_NANCHECK(acc[u], RCCL_NANCHECK_OUTPUT,
+                    (threadBytesBehind + (IntBytes)u*WARP_SIZE*BytePerPack)/(IntBytes)sizeof(T));
     }
 
     #pragma unroll Unroll
@@ -232,6 +246,14 @@ __device__ __forceinline__ void loadSources(
       src += WARP_SIZE * BytePerPack;
     }
   }
+
+  // RCCL NaN/Inf detector (pipelined path input): inspect the first loaded
+  // operand. No-op unless built with RCCL_ENABLE_NAN_CHECK.
+  #pragma unroll Unroll
+  for (int u = 0; u < Unroll; u++)
+    RCCL_NANCHECK(buff[0][u], RCCL_NANCHECK_INPUT,
+                  (globalOffset + (IntBytes)u*WARP_SIZE*BytePerPack)
+                    /(IntBytes)sizeof(typename RedFn::EltType));
 }
 
 template <typename RedFn, typename DstPtrFn, typename IntBytes, int MultimemDsts, int MinSrcs, int MaxSrcs, int MinDsts, int MaxDsts, int PreOpSrcs, int Unroll, int BytePerPack>
@@ -256,6 +278,15 @@ template <typename RedFn, typename DstPtrFn, typename IntBytes, int MultimemDsts
     #pragma unroll Unroll
     for (int u = 0; u < Unroll; u++)
       buff[0][u] = applyPostOp(redFn, buff[0][u]);
+  }
+
+  // RCCL NaN/Inf detector (pipelined path): inspect the reduced result pack
+  // before it is stored. No-op unless built with RCCL_ENABLE_NAN_CHECK.
+  #pragma unroll Unroll
+  for (int u = 0; u < Unroll; u++) {
+    RCCL_NANCHECK(buff[0][u], RCCL_NANCHECK_OUTPUT,
+                  (tailThreadBytesBehind + (IntBytes)u*WARP_SIZE*BytePerPack)
+                    /(IntBytes)sizeof(typename RedFn::EltType));
   }
 
   #pragma unroll Unroll
@@ -480,9 +511,13 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(
           acc[u] = ld_volatile_global<BytePerPack>(minSrcs[0]);
             // coverity[dead_error_condition]
           bias[u] = ld_volatile_global<BytePerPack>(accPtr);
+          RCCL_NANCHECK(bias[u], RCCL_NANCHECK_INPUT,  // opt-in detector: bias operand
+                        (threadBytesBehind + (IntBytes)u*WARP_SIZE*BytePerPack)/(IntBytes)sizeof(T));
           accPtr += WARP_SIZE*BytePerPack;
           if (0 < PreOpSrcs) acc[u] = applyPreOp(redFn, acc[u]);
         }
+        RCCL_NANCHECK(acc[u], RCCL_NANCHECK_INPUT,  // opt-in detector: source operand
+                      (threadBytesBehind + (IntBytes)u*WARP_SIZE*BytePerPack)/(IntBytes)sizeof(T));
         minSrcs[0] += WARP_SIZE*BytePerPack;
       }
     }
@@ -535,6 +570,14 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(
       for (int u=0; u < Unroll; u++)
         acc[u] = applyPostOp(redFn, acc[u]);
     }
+
+    // RCCL NaN/Inf detector: inspect the reduced result before store. No-op
+    // unless built with RCCL_ENABLE_NAN_CHECK. (The d==0 dst additionally folds
+    // in the bias operand, which is checked as INPUT above.)
+    #pragma unroll Unroll
+    for (int u=0; u < Unroll; u++)
+      RCCL_NANCHECK(acc[u], RCCL_NANCHECK_OUTPUT,
+                    (threadBytesBehind + (IntBytes)u*WARP_SIZE*BytePerPack)/(IntBytes)sizeof(T));
 
     #pragma unroll Unroll
     for (int d=0; d < MinDsts; d++) {

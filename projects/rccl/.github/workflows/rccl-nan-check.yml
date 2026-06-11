@@ -1,0 +1,57 @@
+# Opt-in NaN/Inf detector smoke + assertion test.
+#
+# Builds RCCL with the device-side reduction NaN detector enabled
+# (-DRCCL_ENABLE_NAN_CHECK=ON) plus the unit tests, then runs NanCheckTests,
+# which injects a NaN into an AllReduce and asserts the detector reports it.
+#
+# This is fully independent of (and must NOT pull in) any change to the default
+# thread-block size in src/include/device.h / src/include/rccl_common.h. The
+# detector lives in the shared reduction path and fires at any thread count, so
+# stock RCCL (256 threads) is exactly what we build and test here.
+#
+# NOTE: adjust `runs-on` and `container.image` to match your GPU CI runners.
+# Requires a runner with >= 2 GPUs (the test does a 2-GPU ncclCommInitAll).
+
+name: RCCL NaN Detector Test
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "src/device/nan_check.h"
+      - "src/device/common_kernel.h"
+      - "test/NanCheckTests.cpp"
+      - ".github/workflows/rccl-nan-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  nan-check:
+    name: Build (--enable-nan-check) + run NanCheckTests
+    # TODO: point at a >=2-GPU ROCm runner, e.g. linux-mi325-4gpu-ossci-rocm
+    runs-on: linux-mi325-4gpu-ossci-rocm
+    container:
+      # TODO: a ROCm image with cmake + hipcc (any rocm/dev-* works).
+      image: rocm/dev-ubuntu-24.04:7.2.3-complete
+      options: >-
+        --device /dev/kfd --device /dev/dri --group-add video
+        --ipc host --security-opt seccomp=unconfined --ulimit memlock=-1:-1
+    steps:
+      - name: Checkout RCCL
+        uses: actions/checkout@v4
+
+      - name: Build RCCL with NaN detector + unit tests
+        run: |
+          # -l : build only for the runner's local GPU arch (fast).
+          # --enable-nan-check : -DRCCL_ENABLE_NAN_CHECK=ON
+          # --tests_build      : build rccl-UnitTests (includes NanCheckTests)
+          ONLY_FUNCS="AllReduce * * Sum f32/bf16" \
+            ./install.sh -l --enable-nan-check --tests_build
+
+      - name: Run NanCheckTests
+        run: |
+          BIN=$(find "$PWD/build" -name rccl-UnitTests -type f | head -1)
+          echo "Using unit test binary: $BIN"
+          test -n "$BIN" || { echo "rccl-UnitTests not found"; exit 1; }
+          "$BIN" --gtest_filter='NanCheck.*' --gtest_color=yes
