@@ -92,24 +92,79 @@ impl Env {
 
 /// A mock `docker`/`podman` that logs every invocation and behaves just
 /// enough for the host's bring-up and exec paths:
+///   * `image inspect` / `network inspect` fail so bring-up takes the
+///     pull/create path,
 ///   * `pull` / `network create|rm` / `rm` succeed silently,
-///   * `network inspect` fails so `ensure_network` takes the create path,
-///   * `run -d ...` prints a fake container id,
-///   * `exec [-i] [-w DIR] [-e K=V ...] <container> CMD ARGS...` strips
-///     the flags and the container name and runs CMD locally, so the
-///     workload actually executes.
+///   * `run -d ...` remaps the Mirage bind mounts back to host paths,
+///     starts the per-node `mirage host` in the background, and prints a
+///     fake container id.
 fn write_mock_provider(path: &Path, log: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let script = r#"#!/bin/sh
 echo "$@" >> __LOG__
 case "$1" in
+  image)
+    case "$2" in
+      inspect) exit 1 ;;
+      *) exit 0 ;;
+    esac ;;
   pull) exit 0 ;;
   network)
     case "$2" in
       inspect) exit 1 ;;
       *) exit 0 ;;
     esac ;;
-  run) echo cid-12345 ; exit 0 ;;
+  run)
+    shift
+    name=""
+    mirage_bin=""
+    runtime_session=""
+    config_dir=""
+    state_dir=""
+    cache_dir=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -d) shift ;;
+        --name) name="$2"; shift 2 ;;
+        --hostname|--security-opt|--group-add|--network|--device) shift 2 ;;
+        -e) export "$2"; shift 2 ;;
+        -v)
+          spec="$2"
+          host="${spec%%:*}"
+          rest="${spec#*:}"
+          container="${rest%%:*}"
+          case "$container" in
+            /mnt/mirage/bin/mirage) mirage_bin="$host" ;;
+            /mnt/mirage/runtime/session/*) runtime_session="$host" ;;
+            /mnt/mirage/config) config_dir="$host" ;;
+            /mnt/mirage/state) state_dir="$host" ;;
+            /mnt/mirage/cache) cache_dir="$host" ;;
+          esac
+          shift 2 ;;
+        --*) shift 2 ;;
+        *) break ;;
+      esac
+    done
+
+    # Skip the image. The remaining argv is the container's foreground
+    # command, which Mirage now uses for the per-node host.
+    shift
+
+    if [ -n "$runtime_session" ]; then
+      MIRAGE_RUNTIME="$(dirname "$(dirname "$runtime_session")")"
+      export MIRAGE_RUNTIME
+    fi
+    if [ -n "$config_dir" ]; then export MIRAGE_CONFIG="$config_dir"; fi
+    if [ -n "$state_dir" ]; then export MIRAGE_STATE="$state_dir"; fi
+    if [ -n "$cache_dir" ]; then export MIRAGE_CACHE="$cache_dir"; fi
+    if [ "$1" = "/mnt/mirage/bin/mirage" ] && [ -n "$mirage_bin" ]; then
+      shift
+      ( "$mirage_bin" "$@" </dev/null >/dev/null 2>&1 & echo $! > "__STATE_DIR__/$name.pid" )
+    elif [ $# -gt 0 ]; then
+      ( "$@" </dev/null >/dev/null 2>&1 & echo $! > "__STATE_DIR__/$name.pid" )
+    fi
+    echo cid-12345
+    exit 0 ;;
   rm) exit 0 ;;
   inspect) echo true ; exit 0 ;;
   exec)
@@ -127,7 +182,11 @@ case "$1" in
   *) exit 0 ;;
 esac
 "#
-    .replace("__LOG__", &log.display().to_string());
+    .replace("__LOG__", &log.display().to_string())
+    .replace(
+        "__STATE_DIR__",
+        &path.parent().unwrap_or_else(|| Path::new(".")).display().to_string(),
+    );
     std::fs::write(path, script).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -185,14 +244,20 @@ fn containerized_run_executes_in_container_and_cleans_up() {
         log.contains("run -d --name mirage-"),
         "missing container run; log:\n{log}"
     );
-    // Workload executed via exec, with the always-present rank env.
+    // The node container is launched with the always-present rank env,
+    // and its foreground command is the per-node Mirage host that will
+    // pick up and execute the submitted workload.
     assert!(
         log.contains("-e MIRAGE_RANK=0"),
         "missing MIRAGE_RANK injection; log:\n{log}"
     );
     assert!(
-        log.contains("/bin/echo hello-mirage"),
-        "command not exec'd in container; log:\n{log}"
+        log.contains("/mnt/mirage/bin/mirage host --session"),
+        "node host not launched in container; log:\n{log}"
+    );
+    assert!(
+        log.contains("--rank 0"),
+        "node host rank not passed; log:\n{log}"
     );
     // Cleanup on session destroy.
     assert!(
