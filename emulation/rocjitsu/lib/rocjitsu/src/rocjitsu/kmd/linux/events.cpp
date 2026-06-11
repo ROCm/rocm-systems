@@ -16,8 +16,6 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <unistd.h>
 
 namespace rocjitsu {
@@ -39,92 +37,6 @@ void reset_event_slot_if_age(void *page, size_t page_size, uint32_t event_id, ui
   std::atomic_ref<uint64_t>(slots[event_id])
       .compare_exchange_strong(expected, KFD_SIGNAL_EVENT_LIMIT, std::memory_order_acq_rel,
                                std::memory_order_acquire);
-}
-
-bool event_profile_enabled() {
-  static bool enabled = std::getenv("RJ_EVENT_PROFILE") != nullptr;
-  return enabled;
-}
-
-struct EventProfileCounters {
-  std::atomic<uint64_t> wait_calls{0};
-  std::atomic<uint64_t> poll_calls{0};
-  std::atomic<uint64_t> ready_before_wait{0};
-  std::atomic<uint64_t> blocking_waits{0};
-  std::atomic<uint64_t> single_event_waits{0};
-  std::atomic<uint64_t> multi_event_waits{0};
-  std::atomic<uint64_t> single_signal_waits{0};
-  std::atomic<uint64_t> single_system_waits{0};
-  std::atomic<uint64_t> single_auto_reset_waits{0};
-  std::atomic<uint64_t> single_missing_waits{0};
-  std::atomic<uint64_t> fast_out_of_range{0};
-  std::atomic<uint64_t> fast_invalid{0};
-  std::atomic<uint64_t> fast_non_signal{0};
-  std::atomic<uint64_t> fast_auto_reset{0};
-  std::atomic<uint64_t> fast_not_ready_blocking{0};
-  std::atomic<uint64_t> fast_signal_completes{0};
-  std::atomic<uint64_t> fast_signal_timeouts{0};
-  std::atomic<uint64_t> fast_multi_completes{0};
-  std::atomic<uint64_t> fast_multi_timeouts{0};
-  std::atomic<uint64_t> fast_multi_not_ready_blocking{0};
-  std::atomic<uint64_t> broadcast_interrupts{0};
-  std::atomic<uint64_t> broadcast_events{0};
-  std::atomic<uint64_t> specific_interrupts{0};
-  std::atomic<uint64_t> specific_misses{0};
-  std::atomic<uint64_t> complete_results{0};
-  std::atomic<uint64_t> timeout_results{0};
-  std::atomic<uint64_t> fail_results{0};
-
-  ~EventProfileCounters() {
-    if (!event_profile_enabled())
-      return;
-
-    std::fprintf(
-        stderr,
-        "RJ_EVENT_PROFILE wait_calls=%llu poll_calls=%llu ready_before_wait=%llu "
-        "blocking_waits=%llu single_event_waits=%llu multi_event_waits=%llu "
-        "single_signal_waits=%llu single_system_waits=%llu single_auto_reset_waits=%llu "
-        "single_missing_waits=%llu fast_out_of_range=%llu fast_invalid=%llu "
-        "fast_non_signal=%llu fast_auto_reset=%llu fast_not_ready_blocking=%llu "
-        "fast_signal_completes=%llu fast_signal_timeouts=%llu fast_multi_completes=%llu "
-        "fast_multi_timeouts=%llu fast_multi_not_ready_blocking=%llu "
-        "broadcast_interrupts=%llu broadcast_events=%llu specific_interrupts=%llu "
-        "specific_misses=%llu "
-        "complete_results=%llu timeout_results=%llu fail_results=%llu\n",
-        static_cast<unsigned long long>(wait_calls.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(poll_calls.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(ready_before_wait.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(blocking_waits.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(single_event_waits.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(multi_event_waits.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(single_signal_waits.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(single_system_waits.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(single_auto_reset_waits.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(single_missing_waits.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_out_of_range.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_invalid.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_non_signal.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_auto_reset.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_not_ready_blocking.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_signal_completes.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_signal_timeouts.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_multi_completes.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fast_multi_timeouts.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(
-            fast_multi_not_ready_blocking.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(broadcast_interrupts.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(broadcast_events.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(specific_interrupts.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(specific_misses.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(complete_results.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(timeout_results.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(fail_results.load(std::memory_order_relaxed)));
-  }
-};
-
-EventProfileCounters &event_profile_counters() {
-  static EventProfileCounters counters;
-  return counters;
 }
 
 } // namespace
@@ -163,10 +75,8 @@ void EventState::adopt_page(void *ptr, size_t size) {
 void EventState::signal_interrupt(uint32_t event_id) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (event_id == 0) {
-    uint64_t signaled_events = 0;
     for (auto &[id, ev] : events_) {
       if (ev.event_type == 0) {
-        ++signaled_events;
         ev.signaled = true;
         ev.event_age = 1;
         if (id < fast_events_.size()) {
@@ -184,11 +94,6 @@ void EventState::signal_interrupt(uint32_t event_id) {
         for (auto *cv : ev.waiters)
           cv->notify_one();
       }
-    }
-    if (event_profile_enabled()) {
-      auto &profile = event_profile_counters();
-      profile.broadcast_interrupts.fetch_add(1, std::memory_order_relaxed);
-      profile.broadcast_events.fetch_add(signaled_events, std::memory_order_relaxed);
     }
     return;
   }
@@ -211,13 +116,9 @@ void EventState::signal_interrupt(uint32_t event_id) {
                      " waiters=", it->second.waiters.size(), " page=", page ? "valid" : "null");
     for (auto *cv : it->second.waiters)
       cv->notify_one();
-    if (event_profile_enabled())
-      event_profile_counters().specific_interrupts.fetch_add(1, std::memory_order_relaxed);
   } else {
     util::Logger::cp("SIGNAL_INTERRUPT_MISS: event_id=", event_id,
                      " NOT FOUND or wrong type, events_.size()=", events_.size());
-    if (event_profile_enabled())
-      event_profile_counters().specific_misses.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
@@ -388,29 +289,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
 
   bool is_poll = (args->timeout == 0);
 
-  auto record_wait_call = [&](bool ready_before_wait) {
-    if (!event_profile_enabled())
-      return;
-    auto &profile = event_profile_counters();
-    profile.wait_calls.fetch_add(1, std::memory_order_relaxed);
-    if (is_poll)
-      profile.poll_calls.fetch_add(1, std::memory_order_relaxed);
-    if (ready_before_wait)
-      profile.ready_before_wait.fetch_add(1, std::memory_order_relaxed);
-  };
-
-  auto record_wait_result = [&]() {
-    if (!event_profile_enabled())
-      return;
-    auto &profile = event_profile_counters();
-    if (args->wait_result == KFD_IOC_WAIT_RESULT_COMPLETE)
-      profile.complete_results.fetch_add(1, std::memory_order_relaxed);
-    else if (args->wait_result == KFD_IOC_WAIT_RESULT_TIMEOUT)
-      profile.timeout_results.fetch_add(1, std::memory_order_relaxed);
-    else
-      profile.fail_results.fetch_add(1, std::memory_order_relaxed);
-  };
-
   auto clear_fast_signaled_if_age = [&](uint32_t event_id, uint64_t age) {
     if (event_id >= fast_events_.size())
       return false;
@@ -439,34 +317,15 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
         uint64_t caller_age = ev_data[0].signal_event_data.last_event_age;
         bool ready = caller_age == 0 ? ((flags & kFastEventSignaled) != 0) : age >= caller_age;
         if (ready || is_poll) {
-          record_wait_call(ready);
           if (ready) {
             ev_data[0].signal_event_data.last_event_age = age;
             args->wait_result = KFD_IOC_WAIT_RESULT_COMPLETE;
-            if (event_profile_enabled())
-              event_profile_counters().fast_signal_completes.fetch_add(1,
-                                                                       std::memory_order_relaxed);
           } else {
             args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
-            if (event_profile_enabled())
-              event_profile_counters().fast_signal_timeouts.fetch_add(1, std::memory_order_relaxed);
           }
-          record_wait_result();
           return 0;
         }
-        if (event_profile_enabled())
-          event_profile_counters().fast_not_ready_blocking.fetch_add(1, std::memory_order_relaxed);
-      } else if (event_profile_enabled()) {
-        auto &profile = event_profile_counters();
-        if ((flags & kFastEventValid) == 0)
-          profile.fast_invalid.fetch_add(1, std::memory_order_relaxed);
-        else if ((flags & kFastEventSignal) == 0)
-          profile.fast_non_signal.fetch_add(1, std::memory_order_relaxed);
-        else if ((flags & kFastEventAutoReset) != 0)
-          profile.fast_auto_reset.fetch_add(1, std::memory_order_relaxed);
       }
-    } else if (event_profile_enabled()) {
-      event_profile_counters().fast_out_of_range.fetch_add(1, std::memory_order_relaxed);
     }
   }
 
@@ -479,8 +338,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     for (uint32_t i = 0; i < args->num_events; ++i) {
       uint32_t event_id = ev_data[i].event_id;
       if (event_id >= fast_events_.size()) {
-        if (event_profile_enabled())
-          event_profile_counters().fast_out_of_range.fetch_add(1, std::memory_order_relaxed);
         all_fast_signal = false;
         break;
       }
@@ -489,21 +346,12 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
       uint64_t state = fast.state.load(std::memory_order_acquire);
       uint8_t flags = fast_event_flags(state);
       if ((flags & (kFastEventValid | kFastEventSignal)) != fast_signal) {
-        if (event_profile_enabled()) {
-          auto &profile = event_profile_counters();
-          if ((flags & kFastEventValid) == 0)
-            profile.fast_invalid.fetch_add(1, std::memory_order_relaxed);
-          else if ((flags & kFastEventSignal) == 0)
-            profile.fast_non_signal.fetch_add(1, std::memory_order_relaxed);
-        }
         all_fast_signal = false;
         break;
       }
 
       uint64_t caller_age = ev_data[i].signal_event_data.last_event_age;
       if (caller_age == 0 && (flags & kFastEventAutoReset) != 0) {
-        if (event_profile_enabled())
-          event_profile_counters().fast_auto_reset.fetch_add(1, std::memory_order_relaxed);
         all_fast_signal = false;
         break;
       }
@@ -517,9 +365,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     if (all_fast_signal) {
       bool ready = wait_all ? all_satisfied : any_satisfied;
       if (ready || is_poll) {
-        if (event_profile_enabled())
-          event_profile_counters().multi_event_waits.fetch_add(1, std::memory_order_relaxed);
-        record_wait_call(ready);
         if (ready) {
           for (uint32_t i = 0; i < args->num_events; ++i) {
             auto &fast = fast_events_[ev_data[i].event_id];
@@ -538,54 +383,28 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
             }
           }
           args->wait_result = KFD_IOC_WAIT_RESULT_COMPLETE;
-          if (event_profile_enabled())
-            event_profile_counters().fast_multi_completes.fetch_add(1, std::memory_order_relaxed);
         } else {
           args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
-          if (event_profile_enabled())
-            event_profile_counters().fast_multi_timeouts.fetch_add(1, std::memory_order_relaxed);
         }
-        record_wait_result();
         return 0;
       }
-      if (event_profile_enabled())
-        event_profile_counters().fast_multi_not_ready_blocking.fetch_add(1,
-                                                                         std::memory_order_relaxed);
     }
   }
 
   std::unique_lock<std::mutex> lock(mutex_);
 
   if (args->num_events == 1) {
-    if (closing_) {
-      record_wait_call(true);
+    if (closing_)
       return -EBADF;
-    }
 
     auto it = events_.find(ev_data[0].event_id);
     if (it == events_.end()) {
-      if (event_profile_enabled())
-        event_profile_counters().single_missing_waits.fetch_add(1, std::memory_order_relaxed);
-      record_wait_call(true);
       args->wait_result = KFD_IOC_WAIT_RESULT_FAIL;
-      record_wait_result();
       return 0;
-    }
-
-    if (event_profile_enabled()) {
-      auto &profile = event_profile_counters();
-      profile.single_event_waits.fetch_add(1, std::memory_order_relaxed);
-      if (it->second.event_type == 0)
-        profile.single_signal_waits.fetch_add(1, std::memory_order_relaxed);
-      else
-        profile.single_system_waits.fetch_add(1, std::memory_order_relaxed);
-      if (it->second.auto_reset)
-        profile.single_auto_reset_waits.fetch_add(1, std::memory_order_relaxed);
     }
 
     bool ready = satisfied(it->second, ev_data[0]);
     if (ready || is_poll) {
-      record_wait_call(ready);
       if (ready) {
         uint64_t ready_age = 0;
         if (it->second.event_type == 0)
@@ -604,7 +423,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
       } else {
         args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
       }
-      record_wait_result();
       return 0;
     }
   }
@@ -627,12 +445,7 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   };
 
   bool ready_before_wait = is_ready();
-  record_wait_call(ready_before_wait);
-  if (event_profile_enabled() && args->num_events != 1)
-    event_profile_counters().multi_event_waits.fetch_add(1, std::memory_order_relaxed);
   if (!is_poll && !ready_before_wait) {
-    if (event_profile_enabled())
-      event_profile_counters().blocking_waits.fetch_add(1, std::memory_order_relaxed);
     std::condition_variable my_cv;
     for (uint32_t i = 0; i < args->num_events; ++i) {
       auto it = events_.find(ev_data[i].event_id);
@@ -695,7 +508,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     args->wait_result = KFD_IOC_WAIT_RESULT_COMPLETE;
   else
     args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
-  record_wait_result();
 
   static thread_local uint32_t wait_log_counter = 0;
   if (args->wait_result == KFD_IOC_WAIT_RESULT_COMPLETE) {
