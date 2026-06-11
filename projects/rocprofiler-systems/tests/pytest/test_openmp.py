@@ -208,7 +208,7 @@ class TestOpenMPLU(RocprofsysTest):
 # ============================================================================
 
 
-@pytest.mark.rockoff
+@pytest.mark.build_only
 @pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.class_name("openmp-target")

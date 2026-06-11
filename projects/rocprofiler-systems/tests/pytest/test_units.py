@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.unit_tests]
 # =============================================================================
 
 
-@pytest.mark.rockoff
+@pytest.mark.build_only
 @pytest.mark.class_name("unit-tests")
 class TestUnitTests(RocprofsysTest):
     def test(self):

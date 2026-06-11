@@ -229,7 +229,7 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
-        "rockoff: prevents the test from being run on TheRock CI (is not run in install mode)",
+        "build_only: prevents the test from being run in install mode",  # TheRock CI runs in install mode
     )
 
     # See pytest_collection_modifyitems
@@ -435,9 +435,9 @@ def pytest_collection_modifyitems(config, items) -> None:
     # "Skip" markers are left for runtime evaluation
     for item in items:
         base_modifications(item)
-        if "rockoff" in item.keywords:
+        if "build_only" in item.keywords and not rocprof_config.is_installed:
             item.add_marker(
-                pytest.mark.skip(reason="Test is not run in install mode (rockoff)")
+                pytest.mark.skip(reason="Test is not run in build mode (build_only)")
             )
         if "gpu" in item.keywords:
             _msg = gpu_unavailable_reason()
