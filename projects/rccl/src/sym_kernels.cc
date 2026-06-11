@@ -612,10 +612,17 @@ static bool ncclSymkImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, nccl
   case ncclFuncAllGather:
     return true;
   case ncclFuncAllReduce:
+    // Symmetric AllReduce implements sum only; avg uses the legacy kernels.
+    if (red == ncclDevSum) {
+      return isFloat && ty != ncclFloat64;
+    }
+    return false;
   case ncclFuncReduceScatter:
+    // Symmetric ReduceScatter implements sum and avg (ncclDevSumPostDiv).
     if (red == ncclDevSum || red == ncclDevSumPostDiv) {
       return isFloat && ty != ncclFloat64;
     }
+    return false;
   default:
     return false;
   }
