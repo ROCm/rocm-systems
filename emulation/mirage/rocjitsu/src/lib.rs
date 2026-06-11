@@ -107,11 +107,11 @@ impl Emulator for Rocjitsu {
         // as `$ROCJITSU_RUNTIME_DIR`, else `$XDG_RUNTIME_DIR/rocjitsu`, else
         // `/tmp/rocjitsu-<uid>`); the file's contents are the path to the
         // config JSON it then loads via `rj_vm_create`. It does *not* read
-        // any `RJ_CONFIG`/`RJ_SCHEMA` environment variable. We therefore
-        // point it at a per-session runtime directory and write that
-        // discovery file ourselves. Without it the interposer finds no
-        // config, never stands up the emulated device, and the workload
-        // fails with "Unable to open /dev/kfd ... No such device".
+        // any configuration environment variable. We therefore point it at
+        // a per-session runtime directory and write that discovery file
+        // ourselves. Without it the interposer finds no config, never
+        // stands up the emulated device, and the workload fails with
+        // "Unable to open /dev/kfd ... No such device".
         //
         // `config` is already resolved for whichever filesystem view this
         // injection is computed in — host paths on the orchestrator, and
@@ -119,15 +119,7 @@ impl Emulator for Rocjitsu {
         // re-resolves this injection inside its container — so both the
         // runtime directory and the path written into `config_path` are
         // correct in either context.
-        let runtime_dir = config
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join(ASSET_SUBDIR);
-        let config_path_file = runtime_dir.join("config_path");
-        mirage_core::state::write_bytes(
-            &config_path_file,
-            format!("{}\n", config.display()).as_bytes(),
-        )?;
+        let runtime_dir = write_config_discovery(&config)?;
 
         let mut env = std::collections::BTreeMap::new();
         env.insert(
@@ -237,6 +229,28 @@ pub fn rj_config_path(session: &SessionId) -> PathBuf {
     mirage_core::paths::session_dir(session).join(RJ_CONFIG_NAME)
 }
 
+/// Point the KMD interposer at `config` by writing the `config_path`
+/// discovery file it reads from `$ROCJITSU_RUNTIME_DIR`, and return that
+/// runtime directory (to export as `ROCJITSU_RUNTIME_DIR`).
+///
+/// The interposer resolves its `SimulationConfig` by reading a
+/// `config_path` file from its per-user runtime directory; the file's
+/// contents are the path to the config JSON. This derives that runtime
+/// directory from `config`'s location, writes the discovery file, and
+/// returns the directory.
+pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
+    let runtime_dir = config
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(ASSET_SUBDIR);
+    let config_path_file = runtime_dir.join("config_path");
+    mirage_core::state::write_bytes(
+        &config_path_file,
+        format!("{}\n", config.display()).as_bytes(),
+    )?;
+    Ok(runtime_dir)
+}
+
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
 /// rocjitsu-emulated workload.
 ///
@@ -257,7 +271,7 @@ pub fn kmd_preload() -> Option<PathBuf> {
 fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
     mirage_core::discovery::LibSearch {
         file_env: &["ROCJITSU_KMD_LIB"],
-        dir_env: &["ROCJITSU_LIB_DIR", "ROCJITSU_ROOT"],
+        dir_env: &["ROCJITSU_ROOT"],
         home_env: &[],
         lib_name: KMD_LIB_NAME,
         // rocjitsu's in-tree KMD build output, relative to the mirage
