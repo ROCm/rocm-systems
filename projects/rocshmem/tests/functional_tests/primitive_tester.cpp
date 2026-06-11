@@ -148,15 +148,14 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &max_co_resident_wgs_per_cu, PrimitiveTest, args.wg_size, 0));
-  hipDeviceProp_t device_prop;
-  CHECK_HIP(hipGetDeviceProperties(&device_prop, 0));
   const int max_sustainable_wgs =
-      max_co_resident_wgs_per_cu * device_prop.multiProcessorCount;
-  if (args.num_wgs > max_sustainable_wgs) {
-    std::cout << "Warning: Number of work-groups (" << args.num_wgs
-              << ") exceeds max sustainable work-groups ("
-              << max_sustainable_wgs << "). grid_barrier may deadlock."
-              << std::endl;
+      max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
+  if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
+    std::cout << "Warning: Requested work-groups (" << args.num_wgs
+              << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
+              << "). Capping to " << max_sustainable_wgs
+              << " to avoid grid_barrier deadlock." << std::endl;
+    args.num_wgs = max_sustainable_wgs;
   }
 
   switch (_type) {
