@@ -11,6 +11,7 @@
 #include "lib/aqlprofile/core/logger.hpp"
 #include "lib/aqlprofile/core/pm4_factory.h"
 #include "lib/common/static_object.hpp"
+#include "lib/common/environment.hpp"
 
 #include <thread>
 #include <condition_variable>
@@ -177,8 +178,9 @@ is_virtualization_enabled()
 bool
 is_agent_supported_for_spm(const AgentInfo* agentInfo)
 {
-    const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
-    if(env_val && *env_val != '0' && *env_val != '\0') return true;
+    // Check value, not just presence (must be non-empty and non-zero to override)
+    auto env_val = rocprofiler::common::get_env_optional("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");
+    if(env_val && !env_val->empty() && env_val->front() != '0') return true;
 
     // if the device is gfx90a, then spm is not supported
     if(strncmp(agentInfo->gfxip, "gfx90a", 6) == 0)
@@ -484,7 +486,8 @@ aqlprofile_spm_stop(aqlprofile_handle_t handle)
 PUBLIC_API void
 aqlprofile_spm_delete_packets(aqlprofile_handle_t handle)
 {
-    aqlprofile::spm::spm_state_map()->remove(handle);
+    if(auto* map = rocprofiler::common::static_object<aqlprofile::spm::SpmStateMap>::get())
+        map->remove(handle);
 }
 
 struct consumer_thread_handle_t
@@ -493,6 +496,7 @@ struct consumer_thread_handle_t
     : s(std::move(_s)){};
     ~consumer_thread_handle_t()
     {
+        std::unique_lock<std::mutex> lock(s->work_mutex);
         s->stop_cons_thread = true;
         s->work_cond.notify_one();
     }
@@ -586,7 +590,9 @@ consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callback_t callback
     while(true)
     {
         std::unique_lock<std::mutex> lock(s->work_mutex);
+        // Wait for data or producer shutdown; do not wait on data_ready alone (see spm_data.cpp).
         s->work_cond.wait(lock, [&s]() { return s->data_ready || s->stop_cons_thread; });
+        // Producer destructor set stop_cons_thread; exit without processing stale work.
         if(!s->data_ready) return;
         s->data_ready = false;
 

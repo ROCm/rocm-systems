@@ -7,6 +7,7 @@
 #include "binary/binary_info.hpp"
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
+#include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -27,7 +28,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/procfs/maps.hpp>
@@ -617,7 +617,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 // if launched via rocprof-sys-causal, allow end-to-end runs that do not
                 // start experiments
                 auto _omni_causal_launcher =
-                    get_env<std::string>("ROCPROFSYS_LAUNCHER", "", false) ==
+                    get_env<std::string>("ROCPROFSYS_LAUNCHER", "") ==
                     "rocprof-sys-causal";
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))

@@ -182,7 +182,7 @@ void OCLDynamic::run(void) {
 
   for (unsigned int i = 0; i < TotalElements; ++i) {
     if (host[i] != 0) {
-      printf("Bad value: a[%d] = %d\n", i, hostArray[i]);
+      printf("Bad value: a[%d] = %d\n", i, host[i]);
       CHECK_RESULT(true, "Incorrect result for dependency!\n");
     }
   }

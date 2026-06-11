@@ -1,12 +1,6 @@
 name: hipFile
 run-name: Kicks off several hipFile CI workflows for various platforms
 
-# In particular, this root workflow's only purpose is to allow
-# us to put our entire CI in a matrix. It has the added benefit
-# of not needing to specify our supported_platforms in multiple
-# locations.
-# We can consider moving the Pre-Checks here and passing them into
-# the CI as an input.
 on:
   pull_request:
     types: [opened, synchronize, reopened] # Defaults
@@ -25,19 +19,133 @@ permissions:
   packages: write
 
 jobs:
+  Precheck:
+    runs-on: [ubuntu-24.04]
+    outputs:
+      changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+      ci_matrix: ${{ steps.matrices.outputs.ci_matrix }}
+      build_ci_image_matrix: ${{ steps.matrices.outputs.build_ci_image_matrix }}
+      ci_images: ${{ steps.ci-images.outputs.ci_images }}
+    env:
+      # Matrix variables go here in JSON notation.
+      # '>-' strips newlines
+      SUPPORTED_PLATFORMS: >-
+        [
+          "rocky",
+          "rocky8",
+          "suse",
+          "ubuntu"
+        ]
+      ROCM_VERSIONS: >-
+        [
+          "7.2.2"
+        ]
+      # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries,
+      # passed through to GHA's strategy.matrix include/exclude keys
+      # so non-rectangular combinations (e.g. ubuntu x 7.13.0 only) can
+      # be expressed without abandoning the base cross-product.
+      MATRIX_INCLUDE: >-
+        [
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.13.0"}
+        ]
+      MATRIX_EXCLUDE: >-
+        []
+    steps:
+      - name: Fetching code repository...
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Git fetch base ref
+        working-directory: rocm-systems
+        run: git fetch origin "${GITHUB_BASE_REF}"
+      - name: Set CI Flags
+        working-directory: rocm-systems/projects/hipfile
+        id: ci-flags
+        run: |
+          echo "changed_dockerfile=$(./util/files-changed.sh "origin/${GITHUB_BASE_REF}" HEAD 'projects/hipfile/util/docker/DOCKERFILE.*')" >> "${GITHUB_OUTPUT}"
+      - name: Sanity-check jq commands
+        # Ensure that the jq commands work as expected before using them.
+        working-directory: rocm-systems/projects/hipfile
+        run: |
+          util/ci-matrices.sh --test
+          util/ci-images.sh --test
+      - name: Compute matrix configurations
+        id: matrices
+        working-directory: rocm-systems/projects/hipfile
+        # ci_matrix (the full strategy.matrix handed to the Linux test job)
+        # and build_ci_image_matrix (which drives the image-build job) are both
+        # computed by util/ci-matrices.sh. Sourcing it sets both shell vars from
+        # the job-level matrix env vars.
+        run: |
+          source ./util/ci-matrices.sh
+          echo "hipFile CI Matrix: "
+          echo "${ci_matrix}" | jq .
+          echo "hipFile Build CI Image Matrix: "
+          echo "${build_ci_image_matrix}" | jq .
+          echo "ci_matrix=${ci_matrix}" >> "${GITHUB_OUTPUT}"
+          echo "build_ci_image_matrix=${build_ci_image_matrix}" >> "${GITHUB_OUTPUT}"
+      - name: Compute CI image names
+        id: ci-images
+        working-directory: rocm-systems/projects/hipfile
+        env:
+          REGISTRY_URL: ghcr.io/${{ github.repository_owner }}
+          CHANGED_DOCKERFILE: ${{ steps.ci-flags.outputs.changed_dockerfile }}
+          BUILD_CI_IMAGE_MATRIX: ${{ steps.matrices.outputs.build_ci_image_matrix }}
+        # ci_images is computed by util/ci-images.sh. Sourcing it sets ci_images
+        # from REGISTRY_URL, tag, and BUILD_CI_IMAGE_MATRIX in the environment.
+        run: |
+          if [ "${CHANGED_DOCKERFILE}" = "1" ]; then
+            # sanitize ref for tag
+            tag="$(echo "${GITHUB_REF}" | sed 's|[^a-zA-Z0-9]|-|g')-rocm"
+          else
+            tag="latest-rocm"
+          fi
+          export tag
+          source ./util/ci-images.sh
+          echo "List of CI Images: "
+          echo "${ci_images}" | jq .
+          echo "ci_images=${ci_images}" >> "${GITHUB_OUTPUT}"
 
-  Linux:
+  build_CI_image:
+    if: ${{ needs.Precheck.outputs.changed_dockerfile == '1' }}
+    needs: Precheck
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
-      matrix:
-        supported_platforms:
-          - rocky
-          - rocky8
-          - suse
-          - ubuntu
-        rocm_versions:
-          - 7.2.2
+      matrix: ${{ fromJSON(needs.Precheck.outputs.build_ci_image_matrix) }}
+    uses: ./.github/workflows/hipfile-image-build.yml
+    with:
+      ci_image_name: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
+      ci_image_cache: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_cache }}
+      ci_image_name_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
+      ci_image_cache_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia_cache }}
+      platform: ${{ matrix.supported_platforms }}
+      rocm_version: ${{ matrix.rocm_versions }}
+
+  # Due to GHA matrix limitations, we cannot inspect the result of individual jobs
+  # in the matrix. To avoid confusing errors, our only option is that if a single
+  # build fails, the entire workflow must stop. Which is rather unfortunate.
+  Linux:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.Precheck.outputs.ci_matrix) }}
     uses: ./.github/workflows/hipfile-ci.yml
     with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
+      ci_image_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}

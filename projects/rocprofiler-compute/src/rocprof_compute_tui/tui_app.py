@@ -84,13 +84,13 @@ class RocprofTUIApp(App):
     def _load_recent_dirs(self) -> list[str]:
         recent_file = Path.home() / ".textual_browser_recent.json"
         if recent_file.exists():
-            with open(recent_file) as f:
+            with open(recent_file, encoding="utf-8") as f:
                 return json.load(f)
         return []
 
     def _save_recent_dirs(self) -> None:
         recent_file = Path.home() / ".textual_browser_recent.json"
-        with open(recent_file, "w") as f:
+        with open(recent_file, "w", encoding="utf-8") as f:
             json.dump(self.recent_dirs, f, indent=2)
 
     def add_recent_dir(self, directory: str) -> None:

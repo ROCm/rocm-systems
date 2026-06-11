@@ -10,7 +10,7 @@ This module provides shared fixtures and configuration for all test modules.
 from __future__ import annotations
 from pathlib import Path
 from functools import lru_cache
-from typing import Callable, Generator, Optional
+from typing import Any, Callable, Generator, Optional
 
 import re
 import os
@@ -39,6 +39,7 @@ from rocprofsys import (
     validate_rocpd_database,
     validate_timemory_json,
     validate_causal_json,
+    validate_unified_memory_outputs,
     validate_file_exists,
     BaselineRunner,
     SamplingRunner,
@@ -348,7 +349,11 @@ def pytest_configure(config: pytest.Config) -> None:
         "scratch_memory",
         "rocm",
         "kfd",
+        "unified_memory",
+        "validation_usm",
         "selective_regions",
+        "minimal",
+        "rank_filter",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -564,7 +569,7 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = nic_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "kfd" in item.keywords:
+        if "kfd" in item.keywords or "unified_memory" in item.keywords:
             _msg = kfd_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
@@ -1030,7 +1035,7 @@ def _emit_test_item_block(
     props: list[str] = []
     if labels:
         props.append(f'    LABELS "{";".join(sorted(labels))}"')
-    props.append(f"    TIMEOUT ${{_TEST_TIMEOUT}}")
+    props.append("    TIMEOUT ${_TEST_TIMEOUT}")
     props.append(f"    SKIP_RETURN_CODE {SKIP_RETURN_CODE}")
     props.append('    FIXTURES_REQUIRED "rocprofsys-global-tmp-files"')
     if run_serial:
@@ -1629,7 +1634,7 @@ def lock_env(base_env: dict[str, str]) -> dict[str, str]:
         "ROCPROFSYS_COUT_OUTPUT": "ON",
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
-        "ROCPROFSYS_LOG_LEVEL": "trace",
+        "ROCPROFSYS_LOG_LEVEL": "info",
         "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
@@ -1942,6 +1947,69 @@ def _is_assert_disabled(request: pytest.FixtureRequest, subtest_name: str) -> bo
     return False
 
 
+# Contains a set of kwargs accepted for a given (function, mode) pair.
+_FUNCTION_ALLOWED_KWARGS: dict[str, dict[str, set[str]]] = {
+    "run_test": {
+        "baseline": {"command"},
+        "sampling": {"sampling_args"},
+        "binary_rewrite": {"binary_rewrite_args", "cleanup_on_success"},
+        "runtime_instrument": {"runtime_instrument_args"},
+        "sys_run": {"sys_run_args"},
+        "causal": {"causal_args", "causal_mode"},
+        "python": {"python_version", "profile_args", "annotated", "standalone"},
+    },
+    "assert_regex": {
+        "baseline": {"baseline_pass_regex", "baseline_fail_regex"},
+        "sampling": {"sampling_pass_regex", "sampling_fail_regex"},
+        "binary_rewrite": {"binary_rewrite_pass_regex", "binary_rewrite_fail_regex"},
+        "runtime_instrument": {
+            "runtime_instrument_pass_regex",
+            "runtime_instrument_fail_regex",
+        },
+        "sys_run": {"sys_run_pass_regex", "sys_run_fail_regex"},
+        "causal": {"causal_pass_regex", "causal_fail_regex"},
+        "python": {"python_pass_regex", "python_fail_regex"},
+    },
+}
+
+
+def _filter_kwargs(function: str, mode: str, **kwargs: Any) -> dict[str, Any]:
+    """Filter ``kwargs`` to those accepted by ``function`` for ``mode``.
+
+    This also verifies that the kwargs passed are valid for the given function.
+    If a kwarg is not valid, pytest.fail is called.
+
+    Returns:
+        A new dict containing only kwargs valid for ``(function, mode)``.
+    """
+    allowed_per_mode = _FUNCTION_ALLOWED_KWARGS.get(function)
+    if allowed_per_mode is None:
+        pytest.fail(
+            f"_filter_kwargs called with unknown function '{function}'. "
+            f"Expected one of: {sorted(_FUNCTION_ALLOWED_KWARGS.keys())}."
+        )
+
+    mode_key = mode.replace("-", "_")
+    allowed_for_mode = allowed_per_mode.get(mode_key)
+    if allowed_for_mode is None:
+        pytest.fail(
+            f"Unknown mode '{mode}' for '{function}'. "
+            f"Expected one of: {sorted(allowed_per_mode.keys())}."
+        )
+
+    # Union of every kwarg accepted by any mode of this function. Anything
+    # outside this set is considered a typo and an error is raised.
+    all_known_for_function: set[str] = set().union(*allowed_per_mode.values())
+    unknown = set(kwargs) - all_known_for_function
+    if unknown:
+        pytest.fail(
+            f"{function}: unknown kwargs {sorted(unknown)}. "
+            f"Valid kwargs across all modes: {sorted(all_known_for_function)}."
+        )
+
+    return {k: v for k, v in kwargs.items() if k in allowed_for_mode}
+
+
 # ============================================================================
 # Base Test Class
 # ============================================================================
@@ -1957,6 +2025,7 @@ class RocprofsysTest:
         assert_regex,
         assert_perfetto,
         assert_rocpd,
+        assert_unified_memory_output,
         assert_causal_json,
         assert_file_exists,
         assert_timemory,
@@ -1969,6 +2038,7 @@ class RocprofsysTest:
         self.assert_regex = assert_regex
         self.assert_perfetto = assert_perfetto
         self.assert_rocpd = assert_rocpd
+        self.assert_unified_memory_output = assert_unified_memory_output
         self.assert_causal_json = assert_causal_json
         self.assert_file_exists = assert_file_exists
         self.assert_timemory = assert_timemory
@@ -2010,7 +2080,7 @@ def run_test(
         fail_on_not_found: If True, pytest.fail when binary not found (default: False = skip)
         fail_message: Custom failure message (default: "{runner_type} test failed: {output}")
         no_base_env: If true, don't use the base environment (default: False)
-        **kwargs: Additional runner-specific arguments (sample_args, rewrite_args, etc.)
+        **kwargs: Additional runner-specific arguments (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
 
     Returns:
         TestResult for further assertions
@@ -2033,18 +2103,13 @@ def run_test(
         no_base_env: bool = False,
         **kwargs,
     ) -> TestResult:
-        # Filter kwargs to only pass runner-specific args that each runner accepts.
-        runner_specific_args = {
-            "baseline": {"command"},
-            "sampling": {"sample_args"},
-            "binary_rewrite": {"rewrite_args", "cleanup_on_success"},
-            "runtime_instrument": {"runtime_args"},
-            "sys_run": {"sysrun_args"},
-            "causal": {"causal_args", "causal_mode"},
-            "python": {"python_version", "profile_args", "annotated", "standalone"},
-        }
-        allowed_args = runner_specific_args.get(runner_type, set())
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k in allowed_args}
+        filtered_kwargs = _filter_kwargs("run_test", runner_type, **kwargs)
+
+        if num_procs > 0 and launcher is None:
+            pytest.fail(
+                f"num_procs={num_procs} was provided but no launcher was set. "
+                f"Pass launcher='<launcher_name>' alongside num_procs."
+            )
 
         if runner_type == "causal" and "causal_mode" not in filtered_kwargs:
             pytest.exit("causal_mode is required for causal tests", returncode=1)
@@ -2169,13 +2234,14 @@ def assert_regex(subtests, record_subtest_failure, request):
     Args:
         result: TestResult from run_test
         mode: Optional runner type (e.g., "binary_rewrite", "sys_run"). If provided, looks up
-              mode-specific regexes from kwargs (e.g., rewrite_pass_regex, sys_run_pass_regex)
+              mode-specific regexes from kwargs (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
         subtest_name: Name shown in subtest output (defaults to "Regex validation")
         pass_regex: Explicit list of pass regex patterns (used if mode is None or no mode-specific found)
         fail_regex: Explicit list of fail regex patterns (used if mode is None or no mode-specific found)
+        use_abort_fail_regex: Whether to validate against ROCPROFSYS_ABORT_FAIL_REGEX (default: True)
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
-        **kwargs: Mode-specific regexes like rewrite_pass_regex, sys_run_fail_regex, etc.
+        **kwargs: Mode-specific regexes (see _FUNCTION_ALLOWED_KWARGS for valid kwargs)
     """
     if _is_assert_disabled(request, "assert_regex"):
         return lambda *args, **kwargs: None
@@ -2191,12 +2257,23 @@ def assert_regex(subtests, record_subtest_failure, request):
         fail_message: Optional[str] = None,
         **kwargs,
     ) -> None:
-        # If mode is provided, look up mode-specific regexes from kwargs
+
+        if mode is None and kwargs:
+            pytest.fail(
+                f"assert_regex received mode-specific kwargs {sorted(kwargs)} but no "
+                f"'mode' was provided. Pass mode=... so they can be resolved, or use "
+                f"pass_regex/fail_regex directly."
+            )
+
         if mode is not None:
-            # Normalize mode name (hyphens to underscores)
+            filtered = _filter_kwargs("assert_regex", mode, **kwargs)
             mode_key = mode.replace("-", "_")
-            pass_regex = kwargs.get(f"{mode_key}_pass_regex") or pass_regex
-            fail_regex = kwargs.get(f"{mode_key}_fail_regex") or fail_regex
+            mode_pass_regex = filtered.get(f"{mode_key}_pass_regex")
+            if mode_pass_regex is not None:
+                pass_regex = mode_pass_regex
+            mode_fail_regex = filtered.get(f"{mode_key}_fail_regex")
+            if mode_fail_regex is not None:
+                fail_regex = mode_fail_regex
 
         with subtests.test(subtest_name):
             validation = validate_regex(
@@ -2255,6 +2332,10 @@ def assert_perfetto(
 ):
     """Fixture that returns an assert_perfetto function.
 
+    Trace validation kwargs (``categories``, ``labels``, ``counts``, ``depths``,
+    ``label_substrings``, etc.) are forwarded to
+    ``validate_perfetto_trace``; see that function's docstring.
+
     Args not from validate_perfetto_trace:
         subtest_name: Name shown in subtest output (defaults to "Perfetto validation")
         perfetto_file: (Optional) Name of the perfetto file in the test output directory (e.g., for merged.proto)
@@ -2276,6 +2357,7 @@ def assert_perfetto(
         depths: Optional[list[int]] = None,
         label_substrings: Optional[list[str]] = None,
         counter_names: Optional[list[str]] = None,
+        check_counter_pairing: bool = False,
         key_names: Optional[list[str]] = None,
         key_counts: Optional[list[int]] = None,
         trace_processor_path: Optional[Path] = None,
@@ -2308,6 +2390,7 @@ def assert_perfetto(
                 depths=depths,
                 label_substrings=label_substrings,
                 counter_names=counter_names,
+                check_counter_pairing=check_counter_pairing,
                 key_names=key_names,
                 key_counts=key_counts,
                 trace_processor_path=trace_processor_path,
@@ -2353,6 +2436,8 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         fail_regex: (Optional) Regex patterns that must NOT be found in validation.stdout
         skip_on_fail: If True, skip instead of fail when validation fails
         fail_message: Custom message for failure (defaults to validation message)
+        gpu_category_to_skip: GPU categories to skip tagged validation queries for
+            (instinct, radeon, apu). Omit or pass empty to run all queries
     """
     if _is_assert_disabled(request, "assert_rocpd"):
         return lambda *args, **kwargs: None
@@ -2366,6 +2451,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
         fail_regex: Optional[list[str]] = None,
         skip_on_fail: bool = False,
         fail_message: Optional[str] = None,
+        gpu_category_to_skip: Optional[list[str]] = None,
     ) -> None:
         with subtests.test(subtest_name):
             if not check_use_rocpd():
@@ -2387,6 +2473,7 @@ def assert_rocpd(subtests, tests_dir, record_subtest_failure, request):
                 tests_dir=tests_dir,
                 rules_files=existing_rules,
                 timeout=timeout,
+                gpu_category_to_skip=gpu_category_to_skip,
             )
             output = f"Command: {validation.command}\n\n{validation.message}"
             if not validation.is_valid:
@@ -2521,6 +2608,56 @@ def assert_file_exists(subtests, record_subtest_failure, request):
                         pytest.fail(msg)
 
     return _assert_file_exists
+
+
+@pytest.fixture
+def assert_unified_memory_output(subtests, tests_dir, record_subtest_failure, request):
+    """Fixture that returns an assert_unified_memory_output function."""
+    if _is_assert_disabled(request, "assert_unified_memory_output"):
+        return lambda *args, **kwargs: None
+
+    def _assert_unified_memory_output(
+        result: TestResult,
+        subtest_name: str = "Unified-memory output validation",
+        timeout: int = 60,
+        pass_regex: Optional[list[str]] = None,
+        fail_regex: Optional[list[str]] = None,
+        skip_on_fail: bool = False,
+        fail_message: Optional[str] = None,
+    ) -> None:
+        with subtests.test(subtest_name):
+            validation = validate_unified_memory_outputs(
+                result.output_dir,
+                tests_dir=tests_dir,
+                timeout=timeout,
+            )
+            output = f"Command: {validation.command}\n\n{validation.message}"
+            if not validation.is_valid:
+                msg = fail_message or f"Unified-memory validation failed:\n{output}"
+                if skip_on_fail:
+                    pytest.skip(msg)
+                else:
+                    record_subtest_failure(subtest_name)
+                    pytest.fail(msg)
+            if pass_regex:
+                for pattern in pass_regex:
+                    if not re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
+                        pytest.fail(
+                            f"Pass regex not found: {pattern}\n{output}",
+                            pytrace=False,
+                        )
+            if fail_regex:
+                for pattern in fail_regex:
+                    if re.search(pattern, validation.stdout):
+                        record_subtest_failure(subtest_name)
+                        pytest.fail(
+                            f"Fail regex found: {pattern}\n{output}",
+                            pytrace=False,
+                        )
+            _print_subtest_output(request, subtest_name, output)
+
+    return _assert_unified_memory_output
 
 
 @pytest.fixture

@@ -268,8 +268,8 @@ inline TranslationResult encode_sop1_rdna3(const Sop1Fields &f, uint16_t dst_op)
   rocjitsu::rdna3::Sop1MachineInst dst{};
   dst.encoding = 0x17D;
   dst.op = dst_op;
-  dst.ssrc0 = f.ssrc0;
-  dst.sdst = f.sdst;
+  dst.ssrc0 = f.ssrc0 & 0xFF;
+  dst.sdst = f.sdst & 0x7F;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -277,9 +277,9 @@ inline TranslationResult encode_sop2_rdna3(const Sop2Fields &f, uint16_t dst_op)
   rocjitsu::rdna3::Sop2MachineInst dst{};
   dst.encoding = 0x2;
   dst.op = dst_op;
-  dst.ssrc0 = f.ssrc0;
-  dst.ssrc1 = f.ssrc1;
-  dst.sdst = f.sdst;
+  dst.ssrc0 = f.ssrc0 & 0xFF;
+  dst.ssrc1 = f.ssrc1 & 0xFF;
+  dst.sdst = f.sdst & 0x7F;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -287,8 +287,8 @@ inline TranslationResult encode_sopc_rdna3(const SopcFields &f, uint16_t dst_op)
   rocjitsu::rdna3::SopcMachineInst dst{};
   dst.encoding = 0x17E;
   dst.op = dst_op;
-  dst.ssrc0 = f.ssrc0;
-  dst.ssrc1 = f.ssrc1;
+  dst.ssrc0 = f.ssrc0 & 0xFF;
+  dst.ssrc1 = f.ssrc1 & 0xFF;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -296,8 +296,8 @@ inline TranslationResult encode_sopk_rdna3(const SopkFields &f, uint16_t dst_op)
   rocjitsu::rdna3::SopkMachineInst dst{};
   dst.encoding = 0xB;
   dst.op = dst_op;
-  dst.simm16 = f.simm16;
-  dst.sdst = f.sdst;
+  dst.simm16 = f.simm16 & 0xFFFF;
+  dst.sdst = f.sdst & 0x7F;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -305,7 +305,7 @@ inline TranslationResult encode_sopp_rdna3(const SoppFields &f, uint16_t dst_op)
   rocjitsu::rdna3::SoppMachineInst dst{};
   dst.encoding = 0x17F;
   dst.op = dst_op;
-  dst.simm16 = f.simm16;
+  dst.simm16 = f.simm16 & 0xFFFF;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -313,8 +313,8 @@ inline TranslationResult encode_vop1_rdna3(const Vop1Fields &f, uint16_t dst_op)
   rocjitsu::rdna3::Vop1MachineInst dst{};
   dst.encoding = 0x3F;
   dst.op = dst_op;
-  dst.src0 = f.src0;
-  dst.vdst = f.vdst;
+  dst.src0 = f.src0 & 0x1FF;
+  dst.vdst = f.vdst & 0xFF;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -322,9 +322,9 @@ inline TranslationResult encode_vop2_rdna3(const Vop2Fields &f, uint16_t dst_op)
   rocjitsu::rdna3::Vop2MachineInst dst{};
   dst.encoding = 0x0;
   dst.op = dst_op;
-  dst.src0 = f.src0;
-  dst.vsrc1 = f.vsrc1;
-  dst.vdst = f.vdst;
+  dst.src0 = f.src0 & 0x1FF;
+  dst.vsrc1 = f.vsrc1 & 0xFF;
+  dst.vdst = f.vdst & 0xFF;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -332,8 +332,8 @@ inline TranslationResult encode_vopc_rdna3(const VopcFields &f, uint16_t dst_op)
   rocjitsu::rdna3::VopcMachineInst dst{};
   dst.encoding = 0x3E;
   dst.op = dst_op;
-  dst.src0 = f.src0;
-  dst.vsrc1 = f.vsrc1;
+  dst.src0 = f.src0 & 0x1FF;
+  dst.vsrc1 = f.vsrc1 & 0xFF;
   return TranslationResult{{std::bit_cast<uint32_t>(dst), 0u, 0u}, uint8_t{1}};
 }
 
@@ -341,13 +341,13 @@ inline TranslationResult encode_ds_rdna3(const DsFields &f, uint16_t dst_op) {
   rocjitsu::rdna3::DsMachineInst dst{};
   dst.encoding = 0x36;
   dst.op = dst_op;
-  dst.offset0 = f.offset0;
-  dst.offset1 = f.offset1;
-  dst.gds = f.gds;
-  dst.addr = f.vaddr;
-  dst.data0 = f.data0;
-  dst.data1 = f.data1;
-  dst.vdst = f.vdst;
+  dst.offset0 = f.offset0 & 0xFF;
+  dst.offset1 = f.offset1 & 0xFF;
+  dst.gds = f.gds & 0x1;
+  dst.addr = f.vaddr & 0xFF;
+  dst.data0 = f.data0 & 0xFF;
+  dst.data1 = f.data1 & 0xFF;
+  dst.vdst = f.vdst & 0xFF;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -359,11 +359,11 @@ inline TranslationResult encode_flat_rdna3(const FlatFields &f, uint16_t dst_op)
   dst.encoding = 0x37;
   dst.op = dst_op;
   dst.offset = f.ioffset & 0x1FFF;
-  dst.seg = f.seg;
-  dst.addr = f.vaddr;
-  dst.data = f.vsrc;
-  dst.saddr = f.saddr;
-  dst.vdst = f.vdst;
+  dst.seg = f.seg & 0x3;
+  dst.addr = f.vaddr & 0xFF;
+  dst.data = f.vsrc & 0xFF;
+  dst.saddr = f.saddr & 0x7F;
+  dst.vdst = f.vdst & 0xFF;
   dst.dlc = 0;
   dst.glc = 0;
   dst.slc = 0;
@@ -381,12 +381,12 @@ inline TranslationResult encode_flat_glbl_rdna3(const FlatGlblFields &f, uint16_
   dst.encoding = 0x37;
   dst.op = dst_op;
   dst.offset = f.ioffset & 0x1FFF;
-  dst.sve = f.sve;
-  dst.seg = f.seg;
-  dst.addr = f.vaddr;
-  dst.data = f.vsrc;
-  dst.saddr = f.saddr;
-  dst.vdst = f.vdst;
+  dst.sve = f.sve & 0x1;
+  dst.seg = f.seg & 0x3;
+  dst.addr = f.vaddr & 0xFF;
+  dst.data = f.vsrc & 0xFF;
+  dst.saddr = f.saddr & 0x7F;
+  dst.vdst = f.vdst & 0xFF;
   dst.dlc = 0;
   dst.glc = 0;
   dst.slc = 0;
@@ -403,12 +403,12 @@ inline TranslationResult encode_flat_scratch_rdna3(const FlatScratchFields &f, u
   dst.encoding = 0x37;
   dst.op = dst_op;
   dst.offset = f.ioffset & 0x1FFF;
-  dst.sve = f.sve;
-  dst.seg = f.seg;
-  dst.addr = f.vaddr;
-  dst.data = f.vsrc;
-  dst.saddr = f.saddr;
-  dst.vdst = f.vdst;
+  dst.sve = f.sve & 0x1;
+  dst.seg = f.seg & 0x3;
+  dst.addr = f.vaddr & 0xFF;
+  dst.data = f.vsrc & 0xFF;
+  dst.saddr = f.saddr & 0x7F;
+  dst.vdst = f.vdst & 0xFF;
   dst.dlc = 0;
   dst.glc = 0;
   dst.slc = 0;
@@ -424,13 +424,13 @@ inline TranslationResult encode_mubuf_rdna3(const MubufFields &f, uint16_t dst_o
   rocjitsu::rdna3::MubufMachineInst dst{};
   dst.encoding = 0x38;
   dst.op = dst_op;
-  dst.offset = f.ioffset;
-  dst.offen = f.offen;
-  dst.idxen = f.idxen;
-  dst.vaddr = f.vaddr;
-  dst.vdata = f.vdata;
-  dst.srsrc = f.rsrc;
-  dst.soffset = f.soffset;
+  dst.offset = f.ioffset & 0xFFF;
+  dst.offen = f.offen & 0x1;
+  dst.idxen = f.idxen & 0x1;
+  dst.vaddr = f.vaddr & 0xFF;
+  dst.vdata = f.vdata & 0xFF;
+  dst.srsrc = f.rsrc & 0x1F;
+  dst.soffset = f.soffset & 0xFF;
   dst.slc = 0;
   dst.dlc = 0;
   dst.glc = 0;
@@ -447,12 +447,12 @@ inline TranslationResult encode_smem_rdna3(const SmemFields &f, uint16_t dst_op)
   rocjitsu::rdna3::SmemMachineInst dst{};
   dst.encoding = 0x3D;
   dst.op = dst_op;
-  dst.sbase = f.sbase;
-  dst.sdata = f.sdata;
-  dst.offset = f.ioffset;
-  dst.soffset = f.soffset;
+  dst.sbase = f.sbase & 0x3F;
+  dst.sdata = f.sdata & 0x7F;
+  dst.glc = f.glc & 0x1;
+  dst.offset = f.ioffset & 0x1FFFFF;
+  dst.soffset = f.soffset & 0x7F;
   dst.dlc = 0;
-  dst.glc = 0;
   if (dst.soffset == 0x7F)
     dst.soffset = 0x7C;
   if (f.soffset_en == 0)
@@ -467,15 +467,15 @@ inline TranslationResult encode_vop3_rdna3(const Vop3Fields &f, uint16_t dst_op)
   rocjitsu::rdna3::Vop3MachineInst dst{};
   dst.encoding = 0x35;
   dst.op = dst_op;
-  dst.vdst = f.vdst;
-  dst.abs = f.abs;
-  dst.op_sel = f.opsel;
-  dst.clamp = f.clamp;
-  dst.src0 = f.src0;
-  dst.src1 = f.src1;
-  dst.src2 = f.src2;
-  dst.omod = f.omod;
-  dst.neg = f.neg;
+  dst.vdst = f.vdst & 0xFF;
+  dst.abs = f.abs & 0x7;
+  dst.op_sel = f.opsel & 0xF;
+  dst.clamp = f.clamp & 0x1;
+  dst.src0 = f.src0 & 0x1FF;
+  dst.src1 = f.src1 & 0x1FF;
+  dst.src2 = f.src2 & 0x1FF;
+  dst.omod = f.omod & 0x3;
+  dst.neg = f.neg & 0x7;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -486,16 +486,16 @@ inline TranslationResult encode_vop3p_rdna3(const Vop3pFields &f, uint16_t dst_o
   rocjitsu::rdna3::Vop3pMachineInst dst{};
   dst.encoding = 0xCC;
   dst.op = dst_op;
-  dst.vdst = f.vdst;
-  dst.neg_hi = f.neg_hi;
-  dst.op_sel = f.opsel;
-  dst.op_sel_hi_2 = f.opsel_hi_2;
-  dst.clamp = f.clamp;
-  dst.src0 = f.src0;
-  dst.src1 = f.src1;
-  dst.src2 = f.src2;
-  dst.op_sel_hi = f.opsel_hi;
-  dst.neg = f.neg;
+  dst.vdst = f.vdst & 0xFF;
+  dst.neg_hi = f.neg_hi & 0x7;
+  dst.op_sel = f.opsel & 0x7;
+  dst.op_sel_hi_2 = f.opsel_hi_2 & 0x1;
+  dst.clamp = f.clamp & 0x1;
+  dst.src0 = f.src0 & 0x1FF;
+  dst.src1 = f.src1 & 0x1FF;
+  dst.src2 = f.src2 & 0x1FF;
+  dst.op_sel_hi = f.opsel_hi & 0x3;
+  dst.neg = f.neg & 0x7;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));
@@ -506,14 +506,14 @@ inline TranslationResult encode_vop3_sdst_enc_rdna3(const Vop3SdstEncFields &f, 
   rocjitsu::rdna3::Vop3SdstEncMachineInst dst{};
   dst.encoding = 0x35;
   dst.op = dst_op;
-  dst.vdst = f.vdst;
-  dst.sdst = f.sdst;
-  dst.clamp = f.clamp;
-  dst.src0 = f.src0;
-  dst.src1 = f.src1;
-  dst.src2 = f.src2;
-  dst.omod = f.omod;
-  dst.neg = f.neg;
+  dst.vdst = f.vdst & 0xFF;
+  dst.sdst = f.sdst & 0x7F;
+  dst.clamp = f.clamp & 0x1;
+  dst.src0 = f.src0 & 0x1FF;
+  dst.src1 = f.src1 & 0x1FF;
+  dst.src2 = f.src2 & 0x1FF;
+  dst.omod = f.omod & 0x3;
+  dst.neg = f.neg & 0x7;
   TranslationResult r{};
   r.word_count = uint8_t{2};
   std::memcpy(r.words, &dst, sizeof(dst));

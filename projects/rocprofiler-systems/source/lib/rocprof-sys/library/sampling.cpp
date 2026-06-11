@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -47,10 +48,8 @@
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
@@ -567,6 +566,19 @@ start_duration_thread()
                 }
                 else if(_finalized)
                 {
+                    if(_premature)
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds was "
+                                 "interrupted by finalization. Shutting down "
+                                 "sampling...",
+                                 config::get_sampling_duration());
+                    }
+                    else
+                    {
+                        LOG_INFO("Sampling duration of {:.6f} seconds has "
+                                 "elapsed. Shutting down sampling...",
+                                 config::get_sampling_duration());
+                    }
                     break;
                 }
                 else
@@ -1926,15 +1938,19 @@ struct sampling_initialization
 void
 postfork_parent_reinit()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_parent_reinit();
+    }
 }
 
 void
 postfork_child_cleanup()
 {
-    if(config::get_use_process_sampling() && config::get_use_amd_smi())
+    if(config::get_use_process_sampling())
+    {
         pmc::postfork_child_cleanup();
+    }
 }
 
 void

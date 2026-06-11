@@ -63,6 +63,7 @@ public:
   /// @brief Backend-defined tag for pipeline routing or dispatch.
   /// @returns Tag value.
   uint8_t tag() const { return tag_; }
+  void set_tag(uint8_t t) { tag_ = t; }
 
 protected:
   uint8_t tag_ = 0;
@@ -236,6 +237,8 @@ public:
         first = false;
       }
       for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i]->size_bits() == 0)
+          continue;
         disassembly_ += (first ? " " : ", ");
         disassembly_ += src_operands_[i]->name();
         first = false;
@@ -248,8 +251,8 @@ public:
 protected:
   /// @brief Size of the instruction's encoding in bytes.
   int size_ = 0;
-  /// @brief Instruction's source operands (max 4).
-  std::array<Operand *, 4> src_operands_{};
+  /// @brief Instruction's source operands (max 6).
+  std::array<Operand *, 6> src_operands_{};
   uint8_t num_src_ = 0;
   /// @brief Instruction's destination operands (max 2).
   std::array<Operand *, 2> dst_operands_{};

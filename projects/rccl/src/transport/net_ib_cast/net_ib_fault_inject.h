@@ -48,6 +48,23 @@ ncclResult_t ncclIbCastFaultClear(void* sendComm);
 /* Return the current fatalErrorCount from the connection's stats. */
 ncclResult_t ncclIbCastFaultGetFatalCount(void* sendComm, int* out);
 
+/* Drive the QP at the given flat index into IBV_QPS_ERR via ibv_modify_qp.
+ * All outstanding and future WRs on this QP will produce WC with
+ * IBV_WC_WR_FLUSH_ERR — the status code accepted by the resiliency
+ * error whitelist.  Unlike ncclIbCastFaultSetQpError, this injects a
+ * real CQE error rather than bypassing ibv_post_send.
+ * qpIdx must be in [0, nqps). */
+ncclResult_t ncclIbCastFaultDriveQpToError(void* sendComm, int qpIdx);
+
+/* Same as above but for receiver-side QPs. In real port failures both
+ * sides see errors simultaneously. */
+ncclResult_t ncclIbCastFaultDriveRecvQpToError(void* recvComm, int qpIdx);
+
+/* Thin wrapper exposing IbCastResiliencyCheckErrorNotFatal for unit tests.
+ * Returns *isFatal = true if the given WC status code would be treated as
+ * unrecoverable (not eligible for failover). */
+ncclResult_t ncclIbCastFaultCheckErrorFatal(void* sendComm, int wcStatus, bool* isFatal);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

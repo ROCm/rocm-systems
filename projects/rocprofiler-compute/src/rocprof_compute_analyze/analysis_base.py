@@ -23,6 +23,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.expression import build_metric_value_string
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -70,46 +71,6 @@ def test_df_column_equality(df: pd.DataFrame) -> bool:
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()
 
 
-def detect_missing_counters(
-    df: pd.DataFrame,
-    workload_dir: Path,
-    join_type: str,
-) -> None:
-    """Detect missing counter values in joined dataframe.
-
-    Args:
-        df: Joined dataframe to check
-        workload_dir: Path to workload directory
-        join_type: Type of join performed ('kernel' or 'grid')
-    """
-    group_labels = ["Kernel_Name"]
-    if join_type == "grid":
-        group_labels.append("Grid_Size")
-
-    # Old workloads have *.txt, new workloads have pmc_perf_*.yaml
-    num_files = len(list(workload_dir.glob("perfmon/*.txt"))) + len(
-        list(workload_dir.glob("perfmon/pmc_perf_*.yaml"))
-    )
-    kernels_with_missing_counters = []
-    for _, groups in df.groupby(group_labels):
-        if groups["Dispatch_ID"].nunique() < num_files:
-            kernel_name = groups.iloc[0]["Kernel_Name"]
-            kernels_with_missing_counters.append(kernel_name)
-
-    if kernels_with_missing_counters:
-        kernels_with_missing_counters = list(set(kernels_with_missing_counters))
-        console_warning(
-            "join_prof",
-            (
-                f"Insufficient number of kernel calls for kernels: "
-                f"{', '.join(kernels_with_missing_counters)} "
-                f"to collect all counters using iteration multiplexing. "
-                f"Please use kernel filtering and exclude the above kernels "
-                f"or turn off iteration multiplexing."
-            ),
-        )
-
-
 class OmniAnalyze_Base:
     def __init__(
         self, args: argparse.Namespace, supported_archs: dict[str, str]
@@ -144,9 +105,9 @@ class OmniAnalyze_Base:
 
     @demarcate
     def iteration_multiplex_impute_counters(
-        self, df: pd.DataFrame, policy: str
+        self, df: pd.DataFrame, policy: str, workload_dir: Path
     ) -> pd.DataFrame:
-        return impute_counters_iteration_multiplex(df, policy)
+        return impute_counters_iteration_multiplex(df, policy, workload_dir)
 
     @demarcate
     def generate_configs(
@@ -190,15 +151,13 @@ class OmniAnalyze_Base:
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
-        profiling_config = self.get_profiling_config()
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
-            parser.build_metric_value_string(
+            build_metric_value_string(
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
-                profiling_config,
             )
         # Error checking for multiple runs and multiple kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
@@ -445,7 +404,6 @@ class OmniAnalyze_Base:
         # Load profiling config from THIS workload directory (not args)
         profiling_config = file_io.load_profiling_config(str(workload_dir))
         format_rocprof = profiling_config.get("format_rocprof_output", "rocpd")
-        iteration_multiplexing = profiling_config.get("iteration_multiplexing", None)
         join_type = profiling_config.get("join_type", "grid")
         kokkos_trace = profiling_config.get("kokkos_trace", False)
 
@@ -459,10 +417,10 @@ class OmniAnalyze_Base:
                 "will be removed in a future release."
             )
 
-            with open(output_file, "w", newline="") as outfile:
+            with open(output_file, "w", newline="", encoding="utf-8") as outfile:
                 writer = None
                 for file in result_files:
-                    with open(file, newline="") as infile:
+                    with open(file, newline="", encoding="utf-8") as infile:
                         reader = csv.reader(infile)
                         header = next(reader)
                         # Write header only once
@@ -474,16 +432,12 @@ class OmniAnalyze_Base:
 
             console_debug(f"Created file: {output_file}")
 
-            if iteration_multiplexing is not None:
-                df = pd.read_csv(output_file)
-                detect_missing_counters(df, workload_dir, join_type)
-
             return None
 
         # Collect files to process - normalize to Path objects
         files: list[Path] = []
 
-        csv_patterns = ["pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
+        csv_patterns = ["results_pmc_perf_*.csv", "SQ_*.csv", "SQC_*.csv"]
         files = [
             file for pattern in csv_patterns for file in workload_dir.glob(pattern)
         ]
@@ -500,6 +454,19 @@ class OmniAnalyze_Base:
             if current_df.empty:
                 console_warning("join_prof", f"Empty dataframe from {file}")
                 continue
+
+            # rocprof writes the accumulator column as SQ_ACCUM_PREV_HIRES
+            # regardless of which *_ACCUM counter was requested. Recover the
+            # requested name from the file stem so downstream YAML formulas
+            # can reference it directly. Done before the merge so per-bucket
+            # values do not collide and get pandas-suffixed.
+            if (
+                file.name.startswith("results_pmc_perf_")
+                and file.stem.endswith("_ACCUM")
+                and "SQ_ACCUM_PREV_HIRES" in current_df.columns
+            ):
+                target = file.stem[len("results_pmc_perf_") :]
+                current_df = current_df.rename(columns={"SQ_ACCUM_PREV_HIRES": target})
 
             if join_type == "kernel":
                 key = current_df.groupby("Kernel_Name").cumcount()
@@ -585,6 +552,7 @@ class OmniAnalyze_Base:
             "Accum_VGPR_",
             "SGPR_",
             "Dispatch_ID_",
+            "Kernel_ID_",
             "Queue_ID",
             "Queue_Index",
             "PID",
@@ -652,11 +620,6 @@ class OmniAnalyze_Base:
         if "key" in df.columns:
             df = df.drop(columns=["key"])
 
-        console_debug("join_prof", "Checking for missing counter values...")
-
-        if iteration_multiplexing is not None:
-            detect_missing_counters(df, workload_dir, join_type)
-
         # save to file
         df.to_csv(output_file, index=False)
         return None
@@ -679,20 +642,18 @@ class OmniAnalyze_Base:
         # Helper to process and join CSV files in a single directory
         def process_and_join_directory(directory: Path) -> None:
             pmc_perf = directory / "pmc_perf.csv"
-            pmc_perf_files = list(directory.glob("pmc_perf_*.csv"))
             results_files = list(directory.glob("results_*.csv"))
 
             if pmc_perf.exists():
                 console_debug(f"Using existing {pmc_perf}")
-            elif pmc_perf_files or results_files:
-                files_desc = "pmc_perf_*.csv" if pmc_perf_files else "results_*.csv"
-                console_log(f"Joining {files_desc} for {directory}...")
+            elif results_files:
+                console_log(f"Joining results_*.csv for {directory}...")
                 self.join_prof(directory, out=str(pmc_perf))
                 console_log(f"Created {pmc_perf}")
             else:
                 console_error(
                     f"No profiling data found in {directory}.\n"
-                    f"Expected: pmc_perf.csv or pmc_perf_*.csv or results_*.csv\n"
+                    f"Expected: pmc_perf.csv or results_*.csv\n"
                     f"Please run 'rocprof-compute profile' first."
                 )
 
@@ -720,7 +681,7 @@ class OmniAnalyze_Base:
         if args.output_format == "txt":
             output_filename = args.output_name or f"rocprof_compute_{get_uuid()}"
             output_filename += ".txt"
-            self._output = open(output_filename, "w+")
+            self._output = open(output_filename, "w+", encoding="utf-8")
             console_warning("analysis", f"Created file: {output_filename}")
         elif args.output_format == "stdout":
             self._output = sys.stdout
@@ -749,7 +710,7 @@ class OmniAnalyze_Base:
                 setattr(self._runs[path_info[0]], attr_name, filter_value)
 
         if not self.pc_sampling_only():
-            # Join pmc_perf_*.csv or results_*.csv files if needed
+            # Join results_*.csv source files into pmc_perf.csv if needed
             for path_info in args.path:
                 workload_dir = Path(path_info[0])
                 self.join_workload_csvs(workload_dir)
