@@ -541,22 +541,37 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
 
   active->trace_inst_count_++;
 
+  // Decoded-instruction cache lookup (see decode_cache_). On a hit the cache
+  // owns the Instruction (owns_inst stays false); on a miss we decode and own
+  // it until it is either cached (non-memory) or freed/routed.
+  const uint64_t issue_pc = active->pc;
+  const uint64_t decode_idx =
+      ((issue_pc >> 2) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL)) &
+      (kInstFetchCacheLines - 1);
+  DecodeCacheLine &dline = decode_cache_[decode_idx];
+
   Instruction *inst = nullptr;
-  try {
-    inst = decoder_->decode(words);
-  } catch (const util::InvalidInst &e) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec, " what=", e.what());
-    active->halt();
-    return;
-  }
-  if (!inst) {
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec);
-    active->halt();
-    return;
+  bool owns_inst = false;
+  if (dline.inst && dline.pc == issue_pc && dline.vmid == vmid) {
+    inst = dline.inst.get();
+  } else {
+    try {
+      inst = decoder_->decode(words);
+    } catch (const util::InvalidInst &e) {
+      util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(InvalidInst) pc=0x",
+                       std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x",
+                       words[2], ",0x", words[3], "]", std::dec, " what=", e.what());
+      active->halt();
+      return;
+    }
+    if (!inst) {
+      util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(null decode) pc=0x",
+                       std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x",
+                       words[2], ",0x", words[3], "]", std::dec);
+      active->halt();
+      return;
+    }
+    owns_inst = true;
   }
 
   int inst_size_signed = inst->size();
@@ -601,7 +616,8 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
                         (static_cast<uint64_t>(read_sgpr(sb + ssrc0_idx + 1)) << 32);
       if (target == 0) {
         active->halt();
-        delete inst;
+        if (owns_inst)
+          delete inst;
         return;
       }
     }
@@ -628,13 +644,21 @@ void ComputeUnitCore::issue_instruction(Wavefront *active) {
   }
 
   if (inst->is_memory_op()) {
+    // Memory ops carry per-execution state and are owned by the memory pipeline
+    // after issue; never cached. (owns_inst is always true here.)
     if (inst->data() && inst->data()->tag() == GLOBAL_MEM) {
       auto *d = inst->data_as<VectorMemState>();
       d->issue_pc = active->pc;
     }
     route_memory_inst(inst, *active);
-  } else
-    delete inst;
+  } else if (owns_inst) {
+    // Freshly decoded, immutable, no per-exec state: cache it for reuse instead
+    // of freeing. Evicts any prior occupant of this line.
+    dline.pc = issue_pc;
+    dline.vmid = vmid;
+    dline.inst.reset(inst);
+  }
+  // else: cache hit on a non-memory instruction — the cache still owns it.
 
   active->pc += inst_size;
 }
@@ -658,6 +682,8 @@ void ComputeUnitCore::fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32
 void ComputeUnitCore::invalidate_inst_fetch_cache() {
   for (auto &line : inst_fetch_cache_)
     line.valid = false;
+  for (auto &line : decode_cache_)
+    line.inst.reset();
 }
 
 bool ComputeUnitCore::step() {

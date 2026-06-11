@@ -552,6 +552,22 @@ protected:
   static constexpr size_t kInstFetchCacheLines = 1024;
   std::array<InstFetchCacheLine, kInstFetchCacheLines> inst_fetch_cache_{};
 
+  // Per-CU decoded-instruction cache. decoder_->decode() heap-allocates an
+  // Instruction per call, and a hot loop re-decodes the same static instruction
+  // every iteration. Caching the decoded form (keyed by PC) lets repeated
+  // executions skip the decode + alloc/free entirely. Only non-memory, non-
+  // control-flow instructions are cached: they carry no per-execution state and
+  // are immutable during execute(). Memory ops (per-exec DynamicInstState owned
+  // by the memory pipeline) and the s_setpc/s_swappc early-return path are never
+  // cached. Per-CU and accessed single-threaded (one thread runs a CU per
+  // fork-join), so no synchronization is needed.
+  struct DecodeCacheLine {
+    uint64_t pc = 0;
+    uint32_t vmid = 0;
+    std::unique_ptr<Instruction> inst; // non-memory decoded instruction, or null
+  };
+  std::array<DecodeCacheLine, kInstFetchCacheLines> decode_cache_{};
+
   /// Reverse lookup: physical SGPR index -> owning wavefront (for race detection).
   /// Populated at dispatch_wf time. Null entries mean "not allocated".
   std::vector<Wavefront *> sgpr_to_wave_;
