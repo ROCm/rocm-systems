@@ -1074,23 +1074,20 @@ class TestExecutor:
         if not os.path.isfile(req):
             return venv_py, f"requirements file not found: {req}"
 
-        def _run(cmd, label):
-            print(f"  [setup_venv] {label}: {cmd}")
-            r = subprocess.run(cmd, shell=True, cwd=test_dir, capture_output=True, text=True)
+        def _run(argv, label):
+            print(f"  [setup_venv] {label}: {' '.join(argv)}")
+            r = subprocess.run(argv, cwd=test_dir, capture_output=True, text=True)
             if r.returncode != 0:
                 return f"{label} failed (rc={r.returncode}): {(r.stderr or r.stdout).strip()[:500]}"
             return ""
 
         if not os.path.isfile(venv_py):
-            err = _run(f"{shlex.quote(base_python)} -m venv {shlex.quote(venv_dir)}", "create venv")
+            err = _run([base_python, "-m", "venv", venv_dir], "create venv")
             if err:
                 return venv_py, err
 
         # Install ONLY the requirements file, into the venv (no extra packages).
-        err = _run(
-            f"{shlex.quote(venv_py)} -m pip install -r {shlex.quote(req)}",
-            "install requirements",
-        )
+        err = _run([venv_py, "-m", "pip", "install", "-r", req], "install requirements")
         return venv_py, err
 
     def _run_pytest_test(self, test_config, merged_env):
@@ -1143,20 +1140,25 @@ class TestExecutor:
                 venv_py = os.path.join(test_dir, "venv", "bin", "python")
                 python_bin = venv_py if os.path.isfile(venv_py) else "python3"
 
-        # test_filter -> pytest selection (raw args if leading '-', else -k expr).
+        # test_filter -> pytest selection args (raw args if leading '-', else -k expr).
         test_filter = test_config.get("test_filter", "*")
-        select_args = ""
+        select_args = []
         if test_filter and test_filter not in ("*", "ALL"):
             if test_filter.lstrip().startswith("-"):
-                select_args = test_filter
+                select_args = shlex.split(test_filter)
             else:
-                select_args = f"-k {shlex.quote(test_filter)}"
+                select_args = ["-k", test_filter]
 
-        # Env: build_dir first on LD_LIBRARY_PATH, RCCL_BUILD default, + config env.
+        # Env: build_dir first on LD_LIBRARY_PATH, then a per-test LD_LIBRARY_PATH
+        # from the JSON env (mirrors the gtest/MPI path), then rocm/mpi libs.
+        # RCCL_BUILD defaults to build_dir; remaining config env is applied as-is.
         env = os.environ.copy()
         rocm_path = self.paths.get("rocm_path", "/opt/rocm")
         mpi_path = self.paths.get("mpi_path", "")
+        test_ld = merged_env.get("LD_LIBRARY_PATH")
         ld_parts = [self.build_dir]
+        if test_ld:
+            ld_parts.append(str(test_ld))
         if env.get("LD_LIBRARY_PATH"):
             ld_parts.append(env["LD_LIBRARY_PATH"])
         ld_parts.append(os.path.join(rocm_path, "lib"))
@@ -1174,10 +1176,10 @@ class TestExecutor:
         # the only structured record of the pytest run), one file per test.
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", test_name or "pytest")
         junit_path = os.path.join(self.log_dir, f"pytest_{safe_name}.xml")
-        cmd = (
-            f"{shlex.quote(python_bin)} -m pytest -v -p no:cacheprovider "
-            f"--junitxml={shlex.quote(junit_path)} {select_args}"
-        ).strip()
+        cmd = [
+            python_bin, "-m", "pytest", "-v", "-p", "no:cacheprovider",
+            f"--junitxml={junit_path}",
+        ] + select_args
 
         if self.args.verbose:
             print(f"  Description: {test_config.get('description', '')}")
@@ -1185,13 +1187,12 @@ class TestExecutor:
             print(f"  Dir:     {test_dir}")
             print(f"  Filter:  {test_filter}")
             print(f"  Timeout: {timeout if timeout > 0 else 'unlimited'}")
-            print(f"\n  Command: {cmd}")
+            print(f"\n  Command: {' '.join(cmd)}")
             print(f"  Working directory: {test_dir}")
             print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}\n")
 
         start_time = time.time()
         run_kwargs = {
-            "shell": True,
             "cwd": test_dir,
             "env": env,
             "capture_output": False,
