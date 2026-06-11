@@ -45,13 +45,16 @@ cmake_minimum_required ( VERSION 3.7 )
 # Import target 'clang'
 find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
-# Determine the target devices if not specified
+# Determine the target devices if not specified.
+# Use generic targets for gfx9+ to reduce code object count while maintaining
+# compatibility across all GPUs within each architecture generation.
+# Legacy gfx7xx and gfx8xx require specific targets (no generic available).
+# Generic targets require COV 6.
 if (NOT DEFINED TARGET_DEVICES)
   set (TARGET_DEVICES "gfx700;gfx701;gfx702;gfx801;gfx802;gfx803;gfx805;gfx810"
-                      "gfx900;gfx902;gfx904;gfx906;gfx908;gfx909;gfx90a;gfx90c;gfx942;gfx950"
-                      "gfx1010;gfx1011;gfx1012;gfx1013;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
-                      "gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153"
-                      "gfx1200;gfx1201")
+                      "gfx9-generic;gfx9-4-generic"
+                      "gfx10-1-generic;gfx10-3-generic"
+                      "gfx11-generic;gfx12-generic")
 endif()
 set( TARGET_DEVICES ${TARGET_DEVICES} CACHE STRING "Build targets" FORCE )
 
@@ -71,9 +74,10 @@ function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE)
   if(WIN32)
     set (WIN_CL_COMPILE_OPTION "-fshort-wchar")
   endif()
+  # Use COV 6 for generic target support
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
     "-O2 -x cl -Xclang -finclude-default-header -cl-denorms-are-zero -cl-std=CL2.0
-    -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} -mcode-object-version=4 ${WIN_CL_COMPILE_OPTION}
+    -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} -mcode-object-version=6 ${WIN_CL_COMPILE_OPTION}
     -o ${OUTPUT_FILE} ${INPUT_FILE}")
 
   ## Add custom command to produce a code object file.

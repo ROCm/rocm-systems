@@ -64,6 +64,7 @@ extern uint8_t blit_object_gfx7xx[14608];
 extern uint8_t blit_object_gfx8xx[15424];
 extern uint8_t blit_object_gfx9xx[15432];
 
+// Legacy targets (gfx7xx, gfx8xx) - no generic targets available
 extern uint8_t ocl_blit_object_gfx700[];
 extern uint8_t ocl_blit_object_gfx701[];
 extern uint8_t ocl_blit_object_gfx702[];
@@ -72,37 +73,14 @@ extern uint8_t ocl_blit_object_gfx802[];
 extern uint8_t ocl_blit_object_gfx803[];
 extern uint8_t ocl_blit_object_gfx805[];
 extern uint8_t ocl_blit_object_gfx810[];
-extern uint8_t ocl_blit_object_gfx900[];
-extern uint8_t ocl_blit_object_gfx902[];
-extern uint8_t ocl_blit_object_gfx904[];
-extern uint8_t ocl_blit_object_gfx906[];
-extern uint8_t ocl_blit_object_gfx908[];
-extern uint8_t ocl_blit_object_gfx909[];
-extern uint8_t ocl_blit_object_gfx90a[];
-extern uint8_t ocl_blit_object_gfx90c[];
-extern uint8_t ocl_blit_object_gfx942[];
-extern uint8_t ocl_blit_object_gfx950[];
-extern uint8_t ocl_blit_object_gfx1010[];
-extern uint8_t ocl_blit_object_gfx1011[];
-extern uint8_t ocl_blit_object_gfx1012[];
-extern uint8_t ocl_blit_object_gfx1013[];
-extern uint8_t ocl_blit_object_gfx1030[];
-extern uint8_t ocl_blit_object_gfx1031[];
-extern uint8_t ocl_blit_object_gfx1032[];
-extern uint8_t ocl_blit_object_gfx1033[];
-extern uint8_t ocl_blit_object_gfx1034[];
-extern uint8_t ocl_blit_object_gfx1035[];
-extern uint8_t ocl_blit_object_gfx1036[];
-extern uint8_t ocl_blit_object_gfx1100[];
-extern uint8_t ocl_blit_object_gfx1101[];
-extern uint8_t ocl_blit_object_gfx1102[];
-extern uint8_t ocl_blit_object_gfx1103[];
-extern uint8_t ocl_blit_object_gfx1150[];
-extern uint8_t ocl_blit_object_gfx1151[];
-extern uint8_t ocl_blit_object_gfx1152[];
-extern uint8_t ocl_blit_object_gfx1153[];
-extern uint8_t ocl_blit_object_gfx1200[];
-extern uint8_t ocl_blit_object_gfx1201[];
+
+// Generic targets (COV 6+) for architecture-wide compatibility
+extern uint8_t ocl_blit_object_gfx9_generic[];
+extern uint8_t ocl_blit_object_gfx9_4_generic[];
+extern uint8_t ocl_blit_object_gfx10_1_generic[];
+extern uint8_t ocl_blit_object_gfx10_3_generic[];
+extern uint8_t ocl_blit_object_gfx11_generic[];
+extern uint8_t ocl_blit_object_gfx12_generic[];
 
 // Arguments inserted by OCL compiler, all zero here.
 struct OCLHiddenArgs {
@@ -986,6 +964,7 @@ hsa_status_t BlitKernel::GetPatchedBlitObject(const char* agent_name,
                                               uint8_t** blit_code_object) {
   std::string sname(agent_name);
 
+  // Legacy targets (gfx7xx, gfx8xx) - specific code objects required
   if (sname == "gfx700") {
     *blit_code_object = ocl_blit_object_gfx700;
   } else if (sname == "gfx701") {
@@ -1002,68 +981,36 @@ hsa_status_t BlitKernel::GetPatchedBlitObject(const char* agent_name,
     *blit_code_object = ocl_blit_object_gfx805;
   } else if (sname == "gfx810") {
     *blit_code_object = ocl_blit_object_gfx810;
-  } else if (sname == "gfx900") {
-    *blit_code_object = ocl_blit_object_gfx900;
-  } else if (sname == "gfx902") {
-    *blit_code_object = ocl_blit_object_gfx902;
-  } else if (sname == "gfx904") {
-    *blit_code_object = ocl_blit_object_gfx904;
-  } else if (sname == "gfx906") {
-    *blit_code_object = ocl_blit_object_gfx906;
-  } else if (sname == "gfx908") {
-    *blit_code_object = ocl_blit_object_gfx908;
-  } else if (sname == "gfx909") {
-    *blit_code_object = ocl_blit_object_gfx909;
-  } else if (sname == "gfx90a") {
-    *blit_code_object = ocl_blit_object_gfx90a;
-  } else if (sname == "gfx90c") {
-    *blit_code_object = ocl_blit_object_gfx90c;
-  } else if (sname == "gfx942") {
-    *blit_code_object = ocl_blit_object_gfx942;
-  } else if (sname == "gfx950") {
-    *blit_code_object = ocl_blit_object_gfx950;
-  } else if (sname == "gfx1010") {
-    *blit_code_object = ocl_blit_object_gfx1010;
-  } else if (sname == "gfx1011") {
-    *blit_code_object = ocl_blit_object_gfx1011;
-  } else if (sname == "gfx1012") {
-    *blit_code_object = ocl_blit_object_gfx1012;
-  } else if (sname == "gfx1013") {
-    *blit_code_object = ocl_blit_object_gfx1013;
-  } else if (sname == "gfx1030") {
-    *blit_code_object = ocl_blit_object_gfx1030;
-  } else if (sname == "gfx1031") {
-    *blit_code_object = ocl_blit_object_gfx1031;
-  } else if (sname == "gfx1032") {
-    *blit_code_object = ocl_blit_object_gfx1032;
-  } else if (sname == "gfx1033") {
-    *blit_code_object = ocl_blit_object_gfx1033;
-  } else if (sname == "gfx1034") {
-    *blit_code_object = ocl_blit_object_gfx1034;
-  } else if (sname == "gfx1035") {
-    *blit_code_object = ocl_blit_object_gfx1035;
-  } else if (sname == "gfx1036") {
-    *blit_code_object = ocl_blit_object_gfx1036;
-  } else if (sname == "gfx1100") {
-    *blit_code_object = ocl_blit_object_gfx1100;
-  } else if (sname == "gfx1101") {
-    *blit_code_object = ocl_blit_object_gfx1101;
-  } else if (sname == "gfx1102") {
-    *blit_code_object = ocl_blit_object_gfx1102;
-  } else if (sname == "gfx1103") {
-    *blit_code_object = ocl_blit_object_gfx1103;
-  } else if (sname == "gfx1150") {
-    *blit_code_object = ocl_blit_object_gfx1150;
-  } else if (sname == "gfx1151") {
-    *blit_code_object = ocl_blit_object_gfx1151;
-  } else if (sname == "gfx1152") {
-    *blit_code_object = ocl_blit_object_gfx1152;
-  } else if (sname == "gfx1153") {
-    *blit_code_object = ocl_blit_object_gfx1153;
-  } else if (sname == "gfx1200") {
-    *blit_code_object = ocl_blit_object_gfx1200;
-  } else if (sname == "gfx1201") {
-    *blit_code_object = ocl_blit_object_gfx1201;
+  }
+  // GFX9 generic targets - covers gfx900, gfx902, gfx904, gfx906, gfx908, gfx909, gfx90a, gfx90c
+  // Note: gfx908 and gfx90a don't have official generic mappings in the ISA registry
+  // (due to special SRAM ECC handling), but for blit operations (simple memory copy/fill)
+  // the gfx9-generic code is compatible.
+  else if (sname == "gfx900" || sname == "gfx902" || sname == "gfx904" || sname == "gfx906" ||
+           sname == "gfx908" || sname == "gfx909" || sname == "gfx90a" || sname == "gfx90c") {
+    *blit_code_object = ocl_blit_object_gfx9_generic;
+  }
+  // GFX9-4 generic targets - covers gfx942, gfx950
+  else if (sname == "gfx942" || sname == "gfx950") {
+    *blit_code_object = ocl_blit_object_gfx9_4_generic;
+  }
+  // GFX10-1 generic targets - covers gfx1010, gfx1011, gfx1012, gfx1013
+  else if (sname == "gfx1010" || sname == "gfx1011" || sname == "gfx1012" || sname == "gfx1013") {
+    *blit_code_object = ocl_blit_object_gfx10_1_generic;
+  }
+  // GFX10-3 generic targets - covers gfx1030, gfx1031, gfx1032, gfx1033, gfx1034, gfx1035, gfx1036
+  else if (sname == "gfx1030" || sname == "gfx1031" || sname == "gfx1032" || sname == "gfx1033" ||
+           sname == "gfx1034" || sname == "gfx1035" || sname == "gfx1036") {
+    *blit_code_object = ocl_blit_object_gfx10_3_generic;
+  }
+  // GFX11 generic targets - covers all gfx11xx variants
+  else if (sname == "gfx1100" || sname == "gfx1101" || sname == "gfx1102" || sname == "gfx1103" ||
+           sname == "gfx1150" || sname == "gfx1151" || sname == "gfx1152" || sname == "gfx1153") {
+    *blit_code_object = ocl_blit_object_gfx11_generic;
+  }
+  // GFX12 generic targets - covers all gfx12xx variants including gfx1250
+  else if (sname == "gfx1200" || sname == "gfx1201" || sname == "gfx1250") {
+    *blit_code_object = ocl_blit_object_gfx12_generic;
   } else {
     return HSA_STATUS_ERROR_INVALID_ISA_NAME;
   }
