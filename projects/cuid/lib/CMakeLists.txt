@@ -150,6 +150,26 @@ install(
     COMPONENT ${LIB_COMPONENT}
 )
 
+if(UNIX AND NOT APPLE)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/amdcuid_setup_hmac.sh.in
+        ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_setup_hmac.sh
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/postinst.in
+        ${CMAKE_CURRENT_BINARY_DIR}/postinst
+        @ONLY
+    )
+    install(
+        PROGRAMS
+            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_setup_hmac.sh
+            ${CMAKE_CURRENT_BINARY_DIR}/postinst
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
+        COMPONENT ${LIB_COMPONENT}
+    )
+endif()
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                  Finished Cmake amdcuid library                   ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

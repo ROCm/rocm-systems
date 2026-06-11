@@ -28,7 +28,6 @@
 CONFIG_DIR="@AMDCUID_SHARED_CONFIG_DIR@"
 VERSIONED_CONFIG_FILE="@CMAKE_INSTALL_PREFIX@/@CONFIG_INSTALL_DIR@/amdcuid_daemon.conf"
 CONFIG_FILE="$CONFIG_DIR/amdcuid_daemon.conf"
-HMAC_KEY_FILE="$CONFIG_DIR/hmac_key.bin"
 TOOL_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_tool"
 UDEV_RULES_FILE="/etc/udev/rules.d/90-amdcuid.rules"
 SERVICE_NAME="amdcuid_daemon"
@@ -54,22 +53,12 @@ if [ ! -f "$CONFIG_FILE" ]; then
     fi
 fi
 
-# Generate the HMAC key only if one does not already exist, so reinstalls and
-# upgrades preserve the existing key (and therefore existing CUID files remain
-# valid).
-if [ ! -f "$HMAC_KEY_FILE" ]; then
-    echo "Generating HMAC key at $HMAC_KEY_FILE..."
-    # openssl is already a hard dependency (libssl); use it to produce 32 bytes
-    # of cryptographically-random key material and immediately restrict access.
-    if ! openssl rand -out "$HMAC_KEY_FILE" 32; then
-        echo "POST-INSTALL ERROR: Failed to generate HMAC key with openssl." >&2
-        rm -f "$HMAC_KEY_FILE"
-        exit 1
-    fi
-    chmod 600 "$HMAC_KEY_FILE"
-    chown root:root "$HMAC_KEY_FILE"
+SETUP_HMAC="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_setup_hmac.sh"
+if [ -x "$SETUP_HMAC" ]; then
+    "$SETUP_HMAC"
 else
-    echo "HMAC key already exists at $HMAC_KEY_FILE; leaving it unchanged."
+    echo "POST-INSTALL ERROR: HMAC setup script not found at $SETUP_HMAC." >&2
+    exit 1
 fi
 
 # Remove any existing service or udev rules in case we're upgrading from a
