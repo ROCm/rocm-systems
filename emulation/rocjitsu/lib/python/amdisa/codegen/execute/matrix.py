@@ -287,19 +287,39 @@ def gen_mfma(
                 )
                 return '\n'.join(L)
         else:
-            L.append(f'  amdgpu::exec_i32_i8(cu, {M}, {N}, {K}, {B}, dst,')
-            L.append(
-                f'                     amdgpu::src_base(vb, {s0}.encoding_value_),'
-            )
-            L.append(
-                f'                     amdgpu::src_base(vb, {s1}.encoding_value_),'
-            )
+            has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+            if input_type == 'IU4':
+                L.append(
+                    f'  amdgpu::exec_i32_mixed(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,'
+                )
+                L.append(
+                    f'                        amdgpu::src_base(vb, {s0}.encoding_value_),'
+                )
+                L.append(
+                    f'                        amdgpu::src_base(vb, {s1}.encoding_value_),'
+                )
+                L.append(
+                    f'                        s2, amdgpu::extract_u4, amdgpu::extract_u4, const_acc);'
+                )
+            else:
+                L.append(f'  amdgpu::exec_i32_i8(cu, {M}, {N}, {K}, {B}, dst,')
+                L.append(
+                    f'                     amdgpu::src_base(vb, {s0}.encoding_value_),'
+                )
+                L.append(
+                    f'                     amdgpu::src_base(vb, {s1}.encoding_value_),'
+                )
+                if has_blgp:
+                    L.append(f'                     s2, const_acc,')
+                    L.append(
+                        f'                     inst_.cbsz, inst_.abid, inst_.blgp);'
+                    )
+                else:
+                    L.append(f'                     s2, const_acc);')
         if arch == 'gfx1250':
             L.append(
                 f'                     s2, extract_a, extract_b, inst_.clamp, const_acc);'
             )
-        else:
-            L.append(f'                     s2, const_acc);')
     else:
         # F32, F16, and BF16 matrix results accumulate in f32. gfx1250 WMMA
         # uses a wave32 layout; CDNA MFMA uses the GFX9 MFMA layout helpers.
@@ -388,6 +408,16 @@ def gen_mfma(
             L.append('  }')
             L.append('  if (!dispatched)')
             L.append('    throw util::UnimplementedInst(mnemonic());')
+        elif result_type in ('F16', 'BF16') and arch in (
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+        ):
+            exec_fn = 'exec_f16_gfx9' if result_type == 'F16' else 'exec_bf16_gfx9'
+            L.append(f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
+            L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
+            L.append(f'                 amdgpu::src_base(vb, {s1}.encoding_value_),')
+            L.append(f'                 s2, {ea}, {eb}, const_acc);')
         else:
             has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             L.append(f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
