@@ -23,45 +23,6 @@ inline constexpr unsigned char UTF8_CONTINUATION_BITS = 0x80;
 inline constexpr std::size_t MIN_RUN_FOR_RANGE_COMPRESSION = 3;
 }  // namespace
 
-std::vector<std::string>
-wrap_to_width(std::string_view content, std::size_t width)
-{
-    std::vector<std::string> out;
-    if(content.empty())
-    {
-        out.emplace_back();
-        return out;
-    }
-    if(width == 0) width = 1;
-    while(!content.empty())
-    {
-        if(content.size() <= width)
-        {
-            out.emplace_back(content);
-            break;
-        }
-        std::size_t cut = width;
-        // UTF-8 backoff: never split inside a multi-byte code point.
-        while(cut > 0 && (static_cast<unsigned char>(content[cut]) &
-                          UTF8_CONTINUATION_MASK) == UTF8_CONTINUATION_BITS)
-            --cut;
-        // ws==0 would yield an empty leading chunk and never advance;
-        // treat as "no break" and fall through to byte chunking.
-        const auto ws             = content.rfind(' ', cut);
-        bool       broke_on_space = false;
-        if(ws != std::string_view::npos && ws > 0)
-        {
-            cut            = ws;
-            broke_on_space = true;
-        }
-        if(cut == 0) cut = 1;  // pathological: force progress
-        out.emplace_back(content.substr(0, cut));
-        const std::size_t next_start = cut + (broke_on_space ? 1 : 0);
-        content.remove_prefix(std::min(next_start, content.size()));
-    }
-    return out;
-}
-
 std::size_t
 display_width(std::string_view text)
 {
@@ -195,7 +156,7 @@ strip_terminal_control_chars(std::string_view s)
             continue;
         }
         // Drop other C0 controls + DEL; keep tab (0x09) and newline (0x0A)
-        // so wrap_to_width still sees structure.
+        // so downstream layout still sees structure.
         if((byte < 0x20 && byte != 0x09 && byte != 0x0A) || byte == 0x7F)
         {
             ++i;

@@ -23,7 +23,6 @@ add_library(
     summarize_command_tests.cpp
     summary_renderer_pipeline_tests.cpp
     summary_renderer_tests.cpp
-    wrap_to_width_tests.cpp
 )
 
 target_link_libraries(
