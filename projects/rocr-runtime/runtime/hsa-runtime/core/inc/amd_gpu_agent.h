@@ -961,6 +961,7 @@ class GpuAgent : public GpuAgentInt {
   static_assert(offsetof(pcs_tma2_t, host_trap_buffers) == 0x00, "host_trap_buffers offset mismatch");
   static_assert(offsetof(pcs_tma2_t, stochastic_trap_buffers) == 0x08, "stochastic_trap_buffers offset mismatch");
   static_assert(offsetof(pcs_tma2_t, per_xcc_size) == 0x10, "per_xcc_size offset mismatch");
+  static_assert(sizeof(pcs_tma2_t) == 0x20, "pcs_tma2_t must be 32 bytes for trap handler compatibility");
 
   // Per-XCC sampling data - cache-line aligned (64 bytes) to prevent false sharing.
   // Each XCC accesses only its own struct, avoiding cross-XCC cache line contention.

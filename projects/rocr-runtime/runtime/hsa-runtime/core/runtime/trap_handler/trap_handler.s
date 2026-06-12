@@ -305,9 +305,9 @@ trap_entry:
   s_waitcnt                             lgkmcnt(0)
 
   // Check if host_trap_buffers is NULL (not configured for hosttrap).
-  // If NULL, check for stochastic trap (NOT infinite loop to .not_s_trap).
+  // If NULL, exit cleanly - hosttrap and stochastic are mutually exclusive.
   s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .check_stochastic_gfx94
+  s_cbranch_scc1                        .exit_trap
 
   // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
   s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
@@ -323,9 +323,9 @@ trap_entry:
   s_waitcnt                             lgkmcnt(0)
 
   // Check if host_trap_buffers is NULL (not configured for hosttrap).
-  // If NULL, fall through to .not_s_trap (no stochastic on gfx9 < 9.4).
+  // If NULL, exit cleanly - nothing to do (no stochastic on GFX9.0-9.3).
   s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .not_s_trap
+  s_cbranch_scc1                        .exit_trap
 
   s_mov_b64                             ttmp[14:15], ttmp[2:3]          // ttmp14:15 = host_trap_buffers
   s_branch                              .profile_trap_handlers_gfx9
@@ -372,9 +372,9 @@ trap_entry:
   s_waitcnt                             lgkmcnt(0)
 
   // Check if stochastic_trap_buffers is NULL (not configured for stochastic).
-  // If NULL, handle as regular trap/exception (NOT infinite loop to .not_s_trap).
+  // If NULL, exit cleanly - nothing to do for this trap.
   s_cmp_eq_u64                          ttmp[2:3], 0
-  s_cbranch_scc1                        .no_skip_debugtrap
+  s_cbranch_scc1                        .exit_trap
 
   // Calculate offset directly into ttmp14:15 (TMA2 pointer no longer needed after loads complete)
   s_mul_i32                             ttmp14, ttmp4, ttmp5            // ttmp14 = lo32(offset)
