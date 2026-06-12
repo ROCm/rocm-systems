@@ -55,6 +55,12 @@ TEST_TO_IGNORE = {
     },
     "gfx94X-dcgpu": {
         "linux": [
+            # TODO: Re-enable once managed-memory prefetch behavior is stable.
+            "Unit_hipMemPrefetchAsync_v2_Device_Host",
+            "Unit_hipMemPrefetchAsync_Basic_AllDevices",
+            "Unit_hipMemPrefetchBatchAsync_SingleOperationSingleLocation",
+            # TODO: Re-enable once IPC event API is stable on gfx94X-dcgpu.
+            "Unit_hipGetProcAddress_IPC_Event",
             # TODO(#4244): Flaky with compiler submodule update - subprocess aborted.
             "Unit_NonHost_Printf_loop",
             "Unit_NonHost_Printf_multiple_Threads",
