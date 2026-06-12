@@ -11,10 +11,13 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
-                               "ThreadSanitizer")
+                               "ThreadSanitizer" "LeakSanitizer")
 
-# Unconditionally disabled: test has known data race in tool
-set(IS_DISABLED ON)
+if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
+    set(IS_DISABLED ON)
+else()
+    set(IS_DISABLED OFF)
+endif()
 
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
@@ -22,9 +25,11 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
+set(attachment-env
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
 
-# Test that launches the app and reattaches to it twice (CSV format)
+# Test that launches the app and reattaches to it twice
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-attachment-attach-twice
     COMMAND
@@ -32,53 +37,25 @@ rocprofiler_add_integration_execute_test(
         $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
         ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
     DEPENDS rocprofiler-sdk::rocprofv3
-    TIMEOUT 120
-    LABELS "integration-tests;attachment"
-    PRELOAD "${PRELOAD_ENV}"
+    TIMEOUT 90
+    LABELS "attachment"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    ENVIRONMENT "${attachment-env}"
     FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     SKIP_REGULAR_EXPRESSION "This test is skipped."
-    FIXTURES_SETUP rocprofv3-test-attachment-attach-twice
-    DISABLED "${IS_DISABLED}")
+    FIXTURES_SETUP rocprofv3-test-attachment-attach-twice)
 
-# Validate the output from the reattached profiling (CSV)
+# Validate the output from the reattached profiling
 rocprofiler_add_integration_validate_test(
-    rocprofv3-test-attachment-attach-twice-csv
+    rocprofv3-test-attachment-attach-twice
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_kernel_trace.csv
-         --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_hsa_api_trace.csv
-         --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_memory_copy_trace.csv
-         --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_agent_info.csv
-         --skip-if
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped
     TIMEOUT 30
-    LABELS "integration-tests;attachment"
+    LABELS "attachment"
+    DISABLED ${IS_DISABLED}
     SKIP_REGULAR_EXPRESSION "SKIPPED"
     FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
-    DISABLED "${IS_DISABLED}")
-
-rocprofiler_add_integration_validate_test(
-    rocprofv3-test-attachment-attach-twice-json
-    TEST_PATHS validate.py
-    COPY conftest.py
-    CONFIG pytest.ini
-    ARGS --kernel-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --hsa-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --memory-copy-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --agent-input
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
-         --skip-if
-         ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped
-    TIMEOUT 30
-    LABELS "integration-tests;attachment"
-    SKIP_REGULAR_EXPRESSION "SKIPPED"
-    FIXTURES_REQUIRED rocprofv3-test-attachment-attach-twice
-    DISABLED "${IS_DISABLED}")
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/out_results.json
+         --skip-if ${CMAKE_CURRENT_BINARY_DIR}/attachment-output/skipped)

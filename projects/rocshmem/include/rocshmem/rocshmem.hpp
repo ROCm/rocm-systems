@@ -414,6 +414,33 @@ __host__ int rocshmem_team_n_pes(rocshmem_team_t team);
 __host__ int rocshmem_team_my_pe(rocshmem_team_t team);
 
 /**
+ * @brief Splits a parent team into two sets of non-overlapping teams based on a
+ *        2D Cartesian decomposition. Must be called by all PEs in the parent team.
+ *        After the split, each of the x-axis teams will contain all the PEs with the same
+ *        y-coordinate, and each of the y-axis teams will contain all the PEs with
+ *        the same x-coordinate.
+ *
+ * @param[in] parent_team    The team to be split.
+ * @param[in] xrange         Number of PEs per row.
+ * @param[in] xaxis_config   Pointer to a team configuration struct for the x-axis.
+ * @param[in] xaxis_mask     Bitmask representing the set of configuration parameters
+ *                           to use from @p xaxis_config. A zero mask indicates all fields use defaults.
+ * @param[out] xaxis_team    Output handle for the calling PE's x-axis team.
+ * @param[in] yaxis_config   Pointer to a team configuration struct for the y-axis.
+ * @param[in] yaxis_mask     Bitmask representing the set of configuration parameters
+ *                           to use from @p yaxis_config. A zero mask indicates all fields use defaults.
+ * @param[out] yaxis_team    Output handle for the calling PE's y-axis team.
+ *
+ * @return Zero on success; non-zero on failure.
+ */
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
+                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
+                                    rocshmem_team_t *xaxis_team, 
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+                                    rocshmem_team_t *yaxis_team);
+
+
+/**
  * @brief Create a new a team of PEs. Must be called by all PEs
  * in the parent team.
  *

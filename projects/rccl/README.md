@@ -13,6 +13,15 @@ RCCL (pronounced "Rickle") is a stand-alone library of standard collective commu
 
 The collective operations are implemented using ring and tree algorithms and have been optimized for throughput and latency. For best performance, small operations can be either batched into larger operations or aggregated through the API.
 
+Additionally, RCCL supports zero-CU (zero-CTA) collectives for selected operations,
+including all-gather, all-to-all, gather, and scatter. These collectives use SDMA/Copy
+Engine (CE) hardware to offload data movement, enabling communication without consuming
+GPU compute units. This path is opt-in: initialize the communicator with
+NCCL_CTA_POLICY_ZERO and register symmetric buffers via ncclCommWindowRegister
+with NCCL_WIN_COLL_SYMMETRIC (single-node only; requires ROCm 7.12+). On MI350,
+CE collectives can outperform CU-based collectives for large message sizes and improve
+overlap when computation and communication run concurrently.
+
 ## Requirements
 
 1. ROCm supported GPUs
@@ -42,14 +51,13 @@ RCCL build & installation helper script
        --debug                 Build debug library
        --debug-fast            Build debug library with lto optimization disabled (fast build times)
     -d|--dependencies          Install RCCL dependencies
-       --disable-colltrace     Build without collective trace
        --disable-roctx         Build without ROCTX logging
        --disable-warp-speed    Disable WARP_SPEED kernel optimizations
        --dump-asm              Disassemble code and dump assembly with inline code
     -c|--enable-code-coverage  Enable code coverage
        --enable_backtrace      Build with custom backtrace support
        --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
-    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
+    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace)
        --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
        --generate-sym-kernels  Generate symmetric memory kernels (default: OFF)
     -h|--help                  Prints this help message
@@ -59,7 +67,6 @@ RCCL build & installation helper script
     -l|--local_gpu_only        Only compile for local GPU architecture
        --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
        --no_clean              Don't delete files if they already exist
-       --npkit-enable          Compile with npkit enabled
        --openmp-test-enable    Enable OpenMP in rccl unit tests
     -p|--package_build         Build RCCL package
        --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
@@ -78,7 +85,6 @@ RCCL build & installation helper script
     -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
     -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
     -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
-    -DPROFILE=ON                          Enable profiling (default: OFF)
     -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
     -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
 
