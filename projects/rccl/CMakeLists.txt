@@ -80,7 +80,6 @@ option(BUILD_TESTS                             "Build unit test programs"       
 option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)

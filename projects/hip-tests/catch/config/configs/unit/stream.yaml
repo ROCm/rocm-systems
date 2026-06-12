@@ -123,6 +123,8 @@ stream:
     tags: [properties]
   Unit_hipMemPrefetchAsync_Basic:
     <<: *level_2
+    # AIRUNTIME-2337: temporarily disabled (intermittent failure in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
     tags: [memory]
   Unit_hipMemPoolApi_hipStreamLegacy_Basic:
     <<: *level_2
