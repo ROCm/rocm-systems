@@ -51,6 +51,7 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypat
     options = [
         "--experimental",
         "--pc-sampling",
+        "--no-native-tool",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -90,6 +91,7 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypa
     options = [
         "--experimental",
         "--pc-sampling",
+        "--no-native-tool",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -227,6 +229,7 @@ def test_pc_sampling_profile_then_analyze(
     options = [
         "--experimental",
         "--pc-sampling",
+        "--no-native-tool",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -318,6 +321,7 @@ def test_pc_sampling_with_sol_block(
     options = [
         "--experimental",
         "--pc-sampling",
+        "--no-native-tool",
         "--block",
         "21",
         "2",
