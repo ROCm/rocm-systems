@@ -12,6 +12,13 @@
 #define PACKAGE     "rocprofiler-systems"
 #define L_LNNO_SIZE 4
 
+#include <elf.h>
+// Older elf.h versions may not define the newer RELR relocation format
+#ifndef SHT_RELR
+typedef Elf32_Word  Elf32_Relr;
+typedef Elf64_Xword Elf64_Relr;
+#endif
+
 #include <bfd.h>
 #include <coff/external.h>
 #include <coff/internal.h>
