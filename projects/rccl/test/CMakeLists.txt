@@ -426,7 +426,9 @@ if(BUILD_TESTS)
           if(TARGET rocshmem_ext)
             add_dependencies(${_rccl_gin_test_exe} rocshmem_ext)
           endif()
-          target_compile_options(${_rccl_gin_test_exe} PRIVATE -fgpu-rdc)
+          # Do not add -fgpu-rdc to every test TU: most rccl-UnitTests sources are
+          # host-only; -fgpu-rdc breaks those builds. HIP device link (--hip-link)
+          # when linking librocshmem.a is sufficient for __hip_fatbin_* resolution.
           target_link_libraries(${_rccl_gin_test_exe} PRIVATE
             "-Wl,--whole-archive"
             "${_rccl_gin_rocshmem_lib}"
