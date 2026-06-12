@@ -9,7 +9,7 @@
 
 #include "../gin_device_common.h"
 #include "gin_rocshmem_device_host_common_gda.h"
-#include "gda/queue_pair.hpp"
+#include "gda/queue_pair_device.hpp"
 
 template <>
 struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {

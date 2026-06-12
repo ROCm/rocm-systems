@@ -65,7 +65,6 @@ static ncclResult_t ginRocshmemGdaListen(void* ctx, int dev, void* handle, void*
 }
 
 static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks, int rank,
-                                          int nConnections, int queueDepth,
                                           void* listenComm, void** collComm) {
   auto* cctx = new ginRocshmemGdaCollCtx;
   cctx->nranks = nranks;
@@ -88,10 +87,9 @@ static ncclResult_t ginRocshmemGdaFinalize(void* ctx) {
   return ncclSuccess;
 }
 
-static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, int nSignals, int nCounters,
-                                                int nContexts,
+static ncclResult_t ginRocshmemGdaCreateContext(void* collComm, ncclGinConfig_v13_t* config,
                                                 void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
-  return ncclGinRocshmemGdaCreateContextFromPlugin(nSignals, nCounters, ginCtx, devHandle);
+  return ncclGinRocshmemGdaCreateContextFromPlugin(config->nSignals, config->nCounters, ginCtx, devHandle);
 }
 
 static ncclResult_t ginRocshmemGdaRegMrSym(void* collComm, void* data, size_t size,
@@ -114,23 +112,13 @@ static ncclResult_t ginRocshmemGdaDestroyContext(void* ginCtx) {
   return ncclGinRocshmemGdaDestroyContextFromPlugin(ginCtx);
 }
 
-static ncclResult_t ginRocshmemGdaGinProgress(void* collComm) {
+static ncclResult_t ginRocshmemGdaGinProgress(void* ginCtx) {
   return ncclSuccess;
 }
 
 static ncclResult_t ginRocshmemGdaQueryLastError(void* ginCtx, bool* hasError) {
   *hasError = false;
   return ncclSuccess;
-}
-
-static ncclResult_t ginRocshmemGdaIput(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, int, void**) {
-  return ncclInternalError;
-}
-static ncclResult_t ginRocshmemGdaIputSignal(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, uint64_t, void*, uint64_t, uint32_t, int, void**) {
-  return ncclInternalError;
-}
-static ncclResult_t ginRocshmemGdaTest(void*, void*, int*) {
-  return ncclInternalError;
 }
 
 __attribute__((visibility("default")))
@@ -148,9 +136,11 @@ ncclGin_t ncclGinRocshmemGdaPlugin = {
   .destroyContext  = ginRocshmemGdaDestroyContext,
   .closeColl       = ginRocshmemGdaCloseColl,
   .closeListen     = ginRocshmemGdaCloseListen,
-  .iput            = ginRocshmemGdaIput,
-  .iputSignal      = ginRocshmemGdaIputSignal,
-  .test            = ginRocshmemGdaTest,
+  .iput            = NULL,
+  .iputSignal      = NULL,
+  .iget            = NULL,
+  .iflush          = NULL,
+  .test            = NULL,
   .ginProgress     = ginRocshmemGdaGinProgress,
   .queryLastError  = ginRocshmemGdaQueryLastError,
   .finalize        = ginRocshmemGdaFinalize,

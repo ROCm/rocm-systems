@@ -73,7 +73,6 @@ static ncclResult_t ginRocshmemListen(void* ctx, int dev, void* handle, void** l
 }
 
 static ncclResult_t ginRocshmemConnect(void* ctx, void* handles[], int nranks, int rank,
-                                       int nConnections, int queueDepth,
                                        void* listenComm, void** collComm) {
   // No-op: rocshmem manages its own connectivity
   auto* cctx = new ginRocshmemCollCtx;
@@ -100,14 +99,9 @@ static ncclResult_t ginRocshmemFinalize(void* ctx) {
 // Delegate to gin_host_rocshmem_api.cc implementations
 // Note: createContext/regMrSym don't use collComm for rocshmem (transport is internal)
 
-static ncclResult_t ginRocshmemCreateContext(void* collComm, int nSignals, int nCounters,
-                                              int nContexts,
+static ncclResult_t ginRocshmemCreateContext(void* collComm, ncclGinConfig_v13_t* config,
                                               void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
-  // We need the ncclComm, but the plugin interface only gives us collComm.
-  // For now, create the context without ncclComm — the rocshmem context
-  // only needs nSignals/nCounters and rocshmem's symmetric heap.
-  // TODO: plumb ncclComm through when needed for QP-level integration.
-  return ncclGinRocshmemCreateContextFromPlugin(nSignals, nCounters, ginCtx, devHandle);
+  return ncclGinRocshmemCreateContextFromPlugin(config->nSignals, config->nCounters, ginCtx, devHandle);
 }
 
 static ncclResult_t ginRocshmemRegMrSym(void* collComm, void* data, size_t size,
@@ -131,24 +125,13 @@ static ncclResult_t ginRocshmemDestroyContext(void* ginCtx) {
   return ncclGinRocshmemDestroyContextFromPlugin(ginCtx);
 }
 
-static ncclResult_t ginRocshmemGinProgress(void* collComm) {
+static ncclResult_t ginRocshmemGinProgress(void* ginCtx) {
   return ncclSuccess;
 }
 
 static ncclResult_t ginRocshmemQueryLastError(void* ginCtx, bool* hasError) {
   *hasError = false;
   return ncclSuccess;
-}
-
-// Not used for rocshmem (device-initiated only)
-static ncclResult_t ginRocshmemIput(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, int, void**) {
-  return ncclInternalError;
-}
-static ncclResult_t ginRocshmemIputSignal(void*, uint64_t, void*, size_t, uint64_t, void*, uint32_t, uint64_t, void*, uint64_t, uint32_t, int, void**) {
-  return ncclInternalError;
-}
-static ncclResult_t ginRocshmemTest(void*, void*, int*) {
-  return ncclInternalError;
 }
 
 __attribute__((visibility("default")))
@@ -166,9 +149,11 @@ ncclGin_t ncclGinRocshmem = {
   .destroyContext  = ginRocshmemDestroyContext,
   .closeColl       = ginRocshmemCloseColl,
   .closeListen     = ginRocshmemCloseListen,
-  .iput            = ginRocshmemIput,
-  .iputSignal      = ginRocshmemIputSignal,
-  .test            = ginRocshmemTest,
+  .iput            = NULL,
+  .iputSignal      = NULL,
+  .iget            = NULL,
+  .iflush          = NULL,
+  .test            = NULL,
   .ginProgress     = ginRocshmemGinProgress,
   .queryLastError  = ginRocshmemQueryLastError,
   .finalize        = ginRocshmemFinalize,

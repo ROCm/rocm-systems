@@ -33,7 +33,7 @@ extern ncclNet_t ncclNetSocket;
 #if !defined(__HIP_PLATFORM_AMD__)
 extern ncclGin_t ncclGinIbGdaki;
 #endif
-extern ncclGin_t ncclGinIbProxy;
+extern ncclGin_v12_t ncclGinIbProxy;
 #if defined(ENABLE_ROCSHMEM_GIN)
 extern ncclGin_t ncclGinRocshmem;
 #endif

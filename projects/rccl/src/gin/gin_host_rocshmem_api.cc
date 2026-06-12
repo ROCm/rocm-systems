@@ -262,7 +262,6 @@ static ncclResult_t ncclGinRocshmemListen(void* ctx, int dev, void* handle, void
 }
 
 static ncclResult_t ncclGinRocshmemConnect(void* ctx, void* handles[], int nranks, int rank,
-                                           int nConnections, int queueDepth,
                                            void* listenComm, void** collComm) {
   *collComm = (void*)0x1;
   return ncclSuccess;
