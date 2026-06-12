@@ -1,0 +1,49 @@
+# HIP Documentation
+
+> HIP is a C++ runtime API and kernel language that lets developers create portable applications for AMD and NVIDIA GPUs from a single source. This documentation covers the HIP programming model, runtime API, porting from CUDA, API reference, and tutorials. For the broader ROCm software stack, see https://rocm.docs.amd.com.
+
+## Getting started
+
+- [What is HIP?](https://rocm.docs.amd.com/projects/HIP/en/latest/what_is_hip.html): Overview of HIP and its place in the ROCm ecosystem.
+- [HIP 7 changes](https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html): Summary of changes introduced in HIP 7.
+- [FAQ](https://rocm.docs.amd.com/projects/HIP/en/latest/faq.html): Frequently asked questions about HIP.
+- [Installing HIP](https://rocm.docs.amd.com/projects/HIP/en/latest/install/install.html): Install HIP on a supported system.
+- [Building HIP from source](https://rocm.docs.amd.com/projects/HIP/en/latest/install/build.html): Build HIP from source.
+
+## Programming guide
+
+### Understand HIP
+
+- [Programming model](https://rocm.docs.amd.com/projects/HIP/en/latest/understand/programming_model.html): The HIP programming model and execution concepts.
+- [Hardware implementation](https://rocm.docs.amd.com/projects/HIP/en/latest/understand/hardware_implementation.html): How HIP maps to GPU hardware.
+- [Compilers](https://rocm.docs.amd.com/projects/HIP/en/latest/understand/compilers.html): HIP compiler overview.
+- [AMD common language runtime (CLR)](https://rocm.docs.amd.com/projects/HIP/en/latest/understand/amd_clr.html): The AMD common language runtime.
+
+### How to
+
+- [HIP runtime API](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_runtime_api.html): Using the HIP runtime API, including initialization, memory management, error handling, streams, graphs, cooperative groups, multi-device, and interop.
+- [C++ language extensions](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_cpp_language_extensions.html): HIP C++ language extensions and the kernel language.
+- [HIP porting guide](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_porting_guide.html): Port CUDA code to HIP.
+- [HIP RTC](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html): Runtime compilation with HIP RTC.
+- [Performance guidelines](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/performance_guidelines.html): Practical guidelines for optimizing HIP application performance.
+- [Debugging](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/debugging.html): Debugging HIP applications.
+
+## Reference
+
+- [HIP runtime API reference](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/hip_runtime_api_reference.html): Complete HIP runtime API reference, organized by module.
+- [Math API](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/math_api.html): HIP math and complex math API.
+- [Environment variables](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/env_variables.html): HIP environment variables.
+- [Error codes](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/error_codes.html): HIP error codes.
+- [Deprecated APIs](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/deprecated_api_list.html): List of deprecated HIP APIs.
+- [Hardware features](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/hardware_features.html): GPU hardware features.
+
+## Tutorials
+
+- [SAXPY tutorial](https://rocm.docs.amd.com/projects/HIP/en/latest/tutorial/saxpy.html): A first HIP program.
+- [Programming patterns](https://rocm.docs.amd.com/projects/HIP/en/latest/tutorial/programming-patterns.html): Common GPU programming patterns, including matrix multiplication, histograms, k-means, stencils, and BFS.
+- [Reduction](https://rocm.docs.amd.com/projects/HIP/en/latest/tutorial/reduction.html): Implementing reductions in HIP.
+- [Cooperative groups](https://rocm.docs.amd.com/projects/HIP/en/latest/tutorial/cooperative_groups_tutorial.html): Using cooperative groups.
+- [Graph API](https://rocm.docs.amd.com/projects/HIP/en/latest/tutorial/graph_api.html): Using the HIP graph API.
+- [HIP examples (GitHub)](https://github.com/ROCm/rocm-examples): HIP example programs, including HIP-Basic.
+
+---

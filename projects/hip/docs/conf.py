@@ -38,8 +38,17 @@ docs_core.setup()
 
 external_projects_current_project = "hip"
 
+# Generate llms-full.txt for LLM-friendly documentation output.
+rocm_docs_generate_llms_full = True
+
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+# Per-page download button for copying page content into an AI context window.
+html_theme_options["use_download_button"] = True
+
+# Publish the curated llms.txt index at the documentation root.
+html_extra_path = ["llms.txt"]
 
 # Add the _extensions directory to Python's search path
 sys.path.append(str(Path(__file__).parent / 'extension'))
