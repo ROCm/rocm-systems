@@ -29,9 +29,6 @@
 #endif
 #include "nccl_tuner.h"
 #include "bitops.h"
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit_struct.h"
-#endif
 #include <algorithm>
 #include <stdint.h>
 #include <sys/types.h>
@@ -195,8 +192,6 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_DIRECT_NIC   0x04
 #define NCCL_NVLS_MIN_POLL 0x80
 
-
-
 #define NCCL_REGULAR_BUFFER 0x00
 #define NCCL_IPC_REG_BUFFER 0x01
 #define NCCL_NVLS_REG_BUFFER 0x02
@@ -272,7 +267,6 @@ struct ncclRing {
   int* rankToIndex;  // inverse lookup of userRanks, setup in setupChannel
   int index; // This rank's index in the ring
 };
-
 
 // The root of each tree only has one node down (+1 intra-node).
 #define NCCL_MAX_TREE_ARITY_TOP 2
@@ -461,7 +455,6 @@ struct alignas(16) ncclDevWorkColl {
 #endif
 };
 
-
 struct alignas(16) ncclDevWorkBcast {
   int ringDepth;
   int chunkSize;
@@ -612,11 +605,6 @@ struct ncclKernelComm {
   struct ncclDevProfiler* workStarted/*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted/*[MAXCHANNELS]*/;
 
-#if defined(ENABLE_NPKIT)
-  NpKitEventCollectContext* npKitEventCollectContexts;
-  uint64_t* cpuTimestamp;
-#endif
-
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
 #endif
@@ -659,7 +647,6 @@ struct alignas(16) ncclDevKernelArgsStorage {
     ulong2 storage[capacity/sizeof(ulong2)];
   };
 };
-
 
 typedef ncclDevKernelArgsStorage<(5<<10)> ncclDevKernelArgs5K;
 typedef ncclDevKernelArgsStorage<(4<<10)> ncclDevKernelArgs4K;

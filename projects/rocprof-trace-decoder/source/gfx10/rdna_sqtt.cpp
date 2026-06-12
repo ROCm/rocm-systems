@@ -82,23 +82,38 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
         {
             case RdnaType::MISC_GFX10:
             {
-                bool bCtxSave = false;
+                gfx10::misc_fields fields{};
+
+                auto generate_event = [&](rocprofiler_thread_trace_decoder_event_type_t type, uint64_t payload = 0)
+                { stitch.sendEvent(type, token.time, 0, 0, payload, false, false); };
+
                 if (tt_version >= 5)
                 {
                     mi400::misc_type misc{.raw = token.contents};
                     DEBUGPRINT(misc);
-                    bCtxSave = misc.save_context;
+                    fields.raw = (uint8_t) misc.fields;
+
+                    if (misc.CLF) generate_event(ROCPROF_TRACE_DECODER_EVENT_CLUSTER_BEGIN, misc.CLID);
+                    if (misc.CLL) generate_event(ROCPROF_TRACE_DECODER_EVENT_CLUSTER_END, misc.CLID);
                 }
                 else
                 {
                     gfx10::misc_type misc{.raw = token.contents};
                     DEBUGPRINT(misc);
-                    bCtxSave = misc.save_context;
-                    info.bPacketLost |= misc.spm_or_pl == 1 && tt_version <= 2;
+                    fields.raw = (uint8_t) misc.fields;
                 }
 
-                if (bCtxSave)
+                if (tt_version <= 2 && fields.spm_or_pl == 1)
                 {
+                    fields.spm_or_pl = 0;
+                    generate_event(ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS);
+                    info.bPacketLost = true;
+                }
+
+                if (fields.save_context)
+                {
+                    generate_event(ROCPROF_TRACE_DECODER_EVENT_SAVE_CONTEXT);
+
                     for (auto& slot : SIMD)
                         if (slot.size())
                         {
@@ -107,6 +122,14 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                                 back.trap_status = WaveTrapStatus::TRAP_STANDBY;
                         }
                 }
+
+                if (fields.tt_stall_start) generate_event(ROCPROF_TRACE_DECODER_EVENT_TT_STALL_BEGIN);
+                if (fields.tt_stall_end) generate_event(ROCPROF_TRACE_DECODER_EVENT_TT_STALL_END);
+                if (fields.DIDT_stall_start) generate_event(ROCPROF_TRACE_DECODER_EVENT_DIDT_STALL_BEGIN);
+                if (fields.DIDT_stall_end) generate_event(ROCPROF_TRACE_DECODER_EVENT_DIDT_STALL_END);
+                if (fields.gc_rinse) generate_event(ROCPROF_TRACE_DECODER_EVENT_GC_RINSE);
+                if (fields.spm_or_pl) generate_event(ROCPROF_TRACE_DECODER_EVENT_SPM_SAMPLE);
+
                 break;
             }
             case RdnaType::HEADER:
@@ -131,7 +154,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     target_simd = header.DSIMD;
 
                     int mask = tt_version < 3 ? 0xF : 7;
-                    dprate = 1 << ((header.DPRate & mask) - 1);
+                    int dpr = header.DPRate & mask;
+                    dprate = dpr ? (1 << (dpr - 1)) : 1;
                     derate = 1 << (header.dp_derate);
                     if (tt_version == 4) exclude_barrier_wait = (token.contents >> 59) & 1;
                 }
@@ -249,6 +273,13 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     break;
                 }
 
+                if (generator.packetlost && running_waves.find(start.getGPULocation()) != running_waves.end())
+                {
+                    occupancy.push_back({
+                        {0, 0},
+                        token.time - 1, start.SACU(), start.simd, start.wid, 0, 0, 0, 0, 0
+                    });
+                }
                 running_waves[start.getGPULocation()] = wave_addr;
 
                 occupancy.push_back(
@@ -426,7 +457,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx10::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
                 break;
             }
             case RdnaType::NEW_PC_GFX12:
@@ -434,17 +465,78 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 gfx12::new_pc_type pc{.raw = token.contents};
                 DEBUGPRINT(pc);
                 if (pc.wave < SIMD.size() && SIMD[pc.wave].size())
-                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table.write());
+                    SIMD[pc.wave].back().new_pc((uint64_t) token.time, pc.pc, csregister.table);
                 break;
             }
             case RdnaType::REG:
             {
-                reg_write_type reg{.raw = token.contents};
+                gfx10::reg_write_type reg{.raw = token.contents};
                 DEBUGPRINT(reg);
 
                 if (reg.CS) csregister.UpdateRegCS(reg);
+
                 // gfx10 gets userdata in reg.cs
-                if (!reg.CS || tt_version <= 2) csregister.UpdateRegNoCS(reg);
+                if (!reg.CS || tt_version <= 2)
+                {
+                    auto ev = csregister.UpdateRegNoCS(reg);
+                    switch (ev.kind)
+                    {
+                        case CSRegisterHandler::RegUpdateEvent::COUNTER_FREQUENCY_CHANGED: break;
+                        case CSRegisterHandler::RegUpdateEvent::CODEOBJ_LOAD:
+                            stitch.sendEvent(
+                                ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_LOAD,
+                                token.time,
+                                reg.me,
+                                reg.pipe,
+                                static_cast<uint32_t>(ev.id),
+                                false,
+                                false
+                            );
+                            break;
+                        case CSRegisterHandler::RegUpdateEvent::CODEOBJ_UNLOAD:
+                            stitch.sendEvent(
+                                ROCPROF_TRACE_DECODER_EVENT_CODE_OBJECT_UNLOAD,
+                                token.time,
+                                reg.me,
+                                reg.pipe,
+                                static_cast<uint32_t>(ev.id),
+                                false,
+                                false
+                            );
+                            break;
+                        case CSRegisterHandler::RegUpdateEvent::NONE: break;
+                    }
+                }
+
+                break;
+            }
+            case RdnaType::REG_INIT:
+            {
+                gfx10::reg_init_type reg{.raw = token.contents};
+                if (reg.type == 2 && (reg.data & 1) == 1) stitch.sendDispatch(csregister, token.time, reg.me, reg.pipe);
+                break;
+            }
+            case RdnaType::EVENT:
+            {
+                gfx10::event_type event{.raw = token.contents};
+
+                rocprofiler_thread_trace_decoder_event_type_t type{};
+
+                switch (event.id)
+                {
+                    case EVENT_CS_PARTIAL_FLUSH: type = ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH; break;
+                    case EVENT_CACHE_FLUSH:
+                    case EVENT_CACHE_FLUSH_WR:
+                    case EVENT_CACHE_FLUSH_INV:
+                    case EVENT_CACHE_FLUSH_INV_WR: type = ROCPROF_TRACE_DECODER_EVENT_CACHE_FLUSH; break;
+                    case EVENT_BOTTOM_OF_PIPE_WR: type = ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS; break;
+                    case EVENT_TT_FLUSH: type = ROCPROF_TRACE_DECODER_EVENT_TT_FLUSH; break;
+                    default: break;
+                }
+
+                if (type != ROCPROF_TRACE_DECODER_EVENT_NONE)
+                    stitch.sendEvent(type, token.time, event.me, event.pipe, 0, event.bop, true);
+
                 break;
             }
             case RdnaType::WAVE_READY:
@@ -493,6 +585,12 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             }
             default:
                 if (generator.realtime.size() >= MAX_ACCUM_RECORDS) stitch.sendRealtime(generator.realtime);
+                if (generator.packetlost)
+                {
+                    info.bPacketLost = true;
+                    stitch.sendEvent(ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS, token.time, 0, 0, 0, false, false);
+                    generator.packetlost = false;
+                }
                 break;
         }
     }
