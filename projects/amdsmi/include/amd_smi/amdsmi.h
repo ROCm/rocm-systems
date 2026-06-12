@@ -6884,6 +6884,7 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  */
@@ -6913,13 +6914,15 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
  *  updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_FILE_ERROR problem accessing the sysfs file
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  */
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode);
+
 /** @} End tagComputePartition */
 
 /*****************************************************************************/
