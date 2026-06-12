@@ -835,7 +835,7 @@ TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
   # Batch rotation allocates volume*batch*2 = 20 GiB; use 22 GiB to leave headroom
-  ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((22*1024*1024*1024))}
+  ROCSHMEM_HEAP_SIZE=$(( ROCSHMEM_HEAP_SIZE > 22*1024*1024*1024 ? ROCSHMEM_HEAP_SIZE : 22*1024*1024*1024 ))
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
