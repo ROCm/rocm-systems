@@ -81,6 +81,9 @@
 #include <amdgpu.h>
 #endif
 
+#if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
+#include <rocm-timesync/rocm_timesync.hpp>
+#endif
 
 // Size of scratch (private) segment pre-allocated per thread, in bytes.
 #define DEFAULT_SCRATCH_BYTES_PER_THREAD 2048
@@ -2156,6 +2159,12 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
     debug_print("Signal %p time stamps may be invalid.\n", &signal->signal_);
 }
 
+
+#if defined(HSA_ROCM_TIMESYNC) && HSA_ROCM_TIMESYNC > 0
+uint64_t GpuAgent::TranslateTime(uint64_t tick) {
+  ::rocm::timesync::initialize();
+}
+#else
 /*
 Times during program execution are interpolated to adjust for relative clock drift.
 Interval timing may appear as ticks well before process start, leading to large errors due to
@@ -2211,6 +2220,7 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   return system_tick;
 }
+#endif
 
 /* This function is deprecated */
 bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {

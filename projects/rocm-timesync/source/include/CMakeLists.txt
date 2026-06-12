@@ -1,1 +1,1 @@
-add_subdirectory(rocr-timesync)
+add_subdirectory(rocm-timesync)

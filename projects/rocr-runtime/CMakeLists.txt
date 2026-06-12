@@ -108,6 +108,16 @@ if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocprofiler-register")
 endif()
 
+option(USE_ROCM_TIMESYNC "Enable rocm-timesync support" OFF)
+if (USE_ROCM_TIMESYNC)
+  set(HSA_DEP_ROCM_TIMESYNC ON CACHE INTERNAL "")
+endif()
+
+if(HSA_DEP_ROCM_TIMESYNC)
+  string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocm-timesync")
+  string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocm-timesync")
+endif()
+
 if (NOT DEFINED BUILD_THUNK_VIRTIO)
   set(BUILD_THUNK_VIRTIO OFF)
 endif()

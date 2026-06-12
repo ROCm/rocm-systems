@@ -13,7 +13,7 @@
 // 
 
 
-namespace rocr::timesync
+namespace rocm::timesync
 {
     void initialize();
 

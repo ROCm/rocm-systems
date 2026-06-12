@@ -375,6 +375,20 @@ else()
   endif()
 endif()#end BUILD_SHARED_LIBS
 
+if( USE_ROCM_TIMESYNC )
+  if (UNIX)
+    find_package(rocm-timesync)
+    if(rocm-timesync_FOUND)
+      target_compile_definitions( ${CORE_RUNTIME_TARGET} PRIVATE HSA_ROCM_TIMESYNC=1)
+      target_link_libraries( ${CORE_RUNTIME_TARGET} PRIVATE rocm-timesync::rocm-timesync)
+      #target_link_libraries( ${CORE_RUNTIME_TARGET} PRIVATE -Wl,--no-as-needed rocm-timesync::rocm-timesync -Wl,--as-needed)
+      set(HSA_DEP_ROCM_TIMESYNC ON CACHE INTERNAL "")
+    else()
+      set(HSA_DEP_ROCM_TIMESYNC OFF CACHE INTERNAL "")
+    endif() # end rocm-timesync_FOUND
+  endif()
+endif()#end USE_ROCM_TIMESYNC
+
 ## Set the VERSION and SOVERSION values
 set_property ( TARGET ${CORE_RUNTIME_TARGET} PROPERTY VERSION "${SO_VERSION_STRING}" )
 set_property ( TARGET ${CORE_RUNTIME_TARGET} PROPERTY SOVERSION "${VERSION_MAJOR}" )
