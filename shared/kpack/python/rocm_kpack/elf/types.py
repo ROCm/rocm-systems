@@ -579,12 +579,19 @@ _ARCH_CONFIGS: dict[int, ArchConfig] = {
     EM_X86_64: ArchConfig(page_size=0x1000, r_relative=R_X86_64_RELATIVE),
 }
 
-_DEFAULT_ARCH_CONFIG = ArchConfig(page_size=0x1000, r_relative=R_X86_64_RELATIVE)
-
-
 def get_arch_config(e_machine: int) -> ArchConfig:
-    """Return architecture-specific constants for the given ELF machine type."""
-    return _ARCH_CONFIGS.get(e_machine, _DEFAULT_ARCH_CONFIG)
+    """Return architecture-specific constants for the given ELF machine type.
+
+    Raises:
+        ValueError: If the machine type is not supported.
+    """
+    config = _ARCH_CONFIGS.get(e_machine)
+    if config is None:
+        raise ValueError(
+            f"Unsupported ELF machine type: {e_machine} (0x{e_machine:x}). "
+            f"Supported types: {list(_ARCH_CONFIGS.keys())}"
+        )
+    return config
 
 
 def round_up_to_page(addr: int, page_size: int = PAGE_SIZE) -> int:

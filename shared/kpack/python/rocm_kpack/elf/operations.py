@@ -22,7 +22,6 @@ from .types import (
     PT_LOAD,
     PF_R,
     SHF_ALLOC,
-    R_X86_64_RELATIVE,
     round_up_to_page,
     page_align_offset,
 )
@@ -232,7 +231,7 @@ def update_relocation_addend(
         surgery: ElfSurgery instance to operate on
         target_vaddr: Virtual address the relocation targets (r_offset)
         new_addend: New addend value to set
-        convert_to_relative: Convert to R_X86_64_RELATIVE if not already
+        convert_to_relative: Convert to the architecture's R_RELATIVE type if not already
 
     Returns:
         UpdateRelocationResult with operation outcome
@@ -248,8 +247,8 @@ def update_relocation_addend(
 
     # Create updated relocation entry
     if convert_to_relative:
-        # Convert to R_X86_64_RELATIVE with symbol index 0
-        new_info = RelaEntry.make_info(0, R_X86_64_RELATIVE)
+        # Convert to R_RELATIVE for this binary's architecture, with symbol index 0
+        new_info = RelaEntry.make_info(0, surgery.arch_config.r_relative)
     else:
         new_info = reloc_info.entry.r_info
 
