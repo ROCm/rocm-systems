@@ -37,6 +37,7 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/kernel_replay.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -648,6 +649,88 @@ TEST(core, start_stop_callback_ctx)
     found = false;
     ctx.dispatch_counter_collection->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_FALSE(found);
+
+    registration::set_init_status(1);
+    context::pop_client(1);
+}
+
+TEST(core, kernel_replay_configure)
+{
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+
+    EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
+                                                                   nullptr,
+                                                                   nullptr,
+                                                                   null_record_callback,
+                                                                   nullptr),
+              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
+                                                               null_dispatch_callback,
+                                                               (void*) 0x12345,
+                                                               null_record_callback,
+                                                               (void*) 0x54321),
+        "kernel replay configure failed");
+
+    EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
+                                                                   null_dispatch_callback,
+                                                                   (void*) 0x12345,
+                                                                   null_record_callback,
+                                                                   (void*) 0x54321),
+              ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID);
+
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
+    ASSERT_TRUE(ctx_p);
+    EXPECT_TRUE(ctx_p->kernel_replay);
+    bool kr_enabled = false;
+    ctx_p->kernel_replay->enabled.rlock([&](const bool& v) { kr_enabled = v; });
+    EXPECT_TRUE(kr_enabled);
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    registration::set_init_status(1);
+    context::pop_client(1);
+}
+
+TEST(core, kernel_replay_rejects_after_callback_dispatch)
+{
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                 null_dispatch_callback,
+                                                                 (void*) 0x12345,
+                                                                 null_record_callback,
+                                                                 (void*) 0x54321),
+        "callback dispatch configure failed");
+
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    EXPECT_EQ(rocprofiler_configure_kernel_replay_counting_service(get_client_ctx(),
+                                                                     null_dispatch_callback,
+                                                                     (void*) 0x12345,
+                                                                     null_record_callback,
+                                                                     (void*) 0x54321),
+              ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID);
+
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     registration::set_init_status(1);
     context::pop_client(1);
