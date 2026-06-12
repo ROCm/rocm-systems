@@ -134,6 +134,7 @@ All cases live in `test/device/GinAnvilDeviceTests.cpp` (GoogleTest, HIP kernels
 - rocshmem **SDMA headers** available at configure time, either:
   - RCCL configured with **`-DENABLE_ROCSHMEM=ON`** or **`-DENABLE_ROCSHMEM_GIN=ON`** (sets `ROCSHMEM_SDMA_SRC_DIR` via `ROCSHMEM.cmake`), or
   - A mono-repo layout where **`../rocshmem/src/sdma/anvil_device.hpp`** exists relative to the RCCL source root (CMake probes this for the fixtures target).
+- If RCCL builds **rocshmem** into **`ext/rocshmem`**, **`librocshmem.a` must include SDMA/Anvil** (`rocshmem::anvil::anvil`). RCCL’s `cmake/ROCSHMEM.cmake` enables **`USE_SDMA=ON`** for that ExternalProject. If you still see an undefined **`rocshmem::anvil::anvil`** at link time, remove a stale **`projects/rccl/ext/rocshmem/build`** (or bump the ExternalProject) and reconfigure so rocshmem is rebuilt with SDMA.
 
 ### Configure and build (example)
 

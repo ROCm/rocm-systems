@@ -89,11 +89,15 @@ function(add_rocshmem_targets)
         CONFIGURE_COMMAND   ""
         BUILD_COMMAND
             ${CMAKE_COMMAND} -E make_directory build
-            && ${CMAKE_COMMAND} -E chdir build bash -lc "../scripts/build_configs/gda_bnxt -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DBUILD_EXAMPLES=OFF "
+            # USE_SDMA=ON pulls in src/sdma/anvil.cpp (rocshmem::anvil::anvil). The gda_bnxt
+            # preset leaves USE_SDMA default OFF, which breaks RCCL GIN_ANVIL / test links.
+            && ${CMAKE_COMMAND} -E chdir build bash -lc "../scripts/build_configs/gda_bnxt -DUSE_EXTERNAL_MPI=OFF -DUSE_IPC=ON -DUSE_SDMA=ON -DBUILD_EXAMPLES=OFF "
             && ${CMAKE_COMMAND} -E chdir build ${CMAKE_COMMAND}
                 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                 -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-                -DBUILD_EXAMPLES=OFF ..
+                -DBUILD_EXAMPLES=OFF
+                -DUSE_SDMA=ON
+                ..
             && ${CMAKE_COMMAND} -E chdir build ${CMAKE_MAKE_PROGRAM} -j
         INSTALL_COMMAND
             ${CMAKE_COMMAND} -E chdir build ${CMAKE_MAKE_PROGRAM} install
