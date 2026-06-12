@@ -9,7 +9,7 @@
 #define NCCL_DEVICE_RUNTIME_INTERNAL_H_
 
 #include "dev_runtime.h"
-#include "nccl_device/core_tmp.h"
+#include "nccl_device/core.h"
 #include <cuda.h>
 #include <cuda_runtime.h>
 

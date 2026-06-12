@@ -23,7 +23,7 @@
 #include "dev_runtime_internal.h"
 #include "gin/gin_host.h"
 #include "rma/rma_proxy.h"
-#include "nccl_device/core_tmp.h"
+#include "nccl_device/core.h"
 #include "nccl_device/lsa_barrier.h"
 #include "nccl_device/gin_barrier.h"
 

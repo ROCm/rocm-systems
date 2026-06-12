@@ -9,7 +9,7 @@
 //
 // This file implements the C-facing API declared in param/c_api.h.
 
-#include "param/param_tmp.h"
+#include "param/param.h"
 #include "core.h"
 #include "debug.h"
 

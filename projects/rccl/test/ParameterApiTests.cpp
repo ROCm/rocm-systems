@@ -14,9 +14,8 @@
 
 #include "common/ProcessIsolatedTestRunner.hpp"
 
-// Internal param subsystem: DEFINE_NCCL_PARAM + parser factories. Uses the
-// hipify-staged "_tmp" header names, matching src/param/*.cc.
-#include "param/param_tmp.h"
+// Internal param subsystem: DEFINE_NCCL_PARAM + parser factories.
+#include "param/param.h"
 #include "param/parsers.h"
 
 namespace RcclUnitTesting {

@@ -217,14 +217,14 @@ triage it into the right bucket:
 (`-fprofile-instr-generate -fcoverage-mapping`). Render a report with ROCm's
 llvm tooling directly. Scope it to the unit under test -- the file compiled in
 via `P2P_CC_PATH`, i.e. the unroll-transformed
-`hipify/src/transport/p2p_tmp.cc` (there is no plain `p2p.cc` in the hipify
+`hipify/src/transport/p2p.cc` (there is no plain `p2p.cc` in the hipify
 tree; scoping to a non-existent file makes `llvm-cov` silently fall back to
 whole-binary totals).
 
 ```bash
 BD=build/release                        # or build/debug, or a standalone build dir
 BIN=$BD/test/host/rccl-UnitTestsMicro
-SRC=$BD/hipify/src/transport/p2p_tmp.cc
+SRC=$BD/hipify/src/transport/p2p.cc
 LLVM=/opt/rocm/llvm/bin                 # ROCm's llvm-cov matches the build clang
 
 # 1. Run the instrumented binary, capturing a raw profile.

@@ -455,8 +455,7 @@ if(BUILD_TESTS)
 
     # The included source and its headers live in the hipify-staged tree.
     add_dependencies(rccl-UnitTestsDevRuntime
-      hipify_all copy_nccl_device_headers
-      net_ib_header_symlinks rma_header_symlinks)
+      hipify_all copy_nccl_device_headers)
   endif()
 
   # GIN Anvil-SDMA put-segmentation host unit test (no GPU). Pure host C++: the

@@ -149,16 +149,16 @@ hipify:
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/network/unpack/*
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/*.cc
 	# PATCH 3: Generate *_tmp.h files - these are build-time generated headers in rccl
-	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
-	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
-	cp hipify_rccl/include/nccl_device/gin.h hipify_rccl/include/nccl_device/gin_tmp.h
+	#cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
+	#cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h
+	#cp hipify_rccl/include/nccl_device/gin.h hipify_rccl/include/nccl_device/gin_tmp.h
 	# PATCH 3b: The param/ headers (param.h, common.h, utils.h) collide in basename
 	# with include/{param,utils}.h and device/common.h, so the main RCCL build's
 	# add_file_unique() renames the staged copies to *_tmp.h. Sources reference the
 	# _tmp names (see src/include/param/param.h), so mirror those staged names here.
-	cp hipify_rccl/include/param/param.h hipify_rccl/include/param/param_tmp.h
-	cp hipify_rccl/include/param/common.h hipify_rccl/include/param/common_tmp.h
-	cp hipify_rccl/include/param/utils.h hipify_rccl/include/param/utils_tmp.h
+	#cp hipify_rccl/include/param/param.h hipify_rccl/include/param/param_tmp.h
+	#cp hipify_rccl/include/param/common.h hipify_rccl/include/param/common_tmp.h
+	#cp hipify_rccl/include/param/utils.h hipify_rccl/include/param/utils_tmp.h
 	# PATCH 4: Add missing NVTX stub macros for topo_expl build
 	echo '#define NCCL_NVTX3_FUNC_RANGE do {} while(0)' >> hipify_rccl/include/nvtx.h
 	echo 'inline void initNvtxRegisteredEnums() {}' >> hipify_rccl/include/nvtx.h

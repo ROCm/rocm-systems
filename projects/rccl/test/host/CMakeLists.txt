@@ -59,7 +59,7 @@ if(BUILD_TESTS)
   # literals so the #include in the test translation unit stays independent of
   # the build directory layout.
   target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-    P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p_tmp.cc"
+    P2P_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/transport/p2p.cc"
   )
 
   # Make sure the hipify step has run before trying to compile the test.
@@ -164,8 +164,6 @@ if(BUILD_TESTS)
     target_include_directories(${_init_tgt} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
       ${RCCL_COMMON_INCLUDE_DIRS})
-    # src/init.cc is the first of the duplicate basenames (vs transport/net_ib/
-    # init.cc), so hipify keeps its name -- no _tmp suffix.
     target_compile_definitions(${_init_tgt} PRIVATE ${RCCL_COMMON_COMPILE_DEFS}
       INIT_CC_PATH="${PROJECT_BINARY_DIR}/hipify/src/init.cc")
     if(_variant STREQUAL "-uncached")
@@ -510,7 +508,7 @@ target_compile_definitions(rccl-UnitTestsMicro PRIVATE
   __HIP_PLATFORM_AMD__
   NCCL_OS_LINUX
   ROCM_VERSION=70000
-  P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
+  P2P_CC_PATH="${RCCL_HIPIFY_DIR}/src/transport/p2p.cc"
   # Same fallback-vs-runtime conflicts the host target guards against: without
   # these, p2p-test.cc redefines hipMemFabricHandle_st and the amdsmi fabric
   # enumerators on ROCm 7.14+, and the standalone build fails.

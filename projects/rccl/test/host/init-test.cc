@@ -85,7 +85,6 @@
 // Pull in the hipified copy of init.cc (cudaXxx -> hipXxx already applied by
 // the hipify pass in the main RCCL build). INIT_CC_PATH is defined by this
 // target's CMakeLists.txt as ${PROJECT_BINARY_DIR}/hipify/src/init.cc
-// (NOT init_tmp.cc -- src/init.cc is the first of the duplicate basenames).
 #include INIT_CC_PATH
 
 // -------------------------------------------------------------------------
