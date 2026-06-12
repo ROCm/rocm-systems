@@ -52,7 +52,7 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
 #endif
 }
 
-extern int64_t ncclParamGinType();
+NCCL_PARAM(GinType, "GIN_TYPE", -1);
 
 static std::mutex ncclGinIbGdakiLockMutex;
 static int ncclGinIbGdakiNDevs = -1;
@@ -73,15 +73,19 @@ ncclResult_t ncclGinIbGdakiInit() {
   return ncclSuccess;
 }
 
-extern ncclGin_t ncclGinIb;
+extern ncclGin_v12_t ncclGinIb;
 #if !defined(__HIP_PLATFORM_AMD__)
 extern ncclGin_t ncclGinIbGdaki;
 #endif // !defined(__HIP_PLATFORM_AMD__)
-extern ncclGin_t ncclGinIbProxy;
+extern ncclGin_v12_t ncclGinIbProxy;
 
 // Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
 // If provided, overwrite ginIb with the backend (generic ginIb case).
+#if defined(__HIP_PLATFORM_AMD__)
+ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int ginType, ncclGin_v12_t* ginIb) {
+#else
 ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction, int ginType, ncclGin_t* ginIb) {
+#endif
   NCCLCHECK(ncclIbInitDevices(logFunction, nullptr));
   if (ncclNIbDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
@@ -148,7 +152,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm);
 // implementation -- this is a strict subset that always works on ROCm
 // HCAs and matches the existing behaviour. Whoever wires up GDAKI in
 // the future can replace this with a real dispatcher.
-ncclGin_t ncclGinIb = {
+ncclGin_v12_t ncclGinIb = {
   "GIN_IB",
   ncclGinIbInit,
   ncclIbDevices,
@@ -430,7 +434,7 @@ ncclResult_t ncclGinIbGdakiQueryLastError(void *ginCtx, bool *hasError) {
   return ncclGinGdakiQueryLastError(ginCtx, hasError);
 }
 
-ncclGin_t ncclGinIbGdaki = {
+ncclGin_v11_t ncclGinIbGdaki = {
   "GIN_IB_GDAKI",
   ncclGinIbGdakiInit,
   ncclGinIbGdakiDevices,
@@ -708,7 +712,7 @@ ncclResult_t ncclGinIbProxyTest(void *collComm, void *request, int *done) {
 }
 
 // No support for NCCL_IB_SPLIT_DATA_ON_QPS or NCCL_IB_MERGE_NICS
-ncclGin_t ncclGinIbProxy = {
+ncclGin_v12_t ncclGinIbProxy = {
   "GIN_IB_PROXY",
   ncclGinIbProxyInit,
   ncclIbDevices,

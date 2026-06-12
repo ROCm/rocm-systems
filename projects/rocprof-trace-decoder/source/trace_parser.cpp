@@ -39,13 +39,6 @@
 
 void WaveDataInternal::lookbackpcs(class CSRegisterHandler& reg)
 {
-    for (size_t index : unattrib_pcs)
-        if (index < instructions.size())
-        {
-            auto& inst = instructions.at(index);
-            if (inst.pc.code_object_id == 0) inst.pc = reg.get_wave_start_delayed(inst.pc.address);
-        }
-
     for (auto& [_, info] : pc_infos)
     {
         if (info.code_object_id == 0) info = reg.get_wave_start_delayed(info.address);
@@ -224,13 +217,13 @@ TraceArch DetectArch_internal(const uint8_t* buffer, uint64_t buffer_size)
 // template — visitor inlines into the loop). DetectArch_internal above is
 // the dispatch helper it shares with this TU.
 
-pcinfo_t ToPcV2(CodeobjTableTranslator& table, uint64_t pc)
+pcinfo_t ToPcV2(const CachedTable& table, uint64_t pc)
 {
     pcinfo_t pcinfo{.address = pc, .code_object_id = 0};
     try
     {
         address_range_t codeobj;
-        if (table.find_codeobj_in_range(pc, codeobj))
+        if (table.find(pc, codeobj))
         {
             pcinfo.code_object_id = codeobj.id;
             pcinfo.address = pc - codeobj.addr;

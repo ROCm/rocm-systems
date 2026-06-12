@@ -28,11 +28,9 @@ def gen_vector_cmp_class(
     L.append('  uint64_t exec = wf.exec();')
     if is_cmpx:
         L.append('  uint64_t result = 0;')
-    elif dst:
-        # VOP3: initialize from destination register for inactive lanes.
-        L.append(f'  uint64_t vcc = {dst[0]}.read_scalar64(wf);')
     else:
-        L.append('  uint64_t vcc = wf.vcc();')
+        # All v_cmp variants zero inactive lanes regardless of encoding.
+        L.append('  uint64_t vcc = 0;')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'f64':
@@ -277,17 +275,12 @@ def gen_vector_cmp(
 
     VOPC (VOP2-like): result always goes to VCC.
     VOP3: result goes to dst[0] (explicit SGPR pair, may be VCC or any SGPR).
-    Inactive lanes preserve the destination register's existing bits.
+    Inactive lanes are zeroed in the result regardless of encoding.
     """
     L = []
     L.append('  uint64_t exec = wf.exec();')
-    if dst:
-        # VOP3: initialize from the destination register so inactive
-        # lanes preserve its existing bits (not VCC).
-        L.append(f'  uint64_t vcc = {dst[0]}.read_scalar64(wf);')
-    else:
-        # VOPC: destination is VCC.
-        L.append('  uint64_t vcc = wf.vcc();')
+    # All v_cmp variants zero inactive lanes regardless of encoding.
+    L.append('  uint64_t vcc = 0;')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 

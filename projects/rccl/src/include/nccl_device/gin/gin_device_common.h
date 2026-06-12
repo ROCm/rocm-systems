@@ -31,7 +31,7 @@
 #endif
 
 #ifndef NCCL_GIN_ROCSHMEM_ENABLE
-#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM)
+#if defined(__HIP_PLATFORM_AMD__) && defined(ENABLE_ROCSHMEM_GIN)
 #define NCCL_GIN_ROCSHMEM_ENABLE 1
 #else
 #define NCCL_GIN_ROCSHMEM_ENABLE 0
