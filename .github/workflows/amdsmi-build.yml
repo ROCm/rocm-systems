@@ -264,14 +264,83 @@ jobs:
               --test-results-dir '"$RESULTS_DIR"'
           '
 
+      - name: NIC enumeration + mgmt-function probe
+        if: always()
+        # Visibility != enumeration. The gate above proved the 0x1dd8 ethernet
+        # PORTS (0x1002/0x1004) appear as netdevs in host netns, yet the CLI
+        # still enumerates 0 selectable NICs. AI-NIC (Pensando) discovery also
+        # needs the MGMT function (0x1dd8:0x0008) with ports nesting under it.
+        # This probe answers definitively WHY enumeration=0: it dumps the live
+        # handle counts the CLI's get_nic_choices() relies on, plus whether the
+        # 0x0008 mgmt function is present/visible to the container at all.
+        run: |
+          set +e
+          echo "===== PCI: all 0x1dd8 functions visible in container ====="
+          docker exec "$CTR" sh -c '
+            for d in /sys/bus/pci/devices/*; do
+              v=$(cat "$d/vendor" 2>/dev/null)
+              [ "$v" = "0x1dd8" ] || continue
+              dev=$(cat "$d/device" 2>/dev/null)
+              printf "  %s device=%s -> %s\n" "$(basename "$d")" "$dev" "$(readlink -f "$d")"
+            done
+            echo "  -- mgmt (0x0008) present? --"
+            grep -l 0x0008 /sys/bus/pci/devices/*/device 2>/dev/null | while read f; do
+              dd=$(dirname "$f"); vv=$(cat "$dd/vendor" 2>/dev/null)
+              [ "$vv" = "0x1dd8" ] && echo "    FOUND mgmt: $(basename "$dd")"
+            done || true
+          '
+          echo "===== amd-smi NIC handle counts (what get_nic_choices uses) ====="
+          docker exec "$CTR" python3 - <<'PY'
+          try:
+              import amdsmi.amdsmi_interface as ai
+              try:
+                  ai.amdsmi_init(ai.AmdSmiInitFlags.INIT_ALL_PROCESSORS)
+              except Exception as e:
+                  print(f"  amdsmi_init: {e}")
+              for fn in ("get_gpu_handles", "get_nic_handles", "get_ainic_handles", "get_switch_handles"):
+                  try:
+                      print(f"  {fn}: {len(getattr(ai, fn)())}")
+                  except Exception as e:
+                      print(f"  {fn}: ERROR {e}")
+              # If any AI-NIC handles exist, dump their info to see if they are manageable
+              try:
+                  for i, h in enumerate(ai.get_ainic_handles()):
+                      try:
+                          print(f"  ainic[{i}] info: {ai.amdsmi_get_ainic_info(h)}")
+                      except Exception as e:
+                          print(f"  ainic[{i}] info ERROR: {e}")
+              except Exception as e:
+                  print(f"  get_ainic_handles iterate ERROR: {e}")
+              try:
+                  ai.amdsmi_shut_down()
+              except Exception:
+                  pass
+          except Exception as e:
+              print(f"  amdsmi import failed: {e}")
+          PY
+
+      - name: amd-smi version / list / help dumps
+        if: always()
+        # Post-install snapshot of the CLI surface for insight: version, the
+        # enumeration mapping (list -e), and every subcommand's --help so we can
+        # see exactly which device args (notably -N/--nic) are advertised and
+        # with what choices on this hardware.
+        run: |
+          set +e
+          run() { echo "======================================================"; echo "===== $* ====="; echo "======================================================"; docker exec "$CTR" sh -lc "$*"; echo "----- exit: $? -----"; }
+          run 'amd-smi version'
+          run 'amd-smi list'
+          run 'amd-smi list -e'
+          for sub in "" bad-pages event fabric firmware list metric monitor partition process ras reset set static topology version xgmi node; do
+            run "amd-smi $sub --help"
+          done
+
       - name: Run CLI tests (NIC now enumerable)
         run: |
           set -euo pipefail
           docker exec -w /work "$CTR" bash -lc '
             set -euo pipefail
             mkdir -p '"$RESULTS_DIR"'
-            echo "-- amd-smi static --nic (should list real NICs in host netns) --"
-            amd-smi static --nic 2>&1 | head -40 || true
             cd /opt/rocm/share/amd_smi/tests/python_unittest
             ./cli_unit_test.py -v > '"$RESULTS_DIR"'/cli_test_output.txt 2>&1
           '
