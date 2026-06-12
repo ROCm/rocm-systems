@@ -77,6 +77,40 @@ jobs:
           done
           echo "===== ip link (host) ====="
           ip -o link 2>/dev/null || echo "  (ip not available)"
+          echo "===== amd-smi / ROCm availability on HOST (Option 2 feasibility) ====="
+          echo "which amd-smi: $(command -v amd-smi 2>/dev/null || echo '<not on PATH>')"
+          for p in /opt/rocm/bin/amd-smi /usr/local/bin/amd-smi /usr/bin/amd-smi; do
+            [ -e "$p" ] && echo "  exists: $p"
+          done
+          ls -d /opt/rocm* 2>/dev/null || echo "  no /opt/rocm* on host"
+          echo "-- amd-smi list --nic (host netns, if installed) --"
+          if command -v amd-smi >/dev/null 2>&1; then
+            amd-smi list 2>&1 | head -40
+            echo "-- amd-smi static --nic --"
+            amd-smi static --nic 2>&1 | head -20
+          else
+            echo "  amd-smi not installed on host; Option 2 would need install/prebuilt"
+          fi
+          echo "-- python amdsmi handle counts on host (if importable) --"
+          python3 - <<'PY' 2>&1 || echo "  host python amdsmi probe failed: $?"
+          try:
+              import amdsmi.amdsmi_interface as ai
+              try:
+                  ai.amdsmi_init(ai.AmdSmiInitFlags.INIT_ALL_PROCESSORS)
+              except Exception as e:
+                  print(f"  amdsmi_init: {e}")
+              for fn in ("get_gpu_handles", "get_nic_handles", "get_ainic_handles"):
+                  try:
+                      print(f"  {fn}: {len(getattr(ai, fn)())}")
+                  except Exception as e:
+                      print(f"  {fn}: ERROR {e}")
+              try:
+                  ai.amdsmi_shut_down()
+              except Exception:
+                  pass
+          except Exception as e:
+              print(f"  amdsmi not importable on host: {e}")
+          PY
 
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
