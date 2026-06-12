@@ -30,6 +30,9 @@ class SystemCapabilities:
     rocprofsys_site_packages: Optional[Path]
     _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
     _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
+    _base_env: dict[str, str] = field(
+        default_factory=dict, repr=False
+    )  # Will never be empty
 
     @classmethod
     def from_config(cls, config) -> SystemCapabilities:
@@ -41,6 +44,8 @@ class SystemCapabilities:
         Returns:
             A new SystemCapabilities instance with paths from config.
         """
+        base_env = config.get_fundamental_environment()
+        base_env["LD_LIBRARY_PATH"] = config.get_library_path()
         return cls(
             rocm_path=config.rocm_path,
             rocprofsys_build_dir=config.rocprofsys_build_dir,
@@ -51,6 +56,7 @@ class SystemCapabilities:
             _python_versions_hint=config._python_versions_hint,
             _python_root_dirs_hint=config._python_root_dirs_hint,
             is_installed=config.is_installed,
+            _base_env=base_env,
         )
 
     @cached_property
@@ -141,7 +147,7 @@ class SystemCapabilities:
             return False
 
         # Force OpenMPI to use UCX transport
-        ucx_env = os.environ.copy()
+        ucx_env = dict(self._base_env) if self._base_env else os.environ.copy()
         ucx_env.update(
             {
                 "OMPI_MCA_pml": "ucx",
@@ -344,6 +350,7 @@ class SystemCapabilities:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=self._base_env,
             )
             if result.returncode != 0:
                 return None
