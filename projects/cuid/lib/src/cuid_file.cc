@@ -754,8 +754,8 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
   // Clear existing entries
   cuid_file.clear();
 
-  // Get current timestamp
   time_t now = time(nullptr);
+  cuid_hmac hmac = cuid_hmac();
 
   // Track device indices per type
   std::map<amdcuid_device_type_t, uint32_t> device_counters;
@@ -772,15 +772,12 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
 
     amdcuid_status_t status;
     if (is_privileged) {
-      cuid_hmac hmac = cuid_hmac();
-
       // Get primary CUID
       amdcuid_primary_id primary_id = {};
       status = device->get_primary_cuid(primary_id);
       if (status != AMDCUID_STATUS_SUCCESS) {
         std::cerr << "Warning: Failed to get primary CUID for device type "
                   << entry.device_type << " status: " << status << std::endl;
-        continue;
       }
       entry.primary_cuid = primary_id.UUIDv8_representation;
 
@@ -795,27 +792,15 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
       } else {
         entry.hardware_fingerprint = fingerprint;
       }
-
-      // Generate derived CUID using HMAC
-      amdcuid_derived_id derived_id = {};
-      status = device->get_derived_cuid(derived_id, &hmac);
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Warning: Failed to generate derived CUID for device type "
-                  << entry.device_type << " status: " << status << std::endl;
-        continue;
-      }
-      entry.derived_cuid = derived_id.UUIDv8_representation;
-    } else {
-      // Generate derived CUID without hmac
-      amdcuid_derived_id derived_id = {};
-      status = device->get_derived_cuid(derived_id);
-      if (status != AMDCUID_STATUS_SUCCESS) {
-        std::cerr << "Warning: Failed to generate derived CUID for device type "
-                  << entry.device_type << " status: " << status << std::endl;
-        continue;
-      }
-      entry.derived_cuid = derived_id.UUIDv8_representation;
     }
+
+    amdcuid_derived_id derived_id = {};
+    status = device->get_derived_cuid(derived_id, &hmac);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      std::cerr << "Warning: Failed to generate derived CUID for device type "
+                << entry.device_type << " status: " << status << std::endl;
+    }
+    entry.derived_cuid = derived_id.UUIDv8_representation;
 
     // Check if the CUID is temporary
     bool is_temporary = false;
@@ -824,7 +809,6 @@ generate_from_devices(const std::vector<std::shared_ptr<CuidDevice>> &devices,
       std::cerr
           << "Warning: Failed to get temporary CUID status for device type "
           << entry.device_type << " status: " << status << std::endl;
-      continue;
     }
     entry.is_temporary = is_temporary;
 

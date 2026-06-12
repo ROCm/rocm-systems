@@ -384,20 +384,31 @@ uint16_t CuidUtilities::get_gpu_vf_id(const std::string &device_path) {
 amdcuid_status_t
 CuidUtilities::make_fallback_fingerprint(const std::string &id,
                                          uint64_t &fingerprint) {
+  std::string system_id;
+
   std::ifstream machine_id_file("/etc/machine-id");
-  if (!machine_id_file.is_open()) {
-    return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+  if (machine_id_file.is_open())
+    std::getline(machine_id_file, system_id);
+
+  if (system_id.empty()) {
+    std::ifstream hostname_file("/etc/hostname");
+    if (hostname_file.is_open())
+      std::getline(hostname_file, system_id);
   }
-  std::string machine_id;
-  std::getline(machine_id_file, machine_id);
-  machine_id_file.close();
 
   std::string id_hex;
   std::copy_if(id.begin(), id.end(), std::back_inserter(id_hex),
                [](unsigned char c) { return std::isxdigit(c); });
 
-  std::string combined = id_hex + machine_id;
-  fingerprint = std::stoull(combined.substr(0, 16), nullptr, 16);
+  std::string combined = id_hex + system_id;
+  uint8_t digest[32];
+  amdcuid_status_t status =
+      sha256_unkeyed(reinterpret_cast<const uint8_t *>(combined.data()),
+                     combined.size(), digest);
+  if (status != AMDCUID_STATUS_SUCCESS)
+    return status;
+
+  std::memcpy(&fingerprint, digest, sizeof(fingerprint));
   return AMDCUID_STATUS_SUCCESS;
 }
 
@@ -468,7 +479,7 @@ amdcuid_status_t CuidUtilities::generate_primary_cuid(
   uint8_t id_bits[16] = {0}; // 128 bits total (122 bits + 6 bits padding)
 
   uint8_t unit_id_part1 = unit_id & 0xFF;
-  uint8_t unit_id_part2 = (unit_id >> 8) & 0x3F;
+  uint8_t unit_id_part2 = (unit_id >> 8) & 0x1F;
 
   // Bits 0-63: Serial number (8 bytes)
   memcpy(id_bits, &serial_number, 8);

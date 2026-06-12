@@ -317,7 +317,7 @@ typedef enum {
           ///< use cases that require uniqueness or stability, as they may
           ///< change or may not be unique if devices are shifted around within
           ///< a system.
-  AMDCUID_QUERY_LAST = 16
+  AMDCUID_QUERY_LAST
 } amdcuid_query_t;
 
 /**

@@ -46,6 +46,7 @@ private:
   uint8_t *key;
   size_t key_len;
   bool valid;
+  std::string key_file_path = "/opt/amdcuid/etc/hmac_key.bin";
 
 public:
   cuid_hmac();
@@ -58,8 +59,11 @@ public:
   amdcuid_status_t set_hmac_algorithm(const char *digest_name);
   amdcuid_status_t set_hmac_key(const uint8_t key_data[key_length]);
   amdcuid_status_t generate_key(uint8_t key[key_length]);
-
-  std::string key_file_path = "/opt/amdcuid/etc/hmac_key.bin";
+  std::string get_key_file_path() const { return key_file_path; }
 };
+
+// Unkeyed SHA-256 digest of data into a 32-byte output buffer.
+amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
+                                uint8_t out[32]);
 
 #endif // HMAC_H

@@ -455,13 +455,10 @@ amdcuid_status_t CuidCpu::get_primary_cuid(amdcuid_primary_id &id) const {
     if (!machine_id_file.is_open()) {
       return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
     }
-    std::string machine_id;
-    std::getline(machine_id_file, machine_id);
-    machine_id_file.close();
-    fingerprint =
-        (static_cast<uint64_t>(m_info.header.fields.cpu.physical_id) << 32) |
-        (static_cast<uint64_t>(m_info.header.fields.cpu.core) << 16) |
-        (std::hash<std::string>{}(machine_id) & 0xFFFF);
+    std::string physical_core_id =
+        std::to_string(m_info.header.fields.cpu.physical_id) + ":" +
+        std::to_string(m_info.header.fields.cpu.core);
+    CuidUtilities::make_fallback_fingerprint(physical_core_id, fingerprint);
     temp = true;
   }
 

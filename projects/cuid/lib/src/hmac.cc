@@ -67,7 +67,7 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
+    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->hAlg = nullptr;
@@ -236,6 +236,24 @@ amdcuid_status_t cuid_hmac::generate_key(uint8_t out_key[key_length]) {
                                 : AMDCUID_STATUS_KEY_ERROR;
 }
 
+amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
+                                uint8_t out[32]) {
+  BCRYPT_ALG_HANDLE hAlg = nullptr;
+  BCRYPT_HASH_HANDLE hHash = nullptr;
+  if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(
+          &hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0)))
+    return AMDCUID_STATUS_HMAC_ERROR;
+  bool ok = BCRYPT_SUCCESS(
+                BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0)) &&
+            BCRYPT_SUCCESS(BCryptHashData(hHash, const_cast<PUCHAR>(data),
+                                          static_cast<ULONG>(data_len), 0)) &&
+            BCRYPT_SUCCESS(BCryptFinishHash(hHash, out, 32, 0));
+  if (hHash)
+    BCryptDestroyHash(hHash);
+  BCryptCloseAlgorithmProvider(hAlg, 0);
+  return ok ? AMDCUID_STATUS_SUCCESS : AMDCUID_STATUS_HMAC_ERROR;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // OpenSSL backends (Linux / macOS)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -269,7 +287,7 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
+    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->mac = nullptr;
@@ -317,7 +335,7 @@ cuid_hmac::cuid_hmac()
 cuid_hmac::cuid_hmac(uint8_t key_data[key_length])
     : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
   impl_ = new Impl();
-  impl_->mac = EVP_MAC_fetch(NULL, "HMAC", NULL);
+  impl_->mac = EVP_MAC_fetch(nullptr, "HMAC", nullptr);
   if (!impl_->mac) {
     std::cerr << "Error creating EVP_MAC" << std::endl;
     return;
@@ -415,7 +433,7 @@ struct cuid_hmac::Impl {
 };
 
 cuid_hmac::cuid_hmac()
-    : impl_(nullptr), key(nullptr), key_len(0), valid(false) {
+    : impl_(nullptr), key(nullptr), key_len(key_length), valid(false) {
   impl_ = new Impl();
   impl_->digest_name = "SHA256";
   impl_->ctx = HMAC_CTX_new();
@@ -590,6 +608,14 @@ amdcuid_status_t cuid_hmac::generate_key(uint8_t out_key[key_length]) {
   }
 
   return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t sha256_unkeyed(const uint8_t *data, size_t data_len,
+                                uint8_t out[32]) {
+  unsigned int len = 0;
+  return EVP_Digest(data, data_len, out, &len, EVP_sha256(), nullptr) == 1
+             ? AMDCUID_STATUS_SUCCESS
+             : AMDCUID_STATUS_HMAC_ERROR;
 }
 
 #endif // _WIN32
