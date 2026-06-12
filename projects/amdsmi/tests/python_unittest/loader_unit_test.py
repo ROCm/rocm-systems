@@ -52,10 +52,12 @@ class TestFindSmiLibrary(unittest.TestCase):
                 return _DummyLibrary()
             raise OSError("not found")
 
-        base_dir = Path(self.wrapper.__file__).resolve().parents[3] / "lib"
+        wrapper_path = Path(self.wrapper.__file__).resolve()
         expected = [
-            os.fspath(base_dir / "libamd_smi.so"),
-            os.fspath(base_dir.parent / "lib64/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[3] / "lib/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[3] / "lib64/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[4] / "lib/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[4] / "lib64/libamd_smi.so"),
             "/custom/rocm/lib/libamd_smi.so",
         ]
 
@@ -79,10 +81,12 @@ class TestFindSmiLibrary(unittest.TestCase):
             attempts.append(os.fspath(location))
             raise OSError("not found")
 
-        base_dir = Path(self.wrapper.__file__).resolve().parents[3] / "lib"
+        wrapper_path = Path(self.wrapper.__file__).resolve()
         expected = [
-            os.fspath(base_dir / "libamd_smi.so"),
-            os.fspath(base_dir.parent / "lib64/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[3] / "lib/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[3] / "lib64/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[4] / "lib/libamd_smi.so"),
+            os.fspath(wrapper_path.parents[4] / "lib64/libamd_smi.so"),
         ]
 
         with mock.patch.dict(self.wrapper.os.environ, {"ROCM_PATH": "/tmp/evil"}, clear=True):

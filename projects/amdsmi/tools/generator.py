@@ -210,11 +210,11 @@ def _get_trusted_library_dirs(rocm_root):
 
 
 def _get_smi_library_locations():
-    rocm_root = Path(__file__).resolve().parents[3]
     possible_locations = []
-    for lib_dir in _get_trusted_library_dirs(rocm_root):
-        possible_locations.append(lib_dir / "{library_name}")
-        possible_locations.extend(_get_versioned_library_locations(lib_dir, "{library_name}"))
+    for rocm_root in [Path(__file__).resolve().parents[3], Path(__file__).resolve().parents[4]]:
+        for lib_dir in _get_trusted_library_dirs(rocm_root):
+            possible_locations.append(lib_dir / "{library_name}")
+            possible_locations.extend(_get_versioned_library_locations(lib_dir, "{library_name}"))
 
     rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
     if rocm_path:
