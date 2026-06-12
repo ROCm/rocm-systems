@@ -481,7 +481,7 @@ static void thread_Test2(hipMemPool_t mempool, hipStream_t stream, int N, int th
     testObj.freeDevBuf(stream);
     // verify and validate
     HIP_CHECK(hipStreamSynchronize(stream));
-    results = testObj.validateResult();
+    results = testObj.validateResultThreadSafe();
     if (!results) {
       break;
     }
