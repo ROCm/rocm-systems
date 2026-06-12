@@ -48,10 +48,11 @@ release = version
 
 # Theme-related settings
 html_theme = "rocm_docs_theme"
-html_theme_options = {"flavor": "rocm"}
+html_theme_options = {"flavor": "rocm", "use_download_button": True}
 html_title = f"AMD SMI {version}"
 html_static_path = ["static"]
 html_css_files = ["amdsmi_docs.css"]
+html_extra_path = ["llms.txt"]
 
 # Extension-related settings
 sys.path.append(str(DOCS_DIR / "extension"))
@@ -73,6 +74,7 @@ myst_fence_as_directive = ["mermaid"]
 #   {{ AMDSMI_VERSION }}
 #   ```
 myst_substitutions = {"AMDSMI_VERSION": version}
+rocm_docs_generate_llms_full = True
 
 # Builder-related settings
 exclude_patterns = [
