@@ -186,7 +186,12 @@ jobs:
           - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+      # NOTE: --network=host is documented as unsupported in container.options
+      # (GitHub manages the job container's network). Added here to empirically
+      # confirm whether this self-hosted runner honors it; if the runner rejects
+      # it, the proven fallback is launching the image via `docker run
+      # --network=host` from a no-container: host job (probe 27423955481).
+      options: --rm --privileged --network=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
