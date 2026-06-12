@@ -24,12 +24,23 @@
 #include <elf.h>
 #include <hsa.h>
 #include <hsa_api_trace.h>
+#include <hsa_ext_amd.h>
 #include <memory>
 #include <mutex>
 #include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#if defined(__linux__)
+// libdrm is used to read the GPU's internal chip revision (chip_rev) so HotSwap
+// can be gated to gfx1250 A0 silicon only.
+#include <amdgpu.h>
+#include <amdgpu_drm.h>
+#include <xf86drm.h>
+#include <fstream>
+#include <sstream>
+#endif
 
 #define HSA_HOTSWAP_EXPORT __attribute__((visibility("default")))
 
@@ -360,6 +371,101 @@ std::string get_agent_isa_name(hsa_agent_t agent) {
   return name;
 }
 
+#if defined(__linux__)
+// Reads the DRM render minor for the given KFD topology node by parsing
+// /sys/devices/virtual/kfd/kfd/topology/nodes/<node>/properties (lines of the
+// form "<key> <value>"). Returns -1 on failure.
+int read_drm_render_minor(uint32_t kfd_node_id) {
+  static const char *const kTopologyDirs[] = {
+      "/sys/devices/virtual/kfd/kfd/topology/nodes/",
+      "/sys/class/kfd/kfd/topology/nodes/"};
+
+  for (const char *dir : kTopologyDirs) {
+    std::ifstream props(dir + std::to_string(kfd_node_id) + "/properties");
+    if (!props) {
+      continue;
+    }
+    std::string key;
+    uint64_t value = 0;
+    while (props >> key >> value) {
+      if (key == "drm_render_minor") {
+        return static_cast<int>(value);
+      }
+    }
+  }
+  return -1;
+}
+
+// Queries the GPU's internal chip revision (A0 == 0, A1 == 1, ...) via libdrm.
+// Returns -1 on failure.
+int query_chip_rev(int render_minor) {
+  const int drm_fd = drmOpenRender(render_minor);
+  if (drm_fd < 0) {
+    return -1;
+  }
+
+  uint32_t major_ver = 0;
+  uint32_t minor_ver = 0;
+  amdgpu_device_handle dev = nullptr;
+  int chip_rev = -1;
+
+  if (amdgpu_device_initialize(drm_fd, &major_ver, &minor_ver, &dev) == 0) {
+    drm_amdgpu_info_device dev_info = {};
+    if (amdgpu_query_info(dev, AMDGPU_INFO_DEV_INFO, sizeof(dev_info),
+                          &dev_info) == 0) {
+      chip_rev = static_cast<int>(dev_info.chip_rev);
+    }
+    amdgpu_device_deinitialize(dev);
+  }
+
+  drmClose(drm_fd);
+  return chip_rev;
+}
+#endif // __linux__
+
+// Returns true only when the agent is gfx1250 silicon at chip revision A0
+// (internal chip_rev == 0). On non-Linux platforms, or when the gfx target or
+// chip revision cannot be determined, returns false so HotSwap stays disabled.
+// The (potentially DRM-mutex-serializing) libdrm query is performed once per
+// agent and cached, since code-object loads can be frequent.
+bool agent_is_gfx1250_a0(hsa_agent_t agent) {
+#if defined(__linux__)
+  static std::mutex cache_mutex;
+  static std::unordered_map<uint64_t, bool> cache;
+
+  {
+    std::scoped_lock lock(cache_mutex);
+    const auto it = cache.find(agent.handle);
+    if (it != cache.end()) {
+      return it->second;
+    }
+  }
+
+  bool result = false;
+  if (get_agent_isa_name(agent).find("gfx1250") != std::string::npos) {
+    uint32_t kfd_node_id = 0;
+    if (hsa_agent_get_info(
+            agent,
+            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+            &kfd_node_id) == HSA_STATUS_SUCCESS) {
+      const int render_minor = read_drm_render_minor(kfd_node_id);
+      if (render_minor >= 0) {
+        result = (query_chip_rev(render_minor) == 0);  // A0
+      }
+    }
+  }
+
+  {
+    std::scoped_lock lock(cache_mutex);
+    cache[agent.handle] = result;
+  }
+  return result;
+#else
+  (void)agent;
+  return false;
+#endif
+}
+
 hsa_status_t load_original_reader(hsa_executable_t executable, hsa_agent_t agent,
                                   hsa_code_object_reader_t code_object_reader,
                                   const char *options,
@@ -444,6 +550,14 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
                          &reader_from_file);
 
     if (!local_bytes) {
+      return load_original_reader(executable, agent, code_object_reader,
+                                  options, loaded_code_object,
+                                  reader_from_file);
+    }
+
+    // Gate HotSwap to gfx1250 A0 silicon. On any other GPU or stepping, load
+    // the original code object unchanged instead of routing through COMGR.
+    if (!agent_is_gfx1250_a0(agent)) {
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
                                   reader_from_file);

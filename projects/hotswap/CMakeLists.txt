@@ -13,6 +13,14 @@ find_package(amd_comgr CONFIG REQUIRED)
 
 find_path(HSA_INCLUDE_DIR hsa.h PATHS ${HSA_RUNTIME_INC} NO_DEFAULT_PATH REQUIRED)
 
+# libdrm / libdrm_amdgpu are used on Linux to read the GPU's internal chip
+# revision (chip_rev) so HotSwap can be gated to gfx1250 A0 silicon only.
+if(NOT WIN32)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
+  pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
+endif()
+
 # Shared library for HSA_TOOLS_LIB usage
 set(HOTSWAP_PLATFORM_IO_SRC hotswap_platform_io_posix.cpp)
 if(WIN32)
@@ -32,6 +40,9 @@ target_include_directories(hsa-hotswap PRIVATE
 )
 
 target_link_libraries(hsa-hotswap PRIVATE amd_comgr)
+if(NOT WIN32)
+  target_link_libraries(hsa-hotswap PRIVATE PkgConfig::DRM PkgConfig::DRM_AMDGPU)
+endif()
 set_target_properties(hsa-hotswap PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
 
