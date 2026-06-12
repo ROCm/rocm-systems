@@ -55,6 +55,8 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD,
   ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC,
 
+  ncclSymkKernelId_AlltoAll_ST,
+
   ncclSymkKernelId_Count
 };
 

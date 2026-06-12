@@ -40,4 +40,6 @@ template<template<typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_RailA2A_LsaLDMC(struct ncclSymkDevWorkArgs const* args);
 
 __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args);
+
+__device__ __forceinline__ void ncclSymkRun_AlltoAll_ST(struct ncclSymkDevWorkArgs const* args);
 #endif

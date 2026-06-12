@@ -63,7 +63,8 @@ ldmc_algos = ["RSxLDMC_AGxSTMC", "LDMC", "RailA2A_LsaLDMC"]
 coll_to_lower = {
   "AllGather": "all_gather",
   "AllReduce": "all_reduce",
-  "ReduceScatter": "reduce_scatter"
+  "ReduceScatter": "reduce_scatter",
+  "AlltoAll": "all_to_all"
 }
 
 red_to_ncclDevRedOp = {
@@ -93,6 +94,8 @@ ty_to_cxxtype = {
 def enumerate_kernels():
   for algo in ["LL","ST"]:
     yield Rec(coll="AllGather", algo=algo)
+  for algo in ["ST"]:
+    yield Rec(coll="AlltoAll", algo=algo)
   for red in all_reds:
     for ty in all_tys:
       for algo in ["AGxLL_R","RSxLD_AGxST"]:

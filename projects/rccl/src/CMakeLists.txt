@@ -71,6 +71,7 @@ set(SRC_FILES
   device/symmetric/all_gather.cuh
   device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh
+  device/symmetric/all_to_all.cuh
   device/symmetric/data_ops.cuh
   device/symmetric/gin_scratch.h
   device/symmetric/gin_scratch__funcs.h

@@ -32,7 +32,8 @@ constexpr char const* kernelName[] = {
   "ReduceScatter_LD",
   "ReduceScatter_LDMC",
   "ReduceScatter_RailA2A_LsaLD",
-  "ReduceScatter_RailA2A_LsaLDMC"
+  "ReduceScatter_RailA2A_LsaLDMC",
+  "AlltoAll_ST"
 };
 
 constexpr uint32_t kernelMask_STMC = 1<<ncclSymkKernelId_AllGather_LLMC |
@@ -74,6 +75,8 @@ constexpr uint32_t kernelMask_RS = 1<<ncclSymkKernelId_ReduceScatter_LD |
                                    1<<ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                    1<<ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC;
 
+constexpr uint32_t kernelMask_A2A = 1<<ncclSymkKernelId_AlltoAll_ST;
+
 constexpr uint32_t kernelMask_LSA = 1<<ncclSymkKernelId_AllReduce_AGxLL_R |
                                     1<<ncclSymkKernelId_AllReduce_AGxLLMC_R |
                                     1<<ncclSymkKernelId_AllReduce_RSxLD_AGxST |
@@ -88,7 +91,8 @@ constexpr uint32_t kernelMask_LSA = 1<<ncclSymkKernelId_AllReduce_AGxLL_R |
                                     1<<ncclSymkKernelId_ReduceScatter_LL |
                                     1<<ncclSymkKernelId_ReduceScatter_LD |
                                     1<<ncclSymkKernelId_ReduceScatter_LDMC |
-                                    1<<ncclSymkKernelId_ReduceScatter_TmaLD;
+                                    1<<ncclSymkKernelId_ReduceScatter_TmaLD |
+                                    1<<ncclSymkKernelId_AlltoAll_ST;
 
 constexpr uint32_t kernelMask_Gin = 1<<ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1<<ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
@@ -114,6 +118,7 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
   case ncclFuncAllGather: return kernelMask_AG;
   case ncclFuncAllReduce: return kernelMask_AR;
   case ncclFuncReduceScatter: return kernelMask_RS;
+  case ncclFuncAlltoAll: return kernelMask_A2A;
   default: return 0;
   }
 }
@@ -464,6 +469,9 @@ static void queryModel_lsa(struct ncclComm* comm, ncclSymkKernelId k, size_t nBy
     busMultiplier = 0.55*nRanks;
     nMaxBlocks = nMaxBlocksNvls;
     break;
+  case ncclSymkKernelId_AlltoAll_ST:
+    busBytes = (nRanks-1)*nBytes;
+    break;
   }
 
   nMaxBlocks = std::min<int>(nMaxBlocks, comm->config.maxCTAs);
@@ -623,6 +631,8 @@ static bool ncclSymkImplemented(ncclFunc_t coll, int/*ncclDevRedOp_t*/ red, nccl
       return isFloat && ty != ncclFloat64;
     }
     return false;
+  case ncclFuncAlltoAll:
+    return true;
   default:
     return false;
   }
@@ -706,6 +716,8 @@ ncclResult_t ncclSymkPickKernel(
     if (winRegType != ncclSymSendRegRecvReg && comm->nNodes > 1) kmask &= ~kernelMask_Gin;
   } else if (coll == ncclFuncReduceScatter) {
     if (winRegType != ncclSymSendRegRecvReg && winRegType != ncclSymSendRegRecvNonreg) kmask &= kernelMask_LL;
+  } else if (coll == ncclFuncAlltoAll) {
+    if (winRegType != ncclSymSendRegRecvReg) kmask = 0;
   }
 
   ncclSymkKernelId bestKernel = ncclSymkKernelId_Count;
