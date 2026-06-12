@@ -160,6 +160,118 @@ jobs:
           ' 2>&1
           echo "  (PASS criteria: host-netns lists more than eth0+lo, including 0x1dd8 ports)"
 
+  # PROTOTYPE (experiment only): validate the "Approach B" host-netns path on a
+  # single distro before converting the whole build-and-test matrix.
+  #
+  # Why this exists: AI-NIC discovery only enumerates a NIC when it has a live
+  # netdev under /sys/class/net. GitHub's container: key puts the job in a
+  # runner-managed network namespace that hides the host NICs, and --network=host
+  # in container.options is rejected (conflicts with the runner-injected network,
+  # exit 125 — run 27425019397). So instead of using container:, we run on the
+  # host and launch the per-distro image OURSELVES with `docker run --network=host`,
+  # then `docker exec` each step into it. This mirrors what the GitHub runner does
+  # internally (a long-lived `tail -f /dev/null` container + exec per step) but in
+  # the HOST network namespace, so /sys/class/net (and thus --nic) sees real NICs.
+  #
+  # Scoped to Ubuntu22 only; the existing container:-based build-and-test job is
+  # left untouched. If this proves out, the same pattern is applied to the matrix.
+  nic-hostnetns-proto:
+    name: PROTO nic-hostnetns (Ubuntu22)
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    env:
+      CTR: amdsmi-ci-proto-ubuntu22-${{ github.run_id }}-${{ github.run_attempt }}
+      OS_LABEL: Ubuntu22
+      RESULTS_DIR: /tmp/test-results-proto-Ubuntu22
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Start host-netns container
+        run: |
+          set -euo pipefail
+          IMAGE="${{ vars.Ubuntu22_DOCKER_IMAGE }}"
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: Ubuntu22_DOCKER_IMAGE variable is unset"
+            exit 1
+          fi
+          echo "Launching $IMAGE as $CTR (host netns)"
+          # Same device/cap/mount flags as the container: job options, but we
+          # add --network=host and run detached with a no-op keepalive so we can
+          # exec each subsequent step into the running container.
+          docker run -d --name "$CTR" --network=host --privileged \
+            --device=/dev/kfd --device=/dev/dri --group-add video \
+            --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
+            --shm-size=64G --cap-add=SYS_MODULE \
+            -v /lib/modules:/lib/modules \
+            -v "$GITHUB_WORKSPACE":/work -w /work \
+            -u root "$IMAGE" tail -f /dev/null
+          echo "Container started:"
+          docker ps --filter "name=$CTR" --format '  {{.ID}} {{.Image}} {{.Status}}'
+
+      - name: Verify host-netns NIC visibility (gate)
+        run: |
+          set -euo pipefail
+          echo "===== /sys/class/net inside container (expect host NICs, not just eth0/lo) ====="
+          docker exec "$CTR" sh -c 'ls /sys/class/net'
+          echo "===== Pensando (0x1dd8) netdevs ====="
+          docker exec "$CTR" sh -c '
+            found=0
+            for n in /sys/class/net/*; do
+              [ -e "$n/device" ] || continue
+              iface=$(basename "$n")
+              tgt=$(readlink -f "$n/device" 2>/dev/null)
+              v=$(cat "$tgt/vendor" 2>/dev/null)
+              d=$(cat "$tgt/device" 2>/dev/null)
+              if [ "$v" = "0x1dd8" ]; then
+                printf "  %-14s -> %s vendor=%s device=%s\n" "$iface" "$(basename "$tgt")" "$v" "$d"
+                found=1
+              fi
+            done
+            [ "$found" = "1" ] || { echo "FAIL: no 0x1dd8 NIC netdevs visible in host netns"; exit 1; }
+          '
+
+      - name: Build and install (in host-netns container)
+        run: |
+          set -euo pipefail
+          docker exec -w /work "$CTR" bash -lc '
+            set -euo pipefail
+            SCRIPT=$(find /work -path "*/projects/amdsmi/tests/amdsmi_build/run_amdsmi_build.py" | head -1)
+            [ -n "$SCRIPT" ] || { echo "ERROR: run_amdsmi_build.py not found"; exit 1; }
+            PROJECT_DIR=$(find /work -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \; | head -1)
+            echo "SCRIPT=$SCRIPT PROJECT_DIR=$PROJECT_DIR"
+            python3 "$SCRIPT" \
+              --project-dir "$PROJECT_DIR" \
+              --os-label '"$OS_LABEL"' \
+              --test-results-dir '"$RESULTS_DIR"'
+          '
+
+      - name: Run CLI tests (NIC now enumerable)
+        run: |
+          set -euo pipefail
+          docker exec -w /work "$CTR" bash -lc '
+            set -euo pipefail
+            mkdir -p '"$RESULTS_DIR"'
+            echo "-- amd-smi static --nic (should list real NICs in host netns) --"
+            amd-smi static --nic 2>&1 | head -40 || true
+            cd /opt/rocm/share/amd_smi/tests/python_unittest
+            ./cli_unit_test.py -v > '"$RESULTS_DIR"'/cli_test_output.txt 2>&1
+          '
+
+      - name: CLI Test Results
+        if: always()
+        run: |
+          docker exec "$CTR" sh -c 'cat '"$RESULTS_DIR"'/cli_test_output.txt' 2>/dev/null \
+            || echo "No CLI test results"
+
+      - name: Cleanup container
+        if: always()
+        run: docker rm -f "$CTR" || true
+
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the
