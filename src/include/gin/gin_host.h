@@ -13,8 +13,9 @@
 #include "nccl_gin.h"
 #include "os.h"
 #include "nccl_device/gin/gin_device_host_common.h"
+#include <atomic>
+#include <shared_mutex>
 #include <thread>
-#include <mutex>
 
 struct ncclGinStateDevComm {
   int contextCount;
@@ -40,10 +41,15 @@ struct ncclGinState {
   ncclAffinity cpuAffinity;
   bool connected;
   bool supported;              // True if any backend is loaded on this comm.
-  bool proxyThreadCreated;     // Set once the GIN progress thread is spawned.
-  bool proxyThreadStopSignal;  // Signals the GIN progress thread to exit.
-  std::thread thread;
-  std::mutex mutex;
+  int proxyNthreads;           // Number of GIN progress threads.
+  bool proxyThreadsCreated;     // Set once the GIN progress thread is spawned.
+  std::atomic<bool> proxyThreadStopSignal;  // Signals the GIN progress thread to exit.
+  // Use std::shared_timed_mutex (C++14) rather than std::shared_mutex (C++17)
+  // because NCCL targets C++14 for CUDA < 13.
+  std::shared_timed_mutex devCommRwMutex;  // Readers: proxy threads; Writer: main thread (setup/free).
+  // When true, readers skip locking devCommRwMutex. Prevents writer starvation.
+  std::atomic<bool> writePending;
+  std::thread thread[NCCL_GIN_MAX_CONNECTIONS];
   ncclResult_t asyncResult;
 
   struct ncclGinStateDevComm* devComms;

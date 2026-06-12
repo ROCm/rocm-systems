@@ -19,7 +19,8 @@
 #include "plugin/nccl_net.h"
 #include "os.h"
 #include <thread>
-#include <mutex>
+#include <atomic>
+#include <shared_mutex>
 
 #define NCCL_GIN_MAX_CONNECTIONS 4
 
@@ -94,10 +95,12 @@ struct ncclGinState {
   ncclAffinity cpuAffinity;
   bool connected;
   bool supported;
-  bool proxyThreadCreated;
-  bool proxyThreadStopSignal;
-  std::thread thread;
-  std::mutex mutex;
+  int proxyNthreads;
+  bool proxyThreadsCreated;     // Set once the GIN progress thread is spawned.
+  std::atomic<bool> proxyThreadStopSignal;  // Signals the GIN progress thread to exit.
+  std::atomic<bool> writePending;
+  std::shared_timed_mutex devCommRwMutex;
+  std::thread thread[NCCL_GIN_MAX_CONNECTIONS];
   ncclResult_t asyncResult;
   struct ncclGinStateDevComm* devComms;
   ncclGinConnectionType_t ginConnectionType;
