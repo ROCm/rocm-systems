@@ -38,7 +38,8 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
                                        long long int *end_time, char *source,
                                        char *dest, size_t size, TestType type,
                                        ShmemContextType ctx_type,
-                                       int wf_size, int batch) {
+                                       int wf_size, int batch,
+                                       int *grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
@@ -63,6 +64,10 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
       rocshmem_ctx_quiet(ctx);
       __syncthreads();
       if (i == skip) {
+        // Global barrier ensures all WGs have finished their skip-region
+        // puts before any WG starts timing, preventing skip traffic from
+        // contaminating the timed window.
+        grid_barrier(grid_psync, gridDim.x);
         if (is_thread_zero_in_wave()) {
           start_time[idx] = wall_clock64();
         }
@@ -103,6 +108,20 @@ WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
   size_t buff_size = max_msg_size * batch_size * args.num_wgs * num_warps;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
+  CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
+
+  int max_co_resident_wgs_per_cu = 0;
+  CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &max_co_resident_wgs_per_cu, WaveFrontPrimitiveTest, args.wg_size, 0));
+  const int max_sustainable_wgs =
+      max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
+  if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
+    std::cout << "Warning: Requested work-groups (" << args.num_wgs
+              << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
+              << "). Capping to " << max_sustainable_wgs
+              << " to avoid grid_barrier deadlock." << std::endl;
+    args.num_wgs = max_sustainable_wgs;
+  }
 
   switch (_type) {
     case WAVEPutTestType:
@@ -141,11 +160,13 @@ WaveFrontPrimitiveTester::~WaveFrontPrimitiveTester() {
 
   free_test_buffer(local, args.local_buf_type);
   free_test_buffer(remote);
+  CHECK_HIP(hipFree(grid_psync));
 }
 
 void WaveFrontPrimitiveTester::resetBuffers(size_t size) {
   size_t buff_size = size * batch_size * args.num_wgs * num_warps;
-  CHECK_HIP(hipMemset(dest, '1', buff_size));
+  CHECK_HIP(hipMemsetAsync(dest, '1', buff_size, stream));
+  CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
 }
 
 void WaveFrontPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
@@ -155,7 +176,7 @@ void WaveFrontPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(WaveFrontPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
                      source, dest, size, _type, _shmem_context,
-                     wf_size, batch_size);
+                     wf_size, batch_size, grid_psync);
 
   num_msgs = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;

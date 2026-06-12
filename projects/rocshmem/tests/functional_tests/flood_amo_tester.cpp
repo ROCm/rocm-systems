@@ -205,8 +205,8 @@ FloodAmoTester::~FloodAmoTester() {
 }
 
 void FloodAmoTester::resetBuffers([[maybe_unused]] size_t size) {
-  CHECK_HIP(hipMemset(d_buf, 0, sizeof(uint64_t) * args.num_wgs));
-  CHECK_HIP(hipMemset(grid_psync, 0, 4 * sizeof(int)));
+  CHECK_HIP(hipMemsetAsync(d_buf, 0, sizeof(uint64_t) * args.num_wgs, stream));
+  CHECK_HIP(hipMemsetAsync(grid_psync, 0, 4 * sizeof(int), stream));
 }
 
 void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
