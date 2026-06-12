@@ -1818,6 +1818,14 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       bool finish = false;
       bool polling = false;
       bool init_age = true;
+      // Nap bounds for the no-interrupt polling mode below. poll_nap_us is
+      // re-initialized here, i.e. once per outer-loop iteration (one per new
+      // wait batch), so the backoff only compounds within a single idle wait
+      // and every new wait starts again at the floor -- the escalated value
+      // cannot carry across waits.
+      constexpr int kPollNapFloorUs = 20;
+      constexpr int kPollNapCeilingUs = 2000;
+      int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
         // If exception or WaitAny(), then finish with just one iterration
@@ -1912,6 +1920,22 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             break;
           }
           init_age = false;
+        } else if (polling && !finish) {
+          // No interrupt-backed event is available for at least one pending
+          // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
+          // that is every signal, since it implements no KFD events at all.
+          // Without a sleep this loop monopolizes a CPU core re-scanning the
+          // signal values for the whole lifetime of the async-events thread,
+          // idle or not; the two async-events threads cost ~2 cores in every
+          // process that has merely touched the GPU
+          // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
+          // doubling from 20us up to a 2ms cap, so a wait that completes
+          // quickly keeps low observation latency while a long-lived idle
+          // wait costs almost no CPU. Progress resets the escalation: a
+          // processed event leaves this inner loop, and the next wait starts
+          // again from the floor.
+          os::uSleep(poll_nap_us);
+          poll_nap_us = std::min(poll_nap_us * 2, kPollNapCeilingUs);
         }
       }
     }
