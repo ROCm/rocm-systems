@@ -1403,6 +1403,24 @@ class TestAmdSmiCli(unittest.TestCase):
                 (f"amd-smi ras --afid --folder {symlink_dir}", self.FAIL),
             ]
             self.RunCmds(cmds)
+
+            # The --json output must be a flat list of per-file objects, not a
+            # doubly-wrapped [[...]]. Guards against the logger wrapping a list
+            # assigned to self.output a second time.
+            cmd = f"amd-smi ras --afid --folder {tmp_dir} --json"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            json_data = json.loads(data)
+            self.assertIsInstance(json_data, list, f"'{cmd}' did not emit a JSON list")
+            for entry in json_data:
+                self.assertIsInstance(
+                    entry,
+                    dict,
+                    f"'{cmd}' emitted a non-object element (double-wrapped?): {entry!r}",
+                )
+                self.assertIn("cper_file", entry)
+                self.assertIn("afids", entry)
+                self.assertIn("decode_failed", entry)
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         return
