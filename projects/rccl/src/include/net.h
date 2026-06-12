@@ -34,7 +34,7 @@ extern ncclNet_t ncclNetSocket;
 extern ncclGin_t ncclGinIbGdaki;
 #endif
 extern ncclGin_t ncclGinIbProxy;
-#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
+#if defined(ENABLE_ROCSHMEM_GIN)
 extern ncclGin_t ncclGinRocshmem;
 #endif
 
