@@ -15,6 +15,8 @@
 
 #include <gtest/gtest.h>
 
+#include <sys/wait.h>
+
 #include <array>
 #include <cstdio>
 #include <memory>
@@ -43,7 +45,9 @@ struct file_op
 };
 
 // Run a shell command and capture its stdout. Returns false if the command
-// could not be launched.
+// could not be launched OR exited with a non-zero status, so a failed `nm`
+// (e.g. an unreadable library path) is reported as a hard error rather than
+// silently producing empty output and masking a leak.
 bool
 run_capture(const std::string& command, std::string& output)
 {
@@ -60,7 +64,11 @@ run_capture(const std::string& command, std::string& output)
     {
         output += buffer.data();
     }
-    return true;
+
+    // Reclaim the handle from the RAII guard (which still covers the read above
+    // if it threw) so we can close it ourselves and inspect the exit status.
+    const int status = pclose(pipe.release());
+    return status != -1 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 // Locate an `nm`-like tool; empty string if none is available.
@@ -93,10 +101,10 @@ TEST(sqlite3_symbol_seal, shared_library_exports_no_sqlite3_symbols)
         nm + " -D --defined-only \"" + k_shared_library + "\" 2>/dev/null", nm_output))
         << "failed to run " << nm << " on " << k_shared_library;
 
-    // Match exact sqlite3_* symbol names, e.g. "0000... T sqlite3_open"; ignore
-    // mangled C++ names that merely contain the substring "sqlite3_".
+    // Match real sqlite3_* exports (not C++ names that just contain "sqlite3_"),
+    // including versioned ones like "sqlite3_open@@SQLITE_3.45.3".
     const std::regex exported_sqlite{
-        R"(^[0-9a-fA-F]+ [A-Za-z] (sqlite3_[A-Za-z0-9_]+)$)"
+        R"(^[0-9a-fA-F]+ [A-Za-z] (sqlite3_[A-Za-z0-9_]+(?:@{1,2}[A-Za-z0-9_.-]+)?)$)"
     };
 
     std::vector<std::string> leaked;

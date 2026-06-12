@@ -216,11 +216,13 @@ add_library(profiler-hub SHARED $<TARGET_OBJECTS:profiler-hub-objects>)
 add_library(profiler-hub-static STATIC $<TARGET_OBJECTS:profiler-hub-objects>)
 set_target_properties(profiler-hub-static PROPERTIES OUTPUT_NAME profiler-hub)
 
-# Hide bundled SQLite symbols from libprofiler-hub.so, so they can not be accessed by other processes.
+# Hide bundled SQLite symbols from libprofiler-hub.so so they are not visible to other
+# shared objects loaded into the same process
 if(NOT PROFILER_HUB_SQLITE3_USE_SYSTEM)
     target_link_options(
         profiler-hub
-        PRIVATE -Wl,--exclude-libs,libprofiler-hub-sqlite3-static.a
+        PRIVATE
+            -Wl,--exclude-libs,$<TARGET_FILE_NAME:profiler-hub-sqlite3-static>
     )
 endif()
 
