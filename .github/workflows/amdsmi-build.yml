@@ -339,6 +339,24 @@ jobs:
             run "amd-smi $sub --help"
           done
 
+      - name: amd-smi static --nic output probe
+        if: always()
+        # Inspect the exact NIC static output for stdout vs file. The CLI test
+        # fails 12 'static --nic <sel> --json --file' perms with "File was
+        # empty"; this dumps stdout (works) and the written file (suspected
+        # empty) side by side to pin the file-write bug.
+        run: |
+          set +e
+          run() { echo "======================================================"; echo "===== $* ====="; echo "======================================================"; docker exec "$CTR" sh -lc "$*"; echo "----- exit: $? -----"; }
+          run 'amd-smi static --nic 0'
+          run 'amd-smi static --nic 0 --json'
+          run 'amd-smi static --nic 0 --csv'
+          # File-output variants: run, then show the file's byte size and contents.
+          run 'cd /tmp && rm -f nicout.log && amd-smi static --nic 0 --json --file /tmp/nicout.log; echo "---- file bytes ----"; wc -c /tmp/nicout.log; echo "---- file contents ----"; cat /tmp/nicout.log'
+          run 'cd /tmp && rm -f nicout.csv && amd-smi static --nic 0 --csv --file /tmp/nicout.csv; echo "---- file bytes ----"; wc -c /tmp/nicout.csv; echo "---- file contents ----"; cat /tmp/nicout.csv'
+          # Contrast: the equivalent GPU file write (which passes) for comparison.
+          run 'cd /tmp && rm -f gpuout.log && amd-smi static --gpu 0 --json --file /tmp/gpuout.log; echo "---- file bytes ----"; wc -c /tmp/gpuout.log; echo "---- file contents (head) ----"; head -20 /tmp/gpuout.log'
+
       - name: Run CLI tests (NIC now enumerable)
         run: |
           set -euo pipefail
