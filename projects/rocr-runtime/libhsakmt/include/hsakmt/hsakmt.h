@@ -445,15 +445,15 @@ hsaKmtQueueRingDoorbell(
 );
 
 /**
-  Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch. 
+  Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch.
 */
 
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtSetMemoryPolicy(
     HSAuint32       Node,                       //IN
-    HSAuint32       DefaultPolicy,     	   	    //IN  
-    HSAuint32       AlternatePolicy,       	    //IN  
+    HSAuint32       DefaultPolicy,     	   	    //IN
+    HSAuint32       AlternatePolicy,       	    //IN
     void*           MemoryAddressAlternate,     //IN (page-aligned)
     HSAuint64       MemorySizeInBytes   	    //IN (page-aligned)
     );
@@ -640,6 +640,8 @@ hsaKmtQueueWaitExternalSemaphore(
  * allocation. The memory will remain allocated even after the allocation is
  * freed by hsaKmtFreeMemory for as long as a dmabuf fd remains open or any
  * importer of that fd maintains an active reference to the memory.
+ * This is the legacy API that exports dmabuf from KFD interface. To export
+ * dmabuf from DRM interface, use hsaKmtHandleExport instead
  */
 
 HSAKMT_STATUS
@@ -754,7 +756,7 @@ HSAKMTAPI
 hsaKmtMapMemoryToGPU(
     void*           MemoryAddress,     //IN (page-aligned)
     HSAuint64       MemorySizeInBytes, //IN (page-aligned)
-    HSAuint64*      AlternateVAGPU     //OUT (page-aligned)     
+    HSAuint64*      AlternateVAGPU     //OUT (page-aligned)
     );
 
 /**
@@ -847,8 +849,8 @@ hsaKmtDbgRegister(
   Detaches the debugger process from the HW debug established by hsaKmtDbgRegister() API
 */
 
-HSAKMT_STATUS 
-HSAKMTAPI 
+HSAKMT_STATUS
+HSAKMTAPI
 hsaKmtDbgUnregister(
     HSAuint32       NodeId      //IN
     );
@@ -940,7 +942,7 @@ hsaKmtDbgGetQueueData(
     bool suspend_queues //In
     );
 
-/**   
+/**
   Check whether gpu firmware and kernel support debugging
 */
 HSAKMT_STATUS
@@ -1038,7 +1040,7 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtPmcStartTrace(
     HSATraceId  TraceId,                //IN
-    void*       TraceBuffer,            //IN (page aligned) 
+    void*       TraceBuffer,            //IN (page aligned)
     HSAuint64   TraceBufferSizeBytes    //IN (page aligned)
     );
 
@@ -1066,8 +1068,8 @@ hsaKmtPmcStopTrace(
   Sets trap handler and trap buffer to be used for all queues associated with the specified NodeId within this process context
 */
 
-HSAKMT_STATUS 
-HSAKMTAPI 
+HSAKMT_STATUS
+HSAKMTAPI
 hsaKmtSetTrapHandler(
     HSAuint32           NodeId,                   //IN
     void*               TrapHandlerBaseAddress,   //IN
@@ -1389,9 +1391,17 @@ hsaKmtSetSigbusDelay(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleImport(
-    const HsaExternalHandleDesc* ImportDesc,
+    const HsaHandleImportDesc* ImportDesc,
     HsaHandleImportResult* ImportResult,
     HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleExport(
+    const HsaHandleExportDesc* ExportDesc,
+    HsaMemoryExportResult* ExportResult,
+    HsaHandleExportFlags* Flags
 );
 
 HSAKMT_STATUS
@@ -1431,8 +1441,14 @@ HSAKMTAPI
 hsaKmtMemoryGetCpuAddr(
   HsaAMDGPUDeviceHandle DeviceHandle,
   HsaMemoryObjectHandle MemoryHandle,
-  HSAint32* fd, // OUT
   HSAuint64* cpu_addr // OUT
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetAmdGPUDeviceFd(
+  HsaAMDGPUDeviceHandle DeviceHandle, //IN
+  int *fd //OUT
 );
 
 #ifdef __cplusplus

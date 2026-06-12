@@ -352,7 +352,7 @@ class ThunkLoader {
                                       HSAuint64 SizeInBytes, \
                                       uint64_t* SharedMemoryHandle);
 #endif
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaExternalHandleDesc* ImportDesc, \
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaHandleImportDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtImportExternalSemaphore))(HSAuint32 NodeId, \
@@ -366,6 +366,9 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore))(HSA_QUEUEID QueueId, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE Handle, \
                                       HSAuint64 Value);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleExport))(const HsaHandleExportDesc* desc, \
+                                      HsaMemoryExportResult* res, \
+                                      HsaHandleExportFlags* flags);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryVaMap))(HsaMemoryObjectHandle Handle, \
                                       HSAuint64 offset, \
                                       HSAuint64 size, \
@@ -378,12 +381,13 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemHandleFree))(HsaMemoryObjectHandle Handle);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr))(HsaAMDGPUDeviceHandle DeviceHandle, \
                                       HsaMemoryObjectHandle MemoryHandle, \
-                                      HSAint32* fd, \
                                       HSAuint64* cpu_addr);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryCpuMap))(HsaMemoryObjectHandle Handle, \
                                       void** out_cpu_ptr);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency))(HSAuint32 NodeId, \
                                       uint64_t* Frequency);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd))(HsaAMDGPUDeviceHandle DeviceHandle, \
+                                      HSAint32* fd);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -542,10 +546,12 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
     HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore);
     HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore);
+    HSAKMT_DEF(hsaKmtHandleExport)* HSAKMT_PFN(hsaKmtHandleExport);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
     HSAKMT_DEF(hsaKmtMemHandleFree)* HSAKMT_PFN(hsaKmtMemHandleFree);
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
+    HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)* HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd);
     HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
     HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)* HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency);
 

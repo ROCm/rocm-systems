@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "constraint.hpp"
+#include "common/units.hpp"
 #include "config.hpp"
 #include "state.hpp"
 #include "utility.hpp"
 
-#include <timemory/units.hpp>
-#include <timemory/utility/delimit.hpp>
-
 #include "logger/debug.hpp"
+
+#include <timemory/utility/delimit.hpp>
 
 #include <spdlog/fmt/ranges.h>
 
@@ -26,8 +26,6 @@ namespace constraint
 {
 namespace
 {
-namespace units = ::tim::units;
-
 using clock_type    = std::chrono::high_resolution_clock;
 using duration_type = std::chrono::duration<double, std::nano>;
 
