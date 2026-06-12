@@ -14,9 +14,9 @@
 #include "nccl_device/coop.h"
 #include "nccl_device/gin/gin_device_host_common.h"
 #include "nccl_device/gin/gin_device_common.h"
-// gin_proxy.h uses ncclGetLocalPointer; core_tmp.h only declares it — pull the
-// device inline definition so separate HIP device compilation can link.
-#include "nccl_device/impl/core__funcs.h"
+// gin_proxy.h uses ncclGetLocalPointer / ncclSymPtr; core_tmp.h / ptr.h only
+// declare them — pull impl headers so separate HIP device compilation can link.
+#include "nccl_device/impl/ptr__funcs.h"
 #include "nccl_device/gin/proxy/gin_proxy.h"
 #include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
 

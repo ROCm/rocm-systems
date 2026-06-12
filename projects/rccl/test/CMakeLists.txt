@@ -406,11 +406,20 @@ if(BUILD_TESTS)
     find_library(_RCCL_GIN_TEST_IBVERBS ibverbs)
     find_library(_RCCL_GIN_TEST_DRM drm PATHS "${ROCM_PATH}/lib" "${ROCM_PATH}/lib/rocm_sysdeps/lib")
     find_library(_RCCL_GIN_TEST_DRM_AMDGPU drm_amdgpu PATHS "${ROCM_PATH}/lib" "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    # librocshmem.a contains HIP device objects; link must run HIP device link
+    # (__hip_fatbin_*, __hip_gpubin_handle_*), same as rccl-tests alltoall_perf.
+    set(_rccl_gin_rocshmem_offload_arch_flags "")
+    foreach(_gpu_raw IN LISTS GPU_TARGETS)
+      string(REGEX REPLACE ":.*" "" _gpu "${_gpu_raw}")
+      list(APPEND _rccl_gin_rocshmem_offload_arch_flags "--offload-arch=${_gpu}")
+    endforeach()
+    list(REMOVE_DUPLICATES _rccl_gin_rocshmem_offload_arch_flags)
     foreach(_rccl_gin_test_exe IN LISTS RCCL_TEST_EXECUTABLES)
       if(TARGET ${_rccl_gin_test_exe})
         if(TARGET rocshmem_ext)
           add_dependencies(${_rccl_gin_test_exe} rocshmem_ext)
         endif()
+        target_compile_options(${_rccl_gin_test_exe} PRIVATE -fgpu-rdc)
         target_link_libraries(${_rccl_gin_test_exe} PRIVATE
           "-Wl,--whole-archive"
           "${ROCSHMEM_LIBRARY}"
@@ -429,11 +438,17 @@ if(BUILD_TESTS)
         if(_RCCL_GIN_TEST_DRM)
           target_link_libraries(${_rccl_gin_test_exe} PRIVATE "${_RCCL_GIN_TEST_DRM}")
         endif()
+        target_link_options(${_rccl_gin_test_exe} PRIVATE
+          -fgpu-rdc
+          --hip-link
+          ${_rccl_gin_rocshmem_offload_arch_flags}
+        )
         if(UNIX AND NOT APPLE)
           target_link_options(${_rccl_gin_test_exe} PRIVATE "LINKER:--export-dynamic")
         endif()
       endif()
     endforeach()
+    unset(_rccl_gin_rocshmem_offload_arch_flags)
     unset(_rccl_gin_test_hsakmt)
     unset(_rccl_gin_test_numa)
   endif()
