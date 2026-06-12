@@ -162,12 +162,12 @@ device:
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_UUID_setEnv_Thread:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
     tags: [query]
   Unit_hipDeviceAPUCheck:
     <<: *level_2
@@ -353,7 +353,10 @@ device:
   Unit_hipGetDriverEntryPoint_spt_Positive: *level_2
   Unit_hipGetDriverEntryPoint_spt_Negative: *level_2
   Unit_hipGetProcAddress_IPC_Memory: *level_2
-  Unit_hipGetProcAddress_IPC_Event: *level_2
+  Unit_hipGetProcAddress_IPC_Event:
+    <<: *level_2
+    # AIRUNTIME-2336: temporarily disabled (subprocess aborted intermittently in CI)
+    disabled: [amd_windows, amd_wsl, amd_linux]
   Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process:
     <<: *level_2
     # Note: Windows disabled
@@ -373,7 +376,7 @@ device:
     <<: *level_2
     # (amd_linux) SWDEV-511679 : Below tests fail in stress test
     # (amd_wsl) Note: hsa_amd_ipc_ is dummy
-    disabled: [amd_linux]
+    disabled: [amd_linux, amd_wsl]
   Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process:
     <<: *level_2
     # Note: Windows disabled

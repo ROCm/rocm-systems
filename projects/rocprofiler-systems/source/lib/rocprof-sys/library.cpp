@@ -42,7 +42,7 @@
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/shmem_gotcha_policy.hpp"
-#include "library/components/ucx_gotcha.hpp"
+#include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
 #include "library/kokkosp.hpp"
@@ -68,7 +68,6 @@
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/signals/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
@@ -691,7 +690,7 @@ rocprofsys_init_tooling_hidden(void)
                 rocprofiler_sdk::pause();
                 sampling::pause();
                 component::mpi_gotcha::pause();
-                component::ucx_gotcha::pause();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::pause();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
                 component::vaapi_gotcha::pause();
                 ::rocprofsys::pthread_gotcha::pause();
@@ -705,7 +704,7 @@ rocprofsys_init_tooling_hidden(void)
                 rocprofiler_sdk::resume();
                 sampling::resume();
                 component::mpi_gotcha::resume();
-                component::ucx_gotcha::resume();
+                component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::resume();
                 component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
                 component::vaapi_gotcha::resume();
                 ::rocprofsys::pthread_gotcha::resume();
@@ -734,7 +733,7 @@ rocprofsys_init_tooling_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Setting up UCX traces...\n");
-        component::ucx_gotcha::start();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::start();
     }
 
     if(get_use_shmem())
@@ -1017,7 +1016,8 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    LOG_DEBUG("rocprofsys_push_trace :: called {}", _push_count);
+    LOG_DEBUG("rocprofsys_push_trace/rocprofsys_push_trace_with_args :: called {}",
+              _push_count);
     LOG_DEBUG("rocprofsys_pop_trace  :: called {}", _pop_count);
 
     tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
@@ -1039,7 +1039,7 @@ rocprofsys_finalize_hidden(void)
     if(get_use_ucx())
     {
         LOG_DEBUG("Shutting down UCX tracing...\n");
-        component::ucx_gotcha::shutdown();
+        component::ucx_gotcha<rocprofsys::DefaultUCXPolicy>::shutdown();
     }
 
     if(get_use_shmem())
@@ -1315,14 +1315,13 @@ rocprofsys_finalize_hidden(void)
                                              get_perfetto_output_filename()));
     }
 
-    if(_push_count > _pop_count &&
-       !get_env<bool>("ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK", false))
+    if(_push_count > _pop_count)
     {
-        throw std::runtime_error(fmt::format(
-            "rocprofsys_push_trace was called more times than "
-            "rocprofsys_pop_trace. The inverse is fine but the current state "
-            "means not every measurement was ended :: pushed: {} vs. popped: {}",
-            _push_count, _pop_count));
+        LOG_WARNING("rocprofsys_push_trace/rocprofsys_push_trace_with_args was called "
+                    "more times than rocprofsys_pop_trace. This is not fatal, but trace "
+                    "output will not include regions that were still open during "
+                    "finalization :: pushed: {} vs. popped: {}.",
+                    _push_count, _pop_count);
     }
 
     // debug::close_file();

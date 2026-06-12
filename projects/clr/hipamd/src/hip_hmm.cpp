@@ -207,7 +207,7 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes,
   }
 
   size_t offset = 0;
-  amd::Memory* memObj = getMemoryObject(dev_ptr, offset);
+  amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
   if (memObj) {
     if (!(memObj->getMemFlags() & (CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_ALLOC_HOST_PTR))) {
       HIP_RETURN(hipErrorInvalidValue);
@@ -248,11 +248,12 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
   // host-accessible region of system-allocated pageable memory.
   // This type of memory may only be specified if the device associated with the
   // stream reports a non-zero value for the device attribute hipDevAttrPageableMemoryAccess.
+  hip::Device* dev = hip::getCurrentDevice();
   hip::Stream* hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-                                ? hip::getCurrentDevice()->NullStream()
+                                ? dev->NullStream()
                                 : hip::getStream(stream);
   size_t offset = 0;
-  amd::Memory* memObj = getMemoryObject(dev_ptr, offset);
+  amd::Memory* memObj = getMemoryObject(dev, dev_ptr, offset);
   if (memObj == nullptr) {
     if (hip_stream->GetDevice()->devices()[0]->info().hmmCpuMemoryAccessible_ == 0) {
       HIP_RETURN(hipErrorInvalidValue);
@@ -301,12 +302,13 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
     return hipErrorMemoryAllocation;
   }
   size_t offset = 0;  // this is ignored
-  amd::Memory* memObj = getMemoryObject(*ptr, offset);
+  hip::Device* hipDev = hip::getCurrentDevice();
+  amd::Memory* memObj = getMemoryObject(hipDev, *ptr, offset);
   if (memObj == nullptr) {
     return hipErrorMemoryAllocation;
   }
   // saves the current device id so that it can be accessed later
-  memObj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
+  memObj->getUserData().deviceId = hipDev->deviceId();
 
   ClPrint(amd::LOG_INFO, amd::LOG_API, "ihipMallocManaged ptr=0x%zx", *ptr);
   return hipSuccess;
@@ -321,7 +323,7 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   getStreamPerThread(stream);
 
   size_t offset = 0;
-  amd::Memory* memObj = getMemoryObject(dev_ptr, offset);
+  amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
   if ((memObj != nullptr) && (count > (memObj->getSize() - offset))) {
     return hipErrorInvalidValue;
   }
@@ -438,7 +440,8 @@ hipError_t ihipMemPrefetchBatchAsync(void** dev_ptrs, size_t* sizes, size_t coun
 
     // Batched memory object lookup with single lock acquisition
     std::vector<size_t> offsets;
-    std::vector<amd::Memory*> mem_objs = getMemoryObjectBatch(dev_ptrs, count, offsets);
+    std::vector<amd::Memory*> mem_objs =
+        getMemoryObjectBatch(hip::getCurrentDevice(), dev_ptrs, count, offsets);
 
     // Validate and prepare each operation
     size_t current_loc = 0;
@@ -536,7 +539,7 @@ hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advi
   }
 
   size_t offset = 0;
-  amd::Memory* memObj = getMemoryObject(dev_ptr, offset);
+  amd::Memory* memObj = getMemoryObject(hip::getCurrentDevice(), dev_ptr, offset);
   if (memObj && count > (memObj->getSize() - offset)) {
     return hipErrorInvalidValue;
   }

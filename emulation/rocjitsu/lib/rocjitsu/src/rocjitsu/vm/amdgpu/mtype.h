@@ -30,6 +30,23 @@ enum class Mtype : uint8_t {
   NT = 4, ///< Non-temporal - bypass L1, L2 only, evict soon.
 };
 
+/// @brief Combine instruction-level and PTE-level MTYPE, matching the GPU MMU.
+///
+/// @details Real AMDGPU hardware stores MTYPE bits in each PTE (bits 57:55 on
+/// GFX9+). The GPU MMU combines the PTE MTYPE with the instruction's requested
+/// MTYPE — the more restrictive (less cached) one wins. This prevents
+/// instructions from requesting more caching than the page mapping allows.
+///
+/// Restrictiveness order: UC (0) < CC (1) < RW (2). NT is handled specially:
+/// if the PTE forces UC or CC, the NT instruction is downgraded accordingly.
+inline constexpr Mtype effective_mtype(Mtype instruction_mtype, Mtype pte_mtype) {
+  if (pte_mtype == Mtype::RW || pte_mtype == Mtype::WB)
+    return instruction_mtype;
+  if (instruction_mtype == Mtype::NT)
+    return (pte_mtype < Mtype::RW) ? pte_mtype : Mtype::NT;
+  return (pte_mtype < instruction_mtype) ? pte_mtype : instruction_mtype;
+}
+
 } // namespace amdgpu
 } // namespace rocjitsu
 
