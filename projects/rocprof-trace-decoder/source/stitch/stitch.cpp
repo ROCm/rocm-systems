@@ -112,11 +112,7 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
             inst_index++;
             continue;
         }
-#ifndef ARCH_MODEL
         else if (bValid(inst.pc))
-#else
-        else if (bValid(inst.pc) || inst_index == 0)
-#endif
         {
             inst_index++;
             next = nullptr;
@@ -151,6 +147,15 @@ std::pair<size_t, barrier_list_t> Stitcher::stitchWave(class WaveDataInternal& w
                 return {0, barrier_gap};
             }
             continue;
+        }
+        else if (inst_index == 0)
+        {
+            // AM
+            try {
+                next = pctranslator->getcode(inst.pc);
+            } catch(...) {};
+
+            if (!next) return {0, barrier_gap};
         }
 
         line = std::move(next);
@@ -414,10 +419,4 @@ void Stitcher::stitch(WaveDataInternal& wave)
 Stitcher::Stitcher(
     std::shared_ptr<ICodeServicer> service, rocprof_trace_decoder_trace_callback_t _callback, void* _cbdata
 ) :
-codeobj_service(service), callback(_callback), cbdata(_cbdata)
-{
-#ifndef ARCH_MODEL
-    raw_code.push_back(std::make_shared<assemblyLine>());
-    raw_code.at(0)->line = "; Begin ASM";
-#endif
-}
+codeobj_service(service), callback(_callback), cbdata(_cbdata) {}
