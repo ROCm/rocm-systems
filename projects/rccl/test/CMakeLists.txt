@@ -180,6 +180,7 @@ if(BUILD_TESTS)
     SendRecvTests.cpp
     StandaloneTests.cpp
     _RecorderTests.cpp
+    UnrollSweepTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
@@ -326,6 +327,7 @@ if(BUILD_TESTS)
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
   endif()
 
+
   foreach(test_executable IN LISTS RCCL_TEST_EXECUTABLES)
     target_include_directories(${test_executable} PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
     target_compile_definitions(${test_executable} PRIVATE ${RCCL_COMMON_COMPILE_DEFS})
@@ -361,6 +363,12 @@ if(BUILD_TESTS)
 
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
+
+  # Propagate all-unrolls knob to rccl-UnitTests so UnrollSweepTests.cpp
+  # can skip gracefully when the library was not built with --all-unrolls.
+  if(RCCL_BUILD_ALL_UNROLLS)
+    target_compile_definitions(rccl-UnitTests PRIVATE RCCL_BUILD_ALL_UNROLLS)
+  endif()
 
   # Create install-time test file for distribution
   set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
@@ -447,6 +455,7 @@ if(BUILD_TESTS)
             message(WARNING "Skipping test categories for rccl-UnitTestsMPI: missing ${_rccl_test_categories_mpi_yaml}")
         endif()
     endif()
+
   endif()
 
   install(

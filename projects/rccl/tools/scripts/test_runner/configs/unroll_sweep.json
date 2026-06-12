@@ -1,0 +1,52 @@
+{
+  "system_configurations": {
+    "name": "RCCL-tests-gfx950-rccl-unroll-sweep-single-node",
+    "description": "Functional correctness sweep over all 6 unroll factors (1/2/4/8/16/32). Build and run against a library built with --all-unrolls."
+  },
+
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-build/test}"
+  },
+
+  "env_variables": {
+    "NCCL_DEBUG": "WARN"
+  },
+
+  "build_configuration": {
+    "install_flags": ["-l", "--disable-warp-speed", "--all-unrolls"],
+    "cmake_options": "",
+    "parallel_jobs": 64
+  },
+
+  "test_configurations": {
+    "unroll_sweep_config": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {
+          "name": "UnrollFactorSweep",
+          "description": "AllReduce correctness over unroll factors 0-5 (unroll 1/2/4/8/16/32)",
+          "test_filter": "AllReduce.UnrollFactorSweep"
+        }
+      ]
+    }
+  },
+
+  "test_suites": [
+    {
+      "name": "unroll_sweep",
+      "description": "Build with all 6 unroll factors and verify AllReduce correctness for each",
+      "config": "unroll_sweep_config",
+      "enabled": true
+    }
+  ]
+}
