@@ -39,7 +39,9 @@ struct FakeEnv {
   bool drm_open_ok = true;       // drmOpenRender success
   bool device_init_ok = true;    // amdgpu_device_initialize success
   bool query_info_ok = true;     // amdgpu_query_info success
-  int chip_rev = 0;              // reported chip revision (0 == A0)
+  int pci_rev = 0;               // PCI Config Space revision id read by the
+                                 // tool (drm_amdgpu_info_device::pci_rev;
+                                 // 0 == A0 for the gating logic)
 
   // Counters used to assert short-circuiting and caching behavior.
   int isa_query_calls = 0;       // get_agent_isa_name -> iterate_isas
@@ -120,7 +122,8 @@ int amdgpu_query_info(amdgpu_device_handle /*dev*/, unsigned info_id,
   if (info_id == AMDGPU_INFO_DEV_INFO) {
     std::memset(value, 0, size);
     auto *info = static_cast<struct drm_amdgpu_info_device *>(value);
-    info->chip_rev = static_cast<uint32_t>(g_env.chip_rev);
+    // Production query_chip_rev() reads dev_info.pci_rev, so drive that field.
+    info->pci_rev = static_cast<uint32_t>(g_env.pci_rev);
     return 0;
   }
   return -1;
@@ -205,16 +208,16 @@ void set_empty_topology() {
   }
 }
 
-// (7) gfx1250 silicon at chip_rev A0 -> true.
+// (7) gfx1250 silicon at pci_rev A0 -> true.
 void test_Gfx1250A0IsTrue() {
   printf("TEST Gfx1250A0IsTrue...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
   g_env.node_id = 3;
-  g_env.chip_rev = 0;
+  g_env.pci_rev = 0;
   set_topology_with_minor(3, 128);
   check(agent_is_gfx1250_a0(fresh_agent()) == true,
-        "gfx1250 + chip_rev A0 -> true");
+        "gfx1250 + pci_rev A0 -> true");
 }
 
 // (8) Non-gfx1250 ISA -> false, and the DRM/node-id path is never touched.
@@ -228,16 +231,16 @@ void test_NonGfx1250ShortCircuits() {
   check(g_env.drm_open_calls == 0, "non-gfx1250 does not query DRM");
 }
 
-// (9) gfx1250 but a non-A0 stepping (chip_rev != 0) -> false.
+// (9) gfx1250 but a non-A0 stepping (pci_rev != 0) -> false.
 void test_Gfx1250NonA0IsFalse() {
   printf("TEST Gfx1250NonA0IsFalse...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
   g_env.node_id = 5;
-  g_env.chip_rev = 1;  // A1
+  g_env.pci_rev = 1;  // A1
   set_topology_with_minor(5, 128);
   check(agent_is_gfx1250_a0(fresh_agent()) == false,
-        "gfx1250 + chip_rev != 0 -> false");
+        "gfx1250 + pci_rev != 0 -> false");
 }
 
 // (10) Node-id query failure -> false, and DRM is not queried.
@@ -284,7 +287,7 @@ void test_ResultIsCachedPerHandle() {
   reset_env();
   g_env.isa_name = kGfx1250Isa;
   g_env.node_id = 11;
-  g_env.chip_rev = 0;
+  g_env.pci_rev = 0;
   set_topology_with_minor(11, 128);
   const hsa_agent_t agent = fresh_agent();
   const bool first = agent_is_gfx1250_a0(agent);
@@ -301,7 +304,7 @@ void test_DistinctHandlesIndependent() {
   reset_env();
   g_env.isa_name = kGfx1250Isa;
   g_env.node_id = 13;
-  g_env.chip_rev = 0;
+  g_env.pci_rev = 0;
   set_topology_with_minor(13, 128);
   const bool a1 = agent_is_gfx1250_a0(fresh_agent());
 
