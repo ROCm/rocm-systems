@@ -17,7 +17,6 @@
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/environment/types.hpp>
 #include <timemory/log/macros.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/types.hpp>

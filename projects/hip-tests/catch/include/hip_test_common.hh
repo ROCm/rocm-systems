@@ -267,6 +267,15 @@ static void initHipCtx(hipCtx_t* pcontext) {
 #define HIP_TEST_DRIVER_INIT()
 #endif
 
+#if defined(__gfx1250__) || defined(__gfx1251__)
+// Wrap __cluster_dims__ so a test's host code is NOT compiled away when the
+// offload-arch string mixes archs that support clusters with ones that don't
+// (e.g. gfx950). The attribute is only emitted for targets with cluster support.
+#define CLUSTER_DIMS(...) __cluster_dims__(__VA_ARGS__)
+#else
+#define CLUSTER_DIMS(...)
+#endif
+
 static inline int getWarpSize() {
 #if HT_NVIDIA
   return 32;
@@ -737,6 +746,14 @@ class BlockingContext {
   int current_device_ = 0;                                                     \
   HIP_CHECK(hipGetDevice(&current_device_));                                   \
   if (!HipTest::isManagedMemorySupportedOnDevice(current_device_)) {           \
+    HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
+  }
+
+// Call to check whether managed memory is supported on the given device. Useful
+// when validating support across multiple devices without changing the current
+// device.
+#define CHECK_MANAGED_MEMORY_SUPPORT_ON_DEVICE(device)                         \
+  if (!HipTest::isManagedMemorySupportedOnDevice(device)) {                    \
     HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);             \
   }
 

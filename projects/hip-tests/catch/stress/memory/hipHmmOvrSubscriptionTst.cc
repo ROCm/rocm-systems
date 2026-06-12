@@ -19,8 +19,7 @@ __global__ void floatx2(float* ptr, size_t size) {
 }
 
 HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
-  int hmm = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&hmm, hipDeviceAttributeManagedMemory, 0));
+  const bool hmm = HipTest::isManagedMemorySupportedOnDevice(0);
 
   bool shouldRun = []() -> bool {
 #if HT_AMD  // For AMD this gcn arch needs to have xnack+
@@ -35,7 +34,7 @@ HIP_TEST_CASE(Stress_HMM_OverSubscriptionTst) {
 #endif
   }();
 
-  if (hmm == 1 && shouldRun) {
+  if (hmm && shouldRun) {
     hip::SpawnProc proc("hold_memory", true);
     proc.run_async();
     size_t freeMem, totalMem;

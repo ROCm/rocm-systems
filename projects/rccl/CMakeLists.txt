@@ -57,6 +57,14 @@ endif()
 # RCCL project
 #==================================================================================================
 project(rccl CXX)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(NCCL_OS_WINDOWS ON)
+    add_definitions(-DNCCL_OS_WINDOWS)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(NCCL_OS_LINUX ON)
+    add_definitions(-DNCCL_OS_LINUX)
+endif()
 set(ENV{NCCL_USE_CMAKE} "1")
 
 # Build options
@@ -70,18 +78,15 @@ option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on 
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
 option(BUILD_EXT_EXAMPLES                      "Build ext-{net,tuner,profiler} example plugins" OFF)
-option(COLLTRACE                               "Collective Trace Option"                       ON)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
-option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
+option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
-option(PROFILE                                 "Enable profiling"                              OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(QP_TRACKING                             "Enable per-device QP tracking"                 OFF)
@@ -141,8 +146,6 @@ endif()
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
-# ROCM NetIB patch
-include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
@@ -281,8 +284,16 @@ endif()
 if(EXPLICIT_ROCM_VERSION)
   set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
 elseif(ROCMCORE_PATH)
-  message(STATUS "Reading ROCM version from ${ROCMCORE_PATH}/.info/version")
-  file(READ "${ROCMCORE_PATH}/.info/version" rocm_version_string)
+  # Use .info/version directly, or under the 'core' symlink for multi-arch installs.
+  set(rocm_info_version_file "${ROCMCORE_PATH}/.info/version")
+  if(NOT EXISTS "${rocm_info_version_file}")
+    set(rocm_info_version_file "${ROCMCORE_PATH}/core/.info/version")
+  endif()
+  if(NOT EXISTS "${rocm_info_version_file}")
+    message(FATAL_ERROR "Could not determine ROCm version: expected '${ROCMCORE_PATH}/.info/version' or '${ROCMCORE_PATH}/core/.info/version' (set EXPLICIT_ROCM_VERSION or set ROCMCORE_PATH to a valid installation)")
+  endif()
+  message(STATUS "Reading ROCM version from ${rocm_info_version_file}")
+  file(READ "${rocm_info_version_file}" rocm_version_string)
 else()
   message(FATAL_ERROR "Could not determine ROCM version (set EXPLICIT_ROCM_VERSION or set ROCM_PATH to a valid installation)")
 endif()
@@ -623,6 +634,11 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h src/include/p
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 rocm_install(FILES       src/include/api_trace.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
+                         ${PROJECT_BINARY_DIR}/include/nccl_device.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
 ## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
@@ -697,9 +713,9 @@ if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
   if(BUILD_EXT_EXAMPLES)
-    add_subdirectory(ext-net/example)
-    add_subdirectory(ext-tuner/example)
-    add_subdirectory(ext-profiler/example)
+    add_subdirectory(plugins/net/example)
+    add_subdirectory(plugins/tuner/example)
+    add_subdirectory(plugins/profiler/example)
   endif()
   add_subdirectory(test)
 

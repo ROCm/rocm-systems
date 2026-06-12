@@ -243,7 +243,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 26
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 4
+#define AMDSMI_LIB_VERSION_MINOR 5
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -509,6 +509,19 @@ typedef enum {
   AMDSMI_COMPUTE_PARTITION_CPX           /**< Core mode (CPX)- Per-chip XCC with
                                               shared memory */
 } amdsmi_compute_partition_type_t;
+
+/**
+ * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory is evenly capped per XCP
+  AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP in the partition may
+                                                   //!< use the full partition memory
+} amdsmi_compute_partition_mem_alloc_mode_t;
 
 /**
  * @brief Memory Partitions
@@ -1241,7 +1254,11 @@ typedef enum {
   AMDSMI_LINK_TYPE_PCIE = 1,            //!< Peripheral Component Interconnect Express Link Type
   AMDSMI_LINK_TYPE_XGMI = 2,            //!< GPU Memory Interconnect (multi GPU communication)
   AMDSMI_LINK_TYPE_NOT_APPLICABLE = 3,  //!< Not Applicable Link Type
-  AMDSMI_LINK_TYPE_UNKNOWN = 4          //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_UNKNOWN = 4,         //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_NUMA = 5,  //!< Two processors connect via different PCIe switches but on the
+                              //!< same CPU (NIC-to-GPU only)
+  AMDSMI_LINK_TYPE_XNUMA =
+      6  //!< Two processors connect via different PCIe switches on different CPUs (NIC-to-GPU only)
 } amdsmi_link_type_t;
 
 /**
@@ -1978,8 +1995,12 @@ typedef struct {
 typedef struct {
   bool has_deep_sleep;     //!< Deep Sleep frequency is only supported by some GPUs
   uint32_t num_supported;  //!< The number of supported frequencies
-  uint32_t current;        //!< The current frequency index in MHz
-  uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES]; /**< List of frequencies in MHz. Only the first
+  uint32_t current;        //!< The current frequency index. May be (uint32_t)-1
+                           //!< when the clock domain is power-gated / in sleep
+                           //!< mode and no current level is reported by the
+                           //!< kernel (e.g. SYS/MEM/DF/SOC/DCEF at idle on
+                           //!< some APUs).
+  uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES]; /**< List of frequencies in Hz. Only the first
                                                        num_supported frequencies are valid */
 } amdsmi_frequencies_t;
 
@@ -2934,21 +2955,6 @@ typedef struct {
 #define AMDSMI_MAX_NIC_FW 16        //!< Maximum number of NIC firmwares
 
 /**
- * @brief NIC Link Types. This enum is used to identify the link type between
- * NIC and GPU processors based on their PCIe and NUMA connectivity.
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_NIC_LINK_TYPE_UNKNOWN,  //!< unknown type.
-  AMDSMI_NIC_LINK_TYPE_PCIE,     //!< two processors connect via same PCIe
-  AMDSMI_NIC_LINK_TYPE_NUMA,     /**< two processors connect via different PCIe switches but on the
-                                      same CPU */
-  AMDSMI_NIC_LINK_TYPE_X_NUMA,   /**< two processors connect via  different  PCIe switches but on
-                                      different CPUs */
-} amdsmi_nic_link_type_t;
-
-/**
  * @brief Structure for NIC statistic name-value pairs
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -3634,6 +3640,8 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
 /**
  *  @brief Get the vram vendor string of a device.
  *
+ *  @deprecated ::amdsmi_get_gpu_vram_info() should be used instead
+ *
  *  @ingroup tagIdentQuery
  *
  *  @platform{gpu_bm_linux}
@@ -3762,7 +3770,7 @@ amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Give a processor handle @p processor_handle and a pointer to a uint64_t @p
+ *  @details Given a processor handle @p processor_handle and a pointer to a uint64_t @p
  *  bdfid, this function will write the Bus/Device/Function PCI identifier
  *  (BDFID) associated with device @p processor_handle to the value pointed to by
  *  @p bdfid.
@@ -3781,6 +3789,14 @@ amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *  | Bus          | [15: 8] | "location id"    | (LOCATION & 0xFF00)          |
  *  | Device       | [ 7: 3] | "location id"    | (LOCATION & 0xF8)            |
  *  | Function     | [ 2: 0] | "location id"    | (LOCATION & 0x7)             |
+ *
+ *  Note: In some devices, the partition ID may be stored in the function bits
+ *  BDFID[2:0] instead of BDFID[31:28].
+ *
+ *  Note: For MI series devices, the function bits are only used to store the
+ *  partition ID, but this modified BDF is internal to the ROCm stack.
+ *  To the OS, partitions share the same BDF as the unpartitioned device and
+ *  have function bits = 0, which can be verified through lspci.
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -6831,7 +6847,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
  *  updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_SETTING_UNAVAILABLE the provided setting is
  *  unavailable for current device
@@ -6842,6 +6858,68 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                                  amdsmi_compute_partition_type_t compute_partition);
 
+/**
+ *  @brief Retrieves the current compute partition memory allocation mode
+ *  for a desired device.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a pointer
+ *  @p mode, this function will attempt to obtain the device's current
+ *  compute partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share.
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size (useful when only one XCP is active).
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] mode a pointer to an ::amdsmi_compute_partition_mem_alloc_mode_t
+ *  variable, into which the device's current memory allocation mode will
+ *  be written.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode);
+
+/**
+ *  @brief Modifies a selected device's compute partition memory allocation mode.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a mode
+ *  @p mode, this function will attempt to update the selected device's
+ *  compute partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share. This is the default.
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size.
+ *
+ *  @param[in] processor_handle Device which to modify
+ *
+ *  @param[in] mode using enum ::amdsmi_compute_partition_mem_alloc_mode_t,
+ *  define what the selected device's memory allocation mode should be
+ *  updated to.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode);
 /** @} End tagComputePartition */
 
 /*****************************************************************************/
@@ -6907,11 +6985,11 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  define what the selected device's current mode setting should be updated to.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires admin/sudo privileges
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart the amdgpu driver
+ *  @retval ::AMDSMI_STATUS_BUSY device is busy, a resource or mutex could not be acquired
  *  @return ::amdsmi_status_t
  *
  */

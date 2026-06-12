@@ -361,6 +361,14 @@ SPMMemoryPool::Alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t fla
         return status;
     }
 
+    status = pool.fill_fn(*ptr, 0u, size / sizeof(uint32_t));
+    if(status != HSA_STATUS_SUCCESS) return status;
+
+    // Allow access only for command buffer. Output buffer is not accessed by GPU
+    if(flags.device_access)
+    {
+        status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
+    }
     return status;
 }
 
@@ -476,6 +484,8 @@ SPMPacket::kfd_stop()
 
 SPMPacket::~SPMPacket()
 {
+    if(!sym) return;
+
     running.wlock([&](auto& _running) {
         if(_running == false) return;
         auto status = sym->spm_stop(this->handle);
@@ -483,6 +493,12 @@ SPMPacket::~SPMPacket()
             << "spm_stop failed with HSA status: " << status;
         _running = false;
     });
+
+    if(handle.handle != 0 && sym->spm_delete_packets)
+    {
+        sym->spm_delete_packets(this->handle);
+        handle.handle = 0;
+    }
 }
 }  // namespace hsa
 }  // namespace rocprofiler
