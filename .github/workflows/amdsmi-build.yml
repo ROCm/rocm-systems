@@ -156,7 +156,11 @@ jobs:
                   import ctypes
                   sockets = ai.amdsmi_get_socket_handles()
                   print(f"  socket count: {len(sockets)}")
+                  # Include AMD_GPU so we can prove the GPU path enumerates >0
+                  # through the exact same handles_by_type mechanism the NIC
+                  # path uses (apples-to-apples comparison).
                   type_map = {
+                      "AMD_GPU": w.AMDSMI_PROCESSOR_TYPE_AMD_GPU,
                       "AMD_NIC": w.AMDSMI_PROCESSOR_TYPE_AMD_NIC,
                       "BRCM_NIC": w.AMDSMI_PROCESSOR_TYPE_BRCM_NIC,
                       "BRCM_SWITCH": w.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH,
@@ -176,8 +180,54 @@ jobs:
                           except Exception as e:
                               print(f"    handles_by_type[{tname}] socket err: {e}")
                       print(f"  processor_handles_by_type {tname}: {total}")
+
+                  # Full per-socket breakdown: socket info string (GPU sockets
+                  # carry a BDF, CPU sockets are plain ids) plus the processor
+                  # types each socket actually exposes. This shows whether the
+                  # bound NICs appear as sockets/processors at all.
+                  print("  --- per-socket breakdown ---")
+                  for si, s in enumerate(sockets):
+                      try:
+                          sinfo = ai.amdsmi_get_socket_info(s)
+                      except Exception as e:
+                          sinfo = f"<info err: {e}>"
+                      try:
+                          # Enumerate ALL processors in this socket via the
+                          # wrapper (count, then fill), then classify each.
+                          pcnt = ctypes.c_uint32()
+                          null_ptr = ctypes.POINTER(w.amdsmi_processor_handle)()
+                          ai._check_res(
+                              w.amdsmi_get_processor_handles(
+                                  s, ctypes.byref(pcnt), null_ptr
+                              )
+                          )
+                          tcounts = {}
+                          if pcnt.value > 0:
+                              c_handles = (w.amdsmi_processor_handle * pcnt.value)()
+                              ai._check_res(
+                                  w.amdsmi_get_processor_handles(
+                                      s, ctypes.byref(pcnt), c_handles
+                                  )
+                              )
+                              for i in range(pcnt.value):
+                                  ph = w.amdsmi_processor_handle(c_handles[i])
+                                  try:
+                                      pt = ai.amdsmi_get_processor_type(ph)["processor_type"]
+                                  except Exception as e:
+                                      pt = f"<type err: {e}>"
+                                  tcounts[pt] = tcounts.get(pt, 0) + 1
+                          print(f"    socket[{si}] info={sinfo!r} total={pcnt.value} processors={tcounts}")
+                      except Exception as e:
+                          print(f"    socket[{si}] info={sinfo!r} processors ERROR {e}")
               except Exception as e:
                   print(f"  per-socket type probe ERROR: {e}")
+
+              # GPU handle list for a direct contrast against the NIC paths.
+              try:
+                  gpu_handles = ai.get_gpu_handles()
+                  print(f"  get_gpu_handles: {len(gpu_handles)}")
+              except Exception as e:
+                  print(f"  get_gpu_handles: ERROR {e}")
 
               # Handle lists + info calls (mode a vs b)
               probes = [
