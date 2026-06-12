@@ -166,7 +166,7 @@ typedef struct hipDeviceProp_t {
   int maxThreadsPerMultiProcessor;  ///< Maximum resident threads per multi-processor.
   int streamPrioritiesSupported;    ///< Device supports stream priority
   int globalL1CacheSupported;       ///< Indicates globals are cached in L1
-  int localL1CacheSupported;        ///< Locals are cahced in L1
+  int localL1CacheSupported;        ///< Locals are cached in L1
   size_t sharedMemPerMultiprocessor;  ///< Amount of shared memory available per multiprocessor.
   int regsPerMultiprocessor;          ///< registers available per multiprocessor
   int managedMemory;                  ///< Device supports allocating managed memory on this system
