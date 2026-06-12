@@ -153,7 +153,7 @@ of RMA operations. Unlike :ref:`rocshmem_buffer_register`, this is a
 **collective** operation that must be called by all PEs with a buffer of the
 same ``length``.
 
-The call maps the user's buffer to a fresh rocSHMEM-managed virtual address and
+The call maps the user's buffer to a rocSHMEM-managed virtual address and
 returns it. That returned address (**not** ``addr``) is the symmetric handle
 the caller must use as the target for RMA routines, and the same address must
 later be passed to :ref:`rocshmem_buffer_unregister_symmetric`.
