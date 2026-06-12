@@ -1132,7 +1132,7 @@ def test_calc_pc_sampling_data_missing_file(
 ) -> None:
     """Workloads without ps_file_results.json are skipped, returning an empty map."""
     instance = make_db_analysis(str(tmp_path))
-    assert instance.calc_pc_sampling_data() == {}
+    assert instance.calc_pc_sampling_data({str(tmp_path): None}) == {}
 
 
 @pytest.mark.parametrize("placement", ["stochastic", "host_trap", "mixed"])
