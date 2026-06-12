@@ -10,7 +10,7 @@
 /// the scalar body, once the SIMD fast path, with identical inputs/EXEC/VCC-in
 /// -- and the full 64-bit VCC results are asserted equal with EXPECT_EQ
 /// (util::set_force_scalar_for_testing flips the gate in-process). In-process
-/// inactive-lane VCC bits must stay preserved under full and partial EXEC.
+/// inactive-lane VCC bits must be zeroed under full and partial EXEC.
 ///
 /// f16 and f32 read src0 as 32-bit raw bits; f64 reads src0 as a 64-bit VGPR pair
 /// while vsrc1 stays a 32-bit mask (the mixed-width class glue). The
@@ -236,10 +236,10 @@ void check_all(uint64_t exec) {
                                         << vcc_in << ": SIMD VCC diverged from scalar body";
 
         const uint64_t inactive = ~exec;
-        EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-            << c.name << " rot=" << rot << ": altered an inactive-lane VCC bit";
-        EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-            << c.name << " rot=" << rot << ": altered an inactive-lane VCC bit";
+        EXPECT_EQ(simd_vcc & inactive, 0ULL)
+            << c.name << " rot=" << rot << ": inactive-lane VCC bit not zeroed";
+        EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+            << c.name << " rot=" << rot << ": inactive-lane VCC bit not zeroed";
       }
     }
   }
@@ -289,10 +289,10 @@ void check_all_vop3(uint64_t exec) {
                 << std::hex << vcc_in << ": SIMD VCC diverged from scalar body";
 
             const uint64_t inactive = ~exec;
-            EXPECT_EQ(simd_vcc & inactive, vcc_in & inactive)
-                << c.name << " abs=" << abs << " neg=" << neg << ": altered inactive VCC bit";
-            EXPECT_EQ(scalar_vcc & inactive, vcc_in & inactive)
-                << c.name << " abs=" << abs << " neg=" << neg << ": altered inactive VCC bit";
+            EXPECT_EQ(simd_vcc & inactive, 0ULL)
+                << c.name << " abs=" << abs << " neg=" << neg << ": inactive VCC bit not zeroed";
+            EXPECT_EQ(scalar_vcc & inactive, 0ULL)
+                << c.name << " abs=" << abs << " neg=" << neg << ": inactive VCC bit not zeroed";
           }
         }
       }

@@ -37,6 +37,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Add `--list-domains` and `--list-operations <domain>` to `rocprof-sys-avail`.
   There new options allow the user to query more information about available
   ROCm domains (used in `ROCPROFSYS_ROCM_DOMAINS`) and their operations.
+- Added `rocprofsys_push_trace_with_args`, a public API for pushing a user trace region
+  with a pre-serialized argument string attached. The arguments are recorded in cached
+  tracing mode (the default); in legacy tracing (`ROCPROFSYS_TRACE_CACHED=OFF`) they are
+  ignored.
 
 ### Changed
 

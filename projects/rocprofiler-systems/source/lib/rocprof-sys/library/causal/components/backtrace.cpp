@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/causal/components/backtrace.hpp"
+#include "common/units.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
@@ -22,7 +23,6 @@
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/process/threading.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 
 #include "logger/debug.hpp"

@@ -191,7 +191,11 @@ def _register_handlers() -> None:
         c.src_ops,
         c.cls,
         c.op,
-        opsel='inst_.op_sel' if c.is_vop3 and 'op_sel' in c.enc_field_names else '0u',
+        opsel=(
+            'inst_.opsel'
+            if c.is_vop3 and 'opsel' in c.enc_field_names
+            else 'inst_.op_sel' if c.is_vop3 and 'op_sel' in c.enc_field_names else '0u'
+        ),
     )
     DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(
         c.dst_ops, c.src_ops, c.cls, c.op
