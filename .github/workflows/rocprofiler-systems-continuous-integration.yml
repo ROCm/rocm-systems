@@ -139,13 +139,6 @@ jobs:
           fi
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Install dependencies
-        if: false
-        run: |
-          apt-get update
-          apt install -y libavformat-dev libavcodec-dev
-          echo "✅ ROCm dependencies Installed!"
-
       - name: Install MPI
         run: |
           apt install -y libopenmpi-dev
