@@ -943,25 +943,21 @@ class MetricCommands:
 
                             # GFX min/max limits (same for all XCPs)
                             if gfx_limits:
-                                xcp_clocks["GFX_MIN_CLK"] = (
-                                    f"[{self.helpers.unit_format(self.logger, gfx_limits['min_clk'], clock_unit)}]"
+                                xcp_clocks["GFX_MIN_CLK"] = self.helpers.unit_format(
+                                    self.logger, gfx_limits["min_clk"], clock_unit
                                 )
-                                xcp_clocks["GFX_MAX_CLK"] = (
-                                    f"[{self.helpers.unit_format(self.logger, gfx_limits['max_clk'], clock_unit)}]"
+                                xcp_clocks["GFX_MAX_CLK"] = self.helpers.unit_format(
+                                    self.logger, gfx_limits["max_clk"], clock_unit
                                 )
 
-                            # GFX clock lock status (4 engines per XCP)
+                            # GFX clock lock status for this XCP's gfx domain
                             if gfxclk_lock_status != "N/A" and gfxclk_lock_status != 0:
-                                lock_status = []
-                                for bit in range(4):  # 4 engines per XCP
-                                    bit_pos = xcp_idx * 4 + bit
-                                    is_locked = (gfxclk_lock_status >> bit_pos) & 1
-                                    lock_status.append("ENABLED" if is_locked else "DISABLED")
-                                xcp_clocks["GFX_CLK_LOCKED"] = "[" + ", ".join(lock_status) + "]"
-                            else:
+                                is_locked = (gfxclk_lock_status >> xcp_idx) & 1
                                 xcp_clocks["GFX_CLK_LOCKED"] = (
-                                    "[DISABLED, DISABLED, DISABLED, DISABLED]"
+                                    "ENABLED" if is_locked else "DISABLED"
                                 )
+                            else:
+                                xcp_clocks["GFX_CLK_LOCKED"] = "DISABLED"
 
                             if xcp_clocks:
                                 clocks[xcp_key] = xcp_clocks
