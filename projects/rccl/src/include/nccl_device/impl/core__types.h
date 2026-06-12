@@ -7,7 +7,7 @@
 
 #ifndef _NCCL_DEVICE_CORE__TYPES_H_
 #define _NCCL_DEVICE_CORE__TYPES_H_
-#include "../core_tmp.h"
+#include "../core.h"
 #if defined(NCCL_OS_WINDOWS)
 #include <cuda.h>
 /* Minimal types instead of nccl_device/gin/gin_device_host_common.h (GIN is Linux-only) */

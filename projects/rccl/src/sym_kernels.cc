@@ -8,7 +8,7 @@
 #include "sym_kernels.h"
 #include "comm.h"
 #include "device.h"
-#include "nccl_device/core_tmp.h"
+#include "nccl_device/core.h"
 #include "transport.h"
 #include <cmath>
 #include <cfloat>
