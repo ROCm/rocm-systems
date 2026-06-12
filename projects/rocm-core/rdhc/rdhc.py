@@ -15,6 +15,7 @@ import shutil
 from enum import Enum
 from pathlib import Path
 
+
 # Check for required packages before importing them
 def check_required_packages():
     """Check if required Python packages are installed"""
@@ -116,9 +117,11 @@ def generate_table_report(results):
                 test_name,
                 description,
                 result["status"],
-                result["reason"][:50] + "..."
-                if len(result["reason"]) > 50
-                else result["reason"],
+                (
+                    result["reason"][:50] + "..."
+                    if len(result["reason"]) > 50
+                    else result["reason"]
+                ),
             ]
         )
 
@@ -770,18 +773,34 @@ class ROCMHealthCheck:
         rocm_path = self.rocm_path
         rocm_lib_path = os.path.join(rocm_path, "lib")
 
-        max_depth = os.environ.get("LIBDIR_MAX_DEPTH", "")
+        max_depth = os.environ.get("LIBDIR_MAX_DEPTH", "").strip()
         self.logger.debug(f"-- Env LIBDIR_MAX_DEPTH = {max_depth}")
-        max_depth_arg = f"-maxdepth {max_depth}" if max_depth else ""
+        if max_depth:
+            try:
+                depth_value = int(max_depth)
+                if depth_value < 0:
+                    raise ValueError
+            except ValueError:
+                self.logger.error(
+                    f"!!! LIBDIR_MAX_DEPTH must be a non-negative integer: {max_depth}"
+                )
+                return (
+                    TestStatus.FAIL.value,
+                    "LIBDIR_MAX_DEPTH must be a non-negative integer.",
+                )
+            # Normalize to a canonical base-10 integer string
+            max_depth = str(depth_value)
 
         if not os.path.exists(rocm_lib_path):
             self.logger.error(f"!!! ROCm library path not found: {rocm_lib_path}")
             return TestStatus.FAIL.value, "ROCm library path not found."
 
         # Get list of libraries in the ROCm path
-        stdout, stderr, ret_code = run_command(
-            f"find {rocm_lib_path} {max_depth_arg} -name '*.so*'", shell=True
-        )
+        find_cmd = ["find", rocm_lib_path]
+        if max_depth:
+            find_cmd += ["-maxdepth", max_depth]
+        find_cmd += ["-name", "*.so*"]
+        stdout, stderr, ret_code = run_command(find_cmd, shell=False)
         if ret_code != 0:
             self.logger.error(
                 f"--Error finding libraries in {rocm_lib_path}: \n{stderr}"
@@ -830,6 +849,68 @@ class ROCMHealthCheck:
         else:
             return TestStatus.PASS.value, "All library dependencies are satisfied."
 
+    def _find_library_in_paths(self, libname, search_paths):
+        """Search for a library in the given paths.
+
+        Args:
+            libname: Name of the library to find (e.g., 'libfoo.so.1')
+            search_paths: List of directory paths to search
+
+        Returns:
+            Full path to the library if found, None otherwise
+        """
+        for search_dir in search_paths:
+            candidate = os.path.join(search_dir, libname)
+            if os.path.exists(candidate):
+                return os.path.realpath(candidate)
+        return None
+
+    def _get_library_search_paths(self, lib_dir):
+        """Get the library search paths in priority order.
+
+        Args:
+            lib_dir: Directory containing the library being checked
+
+        Returns:
+            List of directory paths to search for dependencies
+        """
+        search_paths = []
+
+        # 1. RPATH/RUNPATH from the binary itself (we'll add lib_dir as proxy)
+        search_paths.append(lib_dir)
+
+        # 2. LD_LIBRARY_PATH
+        ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+        if ld_library_path:
+            search_paths.extend(ld_library_path.split(":"))
+
+        # 3. ROCm library path
+        rocm_path = self.rocm_path
+        search_paths.append(os.path.join(rocm_path, "lib"))
+        search_paths.append(os.path.join(rocm_path, "lib64"))
+
+        # 4. System library paths
+        search_paths.extend(
+            [
+                "/lib",
+                "/lib64",
+                "/usr/lib",
+                "/usr/lib64",
+                "/lib/x86_64-linux-gnu",
+                "/usr/lib/x86_64-linux-gnu",
+            ]
+        )
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_paths = []
+        for path in search_paths:
+            if path and path not in seen and os.path.isdir(path):
+                seen.add(path)
+                unique_paths.append(path)
+
+        return unique_paths
+
     def _check_rocm_libs_dependency(self, libraries, rocm_lib_path):
         missing_deps = {}
         wrong_path_warnings = {}
@@ -840,7 +921,7 @@ class ROCMHealthCheck:
         # create a list of rocm libraries basenames
         rocm_lib_basenames = [os.path.basename(lib) for lib in libraries]
 
-        # Check each library with ldd
+        # Check each library with readelf (safe, non-executing alternative to ldd)
         for lib in libraries:
             missing = []
             path_warnings = []
@@ -863,57 +944,62 @@ class ROCMHealthCheck:
                     rplib.startswith(real_rocm_lib_path)
                     or rplib.startswith(rocm_lib_path)
                 ):
-                    wrong_path_warnings[
-                        lib
-                    ] = f"Library symlink pointing to ->{rplib} ; outside of ROCm library path {rocm_lib_path}."
+                    wrong_path_warnings[lib] = (
+                        f"Library symlink pointing to ->{rplib} ; outside of ROCm library path {rocm_lib_path}."
+                    )
                     self.logger.debug(
                         f"!!! Library symlink {lib}->{rplib} ; pointing outside of ROCm library path {rocm_lib_path}."
                     )
                 continue
 
-            stdout, stderr, ret_code = run_command(f"ldd {lib}", shell=True)
-            # Check if its not a dynamic library
-            if "not a dynamic executable" in stderr:
-                continue
+            # Use readelf -d to safely inspect dynamic dependencies without execution
+            stdout, stderr, ret_code = run_command(
+                ["readelf", "-d", "--", lib], shell=False
+            )
 
+            # Check if it's not a dynamic library
             if ret_code != 0:
-                missing_deps[lib] = f"Error running ldd: {stderr}"
+                if (
+                    "Not an ELF file" in stderr
+                    or "no dynamic section" in stderr.lower()
+                ):
+                    continue
+                missing_deps[lib] = f"Error running readelf: {stderr}"
                 continue
 
             self.logger.debug(f"----Checking dependencies & link paths for {lib}...")
-            # Parse ldd output for any libraries that are not found in the system
-            # and for any linked libraries that are not in the ROCm library path and raise the warning.
-            for line in stdout.splitlines():
-                if "not found" in line:
-                    missing.append(line.strip())
-                elif "=>" in line:
-                    # Ex: "libamdhip64.so => /opt/rocm/lib/libamdhip64.so (0x00007f8c3c000000)"
-                    # Check if the library is outside of the ROCm library path
-                    parts = line.split("=>")
-                    if len(parts) > 1:
-                        dep_lib = parts[0].strip()
-                        dep_lib_path = parts[1].strip().split()[0]
-                        # dep_lib_path can be relative path, so we need to resolve it
-                        # Check if the link is relative or absolute
-                        if not os.path.isabs(dep_lib_path):
-                            # If it's relative, resolve it against the library path
-                            # normalize the path to remove any redundant separators
-                            dep_lib_path = os.path.normpath(
-                                os.path.join(os.path.dirname(lib), dep_lib_path)
-                            )
 
-                        # check if the lib is a ROCm library, else # skip the check
-                        if dep_lib in rocm_lib_basenames:
-                            # If the dependency path is not within the ROCm library path, raise a warning
-                            # Check if dep_lib_path starts with rocm_lib_path(/opt/rocm/lib/) or real_rocm_lib_path(/opt/rocm-7.0.0/lib/) without symlink.
-                            if not (
-                                dep_lib_path.startswith(rocm_lib_path)
-                                or dep_lib_path.startswith(real_rocm_lib_path)
-                            ):
-                                # self.logger.debug(f"!!! Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}.")
-                                path_warnings.append(
-                                    f"Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}."
-                                )
+            # Parse readelf output for NEEDED entries
+            # Format: " 0x0000000000000001 (NEEDED)             Shared library: [libfoo.so]"
+            needed_libs = []
+            for line in stdout.splitlines():
+                if "(NEEDED)" in line and "Shared library:" in line:
+                    # Extract library name from between brackets
+                    match = re.search(r"\[([^\]]+)\]", line)
+                    if match:
+                        needed_libs.append(match.group(1))
+
+            # Get search paths for resolving dependencies
+            lib_dir = os.path.dirname(lib)
+            search_paths = self._get_library_search_paths(lib_dir)
+
+            # Check each needed library
+            for dep_lib in needed_libs:
+                dep_lib_path = self._find_library_in_paths(dep_lib, search_paths)
+
+                if dep_lib_path is None:
+                    # Library not found in any search path
+                    missing.append(f"{dep_lib} => not found")
+                elif dep_lib in rocm_lib_basenames:
+                    # Check if the lib is a ROCm library and verify its path
+                    # If the dependency path is not within the ROCm library path, raise a warning
+                    if not (
+                        dep_lib_path.startswith(rocm_lib_path)
+                        or dep_lib_path.startswith(real_rocm_lib_path)
+                    ):
+                        path_warnings.append(
+                            f"Library {dep_lib} is linked to {dep_lib_path} which is outside of ROCm library path {rocm_lib_path}."
+                        )
 
             if missing:
                 missing_deps[lib] = missing
