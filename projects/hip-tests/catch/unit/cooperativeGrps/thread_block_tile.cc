@@ -1198,7 +1198,8 @@ void testArgsDifferentSizesScan(AggregationType aggType)
     result = &(h_result[laneId].host_ptr()[0]);
 
     if (aggType == AggregationType::InclusiveScan) {
-      INFO("lane: " << laneId);
+      INFO("Lane: " << laneId);
+
       if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
         // the result can be calculated with an arithmetic series formula, modulo 256
         // (we do overflow unsigned char for some indices, but that is defined behaviour)
@@ -1208,7 +1209,8 @@ void testArgsDifferentSizesScan(AggregationType aggType)
       }
     } else if (aggType == AggregationType::ExclusiveScan) {
       if (std::is_same<Functor<NumElems>, Sum<NumElems>>::value) {
-        INFO("lane: " << laneId);
+        INFO("Lane: " << laneId);
+
         // the result can be calculated with an arithmetic series formula, modulo 256
         // (we do overflow unsigned char for some indices, but that is defined behaviour)
         if (laneId == 0) {
@@ -1363,12 +1365,8 @@ void testScanForTileSize(AggregationType aggType)
   std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
   void* args[devicePtrs.size()];
 
-  if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value) {
-    if constexpr (std::is_same<T, half>::value) {
-      id = static_cast<half>(65504);
-    } else {
-      id = std::numeric_limits<T>::max();
-    }
+  if (aggType == AggregationType::ExclusiveScan) {
+    scanIdentity<T, Op>(id);
   }
 
   accum = id;
@@ -1412,6 +1410,7 @@ void testScanForTileSize(AggregationType aggType)
           expected = accum;
         }
 
+        INFO("Lane: " << (pos + i));
         REQUIRE(result == expected);
 
         if (i == 0) {

@@ -421,6 +421,38 @@ constexpr uint64_t nextPowerOf2(uint64_t v) {
   return ++v;
 }
 
+// Sets id to the expected value exclusive_scan returns for the first active lane
+template <class T, class Op>
+void scanIdentity(T& id)
+{
+  T result = {};
+
+  if constexpr (std::is_same<Op, MinOp<T>>::value || std::is_same<Op, cooperative_groups::less<T>>::value) {
+    if constexpr (std::is_same<T, __half>::value) {
+      result = HIPRT_INF_FP16;
+    } else if (std::is_floating_point<T>::value) {
+      result = std::numeric_limits<T>::infinity();
+    } else {
+      result = std::numeric_limits<T>::max();
+    }
+  } else if constexpr (std::is_same<Op, MaxOp<T>>::value || std::is_same<Op, cooperative_groups::greater<T>>::value) {
+    if constexpr (std::is_same<T, __half>::value) {
+      result = -HIPRT_INF_FP16;
+    } else if (std::is_floating_point<T>::value) {
+      result = -std::numeric_limits<T>::infinity();
+    } else {
+      result = std::numeric_limits<T>::lowest();
+    }
+  } else if constexpr (std::is_same<Op, std::bit_and<T>>::value) {
+    result = ~result;
+  } else if constexpr (std::is_same<Op, std::bit_or<T>>::value) {
+  } else {
+    std::memset(&result, 0, sizeof(T));
+  }
+
+  id = result;
+}
+
 // given an operation produces the expected result of the warp-wide reduction
 // @mask indicates the lanes that will participate in the computation
 // @return the result associated the lane with the highest index that is active according to the
@@ -444,28 +476,7 @@ T calculateExpected(T* output,
   std::memset(aggregation, 0, 64 * sizeof(T));
   std::memset(lastAggregation, 0, 64 * sizeof(T));
 
-  if constexpr (std::is_same<Op, MinOp<T>>::value) {
-    if constexpr (std::is_same<T, __half>::value) {
-      id = HIPRT_INF_FP16;
-    } else if (std::is_floating_point<T>::value) {
-      id = std::numeric_limits<T>::infinity();
-    } else {
-      id = std::numeric_limits<T>::max();
-    }
-  } else if constexpr (std::is_same<Op, MaxOp<T>>::value) {
-    if constexpr (std::is_same<T, __half>::value) {
-      id = -HIPRT_INF_FP16;
-    } else if (std::is_floating_point<T>::value) {
-      id = -std::numeric_limits<T>::infinity();
-    } else {
-      id = std::numeric_limits<T>::lowest();
-    }
-  } else if constexpr (std::is_same<Op, std::bit_and<T>>::value) {
-    id = ~id;
-  } else if constexpr (std::is_same<Op, std::bit_or<T>>::value) {
-  } else {
-    std::memset(&id, 0, sizeof(T));
-  }
+  scanIdentity<T, Op>(id);
 
   for (int i = 0; i < 64; i++) {
     output[i] = id;
@@ -609,7 +620,6 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
     }
 
     REQUIRE(!__hisnan(result));
-    REQUIRE(!__hisinf(result));
 
     if (relativeEpsilon > eps) {
       if (absDifference > 0.0001) {

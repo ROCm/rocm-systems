@@ -377,7 +377,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
   if constexpr (isPrimitiveType && (sizeof(T) == 2 || sizeof(T) == 4)) { 
     result = val;
   } else {
-    __builtin_memcpy(result, &val, sizeof(Val));
+    __builtin_memcpy(result, &val, sizeof(T));
   }
 
   // add the values from the lanes using a reduction tree (first the threads with even-numbered

@@ -319,38 +319,38 @@ struct NumericLimits;
 
 template <>
 struct NumericLimits<int> {
-    static constexpr int maximum()    { return 0x7FFFFFFF; }
-    static constexpr int lowest() { return ~0x7FFFFFFF; }
+    static constexpr int maximum() { return 0x7FFFFFFF; }
+    static constexpr int minimum() { return ~0x7FFFFFFF; }
 };
 
 template <>
 struct NumericLimits<unsigned int> {
     static constexpr unsigned int maximum()    { return 0xFFFFFFFFu; }
-    static constexpr unsigned int lowest() { return 0u; }
+    static constexpr unsigned int minimum() { return 0u; }
 };
 
 template <>
 struct NumericLimits<long long> {
-    static constexpr long long maximum()    { return 0x7FFFFFFFFFFFFFFFLL; }
-    static constexpr long long lowest() { return ~0x7FFFFFFFFFFFFFFFLL; }
+    static constexpr long long maximum() { return 0x7FFFFFFFFFFFFFFFLL; }
+    static constexpr long long minimum() { return ~0x7FFFFFFFFFFFFFFFLL; }
 };
 
 template <>
 struct NumericLimits<unsigned long long> {
     static constexpr unsigned long long maximum()    { return 0xFFFFFFFFFFFFFFFFull; }
-    static constexpr unsigned long long lowest() { return 0ull; }
+    static constexpr unsigned long long minimum() { return 0ull; }
 };
 
 template <>
 struct NumericLimits<float> {
-    static constexpr float maximum()    { return __builtin_bit_cast(float, 0x7F7FFFFF); }
-    static constexpr float lowest() { return __builtin_bit_cast(float, 0xFF7FFFFF); }
+  static constexpr float maximum()    { return __builtin_bit_cast(float, 0x7f800000); }
+  static constexpr float minimum()    { return -maximum(); }
 };
 
 template <>
 struct NumericLimits<double> {
-    static constexpr double maximum()    { return __builtin_bit_cast(double, 0x7FEFFFFFFFFFFFFFLL); }
-    static constexpr double lowest() { return __builtin_bit_cast(double, 0xFFEFFFFFFFFFFFFFLL); }
+  static constexpr double maximum()    { return __builtin_bit_cast(double, 0x7FF0000000000000LL); }
+  static constexpr double minimum()    { return -maximum(); }
 };
 
 }  // namespace __hip_internal
