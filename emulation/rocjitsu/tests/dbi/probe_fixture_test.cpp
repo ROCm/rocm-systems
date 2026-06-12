@@ -1,0 +1,75 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// Validate the probe symbol resolver against a real amdclang++-compiled
+// fixture. Loads the standalone gfx90a device ELF built by
+// rj_add_probe_object(), confirms the target, resolves rj_nop_probe, and
+// decodes its body to confirm it returns through s[30:31].
+//
+// Gated by CMake on HAS_DEVICE_KERNELS + HAS_PROBE_FIXTURES (needs amdclang++
+// and clang-offload-bundler at build time). No GPU is required; this only
+// loads and parses the object.
+
+#include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/patch/probe_symbol.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace rocjitsu {
+namespace {
+
+std::string probe_path(const char *name) { return std::string(KERNEL_DIR) + "/" + name + ".hsaco"; }
+
+TEST(ProbeFixture, NopProbeResolvesAndReturns) {
+  Executable exec(probe_path("rj_nop_probe_gfx90a"));
+  ASSERT_TRUE(exec.is_valid()) << "failed to load rj_nop_probe_gfx90a.hsaco";
+  ASSERT_GT(exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX90A), 0u);
+  const AmdGpuCodeObject *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX90A, 0);
+  ASSERT_NE(co, nullptr);
+  EXPECT_EQ(co->target_id(), ROCJITSU_CODE_TARGET_GFX90A);
+
+  std::string err;
+  const auto resolved = resolve_probe_symbol(*co, "rj_nop_probe", &err);
+  ASSERT_TRUE(resolved.has_value()) << err;
+  EXPECT_EQ(resolved->name, "rj_nop_probe");
+  EXPECT_GT(resolved->body_size, 0u);
+  EXPECT_EQ(resolved->body_size % sizeof(uint32_t), 0u);
+
+  // Copy the body into an aligned word buffer before decoding (the image buffer
+  // is only byte-aligned). One extra zero word of slack so the decoder can
+  // always read a second word for an 8-byte/literal instruction whose first
+  // word is the last body word, without reading past the buffer.
+  const auto *base = reinterpret_cast<const uint8_t *>(co->image_data());
+  const size_t num_words = resolved->body_size / sizeof(uint32_t);
+  std::vector<uint32_t> body(num_words + 1, 0);
+  std::memcpy(body.data(), base + resolved->body_file_offset, resolved->body_size);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  // Decode the whole body; the last instruction must be the return.
+  std::string last_mnemonic;
+  size_t w = 0;
+  while (w < num_words) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&body[w]));
+    ASSERT_NE(inst, nullptr);
+    const int size = inst->size();
+    ASSERT_TRUE(size == 4 || size == 8) << "unexpected instruction size in probe body";
+    last_mnemonic = std::string(inst->mnemonic());
+    w += static_cast<size_t>(size) / sizeof(uint32_t);
+  }
+  EXPECT_EQ(last_mnemonic, "s_setpc_b64") << "probe body should return via s_setpc_b64 s[30:31]";
+}
+
+} // namespace
+} // namespace rocjitsu
