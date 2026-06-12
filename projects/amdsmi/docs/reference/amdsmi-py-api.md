@@ -5032,7 +5032,7 @@ finally:
 
 ### amdsmi_get_gpu_vram_vendor
 
-Description: **deprecated** Get the vram vendor string of a gpu device.
+Description: **Deprecated** (slated for removal in a future ROCm release; use `amdsmi_get_gpu_vram_info()` instead). Get the vram vendor string of a gpu device.
 
 Input parameters:
 
