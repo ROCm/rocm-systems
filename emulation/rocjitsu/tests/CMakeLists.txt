@@ -120,6 +120,37 @@ rj_configure_target(rocjitsu_tests TEST)
 include(GoogleTest)
 gtest_discover_tests(rocjitsu_tests)
 
+# --- Conformance Test Suite (CTS) ---
+
+add_executable(
+    rocjitsu_cts
+    cts/cts_scalar_alu_test.cpp
+    cts/cts_scalar_cmp_test.cpp
+    cts/cts_vector_alu_test.cpp
+    cts/cts_vector_cmp_test.cpp
+    cts/cts_vector_ternary_test.cpp
+    cts/cts_vector_modifier_test.cpp
+    cts/cts_vector_bitop3_test.cpp
+    cts/cts_dot_product_test.cpp
+    cts/cts_packed_int_test.cpp
+    cts/cts_packed_fp16_test.cpp
+    cts/cts_mad_64_test.cpp
+    cts/cts_ds_test.cpp
+    cts/cts_mfma_test.cpp
+)
+target_include_directories(rocjitsu_cts PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cts)
+target_link_libraries(
+    rocjitsu_cts
+    PRIVATE
+        ${RJ_OBJECT_LIBS}
+        util
+        flatbuffers
+        Threads::Threads
+        GTest::gtest_main
+)
+rj_configure_target(rocjitsu_cts TEST)
+gtest_discover_tests(rocjitsu_cts)
+
 add_executable(
     rj_dbt_translate_smoke_test
     tools/rj_dbt_translate_smoke_test.cpp
