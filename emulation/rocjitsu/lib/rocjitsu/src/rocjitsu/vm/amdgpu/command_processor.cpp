@@ -1313,6 +1313,21 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
   };
 
   // Phase 1: Dispatch-Execute-Complete loop (functional mode).
+  //
+  // Wrapped in a rescan loop. A dependent kernel the host submits *while this
+  // handler is executing* is picked up only by the post-loop re-fetch below;
+  // without re-running the dispatch loop it would be stranded un-dispatched,
+  // blocking in-order completion of the trailing barrier packets and hanging the
+  // waiting host forever (the doorbell that delivered it was already consumed by
+  // scan_doorbells, so no further handle_doorbell fires). This races at any
+  // thread count — the resume paths that would otherwise catch it (on_cu_idle at
+  // T=1, the synchronous pool drain at T>1) have all finished by the time the
+  // late packet arrives — but the window is widest with multi-dispatch IREE
+  // kernels at RJ_DISPATCH_THREADS>1. After each re-fetch we rescan and re-run
+  // this loop when new packets arrived.
+  bool rescan = true;
+  bool first_pass = true;
+  while (rescan) {
   bool progress = true;
   while (progress) {
     progress = false;
@@ -1408,8 +1423,21 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
   // Re-fetch: pick up any packets the host submitted while we were executing
   // (e.g., barrier packets queued after a kernel dispatch). Process them
   // immediately so host signal waits see completed barriers before returning.
-  for (size_t i = 0; i < hw_queues_.size(); ++i)
+  //
+  // SDMA queues are re-fetched only on the first pass. The compute (AQL) re-fetch
+  // is clamped to last_doorbell so repeating it is safe, but the SDMA path reads
+  // the live doorbell value and would read ahead of an observed doorbell —
+  // re-polling the ring across rescan iterations races with the host's
+  // concurrent ring writes (torn packet -> bad copy). Late *kernel* packets,
+  // which is all the rescan needs, only arrive on the compute queue anyway;
+  // SDMA packets are picked up by their own doorbell-driven passes.
+  const uint32_t dispatch_id_before_refetch = next_dispatch_id_;
+  for (size_t i = 0; i < hw_queues_.size(); ++i) {
+    if (hw_queues_[i].is_sdma && !first_pass)
+      continue;
     fetch_from_queue(hw_queues_[i], new_queue_states_[i]);
+  }
+  first_pass = false;
   // Process any new non-kernel entries (barriers with total_wgs==0).
   for (size_t qi = 0; qi < hw_queues_.size(); ++qi) {
     auto &qs = new_queue_states_[qi];
@@ -1423,6 +1451,16 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick) {
   }
   if (completion_)
     completion_->drain_completions(new_queue_states_);
+
+  // Re-run Phase 1 only if the re-fetch actually pulled in NEW packets
+  // (next_dispatch_id_ advances exactly once per fetched packet). Gating on new
+  // packets — rather than "a dispatchable entry still exists" — is what
+  // guarantees termination: a kernel held back by CU backpressure stays
+  // "dispatchable" but creates no new dispatch ids, so it cannot spin the loop.
+  // New arrivals are finite: they are bounded by host submissions, which are
+  // themselves gated on the completion signals we deliver here.
+  rescan = (next_dispatch_id_ != dispatch_id_before_refetch);
+  } // while (rescan)
 
   // Register as primary on first dispatch.
   if (!is_primary_ && pending_entries() > 0) {
