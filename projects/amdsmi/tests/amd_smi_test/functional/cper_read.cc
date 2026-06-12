@@ -20,16 +20,10 @@
  * THE SOFTWARE.
  */
 
-// Regression tests for the CPER read path exercised via
-// amdsmi_get_gpu_cper_entries_by_path(). They require no GPU.
-//
-// ROCM-25398: amdsmi_get_gpu_cper_entries crashed with "free(): invalid
-// pointer" / SIGABRT when the CPER node reported a zero byte size (the case for
-// debugfs amdgpu_ring_cper nodes, whose content is generated on read). The read
-// path must never abort the process.
-//
-// ROCM-25954: an empty CPER ring (zero bytes read) is a valid "no records"
-// state and must return AMDSMI_STATUS_SUCCESS with zero entries, not an error.
+// Regression tests for the CPER read path via
+// amdsmi_get_gpu_cper_entries_by_path(); no GPU required.
+// ROCM-25398: a zero-byte CPER node must not abort the process.
+// ROCM-25954: an empty ring returns SUCCESS with zero entries, not an error.
 
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -43,10 +37,8 @@
 
 namespace {
 
-// Drives the CPER read path against a caller supplied file and returns the
-// status. All output parameters are valid so that validation succeeds and the
-// file read is actually attempted. The final entry_count and buf_size are
-// reported back through the optional out-parameters.
+// Runs the CPER read path against a file. Out-params report the final
+// entry_count and buf_size.
 static amdsmi_status_t CallCperByPath(const char* path, uint64_t* out_entry_count = nullptr,
                                       uint64_t* out_buf_size = nullptr) {
   std::vector<char> cper_data(4096, 0);
@@ -66,10 +58,8 @@ static amdsmi_status_t CallCperByPath(const char* path, uint64_t* out_entry_coun
 
 }  // namespace
 
-// A zero-size regular file reproduces the debugfs amdgpu_ring_cper case exactly:
-// stat() reports S_ISREG and read() returns 0 bytes. This is an empty ring (no
-// records), which must return AMDSMI_STATUS_SUCCESS with zero entries. It must
-// also never abort the process (ROCM-25398).
+// Zero-size regular file mimics an empty amdgpu_ring_cper node: read() returns
+// 0 bytes. Empty ring -> SUCCESS with zero entries, and no crash.
 TEST(amdsmitstReadOnly, CperReadZeroSizeFile) {
   std::string tmpl = "/tmp/amdsmi_cper_zero_XXXXXX";
   int fd = mkstemp(tmpl.data());
@@ -86,8 +76,7 @@ TEST(amdsmitstReadOnly, CperReadZeroSizeFile) {
   EXPECT_EQ(buf_size, 0u);
 }
 
-// A non-existent path must report a clean status, never crash. stat() fails for
-// a missing path, so the read helper reports AMDSMI_STATUS_NOT_SUPPORTED.
+// Missing path -> NOT_SUPPORTED (stat() fails), no crash.
 TEST(amdsmitstReadOnly, CperReadMissingFile) {
   amdsmi_status_t status = CallCperByPath("/tmp/amdsmi_cper_does_not_exist_12345");
   EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);

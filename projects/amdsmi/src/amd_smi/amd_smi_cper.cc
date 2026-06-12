@@ -103,17 +103,9 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
   ctx.file_size = file_stats.st_size;
   ctx.buffer = std::make_unique<char[]>(ctx.file_size);
 
-  // Read with POSIX open/read/close rather than std::ifstream. The hazard is
-  // not open() vs ifstream itself, but where the memory is allocated and freed:
-  // std::ifstream owns a std::basic_filebuf whose internal buffer is allocated
-  // and later torn down (in its destructor) by the libstdc++ bound to this
-  // library. When libamd_smi.so is LD_PRELOAD-ed alongside a different host
-  // libstdc++, that destructor can free a pointer the host allocator never
-  // owned, producing "free(): invalid pointer". debugfs CPER nodes
-  // (e.g. /sys/kernel/debug/dri/<N>/amdgpu_ring_cper) report st_size == 0
-  // because their content is generated on read, which is the case that
-  // triggered the abort. POSIX I/O performs no STL allocation across the
-  // library boundary, avoiding the issue entirely (ROCM-25398).
+  // Use POSIX open/read/close, not std::ifstream: its basic_filebuf is freed by
+  // this library's libstdc++, an invalid free when libamd_smi.so is LD_PRELOAD-ed
+  // under a different host libstdc++ (ROCM-25398).
   int fd = open(filepath.c_str(), O_RDONLY);
   if (fd == -1) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath
@@ -131,11 +123,8 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
   }
   close(fd);
 
-  // An empty CPER ring (no RAS records) is a valid state, not an error. The
-  // amdgpu_ring_cper debugfs node advertises the ring capacity via st_size, but
-  // read() returns only the bytes actually present (0 when the ring is empty).
-  // Treat a zero read as success so callers report "no CPER records" instead of
-  // AMDSMI_STATUS_FILE_ERROR.
+  // Empty ring: st_size advertises capacity but read() returns 0 bytes. Not an
+  // error, so report success ("no CPER records") rather than FILE_ERROR.
   if (bytes_read == 0) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] ring is empty (no records)";
     LOG_DEBUG(ss);
