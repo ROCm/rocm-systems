@@ -152,6 +152,7 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   // a consecutive set of ranks.
   int lsaSize = computeLsaSize(comm);
   devr->lsaSize = lsaSize;
+  devr->nLsaTeams = comm->nRanks / devr->lsaSize;
   devr->lsaSelf = comm->rank % lsaSize;
   devr->lsaRankList = (int*)malloc(devr->lsaSize*sizeof(int));
   for (int i=0; i < devr->lsaSize; i++) {
