@@ -240,6 +240,10 @@ if(BUILD_TESTS)
     endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+    # GinAnvilDeviceTests.cpp includes hipified device headers; avoid racing hipify.
+    if(_gin_anvil_test_sdma AND TARGET copy_nccl_device_headers)
+      add_dependencies(rccl-UnitTestsFixtures copy_nccl_device_headers)
+    endif()
 
     target_include_directories(rccl-UnitTestsFixtures PRIVATE
       ${PROJECT_BINARY_DIR}/hipify/src/device
