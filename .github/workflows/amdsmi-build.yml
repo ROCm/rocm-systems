@@ -139,21 +139,68 @@ jobs:
           lsmod 2>/dev/null | grep -iE 'ionic|bnxt|amdgpu' || echo "  (none)"
           echo "===== enumerated handle counts (what get_*_handles return) ====="
           python3 - <<'PY'
+          # Mirror exactly what the CLI's get_nic_choices() does, and split the
+          # two possible failure modes apart:
+          #   (a) get_*_handles() returns 0  -> enumeration gap
+          #   (b) handles returned but amdsmi_get_*_info() fails/empty -> info gap
           try:
-              import amdsmi
-              from amdsmi import amdsmi_init, amdsmi_shut_down, AmdSmiInitFlags
+              import amdsmi.amdsmi_interface as ai
+              w = ai.amdsmi_wrapper
               try:
-                  amdsmi_init(AmdSmiInitFlags.INIT_ALL_PROCESSORS)
+                  ai.amdsmi_init(ai.AmdSmiInitFlags.INIT_ALL_PROCESSORS)
               except Exception as e:
                   print(f"  amdsmi_init: {e}")
-              for fn in ("get_gpu_handles", "get_nic_handles", "get_ainic_handles", "get_switch_handles"):
-                  try:
-                      handles = getattr(amdsmi, fn)()
-                      print(f"  {fn}: {len(handles)}")
-                  except Exception as e:
-                      print(f"  {fn}: ERROR {e}")
+
+              # Per-socket processor counts by type (what get_*_handles iterate)
               try:
-                  amdsmi_shut_down()
+                  import ctypes
+                  sockets = ai.amdsmi_get_socket_handles()
+                  print(f"  socket count: {len(sockets)}")
+                  type_map = {
+                      "AMD_NIC": w.AMDSMI_PROCESSOR_TYPE_AMD_NIC,
+                      "BRCM_NIC": w.AMDSMI_PROCESSOR_TYPE_BRCM_NIC,
+                      "BRCM_SWITCH": w.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH,
+                  }
+                  for tname, tval in type_map.items():
+                      total = 0
+                      for s in sockets:
+                          cnt = ctypes.c_uint32()
+                          null_ptr = ctypes.POINTER(w.amdsmi_processor_handle)()
+                          try:
+                              ai._check_res(
+                                  w.amdsmi_get_processor_handles_by_type(
+                                      s, tval, null_ptr, ctypes.byref(cnt)
+                                  )
+                              )
+                              total += cnt.value
+                          except Exception as e:
+                              print(f"    handles_by_type[{tname}] socket err: {e}")
+                      print(f"  processor_handles_by_type {tname}: {total}")
+              except Exception as e:
+                  print(f"  per-socket type probe ERROR: {e}")
+
+              # Handle lists + info calls (mode a vs b)
+              probes = [
+                  ("get_nic_handles", "amdsmi_get_nic_info"),
+                  ("get_ainic_handles", "amdsmi_get_ainic_info"),
+                  ("get_switch_handles", None),
+              ]
+              for hfn, ifn in probes:
+                  try:
+                      handles = getattr(ai, hfn)()
+                      print(f"  {hfn}: {len(handles)}")
+                      if ifn:
+                          for idx, h in enumerate(handles):
+                              try:
+                                  info = getattr(ai, ifn)(h)
+                                  print(f"    {ifn}[{idx}]: {info}")
+                              except Exception as e:
+                                  print(f"    {ifn}[{idx}]: ERROR {e}")
+                  except Exception as e:
+                      print(f"  {hfn}: ERROR {e}")
+
+              try:
+                  ai.amdsmi_shut_down()
               except Exception:
                   pass
           except Exception as e:
