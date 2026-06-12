@@ -63,8 +63,7 @@ AMD SMI provides tools to programmatically monitor and manage these RAS features
 The AMD SMI library provides APIs to query ECC error counts and manage CPER records
 (list, decode, and clear).
 
-See [ECC information](/doxygen/docBin/html/group__tagECCInfo) and [RAS
-information](/doxygen/docBin/html/group__tagRasInfo) for available APIs.
+See {ref}`ECC information <tagECCInfo>` and {ref}`RAS information <tagRasInfo>` for available APIs.
 ::::
 
 ::::{tab-item} Python

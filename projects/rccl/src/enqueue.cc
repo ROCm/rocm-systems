@@ -40,6 +40,7 @@
 #include <rocshmem/rocshmem.hpp>
 #endif
 
+#include "nccl_merge_stubs.h"
 using namespace rccl;
 
 struct ncclKernelMatch {
@@ -1772,6 +1773,10 @@ static ncclResult_t reclaimPlan(struct ncclComm* comm, struct ncclCommCallback* 
     ncclMemoryPoolFree(&comm->memPool_ncclProxyOp, q);
     q = q1;
   }
+  // Free RMA persistent descriptors (graph mode)
+  if (plan->isRma && plan->persistent) {
+    NCCLCHECK(ncclRmaProxyReclaimPlan(comm, plan));
+  }
   // Run other free callbacks
   ncclResult_t result = ncclSuccess;
   while (!ncclIntruQueueEmpty(&plan->cleanupQueue)) {
@@ -3271,6 +3276,16 @@ static ncclResult_t rmaTaskAppend(
     return ncclInvalidArgument;
   }
 
+#if !defined(HIP_PLATFORM_AMD)
+  int driverVersion;
+  NCCLCHECK(ncclCudaDriverVersion(&driverVersion));
+  if (driverVersion < 12050) {
+    WARN("One-sided RMA requires CUDA driver 12.5 or later (found %d.%d).",
+      driverVersion / 1000, (driverVersion % 1000) / 10);
+    return ncclInvalidUsage;
+  }
+#endif
+
   // Check if context is valid (must be 0 for now)
   if (info->ctx != 0) {
     WARN("Context %d is invalid (must be 0)", info->ctx);
@@ -3301,21 +3316,53 @@ static ncclResult_t rmaTaskAppend(
       return ncclInvalidArgument;
     }
 
-    struct ncclWindow_vidmem* peerWinDevHost = NULL;
-    NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
-    peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
+    if (comm->symmetricSupport) {
+      struct ncclWindow_vidmem* peerWinDevHost = NULL;
+      NCCLCHECK(ncclShadowPoolToHost(&comm->devrState.shadows, info->peerWin, &peerWinDevHost));
+      peerWinHost = (struct ncclDevrWindow*)peerWinDevHost->winHost;
+    } else {
+      // hostRmaSupport path: handle is already a host pointer (type-punned in ncclDevrWindowRegisterInGroup)
+      peerWinHost = reinterpret_cast<struct ncclDevrWindow*>(info->peerWin);
+    }
 
     // Validate source buffer and window
     if (srcBuff == NULL) {
       WARN("ncclPutSignal: srcBuff is NULL");
       return ncclInvalidArgument;
     }
-    NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
-    if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
-      WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+    if (info->peerWinOffset >= peerWinHost->size) {
+      WARN("ncclPutSignal: peerWinOffset %zu is greater than peerWin size %zu", info->peerWinOffset, peerWinHost->size);
       return ncclInvalidArgument;
     }
-    srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+    if (comm->symmetricSupport) {
+      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+      if (srcWinHost == NULL || !(srcWinHost->winFlags & NCCL_WIN_COLL_SYMMETRIC)) {
+        WARN("ncclPutSignal: srcWinHost is not in a valid symmetric window");
+        return ncclInvalidArgument;
+      }
+      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+    } else {
+      // hostRmaSupport path: source buffer must be inside a registered window so
+      // the GIN proxy can resolve its MR handle.  Look it up the same way.
+      NCCLCHECK(ncclDevrFindWindow(comm, srcBuff, &srcWinHost));
+      if (srcWinHost == NULL) {
+        WARN("ncclPutSignal: srcBuff is not inside a registered ncclWindow");
+        return ncclInvalidArgument;
+      }
+      srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
+    }
+
+    bool isMultiSegment = ncclDevrWindowIsMultiSegment(srcWinHost) || ncclDevrWindowIsMultiSegment(peerWinHost);
+    bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(srcWinHost) || ncclDevrWindowHasSysmemSegment(peerWinHost);
+
+    if (isMultiSegment) {
+      WARN("ncclPutSignal currently does not support VAs backed by multiple physical cuMem segments");
+      return ncclInvalidArgument;
+    }
+    if (hasSysmemSegment) {
+      WARN("ncclPutSignal currently does not support VAs with host-backed cuMem segments");
+      return ncclInvalidArgument;
+    }
   }
   else if (info->coll == ncclFuncSignal) {
     // Check if count is valid
@@ -3348,6 +3395,7 @@ static ncclResult_t rmaTaskAppend(
     }
   }
 
+#ifdef RCCL_RMA_CU_PATH_ENABLED
   // Check if RMA CE needs initialization
   if (!comm->rmaState.rmaCeState.initialized && ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* ceTask;
@@ -3356,6 +3404,7 @@ static ncclResult_t rmaTaskAppend(
     ncclIntruQueueEnqueue(&comm->rmaCeInitTaskQueue, ceTask);
     ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
   }
+#endif
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
@@ -3388,7 +3437,7 @@ static ncclResult_t rmaTaskAppend(
       t->nsignals[i] = info->signalDescs[i].opCnt;
     }
 
-    t->eActivationMask = __atomic_load_n(&ncclProfilerEventMask, __ATOMIC_RELAXED);
+    t->eActivationMask = COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed);
     planner->nTasksRma++;
     ncclIntruQueueEnqueue(&planner->rmaTaskQueues[t->ctx], t);
 
@@ -3441,7 +3490,7 @@ static ncclResult_t rmaTaskAppend(
       t->nsignals = NULL;
       t->npeers = 0;
 
-      t->eActivationMask = __atomic_load_n(&ncclProfilerEventMask, __ATOMIC_RELAXED);
+      t->eActivationMask = COMPILER_ATOMIC_LOAD(&ncclProfilerEventMask, std::memory_order_relaxed);
 
       planner->nTasksRma++;
       // Enqueue the task into the appropriate context queue

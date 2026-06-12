@@ -1,0 +1,273 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rccl-test-runner-config",
+  "title": "RCCL Test Runner Configuration",
+  "description": "Schema for RCCL test runner JSON configuration files",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+
+    "system_configurations": {
+      "description": "Human-readable metadata about this configuration",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name":        { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+
+    "paths": {
+      "description": "Filesystem paths used by the runner. Values support ${VAR}, $VAR, and ${VAR:-default} expansion.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workdir":         { "type": "string", "description": "RCCL source and build root (default: $PWD)" },
+        "rocm_path":       { "type": "string", "description": "ROCm installation prefix (default: /opt/rocm)" },
+        "mpi_path":        { "type": "string", "description": "MPI installation prefix" },
+        "test_binary_dir": { "type": "string", "description": "Directory containing test binaries; overrides the default build_dir/test/" }
+      }
+    },
+
+    "env_variables": {
+      "$ref": "#/$defs/env_variables_map",
+      "description": "Global environment variables applied to every test run"
+    },
+
+    "auto_detect_hosts": {
+      "type": "boolean",
+      "description": "When true, auto-detect MPI hosts from SLURM_NODELIST or similar"
+    },
+
+    "mpi_args": {
+      "description": "Per-system-profile extra mpirun arguments (keyed by profile name, e.g. 'mellanox', 'ainic', 'thor2')",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+
+    "system_env_variables": {
+      "description": "Per-system-profile environment variable overrides (keyed by profile name)",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/env_variables_map" }
+    },
+
+    "build_configuration": {
+      "description": "Controls how librccl.so and test binaries are built via install.sh",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "install_flags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "install.sh command-line flags, e.g. ['--debug', '-t', '-l', '--no_clean']"
+        },
+        "cmake_options": {
+          "description": "Additional CMake options. Either a string ('-DFOO=BAR -DBAZ=1') or an object whose keys become -DKEY=VAL entries.",
+          "oneOf": [
+            { "type": "string" },
+            {
+              "type": "object",
+              "additionalProperties": { "type": ["string", "number", "boolean"] }
+            }
+          ]
+        },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Environment variables set only during the build step"
+        },
+        "parallel_jobs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of parallel compile jobs passed to install.sh via -j"
+        },
+        "generator": {
+          "type": "string",
+          "description": "CMake generator, e.g. 'Unix Makefiles' or 'Ninja'"
+        }
+      }
+    },
+
+    "test_configurations": {
+      "description": "Named test configuration blocks. Each key is a configuration name referenced by test_suites or via 'extends'.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/test_configuration" }
+    },
+
+    "test_suites": {
+      "description": "Ordered list of test suites to execute",
+      "type": "array",
+      "items": { "$ref": "#/$defs/test_suite" }
+    }
+  },
+
+  "$defs": {
+
+    "env_variables_map": {
+      "description": "Key/value pairs of environment variables. Values are always strings (use '' to unset).",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+
+    "test_defaults": {
+      "description": "Fields that can appear at the test_configuration level as defaults and be overridden per-test",
+      "type": "object",
+      "properties": {
+        "is_gtest": {
+          "type": "boolean",
+          "description": "True → GTest binary using --gtest_filter; false → plain executable with direct args. Default: true."
+        },
+        "binary": {
+          "type": "string",
+          "description": "Test binary name or path. Relative names are resolved under build_dir/test/ (or test_binary_dir if set). Supports ~ and $VAR expansion."
+        },
+        "num_ranks": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total MPI ranks. 1 → no mpirun wrapper."
+        },
+        "num_nodes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of nodes across which ranks are distributed"
+        },
+        "num_gpus": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "GPUs per node; controls --map-by ppr:{num_gpus}:node for multi-node runs. Default: 8."
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timeout in seconds. 0 = unlimited."
+        }
+      }
+    },
+
+    "test_configuration": {
+      "description": "A named test configuration. May extend another configuration and define a list of tests.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extends": {
+          "description": "Name (or list of names) of parent configuration(s) to inherit from",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
+        },
+        "is_gtest":    { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
+        "binary":      { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "num_ranks":   { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
+        "num_nodes":   { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
+        "num_gpus":    { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
+        "timeout":     { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Environment variables applied to every test in this configuration (merged on top of global env_variables)"
+        },
+        "rerun_env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Additional environment variables merged in when a failed test is rerun (requires --rerun-failed)"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra command-line arguments appended to the test binary invocation. Lists are de-duplicated and appended when configs are merged via 'extends'."
+        },
+        "mpi_args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra mpirun arguments for tests in this configuration. Lists are de-duplicated and appended when configs are merged via 'extends'."
+        },
+        "_comment": {
+          "type": "string",
+          "description": "Informal annotation for this configuration block (not interpreted by the runner)"
+        },
+        "tests": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/test_item" },
+          "description": "Individual test cases belonging to this configuration"
+        }
+      }
+    },
+
+    "test_item": {
+      "description": "A single test case within a test_configuration",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique test identifier used for --test-name filtering (supports glob patterns)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description shown in output and logs"
+        },
+        "is_gtest":    { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
+        "binary":      { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "test_binary_dir": {
+          "type": "string",
+          "description": "Per-test override of the directory in which binary is looked up"
+        },
+        "test_filter": {
+          "type": "string",
+          "description": "For GTest binaries: passed as --gtest_filter=<value>. For non-GTest: passed as a plain argument."
+        },
+        "command_args": {
+          "type": "string",
+          "description": "Additional command-line arguments appended after the binary (and after test_filter for non-GTest)"
+        },
+        "num_ranks":   { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
+        "num_nodes":   { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
+        "num_gpus":    { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
+        "timeout":     { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Test-specific environment variables (highest priority, merged on top of all other levels)"
+        },
+        "rerun_env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Per-test additional environment variables used only on rerun"
+        }
+      }
+    },
+
+    "test_suite": {
+      "description": "A suite entry that binds a test_configuration to a named run with optional overrides",
+      "type": "object",
+      "required": ["name", "config"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Human-readable suite name used for --suite-name filtering"
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional longer description of what this suite exercises"
+        },
+        "config": {
+          "type": "string",
+          "description": "Name of the test_configuration to use for this suite"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "When false the suite is skipped unless targeted by --suite-name. Default: true."
+        },
+        "is_gtest":  { "$ref": "#/$defs/test_defaults/properties/is_gtest" },
+        "binary":    { "$ref": "#/$defs/test_defaults/properties/binary" },
+        "num_ranks": { "$ref": "#/$defs/test_defaults/properties/num_ranks" },
+        "num_nodes": { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
+        "num_gpus":  { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
+        "timeout":   { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "env_variables": {
+          "$ref": "#/$defs/env_variables_map",
+          "description": "Suite-level environment variable overrides (between configuration-level and test-level in priority)"
+        }
+      }
+    }
+
+  }
+}
