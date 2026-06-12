@@ -363,6 +363,7 @@ add_executable(
     v_add_simd_benchmark.cpp
     mfma_simd_benchmark.cpp
     wmma_simd_benchmark.cpp
+    mfma_benchmark.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
