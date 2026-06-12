@@ -127,7 +127,7 @@ jobs:
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
-            INCLUDED_LABELS="*"
+            INCLUDED_LABELS=""
           else
             MODE=Continuous
             INCLUDED_LABELS="gpu"
@@ -165,6 +165,11 @@ jobs:
           set -e
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           git config --global --add safe.directory ${PWD}
+          INCLUDED_LABELS="${{ steps.setup_env.outputs.included_labels }}"
+          LABEL_ARG=""
+          if [ -n "${INCLUDED_LABELS}" ]; then
+            LABEL_ARG="-L ${INCLUDED_LABELS}"
+          fi
           PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
           python3 ./scripts/run-ci.py -B build \
@@ -186,8 +191,8 @@ jobs:
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -E "${{ env.EXCLUDED_TESTS }}" \
-            -L "${{ steps.setup_env.outputs.included_labels }}" \
-            -LE "${{ env.EXCLUDED_LABELS }}"
+            -LE "${{ env.EXCLUDED_LABELS }}" \
+            ${LABEL_ARG}
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5
