@@ -171,6 +171,30 @@ jobs:
             fi
           done
           echo "  found 0x1dd8:0x0008 mgmt device: $found_mgmt"
+          echo "===== canonical PCI topology of Pensando (0x1dd8) functions ====="
+          # discover_ports()/downstream_port() require a 0x1002 port whose
+          # canonical sysfs path nests UNDER the 0x0008 mgmt BDF (i.e. contains
+          # '/<mgmt_bdf>/'). Dump canonical paths so we can see the real nesting.
+          for dpath in /sys/bus/pci/devices/*; do
+            v=$(cat "$dpath/vendor" 2>/dev/null)
+            [ "$v" = "0x1dd8" ] || continue
+            dev=$(cat "$dpath/device" 2>/dev/null)
+            bdf=$(basename "$dpath")
+            printf "  %s (device=%s) -> %s\n" "$bdf" "$dev" "$(readlink -f "$dpath")"
+          done
+          echo "===== netdev -> PCI BDF map (what discover_ports iterates) ====="
+          # discover_ports() walks /sys/class/net and resolves each iface's
+          # device symlink to a BDF, then keeps only 0x1dd8:0x1002 ports. If the
+          # 0x1002 ports don't appear here, they're invisible to discovery.
+          for n in /sys/class/net/*; do
+            [ -e "$n/device" ] || continue
+            iface=$(basename "$n")
+            target=$(readlink -f "$n/device" 2>/dev/null)
+            tbdf=$(basename "$target")
+            tv=$(cat "$target/vendor" 2>/dev/null)
+            td=$(cat "$target/device" 2>/dev/null)
+            printf "  %-12s -> %s vendor=%s device=%s\n" "$iface" "$tbdf" "$tv" "$td"
+          done
           echo "===== enumerated handle counts (what get_*_handles return) ====="
           python3 - <<'PY'
           # Mirror exactly what the CLI's get_nic_choices() does, and split the
