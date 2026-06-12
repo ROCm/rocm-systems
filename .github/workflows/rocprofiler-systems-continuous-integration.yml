@@ -127,17 +127,13 @@ jobs:
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
+            INCLUDED_LABELS="*"
           else
             MODE=Continuous
+            INCLUDED_LABELS="gpu"
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
-
-          if [ '${{ matrix.system.os-release }}' = '24.04']; then
-            CODE_NAME=noble
-          else
-            CODE_NAME=jammy
-          fi
-          echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
+          echo "included_labels=${INCLUDED_LABELS}" >> $GITHUB_OUTPUT
 
       - name: Install MPI
         run: |
@@ -190,7 +186,7 @@ jobs:
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -E "${{ env.EXCLUDED_TESTS }}" \
-            -L "rocm" \
+            -L ${{ steps.setup_env.outputs.included_labels }} \
             -LE "${{ env.EXCLUDED_LABELS }}"
 
       - name: Check for Leftover Buffered Files
