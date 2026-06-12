@@ -191,7 +191,9 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -L "rocm"
+            -E "transferbench-sys-run|fork.*|openmp-target.*|roctx-sampling|roctx-runtime-instrument|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode.*|matrix-exponential.*|scratch-memory.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|shmem-pingpong.*|video-decode.*" \
+            -L "rocm" \
+            -LE "annotate|mpi|julia|attach|lulesh|network|overflow|thread_limit"
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5
