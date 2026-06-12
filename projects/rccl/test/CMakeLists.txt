@@ -389,7 +389,7 @@ if(BUILD_TESTS)
   # unresolved rocshmem symbols (--allow-shlib-undefined). The dynamic linker
   # resolves them from the executable (see rccl-tests alltoall_perf). Link
   # librocshmem.a into every test binary that loads librccl.so.
-  if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_ROCSHMEM AND BUILD_SHARED_LIBS)
+  if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_ROCSHMEM)
     set(_rccl_gin_rocshmem_lib "${ROCSHMEM_LIBRARY}")
     if(NOT _rccl_gin_rocshmem_lib)
       set(_rccl_gin_rs_default "${CMAKE_SOURCE_DIR}/ext/rocshmem/lib/librocshmem.a")
@@ -398,6 +398,10 @@ if(BUILD_TESTS)
       endif()
     endif()
     if(_rccl_gin_rocshmem_lib)
+      set(_rccl_gin_sdma "${ROCSHMEM_SDMA_SRC_DIR}")
+      if(NOT _rccl_gin_sdma)
+        get_filename_component(_rccl_gin_sdma "${CMAKE_SOURCE_DIR}/../rocshmem/src" REALPATH)
+      endif()
       if(TARGET hsakmt::hsakmt)
         set(_rccl_gin_test_hsakmt hsakmt::hsakmt)
       else()
@@ -423,6 +427,16 @@ if(BUILD_TESTS)
       list(REMOVE_DUPLICATES _rccl_gin_rocshmem_offload_arch_flags)
       foreach(_rccl_gin_test_exe IN LISTS RCCL_TEST_EXECUTABLES)
         if(TARGET ${_rccl_gin_test_exe})
+          target_sources(${_rccl_gin_test_exe} PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/common/RocshmemGinExecutableAnchor.cpp")
+          if(EXISTS "${_rccl_gin_sdma}/sdma/anvil.hpp")
+            target_include_directories(${_rccl_gin_test_exe} PRIVATE
+              "${_rccl_gin_sdma}/sdma")
+          else()
+            message(FATAL_ERROR
+              "GIN-only test link: expected rocshmem anvil header at ${_rccl_gin_sdma}/sdma/anvil.hpp "
+              "(set ROCSHMEM_SOURCE_DIR / ROCSHMEM_SDMA_SRC_DIR or keep projects/rocshmem alongside rccl).")
+          endif()
           if(TARGET rocshmem_ext)
             add_dependencies(${_rccl_gin_test_exe} rocshmem_ext)
           endif()
@@ -447,22 +461,25 @@ if(BUILD_TESTS)
           if(_RCCL_GIN_TEST_DRM)
             target_link_libraries(${_rccl_gin_test_exe} PRIVATE "${_RCCL_GIN_TEST_DRM}")
           endif()
-          # Export symbols from the archive into the executable's dynamic symbol
-          # table so librccl.so can resolve rocshmem::anvil::anvil at load time.
-          set_target_properties(${_rccl_gin_test_exe} PROPERTIES ENABLE_EXPORTS ON)
           target_link_options(${_rccl_gin_test_exe} PRIVATE
             -fgpu-rdc
             --hip-link
             ${_rccl_gin_rocshmem_offload_arch_flags}
           )
-          if(UNIX AND NOT APPLE)
-            target_link_options(${_rccl_gin_test_exe} PRIVATE "-Wl,--export-dynamic")
+          # Export from the executable only when librccl is shared; static rccl
+          # links rocshmem at final link without needing the dynamic symbol table.
+          if(BUILD_SHARED_LIBS)
+            set_target_properties(${_rccl_gin_test_exe} PROPERTIES ENABLE_EXPORTS ON)
+            if(UNIX AND NOT APPLE)
+              target_link_options(${_rccl_gin_test_exe} PRIVATE "-Wl,--export-dynamic")
+            endif()
           endif()
         endif()
       endforeach()
       unset(_rccl_gin_rocshmem_offload_arch_flags)
       unset(_rccl_gin_test_hsakmt)
       unset(_rccl_gin_test_numa)
+      unset(_rccl_gin_sdma)
     endif()
     unset(_rccl_gin_rocshmem_lib)
   endif()
