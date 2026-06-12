@@ -128,23 +128,40 @@ class TestAmdSmiCli(unittest.TestCase):
                 cls.gpus.append(entry["uuid"])
 
         # Build NIC selectors (mirrors cls.gpus). Source: the list --json
-        # documents stashed above. NIC entries are carried in a "nic_data"
-        # document when NICs are present. When no NICs exist, cls.nics stays
-        # empty -> the harness generates zero --nic permutations (see FindArgs
-        # and the "NIC" key in sub_args), so no spurious failures are produced.
+        # documents stashed above. When a NIC is present, `amd-smi list --json`
+        # emits a second bare-list document whose entries carry an ai_nic /
+        # brcm_nic / nic id (e.g. [{"ai_nic": 0, "bdf": ..., "permanent_address":
+        # ...}]). A future combined form {"nic_data": [...]} is also accepted.
+        # When no NICs exist, cls.nics stays empty -> the harness generates zero
+        # --nic permutations (see FindArgs and the "NIC" key in sub_args), so no
+        # spurious failures are produced.
+        nic_keys = ("ai_nic", "brcm_nic", "nic")
         cls.nics = []
         nic_entries = []
         for doc in getattr(cls, "_list_docs", []):
+            candidate = None
             if isinstance(doc, dict) and isinstance(doc.get("nic_data"), list):
-                nic_entries = doc["nic_data"]
+                candidate = doc["nic_data"]
+            elif isinstance(doc, list):
+                candidate = doc
+            if not candidate:
+                continue
+            if any(
+                isinstance(e, dict) and any(k in e for k in nic_keys) for e in candidate
+            ):
+                nic_entries = candidate
                 break
         for idx, entry in enumerate(nic_entries):
             if not isinstance(entry, dict):
                 continue
             # NIC id mirrors the GPU id; fall back to the positional index.
-            nic_id = entry.get("nic", entry.get("ai_nic", entry.get("brcm_nic", idx)))
+            nic_id = next(
+                (entry[k] for k in nic_keys if k in entry),
+                idx,
+            )
             cls.nics.append(str(nic_id))
             # Only add bdf/uuid selectors for the first NIC (mirrors gpu logic).
+            # The CLI advertises the permanent_address as the NIC UUID.
             if idx == 0:
                 bdf = entry.get("bdf")
                 uuid = entry.get("uuid") or entry.get("permanent_address")
