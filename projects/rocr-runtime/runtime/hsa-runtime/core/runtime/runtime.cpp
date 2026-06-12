@@ -707,6 +707,45 @@ hsa_status_t Runtime::FillMemory(void* ptr, uint32_t value, size_t count) {
   return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 }
 
+hsa_status_t Runtime::FillMemoryBytes(void* ptr, uint8_t value, size_t size) {
+  // Choose blit agent from pointer info
+  hsa_amd_pointer_info_t info = {};
+  uint32_t agent_count = 0;
+  hsa_agent_t* accessible = nullptr;
+  info.size = sizeof(info);
+  MAKE_SCOPE_GUARD([&]() { free(accessible); });
+  hsa_status_t err = PtrInfo(ptr, &info, malloc, &agent_count, &accessible);
+  if (err != HSA_STATUS_SUCCESS) return err;
+
+  ptrdiff_t endPtr = (ptrdiff_t)ptr + size;
+
+  // Check for GPU fill
+  // Selects GPU fill for SVM and Locked allocations if a GPU address is given and is mapped.
+  if (info.agentBaseAddress <= ptr &&
+      endPtr <= (ptrdiff_t)info.agentBaseAddress + info.sizeInBytes) {
+    core::Agent* blit_agent = core::Agent::Convert(info.agentOwner);
+    if (blit_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+      blit_agent = nullptr;
+      for (uint32_t i = 0; i < agent_count; i++) {
+        if (core::Agent::Convert(accessible[i])->device_type() ==
+            core::Agent::DeviceType::kAmdGpuDevice) {
+          blit_agent = core::Agent::Convert(accessible[i]);
+          break;
+        }
+      }
+    }
+    if (blit_agent) return blit_agent->DmaFillBytes(ptr, value, size);
+  }
+
+  // Host and unmapped SVM addresses fill via host.
+  if (info.hostBaseAddress <= ptr && endPtr <= (ptrdiff_t)info.hostBaseAddress + info.sizeInBytes) {
+    memset(ptr, value, size);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+}
+
 hsa_status_t Runtime::AllowAccess(uint32_t num_agents,
                                   const hsa_agent_t* agents, const void* ptr) {
   const AMD::MemoryRegion* amd_region = NULL;

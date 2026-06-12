@@ -66,6 +66,7 @@
 #include "core/inc/isa.h"
 #include "core/inc/runtime.h"
 #include "core/util/os.h"
+#include "inc/hsa_ext_amd.h"
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
 #include "inc/hsa_ven_amd_pc_sampling.h"
@@ -2061,6 +2062,50 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
 
 hsa_status_t GpuAgent::DmaFill(void* ptr, uint32_t value, size_t count) {
   return blits_[BlitDevToDev]->SubmitLinearFillCommand(ptr, value, count);
+}
+
+hsa_status_t GpuAgent::DmaFillBytes(void* ptr, uint8_t value, size_t size) {
+  if (size == 0) return HSA_STATUS_SUCCESS;
+
+  // Check if fill has unaligned prefix or suffix bytes that require CPU writes
+  // in the BlitKernel path. If so, and the memory is coarse-grained (not CPU
+  // accessible), we must use SDMA which has native byte fill support.
+  uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+  size_t prefix_bytes = (addr & 0x3) ? (4 - (addr & 0x3)) : 0;
+  if (prefix_bytes > size) prefix_bytes = size;
+  size_t aligned_size = size - prefix_bytes;
+  size_t suffix_bytes = aligned_size % sizeof(uint32_t);
+
+  bool needs_byte_handling = (prefix_bytes > 0) || (suffix_bytes > 0);
+
+  // If the fill is dword-aligned and dword-sized, BlitKernel is optimal
+  if (!needs_byte_handling) {
+    return blits_[BlitDevToDev]->SubmitLinearFillCommandBytes(ptr, value, size);
+  }
+
+  // For unaligned fills, check if memory is coarse-grained (not CPU accessible).
+  // Query pointer info to determine memory type.
+  hsa_amd_pointer_info_t info = {};
+  info.size = sizeof(info);
+  hsa_status_t err =
+      core::Runtime::runtime_singleton_->PtrInfo(ptr, &info, nullptr, nullptr, nullptr);
+  if (err != HSA_STATUS_SUCCESS) {
+    // If we can't determine memory type, fall back to BlitKernel
+    // (will work for fine-grained, may fault for coarse-grained)
+    return blits_[BlitDevToDev]->SubmitLinearFillCommandBytes(ptr, value, size);
+  }
+
+  // If memory is coarse-grained (no fine-grained flag), use SDMA
+  bool is_coarse_grained = !(info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED);
+
+  if (is_coarse_grained) {
+    // Use SDMA engine (BlitHostToDev or BlitDevToHost) which has native byte fill support
+    lazy_ptr<core::Blit>& blit = GetBlitObject(BlitHostToDev);
+    return blit->SubmitLinearFillCommandBytes(ptr, value, size);
+  }
+
+  // Fine-grained memory: BlitKernel can safely do CPU writes for prefix/suffix
+  return blits_[BlitDevToDev]->SubmitLinearFillCommandBytes(ptr, value, size);
 }
 
 hsa_status_t GpuAgent::EnableDmaProfiling(bool enable) {

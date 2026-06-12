@@ -509,15 +509,13 @@ int GetKernelSourceParam(const char* paramName) {
 }
 
 
-#define DEFINE_KERNEL_PARAM_FUNC(name) \
-static int& name() { \
-    static std::once_flag initFlag; \
-    static int val; \
-    std::call_once(initFlag, [&]() { \
-        val = GetKernelSourceParam(#name); \
-    }); \
-    return val; \
-}
+#define DEFINE_KERNEL_PARAM_FUNC(name)                                                             \
+  static int& name() {                                                                             \
+    static std::once_flag initFlag;                                                                \
+    static int val;                                                                                \
+    std::call_once(initFlag, [&]() { val = GetKernelSourceParam(#name); });                        \
+    return val;                                                                                    \
+  }
 
 // Use the macro to define the functions
 DEFINE_KERNEL_PARAM_FUNC(kCopyAlignedVecWidth)
@@ -560,7 +558,7 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
   const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
   kernarg_async_ = reinterpret_cast<KernelArgs*>(
       gpuAgent->system_allocator()(queue_->public_handle()->size * AlignUp(sizeof(KernelArgs), 16),
-                                  16, core::MemoryRegion::AllocateNoFlags));
+                                   16, core::MemoryRegion::AllocateNoFlags));
 
   kernarg_async_mask_ = queue_->public_handle()->size - 1;
 
@@ -568,15 +566,14 @@ hsa_status_t BlitKernel::Initialize(const core::Agent& agent) {
   num_cus_ = gpuAgent->properties().NumFComputeCores / 4;
 
   // Assemble shaders to AQL code objects.
-  std::map<KernelType, const char*> kernel_names = {
-      {KernelType::CopyAligned, "CopyAligned"},
-      {KernelType::CopyMisaligned, "CopyMisaligned"},
-      {KernelType::Fill, "Fill"}};
+  std::map<KernelType, const char*> kernel_names = {{KernelType::CopyAligned, "CopyAligned"},
+                                                    {KernelType::CopyMisaligned, "CopyMisaligned"},
+                                                    {KernelType::Fill, "Fill"}};
 
   for (auto kernel_name : kernel_names) {
     KernelCode& kernel = kernels_[kernel_name.first];
-    gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL, kernel.code_buf_,
-                            kernel.code_buf_size_);
+    gpuAgent->AssembleShader(kernel_name.second, AMD::GpuAgent::AssembleTarget::AQL,
+                             kernel.code_buf_, kernel.code_buf_size_);
   }
 
   if (agent_->profiling_enabled()) {
@@ -592,8 +589,7 @@ hsa_status_t BlitKernel::Destroy() {
   const AMD::GpuAgent* gpuAgent = static_cast<const AMD::GpuAgent*>(agent_);
 
   for (auto kernel_pair : kernels_) {
-    gpuAgent->ReleaseShader(kernel_pair.second.code_buf_,
-                           kernel_pair.second.code_buf_size_);
+    gpuAgent->ReleaseShader(kernel_pair.second.code_buf_, kernel_pair.second.code_buf_size_);
   }
 
   if (kernarg_async_ != NULL) {
@@ -608,8 +604,7 @@ hsa_status_t BlitKernel::Destroy() {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
-                                                 size_t size) {
+hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src, size_t size) {
   // Protect completion_signal_.
   std::lock_guard<std::mutex> guard(lock_);
 
@@ -632,7 +627,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
     return HSA_STATUS_ERROR;
   }
 
-  if(agent_->profiling_enabled()) {
+  if (agent_->profiling_enabled()) {
     LogSignalDuration(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS, completion_signal_,
                       "BlitKernel::SubmitLinearCopyCommand");
   }
@@ -640,10 +635,10 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::SubmitLinearCopyCommand(
-    void* dst, const void* src, size_t size,
-    std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
-    std::vector<core::Signal*>& gang_signals) {
+hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src, size_t size,
+                                                 std::vector<core::Signal*>& dep_signals,
+                                                 core::Signal& out_signal,
+                                                 std::vector<core::Signal*>& gang_signals) {
   // Reserve write index for barrier(s) + dispatch packet.
   const uint32_t num_barrier_packet = uint32_t((dep_signals.size() + 4) / 5);
   const uint32_t total_num_packet = num_barrier_packet + 1;
@@ -667,8 +662,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
   barrier_packet.header = HSA_PACKET_TYPE_INVALID;
 
   hsa_barrier_and_packet_t* queue_buffer =
-      reinterpret_cast<hsa_barrier_and_packet_t*>(
-          queue_->public_handle()->base_address);
+      reinterpret_cast<hsa_barrier_and_packet_t*>(queue_->public_handle()->base_address);
 
   const size_t dep_signal_count = dep_signals.size();
   for (size_t i = 0; i < dep_signal_count; ++i) {
@@ -681,27 +675,24 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
       queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
 
       LogPrint(HSA_AMD_LOG_FLAG_AQL,
-      "HWq=%p, id=%lu, Barrier Header = "
-      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-      "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
-      "rptr=%lu, wptr=%lu",
-      queue_->public_handle()->base_address, queue_->public_handle()->id,
-      kBarrierPacketHeader,
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
-      extractAqlBits(kBarrierPacketHeader,
-                    HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-      extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-      barrier_packet.dep_signal[0].handle,
-      barrier_packet.dep_signal[1].handle,
-      barrier_packet.dep_signal[2].handle,
-      barrier_packet.dep_signal[3].handle,
-      barrier_packet.dep_signal[4].handle,
-      barrier_packet.completion_signal.handle,
-      queue_->LoadReadIndexRelaxed(), write_index);
+               "HWq=%p, id=%lu, Barrier Header = "
+               "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+               "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
+               "rptr=%lu, wptr=%lu",
+               queue_->public_handle()->base_address, queue_->public_handle()->id,
+               kBarrierPacketHeader,
+               extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_TYPE,
+                              HSA_PACKET_HEADER_WIDTH_TYPE),
+               extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_BARRIER,
+                              HSA_PACKET_HEADER_WIDTH_BARRIER),
+               extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                              HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+               extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                              HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+               barrier_packet.dep_signal[0].handle, barrier_packet.dep_signal[1].handle,
+               barrier_packet.dep_signal[2].handle, barrier_packet.dep_signal[3].handle,
+               barrier_packet.dep_signal[4].handle, barrier_packet.completion_signal.handle,
+               queue_->LoadReadIndexRelaxed(), write_index);
 
       ++write_index;
 
@@ -727,18 +718,16 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     // Phase 1 (byte copy) ends when destination is 0x100-aligned.
     uintptr_t src_start = uintptr_t(src);
     uintptr_t dst_start = uintptr_t(dst);
-    uint64_t phase1_size =
-        std::min(size, uint64_t(0x100 - (dst_start & 0xFF)) & 0xFF);
+    uint64_t phase1_size = std::min(size, uint64_t(0x100 - (dst_start & 0xFF)) & 0xFF);
 
     // Phase 2 (unrolled dwordx4 copy) ends when last whole block fits.
-    uint64_t phase2_block = num_workitems * sizeof(uint32_t) *
-                            kCopyAlignedUnroll() * kCopyAlignedVecWidth();
+    uint64_t phase2_block =
+        num_workitems * sizeof(uint32_t) * kCopyAlignedUnroll() * kCopyAlignedVecWidth();
     uint64_t phase2_size = ((size - phase1_size) / phase2_block) * phase2_block;
 
     // Phase 3 (dword copy) ends when last whole dword fits.
     uint64_t phase3_size =
-        ((size - phase1_size - phase2_size) / sizeof(uint32_t)) *
-        sizeof(uint32_t);
+        ((size - phase1_size - phase2_size) / sizeof(uint32_t)) * sizeof(uint32_t);
 
     args->copy_aligned.phase1_src_start = src_start;
     args->copy_aligned.phase1_dst_start = dst_start;
@@ -746,10 +735,8 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     args->copy_aligned.phase2_dst_start = dst_start + phase1_size;
     args->copy_aligned.phase3_src_start = src_start + phase1_size + phase2_size;
     args->copy_aligned.phase3_dst_start = dst_start + phase1_size + phase2_size;
-    args->copy_aligned.phase4_src_start =
-        src_start + phase1_size + phase2_size + phase3_size;
-    args->copy_aligned.phase4_dst_start =
-        dst_start + phase1_size + phase2_size + phase3_size;
+    args->copy_aligned.phase4_src_start = src_start + phase1_size + phase2_size + phase3_size;
+    args->copy_aligned.phase4_dst_start = dst_start + phase1_size + phase2_size + phase3_size;
     args->copy_aligned.phase4_src_end = src_start + size;
     args->copy_aligned.phase4_dst_end = dst_start + size;
     args->copy_aligned.num_workitems = num_workitems;
@@ -763,8 +750,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
     // Phase 1 (unrolled byte copy) ends when last whole block fits.
     uintptr_t src_start = uintptr_t(src);
     uintptr_t dst_start = uintptr_t(dst);
-    uint64_t phase1_block =
-        num_workitems * sizeof(uint8_t) * kCopyMisalignedUnroll();
+    uint64_t phase1_block = num_workitems * sizeof(uint8_t) * kCopyMisalignedUnroll();
     uint64_t phase1_size = (size / phase1_block) * phase1_block;
 
     args->copy_misaligned.phase1_src_start = src_start;
@@ -777,8 +763,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
   }
 
   hsa_signal_t signal = {(core::Signal::Convert(&out_signal)).handle};
-  PopulateQueue(write_index, uintptr_t(kernel_code->code_buf_), args,
-                num_workitems, signal);
+  PopulateQueue(write_index, uintptr_t(kernel_code->code_buf_), args, num_workitems, signal);
 
   // Submit barrier(s) and dispatch packets.
   ReleaseWriteIndex(write_index_temp, total_num_packet);
@@ -786,8 +771,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
-                                                 size_t count) {
+hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value, size_t count) {
   std::lock_guard<std::mutex> guard(lock_);
 
   // Reject misaligned base address.
@@ -802,8 +786,7 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
   uintptr_t dst_start = uintptr_t(ptr);
   uint64_t fill_size = count * sizeof(uint32_t);
 
-  uint64_t phase1_block =
-      num_workitems * sizeof(uint32_t) * kFillUnroll() * kFillVecWidth();
+  uint64_t phase1_block = num_workitems * sizeof(uint32_t) * kFillUnroll() * kFillVecWidth();
   uint64_t phase1_size = (fill_size / phase1_block) * phase1_block;
 
   KernelArgs* args = ObtainAsyncKernelCopyArg();
@@ -823,8 +806,8 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
     RecordBlitHistory(fill_size, write_index);
   }
 
-  PopulateQueue(write_index, uintptr_t(kernels_[KernelType::Fill].code_buf_),
-                args, num_workitems, completion_signal_);
+  PopulateQueue(write_index, uintptr_t(kernels_[KernelType::Fill].code_buf_), args, num_workitems,
+                completion_signal_);
 
   ReleaseWriteIndex(write_index, 1);
 
@@ -838,6 +821,113 @@ hsa_status_t BlitKernel::SubmitLinearFillCommand(void* ptr, uint32_t value,
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t BlitKernel::SubmitLinearFillCommandBytes(void* ptr, uint8_t value, size_t size) {
+  if (size == 0) return HSA_STATUS_SUCCESS;
+
+  // Create a dword-replicated value for the dword fill kernel
+  uint32_t dword_value = value | (value << 8) | (value << 16) | (value << 24);
+
+  uint8_t* byte_ptr = reinterpret_cast<uint8_t*>(ptr);
+
+  // Calculate prefix bytes needed to reach dword alignment
+  uintptr_t addr = reinterpret_cast<uintptr_t>(byte_ptr);
+  size_t prefix_bytes = (addr & 0x3) ? (4 - (addr & 0x3)) : 0;
+  if (prefix_bytes > size) prefix_bytes = size;
+
+  // Calculate aligned region and suffix
+  size_t remaining = size - prefix_bytes;
+  size_t dword_count = remaining / sizeof(uint32_t);
+  size_t suffix_bytes = remaining % sizeof(uint32_t);
+
+  // Fast path: if dword-aligned and dword-sized, use fill kernel directly
+  if (prefix_bytes == 0 && suffix_bytes == 0 && dword_count > 0) {
+    return SubmitLinearFillCommand(byte_ptr, dword_value, dword_count);
+  }
+
+  // For unaligned prefix/suffix bytes, we use read-modify-write via GPU copy.
+  // This ensures correct operation on coarse-grained GPU memory where direct
+  // CPU writes would fault. We allocate a small staging buffer in fine-grained
+  // system memory, use GPU copy to read the containing dword(s), modify the
+  // specific bytes on CPU, then GPU copy back.
+
+  const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent_);
+
+  // Allocate staging buffer: 4 bytes for prefix dword + 4 bytes for suffix dword
+  void* staging = gpu_agent->system_allocator()(8, 4, core::MemoryRegion::AllocateNoFlags);
+  if (staging == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  uint32_t* prefix_staging = reinterpret_cast<uint32_t*>(staging);
+  uint32_t* suffix_staging = prefix_staging + 1;
+  hsa_status_t status = HSA_STATUS_SUCCESS;
+
+  // Handle prefix bytes via read-modify-write
+  if (prefix_bytes > 0) {
+    // Calculate the dword-aligned address containing the prefix bytes
+    uint32_t* prefix_dword_ptr = reinterpret_cast<uint32_t*>(addr & ~uintptr_t(0x3));
+
+    // Copy the containing dword from GPU to staging buffer
+    status = SubmitLinearCopyCommand(prefix_staging, prefix_dword_ptr, sizeof(uint32_t));
+    if (status != HSA_STATUS_SUCCESS) {
+      gpu_agent->system_deallocator()(staging);
+      return status;
+    }
+
+    // Modify only the bytes we want to fill (at the end of the dword)
+    uint8_t* prefix_bytes_ptr = reinterpret_cast<uint8_t*>(prefix_staging) + (4 - prefix_bytes);
+    for (size_t i = 0; i < prefix_bytes; i++) {
+      prefix_bytes_ptr[i] = value;
+    }
+
+    // Copy the modified dword back to GPU
+    status = SubmitLinearCopyCommand(prefix_dword_ptr, prefix_staging, sizeof(uint32_t));
+    if (status != HSA_STATUS_SUCCESS) {
+      gpu_agent->system_deallocator()(staging);
+      return status;
+    }
+
+    byte_ptr += prefix_bytes;
+  }
+
+  // Fill dword-aligned middle portion using the GPU fill kernel
+  if (dword_count > 0) {
+    status = SubmitLinearFillCommand(byte_ptr, dword_value, dword_count);
+    if (status != HSA_STATUS_SUCCESS) {
+      gpu_agent->system_deallocator()(staging);
+      return status;
+    }
+    byte_ptr += dword_count * sizeof(uint32_t);
+  }
+
+  // Handle suffix bytes via read-modify-write
+  if (suffix_bytes > 0) {
+    // Copy the containing dword from GPU to staging buffer
+    // (byte_ptr is dword-aligned at this point)
+    status = SubmitLinearCopyCommand(suffix_staging, byte_ptr, sizeof(uint32_t));
+    if (status != HSA_STATUS_SUCCESS) {
+      gpu_agent->system_deallocator()(staging);
+      return status;
+    }
+
+    // Modify only the bytes we want to fill (at the start of the dword)
+    uint8_t* suffix_bytes_ptr = reinterpret_cast<uint8_t*>(suffix_staging);
+    for (size_t i = 0; i < suffix_bytes; i++) {
+      suffix_bytes_ptr[i] = value;
+    }
+
+    // Copy the modified dword back to GPU
+    status = SubmitLinearCopyCommand(byte_ptr, suffix_staging, sizeof(uint32_t));
+    if (status != HSA_STATUS_SUCCESS) {
+      gpu_agent->system_deallocator()(staging);
+      return status;
+    }
+  }
+
+  gpu_agent->system_deallocator()(staging);
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t BlitKernel::EnableProfiling(bool enable) {
   queue_->SetProfiling(enable);
   return HSA_STATUS_SUCCESS;
@@ -848,7 +938,8 @@ uint64_t BlitKernel::AcquireWriteIndex(uint32_t num_packet) {
 
   uint64_t write_index = queue_->AddWriteIndexAcqRel(num_packet);
 
-  while (write_index + num_packet - queue_->LoadReadIndexRelaxed() > queue_->public_handle()->size) {
+  while (write_index + num_packet - queue_->LoadReadIndexRelaxed() >
+         queue_->public_handle()->size) {
     os::YieldThread();
   }
 
@@ -857,17 +948,15 @@ uint64_t BlitKernel::AcquireWriteIndex(uint32_t num_packet) {
 
 void BlitKernel::ReleaseWriteIndex(uint64_t write_index, uint32_t num_packet) {
   // Update doorbel register with last packet id.
-  core::Signal* doorbell =
-      core::Signal::Convert(queue_->public_handle()->doorbell_signal);
+  core::Signal* doorbell = core::Signal::Convert(queue_->public_handle()->doorbell_signal);
   doorbell->StoreRelease(write_index + num_packet - 1);
 }
 
 void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
-                               uint32_t grid_size_x,
-                               hsa_signal_t completion_signal) {
+                               uint32_t grid_size_x, hsa_signal_t completion_signal) {
   assert(IsMultipleOf(args, 16));
 
-  hsa_kernel_dispatch_packet_t packet = { };
+  hsa_kernel_dispatch_packet_t packet = {};
 
   static const uint16_t kDispatchPacketHeader =
       (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
@@ -890,8 +979,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
 
   // Populate queue buffer with AQL packet.
   hsa_kernel_dispatch_packet_t* queue_buffer =
-      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-          queue_->public_handle()->base_address);
+      reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue_->public_handle()->base_address);
   std::atomic_thread_fence(std::memory_order_acquire);
   queue_buffer[index & queue_bitmask_] = packet;
   std::atomic_thread_fence(std::memory_order_release);
@@ -901,32 +989,34 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   }
 #if defined(__linux__)
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),
-                    kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
+                   kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
 #else
   std::atomic_ref<uint32_t> atomic_header(queue_buffer[index & queue_bitmask_].full_header);
   atomic_header.store(kDispatchPacketHeader | packet.setup << 16, std::memory_order_release);
 #endif
-  LogPrint(HSA_AMD_LOG_FLAG_AQL,
-    "HWq=%p, id=%lu, Dispatch Header = "
-    "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
-    "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "
-    "group_seg_size=%zu, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx "
-    "rptr=%lu, wptr=%lu",
-    queue_->public_handle()->base_address, queue_->public_handle()->id,
-    kDispatchPacketHeader,
-    extractAqlBits(kDispatchPacketHeader,
-                   HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
-    extractAqlBits(kDispatchPacketHeader,
-                   HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
-    extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
-                   HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
-    extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
-                   HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-    packet.setup, static_cast<size_t>(packet.grid_size_x), static_cast<size_t>(packet.grid_size_y), static_cast<size_t>(packet.grid_size_z),
-    static_cast<size_t>(packet.workgroup_size_x), static_cast<size_t>(packet.workgroup_size_y), static_cast<size_t>(packet.workgroup_size_z),
-    static_cast<size_t>(packet.private_segment_size), static_cast<size_t>(packet.group_segment_size),
-    packet.kernel_object,reinterpret_cast<uintptr_t>(packet.kernarg_address),
-    completion_signal.handle, queue_->LoadReadIndexRelaxed(), index);
+  LogPrint(
+      HSA_AMD_LOG_FLAG_AQL,
+      "HWq=%p, id=%lu, Dispatch Header = "
+      "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
+      "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "
+      "group_seg_size=%zu, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx "
+      "rptr=%lu, wptr=%lu",
+      queue_->public_handle()->base_address, queue_->public_handle()->id, kDispatchPacketHeader,
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_BARRIER,
+                     HSA_PACKET_HEADER_WIDTH_BARRIER),
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE,
+                     HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
+      extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
+                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
+      packet.setup, static_cast<size_t>(packet.grid_size_x),
+      static_cast<size_t>(packet.grid_size_y), static_cast<size_t>(packet.grid_size_z),
+      static_cast<size_t>(packet.workgroup_size_x), static_cast<size_t>(packet.workgroup_size_y),
+      static_cast<size_t>(packet.workgroup_size_z),
+      static_cast<size_t>(packet.private_segment_size),
+      static_cast<size_t>(packet.group_segment_size), packet.kernel_object,
+      reinterpret_cast<uintptr_t>(packet.kernarg_address), completion_signal.handle,
+      queue_->LoadReadIndexRelaxed(), index);
 }
 
 BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg() {
@@ -975,5 +1065,5 @@ uint64_t BlitKernel::PendingBytes() {
   return 0;
 }
 
-}  // namespace amd
+}  // namespace AMD
 }  // namespace rocr

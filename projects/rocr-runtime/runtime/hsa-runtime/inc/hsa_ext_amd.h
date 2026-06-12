@@ -63,7 +63,8 @@
  * - 1.9 - hsa_amd_portable_export_dmabuf_v2
  * - 1.10 - hsa_amd_vmem_address_reserve: HSA_AMD_VMEM_ADDRESS_NO_REGISTER
  * - 1.11 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_CLOCK_COUNTERS
- * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and HSA_EXT_POINTER_TYPE_RESERVED_ADDR
+ * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and
+ *          HSA_EXT_POINTER_TYPE_RESERVED_ADDR
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
@@ -78,9 +79,10 @@
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
  * - 1.26 - hsa_amd_queue_create: batch queue creation with descriptor
+ * - 1.27 - hsa_amd_memory_fill_bytes
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 26
+#define HSA_AMD_INTERFACE_VERSION_MINOR 27
 
 #ifdef __cplusplus
 extern "C" {
@@ -2845,6 +2847,29 @@ hsa_status_t HSA_API hsa_amd_memory_unlock(void* host_ptr);
  */
 hsa_status_t HSA_API
     hsa_amd_memory_fill(void* ptr, uint32_t value, size_t count);
+
+/**
+ * @brief Fills the first @p size bytes of the block of memory pointed by
+ * @p ptr with the specified byte @p value. This is analogous to cudaMemset.
+ *
+ * @param[in] ptr Pointer to the block of memory to fill.
+ *
+ * @param[in] value Byte value to be set (only lower 8 bits are used).
+ *
+ * @param[in] size Number of bytes to be set to the value.
+ *
+ * @retval HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptr is NULL.
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ALLOCATION if the given memory
+ * region was not allocated with HSA runtime APIs.
+ *
+ */
+hsa_status_t HSA_API hsa_amd_memory_fill_bytes(void* ptr, uint8_t value, size_t size);
 
 /**
  * @brief Maps an interop object into the HSA flat address space and establishes

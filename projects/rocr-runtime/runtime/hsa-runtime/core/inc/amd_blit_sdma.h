@@ -232,6 +232,13 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value,
                                                size_t count) override;
 
+  /// @brief Submit a linear fill command with byte granularity
+  ///
+  /// @param ptr Memory address of the fill destination.
+  /// @param value Byte value to be set.
+  /// @param size Number of bytes to fill.
+  virtual hsa_status_t SubmitLinearFillCommandBytes(void* ptr, uint8_t value, size_t size) override;
+
   virtual hsa_status_t EnableProfiling(bool enable) override;
 
   virtual uint64_t PendingBytes() override;
