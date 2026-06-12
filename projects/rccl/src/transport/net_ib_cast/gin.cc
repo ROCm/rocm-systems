@@ -38,6 +38,7 @@ static ncclResult_t IbCastGinIbGdrGpuSupport(bool gdaki) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (IbCastDmaBufSupport(0) == ncclSuccess) return ncclSuccess;
 
+  if (IbCastGdrSupport() == ncclSuccess) return ncclSuccess;
   WARN("Unable to use GIN: Peermem is not supported, and DMA-BUF is not available.");
 #else
   bool peerMemSupport =
