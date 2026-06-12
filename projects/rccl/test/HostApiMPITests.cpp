@@ -1648,7 +1648,8 @@ TEST_F(HostApiTest, DoubleDeregister)
  *        is destroyed, even if the user never calls ncclCommWindowDeregister.
  *
  * Validates the NCCL fix "Free symmetric window objects automatically during
- * commFree" (the window drain loop in ncclDevrFinalize).
+ * commFree" — ncclCommDestroy drives the internal commFree -> ncclDevrFinalize
+ * path, whose window drain loop releases any still-registered windows.
  *
  * Uses a dedicated communicator (not the fixture's shared one) so it can call
  * ncclCommDestroy explicitly and assert it still returns ncclSuccess.
@@ -1660,8 +1661,8 @@ TEST_F(HostApiTest, DestroyCommWithoutDeregister)
         GTEST_SKIP() << "Need at least 2 MPI processes";
     }
 
-    const int worldRank = MPIEnvironment::world_rank;
-    const int worldSize = MPIEnvironment::world_size;
+    const int worldRank = rank();
+    const int worldSize = nRanks();
 
     // Build a communicator we fully own so we can destroy it explicitly and
     // observe the result of commFree -> ncclDevrFinalize.
@@ -1679,6 +1680,11 @@ TEST_F(HostApiTest, DestroyCommWithoutDeregister)
     ASSERT_MPI_EQ(ncclSuccess, ncclCommInitRank(&ownComm, worldSize, id, worldRank));
     ASSERT_MPI_NE(ownComm, nullptr);
 
+    // Safety net: if a later assertion aborts the test before the intentional
+    // destroy below, this guard still tears the comm down. It is cleared after
+    // the explicit ncclCommDestroy to avoid a double-destroy.
+    auto ownCommGuard = makeScopeGuard([&]() { if(ownComm) (void)ncclCommDestroy(ownComm); });
+
     // Allocate a fine-grain buffer and register it as a window.
     void* winBuf = nullptr;
     ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
@@ -1694,6 +1700,7 @@ TEST_F(HostApiTest, DestroyCommWithoutDeregister)
     // during commFree -> ncclDevrFinalize and therefore still succeed.
     MPI_Barrier(MPI_COMM_WORLD);
     ASSERT_MPI_EQ(ncclSuccess, ncclCommDestroy(ownComm));
+    ownComm = nullptr; // destroyed explicitly; disarm the guard
     MPI_Barrier(MPI_COMM_WORLD);
 
     TEST_INFO("W4 rank %d: DestroyCommWithoutDeregister passed.", worldRank);
