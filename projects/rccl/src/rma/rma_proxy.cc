@@ -34,6 +34,11 @@ NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
 RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
 
+// When set, export the DMA-BUF FD for VMM (cuMem) buffers via
+// cuMemGetHandleForAddressRange instead of hsa_amd_portable_export_dmabuf.
+// The HSA exporter cannot export cuMem/VMM allocations on some ROCm/NIC stacks
+RCCL_PARAM(DmaBufUseVmmExport, "DMABUF_USE_VMM_EXPORT", 0);
+
 
 #include <signal.h>
 static ncclRmaProxyState* ncclLastRmaProxyState;
@@ -72,6 +77,21 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
 static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool sym_buffer) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+#if HIP_VERSION >= 71260540
+  if (rcclParamDmaBufUseVmmExport()) {
+    static size_t vmmHostPageSize = ncclOsGetPageSize();
+    size_t vmmAlignedSize = length;
+    ALIGN_SIZE(vmmAlignedSize, vmmHostPageSize);
+    CUresult status =
+        cuMemGetHandleForAddressRange((void*)fd,
+                                      (CUdeviceptr)addr,
+                                      vmmAlignedSize,
+                                      CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                      0);
+    if (status == CUDA_SUCCESS) return ncclSuccess;
+    return ncclInvalidUsage;
+  }
+#endif
 #if HIP_VERSION >= 70000000
   static size_t hostPageSize = ncclOsGetPageSize();
   size_t alignedSize = length;
