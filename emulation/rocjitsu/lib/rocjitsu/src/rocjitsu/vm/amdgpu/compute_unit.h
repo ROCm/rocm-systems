@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -158,10 +159,17 @@ public:
   /// memory mutex while VALU runs fully parallel. Does NOT retire wavefronts —
   /// the command processor retires after the fork-join joins.
   ///
-  /// Only valid for barrier-free workgroups (see uses_lds()); a wavefront that
-  /// parks in BARRIER here is left for the serial fallback to resolve.
+  /// Workgroup barriers are resolved across shards via the per-workgroup
+  /// generation barrier (see WgBarrier); call prepare_shard_barriers() once
+  /// before launching the shard jobs for this CU.
   /// @returns true if any instruction was issued.
   bool run_quantum_shard(uint32_t shard_idx, uint32_t shard_count);
+
+  /// @brief (Re)build the per-workgroup cross-thread barriers from the current
+  /// resident wavefronts. Must be called single-threaded before the CU's shard
+  /// jobs run; the map is then only read (its atomics mutated) during the
+  /// parallel region.
+  void prepare_shard_barriers();
 
   /// @brief Whether any resident workgroup has allocated LDS. Used as a safe
   /// proxy for "may contain cross-wavefront barriers" — such CUs stay on the
@@ -588,6 +596,23 @@ protected:
   }
   std::unordered_map<uint64_t, uint32_t> active_wgs_;
 
+  // Cross-thread workgroup barrier (intra-CU parallel path). When a workgroup's
+  // wavefronts are sharded across host threads, s_barrier can no longer be
+  // resolved by the single-threaded update_wf_states() scan. Each workgroup gets
+  // a generation barrier: a wavefront arriving at the barrier decrements
+  // not_yet_here; the one that drives it to zero advances generation (the
+  // release), and every shard observes the release by polling generation. Fully
+  // cooperative — no thread blocks, so a workgroup whose wavefronts span shards
+  // cannot deadlock. live tracks non-halted participants so a wavefront that
+  // exits (s_endpgm) before its siblings reach the barrier still lets the round
+  // complete.
+  struct WgBarrier {
+    std::atomic<uint32_t> live{0};       // non-halted wavefronts in the workgroup
+    std::atomic<uint32_t> not_yet_here{0}; // live wavefronts not yet at this barrier
+    std::atomic<uint32_t> generation{0}; // bumped on each barrier release
+  };
+  std::unordered_map<uint64_t, std::unique_ptr<WgBarrier>> shard_barriers_;
+
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
@@ -630,6 +655,13 @@ protected:
                          DecodeCacheLine *decode_cache);
   void fetch_instruction_words(uint64_t pc, uint32_t vmid, uint32_t words[4],
                                InstFetchCacheLine *fetch_cache);
+
+  // Cross-thread workgroup-barrier helpers (intra-CU parallel path).
+  // arrive: a wavefront reached s_barrier. depart: a wavefront exited (s_endpgm)
+  // before the pending barrier. release: drive the round to completion.
+  void barrier_arrive(WgBarrier &b, Wavefront &wf);
+  void barrier_depart(WgBarrier &b);
+  static void barrier_release(WgBarrier &b, uint32_t completed_gen);
 
   // Serializes the shared per-CU memory subsystem (L1 V$/S$, LDS) while multiple
   // threads co-run this CU's wavefronts. VALU touches only per-wavefront state

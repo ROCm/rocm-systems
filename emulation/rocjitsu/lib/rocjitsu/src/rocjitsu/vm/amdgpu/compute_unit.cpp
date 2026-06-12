@@ -392,6 +392,13 @@ void ComputeUnitCore::retire_halted_wfs() {
 }
 
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id) {
+  // Under intra-CU parallel execution several host threads can halt wavefronts
+  // (and thus reach here) at once; the active_wgs_ refcount map is not otherwise
+  // synchronized, and a lost decrement would drop the workgroup-complete
+  // notification and hang the waiting host. Serialize the refcount update.
+  std::unique_lock<std::mutex> lk;
+  if (parallel_exec_)
+    lk = std::unique_lock<std::mutex>(parallel_mem_mutex_);
   auto key = wg_key(dispatch_id, wg_id);
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end() && --it->second == 0) {
@@ -703,6 +710,58 @@ void ComputeUnitCore::invalidate_inst_fetch_cache() {
     line.inst.reset();
 }
 
+void ComputeUnitCore::barrier_release(WgBarrier &b, uint32_t completed_gen) {
+  // Re-arm for the next round (every live participant must arrive again) and
+  // publish the release. Order matters: reset the counter before advancing the
+  // generation so a freshly-released wavefront sees the new not_yet_here.
+  b.not_yet_here.store(b.live.load(std::memory_order_acquire), std::memory_order_release);
+  b.generation.store(completed_gen + 1, std::memory_order_release);
+}
+
+void ComputeUnitCore::barrier_arrive(WgBarrier &b, Wavefront &wf) {
+  uint32_t g = b.generation.load(std::memory_order_acquire);
+  wf.set_barrier_wait_gen(g + 1); // released once generation reaches g+1
+  if (b.not_yet_here.fetch_sub(1, std::memory_order_acq_rel) == 1)
+    barrier_release(b, g); // last to arrive this round
+}
+
+void ComputeUnitCore::barrier_depart(WgBarrier &b) {
+  // A wavefront exiting before the pending barrier leaves the participant set;
+  // if it was the last one still expected, the round completes.
+  b.live.fetch_sub(1, std::memory_order_acq_rel);
+  uint32_t g = b.generation.load(std::memory_order_acquire);
+  if (b.not_yet_here.fetch_sub(1, std::memory_order_acq_rel) == 1)
+    barrier_release(b, g);
+}
+
+void ComputeUnitCore::prepare_shard_barriers() {
+  // Count live (non-halted) wavefronts per resident workgroup.
+  std::unordered_map<uint64_t, uint32_t> counts;
+  for (auto &w : wfs_) {
+    if (w->sgpr_alloc().count == 0 || w->state() == WfState::HALTED)
+      continue;
+    counts[wg_key(w->dispatch_id(), w->wg_id())]++;
+  }
+  // Drop barriers for workgroups no longer resident.
+  for (auto it = shard_barriers_.begin(); it != shard_barriers_.end();) {
+    if (counts.find(it->first) == counts.end())
+      it = shard_barriers_.erase(it);
+    else
+      ++it;
+  }
+  // Create barriers for newly-resident workgroups; preserve in-flight ones so a
+  // barrier that spans more than one quantum keeps its arrival state.
+  for (auto &[k, c] : counts) {
+    if (shard_barriers_.find(k) == shard_barriers_.end()) {
+      auto b = std::make_unique<WgBarrier>();
+      b->live.store(c);
+      b->not_yet_here.store(c);
+      b->generation.store(0);
+      shard_barriers_[k] = std::move(b);
+    }
+  }
+}
+
 bool ComputeUnitCore::run_quantum_shard(uint32_t shard_idx, uint32_t shard_count) {
   // Thread-local fetch/decode caches: each co-running shard owns its own so the
   // per-CU caches are never written concurrently. Allocated per call; for the
@@ -713,7 +772,11 @@ bool ComputeUnitCore::run_quantum_shard(uint32_t shard_idx, uint32_t shard_count
 
   bool ran = false;
   for (uint32_t iter = 0, quantum = functional_quantum(); iter < quantum; ++iter) {
-    bool any_running = false;
+    // any_active stays true while any of this shard's wavefronts are not yet
+    // HALTED, including those parked at a barrier waiting for sibling shards —
+    // we must keep polling those for release rather than exit (the releasing
+    // wavefront runs on another shard of the same fork-join).
+    bool any_active = false;
     uint32_t active_idx = 0;
     for (auto &w : wfs_) {
       if (w->sgpr_alloc().count == 0)
@@ -724,30 +787,47 @@ bool ComputeUnitCore::run_quantum_shard(uint32_t shard_idx, uint32_t shard_count
       ++active_idx;
       if (!mine)
         continue;
-      switch (w->state()) {
+      Wavefront *wf = w.get();
+      const WfState st = wf->state();
+      if (st == WfState::HALTED)
+        continue;
+      any_active = true;
+
+      WgBarrier *b = nullptr;
+      if (auto it = shard_barriers_.find(wg_key(wf->dispatch_id(), wf->wg_id()));
+          it != shard_barriers_.end())
+        b = it->second.get();
+
+      switch (st) {
       case WfState::RUNNING:
-        issue_instruction(w.get(), fetch_cache.data(), decode_cache.data());
-        any_running = true;
+        issue_instruction(wf, fetch_cache.data(), decode_cache.data());
         ran = true;
+        // s_barrier parks the wavefront; register its arrival exactly once.
+        if (b && wf->state() == WfState::BARRIER && wf->barrier_wait_gen() == 0)
+          barrier_arrive(*b, *wf);
         break;
-      case WfState::WAITCNT:
-        if (w->wait_satisfied()) {
-          w->set_state(WfState::RUNNING);
-          any_running = true;
+      case WfState::BARRIER:
+        if (b && b->generation.load(std::memory_order_acquire) >= wf->barrier_wait_gen()) {
+          wf->set_barrier_wait_gen(0);
+          wf->set_state(WfState::RUNNING);
         }
         break;
+      case WfState::WAITCNT:
+        if (wf->wait_satisfied())
+          wf->set_state(WfState::RUNNING);
+        break;
       case WfState::ENDING:
-        if (w->wait_counters().empty())
-          w->halt();
+        if (wf->wait_counters().empty()) {
+          wf->halt();
+          if (b)
+            barrier_depart(*b); // never reaches the pending barrier
+        }
         break;
       default:
-        // HALTED: done. BARRIER: this path is only used for barrier-free
-        // workgroups (uses_lds()==false gate); a parked BARRIER is left for the
-        // serial fallback to resolve.
         break;
       }
     }
-    if (!any_running)
+    if (!any_active)
       break;
   }
   return ran;

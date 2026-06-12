@@ -155,6 +155,13 @@ public:
   /// @brief Set the dispatch ID (called by DispatchController).
   void set_dispatch_id(uint32_t id) { dispatch_id_ = id; }
 
+  /// @brief Barrier round this wavefront is waiting to complete (intra-CU
+  /// parallel path). 0 means "not currently waiting at a barrier". Set when the
+  /// wavefront arrives at an s_barrier under cross-thread execution, cleared on
+  /// release. Unused on the single-threaded path.
+  uint32_t barrier_wait_gen() const { return barrier_wait_gen_; }
+  void set_barrier_wait_gen(uint32_t g) { barrier_wait_gen_ = g; }
+
   /// @brief Return the owning process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
 
@@ -461,6 +468,7 @@ protected:
   uint32_t wg_id_ = 0;       ///< Workgroup ID (set per dispatch).
   uint32_t dispatch_id_ = 0; ///< Dispatch ID (set per dispatch, unique per dispatch).
   uint32_t process_id_ = 0;  ///< Owning process ID (PASID analog, set per dispatch).
+  uint32_t barrier_wait_gen_ = 0; ///< Barrier round awaited (intra-CU parallel path; 0 = none).
   uint32_t lds_base_ = 0;    ///< Per-WG LDS base offset (set per dispatch).
 
   uint32_t wf_size_ = 0;   ///< Lanes per wavefront (ISA-fixed).

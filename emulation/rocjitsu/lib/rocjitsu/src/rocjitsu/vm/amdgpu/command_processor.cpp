@@ -213,14 +213,20 @@ bool CommandProcessor::run_active_cus(uint32_t threads) {
   }();
   if (intra_cu_enabled && threads > num_cus && num_cus > 0) {
     intra_cu_jobs_.clear();
+    // floor division keeps the total shard count <= threads, so every shard job
+    // runs concurrently (none queues) -- required because a workgroup's shards
+    // resolve barriers cooperatively and must all be live at once.
     const uint32_t per_cu = std::max<uint32_t>(1, threads / num_cus);
     for (auto *cu : active_cu_scratch_) {
-      uint32_t shards = 1;
-      if (!cu->uses_lds()) {
-        uint32_t wfn = cu->active_wf_count();
-        shards = std::min<uint32_t>(std::max<uint32_t>(wfn, 1), per_cu);
-      }
+      // Cross-thread workgroup barriers (prepare_shard_barriers + run_quantum_
+      // shard) now resolve s_barrier across shards, so LDS / reduction kernels
+      // are eligible too. LDS and global memory stay correct via the per-CU
+      // memory lock taken in route_memory_inst.
+      uint32_t wfn = cu->active_wf_count();
+      uint32_t shards = std::min<uint32_t>(std::max<uint32_t>(wfn, 1), per_cu);
       cu->set_parallel_exec(shards > 1);
+      if (shards > 1)
+        cu->prepare_shard_barriers();
       for (uint32_t s = 0; s < shards; ++s)
         intra_cu_jobs_.push_back({cu, s, shards});
     }
