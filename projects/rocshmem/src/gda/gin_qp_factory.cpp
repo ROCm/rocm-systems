@@ -255,7 +255,7 @@ static int gin_open_ib_device(rocshmem_gin_qp_set *set) {
   (void)hipGetDevice(&gpu_dev);
   std::string closest_nic;
   if (GetClosestNicToGpu(gpu_dev, nullptr, &closest_nic) >= 0) {
-    LOG_INFO("GIN QP factory: GPU %d closest NIC: %s", gpu_dev, closest_nic.c_str());
+    LOG_TRACE("GIN QP factory: GPU %d closest NIC: %s", gpu_dev, closest_nic.c_str());
   }
 
   // Find the selected device (or first active if topology unavailable)
@@ -355,13 +355,6 @@ static int gin_open_ib_device(rocshmem_gin_qp_set *set) {
         }
       }
       set->nic.gid_type = selected_type;
-      LOG_INFO("GIN QP factory: selected GID index=%d type=%u "
-               "gid=%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
-               set->nic.gid_index, set->nic.gid_type,
-               set->nic.gid.raw[0],  set->nic.gid.raw[1],  set->nic.gid.raw[2],  set->nic.gid.raw[3],
-               set->nic.gid.raw[4],  set->nic.gid.raw[5],  set->nic.gid.raw[6],  set->nic.gid.raw[7],
-               set->nic.gid.raw[8],  set->nic.gid.raw[9],  set->nic.gid.raw[10], set->nic.gid.raw[11],
-               set->nic.gid.raw[12], set->nic.gid.raw[13], set->nic.gid.raw[14], set->nic.gid.raw[15]);
       free(gid_entries);
     }
 
@@ -372,8 +365,14 @@ static int gin_open_ib_device(rocshmem_gin_qp_set *set) {
       continue;
     }
 
-    LOG_INFO("GIN QP factory: using device %s port %d (provider=%d)",
-             set->nic.nic_name.c_str(), set->nic.port, set->provider);
+    LOG_INFO("GIN QP factory: GPU %d using %s port %d (provider=%d) "
+             "gid_index=%d gid=%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+             gpu_dev, set->nic.nic_name.c_str(), set->nic.port, set->provider,
+             set->nic.gid_index,
+             set->nic.gid.raw[0],  set->nic.gid.raw[1],  set->nic.gid.raw[2],  set->nic.gid.raw[3],
+             set->nic.gid.raw[4],  set->nic.gid.raw[5],  set->nic.gid.raw[6],  set->nic.gid.raw[7],
+             set->nic.gid.raw[8],  set->nic.gid.raw[9],  set->nic.gid.raw[10], set->nic.gid.raw[11],
+             set->nic.gid.raw[12], set->nic.gid.raw[13], set->nic.gid.raw[14], set->nic.gid.raw[15]);
     ibv.free_device_list(dev_list);
     return 0;
   }
@@ -1013,37 +1012,24 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
     gpu_qp->bnxt_sq.mtu = 128 << this->nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
 
     // Export doorbell
-    {
-      auto *dbattr = this->bnxt_qps[idx].db_region_attr;
-      LOG_INFO("gin_qp dbr[%d]: handle=%u dpi=%u umdbr=0x%llx dbr_host=%p",
-               idx, dbattr->handle, dbattr->dpi,
-               (unsigned long long)dbattr->umdbr, (void*)dbattr->dbr);
-
-      hipPointerAttribute_t pattr;
-      hipError_t perr = hipPointerGetAttributes(&pattr, (void*)dbattr->dbr);
-      LOG_INFO("gin_qp dbr[%d]: hipPointerGetAttributes rc=%d type=%d device=%d",
-               idx, perr, pattr.type, pattr.device);
-    }
     if (hipHostRegister(this->bnxt_qps[idx].db_region_attr->dbr, getpagesize(),
                         hipHostRegisterDefault) != hipSuccess) return -1;
     if (hipHostGetDevicePointer((void**)&gpu_qp->bnxt_dbr,
                                 bnxt_qps[idx].db_region_attr->dbr, 0) != hipSuccess) return -1;
-    LOG_INFO("gin_qp dbr[%d]: host=%p -> device=%p",
-             idx, (void*)this->bnxt_qps[idx].db_region_attr->dbr, (void*)gpu_qp->bnxt_dbr);
 
     gpu_qp->qp_num = this->ibv_qps[idx]->qp_num;
     gpu_qp->inline_threshold = inline_threshold;
 
-    LOG_INFO("gin_qp init[%d]: qp_num=%u sq.buf=%p sq.depth=%u sq.id=%u "
-             "cq.buf=%p cq.depth=%u cq.id=%u dbr=%p (host=%p) "
-             "msntbl=%p msn_tbl_sz=%u psn_sz_log2=%u mtu=%lu inline=%u",
-             idx, gpu_qp->qp_num,
-             gpu_qp->bnxt_sq.buf, gpu_qp->bnxt_sq.depth, gpu_qp->bnxt_sq.id,
-             gpu_qp->bnxt_cq.buf, gpu_qp->bnxt_cq.depth, gpu_qp->bnxt_cq.id,
-             (void*)gpu_qp->bnxt_dbr, (void*)this->bnxt_qps[idx].db_region_attr->dbr,
-             gpu_qp->bnxt_sq.msntbl, gpu_qp->bnxt_sq.msn_tbl_sz,
-             gpu_qp->bnxt_sq.psn_sz_log2, (unsigned long)gpu_qp->bnxt_sq.mtu,
-             gpu_qp->inline_threshold);
+    LOG_TRACE("gin_qp init[%d]: qp_num=%u sq.buf=%p sq.depth=%u sq.id=%u "
+              "cq.buf=%p cq.depth=%u cq.id=%u dbr=%p (host=%p) "
+              "msntbl=%p msn_tbl_sz=%u psn_sz_log2=%u mtu=%lu inline=%u",
+              idx, gpu_qp->qp_num,
+              gpu_qp->bnxt_sq.buf, gpu_qp->bnxt_sq.depth, gpu_qp->bnxt_sq.id,
+              gpu_qp->bnxt_cq.buf, gpu_qp->bnxt_cq.depth, gpu_qp->bnxt_cq.id,
+              (void*)gpu_qp->bnxt_dbr, (void*)this->bnxt_qps[idx].db_region_attr->dbr,
+              gpu_qp->bnxt_sq.msntbl, gpu_qp->bnxt_sq.msn_tbl_sz,
+              gpu_qp->bnxt_sq.psn_sz_log2, (unsigned long)gpu_qp->bnxt_sq.mtu,
+              gpu_qp->inline_threshold);
     return 0;
   }
 #endif
