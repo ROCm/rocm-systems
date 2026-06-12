@@ -32,11 +32,16 @@ NCCL_PARAM(GinType, "GIN_TYPE", -1);
 int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {12, 11};
 getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v12, getNcclGin_v11};
 
-#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
+// rocSHMEM / Anvil built-ins are compiled in only when ENABLE_ROCSHMEM / ENABLE_ROCSHMEM_GIN
+// are enabled with a non-zero value. Use `defined(X) && X+0` so `-DENABLE_ROCSHMEM_GIN=0`
+// from tooling does not leave `defined(X)` true while disabling the feature.
+#if (defined(ENABLE_ROCSHMEM) && ENABLE_ROCSHMEM + 0) || (defined(ENABLE_ROCSHMEM_GIN) && ENABLE_ROCSHMEM_GIN + 0)
+#define RCCL_GIN_HAVE_BUILTIN_ROCSHMEM_PLUGINS 1
 extern ncclGin_t ncclGinRocshmem;
 extern ncclGin_t ncclGinAnvilPlugin;
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 3
 #else
+#define RCCL_GIN_HAVE_BUILTIN_ROCSHMEM_PLUGINS 0
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
 #endif
 
@@ -217,7 +222,7 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
 
-#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
+#if RCCL_GIN_HAVE_BUILTIN_ROCSHMEM_PLUGINS
   // Built-in ROCm GIN plugins (NCCL_GIN_TYPE=4 rocshmem, NCCL_GIN_TYPE=5 anvil)
   ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmem;
   ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
@@ -239,7 +244,7 @@ static void initPluginLibsOnceFunc() {
 static bool ncclGinPluginMatchesRequest(ginPluginLib_t* pluginLib) {
   if (pluginLib->ncclGin == nullptr) return false;
   int64_t requested = ncclParamGinType();
-#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
+#if RCCL_GIN_HAVE_BUILTIN_ROCSHMEM_PLUGINS
   if (requested == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
     return pluginLib->ncclGin == &ncclGinRocshmem;
   }
