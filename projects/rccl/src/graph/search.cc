@@ -1567,13 +1567,13 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, in
     if (system->nodes[GPU].nodes[i].gpu.dev == cudaDev1) {
       struct ncclTopoNode *node = system->nodes[GPU].nodes+i;
       for (int k = 0; k<system->nodes[GPU].count; k++) {
-        if (node->paths[GPU][k].count == 1) {
-          struct ncclTopoLink* link = node->paths[GPU][k].list[0];
-          struct ncclTopoNode* remNode = link->remNode;
-          if (remNode->gpu.dev == cudaDev2) {
-            *isXGMI = (link->type == LINK_NVL);
-            if (*isXGMI) return ncclSuccess;
+        if (system->nodes[GPU].nodes[k].gpu.dev == cudaDev2) {
+          // NCCL 2.30 routes GPU->GPU through DEV nodes, so detect XGMI via path type (not a single hop).
+          if (node->paths[GPU][k].count > 0 && node->paths[GPU][k].type == PATH_NVL) {
+            *isXGMI = true;
+            return ncclSuccess;
           }
+          break;
         }
       }
     }
