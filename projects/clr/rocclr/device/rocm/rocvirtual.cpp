@@ -1102,6 +1102,9 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
 // ================================================================================================
 void VirtualGPU::SetGpuQueue(hsa_queue_t* queue, void* metadata_ring_buffer) {
   gpu_queue_ = queue;
+  // Bind to the ring's shared lock so dispatches on a multiplexed HW queue
+  // serialize against other VGPUs sharing it. nullptr for unpooled queues.
+  ring_lock_ = roc_device_.GetRingLock(queue);
   metadata_preloader_.SetQueueBase(metadata_ring_buffer,
                                    roc_device_.MetadataVersionHeader());
 }
@@ -1264,6 +1267,11 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   const uint32_t queueMask = queueSize - 1;
   const uint32_t sw_queue_size = queueMask;
 
+  // Serialize reserve->write->doorbell against other VGPUs sharing this ring.
+  // Released before the blocking wait below; no-op when the ring is unshared.
+  amd::Monitor* ring = ring_lock_.get();
+  if (ring) ring->lock();
+
   // Check for queue full and wait if needed.
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   setFenceDirty(true);
@@ -1366,6 +1374,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   } else {
     ++skippedDispatches_;
   }
+
+  if (ring) ring->unlock();
 
   // Mark the flag indicating if a dispatch is outstanding.
   // We are not waiting after every dispatch.
@@ -1483,6 +1493,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
   }
 
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
+
+  // Serialize reserve->chunked-publish->doorbell against other VGPUs sharing this
+  // ring. Taken after dispatchBlockingWait above, which dispatches barriers under
+  // the same (non-recursive) lock; no-op when the ring is unshared.
+  amd::Monitor* ring = ring_lock_.get();
+  if (ring) ring->lock();
 
   // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
   // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
@@ -1639,6 +1655,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
     chunkStart = chunkEnd;
   }
 
+  if (ring) ring->unlock();
+
   hasPendingDispatch_ = true;
 
   auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
@@ -1712,6 +1730,12 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     }
   }
 
+  // Serialize reserve->write->doorbell against other VGPUs sharing this ring.
+  // Taken after the recursive flushes above (the Monitor is non-recursive);
+  // no-op when the ring is unshared.
+  amd::Monitor* ring = ring_lock_.get();
+  if (ring) ring->lock();
+
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
 
@@ -1741,6 +1765,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  if (ring) ring->unlock();
   logAqlBarrierPacket(gpu_queue_, packetHeader, &barrier_packet_, read, index,
                       IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)
                         ? [this]() -> const char* {
@@ -1813,6 +1838,12 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
     setFenceDirty(false);
   }
 
+  // Serialize reserve->write->doorbell against other VGPUs sharing this ring.
+  // Taken after the recursive flushes above (the Monitor is non-recursive);
+  // no-op when the ring is unshared.
+  amd::Monitor* ring = ring_lock_.get();
+  if (ring) ring->lock();
+
   uint64_t index = Hsa::queue_add_write_index_screlease(gpu_queue_, 1);
   uint64_t read = Hsa::queue_load_read_index_relaxed(gpu_queue_);
 
@@ -1825,6 +1856,7 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   metadata_preloader_.Set(&barrier_value_packet_, packetHeader, index & queueMask);
   packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, rest);
   Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, index);
+  if (ring) ring->unlock();
 
   logAqlBarrierValuePacket(gpu_queue_, packetHeader, &barrier_value_packet_, read, index,
                            IsLogEnabled(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL)

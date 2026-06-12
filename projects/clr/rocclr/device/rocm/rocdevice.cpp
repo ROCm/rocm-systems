@@ -3380,6 +3380,21 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
   }
 }
 
+// ================================================================================================
+std::shared_ptr<amd::Monitor> Device::GetRingLock(hsa_queue_t* queue) {
+  if (queue == nullptr) {
+    return nullptr;
+  }
+  amd::ScopedLock l(active_queue_access_);
+  for (auto& pool : queuePool_) {
+    auto qIter = pool.find(queue);
+    if (qIter != pool.end()) {
+      return qIter->second.ringLock_;
+    }
+  }
+  return nullptr;
+}
+
 bool Device::findLinkInfo(const amd::Device& other_device, std::vector<LinkAttrType>* link_attrs) {
   return findLinkInfo((static_cast<const roc::Device*>(&other_device))->gpuvm_segment_, link_attrs);
 }

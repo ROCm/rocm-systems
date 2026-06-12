@@ -570,6 +570,9 @@ class Device : public NullDevice {
                                    void** metadata_ring_buffer = nullptr);
   bool ReleaseActiveQueue(hsa_queue_t* queue, amd::CommandQueue::Priority priority);
 
+  //! Return the lock for a pooled HW queue's ring, or nullptr if not pooled
+  std::shared_ptr<amd::Monitor> GetRingLock(hsa_queue_t* queue);
+
   //! Return the pre-computed metadata packet version header bits
   uint32_t MetadataVersionHeader() const { return metadata_version_header_; }
 
@@ -695,9 +698,11 @@ class Device : public NullDevice {
     int refCount;             //! Reference counter. Shows how many time the queue was shared
     bool hasDedicatedQueue_;  //! True if this queue is a dedicated queue (e.g., null stream)
     void* metadataRingBuffer_; //! Metadata prefetch ring buffer base
+    //! Serializes ring writes when refCount > 1 (queue shared across VirtualGPUs)
+    std::shared_ptr<amd::Monitor> ringLock_;
 
     // Constructor
-    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr) {}
+    QueueInfo() : refCount(0), hasDedicatedQueue_(false), metadataRingBuffer_(nullptr), ringLock_(std::make_shared<amd::Monitor>()) {}
 
     //! Get the current hardware queue depth (wptr - rptr)
     static uint64_t GetHwQueueDepth(hsa_queue_t* queue) {
