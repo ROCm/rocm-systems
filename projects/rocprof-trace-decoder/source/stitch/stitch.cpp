@@ -343,7 +343,7 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
             timeline_index++;
         }
 
-        if (wave.timeline.size() && wstates.back().duration >= current_time - inst.time && current_time >= current.time)
+        if (!wstates.empty() && wstates.back().duration >= current_time - inst.time && current_time >= current.time)
         {
             wstates.back().duration -= clamp_to_int32(current_time - inst.time);
             int type = wstates.back().type;

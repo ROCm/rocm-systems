@@ -9,8 +9,8 @@ GPU emulator and other emulator backends. It is designed so that:
 * **Sessions are long-lived** processes that may host an emulator, manage
   containers, and shepherd the lifecycle of user execs (commands).
 * **Execs are individual command invocations** within a session, with
-  fully-redirected stdio (FIFO for stdin, plain files for stdout/stderr)
-  and a published per-node `pid`/`exit_code`.
+  fully-redirected stdio (FIFO for stdin, a plain file for merged
+  stdout/stderr) and a published per-node `pid`/`exit_code`.
 
 This makes mirage easy to inspect (`ls`, `cat`, `tail -f`), easy to
 script (`--json` on every list/show), and easy to recover from crashes

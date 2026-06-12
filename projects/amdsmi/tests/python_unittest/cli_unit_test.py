@@ -756,10 +756,20 @@ class TestAmdSmiCli(unittest.TestCase):
         # Find all available command line args
         cmd_args = []
         found = False
+        cmd_indent = None
         for line in lines:
             if found:
                 if not line:
                     break
+                indent = len(line) - len(line.lstrip())
+                # The first command establishes the command column. Lines that
+                # are indented further are wrapped description continuations
+                # (e.g. the "devices" tail of the long fabric help text) and
+                # must be skipped so they aren't parsed as subcommands.
+                if cmd_indent is None:
+                    cmd_indent = indent
+                elif indent > cmd_indent:
+                    continue
                 items = line.split()
                 cmd_args.append(items[0])
                 continue

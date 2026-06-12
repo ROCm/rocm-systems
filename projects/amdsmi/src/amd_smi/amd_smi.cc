@@ -2394,7 +2394,7 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
 
   // If vendor name is empty and the vendor id is 0x1002, set vendor name to AMD vendor string
   if ((info->vendor_name[0] == '\0') && info->vendor_id == 0x1002) {
-    std::string amd_name = "Advanced Micro Devices Inc. [AMD/ATI]";
+    std::string amd_name = "Advanced Micro Devices, Inc. [AMD/ATI]";
     smi_clear_char_and_reinitialize(info->vendor_name, AMDSMI_MAX_STRING_LENGTH, amd_name);
   }
 
@@ -2627,7 +2627,10 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
 
 amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
                                            uint32_t len) {
-  return rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, len);
+  amdsmi_vram_info_t info;
+  amdsmi_status_t r = amdsmi_get_gpu_vram_info(processor_handle, &info);
+  snprintf(brand, len, "%s", info.vram_vendor);
+  return (r);
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle,

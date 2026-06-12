@@ -1452,7 +1452,7 @@ TEST_F(NetIbMPITest, CtsDepthStress) {
                                          false, kMinGpusPerNode, kNoNodeLimit))
         << "Test requires exactly " << kExactTwoProcesses << " MPI processes";
 
-    net_ = &rocmNetIb;
+    net_ = &netIbCast;
     ASSERT_EQ(InitNetIb(), ncclSuccess);
 
     int ndev = 0;
@@ -1530,7 +1530,7 @@ TEST_F(NetIbMPITest, CtsDepthStress) {
             ASSERT_EQ(net_->listen(initCtx_, i % ndev, &handles[i],
                                    &conns[i]->listenComm), ncclSuccess)
                 << "listen failed conn=" << i;
-            ASSERT_EQ(rcclRocmNetP2pPolicy(&handles[i], 1), ncclSuccess);
+            ASSERT_EQ(rcclCastNetP2pPolicy(&handles[i], 1), ncclSuccess);
             MPI_Send(&handles[i], sizeof(ncclNetHandle_t), MPI_BYTE,
                      1, i, MPI_COMM_WORLD);
         }
