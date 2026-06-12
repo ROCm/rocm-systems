@@ -864,11 +864,13 @@ public:
       }
       patBarrier();
     }
-    if (collWork) {
-      skip_fence = !collWork->gfx9CheapFenceOff;
-    } else if (p2pWork) {
-      skip_fence = !p2pWork->gfx9CheapFenceOff;
-    }
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    skip_fence = !ncclShmem.comm.gfx9CheapFenceOff;
+#else
+    // The cheap post-peer fence is only safe with global DWORDX4 builtins
+    // (system-scope cache-bypassing stores); otherwise always use the full fence.
+    skip_fence = false;
+#endif
   }
 
   __forceinline__ __device__ ~Primitives() {

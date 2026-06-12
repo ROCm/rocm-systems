@@ -382,13 +382,6 @@ static bool testBudget(
   return ok;
 }
 
-// Returns true if the cheap post-peer fence must be disabled (use __threadfence_system).
-// Call after regUsed/netRegUsed are known (0/1).
-static bool ncclResolveGfx9CheapFenceOff(struct ncclComm* comm, int regUsed, int netRegUsed) {
-  bool const fenceOk = regUsed == 0 && netRegUsed == 0 && !comm->gfx9CheapFenceOff;
-  return !fenceOk;
-}
-
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
   struct ncclKernelPlanner* planner = &comm->planner;
   struct ncclTaskColl *task;
@@ -470,7 +463,6 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
-    devWork.gfx9CheapFenceOff = ncclResolveGfx9CheapFenceOff(comm, devWork.regUsed, devWork.netRegUsed);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
@@ -655,7 +647,6 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
         devWork.netRegUsed = 1;
       if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
         devWork.regUsed = 1;
-      devWork.gfx9CheapFenceOff = ncclResolveGfx9CheapFenceOff(comm, devWork.regUsed, devWork.netRegUsed);
       devWork.pivotA2ANumBiRings = comm->topo->pivotA2ANumBiRings;
       devWork.opCount = task->opCount;
 
@@ -1213,9 +1204,6 @@ static ncclResult_t addP2pToPlan(
   work->profilerEnabled = ncclProfilerPluginLoaded() && ((p2pTasks[0] ? p2pTasks[0] : p2pTasks[1])->eActivationMask & ncclProfileKernelCh);
   work->recvConnIndex = connIndex[0];
   work->recvOpCount = recvOpCount;
-  work->gfx9CheapFenceOff = ncclResolveGfx9CheapFenceOff(comm,
-      (work->sendIpcReg || work->recvIpcReg) ? 1 : 0,
-      (work->sendNetReg || work->recvNetReg) ? 1 : 0);
 
   for (int dir=0; dir < nProxyOps; dir++) {
     struct ncclProxyOp* op = &proxyOps[dir];

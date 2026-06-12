@@ -350,7 +350,6 @@ struct alignas(16) ncclDevWorkP2p {
   uint8_t profilerEnabled:1;
 
   uint8_t sendConnIndex:2, recvConnIndex:2;
-  uint8_t gfx9CheapFenceOff:1;
 };
 
 // Compute the subset of the data transfer corresponding to the given part index.
@@ -411,7 +410,7 @@ struct alignas(16) ncclDevWorkColl {
   uint32_t channelLo:8, channelHi:8;
 #endif
   uint32_t nWarps:8;
-  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1, gfx9CheapFenceOff:1;
+  uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1;
   uint32_t root:30, connIndex:2;
   uint16_t pivotA2ANumBiRings:15, profilerEnabled:1;
   void* recvbuff;
@@ -651,6 +650,7 @@ struct ncclKernelComm {
   int p2pChunkSize;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
+  int gfx9CheapFenceOff; // RCCL: true if gfx9 cheap post-peer fence is disabled (comm-global)
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int warpLevelComm;
   int* collNetDenseToUserRank;

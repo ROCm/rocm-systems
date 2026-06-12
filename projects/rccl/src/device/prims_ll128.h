@@ -519,7 +519,13 @@ public:
     // coverity[var_deref_model:FALSE]
     loadSendSync();
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
-    if (e) skip_fence = !e->gfx9CheapFenceOff;
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    skip_fence = !ncclShmem.comm.gfx9CheapFenceOff;
+#else
+    // The cheap post-peer fence is only safe with global DWORDX4 builtins
+    // (system-scope cache-bypassing stores); otherwise always use the full fence.
+    skip_fence = false;
+#endif
   }
 
   __forceinline__ __device__ Primitives(
