@@ -1677,7 +1677,8 @@ memory:
     disabled: [amd_wsl]
   Unit_hipMalloc3D_Basic:
     <<: *level_2
-    disabled: [amd_wsl]
+    # hipMemGetInfo doesnt report updated memory immediately after hipFree in ASAN
+    disabled: [amd_wsl, asan]
     tags: [alloc]
   Unit_hipMalloc3D_SmallandBigChunks:
     <<: *level_2
