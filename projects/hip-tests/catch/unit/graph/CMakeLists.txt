@@ -196,3 +196,17 @@ hip_add_exe_to_target(NAME GraphsTest2
                       TEST_TARGET_NAME build_tests)
 
 add_dependencies(build_tests add_Kernel.code)
+
+if(HIP_PLATFORM MATCHES "amd")
+  set(CONDITIONAL_TEST_SRC
+    hipGraphConditionalNode.cc
+  )
+  set(_clr_install "${CMAKE_SOURCE_DIR}/../clr/build/install")
+  if(EXISTS "${_clr_install}/include/hip/hip_runtime_api.h")
+    set(_cond_hip_path_opt "--hip-path=${_clr_install}")
+  endif()
+  hip_add_exe_to_target(NAME GraphsConditionalTest
+                        TEST_SRC ${CONDITIONAL_TEST_SRC}
+                        TEST_TARGET_NAME build_tests
+                        COMPILE_OPTIONS ${_cond_hip_path_opt})
+endif()
