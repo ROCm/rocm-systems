@@ -2205,17 +2205,14 @@ class ROCMHealthCheck:
                 self.logger.error(f"Error during rocm-examples setup: \n{str(e)}")
                 setup_failed = True
             finally:
-                if setup_failed:
-                    os.chdir(original_dir)
-                    return self.results, actual_temp_dir
+                if not setup_failed:
+                    # Run component tests
+                    component_results = self.run_component_tests()
+                    self.results.update(component_results)
 
-                # Run component tests
-                component_results = self.run_component_tests()
-                self.results.update(component_results)
-
-                # Run Simple Application tests
-                app_results = self.run_applications_tests()
-                self.results.update(app_results)
+                    # Run Simple Application tests
+                    app_results = self.run_applications_tests()
+                    self.results.update(app_results)
 
                 # Return to original directory
                 os.chdir(original_dir)
