@@ -189,7 +189,7 @@ def main():
 #    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
 #    `_rocm_sdk_core/lib`.
 # 1. ROCM_HOME/ROCM_PATH environment variables
-#    - only trusted when running as root
+#    - trusted for non-root; for root only under /opt
 def _get_versioned_library_locations(lib_dir, library_name):
     prefix = f"{{library_name}}."
     candidates = []
@@ -199,7 +199,7 @@ def _get_versioned_library_locations(lib_dir, library_name):
         if suffix and all(part.isdigit() for part in suffix.split(".")):
             candidates.append(candidate)
 
-    return sorted(candidates, key=lambda path: tuple(int(part) for part in path.name[len(prefix):].split(".")))
+    return sorted(candidates, key=lambda path: tuple(int(part) for part in path.name[len(prefix):].split(".")), reverse=True)
 
 
 def _get_trusted_library_dirs(rocm_root):

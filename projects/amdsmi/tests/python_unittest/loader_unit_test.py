@@ -147,8 +147,8 @@ class TestFindSmiLibrary(unittest.TestCase):
         self.assertEqual(
             [os.fspath(candidate) for candidate in candidates],
             [
-                "/trusted/lib/libamd_smi.so.27",
                 "/trusted/lib/libamd_smi.so.27.1",
+                "/trusted/lib/libamd_smi.so.27",
             ],
         )
 

@@ -189,6 +189,7 @@ jobs:
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
           ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          ./loader_unit_test.py -v > "$RESULTS_DIR/loader_unit_test_output.txt" 2>&1
           if [ -f ./perf_tests.py ]; then
             ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else
@@ -214,6 +215,10 @@ jobs:
       - name: Unit Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
+
+      - name: Loader Unit Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/loader_unit_test_output.txt || echo "No loader unit test results"
 
       - name: Perf Test Results
         if: always()
