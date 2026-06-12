@@ -77,6 +77,14 @@ jobs:
           done
           echo "===== ip link (host) ====="
           ip -o link 2>/dev/null || echo "  (ip not available)"
+          echo "===== host build toolchain (temp-build feasibility) ====="
+          for t in cmake gcc g++ make python3 pkg-config dpkg-deb rpm2cpio; do
+            printf "  %-10s %s\n" "$t" "$(command -v "$t" 2>/dev/null || echo '<missing>')"
+          done
+          echo "  cmake version: $(cmake --version 2>/dev/null | head -1 || echo '<none>')"
+          echo "  libnl-3:  $(pkg-config --exists libnl-3.0 2>/dev/null && pkg-config --modversion libnl-3.0 || echo '<missing>')"
+          echo "  libmnl:   $(pkg-config --exists libmnl 2>/dev/null && pkg-config --modversion libmnl || echo '<missing>')"
+          echo "  python3-dev (Python.h): $(ls /usr/include/python3*/Python.h 2>/dev/null | head -1 || echo '<missing>')"
           echo "===== amd-smi / ROCm availability on HOST (Option 2 feasibility) ====="
           echo "which amd-smi: $(command -v amd-smi 2>/dev/null || echo '<not on PATH>')"
           for p in /opt/rocm/bin/amd-smi /usr/local/bin/amd-smi /usr/bin/amd-smi; do
