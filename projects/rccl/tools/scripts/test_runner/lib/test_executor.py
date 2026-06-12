@@ -18,6 +18,7 @@ import tempfile
 import time
 import datetime
 import copy
+import xml.etree.ElementTree as ET
 from enum import IntEnum, Enum
 from pathlib import Path
 
@@ -142,6 +143,44 @@ def infer_gtest_result_from_json_file(json_path: str, returncode: int) -> str:
     if stats["passed"]:
         return TestResult.RESULT_PASSED.value
     if stats["skipped"]:
+        return TestResult.RESULT_SKIPPED.value
+    return TestResult.RESULT_PASSED.value
+
+
+def infer_pytest_result_from_junit(junit_path: str, returncode: int) -> str:
+    """Map a pytest run (JUnit XML + exit code) to a TestResult, preferring the
+    report so a fully-skipped harness reports SKIPPED rather than PASSED."""
+    if returncode == ExitCode.EXIT_TIMEOUT:
+        return TestResult.RESULT_TIMEOUT.value
+    # pytest exit 5 = no tests collected.
+    if returncode == 5:
+        return TestResult.RESULT_SKIPPED.value
+    if not junit_path or not os.path.isfile(junit_path):
+        return (TestResult.RESULT_PASSED.value if returncode == ExitCode.EXIT_SUCCESS
+                else TestResult.RESULT_FAILED.value)
+    try:
+        root = ET.parse(junit_path).getroot()
+    except (OSError, ET.ParseError):
+        return (TestResult.RESULT_PASSED.value if returncode == ExitCode.EXIT_SUCCESS
+                else TestResult.RESULT_FAILED.value)
+
+    total = passed = skipped = failed = 0
+    for tc in root.iter("testcase"):
+        total += 1
+        kinds = {child.tag for child in tc}
+        if kinds & {"failure", "error"}:
+            failed += 1
+        elif "skipped" in kinds:
+            skipped += 1
+        else:
+            passed += 1
+
+    if failed:
+        return TestResult.RESULT_FAILED.value
+    # Non-clean exit with no per-test failure (collection/internal error).
+    if returncode not in (0,):
+        return TestResult.RESULT_FAILED.value
+    if total == 0 or (passed == 0 and skipped > 0):
         return TestResult.RESULT_SKIPPED.value
     return TestResult.RESULT_PASSED.value
 
@@ -470,7 +509,8 @@ class TestExecutor:
 
         The build_configuration in the JSON config specifies:
         - install_flags: List of install.sh command-line flags
-        - cmake_options: Optional string of additional CMake options (passed via --cmake-options)
+        - cmake_options: Optional CMake options, either a string (e.g. "-DFOO=BAR") or a
+          dict (e.g. {"FOO": "BAR"}); dicts are converted to "-DKEY=VAL" form (passed via --cmake-options)
         - env_variables: Environment variables to set during the build
         - parallel_jobs: Number of parallel compilation jobs (passed via -j)
 
@@ -498,6 +538,8 @@ class TestExecutor:
 
         install_flags = list(self.build_config.get("install_flags", []))
         cmake_options = self.build_config.get("cmake_options", "")
+        if isinstance(cmake_options, dict):
+            cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
@@ -694,6 +736,11 @@ class TestExecutor:
         print(f"\n{'='*80}")
         print(f"Test: {test_name}")
         print(f"{'='*80}")
+
+        # Pytest-harness suites use a dedicated runner; the gtest/MPI path below
+        # is left untouched.
+        if test_config.get("is_pytest", False):
+            return self._run_pytest_test(test_config, merged_env)
 
         if self.args.verbose:
             if description:
@@ -1006,6 +1053,186 @@ class TestExecutor:
                     os.unlink(gtest_json_path)
                 except OSError:
                     pass
+
+    def _setup_pytest_venv(self, test_dir, test_config):
+        """Create/reuse a venv and install ONLY the given requirements file into
+        it (opt-in via setup_venv); nothing is installed outside the venv. Keys:
+        venv_dir (default <test_dir>/venv), requirements (default
+        <test_dir>/requirements.txt), python_bin (base interpreter).
+        Returns (venv_python, error) where error is "" on success."""
+        venv_dir = test_config.get("venv_dir", "") or os.path.join(test_dir, "venv")
+        venv_dir = os.path.expanduser(os.path.expandvars(venv_dir))
+        if not os.path.isabs(venv_dir):
+            venv_dir = os.path.join(test_dir, venv_dir)
+        venv_py = os.path.join(venv_dir, "bin", "python")
+        base_python = test_config.get("python_bin", "") or "python3"
+
+        req = test_config.get("requirements", "") or os.path.join(test_dir, "requirements.txt")
+        req = os.path.expanduser(os.path.expandvars(req))
+        if not os.path.isabs(req):
+            req = os.path.join(test_dir, req)
+        if not os.path.isfile(req):
+            return venv_py, f"requirements file not found: {req}"
+
+        def _run(argv, label):
+            print(f"  [setup_venv] {label}: {' '.join(argv)}")
+            r = subprocess.run(argv, cwd=test_dir, capture_output=True, text=True)
+            if r.returncode != 0:
+                return f"{label} failed (rc={r.returncode}): {(r.stderr or r.stdout).strip()[:500]}"
+            return ""
+
+        if not os.path.isfile(venv_py):
+            err = _run([base_python, "-m", "venv", venv_dir], "create venv")
+            if err:
+                return venv_py, err
+
+        # Install ONLY the requirements file, into the venv (no extra packages).
+        err = _run([venv_py, "-m", "pip", "install", "-r", req], "install requirements")
+        return venv_py, err
+
+    def _run_pytest_test(self, test_config, merged_env):
+        """Run a pytest-harness test in its source dir (no mpirun); result is
+        derived from a JUnit XML report. Keys: test_dir (required), test_filter
+        (leading '-' = raw pytest args, else -k expr; '*'/'ALL'/empty = all),
+        python_bin (default <test_dir>/venv else python3), timeout."""
+        test_name = test_config.get("name")
+        timeout = test_config.get("timeout", 0)
+
+        # Resolve harness dir (absolute, or relative to workdir).
+        test_dir = test_config.get("test_dir", "")
+        if not test_dir:
+            print(f"ERROR: pytest test '{test_name}' is missing required 'test_dir'")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": 0,
+                "error": "pytest test missing 'test_dir'",
+            }
+        test_dir = os.path.expanduser(os.path.expandvars(test_dir))
+        if not os.path.isabs(test_dir):
+            workdir = self.paths.get("workdir", os.getcwd())
+            test_dir = os.path.join(workdir, test_dir)
+
+        if not os.path.isdir(test_dir):
+            print(f"SKIP: pytest directory not found: {test_dir}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_SKIPPED.value,
+                "duration": 0,
+                "error": f"pytest directory not found: {test_dir}",
+            }
+
+        # Interpreter selection. With setup_venv, create/reuse a managed venv and
+        # install requirements; otherwise: explicit override > local venv > python3.
+        if test_config.get("setup_venv", False):
+            python_bin, setup_err = self._setup_pytest_venv(test_dir, test_config)
+            if setup_err:
+                print(f"\n  Result: {TestResult.RESULT_FAILED.value} ({setup_err})")
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_FAILED.value,
+                    "duration": 0,
+                    "error": setup_err,
+                }
+        else:
+            python_bin = test_config.get("python_bin", "")
+            if not python_bin:
+                venv_py = os.path.join(test_dir, "venv", "bin", "python")
+                python_bin = venv_py if os.path.isfile(venv_py) else "python3"
+
+        # test_filter -> pytest selection args (raw args if leading '-', else -k expr).
+        test_filter = test_config.get("test_filter", "*")
+        select_args = []
+        if test_filter and test_filter not in ("*", "ALL"):
+            if test_filter.lstrip().startswith("-"):
+                select_args = shlex.split(test_filter)
+            else:
+                select_args = ["-k", test_filter]
+
+        # Env: build_dir first on LD_LIBRARY_PATH, then a per-test LD_LIBRARY_PATH
+        # from the JSON env (mirrors the gtest/MPI path), then rocm/mpi libs.
+        # RCCL_BUILD defaults to build_dir; remaining config env is applied as-is.
+        env = os.environ.copy()
+        rocm_path = self.paths.get("rocm_path", "/opt/rocm")
+        mpi_path = self.paths.get("mpi_path", "")
+        test_ld = merged_env.get("LD_LIBRARY_PATH")
+        ld_parts = [self.build_dir]
+        if test_ld:
+            ld_parts.append(str(test_ld))
+        if env.get("LD_LIBRARY_PATH"):
+            ld_parts.append(env["LD_LIBRARY_PATH"])
+        ld_parts.append(os.path.join(rocm_path, "lib"))
+        if mpi_path:
+            ld_parts.append(os.path.join(mpi_path, "lib"))
+        env["LD_LIBRARY_PATH"] = ":".join(ld_parts)
+        env.setdefault("RCCL_BUILD", self.build_dir)
+        if self.args.coverage_report:
+            env["LLVM_PROFILE_FILE"] = "rccl_tests_%p_%m.profraw"
+        for key, value in merged_env.items():
+            if key != "LD_LIBRARY_PATH":
+                env[key] = str(value)
+
+        # Keep the JUnit report as an artifact under the runner's log dir (it is
+        # the only structured record of the pytest run), one file per test.
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", test_name or "pytest")
+        junit_path = os.path.join(self.log_dir, f"pytest_{safe_name}.xml")
+        cmd = [
+            python_bin, "-m", "pytest", "-v", "-p", "no:cacheprovider",
+            f"--junitxml={junit_path}",
+        ] + select_args
+
+        if self.args.verbose:
+            print(f"  Description: {test_config.get('description', '')}")
+            print(f"  Type:    pytest")
+            print(f"  Dir:     {test_dir}")
+            print(f"  Filter:  {test_filter}")
+            print(f"  Timeout: {timeout if timeout > 0 else 'unlimited'}")
+            print(f"\n  Command: {' '.join(cmd)}")
+            print(f"  Working directory: {test_dir}")
+            print(f"  LD_LIBRARY_PATH: {env.get('LD_LIBRARY_PATH', '')}\n")
+
+        start_time = time.time()
+        run_kwargs = {
+            "cwd": test_dir,
+            "env": env,
+            "capture_output": False,
+        }
+        if timeout > 0:
+            run_kwargs["timeout"] = timeout
+
+        try:
+            result = subprocess.run(cmd, **run_kwargs)
+        except subprocess.TimeoutExpired:
+            duration = time.time() - start_time
+            print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_TIMEOUT.value,
+                "duration": duration,
+                "error": f"Test timed out after {timeout} seconds",
+            }
+        except Exception as e:
+            duration = time.time() - start_time
+            print(f"\n  ERROR: {e}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": duration,
+                "error": str(e),
+            }
+
+        duration = time.time() - start_time
+        rc = result.returncode if result.returncode is not None else -1
+        test_result = infer_pytest_result_from_junit(junit_path, rc)
+        print(f"\n  Result: {test_result} ({duration:.3f} seconds)")
+        if self.args.verbose:
+            print(f"  JUnit report: {junit_path}")
+        return {
+            "name": test_name,
+            "result": test_result,
+            "duration": duration,
+            "exit_code": int(rc),
+        }
 
     def run_test_suite(self, suite_config):
         """

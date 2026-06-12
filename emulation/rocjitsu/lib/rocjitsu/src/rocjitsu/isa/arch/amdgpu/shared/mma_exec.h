@@ -158,8 +158,18 @@ inline InputLoc input_loc(uint32_t dim, uint32_t K, uint32_t B, uint32_t i, uint
   uint32_t lanes_per_block = 64 / (dim * B);
   uint32_t elems_per_group = K / lanes_per_block;
 
-  uint32_t local = k % elems_per_group;
-  uint32_t lane = b * dim + (k / elems_per_group) * dim * B + i;
+  uint32_t local, lane;
+  // Sub-byte formats (fp4, fp6) pack contiguously even at high K; only
+  // byte-or-wider elements (fp8+) use the chunked 16-element lane layout.
+  if (elems_per_group > 16 && data_bits >= 8) {
+    uint32_t chunk = k / 16;
+    uint32_t g = chunk % lanes_per_block;
+    local = (chunk / lanes_per_block) * 16 + (k % 16);
+    lane = b * dim + g * dim * B + i;
+  } else {
+    local = k % elems_per_group;
+    lane = b * dim + (k / elems_per_group) * dim * B + i;
+  }
 
   if (data_bits == 64)
     return {local * 2, lane, 0, 0, data_bits};
@@ -1030,10 +1040,10 @@ void exec_f32_scaled_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, 
             auto bl = input_loc(N, K, B, col, k, b, b_bits);
             block_sum += ea(cu, s0, al) * eb(cu, s1, bl);
           }
-          uint32_t sa_raw = cu.read_vgpr(scale_a_base, out.lane);
-          uint32_t sb_raw = cu.read_vgpr(scale_b_base, out.lane);
-          uint8_t sa_e8m0 = static_cast<uint8_t>((sa_raw >> (blk * 8)) & 0xFF);
-          uint8_t sb_e8m0 = static_cast<uint8_t>((sb_raw >> (blk * 8)) & 0xFF);
+          uint32_t sa_raw = cu.read_vgpr(scale_a_base, M * blk + row);
+          uint32_t sb_raw = cu.read_vgpr(scale_b_base, N * blk + col);
+          uint8_t sa_e8m0 = static_cast<uint8_t>(sa_raw & 0xFFu);
+          uint8_t sb_e8m0 = static_cast<uint8_t>(sb_raw & 0xFFu);
           int scale_exp = static_cast<int>(sa_e8m0) + static_cast<int>(sb_e8m0) - 254;
           acc += std::ldexp(block_sum, scale_exp);
         }

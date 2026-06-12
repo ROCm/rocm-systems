@@ -113,7 +113,7 @@ Once the tests are [built](#build_tests), you can run them by executing the
 ## Build the docs
 
 The [C/C++ API reference](../reference/amdsmi-cpp-api/index.md) is generated
-with [Doxygen 1.9.8](https://www.doxygen.nl/manual/changelog.html#log_1_9_8),
+with [Doxygen 1.15.0](https://www.doxygen.nl/manual/changelog.html#log_1_15_0),
 which must be installed separately and available on your PATH.
 
 1. Create a Python virtual environment and install documentation dependencies.
