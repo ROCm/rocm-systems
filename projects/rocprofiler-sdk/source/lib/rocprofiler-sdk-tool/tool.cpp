@@ -2281,20 +2281,6 @@ namespace
 constexpr auto attach_session_file_perms =
     fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read;
 
-// Attach target PID shared by session bookkeeping and tool_attach metadata.
-// Matches /tmp/rocprofv3_attach_<pid>.pkl: ROCPROF_ATTACH_PID when set by rocprofv3 /
-// rocprof-attach, otherwise getppid().
-pid_t
-get_attach_target_pid()
-{
-    if(const auto env_pid = common::get_env("ROCPROF_ATTACH_PID", static_cast<long>(-1));
-       env_pid > 0)
-    {
-        return static_cast<pid_t>(env_pid);
-    }
-    return getppid();
-}
-
 fs::path
 attach_session_file_path(pid_t target_pid)
 {
@@ -2404,8 +2390,8 @@ write_attach_session(const fs::path& path, uint64_t session)
 void
 assign_attach_output_session_suffix()
 {
-    const auto instrumented_pid    = getpid();
-    const auto session_path = attach_session_file_path(instrumented_pid);
+    const auto instrumented_pid = getpid();
+    const auto session_path     = attach_session_file_path(instrumented_pid);
 
     auto session = uint64_t{0};
     if(read_attach_session(session_path, session)) ++session;
@@ -2416,8 +2402,8 @@ assign_attach_output_session_suffix()
     {
         auto& cfg       = tool::get_config();
         cfg.output_file = fmt::format("{}_{}", cfg.output_file, session);
-        ROCP_INFO << "Reattach #" << session << " for PID " << instrumented_pid << ". Base file name is "
-                  << cfg.output_file;
+        ROCP_INFO << "Reattach #" << session << " for PID " << instrumented_pid
+                  << ". Base file name is " << cfg.output_file;
     }
 }
 
@@ -2453,8 +2439,8 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     assign_attach_output_session_suffix();
 
-    pid_t instrumented_pid  = getpid();  // The target process we're attaching to
-    pid_t parent_pid   = getppid();                 // The rocprofv3 tool process
+    pid_t instrumented_pid = getpid();   // The target process we're attaching to
+    pid_t parent_pid       = getppid();  // The rocprofv3 tool process
     ROCP_INFO << "Attach mode: Setting process_id to target PID " << instrumented_pid
               << " (tool PID: " << parent_pid << ")";
     tool_metadata->set_process_id(instrumented_pid, parent_pid);  // Set target as main process
