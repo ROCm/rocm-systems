@@ -274,6 +274,8 @@ struct ROCPROFSYS_INTERNAL_API indirect
         ROCPROFSYS_DLSYM(rocprofsys_set_env_f, m_omnihandle, "rocprofsys_set_env");
         ROCPROFSYS_DLSYM(rocprofsys_set_mpi_f, m_omnihandle, "rocprofsys_set_mpi");
         ROCPROFSYS_DLSYM(rocprofsys_push_trace_f, m_omnihandle, "rocprofsys_push_trace");
+        ROCPROFSYS_DLSYM(rocprofsys_push_trace_with_args_f, m_omnihandle,
+                         "rocprofsys_push_trace_with_args");
         ROCPROFSYS_DLSYM(rocprofsys_pop_trace_f, m_omnihandle, "rocprofsys_pop_trace");
         ROCPROFSYS_DLSYM(rocprofsys_push_region_f, m_omnihandle,
                          "rocprofsys_push_region");
@@ -387,6 +389,7 @@ public:
                                          const char*)                          = nullptr;
     void (*rocprofsys_register_coverage_f)(const char*, const char*, size_t)   = nullptr;
     void (*rocprofsys_push_trace_f)(const char*)                               = nullptr;
+    void (*rocprofsys_push_trace_with_args_f)(const char*, const char*)        = nullptr;
     void (*rocprofsys_pop_trace_f)(const char*)                                = nullptr;
     int (*rocprofsys_push_region_f)(const char*)                               = nullptr;
     int (*rocprofsys_pop_region_f)(const char*)                                = nullptr;
@@ -670,6 +673,27 @@ extern "C"
         if(dl::get_thread_enabled())
         {
             ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+    }
+
+    void rocprofsys_push_trace_with_args(const char* name, const char* serialized_args)
+    {
+        if(!dl::get_active()) return;
+        if(dl::get_thread_enabled())
+        {
+            if(get_indirect().rocprofsys_push_trace_with_args_f)
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_with_args_f,
+                                     name, serialized_args);
+            }
+            else
+            {
+                ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_trace_f, name);
+            }
         }
         else
         {

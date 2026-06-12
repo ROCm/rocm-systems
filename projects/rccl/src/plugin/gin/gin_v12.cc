@@ -87,8 +87,11 @@ static ncclResult_t ncclGin_getProperties(int dev, ncclNetProperties_t* props) {
   props->maxP2pBytes = props_v11.maxP2pBytes;
   props->maxCollBytes = props_v11.maxCollBytes;
   props->maxMultiRequestSize = props_v11.maxMultiRequestSize;
+#ifdef RCCL_DISABLE_2_30_CODE
+  // NCCL 2.30 not yet merged completely
   props->railId = NCCL_NET_ID_UNDEF;
   props->planeId = NCCL_NET_ID_UNDEF;
+#endif
   return ncclSuccess;
 }
 
@@ -120,4 +123,37 @@ ncclGin_t* getNcclGin_v12(void* lib) {
     return &ncclGin;
   }
   return nullptr;
+}
+
+
+ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12_ext) {
+  if (ncclGin_v12 != NULL) {
+    INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: cannot load built-in v12 gin iface. preoccupied with %s (v12)", ncclGin_v12->name); 
+    return nullptr;
+  }
+  ncclGin_v12 = ncclGin_v12_ext;
+
+  INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded gin plugin %s (v12)", ncclGin_v12->name);
+  ncclGin.name = ncclGin_v12->name;
+  ncclGin.init = ncclGin_v12->init;
+  ncclGin.devices = ncclGin_v12->devices;
+  ncclGin.getProperties = ncclGin_getProperties;
+  ncclGin.listen = ncclGin_v12->listen;
+  ncclGin.connect = ncclGin_connect;
+  ncclGin.createContext = ncclGin_createContext;
+  ncclGin.regMrSym = ncclGin_v12->regMrSym;
+  ncclGin.regMrSymDmaBuf = ncclGin_v12->regMrSymDmaBuf;
+  ncclGin.deregMrSym = ncclGin_v12->deregMrSym;
+  ncclGin.destroyContext = ncclGin_destroyContext;
+  ncclGin.closeColl = ncclGin_v12->closeColl;
+  ncclGin.closeListen = ncclGin_v12->closeListen;
+  ncclGin.iput = ncclGin_iput;
+  ncclGin.iputSignal = ncclGin_iputSignal;
+  ncclGin.iget = NULL;
+  ncclGin.iflush = ncclGin_iflush;
+  ncclGin.test = ncclGin_v12->test;
+  ncclGin.ginProgress = ncclGin_v12->ginProgress;
+  ncclGin.queryLastError = ncclGin_v12->queryLastError;
+  ncclGin.finalize = ncclGin_v12->finalize;
+  return &ncclGin;
 }

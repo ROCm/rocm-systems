@@ -346,12 +346,9 @@ class ArtifactSplitter:
             # Create a BundledBinary instance with our toolchain
             binary = BundledBinary(binary_path, toolchain=self.toolchain)
 
-            # Track code object index as a global counter across all architectures.
-            # This must match the absolute wrapper index written to reserved1 by
-            # rewrite_hipfatbin_magic(), which iterates all wrappers in order
-            # (not per-arch). At runtime, CLR passes that reserved1 value as
-            # co_index, so the TOC key must use the same absolute position.
-            code_object_index: int = 0
+            # Track code object index per (binary, arch) for multi-TU support
+            # Each TU in a -fgpu-rdc binary gets a unique index
+            code_object_index: Dict[str, int] = defaultdict(int)
 
             # Extract kernels using context manager
             with binary.unbundle() as unbundled:
@@ -363,9 +360,7 @@ class ArtifactSplitter:
                         if self.gpu_targets is not None:
                             bare_arch = strip_target_features(arch)
                             if bare_arch not in self.gpu_targets:
-                                # Still advance the global index to stay aligned
-                                # with the absolute wrapper position in the binary.
-                                code_object_index += 1
+                                code_object_index[arch] += 1
                                 if self.verbose:
                                     print(
                                         f"    Skipping kernel for {arch}: "
@@ -377,12 +372,12 @@ class ArtifactSplitter:
                         # Read kernel data while the file still exists
                         kernel_data = kernel_path.read_bytes()
 
-                        # Build source_binary_relpath with index suffix.
-                        # TOC uses the absolute wrapper position so it matches
-                        # the reserved1 field written by rewrite_hipfatbin_magic.
+                        # Build source_binary_relpath with index suffix
+                        # TOC always uses indexed format: "lib/foo.so#0", "lib/foo.so#1"
+                        # This matches the co_index in wrapper's reserved1 field
                         base_relpath = binary_path.relative_to(prefix_path).as_posix()
-                        index = code_object_index
-                        code_object_index += 1
+                        index = code_object_index[arch]
+                        code_object_index[arch] += 1
                         indexed_relpath = f"{base_relpath}#{index}"
 
                         # Create ExtractedKernel object

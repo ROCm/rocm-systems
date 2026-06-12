@@ -7,12 +7,12 @@
 
 #include "nccl_gin.h"
 #include "proxy.h"
-#include <dlfcn.h>
+#include "os.h"
 
 static ncclGin_v13_t* ncclGin_v13;
 
 ncclGin_t* getNcclGin_v13(void* lib) {
-  ncclGin_v13 = (ncclGin_v13_t*)dlsym(lib, "ncclGinPlugin_v13");
+  ncclGin_v13 = (ncclGin_v13_t*)ncclOsDlsym(lib, "ncclGinPlugin_v13");
   if (ncclGin_v13) {
     INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded gin plugin %s (v13)", ncclGin_v13->name);
     return ncclGin_v13;

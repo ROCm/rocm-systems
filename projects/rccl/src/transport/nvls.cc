@@ -1078,4 +1078,13 @@ ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, struct ncclTaskCol
   return ncclSuccess;
 }
 
+// NVLS (NVLink SHARP) is NVIDIA-only; provide stubs so callers in init.cc link.
+// nvlsSupport is 0 on this path (topology yields no NVLS channels), so
+// ncclNvlsTuning is never reached at runtime.
+NCCL_PARAM(NvlsEnable, "NVLS_ENABLE", 2);
+
+ncclResult_t ncclNvlsTuning(struct ncclComm* comm) {
+  return ncclSuccess;
+}
+
 #endif /* CUDA_VERSION >= 12010 */

@@ -7,6 +7,7 @@
 
 #include "nccl_gin.h"
 #include "proxy.h"
+
 #include "os.h"
 
 static ncclGin_v11_t* ncclGin_v11;
@@ -83,8 +84,11 @@ static ncclResult_t ncclGin_getProperties(int dev, ncclNetProperties_t* props) {
   props->maxCollBytes = props_v11.maxCollBytes;
   props->maxMultiRequestSize = props_v11.maxMultiRequestSize;
   // Undefined to be ignore in NCCL core
+#ifdef RCCL_DISABLE_2_30_CODE
+  // NCCL 2.30 not yet merged completely
   props->railId = NCCL_NET_ID_UNDEF;
   props->planeId = NCCL_NET_ID_UNDEF;
+#endif
   return ncclSuccess;
 }
 

@@ -281,8 +281,10 @@ iterate_args_callback(rocprofiler_buffer_tracing_kind_t /*kind*/,
 
     auto* _data = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
+    {
         _data->emplace_back(
             argument_info{arg_number, common::cxx_demangle(arg_type), arg_name, arg_value_str});
+    }
     return 0;
 }
 
@@ -1843,15 +1845,16 @@ write_rocpd(
                 {
                     auto demangled_type = common::cxx_demangle(arg_info.arg_type);
 
-                    get_insert_statement(db,
-                                         "rocpd_arg{{uuid}}",
-                                         {
-                                             insert_value("event_id", evt_id),
-                                             insert_value("position", arg_info.arg_number),
-                                             insert_value("type", demangled_type),
-                                             insert_value("name", arg_info.arg_name),
-                                             insert_value("value", arg_info.arg_value),
-                                         });
+                    get_insert_statement(
+                        db,
+                        "rocpd_arg{{uuid}}",
+                        {
+                            insert_value("event_id", evt_id),
+                            insert_value("position", arg_info.arg_number),
+                            insert_value("type", demangled_type),
+                            insert_value("name", arg_info.arg_name),
+                            insert_value("value", arg_info.arg_value, allow_empty_string{}),
+                        });
                 }
 
                 if(itr.start_timestamp != itr.end_timestamp)
