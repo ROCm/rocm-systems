@@ -491,30 +491,6 @@ class MetricCommands:
                                     )
                                 engine_usage["vcn_busy"] = new_xcp_dict
 
-                            # Add AID-level usage data (VCN_ACTIVITY, JPEG_ACTIVITY per AID)
-                            # Determine number of AIDs - VCN activity is reported per AID
-                            # The first element of each XCP's VCN data corresponds to AID activity
-                            if xcp_vcn_busy != "N/A" and isinstance(xcp_vcn_busy, list):
-                                for aid_idx, vcn_data in enumerate(xcp_vcn_busy):
-                                    if isinstance(vcn_data, list) and len(vcn_data) > 0:
-                                        aid_key = f"AID_{aid_idx}"
-                                        if aid_key not in engine_usage:
-                                            engine_usage[aid_key] = {}
-                                        # First element of VCN data is AID-level
-                                        vcn_activity = (
-                                            vcn_data[0] if vcn_data[0] != "N/A" else "N/A"
-                                        )
-                                        engine_usage[aid_key]["VCN_ACTIVITY"] = vcn_activity
-
-                            # JPEG activity per AID (array of JPEG engines per AID)
-                            if xcp_jpeg_busy != "N/A" and isinstance(xcp_jpeg_busy, list):
-                                for aid_idx, jpeg_data in enumerate(xcp_jpeg_busy):
-                                    if isinstance(jpeg_data, list):
-                                        aid_key = f"AID_{aid_idx}"
-                                        if aid_key not in engine_usage:
-                                            engine_usage[aid_key] = {}
-                                        engine_usage[aid_key]["JPEG_ACTIVITY"] = list(jpeg_data)
-
                         except amdsmi_exception.AmdSmiLibraryException as e:
                             logging.debug(
                                 "Failed to get partition usage metrics for gpu %s | %s",
@@ -830,7 +806,7 @@ class MetricCommands:
                         # Determine number of AIDs based on VCLK array length
                         num_aids = 0
                         if isinstance(current_vclk_clocks, list) and current_vclk_clocks != "N/A":
-                            num_aids = len([x for x in current_vclk_clocks if x != "N/A" and x > 0])
+                            num_aids = len([x for x in current_vclk_clocks if x != "N/A"])
 
                         # Get clock limits for AID clocks
                         try:
