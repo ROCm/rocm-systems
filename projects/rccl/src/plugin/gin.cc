@@ -239,6 +239,7 @@ static void initPluginLibsOnceFunc() {
 static bool ncclGinPluginMatchesRequest(ginPluginLib_t* pluginLib) {
   if (pluginLib->ncclGin == nullptr) return false;
   int64_t requested = ncclParamGinType();
+#if defined(ENABLE_ROCSHMEM) || defined(ENABLE_ROCSHMEM_GIN)
   if (requested == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
     return pluginLib->ncclGin == &ncclGinRocshmem;
   }
@@ -250,6 +251,12 @@ static bool ncclGinPluginMatchesRequest(ginPluginLib_t* pluginLib) {
   }
   // Default: skip built-in ROCm plugins unless explicitly requested.
   return pluginLib->ncclGin != &ncclGinRocshmem && pluginLib->ncclGin != &ncclGinAnvilPlugin;
+#else
+  if (requested == NCCL_NET_DEVICE_GIN_ROCSHMEM || requested == NCCL_NET_DEVICE_GIN_ANVIL) {
+    return false;
+  }
+  return true;
+#endif
 }
 
 static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex) {
