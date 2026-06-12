@@ -104,7 +104,7 @@ jobs:
           - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: --rm --privileged --pid=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
+      options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -145,44 +145,6 @@ jobs:
             --project-dir "${{ env.PROJECT_DIR }}" \
             --os-label "${{ matrix.os }}" \
             --test-results-dir "/tmp/test-results-${{ matrix.os }}"
-
-      # DEBUG (experiment only): test whether --pid=host + nsenter lets the
-      # containerized job reach the HOST network namespace, so amd-smi can see
-      # the NIC netdevs (and thus enumerate AI-NICs) that the container netns
-      # hides. Compares the in-container view against the nsenter --net view.
-      - name: DEBUG nsenter host netns
-        if: always()
-        run: |
-          set +e
-          echo "===== in-container /sys/class/net ====="
-          ls -1 /sys/class/net 2>/dev/null || echo "  (none)"
-          echo "===== nsenter --target 1 --net : host /sys/class/net ====="
-          if command -v nsenter >/dev/null 2>&1; then
-            nsenter --target 1 --net -- ls -1 /sys/class/net 2>&1 || echo "  nsenter failed: $?"
-          else
-            echo "  nsenter not installed"
-          fi
-          echo "===== nsenter handle counts (amd-smi in container mountns, host netns) ====="
-          if command -v nsenter >/dev/null 2>&1; then
-            nsenter --target 1 --net -- python3 - <<'PY' 2>&1 || echo "  probe failed: $?"
-          import amdsmi.amdsmi_interface as ai
-          try:
-              ai.amdsmi_init(ai.AmdSmiInitFlags.INIT_ALL_PROCESSORS)
-          except Exception as e:
-              print(f"  amdsmi_init: {e}")
-          for fn in ("get_gpu_handles", "get_nic_handles", "get_ainic_handles"):
-              try:
-                  print(f"  {fn}: {len(getattr(ai, fn)())}")
-              except Exception as e:
-                  print(f"  {fn}: ERROR {e}")
-          try:
-              ai.amdsmi_shut_down()
-          except Exception:
-              pass
-          PY
-          else
-            echo "  nsenter not installed"
-          fi
 
       # DEBUG (experiment only): show exactly what the NIC driver-detection
       # checks in amdsmi_init.py can see on this runner. The checks gate the
