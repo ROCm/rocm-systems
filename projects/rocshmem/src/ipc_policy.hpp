@@ -44,6 +44,36 @@ namespace rocshmem {
 class Backend;
 class Context;
 
+/**
+ * @brief A single symmetrically-registered user buffer (VMM memory).
+ *
+ * peer_bases is a device-resident array (indexed by local PE) holding the
+ * address at which the registering PE's buffer is mapped in each peer's
+ * address space.
+ */
+struct IpcSymmRegion {
+  uintptr_t local_base;   // this PE's registered buffer base address
+  size_t    length;       // registered length in bytes
+  char**    peer_bases;   // device array[shm_size] of peer-mapped bases
+};
+
+/**
+ * @brief Device-visible table of symmetric IPC registrations.
+ *
+ * Allocated once in host+device accessible memory; its contents are mutated
+ * by (collective) register/unregister calls. The pointer is shared by all
+ * contexts so updates are observed without re-propagation.
+ *
+ * @c regions points to a device-visible array of @c capacity entries. The
+ * capacity is configured at init time via the ROCSHMEM_MAX_SYMM_REGIONS
+ * environment variable (see envvar::max_symm_regions).
+ */
+struct IpcSymmTable {
+  int count;
+  int capacity;
+  IpcSymmRegion *regions;
+};
+
 class IpcOnImpl {
  protected:
   using HEAP_BASES_T = std::vector<char *, StdAllocatorHIP<char *>>;
@@ -56,6 +86,11 @@ class IpcOnImpl {
   char **ipc_bases{nullptr};
 
   int *pes_with_ipc_avail{nullptr};
+
+  /**
+   * @brief Device-visible table of symmetric user-buffer registrations.
+   */
+  IpcSymmTable *symm_table{nullptr};
 
   /**
    * @brief Fast O(1) IPC availability check.
@@ -118,6 +153,35 @@ class IpcOnImpl {
     shm_size = other.shm_size;
     shm_rank = other.shm_rank;
     pes_with_ipc_avail = other.pes_with_ipc_avail;
+    symm_table = other.symm_table;
+  }
+
+  /**
+   * @brief Return the address of a symmetric object on a target PE.
+   *
+   * If sym_addr falls within a symmetrically-registered user buffer, the
+   * translation uses that region's peer base. Otherwise it falls back to the
+   * symmetric heap (ipc_bases).
+   *
+   * @param[in] sym_addr Symmetric address (valid in the local address space)
+   * @param[in] my_pe    Local PE id (index into ipc_bases for the local base)
+   * @param[in] pe       Target PE id
+   * @return Address of the corresponding data in PE 'pe'
+   */
+  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int my_pe,
+                                               int pe) {
+    uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
+    if (symm_table != nullptr) {
+      int n = symm_table->count;
+      for (int i = 0; i < n; ++i) {
+        IpcSymmRegion &r = symm_table->regions[i];
+        if (addr >= r.local_base && addr < r.local_base + r.length) {
+          return r.peer_bases[pe] + (addr - r.local_base);
+        }
+      }
+    }
+    uint64_t offset = addr - reinterpret_cast<uintptr_t>(ipc_bases[my_pe]);
+    return ipc_bases[pe] + offset;
   }
 
   void assignSdmaChannel([[maybe_unused]] unsigned int ctx_id) {}
@@ -411,8 +475,16 @@ class IpcOffImpl {
 
   int *pes_with_ipc_avail{nullptr};
 
+  IpcSymmTable *symm_table{nullptr};
+
   int ipc_first_pe{0};
   int ipc_stride{0};
+
+  __device__ __forceinline__ char *ipcPeerPtr([[maybe_unused]] const void *sym_addr,
+                                               [[maybe_unused]] int my_pe,
+                                               [[maybe_unused]] int pe) {
+    return nullptr;
+  }
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm) {}
