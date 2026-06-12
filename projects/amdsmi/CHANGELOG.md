@@ -8,6 +8,21 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Exposed `BOOT_FIRMWARE` field in `amd-smi static --vbios` output**.··
+  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` is no longer stripped from the CLI output and now appears under the `IFWI` section.
+
+  ```shell
+  $ amd-smi static --ifwi
+  GPU: 0
+    IFWI:
+        NAME: XXXXXXXXXXXXXXXXXX
+        BUILD_DATE: 2024/06/05 12:13
+        PART_NUMBER: 113-D7190300-104
+        VERSION: 00106507
+        BOOT_FIRMWARE: 022.002.001.027.000001
+  ...
+  ```
+
 - **Added IFoE/UALoE fabric telemetry and topology support**.  
   - New `amd-smi fabric` CLI subcommand with `--topology` / `-t` and `--info` / `-i` flags for querying fabric (UALoE) information.
   - New C APIs: `amdsmi_get_fabric_telemetry_data()` and `amdsmi_get_gpu_fabric_info()`.

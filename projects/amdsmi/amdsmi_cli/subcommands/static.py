@@ -405,8 +405,6 @@ class StaticCommands:
                         if value.strip() == "":
                             vbios_info[key] = "N/A"
                 static_dict["ifwi"] = vbios_info
-                # Remove boot_firmware since it's not used
-                del static_dict["ifwi"]["boot_firmware"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["ifwi"] = "N/A"
                 logging.debug(
