@@ -159,6 +159,55 @@ TEST_P(HipFileIo, writeAtNegativeBufferOffsetReturnsEINVAL)
     ASSERT_EQ(EINVAL, errno);
 }
 
+// Zero-sized IO tests require >= ROCm 7.14
+#if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 14)
+TEST_P(HipFileIo, zeroSizedReadAtAlignedFileOffsetReturnsZero)
+{
+    for (hoff_t offset = 0; offset < static_cast<hoff_t>(tmpfile_size); offset += tmpfile_dio_offset_align) {
+        ASSERT_EQ(0, pread(tmpfile.fd, host_buffer.data(), 0, offset));
+        ASSERT_EQ(0, hipFileRead(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+    }
+}
+
+TEST_P(HipFileIo, zeroSizedWriteAtAlignedFileOffsetReturnsZero)
+{
+    for (hoff_t offset = 0; offset < static_cast<hoff_t>(tmpfile_size); offset += tmpfile_dio_offset_align) {
+        ASSERT_EQ(0, pwrite(tmpfile.fd, host_buffer.data(), 0, offset));
+        ASSERT_EQ(0, hipFileWrite(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+    }
+}
+
+TEST_P(HipFileIo, zeroSizedReadAtAlignedOffsetBeyondEndOfFileReturnsZero)
+{
+    size_t aligned_eof{align_up(tmpfile_size, tmpfile_dio_offset_align)};
+    for (size_t i = 0; i < 10; i++) {
+        hoff_t offset{static_cast<hoff_t>(aligned_eof * i)};
+        ASSERT_EQ(0, pread(tmpfile.fd, host_buffer.data(), 0, offset));
+        ASSERT_EQ(0, hipFileRead(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+
+        // ensure the file size has not increased
+        struct stat st {};
+        ASSERT_EQ(0, fstat(tmpfile.fd, &st));
+        ASSERT_EQ(tmpfile_size, static_cast<size_t>(st.st_size));
+    }
+}
+
+TEST_P(HipFileIo, zeroSizedWriteAtAlignedOffsetBeyondEndOfFileReturnsZero)
+{
+    size_t aligned_eof{align_up(tmpfile_size, tmpfile_dio_offset_align)};
+    for (size_t i = 0; i < 10; i++) {
+        hoff_t offset{static_cast<hoff_t>(aligned_eof * i)};
+        ASSERT_EQ(0, pwrite(tmpfile.fd, host_buffer.data(), 0, static_cast<off_t>(offset)));
+        ASSERT_EQ(0, hipFileWrite(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+
+        // ensure the file size has not increased
+        struct stat st {};
+        ASSERT_EQ(0, fstat(tmpfile.fd, &st));
+        ASSERT_EQ(tmpfile_size, static_cast<size_t>(st.st_size));
+    }
+}
+#endif
+
 INSTANTIATE_TEST_SUITE_P(, HipFileIo, testing::ValuesIn(io_test_params),
                          [](const testing::TestParamInfo<HipFileIo::ParamType> &param_info) {
                              return param_info.param.name;
