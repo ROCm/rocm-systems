@@ -85,7 +85,19 @@ Buffer::Buffer(const void *_buffer, const PassKey<BufferMap> &)
     gpu_id = _attrs.device;
 
     HipMemAddressRange range{Context<Hip>::get()->hipMemGetAddressRange(buffer)};
-    length = range.size - (reinterpret_cast<uintptr_t>(buffer) - reinterpret_cast<uintptr_t>(range.base));
+    uintptr_t          uptr = reinterpret_cast<uintptr_t>(buffer);
+    uintptr_t          base = reinterpret_cast<uintptr_t>(range.base);
+
+    if (uptr < base) {
+        throw InvalidPointerRange();
+    }
+
+    uintptr_t offset = uptr - base;
+    if (offset >= range.size) {
+        throw InvalidPointerRange();
+    }
+
+    length = range.size - offset;
 }
 
 void *

@@ -329,4 +329,28 @@ TEST_F(HipFileBuffer, get_buffer_throws_on_getPointerAttributes_error)
     ASSERT_THROW(Context<DriverState>::get()->getBuffer(nonnull_ptr), Hip::RuntimeError);
 }
 
+TEST_F(HipFileBuffer, get_buffer_pointer_before_address_range_base_throws)
+{
+    StrictMock<MHip>   mhip;
+    void              *buffer = reinterpret_cast<void *>(0x1FFF);
+    HipMemAddressRange range{reinterpret_cast<void *>(0x2000), 0x100};
+    EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    hipPointerAttribute_t attrs{};
+    attrs.type = hipMemoryTypeDevice;
+    EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
+    ASSERT_THROW(Context<DriverState>::get()->getBuffer(buffer), InvalidPointerRange);
+}
+
+TEST_F(HipFileBuffer, get_buffer_pointer_at_offset_past_end_throws)
+{
+    StrictMock<MHip>   mhip;
+    void              *buffer = reinterpret_cast<void *>(0x2100);
+    HipMemAddressRange range{reinterpret_cast<void *>(0x2000), 0x100};
+    EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+    hipPointerAttribute_t attrs{};
+    attrs.type = hipMemoryTypeDevice;
+    EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
+    ASSERT_THROW(Context<DriverState>::get()->getBuffer(buffer), InvalidPointerRange);
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
