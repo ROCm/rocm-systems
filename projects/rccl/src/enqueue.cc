@@ -3369,8 +3369,11 @@ static ncclResult_t rmaTaskAppend(
       srcWinOffset = (char*)srcBuff - (char*)srcWinHost->userPtr;
     }
 
-    bool isMultiSegment = ncclDevrWindowIsMultiSegment(srcWinHost) || ncclDevrWindowIsMultiSegment(peerWinHost);
-    bool hasSysmemSegment = ncclDevrWindowHasSysmemSegment(srcWinHost) || ncclDevrWindowHasSysmemSegment(peerWinHost);
+    // Relevant for symmetric window only
+    bool isMultiSegment = (comm->symmetricSupport)
+                       && (ncclDevrWindowIsMultiSegment(srcWinHost) || ncclDevrWindowIsMultiSegment(peerWinHost));
+    bool hasSysmemSegment = (comm->symmetricSupport)
+                       && (ncclDevrWindowHasSysmemSegment(srcWinHost) || ncclDevrWindowHasSysmemSegment(peerWinHost));
 
     if (isMultiSegment) {
       WARN("ncclPutSignal currently does not support VAs backed by multiple physical cuMem segments");

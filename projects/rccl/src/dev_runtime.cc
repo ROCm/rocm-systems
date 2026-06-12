@@ -1636,11 +1636,11 @@ ncclResult_t ncclDevrFindWindow(
 }
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win) {
-  return win != NULL && win->memory->maxGlobalNumSegments > 1;
+  return win != NULL && win->memory != NULL && win->memory->maxGlobalNumSegments > 1;
 }
 
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win) {
-  return win != NULL && win->memory->globalHasSysmemSegment;
+  return win != NULL && win->memory != NULL && win->memory->globalHasSysmemSegment;
 }
 
 // Returns ncclInvalidUsage if the compiled version is greater than the runtime version and NCCL_ENABLE_VERSION_CHECK=0 is not set
