@@ -214,12 +214,8 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
   auto* marker = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags,
                                       batch_flush, enable_profiling);
 
-  // Hand the device layer this event's identity so it can coalesce consecutive
-  // records of the same event. Only timing-disabled events opt in: a non-null
-  // coalesceEvent() is what marks a record eligible. A timing-enabled event
-  // leaves it null so it always emits a fresh barrier for hipEventElapsedTime.
-  // The synced snapshot (only consulted for eligible records) forces a fresh
-  // barrier after hipEventSynchronize, so it is taken under the same guard.
+  // Only timing-disabled events opt into coalescing: a non-null coalesceEvent()
+  // marks the record eligible and carries its identity for the device layer.
   if (flags & hipEventDisableTiming) {
     marker->setCoalesceEvent(reinterpret_cast<void*>(this));
     marker->setSyncedSinceRecord(WasSyncedSinceLastRecord());
@@ -482,9 +478,6 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   if (e->deviceId() != hip_stream->DeviceId()) {
     return hipErrorInvalidResourceHandle;
   }
-  // Coalescing of consecutive records on the same event is detected entirely in
-  // the rocclr layer (VirtualGPU::submitMarker). The marker carries the event
-  // identity and eligibility flags so rocclr can skip a redundant barrier.
   return e->addMarker(hip_stream, nullptr, !hip::Event::kBatchFlush);
 }
 

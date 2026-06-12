@@ -802,7 +802,6 @@ hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKin
       }
     }
   }
-
   command->release();
   return hipSuccess;
 }

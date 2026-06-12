@@ -2263,11 +2263,7 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Track the current command
   command_ = &command;
 
-  // Any non-marker command represents work between event records and ends the
-  // coalescing window. Markers manage the window themselves in submitMarker (a
-  // record sets it, a wait/other marker clears it), so they are excluded here.
-  // This is the single choke point: every submitXxx calls profilingBegin under
-  // the execution() lock, so individual dispatch paths need no explicit reset.
+  // Any non-marker command is intervening work that ends the event coalescing window.
   if (!command.isMarkerCommand()) {
     last_barrier_coalesce_event_ = nullptr;
   }
@@ -4639,10 +4635,8 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         hasPendingDispatch_ = false;
       }
     }
-    // Any marker that reaches here (and wasn't coalesced away, which returns
-    // early) ends the prior coalescing window. A record sets the window to its
-    // own client event; a plain wait/other marker has coalesceEvent() == nullptr
-    // and so clears it, which is what a cross-stream wait relies on.
+    // A record sets the window to its own event; a wait/other marker has a null
+    // coalesceEvent() and so clears it, which a cross-stream wait relies on.
     last_barrier_coalesce_event_ = vcmd.coalesceEvent();
     profilingEnd();
   }

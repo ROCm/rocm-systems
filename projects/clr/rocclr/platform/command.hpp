@@ -443,9 +443,8 @@ class Command : public Event {
    */
   virtual void submit(device::VirtualDevice& device) = 0;
 
-  //! True only for marker commands. The device layer uses this to leave its
-  //! event-record coalescing window intact across markers while resetting it for
-  //! any other command (which represents intervening work).
+  //! True only for marker commands; lets the device layer keep its coalescing
+  //! window across markers while resetting it for any other (intervening) command.
   virtual bool isMarkerCommand() const { return false; }
 
   //! Release the resources associated with this event.
@@ -1502,10 +1501,8 @@ class ExternalSemaphoreCmd : public Command {
 class Marker : public Command {
   device::Signal* ipc_completion_signal_ = nullptr;
   device::Signal* ipc_dep_signal_ = nullptr;
-  //! Opaque client (HIP) event identity used to detect consecutive records of the
-  //! same event so the device layer can skip a redundant barrier dispatch. A
-  //! non-null value also means the client opted this record into coalescing.
-  //! Never dereferenced here; only compared for identity.
+  //! Opaque client (HIP) event identity for detecting consecutive records; a
+  //! non-null value also opts the record into coalescing. Compared, never deref'd.
   void* coalesce_event_ = nullptr;
   bool synced_since_record_ = false;  //!< Client synced the event since its last record
 
