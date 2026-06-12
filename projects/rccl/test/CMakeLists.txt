@@ -245,9 +245,10 @@ if(BUILD_TESTS)
       ${PROJECT_BINARY_DIR}/hipify/src/device
     )
     if(_gin_anvil_test_sdma)
+      # SDMA headers only. Do not add src/include: it shadows hipify's nccl_device
+      # tree (cuda.h vs HIP) and breaks rccl-UnitTestsFixtures on ROCm.
       target_include_directories(rccl-UnitTestsFixtures PRIVATE
         "${_gin_anvil_test_sdma}"
-        "${CMAKE_SOURCE_DIR}/src/include"
       )
       set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/device/GinAnvilDeviceTests.cpp"
