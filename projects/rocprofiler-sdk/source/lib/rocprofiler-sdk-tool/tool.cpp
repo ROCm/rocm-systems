@@ -2404,8 +2404,8 @@ write_attach_session(const fs::path& path, uint64_t session)
 void
 assign_attach_output_session_suffix()
 {
-    const auto target_pid   = getppid();
-    const auto session_path = attach_session_file_path(target_pid);
+    const auto instrumented_pid    = getpid();
+    const auto session_path = attach_session_file_path(instrumented_pid);
 
     auto session = uint64_t{0};
     if(read_attach_session(session_path, session)) ++session;
@@ -2416,7 +2416,7 @@ assign_attach_output_session_suffix()
     {
         auto& cfg       = tool::get_config();
         cfg.output_file = fmt::format("{}_{}", cfg.output_file, session);
-        ROCP_INFO << "Reattach #" << session << " for PID " << target_pid << ". Base file name is "
+        ROCP_INFO << "Reattach #" << session << " for PID " << instrumented_pid << ". Base file name is "
                   << cfg.output_file;
     }
 }
@@ -2453,11 +2453,11 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     assign_attach_output_session_suffix();
 
-    pid_t target_pid = get_attach_target_pid();  // The target process we're attaching to
-    pid_t tool_pid   = getpid();                 // The rocprofv3 tool process
-    ROCP_INFO << "Attach mode: Setting process_id to target PID " << target_pid
-              << " (tool PID: " << tool_pid << ")";
-    tool_metadata->set_process_id(target_pid, 0);  // Set target as main process
+    pid_t instrumented_pid  = getpid();  // The target process we're attaching to
+    pid_t parent_pid   = getppid();                 // The rocprofv3 tool process
+    ROCP_INFO << "Attach mode: Setting process_id to target PID " << instrumented_pid
+              << " (tool PID: " << parent_pid << ")";
+    tool_metadata->set_process_id(instrumented_pid, parent_pid);  // Set target as main process
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
