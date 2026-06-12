@@ -1724,6 +1724,7 @@ def _print_subtest_output(request, subtest_name: str, output: str) -> None:
     if request.config.getoption("--ctest-mode", default="off") == "run" and output:
         print(f"\n--- {subtest_name} ---\n{output}\n", flush=True)
 
+
 # Contains a set of kwargs accepted for a given (function, mode) pair.
 _FUNCTION_ALLOWED_KWARGS: dict[str, dict[str, set[str]]] = {
     "run_test": {

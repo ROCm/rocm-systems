@@ -290,7 +290,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
             env=rocprofiler_env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
             binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
         self.assert_regex(result)
@@ -341,7 +341,7 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             env=gpu_perf_counter_env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=num_processes,
+            num_procs=2,
         )
         self.assert_regex(result)
         self.assert_perfetto(
