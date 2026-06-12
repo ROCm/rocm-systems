@@ -38,6 +38,46 @@ defaults:
     shell: bash
 
 jobs:
+  # DEBUG (experiment only): run directly on the self-hosted runner HOST (no
+  # container:) so /sys/class/net reflects the host network namespace. The
+  # build-and-test job runs in a container whose isolated netns hides the
+  # host NIC interfaces, which is why AI-NIC discovery (which requires a live
+  # netdev port) enumerates 0. This job confirms whether the host itself
+  # exposes the Pensando 0x1002 ports as netdevs.
+  nic-host-probe:
+    name: DEBUG nic-host-probe
+    runs-on:
+      - self-hosted
+      - ${{ vars.RUNNER_TYPE }}
+    continue-on-error: true
+    steps:
+      - name: Host netdev + PCI topology
+        run: |
+          set +e
+          echo "===== host /sys/class/net -> PCI BDF (host network namespace) ====="
+          for n in /sys/class/net/*; do
+            iface=$(basename "$n")
+            if [ -e "$n/device" ]; then
+              target=$(readlink -f "$n/device" 2>/dev/null)
+              tbdf=$(basename "$target")
+              tv=$(cat "$target/vendor" 2>/dev/null)
+              td=$(cat "$target/device" 2>/dev/null)
+              printf "  %-14s -> %s vendor=%s device=%s\n" "$iface" "$tbdf" "$tv" "$td"
+            else
+              printf "  %-14s -> (no PCI device symlink: virtual iface)\n" "$iface"
+            fi
+          done
+          echo "===== Pensando (0x1dd8) PCI functions on host ====="
+          for dpath in /sys/bus/pci/devices/*; do
+            v=$(cat "$dpath/vendor" 2>/dev/null)
+            [ "$v" = "0x1dd8" ] || continue
+            dev=$(cat "$dpath/device" 2>/dev/null)
+            bdf=$(basename "$dpath")
+            printf "  %s device=%s -> %s\n" "$bdf" "$dev" "$(readlink -f "$dpath")"
+          done
+          echo "===== ip link (host) ====="
+          ip -o link 2>/dev/null || echo "  (ip not available)"
+
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the
