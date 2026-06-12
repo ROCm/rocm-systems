@@ -413,6 +413,16 @@ __device__ __forceinline__ void profiler(int action) {
   }
 }
 
+template<int Unroll>
+__device__ __forceinline__ ncclDevFuncPtr_t const* selectFuncTable() {
+  if constexpr (Unroll == 1)  return ncclDevFuncTable_1;
+  else if constexpr (Unroll == 2)  return ncclDevFuncTable_2;
+  else if constexpr (Unroll == 4)  return ncclDevFuncTable_4;
+  else if constexpr (Unroll == 8)  return ncclDevFuncTable_8;
+  else if constexpr (Unroll == 16) return ncclDevFuncTable_16;
+  else                             return ncclDevFuncTable_32;
+}
+
 template<int SpecializedFnId, typename SpecializedRunWorkBatch, int COLL_UNROLL>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
   const int tid = threadIdx.x;
@@ -562,28 +572,17 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     } else {
 #ifndef RCCL_DEVICE_TABLE_OMIT
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
-      if (COLL_UNROLL == 1)
-        ncclDevFuncTable_1[ncclShmem.funcId]();
-      else if (COLL_UNROLL == 2)
-        ncclDevFuncTable_2[ncclShmem.funcId]();
-      else if (COLL_UNROLL == 4)
-        ncclDevFuncTable_4[ncclShmem.funcId]();
-      else if (COLL_UNROLL == 8)
-        ncclDevFuncTable_8[ncclShmem.funcId]();
-      else if (COLL_UNROLL == 16)
-        ncclDevFuncTable_16[ncclShmem.funcId]();
-      else
-        ncclDevFuncTable_32[ncclShmem.funcId]();
+      selectFuncTable<COLL_UNROLL>()[ncclShmem.funcId]();
 #else
-      if (COLL_UNROLL == 1)
+      if constexpr (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
-      else if (COLL_UNROLL == 2)
+      else if constexpr (COLL_UNROLL == 2)
         NCCL_CALL_FUNCTIONS_2(ncclShmem.funcId);
-      else if (COLL_UNROLL == 4)
+      else if constexpr (COLL_UNROLL == 4)
         NCCL_CALL_FUNCTIONS_4(ncclShmem.funcId);
-      else if (COLL_UNROLL == 8)
+      else if constexpr (COLL_UNROLL == 8)
         NCCL_CALL_FUNCTIONS_8(ncclShmem.funcId);
-      else if (COLL_UNROLL == 16)
+      else if constexpr (COLL_UNROLL == 16)
         NCCL_CALL_FUNCTIONS_16(ncclShmem.funcId);
       else
         NCCL_CALL_FUNCTIONS_32(ncclShmem.funcId);
