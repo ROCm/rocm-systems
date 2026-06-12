@@ -51,16 +51,22 @@ std::string cuMemReason() {
   return "";
 }
 
+// Number of MPI ranks co-located on this rank's node.
+int nodeLocalRanks() {
+  MPI_Comm nodeComm;
+  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
+  int n = 0;
+  MPI_Comm_size(nodeComm, &n);
+  MPI_Comm_free(&nodeComm);
+  return n;
+}
+
 // Single-node runs need intranet mode -- otherwise the topology pruner
 // removes the NET node and GIN has no path to bind.
 std::string intranetReason() {
-  MPI_Comm nodeComm;
-  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
-  int nodeSize = 0, worldSize = 0;
-  MPI_Comm_size(nodeComm, &nodeSize);
+  int worldSize = 0;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
-  MPI_Comm_free(&nodeComm);
-  if (nodeSize != worldSize) return "";
+  if (nodeLocalRanks() != worldSize) return "";
   const char* intra = std::getenv("RCCL_ENABLE_INTRANET");
   if (!intra || std::strcmp(intra, "1") != 0)
     return "Intranet mode required for single-node run (RCCL_ENABLE_INTRANET=1)";
@@ -69,13 +75,9 @@ std::string intranetReason() {
 
 // Skip if all ranks share a node -- IB would silently loopback.
 std::string crossNodeReason() {
-  MPI_Comm nodeComm;
-  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
-  int nodeSize = 0, worldSize = 0;
-  MPI_Comm_size(nodeComm, &nodeSize);
+  int worldSize = 0;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
-  MPI_Comm_free(&nodeComm);
-  if (nodeSize == worldSize)
+  if (nodeLocalRanks() == worldSize)
     return "Cross-node test requires ranks on >=2 physical nodes";
   return "";
 }
@@ -1018,25 +1020,15 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
-// ---------------------------------------------------------------------------
-// ncclBarrierSession (unified hybrid LSA+GIN barrier, barrier.h). The two
-// tests below exercise it directly, separate from the alltoall kernels that
-// use it incidentally:
-//   BarrierSession_LsaOnly  -- the LSA-only subset (ncclTeamTagLsa ctor, no
-//                              ncclGin); builds/runs without the GIN stack.
-//   BarrierSession_Hybrid   -- the world-team ctor that composes the inner
-//                              LSA barrier with the outer rail-GIN barrier.
-// ---------------------------------------------------------------------------
+// Direct tests for ncclBarrierSession (barrier.h), separate from the alltoall
+// kernels that use it incidentally: BarrierSession_LsaOnly (LSA-only subset,
+// ncclTeamTagLsa, no GIN) and BarrierSession_Hybrid (world-team: inner LSA +
+// outer rail-GIN).
 
-// Collective over the LSA (intra-node) team. Validates the LSA-only subset of
-// ncclBarrierSession: the ncclTeamTagLsa convenience ctor takes no ncclGin, so
-// this path builds and runs even when GIN is absent. Each round every rank
-// stamps the iteration number into its own slot of every LSA peer's window,
-// barriers, then verifies all peers' stamps for this round are visible in its
-// own buffer. The release sync publishes our writes + provides arrival; the
-// acquire sync before the next round gates the overwrite on all peers having
-// read. A broken barrier (no arrival guarantee, or missing release/acquire
-// ordering) leaves a stale slot, recorded in dErr; a broken epoch deadlocks.
+// LSA-team collective for the LSA-only subset. Each round every rank stamps the
+// iteration into its slot of each peer's window, barriers, then checks all
+// peers' stamps are visible. acq_rel publishes our writes and acquires theirs;
+// a broken barrier leaves a stale slot in dErr (or deadlocks on a broken epoch).
 __global__ void barrierSessionLsaKernel(
     ncclWindow_t win, size_t off, int iters, int* dErr,
     struct ncclDevComm devComm) {
@@ -1051,8 +1043,9 @@ __global__ void barrierSessionLsaKernel(
         peer[lsa.rank] = it;
       }
     }
-    // Publish our writes to LSA peers and arrive.
-    bar.sync(ncclCoopCta(), cuda::memory_order_release, ncclGinFenceLevel::Relaxed);
+    // Publish our writes to LSA peers and acquire theirs (acq_rel so the loads
+    // below are ordered after every peer's store, not relaxed).
+    bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel, ncclGinFenceLevel::Relaxed);
     if (threadIdx.x == 0) {
       for (int p = 0; p < lsa.nRanks; ++p) {
         if (myBuf[p] != it) atomicExch(dErr, it);
@@ -1063,15 +1056,19 @@ __global__ void barrierSessionLsaKernel(
   }
 }
 
-// Exercises the LSA-only subset in isolation. Needs only symmetric memory and
-// >=2 LSA peers; it does NOT require the GIN proxy, so it is gated only on
-// cuMem (not the full GIN prerequisites).
+// Exercises the LSA-only subset in isolation. Needs symmetric memory and >=2
+// ranks co-located on a node; it does NOT require the GIN proxy, so it gates on
+// cuMem + a node-local size check rather than the full GIN prerequisites.
 TEST_F(GinMPIDeviceTests, BarrierSession_LsaOnly) {
   if (auto reason = cuMemReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
     GTEST_SKIP() << "Requires 2-8 ranks";
+
+  // Needs >=2 co-located ranks; otherwise the LSA team is size 1 (vacuous).
+  if (nodeLocalRanks() < 2)
+    GTEST_SKIP() << "Requires >=2 ranks co-located on a node for a non-trivial LSA team";
 
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t  comm   = getActiveCommunicator();
@@ -1082,9 +1079,9 @@ TEST_F(GinMPIDeviceTests, BarrierSession_LsaOnly) {
   ASSERT_GE(nRanks, 2);
   ASSERT_LE(nRanks, 8);
 
-  // Only the inner LSA barrier pool is needed; no GIN signal/counter/force so
-  // GIN stays inactive and the ncclTeamTagLsa path is what gets validated.
-  ncclDevCommRequirements reqs = defaultGinReqs();
+  // LSA-only path: start from the plain initializer (GIN disabled) and ask only
+  // for the inner LSA barrier pool, so ncclDevCommCreate does not activate GIN.
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   reqs.lsaBarrierCount = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
