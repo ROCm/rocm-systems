@@ -26,20 +26,6 @@ pytestmark = [pytest.mark.ainic, pytest.mark.network]
 # Constants
 # =============================================================================
 
-# The 10 AI NIC RDMA track names written to the ROCpd (.db) database.
-AINIC_ROCPD_TRACK_NAMES = [
-    "ainic_rx_rdma_ucast_bytes",
-    "ainic_tx_rdma_ucast_bytes",
-    "ainic_rx_rdma_ucast_pkts",
-    "ainic_tx_rdma_ucast_pkts",
-    "ainic_rx_rdma_cnp_pkts",
-    "ainic_tx_rdma_cnp_pkts",
-    "ainic_tx_rdma_ack_timeout",
-    "ainic_resp_tx_pkt_seq_err",
-    "ainic_req_rx_pkt_seq_err",
-    "ainic_req_rx_impl_nak_seq_err",
-]
-
 # Substrings used to match the 10 Perfetto counter track names via LIKE.
 # Full name format: "NIC [<device_id>] <METRIC> (S)"
 AINIC_PERFETTO_COUNTER_NAMES = [
