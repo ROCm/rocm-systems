@@ -1168,7 +1168,9 @@ def test_calc_pc_sampling_data_aggregation(
         **kwargs,
     )
     instance = make_db_analysis(str(tmp_path))
-    result = instance.calc_pc_sampling_data()
+    result = instance.calc_pc_sampling_data({
+        str(tmp_path): load_pc_sampling_results(str(tmp_path))
+    })
 
     expected_columns = [
         "offset",
@@ -1204,7 +1206,9 @@ def test_calc_pc_sampling_data_unmapped_kernel(
         kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
     )
     instance = make_db_analysis(str(tmp_path))
-    df = instance.calc_pc_sampling_data()[str(tmp_path)]
+    df = instance.calc_pc_sampling_data({
+        str(tmp_path): load_pc_sampling_results(str(tmp_path))
+    })[str(tmp_path)]
     assert df.iloc[0]["kernel_name"] is None
 
 

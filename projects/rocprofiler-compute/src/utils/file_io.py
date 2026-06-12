@@ -235,8 +235,11 @@ def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
     json_path = Path(workload_path) / "ps_file_results.json"
     if not json_path.exists():
         return None
-    with json_path.open(encoding="utf-8") as json_file:
-        return json.load(json_file)["rocprofiler-sdk-tool"][0]
+    try:
+        with json_path.open(encoding="utf-8") as json_file:
+            return json.load(json_file)["rocprofiler-sdk-tool"][0]
+    except (json.JSONDecodeError, KeyError, IndexError) as error:
+        console_error(f"PC sampling: failed to parse {json_path}: {error}")
 
 
 def process_pc_sampling_kernel_trace(

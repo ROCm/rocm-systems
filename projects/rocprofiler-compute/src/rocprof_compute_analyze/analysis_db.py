@@ -388,8 +388,6 @@ class db_analysis(OmniAnalyze_Base):
         for workload_path in self._runs.keys():
             pc_sampling_data = tool_data_per_workload.get(workload_path)
             if pc_sampling_data is None:
-                pc_sampling_data = load_pc_sampling_results(workload_path)
-            if pc_sampling_data is None:
                 console_warning(f"PC sampling data not found for {workload_path}.")
                 continue
 
@@ -894,8 +892,6 @@ class db_analysis(OmniAnalyze_Base):
         for workload_path in self._runs.keys():
             if self.pc_sampling_only():
                 tool_data = tool_data_per_workload.get(workload_path)
-                if tool_data is None:
-                    tool_data = load_pc_sampling_results(workload_path)
                 trace_df = process_pc_sampling_kernel_trace(tool_data)
                 trace_df = pd.DataFrame({
                     "dispatch_id": trace_df["Dispatch_Id"],
