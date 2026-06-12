@@ -1271,7 +1271,7 @@ rocprofsys_finalize_hidden(void)
         if(std::filesystem::exists(_functions_path))
         {
             _output_registry.register_file(std::move(_functions_path),
-                                           output_format::json, "functions", getpid());
+                                           output_format::json, getpid());
         }
 
         if(config::get_use_timemory())
@@ -1286,10 +1286,10 @@ rocprofsys_finalize_hidden(void)
 
                 _output_registry.register_file(
                     settings::compose_output_filename(_comp_name, "txt", _cfg),
-                    output_format::text, _comp_name, getpid());
+                    output_format::text, getpid());
                 _output_registry.register_file(
                     settings::compose_output_filename(_comp_name, "json", _cfg),
-                    output_format::json, _comp_name, getpid());
+                    output_format::json, getpid());
             }
         }
     }

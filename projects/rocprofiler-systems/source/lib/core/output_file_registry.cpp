@@ -4,9 +4,6 @@
 #include "output_file_registry.hpp"
 
 #include "logger/debug.hpp"
-#include "output/text_layout.hpp"
-
-#include <spdlog/fmt/fmt.h>
 
 #include <unistd.h>
 
@@ -21,46 +18,9 @@ namespace rocprofsys
 {
 
 output_file
-output_file_registry::make_entry(std::string path, output_format format,
-                                 const std::string& component_name)
+output_file_registry::make_entry(std::string path, output_format format)
 {
     output_file entry{};
-    switch(format)
-    {
-        case output_format::perfetto:
-            entry.label  = "Perfetto trace";
-            entry.viewer = "Open in https://ui.perfetto.dev";
-            break;
-        case output_format::rocpd:
-            entry.label  = "RocPD database";
-            entry.viewer = "sqlite3, AMD Visualizer (OPTIQ), or rocprofiler-sdk provided "
-                           "rocpd Python module for conversion to other formats";
-            break;
-        case output_format::json:
-            entry.label = component_name.empty()
-                              ? "JSON output"
-                              : fmt::format("JSON ({})", component_name);
-            entry.viewer =
-                fmt::format("jq . {}", output::escape_for_shell_single_quotes(path));
-            break;
-        case output_format::text:
-            entry.label = component_name.empty()
-                              ? "Text profile"
-                              : fmt::format("Profile ({})", component_name);
-            entry.viewer =
-                fmt::format("cat {}", output::escape_for_shell_single_quotes(path));
-            break;
-        case output_format::causal_json:
-            entry.label = "Causal profile (JSON)";
-            entry.viewer =
-                fmt::format("jq . {}", output::escape_for_shell_single_quotes(path));
-            break;
-        case output_format::causal_text:
-            entry.label = "Causal profile (text)";
-            entry.viewer =
-                fmt::format("cat {}", output::escape_for_shell_single_quotes(path));
-            break;
-    }
     entry.path   = std::move(path);
     entry.format = format;
     return entry;
@@ -102,14 +62,6 @@ output_file_registry::register_file(std::string path, output_format format,
                                     std::optional<pid_t> pid)
 {
     push_entry(make_entry(std::move(path), format), pid);
-}
-
-void
-output_file_registry::register_file(std::string path, output_format format,
-                                    const std::string&   component_name,
-                                    std::optional<pid_t> pid)
-{
-    push_entry(make_entry(std::move(path), format, component_name), pid);
 }
 
 std::vector<output_file>

@@ -22,9 +22,7 @@ make_row(const std::string& path, pid_t pid,
          std::optional<std::uintmax_t> size_bytes = std::nullopt)
 {
     rocprofsys::output_file f{};
-    f.label      = "row";
     f.path       = path;
-    f.viewer     = "viewer";
     f.pid        = pid;
     f.size_bytes = size_bytes;
     return f;

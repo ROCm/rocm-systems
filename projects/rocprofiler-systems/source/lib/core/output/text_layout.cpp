@@ -114,23 +114,6 @@ format_duration(std::chrono::nanoseconds dur)
 }
 
 std::string
-escape_for_shell_single_quotes(std::string_view s)
-{
-    std::string out;
-    out.reserve(s.size() + 2);
-    out.push_back('\'');
-    for(char c : s)
-    {
-        if(c == '\'')
-            out += "'\\''";
-        else
-            out.push_back(c);
-    }
-    out.push_back('\'');
-    return out;
-}
-
-std::string
 strip_terminal_control_chars(std::string_view s)
 {
     std::string out;

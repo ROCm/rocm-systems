@@ -41,11 +41,6 @@ format_gpu_ids(const std::vector<int>& gpu_ids);
 [[nodiscard]] std::string
 format_duration(std::chrono::nanoseconds dur);
 
-// Wraps `s` in single quotes and escapes any embedded single quote so
-// the result pastes safely as a single shell argument.
-[[nodiscard]] std::string
-escape_for_shell_single_quotes(std::string_view s);
-
 // Drops C0 control bytes, DEL, and CSI escape sequences (ESC [ ... letter)
 // so peer-controlled strings cannot inject terminal effects when rendered
 // to stdout.

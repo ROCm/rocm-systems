@@ -55,7 +55,7 @@ TEST(summary_renderer, multiple_formats_render_names_and_legend_entries)
     registry.register_file("/tmp/rocprofsys-test/perfetto-trace.proto",
                            rocprofsys::output_format::perfetto);
     registry.register_file("/tmp/rocprofsys-test/wall_clock.txt",
-                           rocprofsys::output_format::text, "wall_clock");
+                           rocprofsys::output_format::text);
 
     const std::string out = render(registry);
     EXPECT_NE(out.find("perfetto-trace.proto"), std::string::npos);
