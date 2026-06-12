@@ -31,7 +31,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 5
+#define RCCL_API_TRACE_VERSION_PATCH 6
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus

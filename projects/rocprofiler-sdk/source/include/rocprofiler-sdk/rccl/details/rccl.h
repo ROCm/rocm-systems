@@ -105,6 +105,15 @@ typedef enum
     ncclStatGpuMemTotal     = 3  /* Total allocated GPU memory tracked by NCCL (bytes) */
 } ncclCommMemStat_t;
 
+/* Wait signal descriptor (for ncclWaitSignal) */
+typedef struct
+{
+    int opCnt;  /* Number of signal operations to wait for */
+    int peer;   /* Target peer to wait for signals from    */
+    int sigIdx; /* Signal index identifier                 */
+    int ctx;    /* Context identifier                      */
+} ncclWaitSignalDesc_t;
+
 /*! @defgroup   rccl_config_type Communicator Configuration
     @details    Structure that allows for customizing Communicator behavior via
    ncclCommInitRankConfig
@@ -411,6 +420,41 @@ ncclResult_t
 ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 ncclResult_t
 pncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+
+ncclResult_t
+ncclPutSignal(const void*    localbuff,
+              size_t         count,
+              ncclDataType_t datatype,
+              int            peer,
+              ncclWindow_t   peerWin,
+              size_t         peerWinOffset,
+              int            sigIdx,
+              int            ctx,
+              unsigned int   flags,
+              ncclComm_t     comm,
+              hipStream_t    stream);
+ncclResult_t
+pncclPutSignal(const void*    localbuff,
+               size_t         count,
+               ncclDataType_t datatype,
+               int            peer,
+               ncclWindow_t   peerWin,
+               size_t         peerWinOffset,
+               int            sigIdx,
+               int            ctx,
+               unsigned int   flags,
+               ncclComm_t     comm,
+               hipStream_t    stream);
+
+ncclResult_t
+ncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclSignal(int peer, int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
+
+ncclResult_t
+ncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclWaitSignal(int nDesc, ncclWaitSignalDesc_t* signalDescs, ncclComm_t comm, hipStream_t stream);
 
 /*! @brief      Creates a new communicator (multi thread/process version), similar to
    ncclCommInitRankConfig.

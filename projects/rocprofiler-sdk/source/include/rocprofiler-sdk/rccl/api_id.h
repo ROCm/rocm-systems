@@ -88,5 +88,10 @@ typedef enum rocprofiler_rccl_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RCCL_API_ID_ncclCommResume,
     ROCPROFILER_RCCL_API_ID_ncclCommMemStats,
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 6
+    ROCPROFILER_RCCL_API_ID_ncclPutSignal,
+    ROCPROFILER_RCCL_API_ID_ncclSignal,
+    ROCPROFILER_RCCL_API_ID_ncclWaitSignal,
+#endif
     ROCPROFILER_RCCL_API_ID_LAST,
 } rocprofiler_rccl_api_id_t;
