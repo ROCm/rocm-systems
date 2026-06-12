@@ -43,6 +43,8 @@ env:
 
   CI_MODE: "Continuous"
 
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/aqlprofile projects/rocprofiler-register projects/rocprof-trace-decoder projects/rocr-runtime projects/clr projects/hip"
+
 jobs:
   build-and-test-ubuntu:
     name: Build & Test • mi325 • Ubuntu 22.04
@@ -166,24 +168,25 @@ jobs:
         run: |
           git --version
           git config --global --add safe.directory '*'
-          git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+          git submodule status --recursive -- ${SUBMODULE_PATHS} > .git-submodules-status-raw
+          awk '{print $1,$2}' .git-submodules-status-raw > .git-submodules-status
           echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+          # cache scoped submodule working trees plus their .git/modules gitdirs
+          awk '{print $2}' .git-submodules-status-raw > .git-submodule-paths
+          for p in ${SUBMODULE_PATHS}; do echo ".git/modules/${p}"; done >> .git-submodule-paths
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
         uses: actions/cache@v4
         with:
           path: |
-            .git/modules
             ${{ steps.submods.outputs.paths }}
-          key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          key: submods-scoped-v1-${{ runner.os }}-${{ steps.submods.outputs.hash }}
           restore-keys: |
-            submods-${{ runner.os }}-
-            submods-
+            submods-scoped-v1-${{ runner.os }}-
 
       - name: Init/Update submodules
-        run: git submodule update --init --recursive --jobs 16
+        run: git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
       - name: Install requirements (venv)
         timeout-minutes: 10

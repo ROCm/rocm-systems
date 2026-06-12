@@ -6,7 +6,6 @@
  *************************************************************************/
 
 #include <assert.h>
-#include <unistd.h>
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include "nccl.h"
@@ -15,125 +14,37 @@
 #include "gdrwrap.h"
 #include "comm.h"
 #include "bootstrap.h"
+#include "compiler.h"
+#include "nccl_merge_stubs.h"
 #include "rma/rma.h"
 #include "rma/rma_proxy.h"
 #include "dev_runtime.h"
+#if !defined(NCCL_OS_WINDOWS)
 #include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
-
+#else
+#define NCCL_GIN_PROXY_VERSION 100  /* stub value; GIN proxy not used at runtime on Windows */
+#endif
+#include "os.h"
 
 extern int64_t ncclParamDmaBufEnable();
 extern int64_t ncclParamIbDataDirect();
 extern int64_t ncclParamGinEnable();
 extern int64_t ncclParamGinType();
 
-// [RCCL] Local copies of the GDR/host CPU-accessible memory helpers.
-// Originally lived in gin_host_proxy.cc; the NCCL 2.29.7 patch removed them
-// upstream but AMD's rma_proxy still needs them. They mirror the gin_host_proxy
-// templates and likewise ignore the manager argument for now.
-namespace {
-
-template <typename T>
-ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int /*host_flags*/,
-                                   void **gdrHandle, struct ncclMemManager* manager,
-                                   bool forceHost = false) {
-  if (ncclGdrCopy && !forceHost) {
-    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, manager));
-  } else {
-    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
-    memset((void *)*ptr, 0, nelem * sizeof(T));
-    *devPtr = *ptr;
-    if (gdrHandle) *gdrHandle = NULL;
-  }
-  return ncclSuccess;
-}
-
-template <typename T>
-ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
-  if (gdrHandle != NULL) {
-    NCCLCHECK(ncclGdrCudaFree(gdrHandle, manager));
-  } else {
-    NCCLCHECK(ncclCuMemHostFree(ptr));
-  }
-  return ncclSuccess;
-}
-
-} // namespace
-
 NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
+RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
+
 
 #include <signal.h>
 static ncclRmaProxyState* ncclLastRmaProxyState;
 
-ncclResult_t dumpRmaProxyState(struct ncclRmaProxyState* rmaProxyState) {
-  ncclLastRmaProxyState = rmaProxyState;
-  if (rmaProxyState->comm) {
-    printf("Rank %d RMA Proxy State:\n", rmaProxyState->comm->rank);
-    printf("  ginProgress: %d\n", rmaProxyState->ginProgress);
-    printf("  ginCommCount: %d\n", rmaProxyState->ginCommCount);
-    printf("  rmaProxyCtxCount:%d\n", rmaProxyState->rmaProxyCtxCount);
-    printf("  connected: %d\n", rmaProxyState->connected);
-    printf("  needsProxyProgress: %d\n", rmaProxyState->needsProxyProgress);
+ncclResult_t dumpRmaProxyState(struct ncclRmaProxyState* rmaProxyState);
+void ncclDumpRmaProxyState(int signal);
 
-    // dump per-context information
-    for (int i = 0; i < rmaProxyState->rmaProxyCtxCount; i++) {
-      struct ncclRmaProxyCtx* ctx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[i];
-      printf("  rmaCtx[%d]: %p\n", i, ctx);
-      printf("    rmaDevHandles: %p\n", ctx->devHandle);
-      printf("    rmaCollComms: %p\n", ctx->ginCollComm);
-      if (ctx && ctx->comm) {
-        printf("    nRanks: %d, myRank: %d\n", ctx->comm->nRanks, ctx->comm->rank);
-        printf("    queueSize: %zu\n", ctx->queueSize);
-        // dump per-peer information
-        for (int peer = 0; peer < ctx->comm->nRanks; peer++) {
-          uint64_t readySeq = __atomic_load_n(&ctx->readySeqs[peer], __ATOMIC_ACQUIRE);
-          uint64_t doneSeq = __atomic_load_n(&ctx->doneSeqs[peer], __ATOMIC_ACQUIRE);
-          uint64_t opSeq = __atomic_load_n(&ctx->opSeqs[peer], __ATOMIC_ACQUIRE);
-          uint32_t pi = __atomic_load_n(&ctx->pis[peer], __ATOMIC_ACQUIRE);
-          uint32_t ci = __atomic_load_n(&ctx->cis[peer], __ATOMIC_ACQUIRE);
-          printf("      Peer %d: readySeq: %lu, doneSeq: %lu, opSeq: %lu, PI: %u, CI: %u\n",
-                 peer, readySeq, doneSeq, opSeq, pi, ci);
+// ---- Internal helpers ----
 
-          // Count and print pending Descs from circular buffer
-          int pendingCount = pi - ci;
-          printf("        Pending Descs: %d\n", pendingCount);
-          for (uint32_t j = ci; j < pi; j++) {
-            uint32_t idx = j & (ctx->queueSize - 1);
-            struct ncclRmaProxyDesc* desc = ctx->pendingQueues[peer * ctx->queueSize + idx];
-            if (desc != NULL) {
-              printf("          Desc: seq=%lu targetRank=%d size=%zu\n",
-                    desc->seq, desc->targetRank, desc->size);
-            }
-          }
-
-          // Count in-progress Descs
-          int inProgressCount = 0;
-          struct ncclRmaProxyDesc* desc = ncclIntruQueueHead(&ctx->rmaProxyInProgressQueues[peer]);
-          while (desc != NULL) {
-            inProgressCount++;
-            desc = desc->next;
-          }
-          printf("        In-progress Descs: %d\n", inProgressCount);
-          // print all in-progress Descs
-          desc = ncclIntruQueueHead(&ctx->rmaProxyInProgressQueues[peer]);
-          while (desc != NULL) {
-            printf("          Desc: seq=%lu targetRank=%d size=%zu\n",
-                  desc->seq, desc->targetRank, desc->size);
-            desc = desc->next;
-          }
-        }
-      } else {
-        printf("    rmaCtx[%d]: NULL\n", i);
-      }
-    }
-  }
-  return ncclSuccess;
-}
-
-void ncclDumpRmaProxyState(int signal) {
-  dumpRmaProxyState(ncclLastRmaProxyState);
-}
-
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
 static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
@@ -158,33 +69,50 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
 
   return ncclInvalidUsage;
 }
+#else
+static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
+                                bool sym_buffer) {
+  if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+#if HIP_VERSION >= 70000000
+  static size_t hostPageSize = ncclOsGetPageSize();
+  size_t alignedSize = length;
+  uint64_t offset;
+  ncclResult_t ret = ncclSuccess;
+  ALIGN_SIZE(alignedSize, hostPageSize);
+#if HIP_VERSION >= 71260540
+  if (ncclCuMemEnable() && sym_buffer) {
+    CUCHECK(cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
+                                          CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0));
+  } else
+#endif
+  {
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)addr, alignedSize, fd, &offset), ret, fail);
+  }
+  return ret;
+fail:
+  return ret;
+#endif
+  return ncclInvalidUsage;
+}
+#endif
 
 // Check if the GIN plugin supports DMA-BUF, if so we can try to get the DMA-BUF handle from CUDA,
 // if that fails we fallback to non-DMA-BUF
 static ncclResult_t ncclRmaProxyRegMrSym(ncclGin_t *ginComm, void *ginCollComm, ncclNetProperties_t props, void *addr,
                                          size_t size, int type, int mr_flags, void **mhandle,
-                                         void **ginHandle) {
+                                         void **ginHandle, bool sym_buffer=false) {
   if (type == NCCL_PTR_HOST) {
     NCCLCHECK(ginComm->regMrSym(ginCollComm, addr, size, type, mr_flags, mhandle, ginHandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
     if (ncclParamDmaBufEnable() && (props.ptrSupport & NCCL_PTR_DMABUF)) {
-      ncclResult_t registrationResult = ncclSuccess;
+      ncclResult_t registrationResult = ncclInternalError;
       int dmabufFd = -1;
-      dmabufResult = getDmaBufFd(addr, size, &dmabufFd);
+      dmabufResult = getDmaBufFd(addr, size, &dmabufFd, sym_buffer);
       if (dmabufResult == ncclSuccess) {
         registrationResult = ginComm->regMrSymDmaBuf(ginCollComm, addr, size, type, 0, dmabufFd,
                                                      mr_flags, mhandle, ginHandle);
         close(dmabufFd);
-      }
-      if (registrationResult != ncclSuccess) {
-        dmabufFd = -1;
-        dmabufResult = getDmaBufFd(addr, size, &dmabufFd, true);
-        if (dmabufResult == ncclSuccess) {
-          NCCLCHECK(ginComm->regMrSymDmaBuf(ginCollComm, addr, size, type, 0, dmabufFd,
-                                            mr_flags, mhandle, ginHandle));
-          close(dmabufFd);
-        }
       }
     }
     // Fallback to non-DMA-BUF if the DMA-BUF handle is not supported
@@ -199,44 +127,41 @@ static ncclResult_t ncclRmaProxyRegMrSym(ncclGin_t *ginComm, void *ginCollComm, 
 }
 static uint64_t isPowerOfTwo(uint64_t n) { return (n > 0) && ((n & (n - 1)) == 0); }
 
-ncclResult_t ncclRmaProxyCreateContext(struct ncclComm *comm, void *collComm, ncclNetProperties_t props,
-                                       void **outRmaProxyCtx, ncclNetDeviceHandle_t **outDevHandle) {
-  // Get the GIN plugin interface
-  ncclGin_t *ginComm = (ncclGin_t *)comm->rmaState.rmaProxyState.ncclGin;
+// ---- Context lifecycle ----
 
-  // Allocate the RMA proxy context
-  struct ncclRmaProxyCtx *rmaProxyCtx = NULL;
-  NCCLCHECK(ncclCalloc(&rmaProxyCtx, 1));
-
-  rmaProxyCtx->comm = comm;
-  rmaProxyCtx->ginCollComm = collComm;
-  rmaProxyCtx->props = props;
-
+static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginComm, struct ncclRmaProxyCtx* rmaProxyCtx) {
+  // The clean up in case of failure will be done by the ncclRmaProxyDestroyContext function invoked by the caller.
   // Allocate the signals on the GPU and then register the memory region with the GIN plugin.
   // Enforcing strong ordering on the signals mr is vital to ensure ordering between puts and signals.
   size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
+  ncclNetProperties_t props_tmp = rmaProxyCtx->props;
+  if (rcclParamRmaProxyUseDMABUF() == 0) {
+    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+  }
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->signalsDev, &rmaProxyCtx->signalsCumemhandle,
-                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize, comm->memManager));
+                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize , comm->memManager));
+#else
+  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->signalsDev, signalsBufSize, hipDeviceMallocUncached));
+#endif
   CUDACHECK(cudaMemset(rmaProxyCtx->signalsDev, 0, signalsBufSize));
-  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->signalsDev, signalsBufSize,
+  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, props_tmp, rmaProxyCtx->signalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
                                  &rmaProxyCtx->signalsMhandle, &rmaProxyCtx->signalsGinHandle));
-
   // Allocate the host buffer to track the expected values of the signals
   NCCLCHECK(ncclCalloc(&rmaProxyCtx->signalsHost, signalsBufSize));
-
   // Allocate the sequence numbers for the per-rank network function descriptors
   // These are allocated as CPU-accessible memory (either GDR or host memory)
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->opSeqs, &rmaProxyCtx->opSeqsDev,
                                   comm->nRanks, 0, &rmaProxyCtx->opSeqsGdrHandle, comm->memManager));
+  for (int i = 0; i < comm->nRanks; i++) rmaProxyCtx->opSeqs[i] = 1;
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->readySeqs, &rmaProxyCtx->readySeqsDev,
                                   comm->nRanks, 0, &rmaProxyCtx->readySeqsGdrHandle, comm->memManager));
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->doneSeqs, &rmaProxyCtx->doneSeqsDev,
                                   comm->nRanks, 0, &rmaProxyCtx->doneSeqsGdrHandle, comm->memManager));
-
   // Sanitize and set up the lock-free circular buffer queue size
   uint64_t queueSize = ncclParamRmaProxyQueueSize();
-  uint32_t maxRequests = NCCL_NET_MAX_REQUESTS * props.maxRecvs;
+  uint32_t maxRequests = NCCL_NET_MAX_REQUESTS * rmaProxyCtx->props.maxRecvs;
   if (queueSize == -1) {
     queueSize = maxRequests;
   }
@@ -259,20 +184,75 @@ ncclResult_t ncclRmaProxyCreateContext(struct ncclComm *comm, void *collComm, nc
   rmaProxyCtx->queueSize = queueSize;
 
   // Allocate lock-free circular buffer for pending Descs
-  size_t pendingQueuesLength = comm->nRanks * queueSize;
-  NCCLCHECK(ncclCalloc(&rmaProxyCtx->pendingQueues, pendingQueuesLength));
+  size_t circularBufLength = comm->nRanks * queueSize;
+  NCCLCHECK(ncclCalloc(&rmaProxyCtx->circularBuffers, circularBufLength));
   NCCLCHECK(ncclCalloc(&rmaProxyCtx->pis, comm->nRanks));
   NCCLCHECK(ncclCalloc(&rmaProxyCtx->cis, comm->nRanks));
 
   // Allocate per-peer InProgress queues (kept as linked list, single consumer)
-  rmaProxyCtx->rmaProxyInProgressQueues = ncclMemoryStackAlloc<struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>>(&comm->memPermanent, comm->nRanks);
+  rmaProxyCtx->inProgressQueues = ncclMemoryStackAlloc<struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>>(&comm->memPermanent, comm->nRanks);
   for (int i = 0; i < comm->nRanks; i++) {
-    ncclIntruQueueConstruct(&rmaProxyCtx->rmaProxyInProgressQueues[i]);
+    ncclIntruQueueConstruct(&rmaProxyCtx->inProgressQueues[i]);
   }
 
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclGin_t* ginComm, struct ncclRmaProxyCtx* rmaProxyCtx) {
+  // The clean up in case of failure will be done by the ncclRmaProxyDestroyContext function invoked by the caller.
+  size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
+  // Allocate the CPU-accessible signal for graph capture and then register the memory region with the GIN plugin.
+  NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->cpuAccessSignals, &rmaProxyCtx->cpuAccessSignalsDev,
+                                  comm->nRanks + 1, 0, &rmaProxyCtx->cpuAccessSignalsGdrHandle, comm->memManager));
+  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->cpuAccessSignalsDev, signalsBufSize,
+                                 NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
+                                 &rmaProxyCtx->cpuAccessSignalsMhandle, &rmaProxyCtx->cpuAccessSignalsGinHandle));
+  // Allocate the host buffer to track the expected values of the signals
+  NCCLCHECK(ncclCalloc(&rmaProxyCtx->cpuAccessSignalsHost, signalsBufSize));
+
+  // Allocate the flush buffer on the GPU and then register the memory region with the GIN plugin.
+  size_t flushBufSize = comm->nRanks * sizeof(uint64_t);
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+  NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->flushBufDev, &rmaProxyCtx->flushBufCumemhandle,
+                           CU_MEM_HANDLE_TYPE_NONE, flushBufSize, comm->memManager));
+#else
+  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->flushBufDev, flushBufSize, hipDeviceMallocFinegrained));
+#endif
+  CUDACHECK(cudaMemset(rmaProxyCtx->flushBufDev, 0, flushBufSize));
+  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->flushBufDev, flushBufSize,
+                                  NCCL_PTR_HOST, NCCL_NET_MR_FLAG_FORCE_SO,
+                                  &rmaProxyCtx->flushBufMhandle, &rmaProxyCtx->flushBufGinHandle));
+  // Allocate and initialize persistent descriptor queue
+  rmaProxyCtx->persistentQueues = ncclMemoryStackAlloc<struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>>(&comm->memPermanent, comm->nRanks);
+  for (int i = 0; i < comm->nRanks; i++) {
+    ncclIntruQueueConstruct(&rmaProxyCtx->persistentQueues[i]);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclRmaProxyCreateContext(struct ncclComm *comm, void *collComm, ncclNetProperties_t props,
+                                       void **outRmaProxyCtx, ncclNetDeviceHandle_t **outDevHandle) {
+  ncclResult_t ret = ncclSuccess;
+  // Get the GIN plugin interface
+  ncclGin_t *ginComm = (ncclGin_t *)comm->rmaState.rmaProxyState.ncclGin;
+  ncclNetDeviceHandle_t *devHandle = nullptr;
+
+  ncclGinConfig_t config = { 0, 0, 1, 0, comm->config.trafficClass };
+
+  // Allocate the RMA proxy context
+  struct ncclRmaProxyCtx *rmaProxyCtx = nullptr;
+  NCCLCHECKGOTO(ncclCalloc(&rmaProxyCtx, 1), ret, fail);
+
+  rmaProxyCtx->comm = comm;
+  rmaProxyCtx->ginCollComm = collComm;
+  rmaProxyCtx->props = props;
+  NCCLCHECK(ginComm->createContext(collComm, &config, &rmaProxyCtx->ginCtx, NULL));
+
+  NCCLCHECKGOTO(ncclRmaProxyCtxAlloc(comm, ginComm, rmaProxyCtx), ret, fail);
+  NCCLCHECKGOTO(ncclRmaProxyCtxAllocGraph(comm, ginComm, rmaProxyCtx), ret, fail);
+
   // Allocate and initialize device handle
-  ncclNetDeviceHandle_t *devHandle = NULL;
-  NCCLCHECK(ncclCalloc(&devHandle, 1));
+  NCCLCHECKGOTO(ncclCalloc(&devHandle, 1), ret, fail);
   devHandle->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
   devHandle->netDeviceVersion = NCCL_GIN_PROXY_VERSION;
   devHandle->handle = (void *)rmaProxyCtx;
@@ -285,178 +265,128 @@ ncclResult_t ncclRmaProxyCreateContext(struct ncclComm *comm, void *collComm, nc
   *outRmaProxyCtx = rmaProxyCtx;
 
   return ncclSuccess;
-}
-
-// Poll and test completion of InProgress Descs for a given peer
-// Returns after testing head Desc (stops on first incomplete to enforce FIFO)
-static ncclResult_t ncclRmaProxyPollCompletion(ncclGin_t *ncclGin, struct ncclRmaProxyCtx *ctx, int peer) {
-  while (true) {
-    struct ncclRmaProxyDesc *inProgressDesc = ncclIntruQueueHead(&ctx->rmaProxyInProgressQueues[peer]);
-    if (inProgressDesc == NULL) break;  // No InProgress Descs
-
-    int done = 0;
-    NCCLCHECK(ncclGin->test(ctx->ginCollComm, inProgressDesc->request, &done));
-    if (done) {
-      INFO(NCCL_COLL, "Rank %d ncclRmaProxyPollCompletion: targetRank=%d descSeq=%lu COMPLETED, updating doneSeq",
-        ctx->comm->rank, inProgressDesc->targetRank, inProgressDesc->seq);
-
-      // Update the doneSeq for the target rank with RELEASE to ensure GPU sees it
-      __atomic_store_n(&ctx->doneSeqs[inProgressDesc->targetRank], inProgressDesc->seq, __ATOMIC_RELEASE); // sync with the custreamWait aquire semantic
-      // Dequeue and free the completed Desc
-      ncclIntruQueueDequeue(&ctx->rmaProxyInProgressQueues[peer]);
-      ncclMemoryPoolFree(&ctx->comm->memPool_ncclRmaProxyDesc, inProgressDesc);
-
-      free(inProgressDesc);
-    } else {
-      // Head is not done - stop testing to enforce FIFO completion order
-      break;
-    }
-  }
-  return ncclSuccess;
-}
-
-// Poll and issue ready Pending Descs for a given peer
-// Moves ready Descs from pending queue to InProgress queue
-static ncclResult_t ncclRmaProxyPollDesc(ncclGin_t *ncclGin, struct ncclRmaProxyCtx *ctx, int peer) {
-  while (true) {
-    // Lock-free dequeue: Check if queue has entries
-    uint32_t ci = __atomic_load_n(&ctx->cis[peer], __ATOMIC_RELAXED);
-    uint32_t pi = __atomic_load_n(&ctx->pis[peer], __ATOMIC_ACQUIRE);
-
-    if (ci >= pi) {
-      break;  // Empty queue
-    }
-
-    // Read descriptor from queue
-    uint32_t idx = ci & (ctx->queueSize - 1);
-    struct ncclRmaProxyDesc *pendingDesc = ctx->pendingQueues[peer * ctx->queueSize + idx];
-
-    // Check if this Desc is ready to be issued
-    uint64_t readySeq = __atomic_load_n(&ctx->readySeqs[peer], __ATOMIC_ACQUIRE);
-    if (readySeq >= pendingDesc->seq) {
-      // Advance CI with RELEASE to ensure descriptor is consumed
-      __atomic_store_n(&ctx->cis[peer], ci + 1, __ATOMIC_RELEASE);
-
-      // Issue the network operation
-      if (pendingDesc->signal.op == 0) {
-        // No signal operation
-        NCCLCHECK(ncclGin->iput(ctx->ginCollComm,
-          pendingDesc->srcOff, pendingDesc->srcHandle, pendingDesc->size,
-          pendingDesc->dstOff, pendingDesc->dstHandle,
-          pendingDesc->targetRank, 0, &pendingDesc->request));
-      } else {
-        // Signal operation needed
-        NCCLCHECK(ncclGin->iputSignal(ctx->ginCollComm,
-          pendingDesc->srcOff, pendingDesc->srcHandle, pendingDesc->size,
-          pendingDesc->dstOff, pendingDesc->dstHandle,
-          pendingDesc->targetRank, pendingDesc->signal.offset, pendingDesc->signal.signalMhandle,
-          pendingDesc->signal.val, pendingDesc->signal.op, 0, &pendingDesc->request));
-      }
-
-      // Enqueue to InProgress queue (no lock needed - progress thread only)
-      ncclIntruQueueEnqueue(&ctx->rmaProxyInProgressQueues[peer], pendingDesc);
-
-      INFO(NCCL_COLL, "Rank %d ncclRmaProxyPollDesc: targetRank=%d descSeq=%lu readySeq=%lu srcOff=%lu srcHandle=%p dstOff=%lu dstHandle=%p size=%lu - issuing network operation",
-        ctx->comm->rank, pendingDesc->targetRank, pendingDesc->seq, readySeq, pendingDesc->srcOff, pendingDesc->srcHandle, pendingDesc->dstOff, pendingDesc->dstHandle, pendingDesc->size);
-    } else {
-      // ReadySeq not ready yet - stop processing this peer's pending queue to maintain FIFO order
-      break;
-    }
-  }
-  return ncclSuccess;
-}
-
-// Checks the RMA proxy progress.
-ncclResult_t ncclRmaProxyProgress(ncclGin_t *ncclGin, void *rmaProxyCtx) {
-  struct ncclRmaProxyCtx *ctx = (struct ncclRmaProxyCtx *)rmaProxyCtx;
-
-  // Loop through each peer's queues
-  for (int i = 0; i < ctx->comm->nRanks; i++) {
-    // Step 1: Poll completion of InProgress Descs
-    NCCLCHECK(ncclRmaProxyPollCompletion(ncclGin, ctx, i));
-
-    // Step 2: Poll and issue ready Pending Descs
-    NCCLCHECK(ncclRmaProxyPollDesc(ncclGin, ctx, i));
-  }
-  return ncclSuccess;
+fail:
+  ncclRmaProxyDestroyContext(ginComm, rmaProxyCtx);
+  return ret;
 }
 
 ncclResult_t ncclRmaProxyDestroyContext(ncclGin_t* ginComm, void* rmaProxyCtx){
   if (!rmaProxyCtx) return ncclSuccess;
   struct ncclRmaProxyCtx *ctx = (struct ncclRmaProxyCtx *)rmaProxyCtx;
 
+  NCCLCHECK(ginComm->destroyContext(ctx->ginCtx));
+
   // Free descriptors remaining in circular buffers
-  if (ctx->pendingQueues) {
+  if (ctx->circularBuffers) {
     for (int i = 0; i < ctx->comm->nRanks; i++) {
-      uint32_t ci = __atomic_load_n(&ctx->cis[i], __ATOMIC_RELAXED);
-      uint32_t pi = __atomic_load_n(&ctx->pis[i], __ATOMIC_RELAXED);
+      uint32_t ci = COMPILER_ATOMIC_LOAD_32(&ctx->cis[i], std::memory_order_relaxed);
+      uint32_t pi = COMPILER_ATOMIC_LOAD_32(&ctx->pis[i], std::memory_order_relaxed);
       // Free any remaining pending descriptors
       for (uint32_t j = ci; j < pi; j++) {
         uint32_t idx = j & (ctx->queueSize - 1);
-        struct ncclRmaProxyDesc *desc = ctx->pendingQueues[i * ctx->queueSize + idx];
+        struct ncclRmaProxyDesc *desc = ctx->circularBuffers[i * ctx->queueSize + idx];
         if (desc != NULL) {
-          free(desc);
+          NCCLCHECK(ncclRmaProxyDestroyDescNonPersistent(desc));
         }
       }
     }
-    free(ctx->pendingQueues);
+    free(ctx->circularBuffers);
   }
 
   // Free PI/CI arrays
-  if (ctx->pis) free(ctx->pis);
-  if (ctx->cis) free(ctx->cis);
+  free(ctx->pis);
+  free(ctx->cis);
 
   // Free InProgress queues and their Descs
-  if (ctx->rmaProxyInProgressQueues) {
+  if (ctx->inProgressQueues) {
     for (int i = 0; i < ctx->comm->nRanks; i++) {
-      struct ncclRmaProxyDesc *desc = ncclIntruQueueHead(&ctx->rmaProxyInProgressQueues[i]);
+      struct ncclRmaProxyDesc *desc = ncclIntruQueueHead(&ctx->inProgressQueues[i]);
       while (desc != NULL) {
         struct ncclRmaProxyDesc *nextDesc = desc->next;
-        ncclIntruQueueDequeue(&ctx->rmaProxyInProgressQueues[i]);
-        free(desc);
+        ncclIntruQueueDequeue(&ctx->inProgressQueues[i]);
+        NCCLCHECK(ncclRmaProxyDestroyDescNonPersistent(desc));
+        desc = nextDesc;
+      }
+    }
+  }
+
+  // Free persistent descriptor queue and their Descs
+  if (ctx->persistentQueues) {
+    for (int i = 0; i < ctx->comm->nRanks; i++) {
+      struct ncclRmaProxyDesc *desc = ncclIntruQueueHead(&ctx->persistentQueues[i]);
+      while (desc != NULL) {
+        struct ncclRmaProxyDesc *nextDesc = desc->next;
+        ncclIntruQueueDequeue(&ctx->persistentQueues[i]);
+        NCCLCHECK(ncclRmaProxyDestroyDescPersistent(ctx->comm, desc));
         desc = nextDesc;
       }
     }
   }
 
   // Free counters (using GDR-aware deallocation)
-  if (ctx->opSeqs) freeMemCPUAccessible(ctx->opSeqs, ctx->opSeqsGdrHandle, ctx->comm->memManager);
-  if (ctx->readySeqs) freeMemCPUAccessible(ctx->readySeqs, ctx->readySeqsGdrHandle, ctx->comm->memManager);
-  if (ctx->doneSeqs) freeMemCPUAccessible(ctx->doneSeqs, ctx->doneSeqsGdrHandle, ctx->comm->memManager);
+  if (ctx->opSeqs) NCCLCHECK(freeMemCPUAccessible(ctx->opSeqs, ctx->opSeqsGdrHandle, ctx->comm->memManager));
+  if (ctx->readySeqs) NCCLCHECK(freeMemCPUAccessible(ctx->readySeqs, ctx->readySeqsGdrHandle, ctx->comm->memManager));
+  if (ctx->doneSeqs) NCCLCHECK(freeMemCPUAccessible(ctx->doneSeqs, ctx->doneSeqsGdrHandle, ctx->comm->memManager));
 
   // Free signals
   if (ginComm && ctx->ginCollComm && ctx->signalsMhandle)
-    ginComm->deregMrSym(ctx->ginCollComm, ctx->signalsMhandle);
-  if (ctx->signalsDev) ncclCudaFree(ctx->signalsDev, ctx->comm->memManager);
+    NCCLCHECK(ginComm->deregMrSym(ctx->ginCollComm, ctx->signalsMhandle));
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+  if (ctx->signalsDev) NCCLCHECK(ncclCudaFree(ctx->signalsDev, ctx->comm->memManager));
+#else
+  if (ctx->signalsDev) CUDACHECK(hipFree(ctx->signalsDev));
+#endif
 
-  // Free host signals buffer
-  if (ctx->signalsHost) free(ctx->signalsHost);
+  // Free flush buffer
+  if (ginComm && ctx->ginCollComm && ctx->flushBufMhandle)
+    ginComm->deregMrSym(ctx->ginCollComm, ctx->flushBufMhandle);
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+  if (ctx->flushBufDev) ncclCudaFree(ctx->flushBufDev, ctx->comm->memManager);
+#else
+  if (ctx->flushBufDev) CUDACHECK(hipFree(ctx->flushBufDev));
+#endif
 
-  ncclNetDeviceHandle_t *devHandle = (ncclNetDeviceHandle_t *)ctx->devHandle;
-  if (devHandle) {
-    // Note: devHandle->handle points to ctx itself, so we don't free it separately
-    free(devHandle);
-  }
+  // Free CPU-accessible signals
+  if (ginComm && ctx->ginCollComm && ctx->cpuAccessSignalsMhandle)
+    ginComm->deregMrSym(ctx->ginCollComm, ctx->cpuAccessSignalsMhandle);
+  if (ctx->cpuAccessSignals) freeMemCPUAccessible(ctx->cpuAccessSignals, ctx->cpuAccessSignalsGdrHandle, ctx->comm->memManager);
+
+  // Free host signals buffers
+  free(ctx->signalsHost);
+  free(ctx->cpuAccessSignalsHost);
+
+  // Note: devHandle->handle points to ctx itself, so we don't free it separately
+  free(ctx->devHandle);
 
   free(ctx);
 
   return ncclSuccess;
 }
 
-
+// ---- Memory registration ----
 ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
-    void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS],
-    ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]){
-      struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
-      for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
-          NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], rmaProxyState->props[n], address, size,
-                                         NCCL_PTR_CUDA, 0, &rmaHostWins[n], &rmaDevWins[n]));
-        if (rmaHostWins[n] == NULL) {
-          WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
-          return ncclSystemError;
-        }
-      }
-      return ncclSuccess;
+                                  void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS],
+                                  ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]){
+  struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
+  for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
+    ncclNetProperties_t props_tmp = rmaProxyState->props[n];
+#if HIP_VERSION >= 71260540
+    if (!ncclCuMemEnable()) {
+      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+    }
+#else
+    if (rcclParamRmaProxyUseDMABUF() == 0) {
+      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+    }
+#endif
+    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], props_tmp, address, size,
+                                       NCCL_PTR_CUDA, 0, &rmaHostWins[n], &rmaDevWins[n], true));
+    if (rmaHostWins[n] == NULL) {
+      WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
+      return ncclSystemError;
+    }
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]){
@@ -466,6 +396,8 @@ ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* rmaHostWins[NCC
   }
   return ncclSuccess;
 }
+
+// ---- Progress thread and global lifecycle ----
 
 void* ncclRmaProxyProgressThread(struct ncclRmaProxyState* rmaProxyState_) {
   struct ncclRmaProxyState* rmaProxyState = (struct ncclRmaProxyState*)rmaProxyState_;
@@ -479,13 +411,19 @@ void* ncclRmaProxyProgressThread(struct ncclRmaProxyState* rmaProxyState_) {
       for (int n=0; n<rmaProxyState->rmaProxyCtxCount; n++) {
         ncclResult_t ret = ncclRmaProxyProgress(rmaProxyState->ncclGin, rmaProxyState->rmaProxyCtxs[n]);
         if (ret != ncclSuccess) {
-          __atomic_store_n(&rmaProxyState->asyncResult, ret, __ATOMIC_RELEASE);
+          COMPILER_ATOMIC_STORE_32(&rmaProxyState->asyncResult, ret, std::memory_order_release);
           INFO(NCCL_ALL,"%s:%d -> %d [RMA Proxy Progress Thread]", __FILE__, __LINE__, ret);
           rmaProxyState->ginProgress = -2;
           return NULL;
         }
       }
       std::this_thread::yield();
+    } else if (rmaProxyState->ginProgress == 2) {
+      // Pause requested for reclaim: acknowledge and sleep.
+      // Main thread will do the actual freeing while we're paused.
+      rmaProxyState->ginProgress = 0;
+      rmaProxyState->cond.notify_one();
+      rmaProxyState->cond.wait(lock);
     } else if (rmaProxyState->ginProgress == -1) {
       return NULL;
     } else if (rmaProxyState->ginProgress == 0) {
@@ -512,7 +450,7 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   }
   if (rmaProxyState->connected) return ncclSuccess;
 
-  NCCLCHECK(rmaProxyState->ncclGin->init(&rmaProxyState->ginInstance, comm->commHash, ncclDebugLog));
+  rmaProxyState->ginInstance = comm->rmaGinContext;
 
   int ndev = 0;
   NCCLCHECK(rmaProxyState->ncclGin->devices(&ndev));
@@ -569,7 +507,7 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
     NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allHandles, NCCL_NET_HANDLE_MAXSIZE), ret,
                   fail);
     NCCLCHECKGOTO(
-      rmaProxyState->ncclGin->connect(comm->netContext, handles, comm->nRanks, comm->rank, 1, 0,
+      rmaProxyState->ncclGin->connect(comm->netContext, handles, comm->nRanks, comm->rank,
                                       listenComm, rmaProxyState->ginComms + n),
       ret, fail);
     NCCLCHECKGOTO(rmaProxyState->ncclGin->getProperties(localGinDevs[n], &rmaProxyState->props[n]), ret, fail);
@@ -655,188 +593,77 @@ ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) {
     }
   }
 
-  // Finalize the GIN instance
-  NCCLCHECK(rmaProxyState->ncclGin->finalize(rmaProxyState->ginInstance));
   memset((void*)rmaProxyState, 0, sizeof(*rmaProxyState));
   return ncclSuccess;
 }
 
-ncclResult_t ncclRmaPutProxy(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream){
-  ncclResult_t ret = ncclSuccess;
+// ---- Debug ----
 
-  // Make sure the RMA proxy is connected
-  if (!comm->rmaState.rmaProxyState.connected) {
-    WARN("RMA proxy is not connected");
-    return ncclInternalError;
-  }
+ncclResult_t dumpRmaProxyState(struct ncclRmaProxyState* rmaProxyState) {
+  ncclLastRmaProxyState = rmaProxyState;
+  if (rmaProxyState->comm) {
+    printf("Rank %d RMA Proxy State:\n", rmaProxyState->comm->rank);
+    printf("  ginProgress: %d\n", rmaProxyState->ginProgress);
+    printf("  ginCommCount: %d\n", rmaProxyState->ginCommCount);
+    printf("  rmaProxyCtxCount:%d\n", rmaProxyState->rmaProxyCtxCount);
+    printf("  connected: %d\n", rmaProxyState->connected);
+    printf("  needsProxyProgress: %d\n", rmaProxyState->needsProxyProgress);
 
-  int ctx = plan->rmaArgs->ctx;
-  int nRmaTasksProxy = plan->rmaArgs->nRmaTasksProxy;
-  struct ncclRmaProxyCtx * rmaProxyCtx = (struct ncclRmaProxyCtx *)comm->rmaState.rmaProxyState.rmaProxyCtxs[ctx];
+    // dump per-context information
+    for (int i = 0; i < rmaProxyState->rmaProxyCtxCount; i++) {
+      struct ncclRmaProxyCtx* ctx = (struct ncclRmaProxyCtx*)rmaProxyState->rmaProxyCtxs[i];
+      printf("  rmaCtx[%d]: %p\n", i, ctx);
+      printf("    rmaDevHandles: %p\n", ctx->devHandle);
+      printf("    rmaCollComms: %p\n", ctx->ginCollComm);
+      if (ctx && ctx->comm) {
+        printf("    nRanks: %d, myRank: %d\n", ctx->comm->nRanks, ctx->comm->rank);
+        printf("    queueSize: %zu\n", ctx->queueSize);
+        // dump per-peer information
+        for (int peer = 0; peer < ctx->comm->nRanks; peer++) {
+          uint64_t readySeq = COMPILER_ATOMIC_LOAD(&ctx->readySeqs[peer], std::memory_order_acquire);
+          uint64_t doneSeq = COMPILER_ATOMIC_LOAD(&ctx->doneSeqs[peer], std::memory_order_acquire);
+          uint64_t opSeq = COMPILER_ATOMIC_LOAD(&ctx->opSeqs[peer], std::memory_order_acquire);
+          uint32_t pi = COMPILER_ATOMIC_LOAD_32(&ctx->pis[peer], std::memory_order_acquire);
+          uint32_t ci = COMPILER_ATOMIC_LOAD_32(&ctx->cis[peer], std::memory_order_acquire);
+          printf("      Peer %d: readySeq: %lu, doneSeq: %lu, opSeq: %lu, PI: %u, CI: %u\n",
+                 peer, readySeq, doneSeq, opSeq, pi, ci);
 
-  // Allocate 2*nRmaTasksProxy CUstreamBatchMemOpParams
-  CUstreamBatchMemOpParams* batchParams = NULL;
-  NCCLCHECK(ncclCalloc(&batchParams, 2*nRmaTasksProxy));
+          // Count and print pending Descs from circular buffer
+          int pendingCount = pi - ci;
+          printf("        Pending Descs: %d\n", pendingCount);
+          for (uint32_t j = ci; j < pi; j++) {
+            uint32_t idx = j & (ctx->queueSize - 1);
+            struct ncclRmaProxyDesc* desc = ctx->circularBuffers[peer * ctx->queueSize + idx];
+            if (desc != NULL) {
+              printf("          Desc: seq=%lu targetRank=%d size=%zu\n",
+                    desc->opSeq, desc->putSignal.targetRank, desc->putSignal.size);
+            }
+          }
 
-  int batchIdx = 0;
-
-  for (int i = 0; i < nRmaTasksProxy; i++) {
-    struct ncclTaskRma* task = ncclIntruQueueHead(&plan->rmaTaskQueueProxy);
-    int peer = task->peer;
-
-    // Check for available slot in the circular buffer
-    uint32_t pi = __atomic_load_n(&rmaProxyCtx->pis[peer], __ATOMIC_RELAXED);
-    uint32_t ci = __atomic_load_n(&rmaProxyCtx->cis[peer], __ATOMIC_ACQUIRE);
-
-    // If queue is full, flush pending batch ops to allow progress thread to free slots
-    while ((pi - ci) >= rmaProxyCtx->queueSize) {
-      if (batchIdx > 0) {
-        // [RCCL] HIP exposes hipStreamBatchMemOp directly; ncclCuStreamBatchMemOp
-        // wrapper (in cudawrap.cc) is excluded from the RCCL build.
-        CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams, 0), ret, fail);
-        CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams+nRmaTasksProxy, 0), ret, fail);
-        batchIdx = 0;
+          // Count in-progress Descs
+          int inProgressCount = 0;
+          struct ncclRmaProxyDesc* desc = ncclIntruQueueHead(&ctx->inProgressQueues[peer]);
+          while (desc != NULL) {
+            inProgressCount++;
+            desc = desc->next;
+          }
+          printf("        In-progress Descs: %d\n", inProgressCount);
+          // print all in-progress Descs
+          desc = ncclIntruQueueHead(&ctx->inProgressQueues[peer]);
+          while (desc != NULL) {
+            printf("          Desc: seq=%lu targetRank=%d size=%zu\n",
+                  desc->opSeq, desc->putSignal.targetRank, desc->putSignal.size);
+            desc = desc->next;
+          }
+        }
+      } else {
+        printf("    rmaCtx[%d]: NULL\n", i);
       }
-      // Yield to allow progress thread to run and process pending entries
-      std::this_thread::yield();
-      // Re-read both PI and CI to get fresh values
-      pi = __atomic_load_n(&rmaProxyCtx->pis[peer], __ATOMIC_RELAXED);
-      ci = __atomic_load_n(&rmaProxyCtx->cis[peer], __ATOMIC_ACQUIRE);
     }
-
-    ncclIntruQueueDequeue(&plan->rmaTaskQueueProxy);
-
-    assert(task->ctx == ctx);
-
-    struct ncclRmaProxyDesc *desc = NULL;
-    NCCLCHECK(ncclCalloc(&desc, 1));
-    desc->srcOff = task->srcWinOffset;
-    desc->srcHandle = ncclDevrGetRmaDevWin(task->srcWinHost, ctx);
-    desc->dstOff = task->peerWinOffset;
-    desc->dstHandle = ncclDevrGetRmaDevWin(task->peerWinHost, ctx);
-    desc->size = task->count * ncclTypeSize(task->datatype);
-    desc->targetRank = task->peer;
-    desc->seq = rmaProxyCtx->opSeqs[task->peer]++;
-    desc->rmaDescState = ncclRmaDescStatePending;
-    desc->request = NULL;
-
-    // If the signal mode is none, we do not need to set the signal operation
-    if (task->signalMode == NCCL_SIGNAL_NONE) {
-      desc->signal.op = 0;
-    }
-    // If the signal mode is NCCL_SIGNAL, we use the per-rank signal for the target rank
-    else if (task->signalMode == NCCL_SIGNAL) {
-      desc->signal.op = NCCL_NET_SIGNAL_OP_ADD;
-      desc->signal.offset = comm->rank * sizeof(uint64_t); // Write to our rank slot in peer's buffer
-      desc->signal.signalMhandle = rmaProxyCtx->signalsMhandle;
-      desc->signal.val = 1;
-    }
-
-    // Prepare the readySeq write operation
-    batchParams[batchIdx].writeValue.operation = CU_STREAM_MEM_OP_WRITE_VALUE_64;
-    batchParams[batchIdx].writeValue.address = (CUdeviceptr)&rmaProxyCtx->readySeqsDev[task->peer];
-    batchParams[batchIdx].writeValue.value = desc->seq;
-    // [RCCL] CU_STREAM_WRITE_VALUE_DEFAULT is a CUDA-specific constant with no HIP equivalent.
-    // This field must be initialized to satisfy the CUDA-compatible struct definition,
-    // but the HIP runtime does not use this flag and treats it as 0.
-    batchParams[batchIdx].writeValue.flags = 0;
-
-    // Prepare the doneSeq wait operation
-    batchParams[batchIdx+nRmaTasksProxy].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_64;
-    batchParams[batchIdx+nRmaTasksProxy].waitValue.address = (CUdeviceptr)&rmaProxyCtx->doneSeqsDev[task->peer];
-    batchParams[batchIdx+nRmaTasksProxy].waitValue.value = desc->seq;
-    batchParams[batchIdx+nRmaTasksProxy].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
-
-    INFO(NCCL_COLL, "ncclRmaPutProxy enqueued Desc: rank=%d peer=%d ctx=%d size=%ld signalMode=%d readySeq=%lu doneSeq=%lu",
-      comm->rank, task->peer, ctx, task->count * ncclTypeSize(task->datatype), task->signalMode, (uint64_t)desc->seq, (uint64_t)desc->seq);
-
-    // Write descriptor to queue
-    uint32_t idx = pi & (rmaProxyCtx->queueSize - 1);
-    rmaProxyCtx->pendingQueues[peer * rmaProxyCtx->queueSize + idx] = desc;
-
-    // Advance PI with RELEASE to ensure descriptor write is visible
-    __atomic_store_n(&rmaProxyCtx->pis[peer], pi + 1, __ATOMIC_RELEASE);
-    batchIdx++;
-
-    // Free the task
-    ncclMemoryPoolFree(&comm->memPool_ncclTaskRma, task);
   }
-
-  // Execute ready operations (readySeq writes) first, then done operations (doneSeq waits)
-  if (batchIdx == nRmaTasksProxy) {
-    // [RCCL] direct HIP call (see comment above).
-    CUCHECKGOTO(hipStreamBatchMemOp(stream, 2*batchIdx, batchParams, 0), ret, fail);
-  } else {
-    CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams, 0), ret, fail);
-    CUCHECKGOTO(hipStreamBatchMemOp(stream, batchIdx, batchParams+nRmaTasksProxy, 0), ret, fail);
-  }
-
-exit:
-  if (batchParams) free(batchParams);
-  return ret;
-fail:
-  goto exit;
+  return ncclSuccess;
 }
 
-
-
-ncclResult_t ncclRmaWaitSignalProxy(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream){
-  ncclResult_t ret = ncclSuccess;
-
-  // Make sure the RMA proxy is connected
-  if (!comm->rmaState.rmaProxyState.connected) {
-    WARN("RMA proxy is not connected");
-    return ncclInternalError;
-  }
-
-  int ctx = plan->rmaArgs->ctx;
-  struct ncclRmaProxyCtx* proxyCtx = (struct ncclRmaProxyCtx*)comm->rmaState.rmaProxyState.rmaProxyCtxs[ctx];
-
-  struct ncclTaskRma* task = ncclIntruQueueHead(&plan->rmaTaskQueueProxy);
-  ncclIntruQueueDequeue(&plan->rmaTaskQueueProxy);
-
-  // Assert task func is ncclFuncWaitSignal
-  assert(task->func == ncclFuncWaitSignal);
-  // Assert task context is the same as the plan context
-  assert(task->ctx == ctx);
-  // Assert the plan has exactly one RMA proxy task
-  assert(plan->rmaArgs->nRmaTasksProxy == 1);
-
-  size_t opIdx = 0;
-  CUstreamBatchMemOpParams* batchParams = nullptr;
-
-  NCCLCHECK(ncclCalloc(&batchParams, task->npeers));
-
-  // Use per-rank signal for the target rank
-  if (task->signalMode == NCCL_SIGNAL) {
-    for (int i = 0; i < task->npeers; i++) {
-      int peerRank = task->peers[i];
-      // Calculate the expected signal value from this peer
-      uint64_t waitValue = proxyCtx->signalsHost[peerRank] + task->nsignals[i];
-
-      // Update our expectation for future waits
-      proxyCtx->signalsHost[peerRank] = waitValue;
-
-      // Add wait operation to batch
-      batchParams[opIdx] = {};
-      batchParams[opIdx].waitValue.operation = CU_STREAM_MEM_OP_WAIT_VALUE_64;
-      batchParams[opIdx].waitValue.address = (CUdeviceptr)&proxyCtx->signalsDev[peerRank];
-      batchParams[opIdx].waitValue.value64 = waitValue;
-      batchParams[opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
-      opIdx++;
-    }
-
-    // Execute all wait operations in a single batch
-    // [RCCL] direct HIP call; ncclCuStreamBatchMemOp wrapper is excluded from the RCCL build.
-    CUCHECKGOTO(hipStreamBatchMemOp(stream, opIdx, batchParams, 0), ret, fail);
-  }
-
-  // Free the task
-  ncclMemoryPoolFree(&comm->memPool_ncclTaskRma, task);
-
-exit:
-  if (batchParams) free(batchParams);
-  return ret;
-fail:
-  goto exit;
+void ncclDumpRmaProxyState(int signal) {
+  dumpRmaProxyState(ncclLastRmaProxyState);
 }

@@ -19,7 +19,7 @@ pytestmark = [pytest.mark.code_coverage]
 
 @pytest.mark.class_name("code-coverage")
 class TestCodeCoverage(RocprofsysTest):
-    def get_rewrite_args(self, type) -> list[str]:
+    def get_binary_rewrite_args(self, type) -> list[str]:
         ret = ["-e", "-v", "2", "--min-instructions=4", "-E", "^std::"]
         if "base" in type:
             ret.extend(["--coverage", "function"])
@@ -29,7 +29,7 @@ class TestCodeCoverage(RocprofsysTest):
             ret.extend(["-M", "coverage"])
         return ret
 
-    def get_runtime_args(self, type) -> list[str]:
+    def get_runtime_instrument_args(self, type) -> list[str]:
         ret = [
             "-e",
             "-v",
@@ -69,8 +69,8 @@ class TestCodeCoverage(RocprofsysTest):
             mode,
             "code-coverage",
             run_args=run_args,
-            rewrite_args=self.get_rewrite_args(type),
-            runtime_args=self.get_runtime_args(type),
+            binary_rewrite_args=self.get_binary_rewrite_args(type),
+            runtime_instrument_args=self.get_runtime_instrument_args(type),
         )
         self.assert_regex(
             result,

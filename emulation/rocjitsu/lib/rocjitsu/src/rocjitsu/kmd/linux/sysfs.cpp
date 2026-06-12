@@ -48,28 +48,26 @@ void Sysfs::cleanup() {
   }
 }
 
-void Sysfs::setup_environment() {
-  // Do NOT set HSA_MODEL_TOPOLOGY. That triggers libhsakmt's "model mode"
-  // which requires HSA_MODEL_LIB (an FFM .so we don't provide). Our
-  // LD_PRELOAD interposer redirects all sysfs topology reads (open, openat,
-  // fopen) from /sys/devices/virtual/kfd/kfd/topology/ to the generated
-  // directory transparently — no env var needed.
-}
+void Sysfs::setup_environment() {}
 
 void Sysfs::write_generation_id() { write_file(topology_dir_ + "/generation_id", "1\n"); }
 
-void Sysfs::write_system_properties() {
-  write_file(topology_dir_ + "/system_properties", "platform_oem 0\n"
-                                                   "platform_id 0\n"
-                                                   "platform_rev 0\n"
-                                                   "num_devices 2\n"); // 1 CPU + 1 GPU node
+void Sysfs::write_system_properties(uint32_t num_devices) {
+  std::ostringstream ss;
+  ss << "platform_oem 0\n"
+        "platform_id 0\n"
+        "platform_rev 0\n"
+     << "num_devices " << num_devices << "\n";
+  write_file(topology_dir_ + "/system_properties", ss.str());
 }
 
-void Sysfs::write_cpu_node(const std::string &nodes_dir) {
+void Sysfs::write_cpu_node(const std::string &nodes_dir, uint32_t num_gpu_links) {
   std::string node_dir = nodes_dir + "/0";
   make_dir(node_dir);
   make_dir(node_dir + "/mem_banks/0");
-  make_dir(node_dir + "/io_links/0");
+
+  for (uint32_t i = 0; i < num_gpu_links; ++i)
+    make_dir(node_dir + "/io_links/" + std::to_string(i));
 
   write_file(node_dir + "/gpu_id", "0\n");
 
@@ -86,7 +84,7 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir) {
         << "simd_count 0\n"
         << "mem_banks_count 1\n"
         << "caches_count 0\n"
-        << "io_links_count 1\n"
+        << "io_links_count " << num_gpu_links << "\n"
         << "cpu_core_id_base 0\n"
         << "simd_id_base 0\n"
         << "max_waves_per_simd 0\n"
@@ -128,67 +126,59 @@ void Sysfs::write_cpu_node(const std::string &nodes_dir) {
       << "mem_clk_max 0\n";
   write_file(node_dir + "/mem_banks/0/properties", mem.str());
 
-  write_file(node_dir + "/io_links/0/properties", "type 2\n"
-                                                  "version_major 0\n"
-                                                  "version_minor 0\n"
-                                                  "node_from 0\n"
-                                                  "node_to 1\n"
-                                                  "weight 20\n"
-                                                  "min_latency 0\n"
-                                                  "max_latency 0\n"
-                                                  "min_bandwidth 0\n"
-                                                  "max_bandwidth 0\n"
-                                                  "recommended_transfer_size 0\n"
-                                                  "num_hops 1\n"
-                                                  "flags 1\n");
+  for (uint32_t i = 0; i < num_gpu_links; ++i) {
+    std::ostringstream link;
+    link << "type 2\n"
+         << "version_major 0\n"
+         << "version_minor 0\n"
+         << "node_from 0\n"
+         << "node_to " << (i + 1) << "\n"
+         << "weight 20\n"
+         << "min_latency 0\n"
+         << "max_latency 0\n"
+         << "min_bandwidth 0\n"
+         << "max_bandwidth 0\n"
+         << "recommended_transfer_size 0\n"
+         << "num_hops 1\n"
+         << "flags 1\n";
+    write_file(node_dir + "/io_links/" + std::to_string(i) + "/properties", link.str());
+  }
 }
 
-void Sysfs::write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu) {
-  std::string node_dir = nodes_dir + "/1";
+void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, const GpuInfo &gpu,
+                           uint32_t total_gpus) {
+  std::string node_dir = nodes_dir + "/" + std::to_string(node_idx);
   make_dir(node_dir);
   make_dir(node_dir + "/mem_banks/0");
   make_dir(node_dir + "/caches/0");
   make_dir(node_dir + "/caches/1");
-  make_dir(node_dir + "/io_links/0");
+
+  // IO links: link 0 = to CPU, links 1..N-1 = XGMI to peer GPUs
+  uint32_t num_io_links = 1 + (total_gpus > 1 ? total_gpus - 1 : 0);
+  for (uint32_t i = 0; i < num_io_links; ++i)
+    make_dir(node_dir + "/io_links/" + std::to_string(i));
 
   std::ostringstream gpu_id;
   gpu_id << gpu.gpu_id << "\n";
   write_file(node_dir + "/gpu_id", gpu_id.str());
-
-  // Write the marketing name file for ROCR's topology enumeration.
   write_file(node_dir + "/name", std::string(gpu.marketing_name) + "\n");
 
-  // Compute capability flags if not explicitly provided.
-  // Layout from hsakmttypes.h HSA_CAP_* defines.
   uint32_t cap = gpu.capability;
   if (cap == 0) {
-    cap = (1u << 1)     // HSAMMUPresent
-          | (1u << 5)   // QueueIdleEvent
-          | (1u << 7)   // WatchPointsSupported
-          | (4u << 8)   // WatchPointsTotalBits = 4 (16 watchpoints)
-          | (2u << 12)  // DoorbellType = 2
-          | (1u << 14)  // AQLQueueDoubleMap
-          | (1u << 15)  // DebugTrapSupported
-          | (1u << 16)  // WaveLaunchTrapOverrideSupported
-          | (1u << 17)  // WaveLaunchModeSupported
-          | (1u << 18)  // PreciseMemoryOperationsSupported
-          | (1u << 20)  // Mem_EDCSupport (HBM ECC)
-          | (1u << 21)  // RASEventNotify
-          | (1u << 26)  // SRAM_EDCSupport
-          | (1u << 27)  // SVMAPISupported
-          | (1u << 28)  // CoherentHostAccess
-          | (1u << 29)  // DebugSupportedFirmware
-          | (1u << 30)  // PreciseALUOperationsSupported
-          | (1u << 31); // PerQueueResetSupported
+    cap = (1u << 1) | (1u << 5) | (1u << 7) | (4u << 8) | (2u << 12) | (1u << 14) | (1u << 15) |
+          (1u << 16) | (1u << 17) | (1u << 18) | (1u << 20) | (1u << 21) | (1u << 26) | (1u << 27) |
+          (1u << 28) | (1u << 29) | (1u << 30) | (1u << 31);
   }
+
+  uint32_t p2p_links = total_gpus > 1 ? total_gpus - 1 : 0;
 
   std::ostringstream props;
   props << "cpu_cores_count 0\n"
         << "simd_count " << gpu.simd_count << "\n"
         << "mem_banks_count 1\n"
         << "caches_count 2\n"
-        << "io_links_count 1\n"
-        << "p2p_links_count 0\n"
+        << "io_links_count " << num_io_links << "\n"
+        << "p2p_links_count " << p2p_links << "\n"
         << "cpu_core_id_base 0\n"
         << "simd_id_base 2147487744\n"
         << "max_waves_per_simd " << gpu.max_waves_per_simd << "\n"
@@ -237,11 +227,8 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu) {
       << "width " << gpu.mem_width << "\n"
       << "mem_clk_max " << gpu.mem_clk_max << "\n";
   write_file(node_dir + "/mem_banks/0/properties", mem.str());
-
-  // Used memory tracking (initially 0).
   write_file(node_dir + "/mem_banks/0/used_memory", "0\n");
 
-  // L1 cache (per CU, data cache)
   std::ostringstream l1;
   l1 << "processor_id_low 0\n"
      << "level 1\n"
@@ -254,7 +241,6 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu) {
      << "sibling_map 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
   write_file(node_dir + "/caches/0/properties", l1.str());
 
-  // L2 cache (shared)
   std::ostringstream l2;
   l2 << "processor_id_low 0\n"
      << "level 2\n"
@@ -267,64 +253,117 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, const GpuInfo &gpu) {
      << "sibling_map 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0\n";
   write_file(node_dir + "/caches/1/properties", l2.str());
 
-  // IO link to CPU — num_hops >= 1 enables Large BAR in ROCR, which allows
-  // memcpy-based code object loading instead of DmaCopy (avoiding the
-  // bootstrap dependency where the blit kernel needs itself to load).
-  write_file(node_dir + "/io_links/0/properties", "type 2\n"
-                                                  "version_major 0\n"
-                                                  "version_minor 0\n"
-                                                  "node_from 1\n"
-                                                  "node_to 0\n"
-                                                  "weight 20\n"
-                                                  "min_latency 0\n"
-                                                  "max_latency 0\n"
-                                                  "min_bandwidth 0\n"
-                                                  "max_bandwidth 0\n"
-                                                  "recommended_transfer_size 0\n"
-                                                  "num_hops 1\n"
-                                                  "flags 1\n");
+  // IO link 0: GPU → CPU (PCIe, type 2)
+  {
+    std::ostringstream link;
+    link << "type 2\n"
+         << "version_major 0\n"
+         << "version_minor 0\n"
+         << "node_from " << node_idx << "\n"
+         << "node_to 0\n"
+         << "weight 20\n"
+         << "min_latency 0\n"
+         << "max_latency 0\n"
+         << "min_bandwidth 0\n"
+         << "max_bandwidth 0\n"
+         << "recommended_transfer_size 0\n"
+         << "num_hops 1\n"
+         << "flags 1\n";
+    write_file(node_dir + "/io_links/0/properties", link.str());
+  }
+
+  // IO links 1..N-1: XGMI to peer GPUs (type 11)
+  if (total_gpus > 1) {
+    uint32_t link_idx = 1;
+    for (uint32_t peer = 1; peer <= total_gpus; ++peer) {
+      if (peer == node_idx)
+        continue;
+      std::ostringstream link;
+      link << "type 11\n"
+           << "version_major 0\n"
+           << "version_minor 0\n"
+           << "node_from " << node_idx << "\n"
+           << "node_to " << peer << "\n"
+           << "weight 15\n"
+           << "min_latency 0\n"
+           << "max_latency 0\n"
+           << "min_bandwidth 50000\n"
+           << "max_bandwidth 50000\n"
+           << "recommended_transfer_size 0\n"
+           << "num_hops 1\n"
+           << "flags 1\n";
+      write_file(node_dir + "/io_links/" + std::to_string(link_idx++) + "/properties", link.str());
+    }
+
+    uint32_t p2p_idx = 0;
+    for (uint32_t peer = 1; peer <= total_gpus; ++peer) {
+      if (peer == node_idx)
+        continue;
+      make_dir(node_dir + "/p2p_links/" + std::to_string(p2p_idx));
+      std::ostringstream plink;
+      plink << "type 11\n"
+            << "version_major 0\n"
+            << "version_minor 0\n"
+            << "node_from " << node_idx << "\n"
+            << "node_to " << peer << "\n"
+            << "weight 15\n"
+            << "min_latency 0\n"
+            << "max_latency 0\n"
+            << "min_bandwidth 50000\n"
+            << "max_bandwidth 50000\n"
+            << "recommended_transfer_size 0\n"
+            << "num_hops 1\n"
+            << "flags 1\n";
+      write_file(node_dir + "/p2p_links/" + std::to_string(p2p_idx) + "/properties", plink.str());
+      ++p2p_idx;
+    }
+  }
 }
 
-void Sysfs::write_drm_tree(const GpuInfo &gpu) {
+void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
   char tmpl[] = "/tmp/rocjitsu_drm_XXXXXX";
   char *dir = mkdtemp(tmpl);
   if (!dir)
     return;
   drm_dir_ = dir;
 
-  uint32_t render_minor = gpu.drm_render_minor;
-  std::string render_name = "renderD" + std::to_string(render_minor);
+  for (size_t i = 0; i < gpus.size(); ++i) {
+    auto &gpu = gpus[i];
+    uint32_t render_minor = gpu.drm_render_minor;
+    std::string render_name = "renderD" + std::to_string(render_minor);
+    std::string card_name = "card" + std::to_string(i);
 
-  std::ostringstream vendor_hex, device_hex;
-  vendor_hex << "0x" << std::hex << gpu.vendor_id << "\n";
-  device_hex << "0x" << std::hex << gpu.device_id << "\n";
+    std::ostringstream vendor_hex, device_hex;
+    vendor_hex << "0x" << std::hex << gpu.vendor_id << "\n";
+    device_hex << "0x" << std::hex << gpu.device_id << "\n";
 
-  uint32_t bus = (gpu.location_id >> 8) & 0xFF;
-  uint32_t dev = (gpu.location_id >> 3) & 0x1F;
-  uint32_t func = gpu.location_id & 0x7;
-  std::ostringstream uevent;
-  uevent << "DRIVER=amdgpu\n"
-         << std::hex << std::uppercase << "PCI_ID=" << std::setw(4) << std::setfill('0')
-         << gpu.vendor_id << ":" << std::setw(4) << std::setfill('0') << gpu.device_id << "\n"
-         << std::dec << "PCI_SLOT_NAME=" << std::setw(4) << std::setfill('0') << std::hex
-         << gpu.domain << ":" << std::setw(2) << std::setfill('0') << bus << ":" << std::setw(2)
-         << std::setfill('0') << dev << "." << func << "\n";
+    uint32_t bus = (gpu.location_id >> 8) & 0xFF;
+    uint32_t dev = (gpu.location_id >> 3) & 0x1F;
+    uint32_t func = gpu.location_id & 0x7;
+    std::ostringstream uevent;
+    uevent << "DRIVER=amdgpu\n"
+           << std::hex << std::uppercase << "PCI_ID=" << std::setw(4) << std::setfill('0')
+           << gpu.vendor_id << ":" << std::setw(4) << std::setfill('0') << gpu.device_id << "\n"
+           << std::dec << "PCI_SLOT_NAME=" << std::setw(4) << std::setfill('0') << std::hex
+           << gpu.domain << ":" << std::setw(2) << std::setfill('0') << bus << ":" << std::setw(2)
+           << std::setfill('0') << dev << "." << func << "\n";
 
-  // Both card0/ and renderD<M>/ need identical device/ subtrees so rsmi can
-  // resolve card↔render in either direction.
-  for (const std::string &entry_name : {std::string("card0"), render_name}) {
-    std::string device_dir = drm_dir_ + "/" + entry_name + "/device";
-    make_dir(device_dir + "/drm/card0");
-    make_dir(device_dir + "/drm/" + render_name);
-    write_file(device_dir + "/vendor", vendor_hex.str());
-    write_file(device_dir + "/device", device_hex.str());
-    write_file(device_dir + "/uevent", uevent.str());
+    for (const std::string &entry_name : {card_name, render_name}) {
+      std::string device_dir = drm_dir_ + "/" + entry_name + "/device";
+      make_dir(device_dir + "/drm/" + card_name);
+      make_dir(device_dir + "/drm/" + render_name);
+      write_file(device_dir + "/vendor", vendor_hex.str());
+      write_file(device_dir + "/device", device_hex.str());
+      write_file(device_dir + "/uevent", uevent.str());
+    }
   }
 
   write_file(drm_dir_ + "/version", "drm 1.1.0\n");
 }
 
-std::string Sysfs::generate(const GpuInfo &gpu) {
+std::string Sysfs::generate(const GpuInfo &gpu) { return generate(std::vector<GpuInfo>{gpu}); }
+
+std::string Sysfs::generate(const std::vector<GpuInfo> &gpus) {
   cleanup();
 
   char tmpl[] = "/tmp/rocjitsu_topology_XXXXXX";
@@ -333,18 +372,22 @@ std::string Sysfs::generate(const GpuInfo &gpu) {
     return {};
 
   topology_dir_ = dir;
-  gpu_info_ = gpu;
+  if (!gpus.empty())
+    gpu_info_ = gpus[0];
+
+  auto num_gpus = static_cast<uint32_t>(gpus.size());
 
   write_generation_id();
-  write_system_properties();
+  write_system_properties(1 + num_gpus);
 
   std::string nodes_dir = topology_dir_ + "/nodes";
   make_dir(nodes_dir);
 
-  write_cpu_node(nodes_dir);
-  write_gpu_node(nodes_dir, gpu);
+  write_cpu_node(nodes_dir, num_gpus);
+  for (uint32_t i = 0; i < num_gpus; ++i)
+    write_gpu_node(nodes_dir, i + 1, gpus[i], num_gpus);
 
-  write_drm_tree(gpu);
+  write_drm_tree(gpus);
 
   return topology_dir_;
 }

@@ -119,8 +119,8 @@ inline T clear_bit(T val, int position) {
 
 /// @brief Extract bits from first to last inclusive from val and justify to the LSB.
 /// @param val The value to extract bits from.
-/// @param first The first bit (LSB) to extact.
-/// @param last The last bit (MSB) to extact.
+/// @param first The first bit (LSB) to extract.
+/// @param last The last bit (MSB) to extract.
 /// @returns The extracted bits.
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
@@ -134,7 +134,7 @@ inline T bits(T val, int first, int last) {
 
 /// @brief Extract bit specified by position from val and justify to the LSB.
 /// @param val The value to extract the bit from.
-/// @param position The bit to extact.
+/// @param position The bit to extract.
 /// @returns The extracted bit.
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
@@ -146,10 +146,10 @@ inline T bit(T val, int position) {
 }
 
 /// @brief Extend bits of val starting from the LSB up to num_bits - 1.
-/// @details The bits are replicated as many times as possibe based on
+/// @details The bits are replicated as many times as possible based on
 /// the size of T. The number of bits should be a power of two.
 /// @param[in] val Value to be extended.
-/// @param[in] num_bits The number of of bits in val to extend.
+/// @param[in] num_bits The number of bits in val to extend.
 /// @returns Value containing the replicated bits.
 template <typename T>
   requires metaprogramming::IsUnsignedInt<T>
@@ -247,6 +247,15 @@ template <typename T>
 constexpr inline T align_up(T val, T alignment) {
   assert(std::has_single_bit(alignment));
   return (val + alignment - 1) & ~(alignment - 1);
+}
+
+/// @brief Return true when @p val is aligned to @p alignment.
+/// @param alignment Must be a power of 2.
+template <typename T>
+  requires metaprogramming::IsUnsignedInt<T>
+constexpr inline bool is_aligned(T val, T alignment) {
+  assert(std::has_single_bit(alignment));
+  return (val & (alignment - 1)) == 0;
 }
 
 } // namespace util

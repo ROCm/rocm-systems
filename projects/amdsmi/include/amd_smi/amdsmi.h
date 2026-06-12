@@ -511,6 +511,19 @@ typedef enum {
 } amdsmi_compute_partition_type_t;
 
 /**
+ * @brief Compute Partition Memory Allocation Mode. Controls how GPU memory
+ * is allocated across XCPs within a memory partition.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
+ */
+typedef enum {
+  AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_INVALID = 0,  //!< Invalid mode
+  AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING,      //!< Memory is evenly capped per XCP
+  AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL           //!< Each XCP in the partition may
+                                                   //!< use the full partition memory
+} amdsmi_compute_partition_mem_alloc_mode_t;
+
+/**
  * @brief Memory Partitions
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -1241,7 +1254,11 @@ typedef enum {
   AMDSMI_LINK_TYPE_PCIE = 1,            //!< Peripheral Component Interconnect Express Link Type
   AMDSMI_LINK_TYPE_XGMI = 2,            //!< GPU Memory Interconnect (multi GPU communication)
   AMDSMI_LINK_TYPE_NOT_APPLICABLE = 3,  //!< Not Applicable Link Type
-  AMDSMI_LINK_TYPE_UNKNOWN = 4          //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_UNKNOWN = 4,         //!< Unknown Link Type
+  AMDSMI_LINK_TYPE_NUMA = 5,  //!< Two processors connect via different PCIe switches but on the
+                              //!< same CPU (NIC-to-GPU only)
+  AMDSMI_LINK_TYPE_XNUMA =
+      6  //!< Two processors connect via different PCIe switches on different CPUs (NIC-to-GPU only)
 } amdsmi_link_type_t;
 
 /**
@@ -2938,21 +2955,6 @@ typedef struct {
 #define AMDSMI_MAX_NIC_FW 16        //!< Maximum number of NIC firmwares
 
 /**
- * @brief NIC Link Types. This enum is used to identify the link type between
- * NIC and GPU processors based on their PCIe and NUMA connectivity.
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_NIC_LINK_TYPE_UNKNOWN,  //!< unknown type.
-  AMDSMI_NIC_LINK_TYPE_PCIE,     //!< two processors connect via same PCIe
-  AMDSMI_NIC_LINK_TYPE_NUMA,     /**< two processors connect via different PCIe switches but on the
-                                      same CPU */
-  AMDSMI_NIC_LINK_TYPE_X_NUMA,   /**< two processors connect via  different  PCIe switches but on
-                                      different CPUs */
-} amdsmi_nic_link_type_t;
-
-/**
  * @brief Structure for NIC statistic name-value pairs
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -3637,6 +3639,8 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
 
 /**
  *  @brief Get the vram vendor string of a device.
+ *
+ *  @deprecated ::amdsmi_get_gpu_vram_info() should be used instead
  *
  *  @ingroup tagIdentQuery
  *
@@ -6854,6 +6858,68 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                                  amdsmi_compute_partition_type_t compute_partition);
 
+/**
+ *  @brief Retrieves the current compute partition memory allocation mode
+ *  for a desired device.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a pointer
+ *  @p mode, this function will attempt to obtain the device's current
+ *  compute partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share.
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size (useful when only one XCP is active).
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] mode a pointer to an ::amdsmi_compute_partition_mem_alloc_mode_t
+ *  variable, into which the device's current memory allocation mode will
+ *  be written.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode);
+
+/**
+ *  @brief Modifies a selected device's compute partition memory allocation mode.
+ *
+ *  @ingroup tagComputePartition
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a mode
+ *  @p mode, this function will attempt to update the selected device's
+ *  compute partition memory allocation mode. The mode controls how HBM
+ *  capacity is distributed across XCPs within each memory partition:
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING — each XCP is capped
+ *    to an even share. This is the default.
+ *  - ::AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL — each XCP may use the
+ *    full memory partition size.
+ *
+ *  @param[in] processor_handle Device which to modify
+ *
+ *  @param[in] mode using enum ::amdsmi_compute_partition_mem_alloc_mode_t,
+ *  define what the selected device's memory allocation mode should be
+ *  updated to.
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
+    amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode);
 /** @} End tagComputePartition */
 
 /*****************************************************************************/
