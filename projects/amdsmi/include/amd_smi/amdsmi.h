@@ -371,10 +371,12 @@ typedef enum {
 typedef amdsmi_processor_type_t processor_type_t;
 
 /**
- * @brief Error codes returned by amdsmi functions
+ * @brief Status codes returned by amdsmi functions.
  *
+ * @internal
  * Please avoid status codes that are multiples of 256 (256, 512, etc..)
  * Return values in the shell get modulo 256 applied, meaning any multiple of 256 ends up as 0
+ * @endinternal
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{cpu_bm} @tag{guest_windows} @endcond
  */
