@@ -133,14 +133,14 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
 
 MemoryRegion::~MemoryRegion() {}
 
-hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** address, int agent_node_id) const {
+hsa_status_t MemoryRegion::Allocate(size_t& size, AllocateFlags alloc_flags, void** mem, int agent_node_id) const {
   std::lock_guard<std::mutex> lock(owner()->agent_memory_lock_);
-  return AllocateImpl(size, alloc_flags, address, agent_node_id);
+  return AllocateImpl(size, alloc_flags, mem, agent_node_id);
 }
 
 hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
-                                        void** address, int agent_node_id) const {
-  if (address == NULL) {
+                                        void** mem, int agent_node_id) const {
+  if (mem == NULL) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -157,8 +157,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   size = AlignUp(size, GetPageSize());
 
-  return owner()->driver().AllocateMemory(*this, alloc_flags, address, size,
-                                          agent_node_id);
+  return owner()->driver().AllocateMemory(*this, alloc_flags, mem, size, agent_node_id);
 }
 
 hsa_status_t MemoryRegion::Free(void* address, size_t size) const {
