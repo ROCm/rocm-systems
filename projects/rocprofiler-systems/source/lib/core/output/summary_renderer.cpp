@@ -50,14 +50,14 @@ badge_for(output_format format) noexcept
 {
     switch(format)
     {
-        case output_format::perfetto: return { "◈", "perfetto" };
-        case output_format::rocpd: return { "◆", "rocpd" };
-        case output_format::json: return { "▪", "json" };
-        case output_format::text: return { "▪", "text" };
-        case output_format::causal_json: return { "▪", "causal-json" };
-        case output_format::causal_text: return { "▪", "causal-text" };
+        case output_format::perfetto: return { .glyph = "◈", .name = "perfetto" };
+        case output_format::rocpd: return { .glyph = "◆", .name = "rocpd" };
+        case output_format::json: return { .glyph = "▪", .name = "json" };
+        case output_format::text: return { .glyph = "▪", .name = "text" };
+        case output_format::causal_json: return { .glyph = "▪", .name = "causal-json" };
+        case output_format::causal_text: return { .glyph = "▪", .name = "causal-text" };
     }
-    return { "▪", "output" };
+    return { .glyph = "▪", .name = "output" };
 }
 
 [[nodiscard]] constexpr const char*
