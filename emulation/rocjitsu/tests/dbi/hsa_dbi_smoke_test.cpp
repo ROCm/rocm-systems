@@ -314,7 +314,7 @@ protected:
       }
     }
     ASSERT_NE(anchor_count_, 0u) << "No relocatable v_add_f32 anchor in vector_add_gfx90a.o; "
-                          "did the compiler change the lowering?";
+                                    "did the compiler change the lowering?";
 
     // Apply the inline-nop trampoline.
     Instrumentor instrumentor(*co, ROCJITSU_CODE_ARCH_CDNA2);
@@ -396,7 +396,8 @@ TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
         << "Anchor at offset " << anchor_offsets_[anchor_idx]
         << " should now decode as s_branch; got: " << decoded->mnemonic();
     EXPECT_NE(decoded->mnemonic(), anchor_mnemonics_[anchor_idx])
-        << "Anchor mnemonic unchanged (" << anchor_mnemonics_[anchor_idx] << ") - was the patch applied?";
+        << "Anchor mnemonic unchanged (" << anchor_mnemonics_[anchor_idx]
+        << ") - was the patch applied?";
   }
 
   // (c) Patched ELF has a .rj_trampolines section.
