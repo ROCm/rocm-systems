@@ -330,6 +330,18 @@ class MetricCommands:
         )
         num_partition = partition_metric_info["num_partition"]
 
+        # Fetch partition metrics once per GPU; the sections below reuse this result
+        gpu_partition_metrics = None
+        if args.partition:
+            try:
+                gpu_partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(
+                    args.gpu
+                )
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug(
+                    "Failed to get partition metrics for gpu %s | %s", gpu_id, e.get_error_info()
+                )
+
         if self.logger.is_json_format():
             values_dict["gpu"] = int(gpu_id)
         # Populate the pcie_dict first due to multiple gpu metrics calls incorrectly increasing bandwidth
@@ -456,69 +468,34 @@ class MetricCommands:
                     engine_usage["vcn_busy"] = "N/A"
 
                     # When partition flag is set, use partition-scoped data source
-                    if args.partition:
-                        try:
-                            gpu_partition_metrics = (
-                                amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
-                            )
-                            xcp_gfx_busy = gpu_partition_metrics.get("xcp_stats.gfx_busy_inst", [])
-                            xcp_jpeg_busy = gpu_partition_metrics.get("xcp_stats.jpeg_busy", [])
-                            xcp_vcn_busy = gpu_partition_metrics.get("xcp_stats.vcn_busy", [])
+                    if args.partition and gpu_partition_metrics is not None:
+                        xcp_gfx_busy = gpu_partition_metrics.get("xcp_stats.gfx_busy_inst", [])
+                        xcp_jpeg_busy = gpu_partition_metrics.get("xcp_stats.jpeg_busy", [])
+                        xcp_vcn_busy = gpu_partition_metrics.get("xcp_stats.vcn_busy", [])
 
-                            if xcp_gfx_busy != "N/A" and isinstance(xcp_gfx_busy, list):
-                                new_xcp_dict = {}
-                                for xcp_idx, gfx_busy in enumerate(xcp_gfx_busy):
-                                    new_xcp_dict[f"xcp_{xcp_idx}"] = (
-                                        list(gfx_busy) if isinstance(gfx_busy, list) else gfx_busy
-                                    )
-                                engine_usage["gfx_busy_inst"] = new_xcp_dict
+                        if xcp_gfx_busy != "N/A" and isinstance(xcp_gfx_busy, list):
+                            new_xcp_dict = {}
+                            for xcp_idx, gfx_busy in enumerate(xcp_gfx_busy):
+                                new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                    list(gfx_busy) if isinstance(gfx_busy, list) else gfx_busy
+                                )
+                            engine_usage["gfx_busy_inst"] = new_xcp_dict
 
-                            if xcp_jpeg_busy != "N/A" and isinstance(xcp_jpeg_busy, list):
-                                new_xcp_dict = {}
-                                for xcp_idx, jpeg_busy in enumerate(xcp_jpeg_busy):
-                                    new_xcp_dict[f"xcp_{xcp_idx}"] = (
-                                        list(jpeg_busy)
-                                        if isinstance(jpeg_busy, list)
-                                        else jpeg_busy
-                                    )
-                                engine_usage["jpeg_busy"] = new_xcp_dict
+                        if xcp_jpeg_busy != "N/A" and isinstance(xcp_jpeg_busy, list):
+                            new_xcp_dict = {}
+                            for xcp_idx, jpeg_busy in enumerate(xcp_jpeg_busy):
+                                new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                    list(jpeg_busy) if isinstance(jpeg_busy, list) else jpeg_busy
+                                )
+                            engine_usage["jpeg_busy"] = new_xcp_dict
 
-                            if xcp_vcn_busy != "N/A" and isinstance(xcp_vcn_busy, list):
-                                new_xcp_dict = {}
-                                for xcp_idx, vcn_busy in enumerate(xcp_vcn_busy):
-                                    new_xcp_dict[f"xcp_{xcp_idx}"] = (
-                                        list(vcn_busy) if isinstance(vcn_busy, list) else vcn_busy
-                                    )
-                                engine_usage["vcn_busy"] = new_xcp_dict
-
-                        except amdsmi_exception.AmdSmiLibraryException as e:
-                            logging.debug(
-                                "Failed to get partition usage metrics for gpu %s | %s",
-                                gpu_id,
-                                e.get_error_info(),
-                            )
-                            # Fall back to socket-level metrics
-                            if num_partition != "N/A":
-                                new_xcp_dict = {}
-                                for current_xcp in range(num_partition):
-                                    new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
-                                        "xcp_stats.gfx_busy_inst"
-                                    ][current_xcp]
-                                engine_usage["gfx_busy_inst"] = new_xcp_dict
-
-                                new_xcp_dict = {}
-                                for current_xcp in range(num_partition):
-                                    new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
-                                        "xcp_stats.jpeg_busy"
-                                    ][current_xcp]
-                                engine_usage["jpeg_busy"] = new_xcp_dict
-
-                                new_xcp_dict = {}
-                                for current_xcp in range(num_partition):
-                                    new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
-                                        "xcp_stats.vcn_busy"
-                                    ][current_xcp]
-                                engine_usage["vcn_busy"] = new_xcp_dict
+                        if xcp_vcn_busy != "N/A" and isinstance(xcp_vcn_busy, list):
+                            new_xcp_dict = {}
+                            for xcp_idx, vcn_busy in enumerate(xcp_vcn_busy):
+                                new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                    list(vcn_busy) if isinstance(vcn_busy, list) else vcn_busy
+                                )
+                            engine_usage["vcn_busy"] = new_xcp_dict
                     elif num_partition != "N/A":
                         # Socket-level metrics with partition support (existing behavior)
                         new_xcp_dict = {}
@@ -723,11 +700,8 @@ class MetricCommands:
 
                 # When partition flag is set, use partition-scoped data source
                 partition_metrics_used = False
-                if args.partition:
+                if args.partition and gpu_partition_metrics is not None:
                     try:
-                        gpu_partition_metrics = (
-                            amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
-                        )
                         partition_metrics_used = True
 
                         # Use partition metrics for GFX/VCLK/DCLK/SOCCLK instead of socket metrics
@@ -819,7 +793,7 @@ class MetricCommands:
                             soc_limits = amdsmi_interface.amdsmi_get_clock_info(
                                 args.gpu, amdsmi_interface.AmdSmiClkType.SOC
                             )
-                        except (amdsmi_exception.AmdSmiLibraryException, Exception):
+                        except amdsmi_exception.AmdSmiLibraryException:
                             vclk0_limits = None
                             dclk0_limits = None
                             soc_limits = None
@@ -888,7 +862,7 @@ class MetricCommands:
                             gfx_limits = amdsmi_interface.amdsmi_get_clock_info(
                                 args.gpu, amdsmi_interface.AmdSmiClkType.GFX
                             )
-                        except (amdsmi_exception.AmdSmiLibraryException, Exception):
+                        except amdsmi_exception.AmdSmiLibraryException:
                             gfx_limits = None
 
                         for xcp_idx in range(num_xcps):
@@ -1314,48 +1288,26 @@ class MetricCommands:
                     )
 
                 # When partition flag is set, use partition-scoped data source
-                if args.partition:
-                    try:
-                        gpu_partition_metrics = (
-                            amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
-                        )
-                        temperatures = {
-                            "edge": temperature_edge_current,
-                            "hotspot": temperature_hotspot_current,
-                            "mem": temperature_vram_current,
-                            "hbm_stacks": "N/A",
-                            "mid": gpu_partition_metrics.get("temperature_mid", "N/A"),
-                            "aid": "N/A",  # AID temps not in partition metrics
-                            "xcd": "N/A",
-                        }
+                if args.partition and gpu_partition_metrics is not None:
+                    temperatures = {
+                        "edge": temperature_edge_current,
+                        "hotspot": temperature_hotspot_current,
+                        "mem": temperature_vram_current,
+                        "hbm_stacks": "N/A",
+                        "mid": gpu_partition_metrics.get("temperature_mid", "N/A"),
+                        "aid": "N/A",  # AID temps not in partition metrics
+                        "xcd": "N/A",
+                    }
 
-                        # MID temperatures from partition metrics
-                        if temperatures["mid"] != "N/A":
-                            temperatures["mid"] = list(temperatures["mid"])
+                    # MID temperatures from partition metrics
+                    if temperatures["mid"] != "N/A":
+                        temperatures["mid"] = list(temperatures["mid"])
 
-                        # XCP/XCD temperatures from partition metrics
-                        xcp_temp_xcd = gpu_partition_metrics.get("xcp_stats.temperature_xcd", "N/A")
-                        if xcp_temp_xcd != "N/A" and isinstance(xcp_temp_xcd, list):
-                            temperatures["xcd"] = {
-                                f"XCP_{idx}": xcp_temp_xcd[idx]
-                                for idx in range(len(xcp_temp_xcd))
-                                if idx < len(xcp_temp_xcd)
-                            }
-                    except amdsmi_exception.AmdSmiLibraryException as e:
-                        logging.debug(
-                            "Failed to get partition temperature metrics for gpu %s | %s",
-                            gpu_id,
-                            e.get_error_info(),
-                        )
-                        # Fall back to socket-level metrics
-                        temperatures = {
-                            "edge": temperature_edge_current,
-                            "hotspot": temperature_hotspot_current,
-                            "mem": temperature_vram_current,
-                            "hbm_stacks": gpu_metric.get("temperature_hbm_stacks", "N/A"),
-                            "mid": gpu_metric.get("temperature_mid", "N/A"),
-                            "aid": gpu_metric.get("temperature_aid", "N/A"),
-                            "xcd": "N/A",
+                    # XCP/XCD temperatures from partition metrics
+                    xcp_temp_xcd = gpu_partition_metrics.get("xcp_stats.temperature_xcd", "N/A")
+                    if xcp_temp_xcd != "N/A" and isinstance(xcp_temp_xcd, list):
+                        temperatures["xcd"] = {
+                            f"XCP_{idx}": xcp_temp_xcd[idx] for idx in range(len(xcp_temp_xcd))
                         }
                 else:
                     # Socket-level metrics (existing behavior)
