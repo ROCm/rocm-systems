@@ -584,6 +584,12 @@ std::vector<uint8_t> make_gfx950_elf_with_two_nops() {
   return image;
 }
 
+/*
+std::vector<uint8_t> make_gfx950_elf_with_100_nops() {
+  return make_gfx950_elf_with_nop_text(400);
+}
+*/
+
 TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
   auto image = make_gfx950_elf_with_two_nops();
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -721,18 +727,6 @@ TEST(InstrumentorPatch, RejectsZeroQueuedPoints) {
   EXPECT_FALSE(result.errors.empty());
 }
 
-TEST(InstrumentorPatch, RejectsMoreThanOneQueuedPoint) {
-  auto image = make_gfx950_elf_with_two_nops();
-  AmdGpuCodeObject obj(image.data(), image.size());
-  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
-  instrumentor.add_point_by_offset(0);
-  instrumentor.add_point_by_offset(4);
-
-  auto result = instrumentor.patch();
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_FALSE(result.errors.empty());
-}
-
 TEST(InstrumentorPatch, ValidationFailurePropagates) {
   auto image = make_gfx950_elf_with_two_nops();
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -825,13 +819,19 @@ TEST(InstrumentorPatch, BranchRangeOverflowPropagatesAsFatalError) {
 
 class InstrumentorPatchElfShape : public ::testing::Test {
 protected:
-  void SetUp() override {
-    image_ = make_gfx950_elf_with_two_nops();
+  // places instrumentation points starting at anchor_offset = 4
+  void Init(uint64_t num_elf_nops, uint64_t num_instrumentation_points) {
+    // leaving anchor_offset = 0 empty, so will fail on num_elf_nops == num_instrumentation_points
+    ASSERT_TRUE(num_elf_nops > num_instrumentation_points);
+
+    image_ = make_gfx950_elf_with_nop_text(num_elf_nops * 4);
     AmdGpuCodeObject obj(image_.data(), image_.size());
     ASSERT_TRUE(obj.is_valid());
 
     Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
-    instrumentor.add_point_by_offset(/*anchor_offset=*/4);
+    for (uint64_t point = 0; point < num_instrumentation_points; ++point)
+      instrumentor.add_point_by_offset(/*anchor_offset=*/(point + 1) * 4);
+
     result_ = instrumentor.patch();
     ASSERT_TRUE(result_.errors.empty())
         << (result_.errors.empty() ? std::string{} : result_.errors.front());
@@ -855,17 +855,43 @@ protected:
 };
 
 TEST_F(InstrumentorPatchElfShape, RjTrampolinesSectionExists) {
+  Init(2, 1);
+  ASSERT_NE(find_section(".rj_trampolines"), nullptr)
+      << ".rj_trampolines must appear in code_sections()";
+}
+
+TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultipleSectionExists) {
+  Init(100, 50);
   ASSERT_NE(find_section(".rj_trampolines"), nullptr)
       << ".rj_trampolines must appear in code_sections()";
 }
 
 TEST_F(InstrumentorPatchElfShape, RjTrampolinesIsExecutable) {
+  Init(2, 1);
+  const Section *tramp = find_section(".rj_trampolines");
+  ASSERT_NE(tramp, nullptr);
+  EXPECT_NE(tramp->flags() & SHF_EXECINSTR, 0u) << ".rj_trampolines must have SHF_EXECINSTR";
+}
+
+TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultipleIsExecutable) {
+  Init(100, 50);
   const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(tramp, nullptr);
   EXPECT_NE(tramp->flags() & SHF_EXECINSTR, 0u) << ".rj_trampolines must have SHF_EXECINSTR";
 }
 
 TEST_F(InstrumentorPatchElfShape, RjTrampolinesPlacedImmediatelyAfterText) {
+  Init(2, 1);
+  const Section *text = find_section(".text");
+  const Section *tramp = find_section(".rj_trampolines");
+  ASSERT_NE(text, nullptr);
+  ASSERT_NE(tramp, nullptr);
+  EXPECT_EQ(tramp->sectionOffset(), text->sectionOffset() + text->size())
+      << ".rj_trampolines must start at the byte immediately after .text";
+}
+
+TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultiplePlacedImmediatelyAfterText) {
+  Init(100, 50);
   const Section *text = find_section(".text");
   const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(text, nullptr);
@@ -875,6 +901,7 @@ TEST_F(InstrumentorPatchElfShape, RjTrampolinesPlacedImmediatelyAfterText) {
 }
 
 TEST_F(InstrumentorPatchElfShape, RjTrampolinesContentsMatchExpectedWords) {
+  Init(2, 1);
   const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(tramp, nullptr);
 
@@ -893,7 +920,30 @@ TEST_F(InstrumentorPatchElfShape, RjTrampolinesContentsMatchExpectedWords) {
       << "trampoline must end with s_branch back to anchor + original_size";
 }
 
+TEST_F(InstrumentorPatchElfShape, RjTrampolinesMultipleContentsMatchExpectedWords) {
+  Init(100, 50);
+  const Section *tramp = find_section(".rj_trampolines");
+  ASSERT_NE(tramp, nullptr);
+
+  // Body for the inline-nop smoke build with a 4-byte anchor:
+  //   [placeholder s_nop 0, relocated original s_nop 0, return s_branch(-3)].
+  ASSERT_EQ(tramp->size(), 600u);
+  std::array<uint32_t, 150> words{};
+  std::memcpy(words.data(), tramp->data(), tramp->size());
+
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  for (uint64_t point = 0; point < 50; ++point) {
+    EXPECT_EQ(words[point * 3], build_s_nop(0, kArch))
+        << "trampoline body must start with the placeholder s_nop 0";
+    EXPECT_EQ(words[point * 3 + 1], 0xBF800000u) // original s_nop 0 from .text)
+        << "trampoline body must contain the relocated original instruction unchanged";
+    EXPECT_EQ(words[point * 3 + 2], build_s_branch(-101 - 2 * point, kArch))
+        << "trampoline must end with s_branch back to anchor + original_size";
+  }
+}
+
 TEST_F(InstrumentorPatchElfShape, CodeSectionsIncludesTextAndTrampoline) {
+  Init(2, 1);
   bool saw_text = false;
   bool saw_tramp = false;
   for (const Section *s : patched_->code_sections()) {
@@ -917,13 +967,18 @@ TEST_F(InstrumentorPatchElfShape, CodeSectionsIncludesTextAndTrampoline) {
 
 class InstrumentorPatchDecoded : public ::testing::Test {
 protected:
-  void SetUp() override {
-    image_ = make_gfx950_elf_with_two_nops();
+  // places instrumentation points starting at anchor_offset = 4
+  void Init(uint64_t num_elf_nops, uint64_t num_instrumentation_points) {
+    // leaving anchor_offset = 0 empty, so will fail on num_elf_nops == num_instrumentation_points
+    ASSERT_TRUE(num_elf_nops > num_instrumentation_points);
+
+    image_ = make_gfx950_elf_with_nop_text(num_elf_nops * 4);
     AmdGpuCodeObject obj(image_.data(), image_.size());
     ASSERT_TRUE(obj.is_valid());
 
     Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
-    instrumentor.add_point_by_offset(/*anchor_offset=*/4);
+    for (uint64_t point = 0; point < num_instrumentation_points; ++point)
+      instrumentor.add_point_by_offset(/*anchor_offset=*/(point + 1) * 4);
     result_ = instrumentor.patch();
     ASSERT_TRUE(result_.errors.empty())
         << (result_.errors.empty() ? std::string{} : result_.errors.front());
@@ -957,6 +1012,7 @@ protected:
 };
 
 TEST_F(InstrumentorPatchDecoded, PatchedAnchorDecodesAsForwardSBranch) {
+  Init(2, 1);
   const Section *text = find_section(".text");
   ASSERT_NE(text, nullptr);
   auto inst = decode_word(text, /*byte_offset=*/4);
@@ -971,7 +1027,26 @@ TEST_F(InstrumentorPatchDecoded, PatchedAnchorDecodesAsForwardSBranch) {
       << "forward branch offset must be non-negative; got " << *inst->branch_offset_bytes();
 }
 
+TEST_F(InstrumentorPatchDecoded, PatchedMultipleAnchorDecodesAsForwardSBranch) {
+  Init(100, 50);
+  const Section *text = find_section(".text");
+  ASSERT_NE(text, nullptr);
+  for (uint64_t point = 0; point < 50; ++point) {
+    auto inst = decode_word(text, /*byte_offset=*/(point + 1) * 4);
+    ASSERT_NE(inst, nullptr);
+
+    EXPECT_NE(inst->mnemonic().find("s_branch"), std::string_view::npos)
+        << "mnemonic was: " << inst->mnemonic();
+    EXPECT_NE(inst->flags() & BRANCH, 0u) << "patched anchor must carry BRANCH flag";
+    ASSERT_TRUE(inst->branch_offset_bytes().has_value())
+        << "patched anchor must report a PC-relative branch offset";
+    EXPECT_GE(*inst->branch_offset_bytes(), 0)
+        << "forward branch offset must be non-negative; got " << *inst->branch_offset_bytes();
+  }
+}
+
 TEST_F(InstrumentorPatchDecoded, UnpatchedTextInstructionIsUnchanged) {
+  Init(2, 1);
   // The first s_nop at .text[0..4] was not the anchor. Decoder must still see
   // it as s_nop — proves the patcher did not accidentally touch it.
   const Section *text = find_section(".text");
@@ -984,7 +1059,30 @@ TEST_F(InstrumentorPatchDecoded, UnpatchedTextInstructionIsUnchanged) {
   EXPECT_FALSE(inst->branch_offset_bytes().has_value());
 }
 
+TEST_F(InstrumentorPatchDecoded, UnpatchedMultipleTextInstructionIsUnchanged) {
+  Init(100, 50);
+  // The first s_nop at .text[0..4] was not the anchor. Decoder must still see
+  // it as s_nop — proves the patcher did not accidentally touch it.
+  const Section *text = find_section(".text");
+  ASSERT_NE(text, nullptr);
+  auto inst = decode_word(text, /*byte_offset=*/0);
+  ASSERT_NE(inst, nullptr);
+  EXPECT_NE(inst->mnemonic().find("s_nop"), std::string_view::npos)
+      << "unpatched .text instruction must remain s_nop; got " << inst->mnemonic();
+  EXPECT_EQ(inst->flags() & BRANCH, 0u);
+  EXPECT_FALSE(inst->branch_offset_bytes().has_value());
+  for (uint64_t point = 51; point < 100; ++point) {
+    inst = decode_word(text, point * 4);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(inst->mnemonic().find("s_nop"), std::string_view::npos)
+        << "unpatched .text instruction must remain s_nop; got " << inst->mnemonic();
+    EXPECT_EQ(inst->flags() & BRANCH, 0u);
+    EXPECT_FALSE(inst->branch_offset_bytes().has_value());
+  }
+}
+
 TEST_F(InstrumentorPatchDecoded, TrampolinePlaceholderDecodesAsSNop) {
+  Init(2, 1);
   const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(tramp, nullptr);
   auto inst = decode_word(tramp, /*byte_offset=*/0);
@@ -997,7 +1095,24 @@ TEST_F(InstrumentorPatchDecoded, TrampolinePlaceholderDecodesAsSNop) {
       << "placeholder must not carry a branch offset";
 }
 
+TEST_F(InstrumentorPatchDecoded, TrampolinePlaceholderMultipleDecodesAsSNop) {
+  Init(100, 50);
+  const Section *tramp = find_section(".rj_trampolines");
+  ASSERT_NE(tramp, nullptr);
+  for (uint64_t trampoline_count = 0; trampoline_count < 50; ++trampoline_count) {
+    auto inst = decode_word(tramp, /*byte_offset=*/trampoline_count * 12);
+    ASSERT_NE(inst, nullptr);
+
+    EXPECT_NE(inst->mnemonic().find("s_nop"), std::string_view::npos)
+        << "mnemonic was: " << inst->mnemonic();
+    EXPECT_EQ(inst->flags() & BRANCH, 0u) << "placeholder must not be marked as a branch";
+    EXPECT_FALSE(inst->branch_offset_bytes().has_value())
+        << "placeholder must not carry a branch offset";
+  }
+}
+
 TEST_F(InstrumentorPatchDecoded, RelocatedOriginalPreservesMnemonic) {
+  Init(2, 1);
   // The original instruction at .text[4..8] was s_nop 0. After relocation it
   // lives in the trampoline body at offset 4. Decoded bytes must agree.
   const Section *tramp = find_section(".rj_trampolines");
@@ -1009,7 +1124,24 @@ TEST_F(InstrumentorPatchDecoded, RelocatedOriginalPreservesMnemonic) {
       << relocated->mnemonic();
 }
 
+TEST_F(InstrumentorPatchDecoded, RelocatedMultipleOriginalPreservesMnemonic) {
+  Init(100, 50);
+  // The original instruction at .text[4..8] was s_nop 0. After relocation it
+  // lives in the trampoline body at offset 4. Decoded bytes must agree.
+  const Section *tramp = find_section(".rj_trampolines");
+  ASSERT_NE(tramp, nullptr);
+
+  for (uint64_t trampoline_count = 0; trampoline_count < 50; ++trampoline_count) {
+    auto relocated = decode_word(tramp, /*byte_offset=*/trampoline_count * 12 + 4);
+    ASSERT_NE(relocated, nullptr);
+    EXPECT_NE(relocated->mnemonic().find("s_nop"), std::string_view::npos)
+        << "relocated original must decode to the same mnemonic as the source; got "
+        << relocated->mnemonic();
+  }
+}
+
 TEST_F(InstrumentorPatchDecoded, TrampolineReturnDecodesAsBackwardSBranch) {
+  Init(2, 1);
   const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(tramp, nullptr);
   auto inst = decode_word(tramp, /*byte_offset=*/8);
@@ -1024,6 +1156,24 @@ TEST_F(InstrumentorPatchDecoded, TrampolineReturnDecodesAsBackwardSBranch) {
       << "return branch offset must be negative; got " << *inst->branch_offset_bytes();
 }
 
+TEST_F(InstrumentorPatchDecoded, TrampolineMultipleReturnDecodesAsBackwardSBranch) {
+  Init(100, 50);
+  const Section *tramp = find_section(".rj_trampolines");
+  ASSERT_NE(tramp, nullptr);
+  for (uint64_t trampoline_count = 0; trampoline_count < 50; ++trampoline_count) {
+    auto inst = decode_word(tramp, /*byte_offset=*/trampoline_count * 12 + 8);
+    ASSERT_NE(inst, nullptr);
+
+    EXPECT_NE(inst->mnemonic().find("s_branch"), std::string_view::npos)
+        << "mnemonic was: " << inst->mnemonic();
+    EXPECT_NE(inst->flags() & BRANCH, 0u) << "return must carry BRANCH flag";
+    ASSERT_TRUE(inst->branch_offset_bytes().has_value())
+        << "return must report a PC-relative branch offset";
+    EXPECT_LT(*inst->branch_offset_bytes(), 0)
+        << "return branch offset must be negative; got " << *inst->branch_offset_bytes();
+  }
+}
+
 // End-to-end behavioral check: decode the patched s_branch and the return
 // s_branch, compute their actual landing addresses from the raw SOPP simm16,
 // and assert they hit the expected .text-relative offsets. This pins the one
@@ -1032,6 +1182,7 @@ TEST_F(InstrumentorPatchDecoded, TrampolineReturnDecodesAsBackwardSBranch) {
 //
 // SOPP semantics: target = branch_pc + 4 + simm16 * 4.
 TEST_F(InstrumentorPatchDecoded, BranchesLandAtTheirIntendedTargets) {
+  Init(2, 1);
   const Section *text = find_section(".text");
   const Section *tramp = find_section(".rj_trampolines");
   ASSERT_NE(text, nullptr);
@@ -1060,6 +1211,37 @@ TEST_F(InstrumentorPatchDecoded, BranchesLandAtTheirIntendedTargets) {
   const uint64_t ret_pc = text->size() + 8;
   const uint64_t ret_target = sopp_target(ret_pc, ret->raw_encoding());
   EXPECT_EQ(ret_target, 8u) << "return branch must land at anchor + original_size";
+}
+
+TEST_F(InstrumentorPatchDecoded, BranchesMultipleLandAtTheirIntendedTargets) {
+  Init(100, 50);
+  const Section *text = find_section(".text");
+  const Section *tramp = find_section(".rj_trampolines");
+  ASSERT_NE(text, nullptr);
+  ASSERT_NE(tramp, nullptr);
+
+  auto sopp_target = [](uint64_t branch_pc, const uint32_t *word) -> uint64_t {
+    const int16_t simm16 = static_cast<int16_t>(*word & 0xFFFFu);
+    return branch_pc + 4 + static_cast<int64_t>(simm16) * 4;
+  };
+
+  for (uint64_t point = 0; point < 50; ++point) {
+    auto fwd = decode_word(text, /*byte_offset=*/(point + 1) * 4);
+    ASSERT_NE(fwd, nullptr);
+    ASSERT_NE(fwd->raw_encoding(), nullptr);
+    const uint64_t fwd_target = sopp_target(/*branch_pc=*/(point + 1) * 4, fwd->raw_encoding());
+    EXPECT_EQ(fwd_target, text->size() + point * 12)
+        << "forward branch must land at trampoline_offset (= text->size())";
+  }
+
+  for (uint64_t point = 0; point < 50; ++point) {
+    auto ret = decode_word(tramp, /*byte_offset=*/point * 12 + 8);
+    ASSERT_NE(ret, nullptr);
+    ASSERT_NE(ret->raw_encoding(), nullptr);
+    const uint64_t ret_pc = text->size() + point * 12 + 8;
+    const uint64_t ret_target = sopp_target(ret_pc, ret->raw_encoding());
+    EXPECT_EQ(ret_target, (point + 2) * 4) << "return branch must land at anchor + original_size";
+  }
 }
 
 } // namespace

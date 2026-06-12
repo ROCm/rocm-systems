@@ -300,28 +300,27 @@ protected:
     const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                               text->size());
 
-    bool found = false;
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
         const bool is_vadd = inst.mnemonic().find("v_add_f32") != std::string_view::npos;
         if (is_vadd && is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
-          anchor_offset_ = cur; // Instrumentor will need offset
-          anchor_mnemonic_ = std::string(inst.mnemonic());
-          found = true;
+          anchor_offsets_.push_back(cur); // Instrumentor will need offset
+          anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
+          ++anchor_count_;
           break;
         }
         cur += static_cast<uint64_t>(inst.size());
       }
-      if (found)
-        break;
     }
-    ASSERT_TRUE(found) << "No relocatable v_add_f32 anchor in vector_add_gfx90a.o; "
+    ASSERT_NE(anchor_count_, 0u) << "No relocatable v_add_f32 anchor in vector_add_gfx90a.o; "
                           "did the compiler change the lowering?";
 
     // Apply the inline-nop trampoline.
     Instrumentor instrumentor(*co, ROCJITSU_CODE_ARCH_CDNA2);
-    instrumentor.add_point_by_offset(anchor_offset_);
+    for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
+      instrumentor.add_point_by_offset(anchor_offsets_[anchor_idx]);
+    }
     auto result = instrumentor.patch();
     ASSERT_TRUE(result.errors.empty())
         << "Instrumentor::patch failed: "
@@ -332,8 +331,9 @@ protected:
 
   std::vector<uint8_t> original_elf_bytes_;
   std::vector<uint8_t> patched_elf_bytes_;
-  uint64_t anchor_offset_ = 0;
-  std::string anchor_mnemonic_;
+  std::vector<uint64_t> anchor_offsets_;
+  std::vector<std::string> anchor_mnemonics_;
+  uint64_t anchor_count_ = 0;
 };
 
 // Tests that need only HSA libs (parsing + decoding the patched ELF). Run
@@ -378,24 +378,26 @@ TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
       << "Patched ELF is byte-identical to original - patcher silently no-oped?";
 
   // (b) The patched .text at anchor_offset_ now decodes as s_branch, not the
-  //     original v_add_f32 we recorded as anchor_mnemonic_.
+  //     original v_add_f32 we recorded as anchor_mnemonics_[idx].
   AmdGpuCodeObject patched(patched_elf_bytes_.data(), patched_elf_bytes_.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_FALSE(patched.text_sections().empty());
   const Section *text = patched.text_sections().front();
-  ASSERT_GT(text->size(), anchor_offset_ + 4);
+  ASSERT_GT(text->size(), anchor_offsets_[0] + 4);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
-  rj_code_binary_inst_t anchor_word = 0;
-  std::memcpy(&anchor_word, text->data() + anchor_offset_, sizeof(anchor_word));
-  std::unique_ptr<Instruction> decoded(decoder->decode(&anchor_word));
-  ASSERT_NE(decoded, nullptr);
-  EXPECT_NE(decoded->mnemonic().find("s_branch"), std::string_view::npos)
-      << "Anchor at offset " << anchor_offset_
-      << " should now decode as s_branch; got: " << decoded->mnemonic();
-  EXPECT_NE(decoded->mnemonic(), anchor_mnemonic_)
-      << "Anchor mnemonic unchanged (" << anchor_mnemonic_ << ") - was the patch applied?";
+  for (uint64_t anchor_idx = 0; anchor_idx < anchor_count_; ++anchor_idx) {
+    rj_code_binary_inst_t anchor_word = 0;
+    std::memcpy(&anchor_word, text->data() + anchor_offsets_[anchor_idx], sizeof(anchor_word));
+    std::unique_ptr<Instruction> decoded(decoder->decode(&anchor_word));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_NE(decoded->mnemonic().find("s_branch"), std::string_view::npos)
+        << "Anchor at offset " << anchor_offsets_[anchor_idx]
+        << " should now decode as s_branch; got: " << decoded->mnemonic();
+    EXPECT_NE(decoded->mnemonic(), anchor_mnemonics_[anchor_idx])
+        << "Anchor mnemonic unchanged (" << anchor_mnemonics_[anchor_idx] << ") - was the patch applied?";
+  }
 
   // (c) Patched ELF has a .rj_trampolines section.
   bool found_tramp = false;

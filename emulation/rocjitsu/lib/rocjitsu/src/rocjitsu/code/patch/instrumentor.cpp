@@ -258,6 +258,15 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
       continue;
     }
 
+    bool cont = false;
+    for (const auto &st : sites) {
+      if (st.anchor_offset == pt.anchor_offset) {
+        result.errors.emplace_back("multiple points requested the same anchor_offset");
+        cont = true;
+      }
+    }
+    if (cont)
+      continue;
     std::string err;
     auto site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &err);
     if (!site) {
@@ -290,11 +299,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
   // Temporary restriction: exactly one queued point.
   if (points_.empty()) {
-    result.errors.emplace_back("Instrumentor::patch requires exactly one queued point; got zero");
-    return result;
-  }
-  if (points_.size() > 1) {
-    result.errors.emplace_back("Instrumentor::patch temporarily accepts only one queued point");
+    result.errors.emplace_back("Instrumentor::patch requires at least one queued point; got zero");
     return result;
   }
 
