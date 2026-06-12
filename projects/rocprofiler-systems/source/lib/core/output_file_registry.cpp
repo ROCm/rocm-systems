@@ -86,7 +86,14 @@ output_file_registry::record_process(output::process_metadata meta)
     {
         if(rec.session_id == m_session_id && rec.value.pid == meta.pid)
         {
-            rec.value = std::move(meta);
+            // Merge, do not replace: a later sparser record (e.g. the
+            // finalize-time self-registration, which knows pid/ppid/command
+            // but not gpu_ids) must not erase richer fields a prior
+            // post-processor record already supplied. Non-empty incoming
+            // fields win; empty ones preserve the existing value.
+            if(meta.ppid != -1) rec.value.ppid = meta.ppid;
+            if(!meta.command.empty()) rec.value.command = std::move(meta.command);
+            if(!meta.gpu_ids.empty()) rec.value.gpu_ids = std::move(meta.gpu_ids);
             return;
         }
     }

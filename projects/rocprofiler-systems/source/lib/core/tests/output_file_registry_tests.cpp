@@ -3,6 +3,7 @@
 
 #include "gtest/gtest.h"
 
+#include "core/output/process_metadata.hpp"
 #include "core/output_file_registry.hpp"
 
 #include <unistd.h>
@@ -166,4 +167,60 @@ TEST(output_file_registry, concurrent_register_is_thread_safe)
 
     EXPECT_EQ(registry.rows().size(),
               static_cast<std::size_t>(THREAD_COUNT * PER_THREAD));
+}
+
+TEST(output_file_registry, record_process_sparse_upsert_preserves_gpu_ids)
+{
+    // Mirrors the finalize ordering: the post-processor records the main
+    // process with its GPU ids and ppid, then emit_summary re-records the
+    // same pid with a sparse self-record that omits both (gpu_ids empty,
+    // ppid at the -1 sentinel). The merge must preserve every richer field
+    // the first record supplied, not let the sentinels clobber them.
+    rocprofsys::output_file_registry registry;
+    constexpr pid_t                  MAIN_PID = 1000;
+
+    rocprofsys::output::process_metadata rich;
+    rich.pid     = MAIN_PID;
+    rich.ppid    = 1;
+    rich.command = "worker";
+    rich.gpu_ids = { 0, 1 };
+    registry.record_process(rich);
+
+    rocprofsys::output::process_metadata sparse;
+    sparse.pid     = MAIN_PID;
+    sparse.ppid    = -1;        // sentinel: must not overwrite existing ppid
+    sparse.command = "worker";  // no gpu_ids
+    registry.record_process(sparse);
+
+    const auto procs = registry.processes();
+    ASSERT_EQ(procs.size(), 1u);
+    EXPECT_EQ(procs.front().ppid, 1);
+    EXPECT_EQ(procs.front().gpu_ids, (std::vector<int>{ 0, 1 }));
+}
+
+TEST(output_file_registry, record_process_non_empty_fields_win_on_upsert)
+{
+    // A later record carrying richer data must overwrite an earlier
+    // sparse record (e.g. self recorded first, post-processor second).
+    rocprofsys::output_file_registry registry;
+    constexpr pid_t                  MAIN_PID = 1001;
+
+    rocprofsys::output::process_metadata sparse;
+    sparse.pid     = MAIN_PID;
+    sparse.ppid    = 1;
+    sparse.command = "main";
+    registry.record_process(sparse);
+
+    rocprofsys::output::process_metadata rich;
+    rich.pid     = MAIN_PID;
+    rich.ppid    = 7;
+    rich.command = "main-resolved";
+    rich.gpu_ids = { 2, 3 };
+    registry.record_process(rich);
+
+    const auto procs = registry.processes();
+    ASSERT_EQ(procs.size(), 1u);
+    EXPECT_EQ(procs.front().ppid, 7);
+    EXPECT_EQ(procs.front().command, "main-resolved");
+    EXPECT_EQ(procs.front().gpu_ids, (std::vector<int>{ 2, 3 }));
 }
