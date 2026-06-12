@@ -9,7 +9,7 @@
 #define _NCCL_DEVICE_MEM_BARRIER_H_
 #include "hip_compat.h"
 #include "impl/core__types.h"
-#include "core_tmp.h"
+#include "core.h"
 
 struct ncclLsaBarrierHandle;
 

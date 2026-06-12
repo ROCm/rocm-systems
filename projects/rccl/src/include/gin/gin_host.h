@@ -11,7 +11,7 @@
 #include "allocator.h"
 #include "nccl.h"
 #include "nccl_gin.h"
-#include "nccl_device/core_tmp.h"
+#include "nccl_device/core.h"
 #include "nccl_device/gin/gin_device_host_common.h"
 #include <thread>
 #include <mutex>

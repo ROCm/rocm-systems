@@ -13,390 +13,67 @@ set(HIPIFY_DIR "${PROJECT_BINARY_DIR}/hipify")
 set(HIPIFY_SRC "${HIPIFY_DIR}/src")
 set(GEN_DIR "${HIPIFY_DIR}/gensrc")
 
-# [NCCL src/CMakeLists.txt L1-18] Source files (LIBSRCFILES). NCCL lists only the top-level
-# src/*.cc here and pulls per-subdir files in via add_subdirectory; RCCL inlines the full file
-# tree. NCCL's conditional appends -- init_nvtx.cc (L20-23, NVTX) and enhcompat.cc (L25-28,
-# static cudart) -- have no separate RCCL block: init_nvtx.cc is listed unconditionally below
-# and enhcompat.cc does not exist in RCCL.
+# [NCCL src/CMakeLists.txt L1-18] Source files (LIBSRCFILES). Mirrors NCCL: only the top-level
+# src/*.cc live here; every other source is pulled in via add_subdirectory(...) below and
+# aggregated into LIBSRCFILES, which then feeds RCCL's hipify pipeline (set(SRC_FILES ...) at the
+# end of this section). RCCL-only additions/removals are fenced with # >>> RCCL-DELTA.
 # Collect list of all source files
 #==================================================================================================
-# E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
-set(SRC_FILES
-  allocator.cc
-  bootstrap.cc
-  ce_coll.cc
-  channel.cc
-  collectives.cc
-  commDump.cc
-  mem_manager.cc
-  debug.cc
-  dev_runtime.cc
-  dda_all_reduce_ipc.cu
-  dda_reduce_scatter_ipc.cu
-  dda_all_gather_ipc.cu
-  dda_alltoall_ipc.cu
-  device_buffer.cc
-  enqueue.cc
-  group.cc
-  ipc_gpu_barrier.cu
-  ipc_init.cu
-  ipc_mem_handler.cc
-  init.cc
-  init_nvtx.cc
-  mnnvl.cc
-  proxy.cc
-  rccl_wrap.cc
-  sym_kernels.cc
-  transport.cc
-  graph/connect.cc
-  graph/paths.cc
-  graph/rings.cc
-  graph/rings.h
-  graph/rome_models.cc
-  graph/rome_models.h
-  graph/rome_topo_consensus.cc
-  graph/rome_topo_consensus.h
-  graph/search.cc
-  graph/topo.cc
-  graph/topo.h
-  graph/trees.cc
-  graph/tuning.cc
-  graph/xml.cc
-  graph/xml.h
-  include/alloc.h
-  include/mem_manager.h
-  include/allocator.h
-  include/algorithms/CollCommon.h
-  include/algorithms/all_reduce/all_reduce_dda.h
-  include/algorithms/reduce_scatter/reduce_scatter_dda.h
-  include/algorithms/all_gather/all_gather_dda.h
-  include/algorithms/alltoall/alltoall_dda.h
-  include/alt_rsmi.h
-  include/archinfo.h
-  include/api_trace.h
-  include/argcheck.h
-  include/BfdBacktrace.hpp
-  include/bitops.h
-  include/bootstrap.h
-  include/ce_coll.h
-  include/ce_fault_inject.h
-  include/channel.h
-  include/checks.h
-  include/collectives.h
-  include/coll_net.h
-  include/cudawrap.h
-  include/comm.h
-  include/compiler.h
-  include/compiler/gcc.h
-  include/compiler/msvc.h
-  include/core.h
-  include/cpuset.h
-# include/cudawrap.h
-  include/dda_all_reduce_ipc.h
-  include/dda_reduce_scatter_ipc.h
-  include/dda_all_gather_ipc.h
-  include/dda_alltoall_ipc.h
-  include/debug.h
-  include/dev_runtime.h
-  include/device.h
-  include/env.h
-  include/device_buffer.h
-  include/enqueue.h
-  include/gdrwrap.h
-  include/git_version.h
-  include/graph.h
-  include/group.h
-  include/gin.h
-  include/gin/gin_host.h
-  include/gin/gin_host_proxy.h
-  include/hip_rocm_version_info.h
-  include/ibvcore.h
-  include/ibvsymbols.h
-  include/ibvwrap.h
-  include/info.h
-  include/ipc_gpu_barrier.h
-  include/ipc_init.h
-  include/ipc_init_detail.h
-  include/ipc_mem_handler.h
-  include/ipcsocket.h
-  include/mem_manager.h
-  include/mnnvl.h
-  include/nccl_common.h
-  include/nccl_device.h
-  include/nccl_device/net_device.h
-  include/net.h
-  include/nvmlwrap.h
-  include/nvtx.h
-  include/nvtx_payload_schemas.h
-  include/nvtx_stub.h
-  include/p2p.h
-  include/param.h
-  include/profiler.h
-  include/proxy.h
-  include/ras.h
-  include/rccl_common.h
-  include/rccl_vars.h
-  include/register.h
-  include/register_inline.h
-  include/rccl_float8.h
-  include/rocmwrap.h
-  include/roctx.h
-  include/recorder.h
-  include/scheduler.h
-  include/shm.h
-  include/shmutils.h
-  include/signals.h
-  include/socket.h
-  include/strongstream.h
-  include/sym_kernels.h
-  include/timer.h
-  include/transport.h
-  include/trees.h
-  include/tuner.h
-  include/utils.h
-  include/mlx5/mlx5dvcore.h
-  include/mlx5/mlx5dvsymbols.h
-  include/mlx5/mlx5dvwrap.h
-  include/ionic/ionicdvcore.h
-  include/ionic/ionicdvsymbols.h
-  include/ionic/ionicdvwrap.h
-  include/nccl_merge_stubs.h
-  include/nccl_device/comm.h
-  include/nccl_device/coop.h
-  include/nccl_device/core.h
-  include/nccl_device/barrier.h
-  include/nccl_device/gin.h
-  include/nccl_device/gin_barrier.h
-  include/nccl_device/gin/gdaki/gin_gdaki.h
-  include/nccl_device/gin/gdaki/gin_gdaki_device_host_common.h
-  include/nccl_device/gin/gin_device_api.h
-  include/nccl_device/gin/gin_device_common.h
-  include/nccl_device/gin/gin_device_host_common.h
-  include/nccl_device/gin/proxy/gin_proxy.h
-  include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
-  include/nccl_device/ll_a2a.h
-  include/nccl_device/lsa_barrier.h
-  include/nccl_device/ptr.h
-  include/nccl_device/rccl_ptr.h
-  include/nccl_device/utility.h
-  include/nccl_device/impl/comm__funcs.h
-  include/nccl_device/impl/comm__types.h
-  include/nccl_device/impl/core__funcs.h
-  include/nccl_device/impl/core__types.h
-  include/nccl_device/impl/barrier__funcs.h
-  include/nccl_device/impl/barrier__types.h
-  include/nccl_device/impl/gin__funcs.h
-  include/nccl_device/impl/gin__types.h
-  include/nccl_device/impl/gin_barrier__funcs.h
-  include/nccl_device/impl/gin_barrier__types.h
-  include/nccl_device/impl/ll_a2a__funcs.h
-  include/nccl_device/impl/ll_a2a__types.h
-  include/nccl_device/impl/lsa_barrier__funcs.h
-  include/nccl_device/impl/lsa_barrier__types.h
-  include/nccl_device/impl/ptr__funcs.h
-  include/nccl_device/impl/ptr__types.h
-  include/nccl_device/impl/multimem__funcs.h
-  include/nccl_device/impl/reduce_copy__funcs.h
-  include/nccl_device/impl/reduce_copy__impl.h
-  include/nccl_device/impl/reduce_copy__types.h
-  include/nccl_device/impl/vector__funcs.h
-  include/nccl_device/impl/vector__types.h
-  include/nccl_device/reduce_copy.h
-  include/nvtx3/nvToolsExt.h
-  include/nvtx3/nvToolsExtCounters.h
-  include/nvtx3/nvToolsExtCuda.h
-  include/nvtx3/nvToolsExtCudaRt.h
-  include/nvtx3/nvToolsExtMem.h
-  include/nvtx3/nvToolsExtMemCudaRt.h
-  include/nvtx3/nvToolsExtOpenCL.h
-  include/nvtx3/nvToolsExtPayload.h
-  include/nvtx3/nvToolsExtPayloadHelper.h
-  include/nvtx3/nvToolsExtSemanticsCounters.h
-  include/nvtx3/nvToolsExtSemanticsScope.h
-  include/nvtx3/nvToolsExtSync.h
-  include/nvtx3/nvtx3.hpp
-  include/nvtx3/nvtxDetail/nvtxExtHelperMacros.h
-  include/nvtx3/nvtxDetail/nvtxExtImpl.h
-  include/nvtx3/nvtxDetail/nvtxExtImplCounters_v1.h
-  include/nvtx3/nvtxDetail/nvtxExtImplMem_v1.h
-  include/nvtx3/nvtxDetail/nvtxExtImplMemCudaRt_v1.h
-  include/nvtx3/nvtxDetail/nvtxExtImplPayload_v1.h
-  include/nvtx3/nvtxDetail/nvtxExtInit.h
-  include/nvtx3/nvtxDetail/nvtxExtPayloadHelperInternal.h
-  include/nvtx3/nvtxDetail/nvtxExtPayloadTypeInfo.h
-  include/nvtx3/nvtxDetail/nvtxExtTypes.h
-  include/nvtx3/nvtxDetail/nvtxImpl.h
-  include/nvtx3/nvtxDetail/nvtxImplCore.h
-  include/nvtx3/nvtxDetail/nvtxImplCuda_v3.h
-  include/nvtx3/nvtxDetail/nvtxImplCudaRt_v3.h
-  include/nvtx3/nvtxDetail/nvtxImplOpenCL_v3.h
-  include/nvtx3/nvtxDetail/nvtxImplSync_v3.h
-  include/nvtx3/nvtxDetail/nvtxInit.h
-  include/nvtx3/nvtxDetail/nvtxInitDecls.h
-  include/nvtx3/nvtxDetail/nvtxInitDefs.h
-  include/nvtx3/nvtxDetail/nvtxLinkOnce.h
-  include/nvtx3/nvtxDetail/nvtxTypes.h
-  include/proxy_trace/proxy_trace.h
-  include/plugin/nccl_net.h
-  include/plugin/nccl_profiler.h
-  include/plugin/nccl_tuner.h
-  include/plugin/nccl_env.h
-  include/plugin/env/env_v1.h
-  include/plugin/plugin.h
-  include/plugin/net/net_v6.h
-  include/plugin/net/net_v7.h
-  include/plugin/net/net_v8.h
-  include/plugin/net/net_v9.h
-  include/plugin/net/net_v10.h
-  include/plugin/net/net_v11.h
-  include/plugin/profiler/net_ib_v1.h
-  include/plugin/profiler/net_ib.h
-  include/plugin/profiler/net_socket_v1.h
-  include/plugin/profiler/net_socket.h
-  include/plugin/profiler/profiler_v1.h
-  include/plugin/profiler/profiler_v2.h
-  include/plugin/profiler/profiler_v3.h
-  include/plugin/profiler/profiler_v4.h
-  include/plugin/profiler/profiler_v5.h
-  include/plugin/profiler/profiler_v6.h
-  include/plugin/tuner/tuner_v2.h
-  include/plugin/tuner/tuner_v3.h
-  include/plugin/tuner/tuner_v4.h
-  include/plugin/tuner/tuner_v5.h
-  include/plugin/nccl_gin.h
-  include/plugin/gin/gin_v11.h
-  include/plugin/gin/gin_v12.h
-  include/plugin/gin/gin_v13.h
-  misc/alt_rsmi.cc
-  misc/archinfo.cc
-  misc/argcheck.cc
-  misc/api_trace.c
-  misc/api_trace.cc
-# misc/cudawrap.cc
-# misc/gdrwrap.cc
-  misc/ibvsymbols.cc
-  misc/ibvwrap.cc
-  misc/ipcsocket.cc
-  misc/mlx5dvsymbols.cc
-  misc/mlx5dvwrap.cc
-  misc/ionicdvsymbols.cc
-  misc/ionicdvwrap.cc
-# misc/nvmlwrap.cc
-  misc/nvmlwrap_stub.cc
-  misc/param.cc
-  misc/rocmwrap.cc
-  misc/roctx.cc
-  misc/recorder.cc
-  misc/shmutils.cc
-  misc/signals.cc
-  misc/socket.cc
-  misc/strongstream.cc
-  misc/utils.cc
-  misc/proxy_trace/proxy_trace.cc
-  nccl_device/core.cc
-  nccl_device/gin_barrier.cc
-  nccl_device/gin_scratch.cc
-  nccl_device/ll_a2a.cc
-  nccl_device/lsa_barrier.cc
-  os/linux.cc
-  include/os.h
-  rma/rma.cc
-  rma/rma_ce.cc
-  rma/rma_proxy.cc
-  rma/rma_proxy_launch.cc
-  rma/rma_proxy_progress.cc
-  include/rma/rma.h
-  include/rma/rma_ce.h
-  include/rma/rma_proxy.h
-  plugin/net.cc
-  plugin/env.cc
-  plugin/env/env_v1.cc
-  plugin/plugin_open.cc
-  plugin/profiler.cc
-  plugin/tuner.cc
-  plugin/net/net_v6.cc
-  plugin/net/net_v7.cc
-  plugin/net/net_v8.cc
-  plugin/net/net_v9.cc
-  plugin/net/net_v10.cc
-  plugin/net/net_v11.cc
-  plugin/profiler/profiler_v1.cc
-  plugin/profiler/profiler_v2.cc
-  plugin/profiler/profiler_v3.cc
-  plugin/profiler/profiler_v4.cc
-  plugin/profiler/profiler_v5.cc
-  plugin/profiler/profiler_v6.cc
-  plugin/tuner/tuner_v2.cc
-  plugin/tuner/tuner_v3.cc
-  plugin/tuner/tuner_v4.cc
-  plugin/tuner/tuner_v5.cc
-  plugin/tuner/csv_tuner.cc
-  plugin/gin.cc
-  plugin/gin/gin_v11.cc
-  plugin/gin/gin_v12.cc
-  plugin/gin/gin_v13.cc
-  ras/client.cc
-  ras/client_support.cc
-  ras/collectives.cc
-  ras/peers.cc
-  ras/ras.cc
-  ras/ras_internal.h
-  ras/rasnet.cc
-  register/coll_reg.cc
-  register/register.cc
-  register/sendrecv_reg.cc
-  scheduler/symmetric_sched.cc
-  scheduler/allgatherv_sched.cc
-  transport/coll_net.cc
-  transport/generic.cc
-  transport/net.cc
-  transport/net_ib_limits.h
-  transport/net_ib/common.cc
-  #transport/net_ib/common.h
-  transport/net_ib/connect.cc
-  transport/net_ib/connect.h
-  transport/net_ib/gdr.cc
-  transport/net_ib/gin.cc
-  transport/net_ib/gin.h
-  transport/net_ib/init.cc
-  transport/net_ib/p2p.cc
-  transport/net_ib/p2p.h
-  transport/net_ib/p2p_resiliency.cc
-  transport/net_ib/p2p_resiliency.h
-  transport/net_ib/reg.cc
-  transport/net_ib_cast/net_ib_cast_inspect.h
-  transport/net_ib_cast/net_ib_fault_inject.h
-  transport/net_ib/gdaki/gin_host_gdaki.h
-  transport/net_socket.cc
-  transport/nvls.cc
-  transport/p2p.cc
-  transport/profiler.cc
-  transport/shm.cc
-  gin/gin_host.cc
-  gin/gin_host_proxy.cc
-  include/latency_profiler/CollTrace.h
-  include/latency_profiler/CollTraceEvent.h
-  include/latency_profiler/CollTraceFunc.h
-  include/latency_profiler/CollTraceUtils.h
-  include/latency_profiler/EventQueue.h
-  misc/latency_profiler/CollTrace.cc
-  misc/latency_profiler/CollTraceEvent.cc
-  misc/latency_profiler/CollTraceFunc.cc
-  misc/latency_profiler/CollTraceUtils.cc
+set(LIBSRCFILES
+    bootstrap.cc
+    channel.cc
+    ce_coll.cc
+    collectives.cc
+    debug.cc
+    enqueue.cc
+    group.cc
+    init.cc
+    proxy.cc
+    transport.cc
+    mnnvl.cc
+    allocator.cc
+    sym_kernels.cc
+    dev_runtime.cc
+    mem_manager.cc
 )
 
-# [NCCL src/CMakeLists.txt L25-28] UNMAPPED -- NCCL-only. RCCL has no enhcompat.cc and never
-# builds against static cudart. Verbatim NCCL block kept for merge reference:
+# [NCCL src/CMakeLists.txt L20-23] Add NVTX support if enabled.
+if(NVTX)
+    list(APPEND LIBSRCFILES init_nvtx.cc)
+endif()
+# >>> RCCL-DELTA: RCCL builds init_nvtx.cc unconditionally (it does not gate on the NVTX switch;
+# RCCL uses ROCTX/NVTX stubs). Add it here when the NCCL block above did not, so the net effect is
+# "always built" with no duplication regardless of NVTX.
+if(NOT NVTX)
+    list(APPEND LIBSRCFILES init_nvtx.cc)
+endif()
+# <<< RCCL-DELTA
+
+# [NCCL src/CMakeLists.txt L25-28] UNMAPPED -- NCCL-only static-cudart shim. RCCL has no
+# enhcompat.cc and never builds against static cudart. Verbatim NCCL block kept for merge reference:
 # | # Add compatibility shim if using static cudart
 # | if(CUDARTLIB STREQUAL "cudart_static")
 # |     list(APPEND LIBSRCFILES enhcompat.cc)
 # | endif()
-# (NCCL L20-23, the NVTX conditional append of init_nvtx.cc, IS mapped: RCCL lists init_nvtx.cc
-#  unconditionally in SRC_FILES -- see the L1-18 marker above.)
 
-# [NCCL src/CMakeLists.txt L30-35] UNMAPPED in this file -- implemented in the RCCL top-level
-# projects/rccl/CMakeLists.txt (RCCL configures rccl.h/nccl.h from src/nccl.h.in; there is no
-# RCCL nccl.pc.in pkg-config). Verbatim NCCL block kept for merge reference:
+# >>> RCCL-DELTA: RCCL-only top-level sources (commDump, IPC + DDA device kernels, device_buffer,
+# rccl_wrap). These have no NCCL counterpart and live directly under src/.
+list(APPEND LIBSRCFILES
+    commDump.cc
+    device_buffer.cc
+    dda_all_reduce_ipc.cu
+    dda_reduce_scatter_ipc.cu
+    dda_all_gather_ipc.cu
+    dda_alltoall_ipc.cu
+    ipc_gpu_barrier.cu
+    ipc_init.cu
+    ipc_mem_handler.cc
+    rccl_wrap.cc
+)
+# <<< RCCL-DELTA
+
+# [NCCL src/CMakeLists.txt L30-35] UNMAPPED in this file -- the pkg-config configure_file is done in
+# the RCCL top-level projects/rccl/CMakeLists.txt (RCCL has no nccl.pc.in). Verbatim NCCL reference:
 # | # Configure pkg-config file
 # | configure_file(
 # |     ${CMAKE_CURRENT_SOURCE_DIR}/nccl.pc.in
@@ -404,29 +81,35 @@ set(SRC_FILES
 # |     @ONLY
 # | )
 
-# [NCCL src/CMakeLists.txt L37-49] add_subdirectory(...): NCCL collects sources from many
-# subdirs (transport, misc, register, graph, plugin, device, nccl_device, ras, scheduler,
-# os, gin, rma). RCCL inlines those source lists into SRC_FILES (above) and only keeps the
-# RCCL-specific net_ib_cast subdirectory here, placed right before the append block to mirror
-# NCCL's source-list -> add_subdirectory -> append ordering.
-# net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
+# [NCCL src/CMakeLists.txt L37-49] Add files from subdirectories. Mirrors NCCL exactly. Each subdir
+# sets a <DIR>_SOURCES variable in THIS scope with absolute paths (via CMAKE_CURRENT_SOURCE_DIR).
+add_subdirectory(transport)
+add_subdirectory(misc)
+add_subdirectory(register)
+add_subdirectory(graph)
+add_subdirectory(plugin)
 add_subdirectory(device)
-add_subdirectory(transport/net_ib_cast)
+add_subdirectory(nccl_device)
+add_subdirectory(ras)
+add_subdirectory(scheduler)
+add_subdirectory(os)
+add_subdirectory(gin)
+add_subdirectory(rma)
+# >>> RCCL-DELTA: src/include is an RCCL-only header tree (NCCL never lists headers in CMake). It
+# sets INCLUDE_HEADERS so the hipify loop copies/converts every header into HIPIFY_DIR.
+# (net_ib_cast is wired from within src/transport/CMakeLists.txt, mirroring how NCCL nests net_ib.)
+add_subdirectory(include)
+# <<< RCCL-DELTA
 
-# [NCCL src/CMakeLists.txt L51-53] UNMAPPED -- NCCL-only. RCCL does not set a macro-prefix map.
-# Verbatim NCCL block kept for merge reference:
+# [NCCL src/CMakeLists.txt L51-53] UNMAPPED -- NCCL-only -fmacro-prefix-map. Verbatim reference:
 #[[
 if(NCCL_OS_LINUX)
     add_compile_options(-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=)
 endif()
 ]]
 
-# [NCCL src/CMakeLists.txt L55-69] Append the subdirectory-collected source lists to the master
-# list. RCCL's equivalent is appending SMI_SOURCES and NET_IB_CAST_SOURCES below (the rest of
-# RCCL's sources are already inlined in SRC_FILES). NCCL's -fmacro-prefix-map block (L51-53)
-# has no RCCL equivalent here.
-# Conditional source files based on build options
-#==================================================================================================
+# >>> RCCL-DELTA: conditional ROCm/AMD SMI sources (no NCCL equivalent). These are bare paths
+# (relative to src/), prepended to absolute below together with the LIBSRCFILES top-level entries.
 if(USE_AMDSMI)
   set(SMI_SOURCES
     include/amdsmi_wrap.h
@@ -440,14 +123,40 @@ else()
     misc/rocm_smi_wrap.cc
   )
 endif()
-list(APPEND SRC_FILES ${SMI_SOURCES})
+list(APPEND LIBSRCFILES ${SMI_SOURCES})
+# <<< RCCL-DELTA
 
-# Prepend src/ to all source files for proper paths from root
-list(TRANSFORM SRC_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+# >>> RCCL-DELTA: LIBSRCFILES so far (NCCL top-level + RCCL top-level + SMI) are bare paths relative
+# to src/. The hipify loop needs absolute paths, and the <DIR>_SOURCES from the subdirectories above
+# are ALREADY absolute -- so prepend src/ to the bare entries BEFORE aggregating the subdir lists.
+list(TRANSFORM LIBSRCFILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+# <<< RCCL-DELTA
 
-list(APPEND SRC_FILES ${DEVICE_SOURCES})
-list(APPEND SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/transport/net_ib/common.h) # temporary
-list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
+# [NCCL src/CMakeLists.txt L55-69] Aggregate the subdirectory source lists into the master list.
+# Mirrors NCCL exactly (the <DIR>_SOURCES variables hold absolute paths in RCCL, so no additional
+# prefixing happens). DOCA_SOURCES is always empty in RCCL (the gdaki subdirectory is not wired).
+list(APPEND LIBSRCFILES
+    ${DEVICE_SOURCES} # RCCL-DELTA
+    ${TRANSPORT_SOURCES}
+    ${MISC_SOURCES}
+    ${REGISTER_SOURCES}
+    ${GRAPH_SOURCES}
+    ${PLUGIN_SOURCES}
+    ${RAS_SOURCES}
+    ${SYM_SOURCES}
+    ${SCHEDULER_SOURCES}
+    ${OS_SOURCES}
+    ${GIN_SOURCES}
+    ${DOCA_SOURCES}
+    ${RMA_SOURCES}
+    ${INCLUDE_HEADERS} # RCCL-DELTA
+    ${NET_IB_CAST_SOURCES} # RCCL-DELTA
+)
+
+# Feed the aggregated NCCL-style list into RCCL's existing hipify pipeline, which consumes
+# SRC_FILES. Only the SOURCE of this variable changed (subdirectories instead of a monolithic
+# hard-coded list); the pipeline below is unchanged.
+set(SRC_FILES ${LIBSRCFILES})
 
 # Hipify source files (copy of source generated into hipify directory)
 #==================================================================================================
@@ -471,7 +180,7 @@ foreach(FULL_SRC_FILE ${SRC_FILES})
   get_filename_component(HIP_FILE_DIR ${HIP_FILE} DIRECTORY)
 
   # Make sure the file name is unique and there is no duplicate
-  add_file_unique(HIP_SOURCES ${HIP_FILE})
+  #add_file_unique(HIP_SOURCES ${HIP_FILE})
 
   # Convert .cu files to .cpp so that they get processed properly
   string(REPLACE "\.cuh" "\.h" HIP_FILE ${HIP_FILE})
@@ -546,19 +255,19 @@ add_dependencies(copy_nccl_device_headers hipify_all)
 # net_ib/ headers collide with other basenames (common.h, gin.h, p2p.h) and are hipified
 # with _tmp suffixes. Create symlinks so that #include "common.h" etc. resolve correctly
 # when compiling files in hipify/src/transport/net_ib/.
-set(NET_IB_HIPIFY_DIR "${HIPIFY_SRC}/transport/net_ib")
-set(NET_IB_HEADER_SYMLINKS "")
-foreach(_hdr common gin p2p)
-  add_custom_command(
-    OUTPUT  "${NET_IB_HIPIFY_DIR}/${_hdr}.h"
-    DEPENDS "${NET_IB_HIPIFY_DIR}/${_hdr}_tmp.h"
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-            "${_hdr}_tmp.h" "${NET_IB_HIPIFY_DIR}/${_hdr}.h"
-    COMMENT "Symlinking net_ib/${_hdr}_tmp.h -> ${_hdr}.h"
-  )
-  list(APPEND NET_IB_HEADER_SYMLINKS "${NET_IB_HIPIFY_DIR}/${_hdr}.h")
-endforeach()
-add_custom_target(net_ib_header_symlinks DEPENDS ${NET_IB_HEADER_SYMLINKS})
+#set(NET_IB_HIPIFY_DIR "${HIPIFY_SRC}/transport/net_ib")
+#set(NET_IB_HEADER_SYMLINKS "")
+#foreach(_hdr common gin p2p)
+#  add_custom_command(
+#    OUTPUT  "${NET_IB_HIPIFY_DIR}/${_hdr}.h"
+#    DEPENDS "${NET_IB_HIPIFY_DIR}/${_hdr}_tmp.h"
+#    COMMAND ${CMAKE_COMMAND} -E create_symlink
+#            "${_hdr}_tmp.h" "${NET_IB_HIPIFY_DIR}/${_hdr}.h"
+#    COMMENT "Symlinking net_ib/${_hdr}_tmp.h -> ${_hdr}.h"
+#  )
+#  list(APPEND NET_IB_HEADER_SYMLINKS "${NET_IB_HIPIFY_DIR}/${_hdr}.h")
+#endforeach()
+#add_custom_target(net_ib_header_symlinks DEPENDS ${NET_IB_HEADER_SYMLINKS})
 
 
 # Append all found generated files to the list
@@ -612,7 +321,7 @@ add_library(rccl ${HIP_SOURCES})
 
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
-add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks)
+add_dependencies(rccl update_git_version copy_nccl_device_headers) # net_ib_header_symlinks)
 
 # [NCCL src/CMakeLists.txt L77-90] Include directories (target_include_directories). RCCL adds
 # the hipify/ tree and ROCm/SMI paths instead of the CUDA toolkit paths.

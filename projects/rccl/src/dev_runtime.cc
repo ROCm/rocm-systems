@@ -7,7 +7,7 @@
 
 #include "dev_runtime.h"
 #include "comm.h"
-#include "nccl_device/core_tmp.h"
+#include "nccl_device/core.h"
 #include "rma/rma.h"
 #include "device.h"
 #include "sym_kernels.h"

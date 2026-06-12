@@ -2,6 +2,7 @@
 set(NET_IB_CAST_SOURCES
     #src/transport/net_ib_limits.h
     ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_cast_inspect.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_fault_inject.h
     ${CMAKE_CURRENT_SOURCE_DIR}/common_cast.h
     ${CMAKE_CURRENT_SOURCE_DIR}/connect_cast.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gin_cast.h

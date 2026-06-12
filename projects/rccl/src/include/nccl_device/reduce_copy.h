@@ -7,7 +7,7 @@
 
 #ifndef _NCCL_DEVICE_REDUCE_COPY_H_
 #define _NCCL_DEVICE_REDUCE_COPY_H_
-#include "core_tmp.h"
+#include "core.h"
 #include "impl/reduce_copy__types.h"
 
 // Forward declarations for public API functions

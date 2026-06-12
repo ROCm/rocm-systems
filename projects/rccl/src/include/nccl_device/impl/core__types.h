@@ -7,7 +7,7 @@
 
 #ifndef _NCCL_DEVICE_CORE__TYPES_H_
 #define _NCCL_DEVICE_CORE__TYPES_H_
-#include "../core_tmp.h"
+#include "../core.h"
 #include "nccl_device/gin/gin_device_host_common.h"
 
 #define NCCL_GIN_MAX_CONNECTIONS 4
