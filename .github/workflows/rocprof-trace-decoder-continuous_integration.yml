@@ -63,7 +63,7 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         sparse-checkout: projects/rocprof-trace-decoder
         set-safe-directory: true
@@ -168,7 +168,7 @@ jobs:
           { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
       - name: Restore submodule cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ steps.submods.outputs.paths }}

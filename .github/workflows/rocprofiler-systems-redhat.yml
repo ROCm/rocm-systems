@@ -108,7 +108,7 @@ jobs:
           fi
 
     - name: Restore ccache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ github.workspace }}/.ccache
         key: ccache-redhat-${{ github.job }}-${{ matrix.os-release }}-${{ matrix.compiler }}-${{ matrix.rocm-version }}-${{ matrix.build-type }}-${{ github.sha }}

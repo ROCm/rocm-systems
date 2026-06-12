@@ -129,7 +129,7 @@ jobs:
         { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule cache
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           ${{ steps.submods.outputs.paths }}
@@ -159,7 +159,7 @@ jobs:
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
       id: load-coverage
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         key: ${{ github.event.pull_request.base.sha }}-codecov
         path: .codecov/**
@@ -289,7 +289,7 @@ jobs:
 
     - name: Save XML Code Coverage
       id: save-coverage
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v5
       with:
         key: ${{ github.sha }}-codecov
         path: |
@@ -344,7 +344,7 @@ jobs:
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 10
-      uses: actions/github-script@v6
+      uses: actions/github-script@v9
       env:
         COMMENT_BODY: |
           <details>
