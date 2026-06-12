@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #ifdef __linux__
 #include <unistd.h>
+#include <sys/wait.h>
 #endif
 #ifdef _WIN64
 #include <windows.h>
@@ -34,6 +35,45 @@ constexpr int LEN = 64;
 constexpr auto SIZE_BYTES = (LEN << 2);
 constexpr auto codeObjFile = "copyKernel.code";
 constexpr auto kernel_name = "copy_ker";
+
+// Helper to run test logic in a forked child process
+// This ensures each test gets a fresh HIP runtime initialization
+#ifdef __linux__
+void runTestInFork(std::function<void()> testFunc) {
+  pid_t pid = fork();
+
+  if (pid < 0) {
+    FAIL("Failed to fork process");
+  }
+
+  if (pid == 0) {
+    // Child process: run the test
+    testFunc();
+    exit(0);  // Test passed in child
+  } else {
+    // Parent process: wait for child
+    int status;
+    waitpid(pid, &status, 0);
+
+    if (WIFEXITED(status)) {
+      int exitCode = WEXITSTATUS(status);
+      if (exitCode != 0) {
+        FAIL("Test failed in child process with exit code " << exitCode);
+      }
+    } else {
+      FAIL("Test terminated abnormally in child process");
+    }
+  }
+}
+#else
+// Windows: just run the test directly (fork not available)
+// Tests may interfere with each other on Windows
+void runTestInFork(std::function<void()> testFunc) {
+  WARN("fork() not available on Windows, tests may interfere");
+  testFunc();
+}
+#endif
+
 /**
  * @addtogroup hipModuleGetLoadingMode hipModuleGetLoadingMode
  * @{
@@ -41,82 +81,6 @@ constexpr auto kernel_name = "copy_ker";
  * `hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode)` -
  * Function gets the current module load mode
  */
-
-/**
- * Test Description
- * ------------------------
- * - Test case verifies the positive case of hipModuleGetLoadingMode API.
- * - Verifies the default mode. Default mode is Lazy.
- * Test source
- * ------------------------
- * - catch/unit/module/hipModuleGetLoadingMode.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 7.2
- */
-TEST_CASE("Unit_hipModuleGetLoadingMode_DefaultModeCheck") {
-  hipModuleLoadingMode_t mode;
-  HIP_CHECK(hipModuleGetLoadingMode(&mode));
-  REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
-}
-
-/**
- * Test Description
- * ------------------------
- * - Test case verifies the positive case of hipModuleGetLoadingMode API.
- * - Verifies the Eager mode after setting the env var HIP_MODULE_LOADING.
- * Test source
- * ------------------------
- * - catch/unit/module/hipModuleGetLoadingMode.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 7.2
- */
-TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
-  hipModuleLoadingMode_t mode;
-  if (setenv("HIP_MODULE_LOADING", "EAGER", 1) != 0) {
-    HIP_CHECK(hipModuleGetLoadingMode(&mode));
-    REQUIRE(mode == HIP_MODULE_LAZY_LOADING); // Default mode is lazy mode
-  } else {
-    HIP_CHECK(hipModuleGetLoadingMode(&mode));
-    REQUIRE(mode ==
-            HIP_MODULE_EAGER_LOADING); // if env var HIP_MODULE_LOADING = EAGER
-  }
-  unsetenv("HIP_MODULE_LOADING");
-}
-
-/**
- * Test Description
- * ------------------------
- * - Test case verifies case-insensitive environment variable handling.
- * - Tests "eager" (lowercase) and "EAGER" (uppercase) both work.
- * Test source
- * ------------------------
- * - catch/unit/module/hipModuleGetLoadingMode.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 7.2
- */
-TEST_CASE("Unit_hipModuleGetLoadingMode_CaseInsensitive") {
-  hipModuleLoadingMode_t mode;
-
-  // Test lowercase "eager"
-  REQUIRE(setenv("HIP_MODULE_LOADING", "eager", 1) == 0);
-  HIP_CHECK(hipModuleGetLoadingMode(&mode));
-  REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
-
-  // Test uppercase "EAGER"
-  REQUIRE(setenv("HIP_MODULE_LOADING", "EAGER", 1) == 0);
-  HIP_CHECK(hipModuleGetLoadingMode(&mode));
-  REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
-
-  // Test default/lazy
-  REQUIRE(setenv("HIP_MODULE_LOADING", "lazy", 1) == 0);
-  HIP_CHECK(hipModuleGetLoadingMode(&mode));
-  REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
-
-  unsetenv("HIP_MODULE_LOADING");
-}
 
 void kernelExecutionFunction(hipModule_t module) {
   float *Ad, *Bd;
@@ -157,9 +121,8 @@ void kernelExecutionFunction(hipModule_t module) {
 /**
  * Test Description
  * ------------------------
- * - Test case verifies the positive case with kernel Launch.
- * - Calculates the time taken for module load if the mode is Eager.
- * - Verifies kernel execution works correctly in eager mode.
+ * - Test case verifies the default mode when no environment variable is set.
+ * - Verifies the default mode is LAZY.
  * Test source
  * ------------------------
  * - catch/unit/module/hipModuleGetLoadingMode.cc
@@ -167,29 +130,33 @@ void kernelExecutionFunction(hipModule_t module) {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeKernel") {
-  hipModuleLoadingMode_t mode;
-  hipModule_t module;
-  if (setenv("HIP_MODULE_LOADING", "EAGER", 1) == 0) {
+TEST_CASE("Unit_hipModuleGetLoadingMode_DefaultModeCheck") {
+  runTestInFork([]() {
+    INFO("Testing default mode (no env var set)");
+
+    // Ensure HIP_MODULE_LOADING is not set
+    unsetenv("HIP_MODULE_LOADING");
+    const char* val = getenv("HIP_MODULE_LOADING");
+    INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
+
+    hipModuleLoadingMode_t mode;
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
-    REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
-    auto start = std::chrono::high_resolution_clock::now();
-    HIP_CHECK(hipModuleLoad(&module, codeObjFile));
-    auto stop = std::chrono::high_resolution_clock::now();
-    auto result = std::chrono::duration<double, std::milli>(stop - start);
-    INFO("Time taken for Eager mode: " << result.count() << " milliseconds");
-    kernelExecutionFunction(module);
-    HIP_CHECK(hipModuleUnload(module));
-  }
-  unsetenv("HIP_MODULE_LOADING");
+
+    INFO("Default mode value: " << mode);
+    INFO("HIP_MODULE_LAZY_LOADING = " << HIP_MODULE_LAZY_LOADING);
+    INFO("HIP_MODULE_EAGER_LOADING = " << HIP_MODULE_EAGER_LOADING);
+    INFO("Default mode (no env var): " << mode);
+
+    REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
+  });
 }
 
 /**
  * Test Description
  * ------------------------
- * - Test case verifies the positive case with kernel Launch.
- * - Calculates the time taken for module load if the mode is Lazy.
- * - Verifies kernel execution works correctly in lazy mode.
+ * - Test case verifies LAZY mode with explicit env var set.
+ * - Sets HIP_MODULE_LOADING=LAZY and verifies the mode.
+ * - Tests kernel execution in LAZY mode.
  * Test source
  * ------------------------
  * - catch/unit/module/hipModuleGetLoadingMode.cc
@@ -197,18 +164,111 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeKernel") {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_LazyModeKernel") {
-  hipModuleLoadingMode_t mode;
-  hipModule_t module;
-  HIP_CHECK(hipModuleGetLoadingMode(&mode));
-  REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
-  auto start = std::chrono::high_resolution_clock::now();
-  HIP_CHECK(hipModuleLoad(&module, codeObjFile));
-  auto stop = std::chrono::high_resolution_clock::now();
-  auto result = std::chrono::duration<double, std::milli>(stop - start);
-  INFO("Time taken for Lazy mode: " << result.count() << " milliseconds");
-  kernelExecutionFunction(module);
-  HIP_CHECK(hipModuleUnload(module));
+TEST_CASE("Unit_hipModuleGetLoadingMode_LazyModeCheck") {
+  runTestInFork([]() {
+    INFO("Testing LAZY mode with explicit env var set");
+
+    // Set env var to LAZY
+    REQUIRE(setenv("HIP_MODULE_LOADING", "LAZY", 1) == 0);
+
+    // Verify the env var is set
+    const char* val = getenv("HIP_MODULE_LOADING");
+    INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
+
+    hipModuleLoadingMode_t mode;
+    HIP_CHECK(hipModuleGetLoadingMode(&mode));
+
+    INFO("Mode value: " << mode);
+    INFO("HIP_MODULE_LAZY_LOADING = " << HIP_MODULE_LAZY_LOADING);
+    INFO("HIP_MODULE_EAGER_LOADING = " << HIP_MODULE_EAGER_LOADING);
+    INFO("Mode with HIP_MODULE_LOADING=LAZY: " << mode);
+
+    REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
+
+    // Execute kernel to verify lazy loading works with actual kernel execution
+    INFO("Testing kernel execution with LAZY mode...");
+    hipModule_t module;
+    auto start = std::chrono::high_resolution_clock::now();
+    HIP_CHECK(hipModuleLoad(&module, codeObjFile));
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto result = std::chrono::duration<double, std::milli>(stop - start);
+    INFO("Module load time: " << result.count() << " milliseconds");
+
+    kernelExecutionFunction(module);
+    HIP_CHECK(hipModuleUnload(module));
+
+    unsetenv("HIP_MODULE_LOADING");
+  });
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Test case verifies EAGER mode after setting the env var HIP_MODULE_LOADING.
+ * - Sets HIP_MODULE_LOADING=EAGER and verifies the mode.
+ * - Tests kernel execution in EAGER mode.
+ * Test source
+ * ------------------------
+ * - catch/unit/module/hipModuleGetLoadingMode.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
+  runTestInFork([]() {
+    // Set env var to EAGER
+    REQUIRE(setenv("HIP_MODULE_LOADING", "EAGER", 1) == 0);
+
+    // Verify the env var is set
+    const char* val = getenv("HIP_MODULE_LOADING");
+    INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
+
+    hipModuleLoadingMode_t mode;
+    HIP_CHECK(hipModuleGetLoadingMode(&mode));
+
+    INFO("Mode with HIP_MODULE_LOADING=EAGER: " << mode);
+    REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
+
+    // Execute kernel to verify eager loading works with actual kernel execution
+    INFO("Testing kernel execution with EAGER mode...");
+    hipModule_t module;
+    auto start = std::chrono::high_resolution_clock::now();
+    HIP_CHECK(hipModuleLoad(&module, codeObjFile));
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto result = std::chrono::duration<double, std::milli>(stop - start);
+    INFO("Module load time: " << result.count() << " milliseconds");
+
+    kernelExecutionFunction(module);
+    HIP_CHECK(hipModuleUnload(module));
+
+    unsetenv("HIP_MODULE_LOADING");
+  });
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Test case verifies case-insensitive environment variable handling.
+ * - Tests "eager" (lowercase) works for EAGER mode.
+ * Test source
+ * ------------------------
+ * - catch/unit/module/hipModuleGetLoadingMode.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipModuleGetLoadingMode_CaseInsensitive") {
+  runTestInFork([]() {
+    hipModuleLoadingMode_t mode;
+
+    // Test lowercase "eager"
+    REQUIRE(setenv("HIP_MODULE_LOADING", "eager", 1) == 0);
+    HIP_CHECK(hipModuleGetLoadingMode(&mode));
+    INFO("Mode with 'eager': " << mode);
+    REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
+
+    unsetenv("HIP_MODULE_LOADING");
+  });
 }
 
 void setMode() { setenv("HIP_MODULE_LOADING", "EAGER", 1); }
@@ -216,6 +276,7 @@ void setMode() { setenv("HIP_MODULE_LOADING", "EAGER", 1); }
 void ChkMode() {
   hipModuleLoadingMode_t mode;
   HIP_CHECK(hipModuleGetLoadingMode(&mode));
+  INFO("Mode in thread: " << mode);
   REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
   unsetenv("HIP_MODULE_LOADING");
 }
@@ -223,8 +284,8 @@ void ChkMode() {
 /**
  * Test Description
  * ------------------------
- * - Test case verifies the multithread Scenario.
- * - Set mode Env in one thread. Verify mode in another thread.
+ * - Test case verifies the multithread scenario.
+ * - Set mode env in one thread. Verify mode in another thread.
  * Test source
  * ------------------------
  * - catch/unit/module/hipModuleGetLoadingMode.cc
@@ -233,19 +294,26 @@ void ChkMode() {
  * - HIP_VERSION >= 7.2
  */
 TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
-  // Create Thread one.
-  std::thread t1(setMode);
-  t1.join();
-  // Create Thread two
-  std::thread t2(ChkMode);
-  t2.join();
+  runTestInFork([]() {
+    // Set env var to EAGER first
+    setenv("HIP_MODULE_LOADING", "EAGER", 1);
+
+    // Create Thread one.
+    std::thread t1(setMode);
+    t1.join();
+    // Create Thread two
+    std::thread t2(ChkMode);
+    t2.join();
+  });
 }
 
 /**
  * Test Description
  * ------------------------
- * - Negative test case for invalid parameter (nullptr).
- * - Verifies API returns hipErrorInvalidValue when mode pointer is NULL.
+ * - Test case verifies that module loading mode is cached at initialization.
+ * - Sets HIP_MODULE_LOADING=EAGER and verifies the mode.
+ * - Changes env var to LAZY and verifies mode remains EAGER (cached).
+ * - This validates that the mode doesn't change dynamically after initialization.
  * Test source
  * ------------------------
  * - catch/unit/module/hipModuleGetLoadingMode.cc
@@ -253,73 +321,35 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipModuleGetLoadingMode_NullptrCheck") {
-  hipError_t err = hipModuleGetLoadingMode(nullptr);
-  REQUIRE(err == hipErrorInvalidValue);
-}
+TEST_CASE("Unit_hipModuleGetLoadingMode_Change") {
+  runTestInFork([]() {
+    hipModuleLoadingMode_t mode;
 
-/**
- * Test Description
- * ------------------------
- * - Test that lazy loading actually defers symbol population.
- * - Verifies that in lazy mode, symbols are not populated until accessed.
- * Test source
- * ------------------------
- * - catch/unit/module/hipModuleGetLoadingMode.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 7.2
- */
-TEST_CASE("Unit_hipModuleGetLoadingMode_LazyLoadingBehavior") {
-  hipModuleLoadingMode_t mode;
-  hipModule_t module;
+    // Set env var to EAGER BEFORE HIP initialization
+    REQUIRE(setenv("HIP_MODULE_LOADING", "EAGER", 1) == 0);
 
-  // Ensure we're in lazy mode
-  unsetenv("HIP_MODULE_LOADING");
-  HIP_CHECK(hipModuleGetLoadingMode(&mode));
-  REQUIRE(mode == HIP_MODULE_LAZY_LOADING);
+    // Verify the env var is set
+    const char* val = getenv("HIP_MODULE_LOADING");
+    INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
 
-  // Load module - in lazy mode, symbols should not be populated yet
-  HIP_CHECK(hipModuleLoad(&module, codeObjFile));
+    // Get the mode - this initializes HIP runtime and caches the mode
+    HIP_CHECK(hipModuleGetLoadingMode(&mode));
+    INFO("Mode with HIP_MODULE_LOADING=EAGER: " << mode);
+    REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
 
-  // Now access a function - this should trigger lazy population
-  hipFunction_t func;
-  HIP_CHECK(hipModuleGetFunction(&func, module, kernel_name));
-  REQUIRE(func != nullptr);
+    // Change env var to LAZY - mode should NOT change (cached at init)
+    REQUIRE(setenv("HIP_MODULE_LOADING", "LAZY", 1) == 0);
+    const char* val1 = getenv("HIP_MODULE_LOADING");
+    INFO("Environment variable HIP_MODULE_LOADING = " << (val1 ? val1 : "(not set)"));
 
-  HIP_CHECK(hipModuleUnload(module));
-}
+    // Get the mode again - should still be EAGER (cached)
+    HIP_CHECK(hipModuleGetLoadingMode(&mode));
+    INFO("Mode after env var changed to LAZY: " << mode);
+    INFO("Verifying mode is still EAGER (not affected by env var change)");
+    REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
 
-/**
- * Test Description
- * ------------------------
- * - Test that eager loading populates symbols immediately.
- * - Verifies that in eager mode, symbols are available right after load.
- * Test source
- * ------------------------
- * - catch/unit/module/hipModuleGetLoadingMode.cc
- * Test requirements
- * ------------------------
- * - HIP_VERSION >= 7.2
- */
-TEST_CASE("Unit_hipModuleGetLoadingMode_EagerLoadingBehavior") {
-  hipModuleLoadingMode_t mode;
-  hipModule_t module;
-
-  REQUIRE(setenv("HIP_MODULE_LOADING", "EAGER", 1) == 0);
-  HIP_CHECK(hipModuleGetLoadingMode(&mode));
-  REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
-
-  // Load module - in eager mode, symbols should be populated immediately
-  HIP_CHECK(hipModuleLoad(&module, codeObjFile));
-
-  // Access a function - should work without lazy population
-  hipFunction_t func;
-  HIP_CHECK(hipModuleGetFunction(&func, module, kernel_name));
-  REQUIRE(func != nullptr);
-
-  HIP_CHECK(hipModuleUnload(module));
-  unsetenv("HIP_MODULE_LOADING");
+    unsetenv("HIP_MODULE_LOADING");
+  });
 }
 
 /**

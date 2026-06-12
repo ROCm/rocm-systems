@@ -1241,22 +1241,12 @@ void PlatformState::SetDynamicLibraryHandle(void* handle) {
 // ================================================================================================
 void PlatformState::GetLoadingMode(hipModuleLoadingMode_t* mode) {
   *mode = HIP_MODULE_LAZY_LOADING;
-  // Read environment variable directly to support dynamic changes
-  std::string mod_loading_mode;
-#ifdef _WIN32
-  char env_buffer[256];
-  DWORD len = GetEnvironmentVariableA("HIP_MODULE_LOADING", env_buffer, sizeof(env_buffer));
-  if (len > 0 && len < sizeof(env_buffer)) {
-    mod_loading_mode = env_buffer;
-  }
-#else
-  const char* env_value = getenv("HIP_MODULE_LOADING");
-  if (env_value != nullptr) {
-    mod_loading_mode = env_value;
-  }
-#endif
 
-  // Common logic for both platforms
+  // Use the cached flag value from initialization (not getenv)
+  // This ensures the mode doesn't change if env var changes after init
+  // The HIP_MODULE_LOADING flag is initialized once at startup from the env var
+  std::string mod_loading_mode(HIP_MODULE_LOADING);
+
   if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
     *mode = HIP_MODULE_EAGER_LOADING;
   } else if (mod_loading_mode == "LAZY" || mod_loading_mode == "lazy") {

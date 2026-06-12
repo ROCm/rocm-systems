@@ -306,3 +306,33 @@ module:
   Unit_hipFuncGetAttributes_basic:
     <<: *level_2
     tags: [function]
+  Unit_hipModuleGetLoadingMode_DefaultModeCheck:
+    <<: *level_2
+    # Requires fork() which is not available on Windows (WSL has fork)
+    disabled: [windows, nvidia_windows, amd_windows]
+    tags: [load]
+  Unit_hipModuleGetLoadingMode_LazyModeCheck:
+    <<: *level_2
+    # Requires fork() which is not available on Windows (WSL has fork)
+    disabled: [windows, nvidia_windows, amd_windows]
+    tags: [load]
+  Unit_hipModuleGetLoadingMode_EagerModeCheck:
+    <<: *level_2
+    # Requires fork() which is not available on Windows (WSL has fork)
+    disabled: [windows, nvidia_windows, amd_windows]
+    tags: [load]
+  Unit_hipModuleGetLoadingMode_CaseInsensitive:
+    <<: *level_2
+    # Requires fork() which is not available on Windows (WSL has fork)
+    disabled: [windows, nvidia_windows, amd_windows]
+    tags: [load]
+  Unit_hipModuleGetLoadingMode_MultiThread:
+    <<: *level_2
+    # Requires fork() which is not available on Windows (WSL has fork)
+    disabled: [windows, nvidia_windows, amd_windows]
+    tags: [load]
+  Unit_hipModuleGetLoadingMode_Change:
+    <<: *level_2
+    # Requires fork() which is not available on Windows (WSL has fork)
+    disabled: [windows, nvidia_windows, amd_windows]
+    tags: [load]

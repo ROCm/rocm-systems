@@ -922,8 +922,8 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMipmappedArrayGetMemoryRequirements: return "hipMipmappedArrayGetMemoryRequirements";
     case HIP_API_ID_hipModuleGetFunction: return "hipModuleGetFunction";
     case HIP_API_ID_hipModuleGetFunctionCount: return "hipModuleGetFunctionCount";
-    case HIP_API_ID_hipModuleGetLoadingMode: return "hipModuleGetLoadingMode";
     case HIP_API_ID_hipModuleGetGlobal: return "hipModuleGetGlobal";
+    case HIP_API_ID_hipModuleGetLoadingMode: return "hipModuleGetLoadingMode";
     case HIP_API_ID_hipModuleGetTexRef: return "hipModuleGetTexRef";
     case HIP_API_ID_hipModuleLaunchCooperativeKernel: return "hipModuleLaunchCooperativeKernel";
     case HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice: return "hipModuleLaunchCooperativeKernelMultiDevice";
@@ -1396,8 +1396,8 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMipmappedArrayGetMemoryRequirements", name) == 0) return HIP_API_ID_hipMipmappedArrayGetMemoryRequirements;
   if (strcmp("hipModuleGetFunction", name) == 0) return HIP_API_ID_hipModuleGetFunction;
   if (strcmp("hipModuleGetFunctionCount", name) == 0) return HIP_API_ID_hipModuleGetFunctionCount;
-  if (strcmp("hipModuleGetLoadingMode", name) == 0) return HIP_API_ID_hipModuleGetLoadingMode;
   if (strcmp("hipModuleGetGlobal", name) == 0) return HIP_API_ID_hipModuleGetGlobal;
+  if (strcmp("hipModuleGetLoadingMode", name) == 0) return HIP_API_ID_hipModuleGetLoadingMode;
   if (strcmp("hipModuleGetTexRef", name) == 0) return HIP_API_ID_hipModuleGetTexRef;
   if (strcmp("hipModuleLaunchCooperativeKernel", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernel;
   if (strcmp("hipModuleLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice;
@@ -3816,10 +3816,6 @@ typedef struct hip_api_data_s {
       hipModule_t mod;
     } hipModuleGetFunctionCount;
     struct {
-      hipModuleLoadingMode_t* mode;
-      hipModuleLoadingMode_t mode__val;
-    } hipModuleGetLoadingMode;
-    struct {
       hipDeviceptr_t* dptr;
       hipDeviceptr_t dptr__val;
       size_t* bytes;
@@ -3828,6 +3824,10 @@ typedef struct hip_api_data_s {
       const char* name;
       char name__val;
     } hipModuleGetGlobal;
+    struct {
+      hipModuleLoadingMode_t* mode;
+      hipModuleLoadingMode_t mode__val;
+    } hipModuleGetLoadingMode;
     struct {
       textureReference** texRef;
       textureReference* texRef__val;
@@ -6690,16 +6690,16 @@ typedef struct hip_api_data_s {
   cb_data.args.hipModuleGetFunctionCount.count = (unsigned int*)count; \
   cb_data.args.hipModuleGetFunctionCount.mod = (hipModule_t)mod; \
 };
-// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
-#define INIT_hipModuleGetLoadingMode_CB_ARGS_DATA(cb_data) { \
-  cb_data.args.hipModuleGetLoadingMode.mode = (hipModuleLoadingMode_t*)mode; \
-};
 // hipModuleGetGlobal[('hipDeviceptr_t*', 'dptr'), ('size_t*', 'bytes'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
 #define INIT_hipModuleGetGlobal_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleGetGlobal.dptr = (hipDeviceptr_t*)dptr; \
   cb_data.args.hipModuleGetGlobal.bytes = (size_t*)bytes; \
   cb_data.args.hipModuleGetGlobal.hmod = (hipModule_t)hmod; \
   cb_data.args.hipModuleGetGlobal.name = (name) ? strdup(name) : NULL; \
+};
+// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
+#define INIT_hipModuleGetLoadingMode_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipModuleGetLoadingMode.mode = (hipModuleLoadingMode_t*)mode; \
 };
 // hipModuleGetTexRef[('textureReference**', 'texRef'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
 #define INIT_hipModuleGetTexRef_CB_ARGS_DATA(cb_data) { \
@@ -8765,15 +8765,15 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipModuleGetFunctionCount:
       if (data->args.hipModuleGetFunctionCount.count) data->args.hipModuleGetFunctionCount.count__val = *(data->args.hipModuleGetFunctionCount.count);
       break;
-// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
-    case HIP_API_ID_hipModuleGetLoadingMode:
-      if (data->args.hipModuleGetLoadingMode.mode) data->args.hipModuleGetLoadingMode.mode__val = *(data->args.hipModuleGetLoadingMode.mode);
-      break;
 // hipModuleGetGlobal[('hipDeviceptr_t*', 'dptr'), ('size_t*', 'bytes'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
     case HIP_API_ID_hipModuleGetGlobal:
       if (data->args.hipModuleGetGlobal.dptr) data->args.hipModuleGetGlobal.dptr__val = *(data->args.hipModuleGetGlobal.dptr);
       if (data->args.hipModuleGetGlobal.bytes) data->args.hipModuleGetGlobal.bytes__val = *(data->args.hipModuleGetGlobal.bytes);
       if (data->args.hipModuleGetGlobal.name) data->args.hipModuleGetGlobal.name__val = *(data->args.hipModuleGetGlobal.name);
+      break;
+// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
+    case HIP_API_ID_hipModuleGetLoadingMode:
+      if (data->args.hipModuleGetLoadingMode.mode) data->args.hipModuleGetLoadingMode.mode__val = *(data->args.hipModuleGetLoadingMode.mode);
       break;
 // hipModuleGetTexRef[('textureReference**', 'texRef'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
     case HIP_API_ID_hipModuleGetTexRef:
@@ -12232,12 +12232,6 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", mod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetFunctionCount.mod);
       oss << ")";
     break;
-    case HIP_API_ID_hipModuleGetLoadingMode:
-      oss << "hipModuleGetLoadingMode(";
-      if (data->args.hipModuleGetLoadingMode.mode == NULL) oss << "mode=NULL";
-      else { oss << "mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetLoadingMode.mode__val); }
-      oss << ")";
-    break;
     case HIP_API_ID_hipModuleGetGlobal:
       oss << "hipModuleGetGlobal(";
       if (data->args.hipModuleGetGlobal.dptr == NULL) oss << "dptr=NULL";
@@ -12247,6 +12241,12 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", hmod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetGlobal.hmod);
       if (data->args.hipModuleGetGlobal.name == NULL) oss << ", name=NULL";
       else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetGlobal.name__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipModuleGetLoadingMode:
+      oss << "hipModuleGetLoadingMode(";
+      if (data->args.hipModuleGetLoadingMode.mode == NULL) oss << "mode=NULL";
+      else { oss << "mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetLoadingMode.mode__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipModuleGetTexRef:
