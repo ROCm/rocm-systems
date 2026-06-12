@@ -42,23 +42,11 @@ function(ais_add_libraries)
 
     # Add dependencies on external libraries
     foreach(lib IN LISTS arg_LIBS)
-        unset(LIBRARY_PATH)
-        if(TARGET ${lib})
-            # We link via the resolved library file rather than the target name so that
-            # install(EXPORT) does not demand the dependency target be in the export set
-            # (e.g. a FetchContent-built TBB that we intentionally do not install).
-            # Include dirs from the target are pulled in separately.
-            target_include_directories(${arg_NAME} SYSTEM PRIVATE
-                $<TARGET_PROPERTY:${lib},INTERFACE_INCLUDE_DIRECTORIES>)
-            target_link_libraries(${arg_NAME} PRIVATE $<TARGET_LINKER_FILE:${lib}>)
-            add_dependencies(${arg_NAME} ${lib})
-        else()
-            find_library(LIBRARY_PATH NAMES ${lib})
-            if(NOT LIBRARY_PATH)
-                message(FATAL_ERROR "lib${lib} not found")
-            endif()
-            target_link_libraries(${arg_NAME} PRIVATE ${LIBRARY_PATH})
+        find_library(LIBRARY_PATH NAMES ${lib})
+        if(NOT LIBRARY_PATH)
+            message(FATAL_ERROR "lib${lib} not found")
         endif()
+        target_link_libraries(${arg_NAME} PRIVATE ${LIBRARY_PATH})
     endforeach()
 
     if(BUILD_TESTING)
