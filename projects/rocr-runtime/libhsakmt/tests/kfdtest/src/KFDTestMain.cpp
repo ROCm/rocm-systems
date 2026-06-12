@@ -27,6 +27,10 @@
 #include "GoogleTestExtension.hpp"
 #include "OSWrapper.hpp"
 #include "Assemble.hpp"
+#include "KFDRemoteTestInfra.hpp"
+
+#include <string>
+#include <vector>
 
 #define KFD_TEST_DEFAULT_TIMEOUT 60000
 #define MAX_GPU 64
@@ -56,6 +60,9 @@ unsigned int g_TestTimeOut;
 int g_TestNodeId = -1;
 int g_TestDstNodeId;
 bool g_IsChildProcess;
+bool g_IsRemoteChildProcess;
+std::string g_RemoteHost; // empty if no remote multi-node tests requested
+int g_RemoteNodeId = -1;  // GPU node passed to the remote host as --node, -1 for its default
 bool g_IsEmuMode;
 unsigned int g_SleepTime;
 unsigned int g_TestGPUFamilyId;
@@ -70,6 +77,9 @@ GTEST_API_ int main(int argc, char **argv) {
     g_TestRunProfile = TESTPROFILE_RUNALL;
     g_TestENVCaps = ENVCAPS_NOADDEDCAPS | ENVCAPS_64BITLINUX;
     g_TestTimeOut = KFD_TEST_DEFAULT_TIMEOUT;
+    g_IsChildProcess = false;
+    g_IsRemoteChildProcess = false;
+    g_RemoteHost = "";
 
     testing::InitGoogleTest(&argc, argv);
 
@@ -85,6 +95,14 @@ GTEST_API_ int main(int argc, char **argv) {
 
         g_TestRunProfile = args.TestProfile;
         g_IsChildProcess = args.ChildProcess;
+        g_IsRemoteChildProcess = args.RemoteChildProcess;
+        g_RemoteHost = args.RemoteHost;
+        g_RemoteNodeId = args.RemoteNodeId >= 0 ? args.RemoteNodeId : args.NodeId;
+
+        if (g_IsRemoteChildProcess && !KFDRemoteTestInfra::SetupRemoteChildStdio()) {
+            WARN() << "Failed to set up the remote control channel" << std::endl;
+            return 1;
+        }
 
         if ( args.TimeOut > 0 )
             g_TestTimeOut = args.TimeOut;
@@ -115,6 +133,20 @@ GTEST_API_ int main(int argc, char **argv) {
         if (g_IsEmuMode)
         {
             LOG() << "Emulation Mode Enabled" << std::endl;
+        }
+
+        if (!g_RemoteHost.empty()) {
+            LOG() << "Remote host: " << g_RemoteHost << std::endl;
+            if (g_RemoteNodeId >= 0)
+                LOG() << "Remote GPU node: " << std::dec << g_RemoteNodeId << std::endl;
+        }
+
+        if (g_IsChildProcess) {
+            LOG() << "Running in child mode" << std::endl;
+        }
+
+        if (g_IsRemoteChildProcess) {
+            LOG() << "Running in remote-child mode" << std::endl;
         }
 
         if (g_SleepTime > 0) {

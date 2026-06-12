@@ -65,6 +65,7 @@ struct CommandLineArguments {
     HwCapabilityStatus HwsEnabled;
     TESTPROFILE TestProfile;
     bool ChildProcess;
+    bool RemoteChildProcess;
     unsigned int TimeOut;
     int NodeId;
     int DstNodeId;
@@ -74,6 +75,8 @@ struct CommandLineArguments {
     unsigned int TestNodeNum;
     unsigned int AisThreads;
     unsigned int AisSizeMB;
+    std::string RemoteHost;
+    int RemoteNodeId;
 };
 
 // It is either MEM_NONE or the bitwise OR of one or more of the following flags

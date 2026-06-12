@@ -255,6 +255,8 @@ set (SRC_FILES gtest-1.6.0/gtest-all.cpp
   src/KFDBaseComponentTest.cpp
   src/KFDMultiProcessTest.cpp
   src/KFDTestMain.cpp
+  src/KFDRemoteTestInfra.cpp
+  src/KFDMultiNodeP2PTest.cpp
   src/KFDTestUtil.cpp
   src/KFDTestUtilQueue.cpp
 
