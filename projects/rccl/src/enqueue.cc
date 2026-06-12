@@ -382,11 +382,11 @@ static bool testBudget(
   return ok;
 }
 
-// Returns whether this should be disabled at the device level.  Should be called after devWork fields have been set for what
-// it depends on.
-bool gfx9CheapFenceOff(const ncclDevWorkColl& devWork, bool disabledByPrecheck){
-    bool fenceOk = devWork.regUsed == 0 && devWork.netRegUsed == 0 && !disabledByPrecheck;
-    return !fenceOk;
+// Returns true if the cheap post-peer fence must be disabled (use __threadfence_system).
+// Call after regUsed/netRegUsed are known (0/1).
+static bool ncclResolveGfx9CheapFenceOff(struct ncclComm* comm, int regUsed, int netRegUsed) {
+  bool const fenceOk = regUsed == 0 && netRegUsed == 0 && !comm->gfx9CheapFenceOff;
+  return !fenceOk;
 }
 
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
@@ -470,7 +470,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.netRegUsed = 1;
     if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
       devWork.regUsed = 1;
-    devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
+    devWork.gfx9CheapFenceOff = ncclResolveGfx9CheapFenceOff(comm, devWork.regUsed, devWork.netRegUsed);
 
     if (task->regBufType & NCCL_NVLS_REG_BUFFER) {
       struct ncclDevWorkCollReg workReg = {};
@@ -655,6 +655,7 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
         devWork.netRegUsed = 1;
       if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER))
         devWork.regUsed = 1;
+      devWork.gfx9CheapFenceOff = ncclResolveGfx9CheapFenceOff(comm, devWork.regUsed, devWork.netRegUsed);
       devWork.pivotA2ANumBiRings = comm->topo->pivotA2ANumBiRings;
       devWork.opCount = task->opCount;
 
@@ -1212,6 +1213,9 @@ static ncclResult_t addP2pToPlan(
   work->profilerEnabled = ncclProfilerPluginLoaded() && ((p2pTasks[0] ? p2pTasks[0] : p2pTasks[1])->eActivationMask & ncclProfileKernelCh);
   work->recvConnIndex = connIndex[0];
   work->recvOpCount = recvOpCount;
+  work->gfx9CheapFenceOff = ncclResolveGfx9CheapFenceOff(comm,
+      (work->sendIpcReg || work->recvIpcReg) ? 1 : 0,
+      (work->sendNetReg || work->recvNetReg) ? 1 : 0);
 
   for (int dir=0; dir < nProxyOps; dir++) {
     struct ncclProxyOp* op = &proxyOps[dir];

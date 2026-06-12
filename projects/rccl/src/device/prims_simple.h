@@ -67,7 +67,7 @@ class Primitives<
   uint64_t* barriers_pat;
   uint64_t barrier_next_pat = 0;
   int repeat;
-  bool skip_fence = 0;
+  bool skip_fence = false;
 
 #if defined(ENABLE_NPKIT)
 public:
@@ -229,9 +229,7 @@ private:
       barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers);
 #endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
-    }
-
-    if ((flags & RolePostSend) && dataStored && !skip_fence) {
+    } else if ((flags & RolePostSend) && dataStored) {
       __threadfence_system();
     }
 
@@ -866,8 +864,8 @@ public:
       }
       patBarrier();
     }
-    if(collWork){
-      skip_fence = !collWork -> gfx9CheapFenceOff;
+    if (collWork) {
+      skip_fence = !collWork->gfx9CheapFenceOff;
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
       // DWORDX4 builtins use system-scope cache-bypassing stores, so the
       // cheap s_waitcnt fence is sufficient when UBR is active.
@@ -875,16 +873,16 @@ public:
         skip_fence = true;
       }
 #endif
-    }
+    } else if (p2pWork) {
+      skip_fence = !p2pWork->gfx9CheapFenceOff;
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
-    else if(p2pWork) {
       // the postPeer fence is gated by RolePostSend and protects
       // send-side stores only.
       if (p2pWork->sendIpcReg || p2pWork->sendNetReg) {
         skip_fence = true;
       }
-    }
 #endif
+    }
   }
 
   __forceinline__ __device__ ~Primitives() {

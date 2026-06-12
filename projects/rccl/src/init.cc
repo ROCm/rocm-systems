@@ -125,8 +125,8 @@ RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
 std::unordered_map<ncclComm_t, rocshmem::rocshmem_team_t> ncclCommToRshmemTeam;
 #endif
 
-// Turn off cheap fence for gfx942/gfx950
-RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 0);
+// RCCL_GFX9_CHEAP_FENCE_OFF: 0 = arch-tuned, non-zero = force cheap fence off (__threadfence_system)
+RCCL_PARAM(Gfx9CheapFenceOff, "GFX9_CHEAP_FENCE_OFF", 1);
 
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes. 
@@ -1759,17 +1759,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4/ringGraph->nChannels);
   if (ringGraph->nChannels > MAXCHANNELS/2)
     allGather3Data[rank].nc = 1;
-  comm -> gfx9CheapFenceOff = 1;
+  comm->gfx9CheapFenceOff = 1;
   #ifdef HIP_UNCACHED_MEMORY
   if(!rcclParamGfx9CheapFenceOff()){
     if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942")){
-      comm -> gfx9CheapFenceOff = 0;
+      comm->gfx9CheapFenceOff = 0;
     }
     else if(IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
-      comm -> gfx9CheapFenceOff = ROCM_VERSION < 70002 && nNodes > 1; // Enable for single node only prior to ROCm 7.0.2
+      comm->gfx9CheapFenceOff = ROCM_VERSION < 70002 && nNodes > 1; // Enable for single node only prior to ROCm 7.0.2
     }
   }
-  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm -> gfx9CheapFenceOff ? "OFF" : "ON");
+  INFO(NCCL_INIT, "GFX9 cheap fence is %s", comm->gfx9CheapFenceOff ? "OFF" : "ON");
   #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")){
