@@ -14,6 +14,14 @@ from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
 
+try:
+    import jsonschema
+    _JSONSCHEMA_AVAILABLE = True
+except ImportError:
+    _JSONSCHEMA_AVAILABLE = False
+
+_SCHEMA_PATH = Path(__file__).parent / "schema.json"
+
 # Set default WORKDIR to rccl root directory if not already defined
 # This file is at: rccl/tools/scripts/test_runner/lib/test_config.py
 # rccl root is 5 directories up
@@ -45,6 +53,9 @@ class TestConfigProcessor:
         with open(config_file, 'r') as file:
             config_data = json.load(file)
 
+        # Validate against the JSON schema
+        self._validate_schema(config_data, config_file)
+
         # Expand environment variables in paths section
         if "paths" in config_data:
             config_data["paths"] = self._expand_env_vars_in_dict(config_data["paths"])
@@ -52,6 +63,36 @@ class TestConfigProcessor:
         # Make the configuration immutable (frozen)
         self.config = MappingProxyType(config_data)
         self.config_file = config_file
+
+    @staticmethod
+    def _validate_schema(config_data, config_file):
+        """
+        Validate config_data against the bundled JSON schema.
+
+        Raises ValueError listing all schema violations if the config is
+        invalid.  Emits a warning and continues if jsonschema is not
+        installed or the schema file is missing.
+        """
+        if not _JSONSCHEMA_AVAILABLE:
+            print("WARNING: 'jsonschema' package not installed — skipping config validation. "
+                  "Install it with: pip install jsonschema")
+            return
+
+        if not _SCHEMA_PATH.exists():
+            print(f"WARNING: Schema file not found at {_SCHEMA_PATH} — skipping config validation.")
+            return
+
+        with open(_SCHEMA_PATH) as f:
+            schema = json.load(f)
+
+        validator = jsonschema.Draft7Validator(schema)
+        errors = sorted(validator.iter_errors(config_data), key=str)
+        if errors:
+            lines = [f"Configuration file '{config_file}' failed schema validation:"]
+            for e in errors:
+                path = " -> ".join(str(p) for p in e.absolute_path)
+                lines.append(f"  {path + ': ' if path else ''}{e.message}")
+            raise ValueError("\n".join(lines))
 
     def _expand_env_var(self, value):
         """
