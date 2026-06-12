@@ -32,9 +32,9 @@ extern "C"
 #endif
 }
 
-#include <rocdecode/rocdecode.h>
 #include <cstdint>
 #include <cstring>
+#include <rocdecode/rocdecode.h>
 
 /*!
  * \file
