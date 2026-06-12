@@ -865,21 +865,24 @@ void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
                                     [&] { return src2.read_scalar(wf); });
   uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  bool dispatched;
   if (!(inst_.abid & 1u)) {
-    amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,
-                                     [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-                                       amdgpu::exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits,
-                                                              dst, s0b, s1b, s2, ea, eb, const_acc);
-                                     });
+    dispatched = amdgpu::dispatch_matrix_fmt_pair(
+        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+          amdgpu::exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
+                                 const_acc);
+        });
   } else {
     uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
     uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
-    amdgpu::dispatch_matrix_fmt_pair(
+    dispatched = amdgpu::dispatch_matrix_fmt_pair(
         inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
           amdgpu::exec_f32_scaled_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
                                         eb, const_acc, sa_base, sb_base);
         });
   }
+  if (!dispatched)
+    throw util::UnimplementedInst(mnemonic());
 }
 
 VMfmaF3232x32x64F8f6f4Vop3pMfma::VMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *inst)
@@ -913,21 +916,24 @@ void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
                                     [&] { return src2.read_scalar(wf); });
   uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);
   uint32_t s1b = amdgpu::src_base(vb, src1.encoding_value_);
+  bool dispatched;
   if (!(inst_.abid & 1u)) {
-    amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,
-                                     [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-                                       amdgpu::exec_f32_mixed(cu, 32, 32, 64, 1, a_bits, b_bits,
-                                                              dst, s0b, s1b, s2, ea, eb, const_acc);
-                                     });
+    dispatched = amdgpu::dispatch_matrix_fmt_pair(
+        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+          amdgpu::exec_f32_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
+                                 const_acc);
+        });
   } else {
     uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);
     uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);
-    amdgpu::dispatch_matrix_fmt_pair(
+    dispatched = amdgpu::dispatch_matrix_fmt_pair(
         inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
           amdgpu::exec_f32_scaled_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea,
                                         eb, const_acc, sa_base, sb_base);
         });
   }
+  if (!dispatched)
+    throw util::UnimplementedInst(mnemonic());
 }
 
 VMfmaF3216x16x32Bf16Vop3pMfma::VMfmaF3216x16x32Bf16Vop3pMfma(const MachineInst *inst)
@@ -1099,24 +1105,9 @@ VSmfmacI3216x16x128I8Vop3pMfma::VSmfmacI3216x16x128I8Vop3pMfma(const MachineInst
 }
 
 void VSmfmacI3216x16x128I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_I32_16X16X128_I8 — 16x16x128 I8→I32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    int32_t dot = 0;
-    for (int k = 0; k < 8; ++k) {
-      int8_t ae = static_cast<int8_t>((a_raw >> (k * 8)) & 0xFF);
-      int8_t be = static_cast<int8_t>((b_raw >> (k * 8)) & 0xFF);
-      dot += static_cast<int32_t>(ae) * be;
-    }
-    int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
-  }
+  // SMFMAC stub: V_SMFMAC_I32_16X16X128_I8 (I32 result, no cross-lane helper)
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VSmfmacF3216x16x128Bf8Bf8Vop3pMfma::VSmfmacF3216x16x128Bf8Bf8Vop3pMfma(const MachineInst *inst)
@@ -1438,24 +1429,9 @@ VSmfmacI3232x32x64I8Vop3pMfma::VSmfmacI3232x32x64I8Vop3pMfma(const MachineInst *
 }
 
 void VSmfmacI3232x32x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_I32_32X32X64_I8 — 32x32x64 I8→I32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    int32_t dot = 0;
-    for (int k = 0; k < 8; ++k) {
-      int8_t ae = static_cast<int8_t>((a_raw >> (k * 8)) & 0xFF);
-      int8_t be = static_cast<int8_t>((b_raw >> (k * 8)) & 0xFF);
-      dot += static_cast<int32_t>(ae) * be;
-    }
-    int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
-  }
+  // SMFMAC stub: V_SMFMAC_I32_32X32X64_I8 (I32 result, no cross-lane helper)
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VMfmaF3232x32x42bF16Vop3pMfma::VMfmaF3232x32x42bF16Vop3pMfma(const MachineInst *inst)
@@ -2286,24 +2262,9 @@ VSmfmacI3216x16x64I8Vop3pMfma::VSmfmacI3216x16x64I8Vop3pMfma(const MachineInst *
 }
 
 void VSmfmacI3216x16x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_I32_16X16X64_I8 — 16x16x64 I8→I32
-  // D(4 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    int32_t dot = 0;
-    for (int k = 0; k < 8; ++k) {
-      int8_t ae = static_cast<int8_t>((a_raw >> (k * 8)) & 0xFF);
-      int8_t be = static_cast<int8_t>((b_raw >> (k * 8)) & 0xFF);
-      dot += static_cast<int32_t>(ae) * be;
-    }
-    int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
-  }
+  // SMFMAC stub: V_SMFMAC_I32_16X16X64_I8 (I32 result, no cross-lane helper)
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VSmfmacI3232x32x32I8Vop3pMfma::VSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *inst)
@@ -2325,24 +2286,9 @@ VSmfmacI3232x32x32I8Vop3pMfma::VSmfmacI3232x32x32I8Vop3pMfma(const MachineInst *
 }
 
 void VSmfmacI3232x32x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  // MFMA: V_SMFMAC_I32_32X32X32_I8 — 32x32x32 I8→I32
-  // D(16 regs/lane) += A * B, functional model
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    uint32_t a_raw = src0.read_lane(wf, lane);
-    uint32_t b_raw = src1.read_lane(wf, lane);
-    int32_t dot = 0;
-    for (int k = 0; k < 8; ++k) {
-      int8_t ae = static_cast<int8_t>((a_raw >> (k * 8)) & 0xFF);
-      int8_t be = static_cast<int8_t>((b_raw >> (k * 8)) & 0xFF);
-      dot += static_cast<int32_t>(ae) * be;
-    }
-    int32_t acc0 = static_cast<int32_t>(src2.read_lane(wf, lane));
-    vdst.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));
-    // Additional result registers would require cross-lane data
-  }
+  // SMFMAC stub: V_SMFMAC_I32_32X32X32_I8 (I32 result, no cross-lane helper)
+  (void)wf;
+  throw util::UnimplementedInst(mnemonic());
 }
 
 VMfmaF6416x16x4F64Vop3pMfma::VMfmaF6416x16x4F64Vop3pMfma(const MachineInst *inst)

@@ -78,105 +78,52 @@ def gen_mfma(
     dst_bits = inst.operands[0].size if inst.operands else 0
     dst_regs = max(1, dst_bits // 32)
 
-    # SMFMAC: cross-lane matrix multiply-accumulate.
-    if 'SMFMAC' in name:
+    # SMFMAC: sparse matrix FMA with 4:2 structured sparsity.
+    # F32-result variants use cross-lane exec_smfmac_* helpers from
+    # mma_exec.h; I32-result variants fall through to the per-lane stub.
+    if 'SMFMAC' in name and result_type == 'F32':
         _SMFMAC_READ = {
             'F16': 'amdgpu::smfmac_read_f16',
             'BF16': 'amdgpu::smfmac_read_bf16',
+        }
+        _SMFMAC_FP8_READ = {
             'FP8': 'amdgpu::smfmac_read_fp8',
             'BF8': 'amdgpu::smfmac_read_bf8',
         }
-        if arch_name == 'cdna4' and input_type != 'I8':
-            L = []
-            L.append(f'  auto &cu = wf.cu();')
-            L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
+        L = []
+        L.append(f'  auto &cu = wf.cu();')
+        L.append(f'  uint32_t vb = wf.vgpr_alloc().base;')
+        has_acc_cd = arch_name in ('cdna2', 'cdna3', 'cdna4')
+        if has_acc_cd:
             L.append(
                 f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, inst_.acc_cd);'
             )
-            L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
-            L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
-            L.append(f'  uint32_t idx = amdgpu::src_base(vb, {s2}.encoding_value_);')
-            if input_type in ('F16', 'BF16'):
-                read_fn = _SMFMAC_READ[input_type]
-                L.append(
-                    f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst, s0b, s1b, idx, {read_fn});'
-                )
-            else:
-                parts = input_type.split('_')
-                read_a = _SMFMAC_READ.get(parts[0], 'amdgpu::smfmac_read_fp8')
-                read_b = _SMFMAC_READ.get(parts[1], 'amdgpu::smfmac_read_fp8')
-                L.append(
-                    f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_fp8(cu, dst, s0b, s1b, idx, {read_a},'
-                )
-                L.append(f'                                        {read_b});')
-            return '\n'.join(L)
-
-        # Fallback: per-lane dot-product functional model.
-        L = []
-        L.append(
-            f'  // MFMA: {name} \u2014 {M}x{N}x{K} {input_type}\u2192{result_type}'
-        )
-        L.append(f'  // D({dst_regs} regs/lane) += A * B, functional model')
-        L.append(f'  uint64_t exec = wf.exec();')
-        L.append(f'  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {{')
-        L.append(f'    if (!(exec & (1ULL << lane)))')
-        L.append(f'      continue;')
-        L.append(f'    uint32_t a_raw = {s0}.read_lane(wf, lane);')
-        L.append(f'    uint32_t b_raw = {s1}.read_lane(wf, lane);')
+        else:
+            L.append(f'  uint32_t dst = amdgpu::dst_base(vb, {d}.encoding_value_, 1);')
+        L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
+        L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
+        L.append(f'  uint32_t idx = amdgpu::src_base(vb, {s2}.encoding_value_);')
 
         if input_type in ('F16', 'BF16'):
-            conv = 'util::f16_to_f32' if input_type == 'F16' else 'util::bf16_to_f32'
-            L.append(f'    float a0 = {conv}(static_cast<uint16_t>(a_raw));')
-            L.append(f'    float a1 = {conv}(static_cast<uint16_t>(a_raw >> 16));')
-            L.append(f'    float b0 = {conv}(static_cast<uint16_t>(b_raw));')
-            L.append(f'    float b1 = {conv}(static_cast<uint16_t>(b_raw >> 16));')
-            L.append(f'    float dot = a0 * b0 + a1 * b1;')
-            L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
+            read_fn = _SMFMAC_READ[input_type]
             L.append(
-                f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));'
-            )
-        elif input_type == 'I8':
-            L.append(f'    int32_t dot = 0;')
-            L.append(f'    for (int k = 0; k < 8; ++k) {{')
-            L.append(
-                f'      int8_t ae = static_cast<int8_t>((a_raw >> (k * 8)) & 0xFF);'
-            )
-            L.append(
-                f'      int8_t be = static_cast<int8_t>((b_raw >> (k * 8)) & 0xFF);'
-            )
-            L.append(f'      dot += static_cast<int32_t>(ae) * be;')
-            L.append(f'    }}')
-            L.append(
-                f'    int32_t acc0 = static_cast<int32_t>({s2}.read_lane(wf, lane));'
-            )
-            L.append(
-                f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(acc0 + dot));'
-            )
-            L.append(
-                f'    // Additional result registers would require cross-lane data'
+                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst, s0b, s1b, idx, {read_fn});'
             )
         else:
-            # FP8/BF8 variants: input_type is e.g. "BF8_BF8", "BF8_FP8", etc.
-            _FP8_CONV = {'BF8': 'util::bf8_e5m2_to_f32', 'FP8': 'util::fp8_e4m3_to_f32'}
             parts = input_type.split('_')
-            conv_a = _FP8_CONV.get(parts[0], 'util::fp8_e4m3_to_f32')
-            conv_b = _FP8_CONV.get(parts[1], 'util::fp8_e4m3_to_f32')
-            L.append(f'    float dot = 0.0f;')
-            L.append(f'    for (int k = 0; k < 4; ++k) {{')
+            read_a = _SMFMAC_FP8_READ.get(parts[0], 'amdgpu::smfmac_read_fp8')
+            read_b = _SMFMAC_FP8_READ.get(parts[1], 'amdgpu::smfmac_read_fp8')
             L.append(
-                f'      float ae = {conv_a}(static_cast<uint8_t>((a_raw >> (k * 8)) & 0xFF));'
+                f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_fp8(cu, dst, s0b, s1b, idx, {read_a},\n'
+                f'                                       {read_b});'
             )
-            L.append(
-                f'      float be = {conv_b}(static_cast<uint8_t>((b_raw >> (k * 8)) & 0xFF));'
-            )
-            L.append(f'      dot += ae * be;')
-            L.append(f'    }}')
-            L.append(f'    float acc = std::bit_cast<float>({s2}.read_lane(wf, lane));')
-            L.append(
-                f'    {d}.write_lane(wf, lane, std::bit_cast<uint32_t>(acc + dot));'
-            )
+        return '\n'.join(L)
 
-        L.append(f'  }}')
+    if 'SMFMAC' in name:
+        L = []
+        L.append(f'  // SMFMAC stub: {name} (I32 result, no cross-lane helper)')
+        L.append(f'  (void)wf;')
+        L.append(f'  throw util::UnimplementedInst(mnemonic());')
         return '\n'.join(L)
 
     # Compute number of blocks from output register count and matrix dims.
@@ -399,49 +346,49 @@ def gen_mfma(
                 L.append(f'                    const_acc);')
             else:
                 L.append(f'                    s2, {ea}, {eb}, const_acc);')
+        elif input_type in ('F8_F6_F4', 'F8F6F4'):
+            # f8f6f4 MFMA: cbsz/blgp encode data format, NOT lane
+            # permutation. Use dispatch_matrix_fmt_pair to select the
+            # correct extract functions and bit widths.
+            L.append(f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);')
+            L.append(f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);')
+            L.append('  bool dispatched;')
+            L.append('  if (!(inst_.abid & 1u)) {')
+            L.append(
+                '    dispatched = amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
+            )
+            L.append(
+                '        [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
+            )
+            L.append(
+                f'          amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
+            )
+            L.append(
+                f'                                 dst, s0b, s1b, s2, ea, eb, const_acc);'
+            )
+            L.append('        });')
+            L.append('  } else {')
+            L.append(
+                '    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);'
+            )
+            L.append(
+                '    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);'
+            )
+            L.append('    dispatched = amdgpu::dispatch_matrix_fmt_pair(')
+            L.append(
+                '        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {'
+            )
+            L.append(
+                f'          amdgpu::exec_f32_scaled_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits, dst, s0b, s1b, s2, ea,'
+            )
+            L.append(
+                f'                                        eb, const_acc, sa_base, sb_base);'
+            )
+            L.append('        });')
+            L.append('  }')
+            L.append('  if (!dispatched)')
+            L.append('    throw util::UnimplementedInst(mnemonic());')
         else:
-            if input_type in ('F8_F6_F4', 'F8F6F4'):
-                L.append(
-                    f'  uint32_t s0b = amdgpu::src_base(vb, {s0}.encoding_value_);'
-                )
-                L.append(
-                    f'  uint32_t s1b = amdgpu::src_base(vb, {s1}.encoding_value_);'
-                )
-                L.append(f'  if (!(inst_.abid & 1u)) {{')
-                L.append(
-                    f'    amdgpu::dispatch_matrix_fmt_pair(inst_.cbsz, inst_.blgp,'
-                )
-                L.append(
-                    f'                                     [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {{'
-                )
-                L.append(
-                    f'                                       amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
-                )
-                L.append(
-                    f'                                                              dst, s0b, s1b, s2, ea, eb, const_acc);'
-                )
-                L.append(f'                                     }});')
-                L.append(f'  }} else {{')
-                L.append(
-                    f'    uint32_t sa_base = amdgpu::src_base(vb, raw_words_[1] & 0x1FFu);'
-                )
-                L.append(
-                    f'    uint32_t sb_base = amdgpu::src_base(vb, (raw_words_[1] >> 9) & 0x1FFu);'
-                )
-                L.append(f'    amdgpu::dispatch_matrix_fmt_pair(')
-                L.append(
-                    f'        inst_.cbsz, inst_.blgp, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {{'
-                )
-                L.append(
-                    f'          amdgpu::exec_f32_scaled_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits, dst, s0b, s1b, s2, ea,'
-                )
-                L.append(
-                    f'                                        eb, const_acc, sa_base, sb_base);'
-                )
-                L.append(f'        }});')
-                L.append(f'  }}')
-                return '\n'.join(L)
-
             has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             L.append(f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst,')
             L.append(f'                 amdgpu::src_base(vb, {s0}.encoding_value_),')
