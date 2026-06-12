@@ -413,8 +413,9 @@ __device__ __forceinline__ void profiler(int action) {
   }
 }
 
+#ifndef RCCL_DEVICE_TABLE_OMIT
 template<int Unroll>
-__device__ __forceinline__ ncclDevFuncPtr_t const* selectFuncTable() {
+__device__ __forceinline__ constexpr ncclDevFuncPtr_t const* selectFuncTable() {
   if constexpr (Unroll == 1)  return ncclDevFuncTable_1;
   else if constexpr (Unroll == 2)  return ncclDevFuncTable_2;
   else if constexpr (Unroll == 4)  return ncclDevFuncTable_4;
@@ -422,6 +423,7 @@ __device__ __forceinline__ ncclDevFuncPtr_t const* selectFuncTable() {
   else if constexpr (Unroll == 16) return ncclDevFuncTable_16;
   else                             return ncclDevFuncTable_32;
 }
+#endif
 
 template<int SpecializedFnId, typename SpecializedRunWorkBatch, int COLL_UNROLL>
 __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args) {
@@ -572,7 +574,8 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     } else {
 #ifndef RCCL_DEVICE_TABLE_OMIT
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
-      selectFuncTable<COLL_UNROLL>()[ncclShmem.funcId]();
+      constexpr ncclDevFuncPtr_t const* table = selectFuncTable<COLL_UNROLL>();
+      table[ncclShmem.funcId]();
 #else
       if constexpr (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
