@@ -57,6 +57,10 @@ env:
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
   ROCM_PATH: "/opt/rocm"
 
+  # Excluded tests (AIPROFSYST-441)
+  EXCLUDED_TESTS: "transferbench-sys-run|fork.*|openmp-target.*|roctx-sampling|roctx-runtime-instrument|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode.*|matrix-exponential.*|scratch-memory.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|shmem-pingpong.*|video-decode.*"
+  EXCLUDED_LABELS: "annotate|mpi|julia|attach|lulesh|network|overflow|thread_limit"
+
 jobs:
   prepare_matrix:
     runs-on: ubuntu-latest
@@ -136,6 +140,7 @@ jobs:
           echo "code_name=${CODE_NAME}" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
+        if: false
         run: |
           apt-get update
           apt install -y libavformat-dev libavcodec-dev
@@ -191,9 +196,9 @@ jobs:
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
-            -E "transferbench-sys-run|fork.*|openmp-target.*|roctx-sampling|roctx-runtime-instrument|jacobi-usm-sys-run|jacobi-roctx.*|jpeg-decode.*|matrix-exponential.*|scratch-memory.*|selective-region-region-1-filter.*|selective-region-region-2-and-3.*|selective-region-no-marker-region-1-filter.*|shmem-pingpong.*|video-decode.*" \
+            -E ${{ env.EXCLUDED_TESTS }} \
             -L "rocm" \
-            -LE "annotate|mpi|julia|attach|lulesh|network|overflow|thread_limit"
+            -LE ${{ env.EXCLUDED_LABELS }}
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5
