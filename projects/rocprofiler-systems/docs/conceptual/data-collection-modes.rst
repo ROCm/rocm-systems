@@ -208,7 +208,7 @@ Profile types:
 Selecting output formats
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``--output-format`` flag (available in ``rocprof-sys-run`` and ``rocprof-sys-sample``) selects which output format(s) to produce in a single, intuitive option. The selection is authoritative: only the formats you name are produced.
+The ``--output-format`` flag (available in ``rocprof-sys-run`` and ``rocprof-sys-sample``) selects which output format(s) to produce in a single, intuitive option. The selection is authoritative: only the formats you name are produced. Use either ``--output-format`` or the legacy individual flags, not both.
 
 .. list-table::
    :header-rows: 1
