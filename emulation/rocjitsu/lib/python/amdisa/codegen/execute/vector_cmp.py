@@ -14,6 +14,13 @@ from amdisa.codegen.execute.vop3_modifiers import (
 )
 
 
+def _write_mask_to_explicit_dst(lines: list[str], dst: str, value: str) -> None:
+    lines.append('  if (wf.wf_size() <= 32)')
+    lines.append(f'    {dst}.write_scalar(wf, static_cast<uint32_t>({value}));')
+    lines.append('  else')
+    lines.append(f'    {dst}.write_scalar64(wf, {value});')
+
+
 def gen_vector_cmp_class(
     dst: list[str],
     src: list[str],
@@ -142,7 +149,7 @@ def gen_vector_cmp_class(
             L.append('  wf.set_vcc(result);')
         L.append('  wf.set_exec(result);')
     elif dst:
-        L.append(f'  {dst[0]}.write_scalar64(wf, vcc);')
+        _write_mask_to_explicit_dst(L, dst[0], 'vcc')
     else:
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
@@ -297,7 +304,7 @@ def gen_vector_cmp(
     L.append('  }')
     if dst:
         # VOP3: write to explicit destination (sdst/vdst SGPR pair).
-        L.append(f'  {dst[0]}.write_scalar64(wf, vcc);')
+        _write_mask_to_explicit_dst(L, dst[0], 'vcc')
     else:
         # VOPC: write to VCC.
         L.append('  wf.set_vcc(vcc);')

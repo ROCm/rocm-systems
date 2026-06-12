@@ -1313,6 +1313,21 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   auto resolve = [&](uint64_t va) -> void * {
     return resolve_sdma_ptr(memory_, va, queue.process_id);
   };
+  auto write_read_ptr = [&] {
+    uint64_t rptr_val = rpos * sizeof(uint32_t);
+    auto *read_ptr = static_cast<uint64_t *>(resolve(queue.read_ptr_va));
+    if (read_ptr &&
+        (queue.read_ptr_va & GpuMemory::PAGE_MASK) + sizeof(rptr_val) <= GpuMemory::PAGE_SIZE &&
+        reinterpret_cast<uintptr_t>(read_ptr) % alignof(uint64_t) == 0) {
+      std::atomic_ref<uint64_t>(*read_ptr).store(rptr_val, std::memory_order_release);
+      return;
+    }
+    write_gpu_block(queue.read_ptr_va, &rptr_val, sizeof(rptr_val), queue.process_id);
+  };
+  auto reschedule_current_packet = [&] {
+    write_read_ptr();
+    engine()->schedule_event_now(&doorbell_event_);
+  };
 
   while (rpos < wpos) {
     uint32_t header = dw(0);
@@ -1346,44 +1361,65 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           uint64_t wait_ref = static_cast<uint64_t>(dw(4)) | (static_cast<uint64_t>(dw(5)) << 32);
           uint64_t wait_mask = static_cast<uint64_t>(dw(6)) | (static_cast<uint64_t>(dw(7)) << 32);
           if (wait_addr > 0x1000) {
+            auto *wait_ptr = static_cast<uint64_t *>(resolve(wait_addr));
+            if (!wait_ptr) {
+              reschedule_current_packet();
+              return;
+            }
             uint64_t wait_value =
-                std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(wait_addr))
-                    .load(std::memory_order_acquire);
+                std::atomic_ref<uint64_t>(*wait_ptr).load(std::memory_order_acquire);
             if (!sdma_compare_u64(wait_func, wait_value & wait_mask, wait_ref)) {
-              if (queue.host_accessible) {
-                std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(queue.read_ptr_va))
-                    .store(rpos * sizeof(uint32_t), std::memory_order_release);
-              }
-              engine()->schedule_event_now(&doorbell_event_);
+              reschedule_current_packet();
               return;
             }
           }
         }
 
-        uint32_t count = (dw(COPY_BASE) & 0x3FFFFFFF) + 1;
-        uint64_t src = static_cast<uint64_t>(dw(COPY_BASE + 2)) |
-                       (static_cast<uint64_t>(dw(COPY_BASE + 3)) << 32);
-        uint64_t dst = static_cast<uint64_t>(dw(COPY_BASE + 4)) |
-                       (static_cast<uint64_t>(dw(COPY_BASE + 5)) << 32);
+        int64_t *signal_ptr = nullptr;
+        uint64_t signal_addr = 0;
+        uint64_t signal_data = 0;
+        bool signal_decrement = false;
+        if (has_signal) {
+          uint32_t signal_op = dw(SIGNAL_BASE) & 0x7F;
+          signal_addr = (static_cast<uint64_t>(dw(SIGNAL_BASE + 1) & ~0x7u)) |
+                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 2)) << 32);
+          signal_data = static_cast<uint64_t>(dw(SIGNAL_BASE + 3)) |
+                        (static_cast<uint64_t>(dw(SIGNAL_BASE + 4)) << 32);
 
-        std::memcpy(reinterpret_cast<void *>(dst), reinterpret_cast<const void *>(src), count);
+          if (signal_addr > 0x1000 && signal_op == 0x70) {
+            signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
+            if (!signal_ptr) {
+              reschedule_current_packet();
+              return;
+            }
+            signal_decrement = true;
+          }
+        }
+
+        uint32_t count = (dw(COPY_BASE) & 0x3FFFFFFF) + 1;
+        uint64_t src_va = static_cast<uint64_t>(dw(COPY_BASE + 2)) |
+                          (static_cast<uint64_t>(dw(COPY_BASE + 3)) << 32);
+        uint64_t dst_va = static_cast<uint64_t>(dw(COPY_BASE + 4)) |
+                          (static_cast<uint64_t>(dw(COPY_BASE + 5)) << 32);
+        auto *src_ptr = resolve(src_va);
+        auto *dst_ptr = resolve(dst_va);
+        if (!src_ptr || !dst_ptr) {
+          reschedule_current_packet();
+          return;
+        }
+
+        std::memcpy(dst_ptr, src_ptr, count);
 
         for (auto *l2 : l2_caches_)
-          l2->invalidate_range(dst, count);
+          l2->invalidate_range(dst_va, count);
         for (auto *cu : cus_)
           cu->l1_vector().invalidate_all();
 
-        if (has_signal) {
-          uint32_t signal_op = dw(SIGNAL_BASE) & 0x7F;
-          uint64_t signal_addr = (static_cast<uint64_t>(dw(SIGNAL_BASE + 1) & ~0x7u)) |
-                                 (static_cast<uint64_t>(dw(SIGNAL_BASE + 2)) << 32);
-          uint64_t signal_data = static_cast<uint64_t>(dw(SIGNAL_BASE + 3)) |
-                                 (static_cast<uint64_t>(dw(SIGNAL_BASE + 4)) << 32);
-
-          if (signal_addr > 0x1000 && signal_op == 0x70) {
-            std::atomic_ref<int64_t>(*reinterpret_cast<int64_t *>(signal_addr))
-                .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
-          }
+        if (signal_decrement) {
+          std::atomic_ref<int64_t>(*signal_ptr)
+              .fetch_sub(static_cast<int64_t>(signal_data), std::memory_order_release);
+          for (auto *l2 : l2_caches_)
+            l2->invalidate_range(signal_addr, sizeof(int64_t));
         }
 
         pkt_dwords = sdma::COPY_LINEAR_WAITSIGNAL_GFX1250_SIZE;
@@ -1401,27 +1437,29 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
                        " count=", count, " (", count / 1024, " KB)");
       auto *src_ptr = resolve(src_va);
       auto *dst_ptr = resolve(dst_va);
-      if (src_ptr && dst_ptr) {
-        if (header & (1u << 28)) {
-          uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
-          auto *dst2_ptr = resolve(dst2_va);
-          std::memcpy(dst_ptr, src_ptr, count);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(dst_va, count);
-          if (dst2_ptr) {
-            std::memcpy(dst2_ptr, src_ptr, count);
-            for (auto *l2 : l2_caches_)
-              l2->invalidate_range(dst2_va, count);
-          }
-          pkt_dwords = 9;
-        } else {
-          std::memcpy(dst_ptr, src_ptr, count);
-          for (auto *l2 : l2_caches_)
-            l2->invalidate_range(dst_va, count);
-          pkt_dwords = sdma::COPY_LINEAR_SIZE;
+      if (!src_ptr || !dst_ptr) {
+        reschedule_current_packet();
+        return;
+      }
+      if (header & (1u << 28)) {
+        uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
+        auto *dst2_ptr = resolve(dst2_va);
+        if (!dst2_ptr) {
+          reschedule_current_packet();
+          return;
         }
+        std::memcpy(dst_ptr, src_ptr, count);
+        for (auto *l2 : l2_caches_)
+          l2->invalidate_range(dst_va, count);
+        std::memcpy(dst2_ptr, src_ptr, count);
+        for (auto *l2 : l2_caches_)
+          l2->invalidate_range(dst2_va, count);
+        pkt_dwords = 9;
       } else {
-        pkt_dwords = (header & (1u << 28)) ? 9 : sdma::COPY_LINEAR_SIZE;
+        std::memcpy(dst_ptr, src_ptr, count);
+        for (auto *l2 : l2_caches_)
+          l2->invalidate_range(dst_va, count);
+        pkt_dwords = sdma::COPY_LINEAR_SIZE;
       }
       break;
     }
@@ -1475,14 +1513,14 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t ref = static_cast<uint64_t>(dw(3)) | (static_cast<uint64_t>(dw(4)) << 32);
         uint64_t mask = static_cast<uint64_t>(dw(5)) | (static_cast<uint64_t>(dw(6)) << 32);
         if (addr > 0x1000) {
-          auto *ptr = reinterpret_cast<uint64_t *>(addr);
+          auto *ptr = static_cast<uint64_t *>(resolve(addr));
+          if (!ptr) {
+            reschedule_current_packet();
+            return;
+          }
           uint64_t val = std::atomic_ref<uint64_t>(*ptr).load(std::memory_order_acquire);
           if (!sdma_compare_u64(func, val & mask, ref)) {
-            if (queue.host_accessible) {
-              std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(queue.read_ptr_va))
-                  .store(rpos * sizeof(uint32_t), std::memory_order_release);
-            }
-            engine()->schedule_event_now(&doorbell_event_);
+            reschedule_current_packet();
             return;
           }
         }
@@ -1500,6 +1538,10 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         // Register poll / HDP flush — no-op in functional sim.
       } else if (addr_va > 0x1000) {
         auto *ptr = static_cast<uint32_t *>(resolve(addr_va));
+        if (!ptr) {
+          reschedule_current_packet();
+          return;
+        }
         auto compare = [func](uint32_t val, uint32_t reference) -> bool {
           switch (func) {
           case 0:
@@ -1520,15 +1562,9 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
             return true;
           }
         };
-        uint32_t val = ptr ? std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire) : 0;
+        uint32_t val = std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire);
         if (!compare(val & mask, ref)) {
-          {
-            uint64_t rptr_val = rpos * sizeof(uint32_t);
-            auto *rp_src = reinterpret_cast<const uint8_t *>(&rptr_val);
-            for (uint32_t b = 0; b < sizeof(rptr_val); ++b)
-              memory_->write8(queue.read_ptr_va + b, rp_src[b], queue.process_id);
-          }
-          engine()->schedule_event_now(&doorbell_event_);
+          reschedule_current_packet();
           return;
         }
       }
@@ -1652,12 +1688,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     rpos += pkt_dwords;
   }
 
-  {
-    uint64_t rptr_val = rpos * sizeof(uint32_t);
-    auto *src = reinterpret_cast<const uint8_t *>(&rptr_val);
-    for (uint32_t b = 0; b < sizeof(rptr_val); ++b)
-      memory_->write8(queue.read_ptr_va + b, src[b], queue.process_id);
-  }
+  write_read_ptr();
 }
 
 } // namespace amdgpu

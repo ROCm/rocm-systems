@@ -35,6 +35,14 @@ using float32_t = float;
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
 
+template <typename Op>
+inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
+  if (wf.wf_size() <= 32)
+    op.write_scalar(wf, static_cast<uint32_t>(mask));
+  else
+    op.write_scalar64(wf, mask);
+}
+
 /// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
 /// generated bodies emit per source: `abs` first (`std::fabs`), then `neg`
 /// (`-x`). `abs`/`neg` are the raw VOP3 modifier fields; the bit for source
@@ -1195,7 +1203,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, vcc);
+  write_wave_mask_scalar(inst.vdst, wf, vcc);
   return true;
 }
 
@@ -1249,7 +1257,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, vcc);
+  write_wave_mask_scalar(inst.vdst, wf, vcc);
   return true;
 }
 
@@ -1393,7 +1401,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_wave_mask_scalar(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1439,7 +1447,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_wave_mask_scalar(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1488,7 +1496,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_wave_mask_scalar(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1539,7 +1547,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_wave_mask_scalar(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1591,7 +1599,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  inst.vdst.write_scalar64(wf, dst);
+  write_wave_mask_scalar(inst.vdst, wf, dst);
   return true;
 }
 
@@ -2481,8 +2489,9 @@ template <typename Inst, typename MadOp>
 
 /// VOP3 carry-OUT binary fast path (v_add_co/sub_co/subrev_co_u32). No carry-in
 /// (the SimdCarry functor's third arg is a zero vector); the per-lane carry-out
-/// is merged into a copy of the current VCC and written to the SGPR-pair `sdst`
-/// (not the fixed VCC) — exactly the scalar body's `inst.sdst.write_scalar64`.
+/// is written to the SGPR-pair `sdst` (not the fixed VCC). In wave32, explicit
+/// scalar mask destinations write only the low SGPR and preserve the high SGPR;
+/// wave64 writes the full pair.
 /// `sdst` is an SGPR operand, so it does not participate in the simd_capable
 /// gate; src0/src1/vdst do. (These VOP3 forms carry no `src2` member, so the
 /// carry-in path lives in the separate _cin glue below.)
@@ -2517,7 +2526,7 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  inst.sdst.write_scalar64(wf, carry_out);
+  write_wave_mask_scalar(inst.sdst, wf, carry_out);
   return true;
 }
 template <typename Inst, typename CarryOp>
@@ -2528,7 +2537,8 @@ template <typename Inst, typename CarryOp>
 /// VOP3 carry-IN binary fast path (v_addc_co/subb_co/subbrev_co_u32). Same as
 /// the _co glue but the per-lane carry-in is read from the SGPR-pair `src2`
 /// (these forms have a src2 member) and expanded to a 0/1-per-lane vector;
-/// carry-out goes to `sdst`. src2/sdst are SGPR operands (not gated).
+/// carry-out goes to `sdst` with the same wave32/wave64 width rule as _co.
+/// src2/sdst are SGPR operands (not gated).
 template <typename Inst, typename CarryOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_cin_simd(Inst &inst, Wavefront &wf,
@@ -2565,7 +2575,7 @@ template <typename Inst, typename CarryOp>
         carry_bits |= (1ULL << i);
     carry_out = (carry_out & ~(chunk << base)) | ((carry_bits & chunk) << base);
   }
-  inst.sdst.write_scalar64(wf, carry_out);
+  write_wave_mask_scalar(inst.sdst, wf, carry_out);
   return true;
 }
 template <typename Inst, typename CarryOp>
@@ -2579,10 +2589,20 @@ template <typename Inst, typename CarryOp>
 /// high half (low half preserved). Selected by the per-mnemonic glue probe.
 enum class FmaMixDst { F32, F16_LO, F16_HI };
 
-/// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because
-/// the scalar reference computes `a * b + c` (plain `*+`, not std::fma) for
-/// all six and differs only in (a) the f16-vs-f32 widening shape per source
-/// and (b) the f16-lo/f16-hi/f32 narrowing shape on the destination.
+inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<float> b,
+                                           util::native<float> c) {
+#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
+  return util::stdx::fma(a, b, c);
+#else
+  return a * b + c;
+#endif
+}
+
+/// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because all
+/// six differ only in (a) the f16-vs-f32 widening shape per source and (b) the
+/// f16-lo/f16-hi/f32 narrowing shape on the destination. When the host compiler
+/// enables FMA contraction for the scalar `a * b + c` reference, the SIMD path
+/// uses `stdx::fma`; otherwise it keeps the same separate multiply/add shape.
 ///
 /// Per-source data fetch is gated by `op_sel_hi` (src0/src1) and
 /// `op_sel_hi_2` (src2): when the bit is 0 the source is read as f32; when
@@ -2635,7 +2655,7 @@ template <FmaMixDst DstMode, typename Inst>
     F a = load_src(inst.src0, op_sel_hi & 1u, op_sel & 1u, neg & 1u);
     F b = load_src(inst.src1, (op_sel_hi >> 1) & 1u, (op_sel >> 1) & 1u, (neg >> 1) & 1u);
     F c = load_src(inst.src2, op_sel_hi_2, (op_sel >> 2) & 1u, (neg >> 2) & 1u);
-    F r = a * b + c;
+    F r = fma_mix_mul_add(a, b, c);
     if (clamp) {
       util::stdx::where(r < kZero, r) = kZero;
       util::stdx::where(r > kOne, r) = kOne;

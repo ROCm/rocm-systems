@@ -69,7 +69,10 @@ def test_arch_local_execute_bodies_are_not_shared():
 
 def test_gfx1250_true16_execute_bodies_are_arch_local():
     codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(arch_name='gfx1250')
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=SimpleNamespace(vop3p_opsel_fields=('opsel', 'opsel_hi')),
+    )
     mov_b16 = Instruction(
         'V_MOV_B16',
         'ENC_VOP1',
@@ -89,6 +92,48 @@ def test_gfx1250_true16_execute_bodies_are_arch_local():
             Operand('src1', 16, 'OPR_SRC', True, False, False, False, 2),
         ],
     )
+    add_f16 = Instruction(
+        'V_ADD_F16',
+        'ENC_VOP2',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+            Operand('vsrc1', 16, 'OPR_VGPR', True, False, False, False, 2),
+        ],
+    )
+    not_b16 = Instruction(
+        'V_NOT_B16',
+        'ENC_VOP1',
+        0,
+        [
+            Operand('vdst', 16, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 16, 'OPR_SRC', True, False, False, False, 1),
+        ],
+    )
 
     assert codegen._requires_arch_local_execute(mov_b16, 'ENC_VOP1')
+    assert codegen._requires_arch_local_execute(not_b16, 'ENC_VOP1')
+    assert codegen._requires_arch_local_execute(add_f16, 'ENC_VOP2')
     assert codegen._requires_arch_local_execute(or_b16, 'ENC_VOP3')
+    assert not codegen._can_force_shared_simd_probe(mov_b16, 'ENC_VOP1')
+
+
+def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='gfx1250',
+        profile=SimpleNamespace(vop3p_opsel_fields=('opsel', 'opsel_hi')),
+    )
+    mov_b32 = Instruction(
+        'V_MOV_B32',
+        'ENC_VOP1',
+        0,
+        [
+            Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('src0', 32, 'OPR_SRC', True, False, False, False, 1),
+        ],
+    )
+
+    assert not codegen._requires_arch_local_execute(mov_b32, 'ENC_VOP1')
+    assert codegen._can_force_shared_simd_probe(mov_b32, 'ENC_VOP1')

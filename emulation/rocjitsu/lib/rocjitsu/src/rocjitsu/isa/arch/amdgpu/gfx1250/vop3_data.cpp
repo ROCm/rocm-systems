@@ -983,7 +983,25 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
 }
 
 void VCndmaskB16Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cndmask_b16_vop3(*this, wf);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    {
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>(static_cast<uint32_t>(
+          static_cast<uint16_t>(((src2.read_scalar64(wf) >> lane) & 1)
+                                    ? static_cast<uint16_t>(((inst_.opsel & 0x2u) != 0
+                                                                 ? (src1.read_lane(wf, lane) >> 16)
+                                                                 : src1.read_lane(wf, lane)))
+                                    : static_cast<uint16_t>(((inst_.opsel & 0x1u) != 0
+                                                                 ? (src0.read_lane(wf, lane) >> 16)
+                                                                 : src0.read_lane(wf, lane)))))));
+      uint32_t old_dst = vdst.read_lane(wf, lane);
+      uint32_t merged = ((inst_.opsel & 0x8u) != 0) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
+                                                    : ((old_dst & 0xffff0000u) | src_half);
+      vdst.write_lane(wf, lane, merged);
+    }
+  }
 }
 
 VPermlaneBcastB32Vop3::VPermlaneBcastB32Vop3(const MachineInst *inst)

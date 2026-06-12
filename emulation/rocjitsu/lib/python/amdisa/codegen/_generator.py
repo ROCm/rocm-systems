@@ -1961,17 +1961,17 @@ class CodeGenerator:
                 ):
                     lctx.vector_sgpr_once = True
                 is_gfx1250 = self.isa_spec.arch_name.lower() == 'gfx1250'
-                has_true16_vop3_src = any(
+                has_true16_src = any(
                     opnd.is_input and opnd.size == 16 for opnd in src_operands
                 )
-                has_true16_vop3_dst = any(
+                has_true16_dst = any(
                     opnd.is_output and opnd.size == 16 for opnd in dst_operands
                 )
                 is_true16_vop3 = (
                     is_gfx1250
                     and is_vop3
                     and dst_operands
-                    and (has_true16_vop3_src or has_true16_vop3_dst)
+                    and (has_true16_src or has_true16_dst)
                 )
                 if is_true16_vop3:
                     for src_idx, opnd in enumerate(src_operands):
@@ -1979,7 +1979,7 @@ class CodeGenerator:
                             lctx.true16_src_selects[src_idx] = (
                                 f'inst_.opsel & 0x{1 << src_idx:x}u'
                             )
-                    if has_true16_vop3_dst:
+                    if has_true16_dst:
                         lctx.true16_dst_select = 'inst_.opsel & 0x8u'
                 elif (
                     is_gfx1250
@@ -2001,6 +2001,14 @@ class CodeGenerator:
                             '((inst_.src0 - 256) & 0x7fu), lane) '
                             ': src0.read_lane(wf, lane))'
                         )
+                elif (
+                    is_gfx1250
+                    and enc_name.upper() in ('ENC_VOP1', 'ENC_VOP2')
+                    and has_true16_dst
+                    and cls != 'vector_swap'
+                ):
+                    lctx.true16_dst_select = 'inst_.vdst & 0x80u'
+                    lctx.true16_dst_reg = 'inst_.vdst & 0x7fu'
                 if cls == 'vector_cndmask' and is_vop3 and len(src_ops) >= 3:
                     lctx.vcc_read = f'{src_ops[2]}.read_scalar64(wf)'
                 if cls == 'vector_add_co':
@@ -4248,6 +4256,10 @@ class CodeGenerator:
             and any(op.size == 16 for op in inst.operands)
         ):
             return True
+        if enc_upper in ('ENC_VOP1', 'ENC_VOP2') and any(
+            op.is_output and op.size == 16 for op in inst.operands
+        ):
+            return True
         if enc_upper == 'ENC_VOP3' and any(
             (op.is_input or op.is_output) and op.size == 16 for op in inst.operands
         ):
@@ -4294,6 +4306,20 @@ class CodeGenerator:
                 if arch in info.isa_names and len(info.isa_names) >= 2:
                     return True
         return False
+
+    def _can_force_shared_simd_probe(
+        self, inst: Instruction | None, enc_name: str | None = None
+    ) -> bool:
+        if inst is None or self._requires_arch_local_execute(inst, enc_name):
+            return False
+
+        from amdisa.codegen.execute.simd_codegen import simd_probe_arch_portable
+
+        enc_key = (enc_name or inst.enc_name).lower().replace('enc_', '')
+        return simd_probe_arch_portable(
+            f'{inst.mnemonic}_{enc_key}',
+            self.isa_spec.profile.vop3p_opsel_fields,
+        )
 
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
@@ -5050,14 +5076,8 @@ class CodeGenerator:
                         # read the literal through an ISA-divergent member, so a
                         # single shared body can't serve every ISA — those are
                         # left to the genuine shared plan.
-                        from amdisa.codegen.execute.simd_codegen import (
-                            simd_probe_arch_portable as _simd_probe_arch_portable,
-                        )
-
-                        _enc_key_for_probe = enc.enc_name.lower().replace('enc_', '')
-                        _portable_probe = _simd_probe_arch_portable(
-                            f'{inst.mnemonic}_{_enc_key_for_probe}',
-                            self.isa_spec.profile.vop3p_opsel_fields,
+                        _portable_probe = self._can_force_shared_simd_probe(
+                            inst, enc.enc_name
                         )
                         if body_throws:
                             exec_impl = cgen.Line(
@@ -5320,21 +5340,12 @@ class CodeGenerator:
                 # any instruction in this encoding delegates to a template.
                 # Portable SIMD probes can delegate even outside --multi mode,
                 # so this cannot be gated solely on shared_plan.
-                from amdisa.codegen.execute.simd_codegen import (
-                    simd_probe_arch_portable as _simd_probe_arch_portable,
-                )
-
-                enc_key = enc.enc_name.lower().replace('enc_', '')
-
                 def _delegates_to_shared(i: Instruction) -> bool:
                     if not self.semantics or i.name not in self.semantics.instructions:
                         return False
                     return self._can_share_execute(
                         i.mnemonic, i, enc.enc_name
-                    ) or _simd_probe_arch_portable(
-                        f'{i.mnemonic}_{enc_key}',
-                        self.isa_spec.profile.vop3p_opsel_fields,
-                    )
+                    ) or self._can_force_shared_simd_probe(i, enc.enc_name)
 
                 has_shared = any(_delegates_to_shared(i) for i in all_insts)
                 if has_shared:

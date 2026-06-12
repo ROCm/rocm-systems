@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -533,6 +534,9 @@ int SimulatedDriver::ioctl(uint32_t process_id, unsigned long request, void *arg
 }
 
 static const char *ioctl_name(unsigned long req) {
+  if (is_svm_ioctl(req))
+    return "SVM";
+
   switch (req) {
   case AMDKFD_IOC_GET_VERSION:
     return "GET_VERSION";
@@ -585,6 +589,9 @@ static const char *ioctl_name(unsigned long req) {
 
 int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
   util::Logger::cp("IOCTL pid=", proc.process_id(), " ", ioctl_name(request));
+  if (is_svm_ioctl(request))
+    return svm_ioctl(proc, arg);
+
   switch (request) {
   case AMDKFD_IOC_GET_VERSION:
     return get_version_ioctl(arg);
@@ -663,8 +670,6 @@ int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, voi
     return ipc_export_handle_ioctl(proc, arg);
   case AMDKFD_IOC_IPC_IMPORT_HANDLE:
     return ipc_import_handle_ioctl(proc, arg);
-  case AMDKFD_IOC_SVM:
-    return svm_ioctl(proc, arg);
   default:
     util::Logger::debug_print("rocjitsu: unhandled ioctl 0x", std::hex, request);
     return 0;
