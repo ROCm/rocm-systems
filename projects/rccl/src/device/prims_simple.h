@@ -866,22 +866,8 @@ public:
     }
     if (collWork) {
       skip_fence = !collWork->gfx9CheapFenceOff;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
-      // DWORDX4 builtins use system-scope cache-bypassing stores, so the
-      // cheap s_waitcnt fence is sufficient when UBR is active.
-      if (collWork->regUsed || collWork->netRegUsed) {
-        skip_fence = true;
-      }
-#endif
     } else if (p2pWork) {
       skip_fence = !p2pWork->gfx9CheapFenceOff;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && (defined(__GFX9__))
-      // the postPeer fence is gated by RolePostSend and protects
-      // send-side stores only.
-      if (p2pWork->sendIpcReg || p2pWork->sendNetReg) {
-        skip_fence = true;
-      }
-#endif
     }
   }
 
