@@ -134,6 +134,8 @@ staticlib : $(LIBDIR)/$(STATICLIBTARGET)
 
 binary : $(BINDIR)/$(BINNAME) $(BINDIR)/$(PARAMBIN)
 
+headers : $(INCTARGETS)
+
 $(DEVMANIFEST): ALWAYS_REBUILD $(INCTARGETS)
 	$(MAKE) -C ./device
 
