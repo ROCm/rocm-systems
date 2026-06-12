@@ -30,6 +30,7 @@
 #include "gda/nic_policy.hpp"
 
 #include "backend_bc.hpp"
+#include "gda_enums.hpp"
 #include "containers/free_list_impl.hpp"
 #include "hdp_proxy.hpp" //TODO useless?
 #include "memory/hip_allocator.hpp"
@@ -47,13 +48,6 @@ class GDAContext;
 class GDAHostContext;
 class QueuePair;
 class HostInterface;
-
-enum GDAProvider {
-  UNSET,
-  IONIC,
-  BNXT,
-  MLX5
-};
 
 inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
 inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
@@ -88,7 +82,7 @@ class GDABackend : public Backend {
     union ibv_gid gid;
   } dest_info_t;
 
-  enum GDAProvider gda_provider = GDAProvider::UNSET;
+  GDAProvider gda_provider = GDAProvider::UNSET;
 
   uint32_t *heap_rkey = nullptr;
 
@@ -168,6 +162,8 @@ class GDABackend : public Backend {
   static GDAProvider requested_provider();
 
  public:
+  GDAProvider get_gda_provider() const { return gda_provider; }
+
   friend GDAContext;
 
   /**
