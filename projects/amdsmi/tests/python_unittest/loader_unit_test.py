@@ -61,7 +61,9 @@ class TestFindSmiLibrary(unittest.TestCase):
 
         with mock.patch.dict(self.wrapper.os.environ, {"ROCM_PATH": "/custom/rocm"}, clear=True):
             with mock.patch.object(self.wrapper.os, "geteuid", return_value=1000):
-                with mock.patch.object(self.wrapper, "_get_versioned_library_locations", return_value=[]):
+                with mock.patch.object(
+                    self.wrapper, "_get_versioned_library_locations", return_value=[]
+                ):
                     with mock.patch.object(self.wrapper.ctypes, "CDLL", side_effect=fake_cdll):
                         _, location = self.wrapper.find_smi_library()
 
@@ -85,7 +87,9 @@ class TestFindSmiLibrary(unittest.TestCase):
 
         with mock.patch.dict(self.wrapper.os.environ, {"ROCM_PATH": "/tmp/evil"}, clear=True):
             with mock.patch.object(self.wrapper.os, "geteuid", return_value=0):
-                with mock.patch.object(self.wrapper, "_get_versioned_library_locations", return_value=[]):
+                with mock.patch.object(
+                    self.wrapper, "_get_versioned_library_locations", return_value=[]
+                ):
                     with mock.patch.object(self.wrapper.ctypes, "CDLL", side_effect=fake_cdll):
                         with self.assertRaises(OSError):
                             self.wrapper.find_smi_library()
@@ -105,7 +109,9 @@ class TestFindSmiLibrary(unittest.TestCase):
 
         with mock.patch.dict(self.wrapper.os.environ, {"ROCM_PATH": "/opt/rocm"}, clear=True):
             with mock.patch.object(self.wrapper.os, "geteuid", return_value=0):
-                with mock.patch.object(self.wrapper, "_get_versioned_library_locations", return_value=[]):
+                with mock.patch.object(
+                    self.wrapper, "_get_versioned_library_locations", return_value=[]
+                ):
                     with mock.patch.object(self.wrapper.ctypes, "CDLL", side_effect=fake_cdll):
                         _, location = self.wrapper.find_smi_library()
 
@@ -125,7 +131,9 @@ class TestFindSmiLibrary(unittest.TestCase):
 
         with mock.patch.dict(self.wrapper.os.environ, {"ROCM_PATH": "/opt/rocm"}, clear=True):
             with mock.patch.object(self.wrapper.os, "geteuid", return_value=0):
-                with mock.patch.object(self.wrapper, "_get_versioned_library_locations", return_value=[]):
+                with mock.patch.object(
+                    self.wrapper, "_get_versioned_library_locations", return_value=[]
+                ):
                     with mock.patch.object(self.wrapper.ctypes, "CDLL", side_effect=fake_cdll):
                         _, location = self.wrapper.find_smi_library()
 
