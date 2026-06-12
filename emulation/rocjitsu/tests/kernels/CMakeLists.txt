@@ -46,10 +46,6 @@ message(STATUS "Found amdclang++: ${AMDCLANG}")
 set(KERNEL_OUTPUT_DIR ${CMAKE_BINARY_DIR}/kernels)
 file(MAKE_DIRECTORY ${KERNEL_OUTPUT_DIR})
 
-# Locate the ROCm installation root for --rocm-path.
-get_filename_component(ROCM_PATH "${AMDCLANG}" DIRECTORY)
-get_filename_component(ROCM_PATH "${ROCM_PATH}" DIRECTORY)
-
 include(rj_add_device_kernel)
 
 rj_add_device_kernel(matmul_naive gfx950)
