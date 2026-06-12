@@ -51,7 +51,7 @@ if(BUILD_TESTING)
     # because the e2e tests need an O_DIRECT-capable local FS — the build
     # tree may live on overlay/nfs and isn't a safe default.
     execute_process(
-        COMMAND uuidgen
+        COMMAND cat /proc/sys/kernel/random/uuid
         OUTPUT_VARIABLE _basics_scratch_token
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
