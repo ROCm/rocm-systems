@@ -6,12 +6,17 @@
 
 // When RCCL is built with ENABLE_ROCSHMEM_GIN but not ENABLE_ROCSHMEM,
 // librccl.so holds an unresolved reference to rocshmem::anvil::anvil.
-// Tests link librocshmem.a and rely on the dynamic loader to bind that
-// symbol from the executable. The linker can still drop the anvil object
-// from the archive (no TU in the tests references it). This file keeps
-// the symbol linked into the binary.
+// Tests link librocshmem.a; the linker can drop anvil.o if nothing in the
+// test objects references it. We only need the symbol address — do not
+// include rocshmem's anvil.hpp here (it pulls HSA/HIP/device headers that
+// are not set up like the rocshmem library build).
 
-#include "anvil.hpp"
+namespace rocshmem {
+namespace anvil {
+class AnvilLib;
+extern AnvilLib& anvil;
+}  // namespace anvil
+}  // namespace rocshmem
 
 namespace {
 
