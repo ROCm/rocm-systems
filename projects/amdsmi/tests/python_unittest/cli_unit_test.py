@@ -43,6 +43,31 @@ class TestAmdSmiCli(unittest.TestCase):
     TMP_FILENAME = "_tmp.log"
     TMP_FOLDER = "_tmp"
 
+    @staticmethod
+    def _loads_concatenated_json(text):
+        """Decode one or more concatenated JSON documents from *text*.
+
+        ``amd-smi list --json`` currently prints two concatenated JSON
+        documents when a NIC is present (a GPU array followed by a combined
+        object). ``json.loads`` only accepts a single document and raises, so
+        decode iteratively with ``raw_decode``. Returns the list of decoded
+        top-level objects. The CLI emitting multiple documents is a separate
+        product bug; this only makes the test tolerant of it.
+        """
+        decoder = json.JSONDecoder()
+        docs = []
+        idx = 0
+        length = len(text)
+        while idx < length:
+            # Skip inter-document whitespace.
+            while idx < length and text[idx] in " \t\r\n":
+                idx += 1
+            if idx >= length:
+                break
+            obj, idx = decoder.raw_decode(text, idx)
+            docs.append(obj)
+        return docs
+
     @classmethod
     def setUpClass(cls):
         cls.common = common.Common(verbose)
@@ -63,27 +88,72 @@ class TestAmdSmiCli(unittest.TestCase):
                 raise RuntimeError(f'Error executing "{cmd}": {std_err}')
             if not data:
                 raise RuntimeError(f'Empty JSON output from "{cmd}". stderr: {std_err}')
+            docs = None
             try:
-                setattr(cls, f"{name}_data", json.loads(data))
+                parsed = json.loads(data)
             except (json.JSONDecodeError, TypeError) as e:
                 # TODO(amdsmi_team): Known issue — several AI NIC and CPU commands can produce
                 # malformed JSON/CSV/error output, causing parsing & other failures.
                 # We need to log tickets on these issues.
-
-                # Log warning but continue — malformed JSON output is a CLI bug,
-                # not a test infrastructure failure; tests that depend on this
-                # data will fail individually with a KeyError pointing to the
-                # missing key, making the root cause clear.
-                cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
-                setattr(cls, f"{name}_data", {})
+                #
+                # In particular `amd-smi list --json` emits two concatenated JSON
+                # documents when a NIC is present, which json.loads rejects.
+                # Decode the documents tolerantly so device enumeration (GPU and
+                # NIC) still works; fall back to {} only if nothing parses.
+                try:
+                    docs = cls._loads_concatenated_json(data) if isinstance(data, str) else []
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    docs = []
+                if docs:
+                    # Prefer the first list-shaped document for *_data (the device
+                    # array the existing logic iterates); else the first document.
+                    parsed = next((d for d in docs if isinstance(d, list)), docs[0])
+                else:
+                    cls.common.print(f'\n\tERROR: Could not parse JSON from "{cmd}": {e}')
+                    parsed = {}
+            setattr(cls, f"{name}_data", parsed)
+            if name == "list":
+                # Stash every parsed document so NIC entries (carried in a second
+                # "nic_data" document) can be extracted below regardless of shape.
+                cls._list_docs = docs if docs is not None else ([parsed] if parsed else [])
 
         cls.gpus = ["all"]
         for entry in cls.list_data:
+            if not isinstance(entry, dict) or "gpu" not in entry:
+                continue
             cls.gpus.append(entry["gpu"])
             if entry["gpu"] == 0:
                 # Only test bdf and uuid when gpu=0
                 cls.gpus.append(entry["bdf"])
                 cls.gpus.append(entry["uuid"])
+
+        # Build NIC selectors (mirrors cls.gpus). Source: the list --json
+        # documents stashed above. NIC entries are carried in a "nic_data"
+        # document when NICs are present. When no NICs exist, cls.nics stays
+        # empty -> the harness generates zero --nic permutations (see FindArgs
+        # and the "NIC" key in sub_args), so no spurious failures are produced.
+        cls.nics = []
+        nic_entries = []
+        for doc in getattr(cls, "_list_docs", []):
+            if isinstance(doc, dict) and isinstance(doc.get("nic_data"), list):
+                nic_entries = doc["nic_data"]
+                break
+        for idx, entry in enumerate(nic_entries):
+            if not isinstance(entry, dict):
+                continue
+            # NIC id mirrors the GPU id; fall back to the positional index.
+            nic_id = entry.get("nic", entry.get("ai_nic", entry.get("brcm_nic", idx)))
+            cls.nics.append(str(nic_id))
+            # Only add bdf/uuid selectors for the first NIC (mirrors gpu logic).
+            if idx == 0:
+                bdf = entry.get("bdf")
+                uuid = entry.get("uuid") or entry.get("permanent_address")
+                if bdf:
+                    cls.nics.append(str(bdf))
+                if uuid:
+                    cls.nics.append(str(uuid))
+        if cls.nics:
+            cls.nics.append("all")
 
         # When parsing, expand each arg with array element
         cls.sub_args = {
@@ -91,6 +161,7 @@ class TestAmdSmiCli(unittest.TestCase):
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": cls.gpus,
+            "NIC": cls.nics,
             "FILE": [
                 cls.TMP_FILENAME,
                 f"{cls.TMP_FILENAME} --overwrite",

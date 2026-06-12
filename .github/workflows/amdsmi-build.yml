@@ -331,6 +331,10 @@ jobs:
           run 'amd-smi version'
           run 'amd-smi list'
           run 'amd-smi list -e'
+          # Raw JSON: validates the cli_unit_test multi-document parser against
+          # real output (this is the command that emits two concatenated JSON
+          # docs when a NIC is present) and reveals the exact NIC entry keys.
+          run 'amd-smi list --json'
           for sub in "" bad-pages event fabric firmware list metric monitor partition process ras reset set static topology version xgmi node; do
             run "amd-smi $sub --help"
           done
