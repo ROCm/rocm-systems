@@ -245,7 +245,26 @@ correlation_id_finalize()
                 {}
             }
         }
-        ROCP_CI_LOG_IF(INFO, ndangling > 0) << "retired dangling correlation IDs: " << ndangling;
+
+        if(ndangling > 0)
+        {
+            auto retirement_ctxs = get_active_contexts([](const context* ctx) {
+                return (ctx->buffered_tracer &&
+                        (ctx->buffered_tracer->domains(
+                            ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
+            });
+
+            if(!retirement_ctxs.empty())
+            {
+                ROCP_CI_LOG_IF(INFO, ndangling > 0)
+                    << "retired dangling correlation IDs: " << ndangling;
+            }
+            else
+            {
+                ROCP_INFO << "retired dangling correlation IDs: " << ndangling
+                          << " (no retirement consumer active)";
+            }
+        }
     });
 }
 }  // namespace context
