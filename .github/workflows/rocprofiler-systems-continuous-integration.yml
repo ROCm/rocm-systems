@@ -190,6 +190,7 @@ jobs:
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -E "${{ env.EXCLUDED_TESTS }}" \
+            -L "rocm" \
             -LE "${{ env.EXCLUDED_LABELS }}"
 
       - name: Check for Leftover Buffered Files
