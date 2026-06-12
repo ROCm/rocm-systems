@@ -5032,7 +5032,7 @@ finally:
 
 ### amdsmi_get_gpu_vram_vendor
 
-Description: Get the vram vendor string of a gpu device.
+Description: **deprecated** Get the vram vendor string of a gpu device.
 
 Input parameters:
 

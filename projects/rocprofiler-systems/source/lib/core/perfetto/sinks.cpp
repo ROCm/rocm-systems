@@ -4,6 +4,7 @@
 #include "core/perfetto/sinks.hpp"
 #include <cstdint>
 
+#include "common/units.hpp"
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/locked_file_append.hpp"
@@ -39,8 +40,9 @@ emit_size_line(const std::string& filename, std::size_t bytes)
     if(!stderr_log_allowed()) return;
     std::fprintf(
         stderr, "[rocprofsys][%i]> %s perfetto (%.2f KB / %.2f MB / %.2f GB)... Done\n",
-        dmp::rank(), filename.c_str(), static_cast<double>(bytes) / units::KB,
-        static_cast<double>(bytes) / units::MB, static_cast<double>(bytes) / units::GB);
+        dmp::rank(), filename.c_str(), static_cast<double>(bytes) / units::kilobyte,
+        static_cast<double>(bytes) / units::megabyte,
+        static_cast<double>(bytes) / units::gigabyte);
     std::fflush(stderr);
 }
 

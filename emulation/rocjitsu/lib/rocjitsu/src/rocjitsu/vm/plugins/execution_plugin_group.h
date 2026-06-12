@@ -103,10 +103,11 @@ public:
   }
 
   virtual void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
-                                           uint32_t vgpr_count, uint32_t sgpr_count,
+                                           uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                            std::span<amdgpu::Wavefront *> wavefronts) {
     for (auto &p : plugins_)
-      p->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, vgpr_count, sgpr_count, wavefronts);
+      p->onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count, sgpr_count,
+                                     wavefronts);
   }
 
   virtual void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {

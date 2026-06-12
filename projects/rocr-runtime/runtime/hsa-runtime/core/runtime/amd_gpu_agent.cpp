@@ -143,7 +143,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
   num_p2p_engines_ =  properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
-                      : std::max(0U, properties_.NumSdmaEngines - 2);
+                      : (properties_.NumSdmaEngines > 2 ? properties_.NumSdmaEngines - 2 : 0);
 
   const core::Isa *isa_base;
 
@@ -1056,6 +1056,10 @@ hsa_status_t GpuAgent::PostToolsInit() {
   InitScratchPool();
   BindTrapHandler();
   InitDma();
+
+  const auto& flag = core::Runtime::runtime_singleton_->flag();
+  if (flag.poison_sigbus_delay_set())
+    driver().SetSigbusDelay(node_id(), flag.poison_sigbus_delay_ms());
 
   return HSA_STATUS_SUCCESS;
 }

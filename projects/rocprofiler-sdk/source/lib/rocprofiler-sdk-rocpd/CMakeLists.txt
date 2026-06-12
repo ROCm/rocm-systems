@@ -26,6 +26,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-build-flags
             rocprofiler-sdk::rocprofiler-sdk-memcheck
             rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-yaml-cpp
             rocprofiler-sdk::rocprofiler-sdk-dl)
 
 set_target_properties(
@@ -44,3 +45,5 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
     COMPONENT rocpd
     EXPORT rocprofiler-sdk-rocpd-targets)
+
+add_subdirectory(details)

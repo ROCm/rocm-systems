@@ -10,7 +10,7 @@
 ///     v_add_co_ci_u32, v_sub_co_ci_u32, v_subrev_co_ci_u32
 /// All six cin-form scalar bodies pull per-lane carry-in from
 /// `inst.src2.read_scalar64(wf)` (SGPR-pair) and write co into
-/// `inst.sdst.write_scalar64`, with inactive lanes preserved from the
+/// `inst.sdst.write_scalar64`, with inactive lanes zeroed in the
 /// incoming VCC. Each (case, vcc_in, cin) runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs --
 /// and the scalar-vs-SIMD equivalence on BOTH the destination VGPR AND the full

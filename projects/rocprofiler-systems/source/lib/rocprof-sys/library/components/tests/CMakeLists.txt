@@ -6,6 +6,7 @@ add_library(
     lib-components-tests
     OBJECT
     test_shmem_gotcha.cpp
+    test_ucx_gotcha.cpp
     test_pthread_mutex_gotcha.cpp
 )
 
