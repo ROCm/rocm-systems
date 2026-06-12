@@ -9,12 +9,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Added `--partition` flag to `amd-smi metric` for partition-scoped metrics**.  
-  - The `-X`/`--partition` flag switches existing metric categories (temperature, clock, usage, throttle) to use partition-level data sources
-  - Preserves existing output schema for JSON/CSV compatibility
-  - When `--partition` is set with `--temperature`: displays MID and XCP/XCD temperatures
-  - When `--partition` is set with `--clock`: displays GFX/VCLK/DCLK/SOCCLK from partition metrics
-  - When `--partition` is set with `--usage`: displays XCP-scoped GFX/JPEG/VCN activity
-  - Throttle metrics already include partition-level violation status and activity
+  - The `-X`/`--partition` flag switches the temperature, clock, and usage categories to partition-level data sources; throttle metrics are already partition-aware.
+  - Reuses the existing temperature/clock/usage section schema and adds partition-only AID/XCP/MID entries within it; socket-only fields with no partition equivalent report `N/A`.
+  - When `--partition` is set with `--temperature`: adds MID and per-XCP/XCD temperatures.
+  - When `--partition` is set with `--clock`: sources GFX/VCLK/DCLK/SOCCLK from partition metrics and adds per-AID and per-XCP clock entries with their limits.
+  - When `--partition` is set with `--usage`: reports per-XCP GFX/JPEG/VCN activity.
+  - Only available on MI300 or newer ASICs.
 
 - **Added `--folder` support to `amd-smi ras --afid`**.
   - `amd-smi ras --afid --folder <DIR>` decodes every `*.cper` in a directory and prints a `file_name | list of afids` table (or a JSON array under `--json`).
