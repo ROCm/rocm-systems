@@ -914,12 +914,6 @@ def load_non_mertrics_table(
                     f"Couldn't load {csv_file.name}. "
                     "This may result in missing analysis data."
                 )
-        # NB: Special case for sysinfo. Probably room for improvement in this whole
-        # function design
-        elif "from_csv_columnwise" in df.columns and id == 101:
-            tmp[df_id] = workload.sys_info.transpose()
-            # All transposed columns should be marked with a general header
-            tmp[df_id].columns = ["Info"]
         elif "from_csv_columnwise" in df.columns:
             # NB:
             #   Another way might be doing transpose in tty like metric_table.

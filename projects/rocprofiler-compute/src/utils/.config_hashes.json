@@ -3,7 +3,7 @@
     "gfx115x": {
       "files": {
         "0000_top_stats.yaml": "9d2d844dd3e3cbd6743c5a7f4ada6dcc",
-        "0100_system_info.yaml": "cdf8d8eb53253c6525b71dc93b9ad931",
+        "0100_system_info.yaml": "09a09ab73c94db93d40eba5068ae06ca",
         "0200_system_speed_of_light.yaml": "543e5abb435a901c41a0ab626b08b8ce",
         "0300_memory_chart.yaml": "d20bdacd6481a6d4d9d45681f1a81f1c",
         "0400_roofline.yaml": "4da7743df670dcc04465255e0a208ef7",
