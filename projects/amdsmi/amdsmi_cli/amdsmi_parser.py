@@ -1776,7 +1776,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         throttle_help = (
             "Displays throttle accumulators;\n    Only available for MI300 or newer ASICs"
         )
-        partition_help = "Displays XCP partition metrics"
+        partition_help = "Display partition-scoped metrics (XCP/AID/MID)"
 
         # Help text for Arguments only on Hypervisors
         schedule_help = "All scheduling information"

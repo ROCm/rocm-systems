@@ -457,8 +457,96 @@ class MetricCommands:
                     engine_usage["jpeg_busy"] = "N/A"
                     engine_usage["vcn_busy"] = "N/A"
 
-                    if num_partition != "N/A":
-                        # these are one after another, in order to display each in sub-sections
+                    # When partition flag is set, use partition-scoped data source
+                    if args.partition:
+                        try:
+                            gpu_partition_metrics = (
+                                amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
+                            )
+                            xcp_gfx_busy = gpu_partition_metrics.get("xcp_stats.gfx_busy_inst", [])
+                            xcp_jpeg_busy = gpu_partition_metrics.get("xcp_stats.jpeg_busy", [])
+                            xcp_vcn_busy = gpu_partition_metrics.get("xcp_stats.vcn_busy", [])
+
+                            if xcp_gfx_busy != "N/A" and isinstance(xcp_gfx_busy, list):
+                                new_xcp_dict = {}
+                                for xcp_idx, gfx_busy in enumerate(xcp_gfx_busy):
+                                    new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                        list(gfx_busy) if isinstance(gfx_busy, list) else gfx_busy
+                                    )
+                                engine_usage["gfx_busy_inst"] = new_xcp_dict
+
+                            if xcp_jpeg_busy != "N/A" and isinstance(xcp_jpeg_busy, list):
+                                new_xcp_dict = {}
+                                for xcp_idx, jpeg_busy in enumerate(xcp_jpeg_busy):
+                                    new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                        list(jpeg_busy)
+                                        if isinstance(jpeg_busy, list)
+                                        else jpeg_busy
+                                    )
+                                engine_usage["jpeg_busy"] = new_xcp_dict
+
+                            if xcp_vcn_busy != "N/A" and isinstance(xcp_vcn_busy, list):
+                                new_xcp_dict = {}
+                                for xcp_idx, vcn_busy in enumerate(xcp_vcn_busy):
+                                    new_xcp_dict[f"xcp_{xcp_idx}"] = (
+                                        list(vcn_busy) if isinstance(vcn_busy, list) else vcn_busy
+                                    )
+                                engine_usage["vcn_busy"] = new_xcp_dict
+
+                            # Add AID-level usage data (VCN_ACTIVITY, JPEG_ACTIVITY per AID)
+                            # Determine number of AIDs - VCN activity is reported per AID
+                            # The first element of each XCP's VCN data corresponds to AID activity
+                            if xcp_vcn_busy != "N/A" and isinstance(xcp_vcn_busy, list):
+                                for aid_idx, vcn_data in enumerate(xcp_vcn_busy):
+                                    if isinstance(vcn_data, list) and len(vcn_data) > 0:
+                                        aid_key = f"AID_{aid_idx}"
+                                        if aid_key not in engine_usage:
+                                            engine_usage[aid_key] = {}
+                                        # First element of VCN data is AID-level
+                                        vcn_activity = (
+                                            vcn_data[0] if vcn_data[0] != "N/A" else "N/A"
+                                        )
+                                        engine_usage[aid_key]["VCN_ACTIVITY"] = vcn_activity
+
+                            # JPEG activity per AID (array of JPEG engines per AID)
+                            if xcp_jpeg_busy != "N/A" and isinstance(xcp_jpeg_busy, list):
+                                for aid_idx, jpeg_data in enumerate(xcp_jpeg_busy):
+                                    if isinstance(jpeg_data, list):
+                                        aid_key = f"AID_{aid_idx}"
+                                        if aid_key not in engine_usage:
+                                            engine_usage[aid_key] = {}
+                                        engine_usage[aid_key]["JPEG_ACTIVITY"] = list(jpeg_data)
+
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            logging.debug(
+                                "Failed to get partition usage metrics for gpu %s | %s",
+                                gpu_id,
+                                e.get_error_info(),
+                            )
+                            # Fall back to socket-level metrics
+                            if num_partition != "N/A":
+                                new_xcp_dict = {}
+                                for current_xcp in range(num_partition):
+                                    new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
+                                        "xcp_stats.gfx_busy_inst"
+                                    ][current_xcp]
+                                engine_usage["gfx_busy_inst"] = new_xcp_dict
+
+                                new_xcp_dict = {}
+                                for current_xcp in range(num_partition):
+                                    new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
+                                        "xcp_stats.jpeg_busy"
+                                    ][current_xcp]
+                                engine_usage["jpeg_busy"] = new_xcp_dict
+
+                                new_xcp_dict = {}
+                                for current_xcp in range(num_partition):
+                                    new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
+                                        "xcp_stats.vcn_busy"
+                                    ][current_xcp]
+                                engine_usage["vcn_busy"] = new_xcp_dict
+                    elif num_partition != "N/A":
+                        # Socket-level metrics with partition support (existing behavior)
                         new_xcp_dict = {}
                         for current_xcp in range(num_partition):
                             new_xcp_dict[f"xcp_{current_xcp}"] = gpu_metric[
@@ -490,14 +578,19 @@ class MetricCommands:
                                     if activity != "N/A":
                                         engine_usage[key][index] = f"{activity} {activity_unit}"
                                 # Convert list to a string for human readable format
-                                engine_usage[key] = "[" + ", ".join(engine_usage[key]) + "]"
+                                engine_usage[key] = (
+                                    "[" + ", ".join(str(x) for x in engine_usage[key]) + "]"
+                                )
                             elif isinstance(value, dict):
                                 for k, v in value.items():
-                                    for index, activity in enumerate(v):
-                                        if activity != "N/A":
-                                            value[k][index] = f"{activity} {activity_unit}"
-                                    # Convert list to a string for human readable format
-                                    value[k] = "[" + ", ".join(value[k]) + "]"
+                                    if isinstance(v, list):
+                                        for index, activity in enumerate(v):
+                                            if activity != "N/A" and not isinstance(activity, str):
+                                                value[k][index] = f"{activity} {activity_unit}"
+                                        # Convert list to a string for human readable format
+                                        value[k] = "[" + ", ".join(str(x) for x in value[k]) + "]"
+                                    elif v != "N/A" and not isinstance(v, str):
+                                        value[k] = f"{v} {activity_unit}"
                             elif value != "N/A":
                                 engine_usage[key] = f"{value} {activity_unit}"
                         if self.logger.is_json_format():
@@ -510,12 +603,15 @@ class MetricCommands:
                                         }
                             elif isinstance(value, dict):
                                 for k, v in value.items():
-                                    for index, activity in enumerate(v):
-                                        if activity != "N/A":
-                                            value[k][index] = {
-                                                "value": activity,
-                                                "unit": activity_unit,
-                                            }
+                                    if isinstance(v, list):
+                                        for index, activity in enumerate(v):
+                                            if activity != "N/A":
+                                                value[k][index] = {
+                                                    "value": activity,
+                                                    "unit": activity_unit,
+                                                }
+                                    elif v != "N/A":
+                                        value[k] = {"value": v, "unit": activity_unit}
                             elif value != "N/A":
                                 engine_usage[key] = {"value": value, "unit": activity_unit}
 
@@ -651,132 +747,368 @@ class MetricCommands:
 
                 clock_unit = "MHz"
 
-                # Populate clock values from gpu_metrics_info
-                # Populate GFX clock values
-                try:
-                    current_gfx_clocks = gpu_metric["current_gfxclks"]
-                    if current_gfx_clocks != "N/A":
-                        for clock_index, current_gfx_clock in enumerate(current_gfx_clocks):
-                            # If the current clock is N/A then nothing else applies
-                            if current_gfx_clock == "N/A":
-                                continue
-                            gfx_index = f"gfx_{clock_index}"
-                            clocks[gfx_index]["clk"] = self.helpers.unit_format(
-                                self.logger, current_gfx_clock, clock_unit
-                            )
-                            # Populate clock locked status
-                            if gpu_metric["gfxclk_lock_status"] != "N/A":
-                                gfx_clock_lock_flag = (
-                                    1 << clock_index
-                                )  # This is the position of the clock lock flag
-                                if gpu_metric["gfxclk_lock_status"] & gfx_clock_lock_flag:
-                                    clocks[gfx_index]["clk_locked"] = "ENABLED"
-                                else:
-                                    clocks[gfx_index]["clk_locked"] = "DISABLED"
-                except Exception as e:
-                    logging.debug("Failed to get current_gfxclks for gpu %s | %s", gpu_id, e)
-
-                # Populate MEM clock value
-                try:
-                    current_mem_clock = gpu_metric["current_uclk"]  # single value
-                    if current_mem_clock != "N/A":
-                        clocks["mem_0"]["clk"] = self.helpers.unit_format(
-                            self.logger, current_mem_clock, clock_unit
+                # When partition flag is set, use partition-scoped data source
+                partition_metrics_used = False
+                if args.partition:
+                    try:
+                        gpu_partition_metrics = (
+                            amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
                         )
-                except Exception as e:
-                    logging.debug("Failed to get current_uclk for gpu %s | %s", gpu_id, e)
+                        partition_metrics_used = True
 
-                # Populate VCLK clock values
-                try:
-                    current_vclk_clocks = gpu_metric["current_vclk0s"]
-                    # If the current vclk clocks are not available, we cannot proceed further
-                    if current_vclk_clocks != "N/A":
-                        for clock_index, current_vclk_clock in enumerate(current_vclk_clocks):
-                            # If the current clock is N/A then nothing else applies
-                            if current_vclk_clock == "N/A":
-                                continue
-                            vclk_index = f"vclk_{clock_index}"
-                            clocks[vclk_index]["clk"] = self.helpers.unit_format(
-                                self.logger, current_vclk_clock, clock_unit
-                            )
-                except Exception as e:
-                    logging.debug("Failed to get current_vclk0s for gpu %s | %s", gpu_id, e)
+                        # Use partition metrics for GFX/VCLK/DCLK/SOCCLK instead of socket metrics
+                        # Populate GFX clocks from partition metrics
+                        current_gfx_clocks = gpu_partition_metrics.get("current_gfxclks", "N/A")
+                        if current_gfx_clocks != "N/A" and isinstance(current_gfx_clocks, list):
+                            for xcp_idx, xcp_gfx_clks in enumerate(current_gfx_clocks):
+                                if xcp_gfx_clks != "N/A" and isinstance(xcp_gfx_clks, list):
+                                    for engine_idx, clk in enumerate(xcp_gfx_clks):
+                                        if clk != "N/A":
+                                            gfx_index = (
+                                                f"gfx_{xcp_idx * len(xcp_gfx_clks) + engine_idx}"
+                                            )
+                                            if gfx_index in clocks:
+                                                clocks[gfx_index]["clk"] = self.helpers.unit_format(
+                                                    self.logger, clk, clock_unit
+                                                )
 
-                # Populate DCLK clock values
-                try:
-                    current_dclk_clocks = gpu_metric["current_dclk0s"]
-                    # If the current dclk clocks are not available, we cannot proceed further
-                    if current_dclk_clocks != "N/A":
-                        for clock_index, current_dclk_clock in enumerate(current_dclk_clocks):
-                            # If the current clock is N/A then nothing else applies
-                            if current_dclk_clock == "N/A":
-                                continue
-                            dclk_index = f"dclk_{clock_index}"
-                            clocks[dclk_index]["clk"] = self.helpers.unit_format(
-                                self.logger, current_dclk_clock, clock_unit
-                            )
-                except Exception as e:
-                    logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
+                        # GFX clock lock status from partition metrics
+                        gfxclk_lock_status = gpu_partition_metrics.get("gfxclk_lock_status", 0)
+                        if gfxclk_lock_status != "N/A" and gfxclk_lock_status != 0:
+                            for idx in range(amdsmi_interface.AMDSMI_MAX_NUM_GFX_CLKS):
+                                gfx_index = f"gfx_{idx}"
+                                if gfx_index in clocks:
+                                    if (gfxclk_lock_status >> idx) & 1:
+                                        clocks[gfx_index]["clk_locked"] = "ENABLED"
+                                    else:
+                                        clocks[gfx_index]["clk_locked"] = "DISABLED"
 
-                # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
-                try:
-                    frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
-                        args.gpu, amdsmi_interface.AmdSmiClkType.DF
-                    )
-                    # The C library reports current = (uint32_t)-1 when the
-                    # kernel exposes pp_dpm_fclk without a '*' current-level
-                    # marker (e.g. SMU power-gated DF on gfx1151 APUs at idle).
-                    # Treat that as "no current frequency" so we don't index
-                    # out of range.
-                    current_fclk_index = frequency_dict["current"]
-                    if current_fclk_index == 0xFFFFFFFF or current_fclk_index >= len(
-                        frequency_dict["frequency"]
-                    ):
-                        raise IndexError("no current fclk level reported by kernel")
-                    current_fclk_clock = frequency_dict["frequency"][current_fclk_index]
-                    current_fclk_clock = self.helpers.convert_SI_unit(
-                        current_fclk_clock, self.helpers.SI_Unit.MICRO
-                    )
-                    clocks["fclk_0"]["clk"] = self.helpers.unit_format(
-                        self.logger, current_fclk_clock, clock_unit
-                    )
-                except (KeyError, IndexError, amdsmi_exception.AmdSmiLibraryException) as e:
-                    logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
+                        # Populate VCLK from partition metrics
+                        current_vclk_clocks = gpu_partition_metrics.get("current_vclk0s", "N/A")
+                        if current_vclk_clocks != "N/A" and isinstance(current_vclk_clocks, list):
+                            for clock_index, current_vclk_clock in enumerate(current_vclk_clocks):
+                                if current_vclk_clock != "N/A":
+                                    vclk_index = f"vclk_{clock_index}"
+                                    if vclk_index in clocks:
+                                        clocks[vclk_index]["clk"] = self.helpers.unit_format(
+                                            self.logger, current_vclk_clock, clock_unit
+                                        )
 
-                # Populate SOCCLK clock value
-                try:
-                    current_socclk_clock = gpu_metric["current_socclk"]
-                    # If the current socclk clocks are not available, we cannot proceed further
-                    if current_socclk_clock != "N/A":
-                        clocks["socclk_0"]["clk"] = self.helpers.unit_format(
-                            self.logger, current_socclk_clock, clock_unit
+                        # Populate DCLK from partition metrics
+                        current_dclk_clocks = gpu_partition_metrics.get("current_dclk0s", "N/A")
+                        if current_dclk_clocks != "N/A" and isinstance(current_dclk_clocks, list):
+                            for clock_index, current_dclk_clock in enumerate(current_dclk_clocks):
+                                if current_dclk_clock != "N/A":
+                                    dclk_index = f"dclk_{clock_index}"
+                                    if dclk_index in clocks:
+                                        clocks[dclk_index]["clk"] = self.helpers.unit_format(
+                                            self.logger, current_dclk_clock, clock_unit
+                                        )
+
+                        # Populate SOCCLK from partition metrics (AID level)
+                        current_socclks = gpu_partition_metrics.get("current_socclks", "N/A")
+                        if current_socclks != "N/A" and isinstance(current_socclks, list):
+                            for idx, socclk in enumerate(current_socclks):
+                                if socclk != "N/A":
+                                    clocks["socclk_0"]["clk"] = self.helpers.unit_format(
+                                        self.logger, socclk, clock_unit
+                                    )
+                                    break  # Use first valid value
+
+                        # Populate MID SOC clocks from partition metrics
+                        current_socclks_mid = gpu_partition_metrics.get(
+                            "current_socclks_mid", "N/A"
                         )
-                except KeyError as e:
-                    logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
+                        if current_socclks_mid != "N/A" and isinstance(current_socclks_mid, list):
+                            clocks["socclks_mid"] = {
+                                f"MID_{index}": self.helpers.unit_format(
+                                    self.logger, clk, clock_unit
+                                )
+                                for index, clk in enumerate(current_socclks_mid)
+                                if clk != "N/A"
+                            }
 
-                try:
-                    current_uclk_aid = gpu_metric.get("current_uclk_aid", "N/A")
-                    if current_uclk_aid != "N/A":
-                        clocks["uclk_aid"] = {
-                            f"AID_{index}": self.helpers.unit_format(self.logger, clk, clock_unit)
-                            if clk != "N/A"
-                            else "N/A"
-                            for index, clk in enumerate(current_uclk_aid)
-                        }
-                except Exception as e:
-                    logging.debug("Failed to get current_uclk_aid for gpu %s | %s", gpu_id, e)
+                        # Add AID-level clock data (VCLK, DCLK, SOCCLK per AID)
+                        # Determine number of AIDs based on VCLK array length
+                        num_aids = 0
+                        if isinstance(current_vclk_clocks, list) and current_vclk_clocks != "N/A":
+                            num_aids = len([x for x in current_vclk_clocks if x != "N/A" and x > 0])
 
-                try:
-                    current_socclks_mid = gpu_metric.get("current_socclks_mid", "N/A")
-                    if current_socclks_mid != "N/A":
-                        clocks["socclks_mid"] = {
-                            f"MID_{index}": self.helpers.unit_format(self.logger, clk, clock_unit)
-                            if clk != "N/A"
-                            else "N/A"
-                            for index, clk in enumerate(current_socclks_mid)
-                        }
-                except Exception as e:
-                    logging.debug("Failed to get current_socclks_mid for gpu %s | %s", gpu_id, e)
+                        # Get clock limits for AID clocks
+                        try:
+                            vclk0_limits = amdsmi_interface.amdsmi_get_clock_info(
+                                args.gpu, amdsmi_interface.AmdSmiClkType.VCLK0
+                            )
+                            dclk0_limits = amdsmi_interface.amdsmi_get_clock_info(
+                                args.gpu, amdsmi_interface.AmdSmiClkType.DCLK0
+                            )
+                            soc_limits = amdsmi_interface.amdsmi_get_clock_info(
+                                args.gpu, amdsmi_interface.AmdSmiClkType.SOC
+                            )
+                        except (amdsmi_exception.AmdSmiLibraryException, Exception):
+                            vclk0_limits = None
+                            dclk0_limits = None
+                            soc_limits = None
+
+                        for aid_idx in range(num_aids):
+                            aid_key = f"AID_{aid_idx}"
+                            aid_clocks = {}
+
+                            # VCLK for this AID
+                            if (
+                                aid_idx < len(current_vclk_clocks)
+                                and current_vclk_clocks[aid_idx] != "N/A"
+                            ):
+                                aid_clocks["CLK_VCLK"] = self.helpers.unit_format(
+                                    self.logger, current_vclk_clocks[aid_idx], clock_unit
+                                )
+                                if vclk0_limits:
+                                    aid_clocks["CLK_VCLK_MIN_LIMIT"] = self.helpers.unit_format(
+                                        self.logger, vclk0_limits["min_clk"], clock_unit
+                                    )
+                                    aid_clocks["CLK_VCLK_MAX_LIMIT"] = self.helpers.unit_format(
+                                        self.logger, vclk0_limits["max_clk"], clock_unit
+                                    )
+
+                            # DCLK for this AID
+                            if isinstance(current_dclk_clocks, list) and aid_idx < len(
+                                current_dclk_clocks
+                            ):
+                                if current_dclk_clocks[aid_idx] != "N/A":
+                                    aid_clocks["CLK_DCLK_LIMIT"] = self.helpers.unit_format(
+                                        self.logger, current_dclk_clocks[aid_idx], clock_unit
+                                    )
+                                    if dclk0_limits:
+                                        aid_clocks["CLK_DCLK_MIN_LIMIT"] = self.helpers.unit_format(
+                                            self.logger, dclk0_limits["min_clk"], clock_unit
+                                        )
+                                        aid_clocks["CLK_DCLK_MAX_LIMIT"] = self.helpers.unit_format(
+                                            self.logger, dclk0_limits["max_clk"], clock_unit
+                                        )
+
+                            # SOCCLK for this AID
+                            if isinstance(current_socclks, list) and aid_idx < len(current_socclks):
+                                if current_socclks[aid_idx] != "N/A":
+                                    aid_clocks["CLK_SOCCLK_LIMIT"] = self.helpers.unit_format(
+                                        self.logger, current_socclks[aid_idx], clock_unit
+                                    )
+                                    if soc_limits:
+                                        aid_clocks["CLK_SOCCLK_MIN_LIMIT"] = (
+                                            self.helpers.unit_format(
+                                                self.logger, soc_limits["min_clk"], clock_unit
+                                            )
+                                        )
+                                        aid_clocks["CLK_SOCCLK_MAX_LIMIT"] = (
+                                            self.helpers.unit_format(
+                                                self.logger, soc_limits["max_clk"], clock_unit
+                                            )
+                                        )
+
+                            if aid_clocks:
+                                clocks[aid_key] = aid_clocks
+
+                        # Add XCP-level GFX clock data (GFX_CLK per XCP with limits and lock status)
+                        # Determine number of XCPs
+                        num_xcps = 0
+                        if isinstance(current_gfx_clocks, list) and current_gfx_clocks != "N/A":
+                            num_xcps = len(current_gfx_clocks)
+
+                        # Get GFX clock limits
+                        try:
+                            gfx_limits = amdsmi_interface.amdsmi_get_clock_info(
+                                args.gpu, amdsmi_interface.AmdSmiClkType.GFX
+                            )
+                        except (amdsmi_exception.AmdSmiLibraryException, Exception):
+                            gfx_limits = None
+
+                        for xcp_idx in range(num_xcps):
+                            xcp_key = f"XCP_{xcp_idx}"
+                            xcp_clocks = {}
+
+                            # GFX clock for this XCP (could be single value or array of engine clocks)
+                            if xcp_idx < len(current_gfx_clocks):
+                                gfx_clk_data = current_gfx_clocks[xcp_idx]
+                                if gfx_clk_data != "N/A":
+                                    if isinstance(gfx_clk_data, list):
+                                        # Array of engine clocks - take first valid value
+                                        for clk in gfx_clk_data:
+                                            if clk != "N/A":
+                                                xcp_clocks["GFX_CLK"] = self.helpers.unit_format(
+                                                    self.logger, clk, clock_unit
+                                                )
+                                                break
+                                    else:
+                                        # Single clock value
+                                        xcp_clocks["GFX_CLK"] = self.helpers.unit_format(
+                                            self.logger, gfx_clk_data, clock_unit
+                                        )
+
+                            # GFX min/max limits (same for all XCPs)
+                            if gfx_limits:
+                                xcp_clocks["GFX_MIN_CLK"] = (
+                                    f"[{self.helpers.unit_format(self.logger, gfx_limits['min_clk'], clock_unit)}]"
+                                )
+                                xcp_clocks["GFX_MAX_CLK"] = (
+                                    f"[{self.helpers.unit_format(self.logger, gfx_limits['max_clk'], clock_unit)}]"
+                                )
+
+                            # GFX clock lock status (4 engines per XCP)
+                            if gfxclk_lock_status != "N/A" and gfxclk_lock_status != 0:
+                                lock_status = []
+                                for bit in range(4):  # 4 engines per XCP
+                                    bit_pos = xcp_idx * 4 + bit
+                                    is_locked = (gfxclk_lock_status >> bit_pos) & 1
+                                    lock_status.append("ENABLED" if is_locked else "DISABLED")
+                                xcp_clocks["GFX_CLK_LOCKED"] = "[" + ", ".join(lock_status) + "]"
+                            else:
+                                xcp_clocks["GFX_CLK_LOCKED"] = (
+                                    "[DISABLED, DISABLED, DISABLED, DISABLED]"
+                                )
+
+                            if xcp_clocks:
+                                clocks[xcp_key] = xcp_clocks
+
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        logging.debug(
+                            "Failed to get partition clock metrics for gpu %s | %s",
+                            gpu_id,
+                            e.get_error_info(),
+                        )
+                        partition_metrics_used = False
+
+                # Populate clock values from gpu_metrics_info (socket-level or fallback)
+                if not partition_metrics_used:
+                    # Populate GFX clock values
+                    try:
+                        current_gfx_clocks = gpu_metric["current_gfxclks"]
+                        if current_gfx_clocks != "N/A":
+                            for clock_index, current_gfx_clock in enumerate(current_gfx_clocks):
+                                # If the current clock is N/A then nothing else applies
+                                if current_gfx_clock == "N/A":
+                                    continue
+                                gfx_index = f"gfx_{clock_index}"
+                                clocks[gfx_index]["clk"] = self.helpers.unit_format(
+                                    self.logger, current_gfx_clock, clock_unit
+                                )
+                                # Populate clock locked status
+                                if gpu_metric["gfxclk_lock_status"] != "N/A":
+                                    gfx_clock_lock_flag = (
+                                        1 << clock_index
+                                    )  # This is the position of the clock lock flag
+                                    if gpu_metric["gfxclk_lock_status"] & gfx_clock_lock_flag:
+                                        clocks[gfx_index]["clk_locked"] = "ENABLED"
+                                    else:
+                                        clocks[gfx_index]["clk_locked"] = "DISABLED"
+                    except Exception as e:
+                        logging.debug("Failed to get current_gfxclks for gpu %s | %s", gpu_id, e)
+
+                    # Populate MEM clock value
+                    try:
+                        current_mem_clock = gpu_metric["current_uclk"]  # single value
+                        if current_mem_clock != "N/A":
+                            clocks["mem_0"]["clk"] = self.helpers.unit_format(
+                                self.logger, current_mem_clock, clock_unit
+                            )
+                    except Exception as e:
+                        logging.debug("Failed to get current_uclk for gpu %s | %s", gpu_id, e)
+
+                    # Populate VCLK clock values
+                    try:
+                        current_vclk_clocks = gpu_metric["current_vclk0s"]
+                        # If the current vclk clocks are not available, we cannot proceed further
+                        if current_vclk_clocks != "N/A":
+                            for clock_index, current_vclk_clock in enumerate(current_vclk_clocks):
+                                # If the current clock is N/A then nothing else applies
+                                if current_vclk_clock == "N/A":
+                                    continue
+                                vclk_index = f"vclk_{clock_index}"
+                                clocks[vclk_index]["clk"] = self.helpers.unit_format(
+                                    self.logger, current_vclk_clock, clock_unit
+                                )
+                    except Exception as e:
+                        logging.debug("Failed to get current_vclk0s for gpu %s | %s", gpu_id, e)
+
+                    # Populate DCLK clock values
+                    try:
+                        current_dclk_clocks = gpu_metric["current_dclk0s"]
+                        # If the current dclk clocks are not available, we cannot proceed further
+                        if current_dclk_clocks != "N/A":
+                            for clock_index, current_dclk_clock in enumerate(current_dclk_clocks):
+                                # If the current clock is N/A then nothing else applies
+                                if current_dclk_clock == "N/A":
+                                    continue
+                                dclk_index = f"dclk_{clock_index}"
+                                clocks[dclk_index]["clk"] = self.helpers.unit_format(
+                                    self.logger, current_dclk_clock, clock_unit
+                                )
+                    except Exception as e:
+                        logging.debug("Failed to get current_dclk0s for gpu %s | %s", gpu_id, e)
+
+                    # Populate FCLK clock value; fclk not present in gpu_metrics so use amdsmi_get_clk_freq
+                    try:
+                        frequency_dict = amdsmi_interface.amdsmi_get_clk_freq(
+                            args.gpu, amdsmi_interface.AmdSmiClkType.DF
+                        )
+                        # The C library reports current = (uint32_t)-1 when the
+                        # kernel exposes pp_dpm_fclk without a '*' current-level
+                        # marker (e.g. SMU power-gated DF on gfx1151 APUs at idle).
+                        # Treat that as "no current frequency" so we don't index
+                        # out of range.
+                        current_fclk_index = frequency_dict["current"]
+                        if current_fclk_index == 0xFFFFFFFF or current_fclk_index >= len(
+                            frequency_dict["frequency"]
+                        ):
+                            raise IndexError("no current fclk level reported by kernel")
+                        current_fclk_clock = frequency_dict["frequency"][current_fclk_index]
+                        current_fclk_clock = self.helpers.convert_SI_unit(
+                            current_fclk_clock, self.helpers.SI_Unit.MICRO
+                        )
+                        clocks["fclk_0"]["clk"] = self.helpers.unit_format(
+                            self.logger, current_fclk_clock, clock_unit
+                        )
+                    except (KeyError, IndexError, amdsmi_exception.AmdSmiLibraryException) as e:
+                        logging.debug("Failed to get fclk info for gpu %s | %s", gpu_id, e)
+
+                    # Populate SOCCLK clock value
+                    try:
+                        current_socclk_clock = gpu_metric["current_socclk"]
+                        # If the current socclk clocks are not available, we cannot proceed further
+                        if current_socclk_clock != "N/A":
+                            clocks["socclk_0"]["clk"] = self.helpers.unit_format(
+                                self.logger, current_socclk_clock, clock_unit
+                            )
+                    except KeyError as e:
+                        logging.debug("Failed to get current_socclk for gpu %s | %s", gpu_id, e)
+
+                    try:
+                        current_uclk_aid = gpu_metric.get("current_uclk_aid", "N/A")
+                        if current_uclk_aid != "N/A":
+                            clocks["uclk_aid"] = {
+                                f"AID_{index}": self.helpers.unit_format(
+                                    self.logger, clk, clock_unit
+                                )
+                                if clk != "N/A"
+                                else "N/A"
+                                for index, clk in enumerate(current_uclk_aid)
+                            }
+                    except Exception as e:
+                        logging.debug("Failed to get current_uclk_aid for gpu %s | %s", gpu_id, e)
+
+                    try:
+                        current_socclks_mid = gpu_metric.get("current_socclks_mid", "N/A")
+                        if current_socclks_mid != "N/A":
+                            clocks["socclks_mid"] = {
+                                f"MID_{index}": self.helpers.unit_format(
+                                    self.logger, clk, clock_unit
+                                )
+                                if clk != "N/A"
+                                else "N/A"
+                                for index, clk in enumerate(current_socclks_mid)
+                            }
+                    except Exception as e:
+                        logging.debug(
+                            "Failed to get current_socclks_mid for gpu %s | %s", gpu_id, e
+                        )
 
                 # Populate the max and min clock values from sysfs.
                 # Min and Max values are per clock type, not per clock engine.
@@ -1015,31 +1347,77 @@ class MetricCommands:
                         e.get_error_info(),
                     )
 
-                temperatures = {
-                    "edge": temperature_edge_current,
-                    "hotspot": temperature_hotspot_current,
-                    "mem": temperature_vram_current,
-                    "hbm_stacks": gpu_metric.get("temperature_hbm_stacks", "N/A"),
-                    "mid": gpu_metric.get("temperature_mid", "N/A"),
-                    "aid": gpu_metric.get("temperature_aid", "N/A"),
-                    "xcd": "N/A",
-                }
-
-                if temperatures["hbm_stacks"] != "N/A":
-                    temperatures["hbm_stacks"] = list(temperatures["hbm_stacks"])
-                if temperatures["mid"] != "N/A":
-                    temperatures["mid"] = list(temperatures["mid"])
-                if temperatures["aid"] != "N/A":
-                    temperatures["aid"] = list(temperatures["aid"])
-
-                if num_partition != "N/A":
-                    xcp_temp_xcd = gpu_metric.get("xcp_stats.temperature_xcd", "N/A")
-                    if xcp_temp_xcd != "N/A":
-                        available_partition = min(num_partition, len(xcp_temp_xcd))
-                        temperatures["xcd"] = {
-                            f"XCP_{current_xcp}": xcp_temp_xcd[current_xcp]
-                            for current_xcp in range(available_partition)
+                # When partition flag is set, use partition-scoped data source
+                if args.partition:
+                    try:
+                        gpu_partition_metrics = (
+                            amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(args.gpu)
+                        )
+                        temperatures = {
+                            "edge": temperature_edge_current,
+                            "hotspot": temperature_hotspot_current,
+                            "mem": temperature_vram_current,
+                            "hbm_stacks": "N/A",
+                            "mid": gpu_partition_metrics.get("temperature_mid", "N/A"),
+                            "aid": "N/A",  # AID temps not in partition metrics
+                            "xcd": "N/A",
                         }
+
+                        # MID temperatures from partition metrics
+                        if temperatures["mid"] != "N/A":
+                            temperatures["mid"] = list(temperatures["mid"])
+
+                        # XCP/XCD temperatures from partition metrics
+                        xcp_temp_xcd = gpu_partition_metrics.get("xcp_stats.temperature_xcd", "N/A")
+                        if xcp_temp_xcd != "N/A" and isinstance(xcp_temp_xcd, list):
+                            temperatures["xcd"] = {
+                                f"XCP_{idx}": xcp_temp_xcd[idx]
+                                for idx in range(len(xcp_temp_xcd))
+                                if idx < len(xcp_temp_xcd)
+                            }
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        logging.debug(
+                            "Failed to get partition temperature metrics for gpu %s | %s",
+                            gpu_id,
+                            e.get_error_info(),
+                        )
+                        # Fall back to socket-level metrics
+                        temperatures = {
+                            "edge": temperature_edge_current,
+                            "hotspot": temperature_hotspot_current,
+                            "mem": temperature_vram_current,
+                            "hbm_stacks": gpu_metric.get("temperature_hbm_stacks", "N/A"),
+                            "mid": gpu_metric.get("temperature_mid", "N/A"),
+                            "aid": gpu_metric.get("temperature_aid", "N/A"),
+                            "xcd": "N/A",
+                        }
+                else:
+                    # Socket-level metrics (existing behavior)
+                    temperatures = {
+                        "edge": temperature_edge_current,
+                        "hotspot": temperature_hotspot_current,
+                        "mem": temperature_vram_current,
+                        "hbm_stacks": gpu_metric.get("temperature_hbm_stacks", "N/A"),
+                        "mid": gpu_metric.get("temperature_mid", "N/A"),
+                        "aid": gpu_metric.get("temperature_aid", "N/A"),
+                        "xcd": "N/A",
+                    }
+
+                    if temperatures["hbm_stacks"] != "N/A":
+                        temperatures["hbm_stacks"] = list(temperatures["hbm_stacks"])
+                    if temperatures["mid"] != "N/A":
+                        temperatures["mid"] = list(temperatures["mid"])
+                    if temperatures["aid"] != "N/A":
+                        temperatures["aid"] = list(temperatures["aid"])
+
+                    if num_partition != "N/A":
+                        xcp_temp_xcd = gpu_metric.get("xcp_stats.temperature_xcd", "N/A")
+                        if xcp_temp_xcd != "N/A":
+                            available_partition = min(num_partition, len(xcp_temp_xcd))
+                            temperatures["xcd"] = {
+                                f"XCP_{current_xcp}": xcp_temp_xcd[current_xcp]
+                                for current_xcp in range(available_partition)
+                            }
 
                 temp_unit_human_readable = "\N{DEGREE SIGN}C"
                 temp_unit_json = "C"
@@ -1697,442 +2075,6 @@ class MetricCommands:
                                 self.logger, value, activity_unit
                             )
                 values_dict["throttle"] = throttle_status
-
-        if "partition" in current_platform_args:
-            if args.partition:
-                partition_output = {}
-
-                # Determine which metric flags are active to filter partition output
-                # If no specific flags are set, show all partition data
-                show_temperature = getattr(args, "temperature", False)
-                show_clock = getattr(args, "clock", False)
-                show_usage = getattr(args, "usage", False)
-                show_throttle = getattr(args, "throttle", False)
-                show_all = not any([show_temperature, show_clock, show_usage, show_throttle])
-
-                try:
-                    gpu_partition_metrics = amdsmi_interface.amdsmi_get_gpu_partition_metrics_info(
-                        args.gpu
-                    )
-                    num_partitions = gpu_partition_metrics.get("num_partition", 0)
-
-                    # Get clock limit information for different clock types
-                    # Only fetch if clock flag is active or showing all
-                    clock_limits = {}
-                    if show_clock or show_all:
-                        for clk_type_name in ["GFX", "VCLK0", "DCLK0", "SOC"]:
-                            try:
-                                clk_type = getattr(amdsmi_interface.AmdSmiClkType, clk_type_name)
-                                clk_info = amdsmi_interface.amdsmi_get_clk_freq(args.gpu, clk_type)
-                                if clk_info and "frequency" in clk_info:
-                                    freq_list = clk_info["frequency"]
-                                    if isinstance(freq_list, list) and len(freq_list) >= 2:
-                                        # frequency list contains DPM levels up to num_supported
-                                        # min = first element, max = last element
-                                        freq_list = [
-                                            f // 1000000 for f in freq_list
-                                        ]  # Convert to MHz
-                                        clock_limits[clk_type_name] = {
-                                            "min": freq_list[0],
-                                            "max": freq_list[-1],
-                                        }
-                            except Exception as e:
-                                logging.debug(f"Failed to get {clk_type_name} clock limits: {e}")
-
-                    # Build AID-level metrics (VCLK, DCLK, SCLK clocks and activities)
-                    current_vclk0s = gpu_partition_metrics.get("current_vclk0s", [])
-                    current_dclk0s = gpu_partition_metrics.get("current_dclk0s", [])
-                    current_socclks = gpu_partition_metrics.get("current_socclks", [])
-
-                    # Get MID-level metrics
-                    current_socclks_mid = gpu_partition_metrics.get("current_socclks_mid", [])
-                    temperature_mid = gpu_partition_metrics.get("temperature_mid", [])
-
-                    # Get VCN and JPEG activity from xcp_stats
-                    xcp_vcn_busy = gpu_partition_metrics.get("xcp_stats.vcn_busy", [])
-                    xcp_jpeg_busy = gpu_partition_metrics.get("xcp_stats.jpeg_busy", [])
-
-                    # Determine number of AIDs based on array lengths
-                    num_aids = 0
-                    if isinstance(current_vclk0s, list) and current_vclk0s != "N/A":
-                        num_aids = len([x for x in current_vclk0s if x != "N/A" and x > 0])
-
-                    # Build AID partitions
-                    for aid_idx in range(num_aids):
-                        aid_key = f"AID_{aid_idx}"
-                        aid_data = {}
-
-                        # Clock fields - only include if --clock flag is set or showing all
-                        if show_clock or show_all:
-                            # VCLK (video clock) - current, min, max
-                            if isinstance(current_vclk0s, list) and aid_idx < len(current_vclk0s):
-                                vclk = current_vclk0s[aid_idx]
-                                if vclk != "N/A" and vclk > 0:
-                                    aid_data["CLK_VCLK"] = f"{vclk} MHz"
-
-                            # VCLK limits from clock_limits
-                            if "VCLK0" in clock_limits:
-                                if "min" in clock_limits["VCLK0"]:
-                                    aid_data["CLK_VCLK_MIN_LIMIT"] = (
-                                        f"{clock_limits['VCLK0']['min']} MHz"
-                                    )
-                                aid_data["CLK_VCLK_MAX_LIMIT"] = (
-                                    f"{clock_limits['VCLK0']['max']} MHz"
-                                )
-
-                            # DCLK (display clock) - current and limit
-                            if isinstance(current_dclk0s, list) and aid_idx < len(current_dclk0s):
-                                dclk = current_dclk0s[aid_idx]
-                                if dclk != "N/A" and dclk > 0:
-                                    aid_data["CLK_DCLK_LIMIT"] = f"{dclk} MHz"
-
-                            # DCLK limits from clock_limits
-                            if "DCLK0" in clock_limits:
-                                if "min" in clock_limits["DCLK0"]:
-                                    aid_data["CLK_DCLK_MIN_LIMIT"] = (
-                                        f"{clock_limits['DCLK0']['min']} MHz"
-                                    )
-                                aid_data["CLK_DCLK_MAX_LIMIT"] = (
-                                    f"{clock_limits['DCLK0']['max']} MHz"
-                                )
-
-                            # SOCCLK (SOC clock) - current and limits
-                            if isinstance(current_socclks, list) and aid_idx < len(current_socclks):
-                                sclk = current_socclks[aid_idx]
-                                if sclk != "N/A" and sclk > 0:
-                                    aid_data["CLK_SOCCLK_LIMIT"] = f"{sclk} MHz"
-
-                            # SOCCLK limits from clock_limits
-                            if "SOC" in clock_limits:
-                                if "min" in clock_limits["SOC"]:
-                                    aid_data["CLK_SOCCLK_MIN_LIMIT"] = (
-                                        f"{clock_limits['SOC']['min']} MHz"
-                                    )
-                                aid_data["CLK_SOCCLK_MAX_LIMIT"] = (
-                                    f"{clock_limits['SOC']['max']} MHz"
-                                )
-
-                        # Usage fields - only include if --usage flag is set or showing all
-                        if show_usage or show_all:
-                            # VCN activity from xcp_stats (first element per XCP corresponds to AID activity)
-                            if isinstance(xcp_vcn_busy, list) and aid_idx < len(xcp_vcn_busy):
-                                vcn_data = xcp_vcn_busy[aid_idx]
-                                if isinstance(vcn_data, list) and len(vcn_data) > 0:
-                                    vcn = vcn_data[0]
-                                    aid_data["VCN_ACTIVITY"] = f"{vcn} %" if vcn != "N/A" else "N/A"
-
-                            # JPEG activity from xcp_stats (array per XCP/AID)
-                            if isinstance(xcp_jpeg_busy, list) and aid_idx < len(xcp_jpeg_busy):
-                                jpeg_data = xcp_jpeg_busy[aid_idx]
-                                if isinstance(jpeg_data, list):
-                                    jpeg_str = ", ".join(
-                                        [f"{j} %" if j != "N/A" else "N/A" for j in jpeg_data]
-                                    )
-                                    aid_data["JPEG_ACTIVITY"] = f"[{jpeg_str}]"
-
-                        if aid_data:
-                            partition_output[aid_key] = aid_data
-
-                    # Build MID-level metrics (Memory Interface Die)
-                    num_mids = 0
-                    if isinstance(current_socclks_mid, list) and current_socclks_mid != "N/A":
-                        num_mids = len([x for x in current_socclks_mid if x != "N/A"])
-
-                    for mid_idx in range(num_mids):
-                        mid_key = f"MID_{mid_idx}"
-                        mid_data = {}
-
-                        # Clock fields - only include if --clock flag is set or showing all
-                        if show_clock or show_all:
-                            # SOC clock for MID
-                            if isinstance(current_socclks_mid, list) and mid_idx < len(
-                                current_socclks_mid
-                            ):
-                                socclk_mid = current_socclks_mid[mid_idx]
-                                if socclk_mid != "N/A":
-                                    mid_data["CLK_SOCCLK"] = f"{socclk_mid} MHz"
-
-                        # Temperature fields - only include if --temperature flag is set or showing all
-                        if show_temperature or show_all:
-                            # Temperature for MID
-                            if isinstance(temperature_mid, list) and mid_idx < len(temperature_mid):
-                                temp_mid = temperature_mid[mid_idx]
-                                if temp_mid != "N/A":
-                                    mid_data["TEMPERATURE"] = f"{temp_mid} C"
-
-                        if mid_data:
-                            partition_output[mid_key] = mid_data
-
-                    # Build XCP-level metrics (GFX clocks, usage, lock status)
-                    current_gfxclks = gpu_partition_metrics.get("current_gfxclks", [])
-                    gfxclk_lock_status = gpu_partition_metrics.get("gfxclk_lock_status", 0)
-
-                    # Get XCP stats (usage, violations, and XCD temperatures)
-                    xcp_gfx_busy = gpu_partition_metrics.get("xcp_stats.gfx_busy_inst", [])
-                    xcp_below_limit_ppt = gpu_partition_metrics.get(
-                        "xcp_stats.gfx_below_host_limit_ppt_acc", []
-                    )
-                    xcp_below_limit_thm = gpu_partition_metrics.get(
-                        "xcp_stats.gfx_below_host_limit_thm_acc", []
-                    )
-                    xcp_low_util = gpu_partition_metrics.get(
-                        "xcp_stats.gfx_low_utilization_acc", []
-                    )
-                    xcp_below_limit_total = gpu_partition_metrics.get(
-                        "xcp_stats.gfx_below_host_limit_total_acc", []
-                    )
-                    xcp_temp_xcd = gpu_partition_metrics.get("xcp_stats.temperature_xcd", [])
-
-                    # Get violation status and activity for throttle fields
-                    violation_status = {}
-                    if show_throttle or show_all:
-                        try:
-                            violation_status = amdsmi_interface.amdsmi_get_violation_status(
-                                args.gpu
-                            )
-                        except Exception as e:
-                            logging.debug(f"Failed to get violation status: {e}")
-
-                    # Determine number of XCPs
-                    # For partition section, show XCPs that have actual data even if num_partition is N/A
-                    num_xcps = 0
-                    if isinstance(xcp_gfx_busy, list) and xcp_gfx_busy != "N/A":
-                        num_xcps = len(xcp_gfx_busy)
-                    elif num_partitions != "N/A" and num_partitions > 0:
-                        num_xcps = num_partitions
-
-                    for xcp_idx in range(num_xcps):
-                        xcp_key = f"XCP_{xcp_idx}"
-                        xcp_data = {}
-
-                        # Clock fields - only include if --clock flag is set or showing all
-                        if show_clock or show_all:
-                            # GFX clocks (current values per engine in XCP)
-                            if isinstance(current_gfxclks, list) and current_gfxclks != "N/A":
-                                if xcp_idx < len(current_gfxclks):
-                                    gfx_clk = current_gfxclks[xcp_idx]
-                                    if gfx_clk != "N/A":
-                                        if isinstance(gfx_clk, list):
-                                            clk_str = ", ".join(
-                                                [
-                                                    f"{c} MHz" if c != "N/A" else "N/A"
-                                                    for c in gfx_clk
-                                                ]
-                                            )
-                                            xcp_data["GFX_CLK"] = f"[{clk_str}]"
-                                        else:
-                                            xcp_data["GFX_CLK"] = f"{gfx_clk} MHz"
-
-                            # GFX clock min/max limits from clock_limits
-                            if "GFX" in clock_limits:
-                                xcp_data["GFX_MIN_CLK"] = f"[{clock_limits['GFX']['min']} MHz]"
-                                xcp_data["GFX_MAX_CLK"] = f"[{clock_limits['GFX']['max']} MHz]"
-
-                            # GFX clock locked status
-                            if gfxclk_lock_status != "N/A" and gfxclk_lock_status != 0:
-                                # Decode lock status bit field (one bit per engine)
-                                lock_status = []
-                                # Assuming 4 engines per XCP, 8 XCPs = 32 bits
-                                for bit in range(4):  # 4 engines per XCP
-                                    bit_pos = xcp_idx * 4 + bit
-                                    is_locked = (gfxclk_lock_status >> bit_pos) & 1
-                                    lock_status.append("ENABLED" if is_locked else "DISABLED")
-                                xcp_data["GFX_CLK_LOCKED"] = "[" + ", ".join(lock_status) + "]"
-                            else:
-                                # All disabled if no lock status
-                                xcp_data["GFX_CLK_LOCKED"] = (
-                                    "[DISABLED, DISABLED, DISABLED, DISABLED]"
-                                )
-
-                        # Usage fields - only include if --usage flag is set or showing all
-                        if show_usage or show_all:
-                            # GFX usage (from xcp_stats.gfx_busy_inst)
-                            if isinstance(xcp_gfx_busy, list) and xcp_idx < len(xcp_gfx_busy):
-                                gfx_usage = xcp_gfx_busy[xcp_idx]
-                                if gfx_usage != "N/A" and isinstance(gfx_usage, list):
-                                    usage_str = ", ".join(
-                                        [f"{u} %" if u != "N/A" else "N/A" for u in gfx_usage]
-                                    )
-                                    xcp_data["GFX_BUSY_INST"] = f"[{usage_str}]"
-
-                            # JPEG usage (from xcp_stats.jpeg_busy)
-                            if isinstance(xcp_jpeg_busy, list) and xcp_idx < len(xcp_jpeg_busy):
-                                jpeg_usage = xcp_jpeg_busy[xcp_idx]
-                                if jpeg_usage != "N/A" and isinstance(jpeg_usage, list):
-                                    jpeg_str = ", ".join(
-                                        [f"{j} %" if j != "N/A" else "N/A" for j in jpeg_usage]
-                                    )
-                                    xcp_data["JPEG_BUSY"] = f"[{jpeg_str}]"
-
-                            # VCN usage (from xcp_stats.vcn_busy)
-                            if isinstance(xcp_vcn_busy, list) and xcp_idx < len(xcp_vcn_busy):
-                                vcn_usage = xcp_vcn_busy[xcp_idx]
-                                if vcn_usage != "N/A" and isinstance(vcn_usage, list):
-                                    vcn_str = ", ".join(
-                                        [f"{v} %" if v != "N/A" else "N/A" for v in vcn_usage]
-                                    )
-                                    xcp_data["VCN_BUSY"] = f"[{vcn_str}]"
-
-                        # Throttle fields - only include if --throttle flag is set or showing all
-                        if show_throttle or show_all:
-                            # Throttle/violation accumulated counters (time spent throttled)
-                            if isinstance(xcp_below_limit_ppt, list) and xcp_idx < len(
-                                xcp_below_limit_ppt
-                            ):
-                                ppt_acc = xcp_below_limit_ppt[xcp_idx]
-                                if ppt_acc != "N/A" and isinstance(ppt_acc, list):
-                                    ppt_str = ", ".join([str(p) for p in ppt_acc])
-                                    xcp_data["GFX_CLK_BELOW_HOST_LIMIT_POWER_ACCUMULATED"] = (
-                                        f"[{ppt_str}]"
-                                    )
-
-                            if isinstance(xcp_below_limit_thm, list) and xcp_idx < len(
-                                xcp_below_limit_thm
-                            ):
-                                thm_acc = xcp_below_limit_thm[xcp_idx]
-                                if thm_acc != "N/A" and isinstance(thm_acc, list):
-                                    thm_str = ", ".join([str(t) for t in thm_acc])
-                                    xcp_data["GFX_CLK_BELOW_HOST_LIMIT_THERMAL_ACCUMULATED"] = (
-                                        f"[{thm_str}]"
-                                    )
-
-                            if isinstance(xcp_low_util, list) and xcp_idx < len(xcp_low_util):
-                                low_util = xcp_low_util[xcp_idx]
-                                if low_util != "N/A" and isinstance(low_util, list):
-                                    util_str = ", ".join([str(u) for u in low_util])
-                                    xcp_data["LOW_UTILIZATION_ACCUMULATED"] = f"[{util_str}]"
-
-                            if isinstance(xcp_below_limit_total, list) and xcp_idx < len(
-                                xcp_below_limit_total
-                            ):
-                                total_acc = xcp_below_limit_total[xcp_idx]
-                                if total_acc != "N/A" and isinstance(total_acc, list):
-                                    total_str = ", ".join([str(t) for t in total_acc])
-                                    xcp_data["TOTAL_GFX_CLK_BELOW_HOST_LIMIT_ACCUMULATED"] = (
-                                        f"[{total_str}]"
-                                    )
-
-                            # Violation status fields (active violations)
-                            if violation_status:
-                                if "active_gfx_clk_below_host_limit_pwr" in violation_status:
-                                    active_pwr = violation_status[
-                                        "active_gfx_clk_below_host_limit_pwr"
-                                    ]
-                                    if isinstance(active_pwr, list) and xcp_idx < len(active_pwr):
-                                        pwr_status = active_pwr[xcp_idx]
-                                        if isinstance(pwr_status, list):
-                                            status_str = ", ".join([str(s) for s in pwr_status])
-                                            xcp_data[
-                                                "GFX_CLK_BELOW_HOST_LIMIT_POWER_VIOLATION_STATUS"
-                                            ] = f"[{status_str}]"
-
-                                if "active_gfx_clk_below_host_limit_thm" in violation_status:
-                                    active_thm = violation_status[
-                                        "active_gfx_clk_below_host_limit_thm"
-                                    ]
-                                    if isinstance(active_thm, list) and xcp_idx < len(active_thm):
-                                        thm_status = active_thm[xcp_idx]
-                                        if isinstance(thm_status, list):
-                                            status_str = ", ".join([str(s) for s in thm_status])
-                                            xcp_data[
-                                                "GFX_CLK_BELOW_HOST_LIMIT_THERMAL_VIOLATION_STATUS"
-                                            ] = f"[{status_str}]"
-
-                                if "active_gfx_clk_below_host_limit_total" in violation_status:
-                                    active_total = violation_status[
-                                        "active_gfx_clk_below_host_limit_total"
-                                    ]
-                                    if isinstance(active_total, list) and xcp_idx < len(
-                                        active_total
-                                    ):
-                                        total_status = active_total[xcp_idx]
-                                        if isinstance(total_status, list):
-                                            status_str = ", ".join([str(s) for s in total_status])
-                                            xcp_data[
-                                                "TOTAL_GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_STATUS"
-                                            ] = f"[{status_str}]"
-
-                                if "active_low_utilization" in violation_status:
-                                    active_util = violation_status["active_low_utilization"]
-                                    if isinstance(active_util, list) and xcp_idx < len(active_util):
-                                        util_status = active_util[xcp_idx]
-                                        if isinstance(util_status, list):
-                                            status_str = ", ".join([str(s) for s in util_status])
-                                            xcp_data["LOW_UTILIZATION_VIOLATION_STATUS"] = (
-                                                f"[{status_str}]"
-                                            )
-
-                            # Violation activity fields (per-activity violations)
-                            if violation_status:
-                                if "per_gfx_clk_below_host_limit_pwr" in violation_status:
-                                    per_pwr = violation_status["per_gfx_clk_below_host_limit_pwr"]
-                                    if isinstance(per_pwr, list) and xcp_idx < len(per_pwr):
-                                        pwr_activity = per_pwr[xcp_idx]
-                                        if isinstance(pwr_activity, list):
-                                            activity_str = ", ".join([str(a) for a in pwr_activity])
-                                            xcp_data[
-                                                "GFX_CLK_BELOW_HOST_LIMIT_POWER_VIOLATION_ACTIVITY"
-                                            ] = f"[{activity_str}]"
-
-                                if "per_gfx_clk_below_host_limit_thm" in violation_status:
-                                    per_thm = violation_status["per_gfx_clk_below_host_limit_thm"]
-                                    if isinstance(per_thm, list) and xcp_idx < len(per_thm):
-                                        thm_activity = per_thm[xcp_idx]
-                                        if isinstance(thm_activity, list):
-                                            activity_str = ", ".join([str(a) for a in thm_activity])
-                                            xcp_data[
-                                                "GFX_CLK_BELOW_HOST_LIMIT_THERMAL_VIOLATION_ACTIVITY"
-                                            ] = f"[{activity_str}]"
-
-                                if "per_gfx_clk_below_host_limit_total" in violation_status:
-                                    per_total = violation_status[
-                                        "per_gfx_clk_below_host_limit_total"
-                                    ]
-                                    if isinstance(per_total, list) and xcp_idx < len(per_total):
-                                        total_activity = per_total[xcp_idx]
-                                        if isinstance(total_activity, list):
-                                            activity_str = ", ".join(
-                                                [str(a) for a in total_activity]
-                                            )
-                                            xcp_data[
-                                                "TOTAL_GFX_CLK_BELOW_HOST_LIMIT_VIOLATION_ACTIVITY"
-                                            ] = f"[{activity_str}]"
-
-                                if "per_low_utilization" in violation_status:
-                                    per_util = violation_status["per_low_utilization"]
-                                    if isinstance(per_util, list) and xcp_idx < len(per_util):
-                                        util_activity = per_util[xcp_idx]
-                                        if isinstance(util_activity, list):
-                                            activity_str = ", ".join(
-                                                [str(a) for a in util_activity]
-                                            )
-                                            xcp_data["LOW_UTILIZATION_VIOLATION_ACTIVITY"] = (
-                                                f"[{activity_str}]"
-                                            )
-
-                        # Temperature fields - only include if --temperature flag is set or showing all
-                        if show_temperature or show_all:
-                            # XCD temperatures (eXtended Compute Die within XCP)
-                            if isinstance(xcp_temp_xcd, list) and xcp_idx < len(xcp_temp_xcd):
-                                xcd_temps = xcp_temp_xcd[xcp_idx]
-                                if xcd_temps != "N/A" and isinstance(xcd_temps, list):
-                                    temp_str = ", ".join(
-                                        [f"{t} C" if t != "N/A" else "N/A" for t in xcd_temps]
-                                    )
-                                    xcp_data["TEMPERATURE_XCD"] = f"[{temp_str}]"
-
-                        if xcp_data:
-                            partition_output[xcp_key] = xcp_data
-
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    logging.debug(
-                        "Failed to get partition metrics for gpu %s | %s",
-                        gpu_id,
-                        e.get_error_info(),
-                    )
-                    partition_output = {"error": "Failed to get partition metrics"}
-
-                values_dict["partition"] = partition_output
 
         # Store timestamp first if watching_output is enabled
         if watching_output:
