@@ -20,10 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include <hip/hip_runtime.h>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-#include <hip/hip_runtime.h>
 
 #define HIP_ASSERT(call)                                                                           \
     do                                                                                             \

@@ -39,8 +39,8 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-hip-stream-reuse
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -s -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json
-        --log-level env -- $<TARGET_FILE:hip-stream-reuse>
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json --log-level
+        env -- $<TARGET_FILE:hip-stream-reuse>
         ${CMAKE_CURRENT_BINARY_DIR}/hip-stream-reuse-trace/stream_pointers.txt
     DEPENDS hip-stream-reuse
     TIMEOUT 60
@@ -54,8 +54,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --json-input
-         ${CMAKE_CURRENT_BINARY_DIR}/hip-stream-reuse-trace/out_results.json
+    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/hip-stream-reuse-trace/out_results.json
          --pointer-file
          ${CMAKE_CURRENT_BINARY_DIR}/hip-stream-reuse-trace/stream_pointers.txt
     TIMEOUT 60

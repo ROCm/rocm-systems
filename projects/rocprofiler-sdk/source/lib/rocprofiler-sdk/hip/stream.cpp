@@ -130,7 +130,9 @@ remove_stream(hipStream_t stream)
             }
             else
             {
-                ROCP_CI_LOG(WARNING) << fmt::format(
+                // Not an error: the stream may have been created during a window when HIP stream
+                // tracing was not active, so it was never added to the map.
+                ROCP_INFO << fmt::format(
                     "remove_stream :: hipStream_t ({}) not found in map after destroy",
                     sdk::utility::as_hex(static_cast<void*>(_stream)));
             }
@@ -342,9 +344,11 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
                                                   ROCPROFILER_CALLBACK_TRACING_HIP_STREAM,
                                                   ROCPROFILER_HIP_STREAM_DESTROY,
                                                   tracer_data);
-        }
 
-        remove_stream(stream);
+            // Mirror add_stream in the create functor: only mutate the map while stream tracing
+            // is active so create/destroy bookkeeping stays symmetric.
+            remove_stream(stream);
+        }
 
         if constexpr(!std::is_void<RetT>::value) return _ret;
     };
