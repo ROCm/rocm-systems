@@ -141,7 +141,7 @@ while true; do
          --disable-roctx)            roctx_enabled=false;                                                                              shift ;;
          --disable-sym-kernels)      generate_sym_kernels=false;                                                                       shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
-         --all-unrolls)              build_all_unrolls=true;                                                                             shift ;;
+         --all-unrolls)              build_all_unrolls=true;                                                                           shift ;;
          --dump-asm)                 dump_asm=true;                                                                                    shift ;;
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
