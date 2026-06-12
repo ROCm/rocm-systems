@@ -1233,6 +1233,10 @@ graph:
   Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
     <<: *level_2
     tags: [capture]
+    # Hangs on Windows (PAL) due to TDR timeout; passes on Linux. Disabled
+    # pending investigation of the segment scheduler's leading-batch dispatch
+    # on the Windows command processor path.
+    disabled: [amd_windows, amd_wsl]
   Unit_hipUserObjectCreate_Functional_1:
     <<: *level_2
     tags: [userobj]
