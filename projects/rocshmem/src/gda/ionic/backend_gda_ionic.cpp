@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <new>
+
 #include "gda/backend_gda.hpp"
 #include "log.hpp"
 #include "util.hpp"
