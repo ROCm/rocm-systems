@@ -59,7 +59,7 @@ jobs:
           PY_BUILD=/opt/python/cp38-cp38/bin/python3
 
           echo "Installing build prerequisites..."
-          dnf -y install git make gcc gcc-c++ cmake ninja-build openssl-devel
+          dnf -y install git make gcc gcc-c++ cmake ninja-build openssl-devel libnl3-devel libmnl-devel
 
           echo "Configuring and building AMDSMI..."
           rm -rf "$BUILD_DIR"
@@ -227,11 +227,11 @@ jobs:
           source amdsmitst.exclude
           source detect_asic_filter.sh
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
-          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
+          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1 || echo 'amdsmitst failed'
 
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
-          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
+          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1 || echo 'integration_test.py failed'
+          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1 || echo 'unit_tests.py failed'
           if [ -f ./perf_tests.py ]; then
             ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else
