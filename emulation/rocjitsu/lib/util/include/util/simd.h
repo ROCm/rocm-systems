@@ -522,8 +522,9 @@ inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
 /// Vector port of `util::fp8_e4m3_to_f32` over the low byte of each lane (E4M3:
 /// 1 sign / 4 exp / 3 mantissa, bias 7, no Inf). Bit-identical to the scalar:
 /// the denormal path `mant * 2^-9` is exact for mant in [0,7] and folds the ±0
-/// case (mant==0 -> +0 | signbit); exp==15 yields the max normal (mant==0) or a
-/// canonical qNaN (mant!=0). Used by the v_cvt_f32_fp8 SIMD fast path.
+/// case (mant==0 -> +0 | signbit). E4M3FN has no Inf and a single NaN encoding
+/// (S.1111.111): exp==15 stays normal for mant 0..6 (max finite 448) and yields
+/// a canonical qNaN only for mant==7. Used by the v_cvt_f32_fp8 SIMD fast path.
 inline native<float> fp8_e4m3_to_f32_simd(native<uint32_t> v) {
   using U = native<uint32_t>;
   U b = v & U(0xFFu);
@@ -532,14 +533,13 @@ inline native<float> fp8_e4m3_to_f32_simd(native<uint32_t> v) {
   U mant = b & U(0x7u);
   U signbit = sign << 31;
   U normal = signbit | ((exp + U(120u)) << 23) | (mant << 20); // exp + 127 - 7
-  U inf_nan = signbit | U(0x43800000u);                        // exp15, mant0 -> max normal
-  stdx::where(mant != 0u, inf_nan) = signbit | U(0x7FC00000u); // exp15, mant!=0 -> qNaN
   native<float> dn =
       stdx::static_simd_cast<native<float>>(mant) * native<float>(0.001953125f); // 2^-9
   U dnb = std::bit_cast<U>(dn) | signbit; // exp0: ±denormal, or ±0 when mant==0
-  U out = normal;
+  U out = normal;                         // exp15/mant<7 stay normal (E4M3FN, no Inf)
   stdx::where(exp == 0u, out) = dnb;
-  stdx::where(exp == 15u, out) = inf_nan;
+  stdx::where((exp == 15u) & (mant == 7u), out) =
+      signbit | U(0x7FC00000u); // E4M3FN single NaN (S.1111.111)
   return std::bit_cast<native<float>>(out);
 }
 

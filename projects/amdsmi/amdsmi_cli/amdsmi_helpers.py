@@ -224,10 +224,38 @@ class AMDSMIHelpers:
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS
 
     def is_brcm_nic_initialized(self):
-        return False
+        """Returns True if a Broadcom NIC handle is enumerated.
+
+        The result is cached on first call. The init flag is checked first to
+        short-circuit on systems where no NIC stack was initialized; otherwise
+        a single C-library probe is issued and memoized.
+        """
+        if hasattr(self, "_brcm_nic_initialized_cached"):
+            return self._brcm_nic_initialized_cached
+        result = False
+        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
+            try:
+                result = len(amdsmi_interface.get_nic_handles()) > 0
+            except amdsmi_interface.AmdSmiLibraryException:
+                result = False
+        self._brcm_nic_initialized_cached = result
+        return result
 
     def is_brcm_switch_initialized(self):
-        return False
+        """Returns True if a Broadcom switch handle is enumerated.
+
+        The result is cached on first call.  See ``is_brcm_nic_initialized``.
+        """
+        if hasattr(self, "_brcm_switch_initialized_cached"):
+            return self._brcm_switch_initialized_cached
+        result = False
+        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
+            try:
+                result = len(amdsmi_interface.get_switch_handles()) > 0
+            except amdsmi_interface.AmdSmiLibraryException:
+                result = False
+        self._brcm_switch_initialized_cached = result
+        return result
 
     def get_rocm_version(self):
         try:
@@ -850,6 +878,7 @@ class AMDSMIHelpers:
                 return False, args.gpu
             else:
                 logging.debug("args.gpu has an empty list")
+                return True, args.gpu
         else:
             return False, args.gpu
 
@@ -890,6 +919,7 @@ class AMDSMIHelpers:
                 return False, args.switch
             else:
                 logging.debug("args.switch has an empty list")
+                return True, args.switch
         else:
             return False, args.switch
 
@@ -930,6 +960,7 @@ class AMDSMIHelpers:
                 return False, args.nic
             else:
                 logging.debug("args.nic has an empty list")
+                return True, args.nic
         else:
             return False, args.nic
 
@@ -970,6 +1001,7 @@ class AMDSMIHelpers:
                 return False, args.nic
             else:
                 logging.debug("args.nic has an empty list")
+                return True, args.nic
         else:
             return False, args.nic
 

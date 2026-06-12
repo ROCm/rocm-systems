@@ -19,6 +19,9 @@ if(BUILD_TESTS)
   if (ENABLE_CODE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
     set(HIPCC_COMPILE_FLAGS "${HIPCC_COMPILE_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+    # Allow ProcessIsolatedTestRunner.cpp to call __llvm_profile_write_file()
+    # explicitly before _exit() so child-process coverage data is flushed.
+    add_compile_definitions(RCCL_TEST_CODE_COVERAGE=1)
   endif()
 
   find_package(hsa-runtime64 PATHS /opt/rocm )
@@ -218,6 +221,7 @@ if(BUILD_TESTS)
       MiscTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
+      DdaCollCommonTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
       common/main_fixtures.cpp
@@ -243,6 +247,7 @@ if(BUILD_TESTS)
       ParamTests.cpp
       ArgCheckTests.cpp
       BootstrapBidirTests.cpp
+      DdaIpcEligibilityTests.cpp
       EnqueueTests.cpp
       IpcsocketTests.cpp
       NetSocketTests.cpp
