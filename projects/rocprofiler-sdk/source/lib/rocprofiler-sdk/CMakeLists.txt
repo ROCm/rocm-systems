@@ -20,6 +20,7 @@ set(ROCPROFILER_LIB_SOURCES
     external_correlation.cpp
     intercept_table.cpp
     internal_threading.cpp
+    kernel_replay.cpp
     ompt.cpp
     pc_sampling.cpp
     registration.cpp

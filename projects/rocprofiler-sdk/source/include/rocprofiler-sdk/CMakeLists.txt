@@ -29,6 +29,7 @@ set(ROCPROFILER_HEADER_FILES
     hip.h
     hsa.h
     intercept_table.h
+    kernel_replay.h
     internal_threading.h
     marker.h
     ompt.h
