@@ -195,34 +195,34 @@ __device__ static inline __hip_uint64_t __bitinsert_u64(__hip_uint64_t src0, __h
 __device__ inline unsigned int __funnelshift_l(unsigned int lo, unsigned int hi,
                                                unsigned int shift) {
   __hip_uint32_t mask_shift = shift & 31;
-  return mask_shift == 0 ? hi
-                         : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit)
-                                ? __builtin_amdgcn_alignbit(hi, lo, 32 - mask_shift)
-                                : 0u);
+  if (mask_shift == 0) return hi;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
+    return __builtin_amdgcn_alignbit(hi, lo, 32 - mask_shift);
+  __builtin_trap();
 }
 
 __device__ inline unsigned int __funnelshift_lc(unsigned int lo, unsigned int hi,
                                                 unsigned int shift) {
   __hip_uint32_t min_shift = shift >= 32 ? 32 : shift;
-  return min_shift == 0 ? hi
-                        : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit)
-                               ? __builtin_amdgcn_alignbit(hi, lo, 32 - min_shift)
-                               : 0u);
+  if (min_shift == 0) return hi;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
+    return __builtin_amdgcn_alignbit(hi, lo, 32 - min_shift);
+  __builtin_trap();
 }
 
 __device__ inline unsigned int __funnelshift_r(unsigned int lo, unsigned int hi,
                                                unsigned int shift) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
     return __builtin_amdgcn_alignbit(hi, lo, shift);
-  return 0;
+  __builtin_trap();
 }
 
 __device__ inline unsigned int __funnelshift_rc(unsigned int lo, unsigned int hi,
                                                 unsigned int shift) {
-  return shift >= 32 ? hi
-                     : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit)
-                            ? __builtin_amdgcn_alignbit(hi, lo, shift)
-                            : 0u);
+  if (shift >= 32) return hi;
+  if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_alignbit))
+    return __builtin_amdgcn_alignbit(hi, lo, shift);
+  __builtin_trap();
 }
 
 __device__ static unsigned int __byte_perm(unsigned int x, unsigned int y, unsigned int s);
@@ -332,13 +332,13 @@ __device__ static inline unsigned int __usad(unsigned int x, unsigned int y, uns
 __device__ static inline unsigned int __mbcnt_lo(unsigned int x, unsigned int y) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_lo))
     return __builtin_amdgcn_mbcnt_lo(x, y);
-  return 0;
+  __builtin_trap();
 };
 
 __device__ static inline unsigned int __mbcnt_hi(unsigned int x, unsigned int y) {
   if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_mbcnt_hi))
     return __builtin_amdgcn_mbcnt_hi(x, y);
-  return 0;
+  __builtin_trap();
 };
 
 /*
