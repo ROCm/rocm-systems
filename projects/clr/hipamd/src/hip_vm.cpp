@@ -95,7 +95,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
-  amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
+  hip::Device* dev = hip::getCurrentDevice();
+  amd::Context* curDevContext = dev->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
   if (amdContext == nullptr) {
@@ -129,7 +130,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
 
   // Add this to amd::Memory object, so this ptr is accesible for other hipmemory operations.
   size_t offset = 0;  // this is ignored
-  amd::Memory* phys_mem_obj = getMemoryObject(ptr, offset);
+  amd::Memory* phys_mem_obj = getMemoryObject(dev, ptr, offset);
   // saves the current device id so that it can be accessed later
   phys_mem_obj->getUserData().deviceId = prop->location.id;
   phys_mem_obj->getUserData().locationType = prop->location.type;

@@ -11,7 +11,6 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <timemory/defines.h>
-#include <timemory/utility/demangle.hpp>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>

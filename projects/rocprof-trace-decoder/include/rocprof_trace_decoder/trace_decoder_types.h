@@ -250,8 +250,22 @@ typedef enum rocprofiler_thread_trace_decoder_event_type_t
     ROCPROF_TRACE_DECODER_EVENT_TT_STALL_BEGIN,
     ROCPROF_TRACE_DECODER_EVENT_TT_STALL_END,
     ROCPROF_TRACE_DECODER_EVENT_TT_FLUSH,
+    ROCPROF_TRACE_DECODER_EVENT_DIDT_STALL_BEGIN,
+    ROCPROF_TRACE_DECODER_EVENT_DIDT_STALL_END,
+    ROCPROF_TRACE_DECODER_EVENT_CLUSTER_BEGIN, ///< Payload is the ID
+    ROCPROF_TRACE_DECODER_EVENT_CLUSTER_END,   ///< Payload is the ID
+    ROCPROF_TRACE_DECODER_EVENT_GC_RINSE,
+    ROCPROF_TRACE_DECODER_EVENT_SPM_SAMPLE,
     ROCPROF_TRACE_DECODER_EVENT_LAST
 } rocprofiler_thread_trace_decoder_event_type_t;
+
+typedef enum rocprofiler_thread_trace_decoder_event_flags_t
+{
+    ROCPROF_TRACE_DECODER_EVENT_FLAGS_NONE = 0,
+    ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE = 0x1,
+    ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP = 0x2,
+    ROCPROF_TRACE_DECODER_EVENT_FLAGS_LAST = ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP,
+} rocprofiler_thread_trace_decoder_event_flags_t;
 
 typedef struct rocprofiler_thread_trace_decoder_event_t
 {
@@ -260,7 +274,7 @@ typedef struct rocprofiler_thread_trace_decoder_event_t
     rocprofiler_thread_trace_decoder_event_type_t type;
     uint8_t me_id;
     uint8_t pipe_id;
-    uint16_t reserved;
+    uint16_t flags;
     uint64_t payload;
     uint64_t byte_offset; ///< Byte offset within the trace data
 } rocprofiler_thread_trace_decoder_event_t;
@@ -272,8 +286,8 @@ typedef enum rocprofiler_thread_trace_decoder_dispatch_flags_t
     ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_VECTOR_CACHE_INVALIDATE = 0x2,
     ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_IS_CTX_RESTORE = 0x4,
     ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCRATCH_ENABLED = 0x8,
-    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_LAST =
-        ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_SCRATCH_ENABLED,
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_REALTIME_TS = 0x10,
+    ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_LAST = ROCPROFILER_THREAD_TRACE_DECODER_DISPATCH_FLAGS_REALTIME_TS,
 } rocprofiler_thread_trace_decoder_dispatch_flags_t;
 
 typedef struct rocprofiler_thread_trace_decoder_dispatch_t

@@ -16,7 +16,7 @@
   },
   "build_configuration": {
     "install_flags": ["--debug", "-t", "-l", "--log-trace", "--enable-code-coverage", "--enable-mpi-tests", "--no_clean"],
-    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DEMIT_LLVM_IR=ON -DBITCODE_LIB_ARCH=gfx942",
     "parallel_jobs": 64
   },
   "test_configurations": {
@@ -437,6 +437,11 @@
           "test_filter": "EnqueueCountTests.*"
         },
         {
+          "name": "DdaCollCommonTests",
+          "description": "Dda collective tests",
+          "test_filter": "DdaCollCommon.*"
+        },
+        {
           "name": "DeviceOp128_PtrLoadStore",
           "description": "Pointer-based volatile, relaxed, and acquire/release global load/store roundtrips",
           "test_filter": "PackRoundtripTest.LdStVolatileGlobalPtr:PackRoundtripTest.LdStRelaxedSysGlobal:PackRoundtripTest.LdStAcquireReleaseSysGlobal:PackRoundtripTest.L2_VolatileGlobalPtr_MultiElement:PackRoundtripTest.CvtaFromGlobal"
@@ -514,6 +519,11 @@
           "name": "XmlTest",
           "description": "XML topology parsing tests",
           "test_filter": "XmlTest.*"
+        },
+        {
+          "name": "DdaIpcEligibilityTest",
+          "description": "Dda IPC eligibility tests",
+          "test_filter": "DdaIpcEligibilityTest.*"
         }
       ]
     },
@@ -525,7 +535,8 @@
       "num_gpus": 8,
       "timeout": 0,
       "env_variables": {
-        "NCCL_DEBUG": ""
+        "NCCL_DEBUG": "",
+        "UT_MIN_GPUS": "8"
       },
       "rerun_env_variables": {
         "NCCL_DEBUG": "INFO"
@@ -1942,6 +1953,26 @@
     "net_ib_stress_inline_cast": {
       "extends": "net_ib_stress_inline",
       "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "ir_device": {
+      "extends": "default",
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/ir-device",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "ARCH": "gfx942"
+      },
+      "tests": [
+        {
+          "name": "IR_Device_All",
+          "description": "Full IR device pytest harness (builds bitcode + gtest binary on demand, self-skips if prereqs missing)",
+          "test_filter": "ALL"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -2351,6 +2382,12 @@
       "name": "NET IB - Stress Inline CTS (ib-cast)",
       "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_stress_inline_cast",
+      "enabled": true
+    },
+    {
+      "name": "IR Device Tests",
+      "description": "librccl_device.bc (IR) device-API tests via pytest harness; builds artifacts on demand and self-skips when prerequisites are missing",
+      "config": "ir_device",
       "enabled": true
     }
   ]
