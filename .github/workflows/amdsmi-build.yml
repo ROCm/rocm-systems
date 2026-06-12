@@ -186,6 +186,20 @@ jobs:
       OS_LABEL: Ubuntu22
       RESULTS_DIR: /tmp/test-results-proto-Ubuntu22
     steps:
+      - name: Reclaim workspace ownership
+        # The container:-based build-and-test jobs run as -u root and write
+        # into the shared self-hosted-runner workspace, leaving root-owned
+        # files. This host job's actions/checkout runs as the unprivileged
+        # runner user and fails to clean them ("Permission denied"). Chown the
+        # bind-mounted workspace back to the runner user via a root container
+        # before checkout. Best-effort: workspace may not exist on first run.
+        run: |
+          set +e
+          [ -d "$GITHUB_WORKSPACE" ] || exit 0
+          docker run --rm -v "$GITHUB_WORKSPACE":/work alpine \
+            chown -R "$(id -u):$(id -g)" /work
+          exit 0
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Mark workspace safe for git
@@ -270,7 +284,14 @@ jobs:
 
       - name: Cleanup container
         if: always()
-        run: docker rm -f "$CTR" || true
+        run: |
+          set +e
+          docker rm -f "$CTR" || true
+          # Our in-container steps wrote to the bind-mounted workspace as root;
+          # reclaim ownership so the next host-side job's checkout can clean it.
+          [ -d "$GITHUB_WORKSPACE" ] && docker run --rm -v "$GITHUB_WORKSPACE":/work alpine \
+            chown -R "$(id -u):$(id -g)" /work
+          exit 0
 
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
