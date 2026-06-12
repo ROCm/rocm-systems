@@ -261,7 +261,7 @@ tabulate==0.10.0
     # via jupyter-cache
 tomli==2.4.1
     # via sphinx
-tornado==6.5.5
+tornado==6.5.6
     # via
     #   ipykernel
     #   jupyter-client
