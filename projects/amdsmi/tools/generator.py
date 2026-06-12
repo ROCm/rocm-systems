@@ -245,14 +245,17 @@ def find_smi_library():
 try:
     _libraries['{library_name}'], location = find_smi_library()
     #print(f"found smi lib in [", location, "]")
+    #Add support for amdsmi_free_name_value_pairs
+    amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
+    amdsmi_free_name_value_pairs.restype = None
+    amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]
 except OSError as e:
     print(e)
     print("Unable to find {library_name} library try installing amd-smi-lib from your package manager")
 
-#Add support for amdsmi_free_name_value_pairs
-amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
-amdsmi_free_name_value_pairs.restype = None
-amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
+if '{library_name}' in _libraries:
+    # Function definitions below require the library to be loaded
+"""
     else:
         print("Unknown operating system. It is only supporting Linux and Windows.")
         return
@@ -412,6 +415,9 @@ amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
         # trim last newline - avoids pre-commit hook error
         if output_file_array[-1] == "":
             output_file_array = output_file_array[:-1]
+
+        # Close the if block that guards library function definitions
+        output_file_array.append("# end of library function definitions")
 
         write_file(output_file, output_file_array)
 
