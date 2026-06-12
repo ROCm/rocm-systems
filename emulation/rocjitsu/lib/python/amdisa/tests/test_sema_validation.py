@@ -209,6 +209,15 @@ class TestSaveexecValidation:
         assert 'set_exec' in new
         assert 'write_scc' in new
 
+    def test_saveexec_b32_uses_32_bit_operand_access(self):
+        sem = _FakeSem('S_AND_SAVEEXEC_B32', 'scalar_saveexec', 'and', 'b32')
+        new = _new_output(sem, ['ssrc0'], ['sdst'], 'b32')
+        assert 'ssrc0.read_scalar(wf)' in new
+        assert 'ssrc0.read_scalar64(wf)' not in new
+        assert 'sdst.write_scalar(wf' in new
+        assert 'sdst.write_scalar64(wf' not in new
+        assert '0xffffffffULL' in new
+
 
 class TestAllClassesLowerWithOperandMap:
     """Verify every registered semantic class lowers with OperandMap."""

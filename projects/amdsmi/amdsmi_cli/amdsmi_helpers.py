@@ -119,6 +119,20 @@ class AMDSMIHelpers:
                     "Unable to determine virtualization status: " + str(e.get_error_code())
                 )
 
+        self.convert_clock_type = {
+            "sys": amdsmi_interface.AmdSmiClkType.SYS,
+            "mem": amdsmi_interface.AmdSmiClkType.MEM,
+            "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
+            "soc": amdsmi_interface.AmdSmiClkType.SOC,
+            "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
+            # vclk and dclk currently do not support levels so average clk is given for frequency levels
+            "vclk0": amdsmi_interface.AmdSmiClkType.VCLK0,
+            "vclk1": amdsmi_interface.AmdSmiClkType.VCLK1,
+            "dclk0": amdsmi_interface.AmdSmiClkType.DCLK0,
+            "dclk1": amdsmi_interface.AmdSmiClkType.DCLK1,
+        }
+
     def increment_set_count(self):
         self._count_of_sets_called += 1
 
@@ -210,10 +224,38 @@ class AMDSMIHelpers:
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS
 
     def is_brcm_nic_initialized(self):
-        return False
+        """Returns True if a Broadcom NIC handle is enumerated.
+
+        The result is cached on first call. The init flag is checked first to
+        short-circuit on systems where no NIC stack was initialized; otherwise
+        a single C-library probe is issued and memoized.
+        """
+        if hasattr(self, "_brcm_nic_initialized_cached"):
+            return self._brcm_nic_initialized_cached
+        result = False
+        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
+            try:
+                result = len(amdsmi_interface.get_nic_handles()) > 0
+            except amdsmi_interface.AmdSmiLibraryException:
+                result = False
+        self._brcm_nic_initialized_cached = result
+        return result
 
     def is_brcm_switch_initialized(self):
-        return False
+        """Returns True if a Broadcom switch handle is enumerated.
+
+        The result is cached on first call.  See ``is_brcm_nic_initialized``.
+        """
+        if hasattr(self, "_brcm_switch_initialized_cached"):
+            return self._brcm_switch_initialized_cached
+        result = False
+        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
+            try:
+                result = len(amdsmi_interface.get_switch_handles()) > 0
+            except amdsmi_interface.AmdSmiLibraryException:
+                result = False
+        self._brcm_switch_initialized_cached = result
+        return result
 
     def get_rocm_version(self):
         try:
@@ -836,6 +878,7 @@ class AMDSMIHelpers:
                 return False, args.gpu
             else:
                 logging.debug("args.gpu has an empty list")
+                return True, args.gpu
         else:
             return False, args.gpu
 
@@ -876,6 +919,7 @@ class AMDSMIHelpers:
                 return False, args.switch
             else:
                 logging.debug("args.switch has an empty list")
+                return True, args.switch
         else:
             return False, args.switch
 
@@ -916,6 +960,7 @@ class AMDSMIHelpers:
                 return False, args.nic
             else:
                 logging.debug("args.nic has an empty list")
+                return True, args.nic
         else:
             return False, args.nic
 
@@ -956,6 +1001,7 @@ class AMDSMIHelpers:
                 return False, args.nic
             else:
                 logging.debug("args.nic has an empty list")
+                return True, args.nic
         else:
             return False, args.nic
 
@@ -1690,6 +1736,46 @@ class AMDSMIHelpers:
         page_size = os.sysconf("SC_PAGESIZE")
         bytes_value = pages * page_size
         return bytes_value / (1024**3)
+
+    def read_pending_gtt_pages(self):
+        """Read the pending GTT pages_limit written by `amd-smi set --gtt`.
+
+        Returns the integer ``pages_limit`` from the modprobe.d snippet
+        produced by ``amdsmi_set_ttm_pages_limit``, which will take effect
+        on the next boot once the initramfs picks it up. The file name
+        depends on the active TTM module detected by the C++ layer
+        (``amdttm``, ``amd-ttm``, or ``ttm``), so all three candidates are
+        probed in the same priority order. The ``AMDSMI_TTM_SYSFS_NAME``
+        environment variable (when set to one of ``amdttm`` / ``amd_ttm`` /
+        ``ttm``) is checked first to mirror the C++ override. Returns
+        ``None`` if no candidate file exists, none is readable, or none
+        contains a valid ``options <mod> ... pages_limit=<int>`` directive.
+        """
+        candidates = ["amdttm", "amd-ttm", "ttm"]
+        override = os.environ.get("AMDSMI_TTM_SYSFS_NAME", "").strip()
+        if override:
+            # Mirror C++ ttm_modprobe_name(): sysfs "amd_ttm" -> conf "amd-ttm".
+            override_conf = "amd-ttm" if override == "amd_ttm" else override
+            if override_conf in candidates:
+                candidates.remove(override_conf)
+            candidates.insert(0, override_conf)
+
+        pattern = re.compile(r"^\s*options\s+\S+\s+.*?pages_limit\s*=\s*(\d+)", re.MULTILINE)
+        for name in candidates:
+            path = "/etc/modprobe.d/" + name + ".conf"
+            try:
+                with open(path, "r") as f:
+                    content = f.read()
+            except (OSError, IOError):
+                continue
+            m = pattern.search(content)
+            if not m:
+                continue
+            try:
+                return int(m.group(1))
+            except ValueError:
+                continue
+        return None
 
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.

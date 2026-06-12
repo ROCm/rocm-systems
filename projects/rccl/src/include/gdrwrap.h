@@ -13,17 +13,14 @@
 #include <stdint.h> // for standard [u]intX_t types
 #include <stdio.h>
 #include <stdlib.h>
+#include <mutex>
 #include "archinfo.h"
 
 // These can be used if the GDR library isn't thread safe
-#include <pthread.h>
-extern pthread_mutex_t gdrLock;
-#define GDRLOCK() pthread_mutex_lock(&gdrLock)
-#define GDRUNLOCK() pthread_mutex_unlock(&gdrLock)
+std::mutex& getGdrMutex();
 #define GDRLOCKCALL(cmd, ret) do {                      \
-    GDRLOCK();                                          \
+    std::lock_guard<std::mutex> lock(getGdrMutex());   \
     ret = cmd;                                          \
-    GDRUNLOCK();                                        \
 } while(false)
 
 #define GDRCHECK(cmd) do {                              \
@@ -39,7 +36,7 @@ extern pthread_mutex_t gdrLock;
 // This is required as the GDR memory is mapped WC
 #if !defined(__NVCC__)
 #if defined(__PPC__)
-static inline void wc_store_fence(void) { asm volatile("sync") ; }
+static inline void wc_store_fence(void) { asm volatile("sync" : : : "memory"); }
 #elif defined(__x86_64__)
 #include <immintrin.h>
 static inline void wc_store_fence(void) { _mm_sfence(); }
@@ -231,6 +228,7 @@ static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* mana
 
   return ncclSuccess;
 }
+
 #else
 static gdr_t ncclGdrInit() {
   int libMajor, libMinor, drvMajor, drvMinor;
@@ -327,5 +325,39 @@ static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* mana
   return ncclSuccess;
 }
 #endif
+
+// Helper: Allocate memory accessible from CPU (either GDR or host memory)
+template <typename T>
+static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
+                                          void **gdrHandle, struct ncclMemManager* manager, bool forceHost = false) {
+  if (ncclGdrCopy && !forceHost) {
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, manager));
+  } else {
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
+#else
+    CUDACHECK(hipHostMalloc((void **)ptr, nelem * sizeof(T)));
+#endif
+    memset((void *)*ptr, 0, nelem * sizeof(T));
+    *devPtr = *ptr;
+    if (gdrHandle) *gdrHandle = NULL;  // Mark as host allocated by nulling GDR handle
+  }
+  return ncclSuccess;
+}
+
+// Helper: Free memory allocated by allocMemCPUAccessible
+template <typename T>
+static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
+  if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, manager));
+  } else {  // Otherwise, it was host memory (or GDR was off)
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostFree(ptr));
+#else
+    CUDACHECK(hipHostFree(ptr));
+#endif
+  }
+  return ncclSuccess;
+}
 
 #endif // End include guard

@@ -274,6 +274,8 @@ global:
 	hsa_amd_counted_queue_release;
 	hsa_amd_svm_discard_batch_async;
 	hsa_amd_signal_get_event_id;
+	hsa_amd_vmem_export_fabric_handle;
+	hsa_amd_vmem_import_fabric_handle;
 local:
     *;
 };

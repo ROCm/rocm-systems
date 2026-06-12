@@ -97,7 +97,7 @@ def rocprofiler_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.mark.mpi_optional("transpose")
 class TestTranspose(RocprofsysTest):
-    REWRITE_ARGS = [
+    BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -105,7 +105,7 @@ class TestTranspose(RocprofsysTest):
         "-E",
         "uniform_int_distribution",
     ]
-    RUNTIME_ARGS = [
+    RUNTIME_INSTRUMENT_ARGS = [
         "-e",
         "-v",
         "1",
@@ -118,7 +118,7 @@ class TestTranspose(RocprofsysTest):
         "uniform_int_distribution",
     ]
     TWO_KERNELS_RUN_ARGS = ["1", "2", "2"]
-    LOOPS_REWRITE_ARGS = [
+    LOOPS_BINARY_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -153,8 +153,8 @@ class TestTranspose(RocprofsysTest):
             mode,
             "transpose",
             env=transpose_env,
-            rewrite_args=self.REWRITE_ARGS,
-            runtime_args=self.RUNTIME_ARGS,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
             check_target_arch=True,
             launcher="mpi",
             num_procs=2,
@@ -210,14 +210,14 @@ class TestTranspose(RocprofsysTest):
             mode,
             "transpose",
             env=transpose_env,
-            rewrite_args=self.LOOPS_REWRITE_ARGS,
+            binary_rewrite_args=self.LOOPS_BINARY_REWRITE_ARGS,
             run_args=self.LOOPS_RUN_ARGS,
             check_target_arch=True,
         )
         self.assert_regex(
             result,
             mode,
-            rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
+            binary_rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
         )
 
     @pytest.mark.timeout(120)
@@ -279,7 +279,7 @@ class TestTranspose(RocprofsysTest):
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
 @pytest.mark.class_name("transpose-rocprofiler")
 class TestTransposeROCProfiler(RocprofsysTest):
-    REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
+    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
     @pytest.mark.timeout(120)
     @pytest.mark.rocpd("rocprofiler_env")
@@ -290,8 +290,8 @@ class TestTransposeROCProfiler(RocprofsysTest):
             env=rocprofiler_env,
             check_target_arch=True,
             launcher="mpi",
-            num_procs=2,
-            rewrite_args=self.REWRITE_ARGS,
+            num_procs=num_processes,
+            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
         )
         self.assert_regex(result)
         # Counter file device ID depends on GPU topology, search across IDs 0-9
@@ -326,6 +326,7 @@ class TestTransposeROCProfiler(RocprofsysTest):
 @pytest.mark.mpi_optional("transpose")
 @pytest.mark.rocprofiler
 @pytest.mark.class_name("transpose-gpu-perf-counters")
+@pytest.mark.timeout(120)
 class TestTransposeGPUPerfCounters(RocprofsysTest):
     @pytest.mark.rocpd("gpu_perf_counter_env")
     def test(
@@ -339,8 +340,8 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             "transpose",
             env=gpu_perf_counter_env,
             check_target_arch=True,
-            timeout=120,
-            mpi_ranks=2,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         self.assert_perfetto(

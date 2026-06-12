@@ -266,13 +266,13 @@ class TestExecutor:
 
         if self.args.build_dir:
             # Use custom build directory from command line
-            self.build_dir = os.path.expanduser(os.path.expandvars(self.args.build_dir))
+            self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(self.args.build_dir)))
             self.using_custom_lib = True
             if self.args.verbose:
                 print(f"Using custom build directory from --build-dir: {self.build_dir}")
         elif custom_rccl_path:
             # Use custom library path from environment variable
-            self.build_dir = os.path.expanduser(os.path.expandvars(custom_rccl_path))
+            self.build_dir = os.path.abspath(os.path.expanduser(os.path.expandvars(custom_rccl_path)))
             self.using_custom_lib = True
             if self.args.verbose:
                 print(f"Using custom RCCL library path from environment: {self.build_dir}")
@@ -470,7 +470,8 @@ class TestExecutor:
 
         The build_configuration in the JSON config specifies:
         - install_flags: List of install.sh command-line flags
-        - cmake_options: Optional string of additional CMake options (passed via --cmake-options)
+        - cmake_options: Optional CMake options, either a string (e.g. "-DFOO=BAR") or a
+          dict (e.g. {"FOO": "BAR"}); dicts are converted to "-DKEY=VAL" form (passed via --cmake-options)
         - env_variables: Environment variables to set during the build
         - parallel_jobs: Number of parallel compilation jobs (passed via -j)
 
@@ -498,6 +499,8 @@ class TestExecutor:
 
         install_flags = list(self.build_config.get("install_flags", []))
         cmake_options = self.build_config.get("cmake_options", "")
+        if isinstance(cmake_options, dict):
+            cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 
@@ -801,6 +804,11 @@ class TestExecutor:
         # an instrumented binary, writing per-PID profraw files on every process
         # exit is a significant overhead when many short-lived test processes
         # are spawned.
+        #
+        # %p  — unique per child PID (ProcessIsolatedTestRunner re-execs each
+        #        test as a separate process, so each gets its own file).
+        # %m  — binary/module signature (keeps test-binary and librccl.so
+        #        profiles in separate files since each has its own runtime).
         if self.args.coverage_report:
             env['LLVM_PROFILE_FILE'] = "rccl_tests_%p_%m.profraw"
 

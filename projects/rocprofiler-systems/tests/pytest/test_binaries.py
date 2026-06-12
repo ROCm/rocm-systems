@@ -27,6 +27,7 @@ EXCLUDED_FROM_JSON_SCHEMA: frozenset[str] = frozenset(
         "ROCPROFSYS_CI",
         "ROCPROFSYS_CONFIG_FILE",
         "ROCPROFSYS_ENABLED",
+        "ROCPROFSYS_LOG_LEVEL",
         "ROCPROFSYS_OUTPUT_PREFIX",
         "ROCPROFSYS_SUPPRESS_CONFIG",
         "ROCPROFSYS_SUPPRESS_PARSING",
@@ -472,7 +473,6 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     def test_regex_negation(self):
         pass_regex = [
             r"ENVIRONMENT VARIABLE,[\s\S]*"
-            r"ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK,[\s\S]*"
             r"ROCPROFSYS_THREAD_POOL_SIZE,[\s\S]*"
             r"ROCPROFSYS_USE_PID,"
         ]
