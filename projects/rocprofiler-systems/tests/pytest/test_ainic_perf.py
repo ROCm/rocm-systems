@@ -50,7 +50,6 @@ AINIC_PERFETTO_COUNTER_NAMES = [
 def ainic_perf_env(rocprof_config) -> dict[str, str]:
     """Environment variables for AI NIC performance tests."""
     env = {
-        "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_USE_PID": "OFF",
         "ROCPROFSYS_LOG_LEVEL": "trace",
         "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
