@@ -1,15 +1,15 @@
 ---
 myst:
   html_meta:
-    "description lang=en": "Get started with the AMD SMI C++ library. Basic usage and examples."
+    "description lang=en": "Get started with the AMD SMI C/C++ library. Basic usage and examples."
     "keywords": "api, smi, lib, c++, system, management, interface, ROCm"
 ---
 
-# AMD SMI C++ library usage and examples
+# AMD SMI C/C++ library overview
 
 This section presents a brief overview and some basic examples on the AMD SMI
 library's usage. Whether you are developing applications for performance
-monitoring, system diagnostics, or resource allocation, the AMD SMI C++ library
+monitoring, system diagnostics, or resource allocation, the AMD SMI library
 serves as a valuable tool for leveraging the full potential of AMD hardware in
 your projects.
 
@@ -50,29 +50,29 @@ For MI200 GPUs, multiple GCDs may reside within a single socket, so a single soc
 own several processor handles. GPU socket IDs are derived from the device's BDF, whereas
 CPU socket IDs correspond to the physical CPU package.
 
-To identify the sockets in a system, use the `amdsmi_get_socket_handles()`
+To identify the sockets in a system, use the {c:func}`amdsmi_get_socket_handles()`
 function, which returns a list of socket handles. These handles can then be used
-with `amdsmi_get_processor_handles()` to query devices within each socket. The
+with {c:func}`amdsmi_get_processor_handles()` to query devices within each socket. The
 device handle is used to differentiate between detected devices; however, it's
 important to note that a device handle may change after restarting the
 application, so it should not be considered a persistent identifier across
 processes.
 
-The list of socket handles obtained from `amdsmi_get_socket_handles()` can
+The list of socket handles obtained from {c:func}`amdsmi_get_socket_handles()` can
 also be used to query the CPUs in each socket by calling
-`amdsmi_get_processor_handles_by_type()`. This function can then be called again
+{c:func}`amdsmi_get_processor_handles_by_type()`. This function can then be called again
 to query the cores within each CPU.
 
 (cpp_hello_amdsmi)=
 ## Hello AMD SMI
 
-An application using AMD SMI must call `amdsmi_init()` to initialize the AMI SMI
+An application using AMD SMI must call {c:func}`amdsmi_init()` to initialize the AMI SMI
 library before all other calls. This call initializes the internal data
 structures required for subsequent AMD SMI operations. In the call, a flag can
 be passed to indicate if the application is interested in a specific device
 type.
 
-`amdsmi_shut_down()` must be the last call to properly close connection to
+{c:func}`amdsmi_shut_down()` must be the last call to properly close connection to
 driver and make sure that any resources held by AMD SMI are released.
 
 1. A simple "Hello World" type program that displays the temperature of detected
