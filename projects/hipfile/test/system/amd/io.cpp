@@ -14,9 +14,12 @@
 #include "test-options.h"
 
 #include <array>
+#include <bit>
 #include <cstdlib>
+#include <fcntl.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
+#include <linux/stat.h>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -71,16 +74,27 @@ struct HipFileIo : public testing::TestWithParam<IoTestParam> {
 
     Tmpfile              tmpfile;
     size_t               tmpfile_size;
+    uint32_t             tmpfile_dio_offset_align;
     hipFileHandle_t      tmpfile_handle;
     void                *unregistered_device_buffer;
     size_t               unregistered_device_buffer_size;
     std::vector<uint8_t> host_buffer;
 
     HipFileIo()
-        : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1_MiB}, tmpfile_handle{nullptr},
-          unregistered_device_buffer{nullptr}, unregistered_device_buffer_size{tmpfile_size},
-          host_buffer(tmpfile_size)
+        : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1_MiB}, tmpfile_dio_offset_align{4_KiB},
+          tmpfile_handle{nullptr}, unregistered_device_buffer{nullptr},
+          unregistered_device_buffer_size{tmpfile_size}, host_buffer(tmpfile_size)
     {
+#if defined(STATX_DIOALIGN)
+        struct statx stx {};
+        if (0 == statx(tmpfile.fd, "", AT_EMPTY_PATH, STATX_DIOALIGN, &stx) &&
+            stx.stx_mask & STATX_DIOALIGN) {
+            if (std::popcount(stx.stx_dio_offset_align) != 1) {
+                throw std::runtime_error("Invalid statx dio offset");
+            }
+            tmpfile_dio_offset_align = stx.stx_dio_offset_align;
+        }
+#endif
     }
 
     void SetUp() override
@@ -182,6 +196,55 @@ TEST_P(HipFileIo, writeAtNegativeBufferOffsetReturnsEINVAL)
         -1, hipFileWrite(tmpfile_handle, unregistered_device_buffer, unregistered_device_buffer_size, 0, -1));
     ASSERT_EQ(EINVAL, errno);
 }
+
+// Zero-sized IO tests require >= ROCm 7.14
+#if HIP_VERSION_MAJOR > 7 || (HIP_VERSION_MAJOR == 7 && HIP_VERSION_MINOR >= 14)
+TEST_P(HipFileIo, zeroSizedReadAtAlignedFileOffsetReturnsZero)
+{
+    for (hoff_t offset = 0; offset < static_cast<hoff_t>(tmpfile_size); offset += tmpfile_dio_offset_align) {
+        ASSERT_EQ(0, pread(tmpfile.fd, host_buffer.data(), 0, offset));
+        ASSERT_EQ(0, hipFileRead(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+    }
+}
+
+TEST_P(HipFileIo, zeroSizedWriteAtAlignedFileOffsetReturnsZero)
+{
+    for (hoff_t offset = 0; offset < static_cast<hoff_t>(tmpfile_size); offset += tmpfile_dio_offset_align) {
+        ASSERT_EQ(0, pwrite(tmpfile.fd, host_buffer.data(), 0, offset));
+        ASSERT_EQ(0, hipFileWrite(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+    }
+}
+
+TEST_P(HipFileIo, zeroSizedReadAtAlignedOffsetBeyondEndOfFileReturnsZero)
+{
+    size_t aligned_eof{align_up(tmpfile_size + 1, tmpfile_dio_offset_align)};
+    for (size_t i = 0; i < 10; i++) {
+        hoff_t offset{static_cast<hoff_t>(aligned_eof * i)};
+        ASSERT_EQ(0, pread(tmpfile.fd, host_buffer.data(), 0, offset));
+        ASSERT_EQ(0, hipFileRead(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+
+        // ensure the file size has not increased
+        struct stat st {};
+        ASSERT_EQ(0, fstat(tmpfile.fd, &st));
+        ASSERT_EQ(tmpfile_size, static_cast<size_t>(st.st_size));
+    }
+}
+
+TEST_P(HipFileIo, zeroSizedWriteAtAlignedOffsetBeyondEndOfFileReturnsZero)
+{
+    size_t aligned_eof{align_up(tmpfile_size + 1, tmpfile_dio_offset_align)};
+    for (size_t i = 0; i < 10; i++) {
+        hoff_t offset{static_cast<hoff_t>(aligned_eof * i)};
+        ASSERT_EQ(0, pwrite(tmpfile.fd, host_buffer.data(), 0, static_cast<off_t>(offset)));
+        ASSERT_EQ(0, hipFileWrite(tmpfile_handle, unregistered_device_buffer, 0, offset, 0));
+
+        // ensure the file size has not increased
+        struct stat st {};
+        ASSERT_EQ(0, fstat(tmpfile.fd, &st));
+        ASSERT_EQ(tmpfile_size, static_cast<size_t>(st.st_size));
+    }
+}
+#endif
 
 INSTANTIATE_TEST_SUITE_P(, HipFileIo, testing::ValuesIn(io_test_params),
                          [](const testing::TestParamInfo<HipFileIo::ParamType> &param_info) {
