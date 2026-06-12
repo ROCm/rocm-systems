@@ -34,10 +34,10 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// Minimal KFD SVM ioctl bindings (mirrors drivers/gpu/drm/amd/amdkfd/kfd_ioctl.h is from
-// kernel source tree fields used here; UAPI is stable across recent kernels w.r.t. SVM op
-// 0x20). Used by Test 7 to set KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED on a user range so
-// the QUEUE_EVICT_SVM emission path is reachable under HSA_XNACK=1.
+// Minimal KFD SVM ioctl bindings. These mirror fields from
+// <linux/kfd_ioctl.h>; the UAPI is stable across recent kernels w.r.t. SVM op
+// 0x20. Used by Test 7 to set KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED on a user
+// range so the QUEUE_EVICT_SVM emission path is reachable under HSA_XNACK=1.
 // ---------------------------------------------------------------------------
 #ifndef KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED
 #    define KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED 0x00000040
