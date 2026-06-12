@@ -122,6 +122,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/hip.h"
 #include "rocprofiler-sdk/hsa.h"
 #include "rocprofiler-sdk/intercept_table.h"
+#include "rocprofiler-sdk/kernel_replay.h"
 #include "rocprofiler-sdk/internal_threading.h"
 #include "rocprofiler-sdk/marker.h"
 #include "rocprofiler-sdk/ompt.h"

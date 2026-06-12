@@ -7,6 +7,8 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     hsa_barrier.cpp
     hsa.cpp
     memory_allocation.cpp
+    memory_snapshot.cpp
+    memory_tracker.cpp
     pc_sampling.hpp
     profile_serializer.cpp
     queue_controller.cpp
@@ -20,6 +22,8 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     aql_packet.hpp
     async_copy.hpp
     memory_allocation.hpp
+    memory_snapshot.hpp
+    memory_tracker.hpp
     defines.hpp
     hsa_barrier.hpp
     hsa.hpp

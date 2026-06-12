@@ -100,6 +100,14 @@ struct spm_dispatch_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
+/// @brief Kernel replay (multi-pass counter collection) service state.
+/// Dispatch counting callbacks are stored in dispatch_counter_collection; this service only
+/// marks that replay orchestration should run once implemented in the HSA queue path.
+struct kernel_replay_service
+{
+    common::Synchronized<bool> enabled{false};
+};
+
 struct device_counting_service
 {
     std::unordered_set<uint64_t>                            conf_agents;
@@ -149,6 +157,8 @@ struct context
 
     std::unique_ptr<spm_dispatch_counter_collection_service> dispatch_spm = {};
 
+    std::unique_ptr<kernel_replay_service> kernel_replay = {};
+
     template <typename KindT>
     bool is_tracing(KindT _kind) const;
 
@@ -161,6 +171,16 @@ struct context
         return (is_tracing(_args) || ...);
     }
 };
+
+/// @brief True when this context was configured for kernel replay (multi-pass dispatch counting).
+inline bool
+kernel_replay_is_enabled(const context* ctx)
+{
+    if(!ctx || !ctx->kernel_replay) return false;
+    bool enabled = false;
+    ctx->kernel_replay->enabled.rlock([&](const bool& v) { enabled = v; });
+    return enabled;
+}
 
 // set the client index needs to be called before allocate_context()
 void push_client(uint32_t);
