@@ -40,6 +40,18 @@
 #include <utility>
 #include <variant>
 
+// Test executables are built with -fno-sanitize=all, so __has_feature() cannot
+// detect the sanitizer here. The LSan runtime is still linked (it reports the
+// leak at exit), so we reach its ignore-list via a weak symbol: it resolves and
+// is called in sanitized builds, and is nullptr (a no-op) otherwise.
+extern "C" void __lsan_ignore_object(const void *p) __attribute__((weak));
+#define HIPFILE_LSAN_IGNORE(ptr)                                                                             \
+    do {                                                                                                     \
+        if (__lsan_ignore_object) {                                                                          \
+            __lsan_ignore_object(ptr);                                                                       \
+        }                                                                                                    \
+    } while (0)
+
 // Put tests inside the macros to suppress the global constructor
 // warnings
 HIPFILE_WARN_NO_GLOBAL_CTOR_OFF
@@ -502,10 +514,18 @@ TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
     EXPECT_CALL(*mstream, fixedFileOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
     EXPECT_CALL(*mstream, fixedBufferOffset).Times(AnyNumber()).WillRepeatedly(Return(false));
 
+    // These two allocations are intentionally leaked. The singleton AsyncMonitor
+    // retains a shared_ptr to the AsyncOpFallback (cleanup would normally run via
+    // async_io_cleanup, which we suppress here by making hipLaunchHostFunc throw),
+    // and that pointer outlives the test. Freeing op_data/bounce_buffer here would
+    // make the retained pointer dangle and crash at process exit, so we hand them
+    // to LSan's ignore list instead.
     auto op_data = malloc(sizeof(AsyncOpFallback));
     ASSERT_NE(op_data, nullptr);
+    HIPFILE_LSAN_IGNORE(op_data);
     auto bounce_buffer = malloc(size);
     ASSERT_NE(bounce_buffer, nullptr);
+    HIPFILE_LSAN_IGNORE(bounce_buffer);
     EXPECT_CALL(mhip, hipHostMalloc).WillOnce(Return(op_data)).WillOnce(Return(bounce_buffer));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(bounce_buffer), _))
         .WillOnce(Return(reinterpret_cast<void *>(0xDEBBBBBB)));
