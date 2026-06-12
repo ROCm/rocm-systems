@@ -49,7 +49,7 @@ _EXCLUDE_GPU_KEY_RE = re.compile(r"^exclude_gpu_(gfx\w+?)(?:_(windows|linux))?$"
 
 
 def parse_exclude_gpu_key(key):
-    """Return (gpu_arch, os_suffix) for a YAML key under ``exclude_arch``."""
+    """Return (gpu_arch, os_suffix) for a YAML key under ``exclude_arch``.
 
     ``os_suffix`` is one of ``"windows"``, ``"linux"`` or ``None``.
     Returns ``(None, None)`` if the key does not match the expected shape.
@@ -77,6 +77,7 @@ def exclude_gpu_key_applies(os_suffix, is_windows, is_linux):
 # Load categorisation policy from test_categories.yaml
 # ---------------------------------------------------------------------------
 
+
 def load_test_categories(yaml_path):
     """Parse test_categories.yaml and return (tier_patterns, gpu_exclusion_tags).
 
@@ -93,14 +94,18 @@ def load_test_categories(yaml_path):
     # --- tier patterns -------------------------------------------------------
     tier_patterns: dict = {}
     for tier in TIER_ORDER:
-        raw = (data.get("test_categories", {}).get(tier) or {}).get("test_patterns") or []
+        raw = (data.get("test_categories", {}).get(tier) or {}).get(
+            "test_patterns"
+        ) or []
         compiled = []
         for p in raw:
             try:
                 compiled.append(re.compile(f"^{p}$"))
             except re.error as exc:
-                print(f"Warning: invalid regex '{p}' in tier '{tier}': {exc}",
-                      file=sys.stderr)
+                print(
+                    f"Warning: invalid regex '{p}' in tier '{tier}': {exc}",
+                    file=sys.stderr,
+                )
         if compiled:
             tier_patterns[tier] = compiled
 
@@ -117,7 +122,11 @@ def load_test_categories(yaml_path):
         # Use all labels from the exclude_gpu section (no prefix filter so any
         # naming convention — ex_gpu_*, gfx*_exclude, etc. — is supported).
         ex_tags = [lbl for lbl in labels if lbl]
-        for test_name in ((section or {}).get("test_patterns", []) if isinstance(section, dict) else []):
+        for test_name in (
+            (section or {}).get("test_patterns", [])
+            if isinstance(section, dict)
+            else []
+        ):
             base_test_name = test_name.split(" - ", 1)[0].strip()
             if base_test_name:
                 gpu_exclusion_tags.setdefault(base_test_name, set()).update(ex_tags)
@@ -128,6 +137,7 @@ def load_test_categories(yaml_path):
 # ---------------------------------------------------------------------------
 # Tier tag resolution
 # ---------------------------------------------------------------------------
+
 
 def resolve_tier_tags(test_name, tier_patterns):
     """Return the sorted list of tier tags for *test_name*.
@@ -178,7 +188,11 @@ def patch_header(header_path, tier_patterns, gpu_exclusion_tags):
             continue
 
         prefix, test_name, existing_tags, close_quote, rest = (
-            m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+            m.group(1),
+            m.group(2),
+            m.group(3),
+            m.group(4),
+            m.group(5),
         )
 
         # Skip disabled tests -- they already have "[.]" as their entire tag
@@ -220,6 +234,7 @@ def patch_header(header_path, tier_patterns, gpu_exclusion_tags):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 def main():
     parser = argparse.ArgumentParser(
