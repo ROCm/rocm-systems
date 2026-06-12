@@ -137,6 +137,40 @@ jobs:
           done
           echo "===== lsmod (nic-related) ====="
           lsmod 2>/dev/null | grep -iE 'ionic|bnxt|amdgpu' || echo "  (none)"
+          echo "===== PCI vendor/device/class of bound NIC functions ====="
+          # The AI-NIC (Pensando) discovery in smi_nic_subsystem.cpp only
+          # registers a device when it finds vendor 0x1dd8 + mgmt device 0x0008
+          # (bridge) plus downstream ports 0x1dd8:0x1002. Dump the actual IDs so
+          # we can tell whether these are AI-NIC managed parts or plain ionic
+          # ethernet NICs (which the library correctly does NOT enumerate).
+          for d in ionic bnxt_en; do
+            dir="/sys/bus/pci/drivers/$d"
+            [ -d "$dir" ] || continue
+            for l in "$dir"/*; do
+              [ -L "$l" ] || continue
+              bdf=$(basename "$l")
+              case "$bdf" in
+                *:*) : ;;   # looks like a BDF
+                *) continue ;;
+              esac
+              v=$(cat "/sys/bus/pci/devices/$bdf/vendor" 2>/dev/null)
+              dev=$(cat "/sys/bus/pci/devices/$bdf/device" 2>/dev/null)
+              cls=$(cat "/sys/bus/pci/devices/$bdf/class" 2>/dev/null)
+              printf "  %-7s %s  vendor=%s device=%s class=%s\n" "$d" "$bdf" "$v" "$dev" "$cls"
+            done
+          done
+          echo "  (AI-NIC discovery wants vendor=0x1dd8 device=0x0008 mgmt + 0x1002 ports)"
+          echo "===== any 0x1dd8:0x0008 (AI-NIC mgmt) anywhere on PCI bus? ====="
+          found_mgmt=0
+          for dpath in /sys/bus/pci/devices/*; do
+            v=$(cat "$dpath/vendor" 2>/dev/null)
+            dev=$(cat "$dpath/device" 2>/dev/null)
+            if [ "$v" = "0x1dd8" ]; then
+              printf "  %s vendor=%s device=%s\n" "$(basename "$dpath")" "$v" "$dev"
+              [ "$dev" = "0x0008" ] && found_mgmt=1
+            fi
+          done
+          echo "  found 0x1dd8:0x0008 mgmt device: $found_mgmt"
           echo "===== enumerated handle counts (what get_*_handles return) ====="
           python3 - <<'PY'
           # Mirror exactly what the CLI's get_nic_choices() does, and split the
