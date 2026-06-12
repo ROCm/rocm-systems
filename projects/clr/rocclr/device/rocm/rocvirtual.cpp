@@ -1859,6 +1859,8 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
     skippedDispatches_ = 0;
     retainExternalSignals_ = false;
   }
+  // Any fence/flush ends the coalescing window for event records.
+  last_barrier_coalesce_event_ = nullptr;
 
   // Check if runtime could skip CPU wait
   if (!skip_cpu_wait) {
@@ -2261,6 +2263,15 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
   // Track the current command
   command_ = &command;
 
+  // Any non-marker command represents work between event records and ends the
+  // coalescing window. Markers manage the window themselves in submitMarker (a
+  // record sets it, a wait/other marker clears it), so they are excluded here.
+  // This is the single choke point: every submitXxx calls profilingBegin under
+  // the execution() lock, so individual dispatch paths need no explicit reset.
+  if (!command.isMarkerCommand()) {
+    last_barrier_coalesce_event_ = nullptr;
+  }
+
   // Disable profiling when command is being captured to prevent memory leak from created timestamp_
   // which won't get freed, since the command is not being executed until graph launch
   if (!command.getPktCapturingState() && command.profilingInfo().enabled_) {
@@ -2323,10 +2334,12 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
  */
 void VirtualGPU::profilingEnd(bool clearHwEvent) {
   if (!command_->getPktCapturingState() && command_->profilingInfo().enabled_) {
-    if (timestamp_->HwProfiling() == false) {
-      timestamp_->end();
+    if (timestamp_ != nullptr) {
+      if (timestamp_->HwProfiling() == false) {
+        timestamp_->end();
+      }
+      timestamp_ = nullptr;
     }
-    timestamp_ = nullptr;
   }
 
   // Certain commands like map/unmap memory may not need hw_events as its not a
@@ -4574,6 +4587,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
     }
     flush(vcmd.GetBatchHead());
+    last_barrier_coalesce_event_ = nullptr;
   } else {
     profilingBegin(vcmd);
     const Settings& settings = dev().settings();
@@ -4588,7 +4602,14 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       s.handle = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(
           vcmd.ipcDepSignal()->getHandle()));
       WaitCompleteSignal(s);
-    } else if (timestamp_ != nullptr || ipc_s.handle != 0) {
+    } else if (timestamp_ != nullptr || vcmd.profilingInfo().marker_ts_ || ipc_s.handle != 0) {
+      // Skip a redundant barrier when this marker records the same client event as
+      // the previous barrier with no intervening work. IPC records always dispatch.
+      if (ipc_s.handle == 0 && ShouldCoalesceMarker(vcmd)) {
+        profilingEnd();
+        force_irq_ = false;
+        return;
+      }
       // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
       // the IPC signal as completion_signal; it fires when prior work completes.
       if (ipc_s.handle != 0) {
@@ -4618,6 +4639,11 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         hasPendingDispatch_ = false;
       }
     }
+    // Any marker that reaches here (and wasn't coalesced away, which returns
+    // early) ends the prior coalescing window. A record sets the window to its
+    // own client event; a plain wait/other marker has coalesceEvent() == nullptr
+    // and so clears it, which is what a cross-stream wait relies on.
+    last_barrier_coalesce_event_ = vcmd.coalesceEvent();
     profilingEnd();
   }
   force_irq_ = false;

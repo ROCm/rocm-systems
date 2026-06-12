@@ -443,6 +443,11 @@ class Command : public Event {
    */
   virtual void submit(device::VirtualDevice& device) = 0;
 
+  //! True only for marker commands. The device layer uses this to leave its
+  //! event-record coalescing window intact across markers while resetting it for
+  //! any other command (which represents intervening work).
+  virtual bool isMarkerCommand() const { return false; }
+
   //! Release the resources associated with this event.
   virtual void releaseResources();
 
@@ -1497,6 +1502,12 @@ class ExternalSemaphoreCmd : public Command {
 class Marker : public Command {
   device::Signal* ipc_completion_signal_ = nullptr;
   device::Signal* ipc_dep_signal_ = nullptr;
+  //! Opaque client (HIP) event identity used to detect consecutive records of the
+  //! same event so the device layer can skip a redundant barrier dispatch. A
+  //! non-null value also means the client opted this record into coalescing.
+  //! Never dereferenced here; only compared for identity.
+  void* coalesce_event_ = nullptr;
+  bool synced_since_record_ = false;  //!< Client synced the event since its last record
 
  public:
   //! Create a new Marker
@@ -1513,6 +1524,15 @@ class Marker : public Command {
   //! Attach an IPC signal as dep_signal on the barrier packet (for stream wait)
   void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
   device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
+
+  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-null
+  //! coalesceEvent() both identifies the event and marks the record eligible.
+  void setCoalesceEvent(void* e) { coalesce_event_ = e; }
+  void* coalesceEvent() const { return coalesce_event_; }
+  void setSyncedSinceRecord(bool v) { synced_since_record_ = v; }
+  bool syncedSinceRecord() const { return synced_since_record_; }
+
+  bool isMarkerCommand() const override { return true; }
 
   //! The actual command implementation.
   virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }

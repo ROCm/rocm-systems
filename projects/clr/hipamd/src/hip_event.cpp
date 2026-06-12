@@ -207,7 +207,26 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
 
   constexpr bool kMarkerTs = true;
   constexpr bool kFlushCache = false;
-  command = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags, batch_flush);
+
+  // Check hipEventDisableTiming flag to skip profiling/timing infrastructure
+  const bool enable_profiling = !(flags & hipEventDisableTiming);
+
+  auto* marker = new hip::EventMarker(*stream, kFlushCache, kMarkerTs, releaseFlags,
+                                      batch_flush, enable_profiling);
+
+  // Hand the device layer this event's identity so it can coalesce consecutive
+  // records of the same event. Only timing-disabled events opt in: a non-null
+  // coalesceEvent() is what marks a record eligible. A timing-enabled event
+  // leaves it null so it always emits a fresh barrier for hipEventElapsedTime.
+  // The synced snapshot (only consulted for eligible records) forces a fresh
+  // barrier after hipEventSynchronize, so it is taken under the same guard.
+  if (flags & hipEventDisableTiming) {
+    marker->setCoalesceEvent(reinterpret_cast<void*>(this));
+    marker->setSyncedSinceRecord(WasSyncedSinceLastRecord());
+  }
+
+  command = marker;
+
   return hipSuccess;
 }
 
@@ -463,6 +482,9 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, uint32_t 
   if (e->deviceId() != hip_stream->DeviceId()) {
     return hipErrorInvalidResourceHandle;
   }
+  // Coalescing of consecutive records on the same event is detected entirely in
+  // the rocclr layer (VirtualGPU::submitMarker). The marker carries the event
+  // identity and eligibility flags so rocclr can skip a redundant barrier.
   return e->addMarker(hip_stream, nullptr, !hip::Event::kBatchFlush);
 }
 
@@ -544,6 +566,8 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
 
   auto* e = reinterpret_cast<hip::Event*>(event);
   const auto status = e->synchronize();
+  // Mark event as synced to prevent coalescing until next record
+  e->MarkSynced();
   // Release freed memory for all memory pools on the device
   g_devices[e->deviceId()]->ReleaseFreedMemory();
   HIP_RETURN(status);

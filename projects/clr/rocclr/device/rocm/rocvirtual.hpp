@@ -729,6 +729,22 @@ class VirtualGPU : public device::VirtualDevice {
     return false;
   }
 
+  //! Returns true if the marker's barrier can be skipped because it records the
+  //! same client event as the immediately preceding barrier, with no intervening
+  //! dispatch and no sync since that record. Caller must hold the execution() lock.
+  bool ShouldCoalesceMarker(const amd::Marker& vcmd) const {
+    // A null coalesceEvent() means the record either didn't opt in (timing
+    // enabled) or isn't a record at all, so it can never be coalesced.
+    void* event = vcmd.coalesceEvent();
+    if (event == nullptr || event != last_barrier_coalesce_event_) {
+      return false;
+    }
+    if (IsPendingDispatch() || vcmd.syncedSinceRecord()) {
+      return false;
+    }
+    return true;
+  }
+
   //! Queue state flags
   union {
     struct {
@@ -745,6 +761,10 @@ class VirtualGPU : public device::VirtualDevice {
 
   Timestamp* timestamp_;
   amd::Command* command_;   //!< Current command
+  //! Opaque client event identity of the last barrier dispatched by submitMarker.
+  //! Used to coalesce consecutive markers for the same event. Accessed only under
+  //! the execution() lock. Never dereferenced; compared for identity only.
+  void* last_barrier_coalesce_event_ = nullptr;
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
   hsa_barrier_and_packet_t barrier_packet_ {};
