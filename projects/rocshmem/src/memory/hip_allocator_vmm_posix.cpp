@@ -139,6 +139,10 @@ HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFre
                     "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
                     "Please use a different memory allocator.", device_id);
   }
+
+  // Cache the VMM allocation granularity for this allocator.
+  size_t granularity = VMMQueryGranularity(hipMemHandleTypePosixFileDescriptor);
+  mem_granularity_ = (granularity != 0) ? granularity : 1;
 }
 
 hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
@@ -327,6 +331,64 @@ hipError_t HIPAllocatorVMMPosixFd::CloseIpcHandle(void *dev_ptr)
   // Remove from tracking map
   imported_allocations_.erase(it);
 
+  return hipSuccess;
+}
+
+hipError_t HIPAllocatorVMMPosixFd::GetIpcHandleFromPtr(void *dev_ptr, size_t length, void *handle)
+{
+  if (dev_ptr == nullptr || handle == nullptr || length == 0) {
+    return hipErrorInvalidValue;
+  }
+
+  // Retain the generic allocation handle backing this VMM pointer. This only
+  // succeeds for VMM allocations (the caller is expected to have validated
+  // this), and gives us a handle we can export without relying on this
+  // allocator's internal allocation tracking.
+  hipMemGenericAllocationHandle_t generic_handle;
+  hipError_t err = hipMemRetainAllocationHandle(&generic_handle, dev_ptr);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  int fd;
+  err = hipMemExportToShareableHandle(&fd, generic_handle,
+                                      hipMemHandleTypePosixFileDescriptor, 0);
+
+  // Drop our retained reference regardless of the export outcome. On success
+  // the exported fd keeps the underlying memory alive for importers; a release
+  // failure only leaks a reference, so warn rather than fail.
+  hipError_t rel_err = hipMemRelease(generic_handle);
+  if (rel_err != hipSuccess) {
+    LOG_WARN("hipMemRelease failed in GetIpcHandleFromPtr: %s",
+             hipGetErrorString(rel_err));
+  }
+
+  // Report any export failure once cleanup is done.
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+  posix_handle->fd = static_cast<uint64_t>(fd);
+  posix_handle->pid = static_cast<uint32_t>(getpid());
+  /* length is already granularity-aligned (validated at registration). */
+  posix_handle->size = length;
+
+  return hipSuccess;
+}
+
+hipError_t HIPAllocatorVMMPosixFd::CloseExportedHandle(void *handle)
+{
+  if (handle == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  HIPIpcMemHandlePosix_t* posix_handle = reinterpret_cast<HIPIpcMemHandlePosix_t*>(handle);
+  int fd = static_cast<int>(posix_handle->fd);
+  if (fd != -1) {
+    close(fd);
+    posix_handle->fd = static_cast<uint64_t>(-1);
+  }
   return hipSuccess;
 }
 
