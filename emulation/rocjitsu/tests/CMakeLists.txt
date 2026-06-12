@@ -86,6 +86,7 @@ add_executable(
     simd_correctness/vop3_carry_simd_correctness_test.cpp
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
+    simd_correctness/vop3_shift64_scalar_correctness_test.cpp
     simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
     simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
@@ -103,6 +104,7 @@ add_executable(
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     data_types_test.cpp
+    drm_info_layout_test.cpp
 )
 target_link_libraries(
     rocjitsu_tests

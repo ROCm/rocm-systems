@@ -747,6 +747,30 @@ def gen_vector_cvt_pk(
                 L.append(
                     f'    {dst[0]}.write_lane(wf, lane, lo_bits | (hi_bits << 16));'
                 )
+        elif op in ('u16_f32', 'i16_f32'):
+            L.append(
+                f'    float f0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));'
+            )
+            L.append(
+                f'    float f1 = std::bit_cast<float>({src[1]}.read_lane(wf, lane));'
+            )
+            if op == 'u16_f32':
+                L.append(
+                    '    uint16_t lo = static_cast<uint16_t>(std::clamp(f0, 0.0f, 65535.0f));'
+                )
+                L.append(
+                    '    uint16_t hi = static_cast<uint16_t>(std::clamp(f1, 0.0f, 65535.0f));'
+                )
+            else:
+                L.append(
+                    '    int16_t lo = static_cast<int16_t>(std::clamp(f0, -32768.0f, 32767.0f));'
+                )
+                L.append(
+                    '    int16_t hi = static_cast<int16_t>(std::clamp(f1, -32768.0f, 32767.0f));'
+                )
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) | static_cast<uint32_t>(static_cast<uint16_t>(lo)));'
+            )
         else:
             L.append(f'    uint32_t s0 = {src[0]}.read_lane(wf, lane);')
             L.append(f'    uint32_t s1 = {src[1]}.read_lane(wf, lane);')
@@ -1030,11 +1054,26 @@ def gen_vector_cvt_scale(
 
 
 def _opsel_field(ctx) -> str:
-    """Return the correct opsel field name for the current ISA encoding."""
+    """Return the correct opsel field name for the current ISA encoding.
+
+    VOP3 encodings always have an opsel field in the machine instruction struct,
+    but the ISA spec may not list it as a ucode field for every instruction.
+    When encoding fields don't include it, fall back to the struct field name
+    based on ISA convention (op_sel for CDNA/RDNA3, opsel for RDNA4/gfx1250).
+    """
     if 'op_sel' in ctx.enc_field_names:
         return 'inst_.op_sel'
     if 'opsel' in ctx.enc_field_names:
         return 'inst_.opsel'
+    if ctx.is_vop3:
+        enc_map = getattr(ctx, 'encoding_map', None)
+        if enc_map and ctx.enc_name in enc_map:
+            fields = {f.name for f in enc_map[ctx.enc_name].ucode_fields}
+            if 'opsel' in fields:
+                return 'inst_.opsel'
+            if 'op_sel' in fields:
+                return 'inst_.op_sel'
+        return 'inst_.op_sel'
     return '0u'
 
 

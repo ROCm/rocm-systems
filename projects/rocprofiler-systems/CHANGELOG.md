@@ -8,6 +8,14 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- `--output-format` flag for `rocprof-sys-run` and `rocprof-sys-sample` to select
+  output format(s) in a single, intuitive option: `proto` (Perfetto), `rocpd`
+  (RocPD database), and `json` / `text` (Timemory profile; `txt` aliases `text`).
+  Tokens are space- or comma-separated and authoritative — only the listed
+  formats are produced. The existing `--trace`, `--profile`, `--flat-profile`,
+  and `--profile-format` flags and their environment variables remain available,
+  but cannot be combined with `--output-format` on the same command line.
+
 - Unified-memory profiling reports (`unified_memory.txt` and
   `unified_memory.json`) summarizing KFD page-fault and page-migration events,
   including per-GPU counts, trigger breakdown (`gpu_page_fault`,
@@ -37,6 +45,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Add `--list-domains` and `--list-operations <domain>` to `rocprof-sys-avail`.
   There new options allow the user to query more information about available
   ROCm domains (used in `ROCPROFSYS_ROCM_DOMAINS`) and their operations.
+- Added `rocprofsys_push_trace_with_args`, a public API for pushing a user trace region
+  with a pre-serialized argument string attached. The arguments are recorded in cached
+  tracing mode (the default); in legacy tracing (`ROCPROFSYS_TRACE_CACHED=OFF`) they are
+  ignored.
 
 ### Changed
 
