@@ -16,6 +16,16 @@ class KFDMultiNodeP2PTest : public KFDBaseComponentTest {
     KFDMultiNodeP2PTest() {}
     ~KFDMultiNodeP2PTest() {}
 
+    /* Returns a --gtest_filter-compatible name for the currently running test,
+     * including any parameterized instantiation prefix and parameter index.
+     * Used to launch the matching test on the remote host.
+     */
+    static std::string CurrentTestFilter() {
+        const ::testing::TestInfo* info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        return std::string(info->test_case_name()) + "." + info->name();
+    }
+
  protected:
     virtual void SetUp() override;
     virtual void TearDown() override;
