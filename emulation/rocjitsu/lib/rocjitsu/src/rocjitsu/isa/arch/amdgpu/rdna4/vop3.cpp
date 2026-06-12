@@ -1588,7 +1588,7 @@ void VCvtPkF32Fp8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t packed = src0.read_lane(wf, lane);
-    bool src_hi = 0u & 1;
+    bool src_hi = inst_.opsel & 1;
     uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
     float lo = util::fp8_e4m3_to_f32(static_cast<uint8_t>(half & 0xFFu));
     float hi = util::fp8_e4m3_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
@@ -1620,7 +1620,7 @@ void VCvtPkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t packed = src0.read_lane(wf, lane);
-    bool src_hi = 0u & 1;
+    bool src_hi = inst_.opsel & 1;
     uint32_t half = src_hi ? (packed >> 16) : (packed & 0xFFFFu);
     float lo = util::bf8_e5m2_to_f32(static_cast<uint8_t>(half & 0xFFu));
     float hi = util::bf8_e5m2_to_f32(static_cast<uint8_t>((half >> 8) & 0xFFu));
@@ -5588,10 +5588,10 @@ void VCvtPkI16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = src0.read_lane(wf, lane);
-    uint32_t s1 = src1.read_lane(wf, lane);
-    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));
-    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));
+    float f0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float f1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    int16_t lo = static_cast<int16_t>(std::clamp(f0, -32768.0f, 32767.0f));
+    int16_t hi = static_cast<int16_t>(std::clamp(f1, -32768.0f, 32767.0f));
     vdst.write_lane(wf, lane,
                     (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
                         static_cast<uint32_t>(static_cast<uint16_t>(lo)));
@@ -5624,10 +5624,10 @@ void VCvtPkU16F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t s0 = src0.read_lane(wf, lane);
-    uint32_t s1 = src1.read_lane(wf, lane);
-    int16_t lo = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s0), -32768, 32767));
-    int16_t hi = static_cast<int16_t>(std::clamp(static_cast<int32_t>(s1), -32768, 32767));
+    float f0 = std::bit_cast<float>(src0.read_lane(wf, lane));
+    float f1 = std::bit_cast<float>(src1.read_lane(wf, lane));
+    uint16_t lo = static_cast<uint16_t>(std::clamp(f0, 0.0f, 65535.0f));
+    uint16_t hi = static_cast<uint16_t>(std::clamp(f1, 0.0f, 65535.0f));
     vdst.write_lane(wf, lane,
                     (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
                         static_cast<uint32_t>(static_cast<uint16_t>(lo)));
@@ -6763,7 +6763,7 @@ void VCvtPkFp8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = util::f32_to_fp8_e4m3_rne(s0);
     uint32_t hi = util::f32_to_fp8_e4m3_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    bool word_hi = (0u >> 3) & 1;
+    bool word_hi = (inst_.opsel >> 3) & 1;
     uint32_t old = vdst.read_lane(wf, lane);
     if (word_hi)
       vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
@@ -6803,7 +6803,7 @@ void VCvtPkBf8F32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t lo = util::f32_to_bf8_e5m2_rne(s0);
     uint32_t hi = util::f32_to_bf8_e5m2_rne(s1);
     uint32_t packed = static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 8);
-    bool word_hi = (0u >> 3) & 1;
+    bool word_hi = (inst_.opsel >> 3) & 1;
     uint32_t old = vdst.read_lane(wf, lane);
     if (word_hi)
       vdst.write_lane(wf, lane, (old & 0xFFFFu) | (packed << 16));
