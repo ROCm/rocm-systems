@@ -22,8 +22,8 @@ If I/O is routed through the fastpath but an unexpected error occurs and the I/O
 
    If the ``HIPFILE_FORCE_COMPAT_MODE`` environment variable is set to ``true``, the fastpath backend will never be used and all I/O will go through the fallback backend.
 
-Fastpath will only return 100 if the file was open with ``O_DIRECT`` and if the destination or the source of the transfer is device memory. If the file doesn't reside on a block device, or if it isn't stored on ext4 or XFS, fastpath will return an eagerness score of -1.
+Fastpath will only return 100 if the file was open with ``O_DIRECT`` and if the destination or the source of the transfer is device memory. The file's type must be either a regular file or a block device. If the file is a regular file, the file must reside on an ext4 filesystem with ordered journaling mode or on an xfs filesystem. Files on other filesystems are rejected by the fastpath backend unless ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` is set to ``true``.
 
 File offsets, buffer offsets, and I/O sizes must be aligned to the file system's direct I/O alignment for fastpath to return a score of 100.
 
-The fallback backend uses POSIX ``pread`` and ``pwrite`` system calls combined with ``hipMemcpy``. Because it does not require ``O_DIRECT``, specific filesystem types, or aligned offsets, it can handle I/O request that the fastpath backend can't.
+The fallback backend uses POSIX ``pread`` and ``pwrite`` system calls combined with ``hipMemcpy``. It will reject the I/O operation if the buffer type is not ``hipMemoryTypeDevice``.

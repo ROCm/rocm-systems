@@ -197,8 +197,8 @@ Next steps
   ``hipFileStreamRegister``, and ``hipFileStreamDeregister``, see
   :doc:`/reference/api-async`.
 - To understand the differences between the fastpath and fallback IO backends,
-  see :doc:`/conceptual/io-backends`.
+  see :doc:`/reference/hipFile-io-backends`.
 - For a synchronous file copy example, see
   :doc:`/tutorials/synchronous-file-copy`.
-- To learn about the registration lifecycle for files and buffers, see
-  :doc:`/conceptual/registration-lifecycle`.
+- To learn about file handle registration, see :doc:`/reference/registration-lifecycle`.
+  For GPU buffer registration, see :doc:`/reference/hipFile-buffer-registration`.

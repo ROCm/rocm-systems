@@ -1,96 +1,64 @@
 .. meta::
-  :description: Filesystem and file type requirements for the hipFile fastpath backend, including supported file systems, mount info discovery, and direct I/O alignment.
-  :keywords: hipFile, file system, ext4, xfs, fastpath, direct I/O, DIO alignment, libmount, mountinfo, ROCm
+  :description: File system and file type requirements for the hipFile fastpath backend, including supported layouts and direct I/O alignment.
+  :keywords: hipFile, file system, ext4, XFS, fastpath, direct I/O, DIO alignment, ROCm
 
 *************************************
 Filesystem and file type requirements
 *************************************
 
-The hipFile fastpath backend performs direct-to-GPU I/O through the HIP runtime. Before it accepts an I/O request, it validates that the target file meets specific file system and file type criteria. If validation fails, the request either falls back to the POSIX backend or is rejected, depending on configuration. For an overview of how backends are selected, see :doc:`/conceptual/io-backends`.
+The hipFile fastpath backend performs direct-to-GPU I/O through the HIP runtime. Before it accepts an I/O request, it validates that the target file meets specific file system and file type criteria. If validation fails, the request either falls back to the fallback backend or is rejected, depending on configuration. For backend selection and scoring, see :doc:`/reference/hipFile-io-backends`.
 
 Supported file types
-********************
+====================
 
-The fastpath backend requires that the target file is one of the following:
+The fastpath backend accepts only:
 
 - A block device
 - A regular file
 
-These properties are determined at file registration time using the Linux ``statx`` system call. The ``IFile`` interface exposes the results through ``isBlockDevice()`` and ``isRegularFile()``. If ``statx`` does not return type information, both methods return ``false``, which prevents the fastpath backend from accepting the file.
+hipFile checks file type at registration time. Files that don't meet either criterion can't use the fastpath.
 
 Supported file systems
-*********************
+======================
 
-For regular files, the fastpath backend validates the underlying file system. Only two file system types are supported:
+For regular files, the fastpath backend validates the underlying file system. Only two file system types are supported by default:
 
 ext4 with ordered journaling
 ----------------------------
 
-The file must reside on an ext4 file system configured with the ordered journaling mode. The ordered mode ensures that file data is flushed to disk before metadata is committed to the journal, which provides the consistency guarantees that the direct I/O path requires.
+The file must reside on an ext4 file system configured with ordered journaling mode. Ordered mode flushes file data to disk before metadata is committed to the journal, which matches what the direct I/O path requires.
 
-hipFile checks the journaling mode by inspecting the mount options obtained from the system. The ``IFile`` interface exposes this check through ``onExt4Ordered()``, which returns ``true`` only when the file system type is ext4 and the journaling mode is ``ordered``. Other ext4 journaling modes (``journal`` and ``writeback``) are not supported by default.
+hipFile reads journaling mode from mount options. Only ext4 with ``ordered`` journaling is accepted. Other ext4 modes (``journal`` and ``writeback``) are rejected unless you enable the unsupported file system escape hatch.
 
-xfs
+XFS
 ---
 
-The file must reside on an xfs file system. No additional mount option validation is performed for xfs. The ``IFile`` interface exposes this check through ``onXfs()``.
+The file must reside on an XFS file system. hipFile doesn't perform additional mount option checks for XFS.
 
-Mount information discovery
-***************************
-
-hipFile discovers file system type and mount options by reading ``/proc/self/mountinfo`` through the libmount library. The ``LibMountHelper`` class wraps the libmount API and provides a ``getMountInfo()`` method that accepts a device number (``dev_t``) and returns a ``MountInfo`` structure containing:
-
-- ``type``: the file system type, represented as a ``FilesystemType`` enum with values ``ext4``, ``xfs``, or ``other``
-- ``options``: filesystem-specific mount options; for ext4, this includes the journaling mode (``journal``, ``ordered``, ``writeback``, or ``unknown``)
-
-The device number is obtained from the ``statx`` call performed during file registration. The ``LibMount`` class provides a thin wrapper over the following libmount functions:
-
-- ``mnt_new_context()`` and ``mnt_free_context()`` for context lifecycle management
-- ``mnt_context_get_mtab()`` to read the mount table
-- ``mnt_table_find_devno()`` to locate the mount entry for a specific device
-- ``mnt_fs_get_fstype()`` to retrieve the file system type string
-- ``mnt_fs_get_option()`` to retrieve specific mount options
-
-If mount information is not available for a file, such as if ``/proc/self/mountinfo`` is inaccessible), the ``mountinfo`` field on the file object is empty, and both ``onExt4Ordered()`` and ``onXfs()`` return ``false``. In this case, the fastpath backend refuses the request unless the unsupported file system escape hatch is enabled.
+If hipFile can't read mount information (for example when ``/proc/self/mountinfo`` is inaccessible), the fastpath treats the file system as unsupported and refuses the request unless you enable the escape hatch.
 
 Allowing unsupported file systems
-********************************
+=================================
 
-You can bypass file system validation by setting the ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` environment variable to ``true``. When enabled, the fastpath backend allows I/O on filesystems other than ext4 (with ordered journaling) and xfs.
+You can bypass file system validation by setting ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` to ``true``. When enabled, the fastpath accepts I/O on file systems other than ext4 (ordered) and XFS.
 
 .. warning::
 
-   Using unsupported file systems with the fastpath backend may lead to data corruption or unexpected behavior. Use this option only for testing or when you have confirmed that your file system is compatible with direct I/O.
+   Using unsupported file systems with the fastpath may lead to data corruption or unexpected behavior. Data integrity is validated only on ext4 (ordered) and XFS. Use this option for testing or when you've confirmed your file system works with direct I/O.
 
-The ``Configuration`` class exposes this setting through its ``unsupportedFileSystems()`` method, which reads the value of the ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` environment variable. The default value is ``false``.
-
-For the full list of environment variables, see :doc:`/reference/environment-variables`.
+For export examples and when to use this setting, see :doc:`/reference/hipFile-io-backends`. For all environment variables, see :doc:`/reference/hipFile-environment-variables`.
 
 Direct I/O alignment requirements
-*********************************
+=================================
 
-The fastpath backend uses direct I/O (``O_DIRECT``), which imposes alignment requirements on memory buffers, file offsets, and I/O segment lengths. hipFile determines these requirements at file registration time using information from ``statx``:
+The fastpath uses direct I/O (``O_DIRECT``), which imposes alignment on buffers, file offsets, and I/O segment lengths. hipFile reads alignment requirements from ``statx`` at file registration:
 
-``dioMemAlign``
-   The memory alignment (in bytes) required for buffers used with direct I/O. If the file does not support direct I/O, this value is ``0``. If ``statx`` does not provide alignment information, hipFile defaults to ``4096`` bytes.
+Memory alignment
+   Byte alignment required for buffers used with direct I/O. Defaults to ``4096`` when ``statx`` doesn't report a value.
 
-``dioOffsetAlign``
-   The alignment (in bytes) required for file offsets and I/O segment lengths when using direct I/O. If the file does not support direct I/O, this value is ``0``. If ``statx`` does not provide alignment information, hipFile defaults to ``4096`` bytes.
+Offset and length alignment
+   Byte alignment required for file offsets and I/O lengths. Defaults to ``4096`` when ``statx`` doesn't report a value.
 
-During file registration, hipFile attempts to open an additional file descriptor with the ``O_DIRECT`` flag (the "unbuffered" file descriptor). If the file or file system does not support ``O_DIRECT``, the unbuffered file descriptor is not available, and the fastpath backend cannot service the request.
+During registration, hipFile tries to open an additional file descriptor with ``O_DIRECT``. If the file or file system doesn't support ``O_DIRECT``, the fastpath can't service the request.
 
-The ``aiscp`` example demonstrates proper alignment handling when performing I/O:
-
-.. code-block:: cpp
-
-   /// @brief Round value to the next multiple of align. Align _must_ be a power of 2.
-   static inline size_t
-   align_up(size_t value, size_t align)
-   {
-       return (value + align - 1) & ~(align - 1);
-   }
-
-   // When writing, align the size to the block size
-   nbytes = hipFileWrite(dst_handle, devbuf,
-                         align_up(static_cast<size_t>(nread - nwrite), block_size),
-                         file_offset + nwrite, nwrite);
+For alignment examples in application code, see :doc:`/tutorials/copy-a-file` or :doc:`/tutorials/synchronous-file-copy`.

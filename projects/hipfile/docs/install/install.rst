@@ -225,4 +225,4 @@ Post-install configuration
 
 hipFile uses environment variables to control runtime behavior such as IO
 backend selection and statistics collection. For a full list, see
-:doc:`/conceptual/environment-variables`.
+:doc:`/reference/hipFile-environment-variables`.

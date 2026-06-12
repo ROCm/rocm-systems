@@ -7,20 +7,28 @@ subtrees:
       - file: install/python-bindings
   - caption: How to
     entries:
+      - file: how-to/register-file-and-buffer
+      - file: how-to/use-with-fio
+      - file: how-to/use-python-api
       - file: how-to/collect-io-statistics
-      - file: how-to/ais-stats-tool
+      - file: how-to/hipFile-ais-stats-tool
   - caption: Tutorials
     entries:
       - file: tutorials/copy-a-file
+      - file: tutorials/synchronous-file-copy
+      - file: tutorials/async-multistream-io
       - file: tutorials/get-version
+      - file: tutorials/python-file-copy
       - file: tutorials/python-gpu-io
   - caption: Reference
     entries:
-      - file: reference/io-backends
+      - file: reference/hipFile-io-backends
       - file: reference/filesystem-requirements
-      - file: reference/driver-lifecycle
+      - file: reference/hipFile-driver-lifecycle
+      - file: reference/hipFile-file-registration
+      - file: reference/hipFile-buffer-registration
       - file: reference/statistics-collection
-      - file: reference/environment-variables
+      - file: reference/hipFile-environment-variables
       - file: reference/api-reference
       - file: reference/errors
       - file: reference/python-api-reference

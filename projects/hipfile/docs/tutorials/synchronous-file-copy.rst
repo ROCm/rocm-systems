@@ -35,7 +35,7 @@ Prerequisites
 - A GPU visible to the HIP runtime.
 - Source and destination paths on a filesystem that supports ``O_DIRECT``
   (for example, ext4 with ordered journaling, or XFS). The hipFile fast path
-  requires ``O_DIRECT``; see :doc:`/conceptual/io-backends` for details on
+  requires ``O_DIRECT``; see :doc:`/reference/hipFile-io-backends` for details on
   backend selection.
 
 Complete source
@@ -127,7 +127,7 @@ Key points:
   file descriptor.
 - ``hipFileHandleRegister`` initializes the hipFile driver automatically if it
   has not been opened with ``hipFileDriverOpen``. For more on this lifecycle,
-  see :doc:`/conceptual/registration-lifecycle`.
+  see :doc:`/reference/driver-lifecycle`.
 - The error check compares ``hipfile_err.err`` against ``hipFileSuccess`` and
   uses ``hipFileGetOpErrorString`` to produce a human-readable message.
 
@@ -277,7 +277,7 @@ Next steps
   ``hipFileHandleRegister``, ``hipFileBufRegister``, and related functions,
   see :doc:`/reference/api-file-and-buffer`.
 - To understand when the hipFile driver is initialized and how reference
-  counting works, see :doc:`/conceptual/registration-lifecycle`.
+  counting works, see :doc:`/reference/driver-lifecycle`.
 - For an asynchronous, multi-stream variant of GPU-mediated IO, see
   :doc:`/tutorials/async-multistream-io`.
 - For a Python version of a GPU-mediated file copy, see

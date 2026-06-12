@@ -24,23 +24,29 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
    .. grid-item-card:: How to
 
       * :doc:`Register a file and GPU buffer for GPU I/O <how-to/register-file-and-buffer>`
-      * :doc:`Configure the I/O backend <how-to/configure-io-backend>`
+      * :doc:`Exercise hipFile with fio <how-to/use-with-fio>`
+      * :doc:`Use the hipFile Python API <how-to/use-python-api>`
       * :doc:`Collect I/O statistics with ais-stats <how-to/collect-io-statistics>`
-      * :doc:`Use the ais-stats tool <how-to/ais-stats-tool>`
+      * :doc:`Use the ais-stats tool <how-to/hipFile-ais-stats-tool>`
 
    .. grid-item-card:: Tutorials
 
       * :doc:`Copy a file via GPU memory using hipFile <tutorials/copy-a-file>`
+      * :doc:`Synchronous file copy walkthrough <tutorials/synchronous-file-copy>`
+      * :doc:`Async multistream I/O <tutorials/async-multistream-io>`
       * :doc:`Query the hipFile version <tutorials/get-version>`
+      * :doc:`Python file copy with verification <tutorials/python-file-copy>`
       * :doc:`Perform GPU I/O with the Python bindings <tutorials/python-gpu-io>`
 
    .. grid-item-card:: Reference
 
       * :doc:`hipFile fastpath and fallback backends <reference/hipFile-io-backends>`
       * :doc:`File system and file type requirements <reference/filesystem-requirements>`
-      * :doc:`Driver lifecycle and reference counting <reference/driver-lifecycle>`
+      * :doc:`hipFile reference counting <reference/hipFile-driver-lifecycle>`
+      * :doc:`hipFile file registration <reference/hipFile-file-registration>`
+      * :doc:`hipFile buffer registration <reference/hipFile-buffer-registration>`
       * :doc:`I/O statistics collection <reference/statistics-collection>`
-      * :doc:`hipFile environment variables <reference/environment-variables>`
+      * :doc:`hipFile environment variables <reference/hipFile-environment-variables>`
       * API reference
          * :doc:`Synchronous read and write API reference <reference/api-synchronous-io>`
          * :doc:`Driver lifecycle and configuration API reference <reference/api-driver>`

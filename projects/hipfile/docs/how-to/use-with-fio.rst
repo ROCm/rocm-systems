@@ -97,5 +97,5 @@ Related resources
 *****************
 
 - :doc:`/install/install` — build and install hipFile from source.
-- :doc:`/conceptual/io-backends` — understand the fastpath and fallback IO paths that fio exercises.
+- :doc:`/reference/hipFile-io-backends` — understand the fastpath and fallback I/O paths that fio exercises.
 - :doc:`/how-to/collect-io-statistics` — attach ``ais-stats`` to a running fio process to collect per-backend bandwidth and latency data.

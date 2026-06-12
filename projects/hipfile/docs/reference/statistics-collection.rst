@@ -94,7 +94,7 @@ The ``HIPFILE_STATS_LEVEL`` environment variable controls how much data hipFile 
 
 The level is read once during library initialization and stored in the ``Stats`` structure so that the client can see which level was active.
 
-For the complete list of hipFile environment variables, see :doc:`/reference/environment-variables`.
+For the complete list of hipFile environment variables, see :doc:`/reference/hipFile-environment-variables`.
 
 The ais-stats tool
 ******************
@@ -111,7 +111,7 @@ The typical workflow is:
 
 Because the client reads from shared memory, it imposes negligible overhead on the monitored process.
 
-For usage details and command-line options, see :doc:`/reference/ais-stats-tool`.
+For usage details and command-line options, see :doc:`/how-to/hipFile-ais-stats-tool`.
 
 Statistics C API
 ----------------

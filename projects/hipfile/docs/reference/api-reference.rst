@@ -6,7 +6,7 @@
 API reference
 *************
 
-This page documents all public C API functions and types provided by hipFile, organized by functional area. For error code details, see :doc:`/reference/error-codes`. For driver lifecycle concepts, see :doc:`/conceptual/driver-lifecycle`.
+This page documents all public C API functions and types provided by hipFile, organized by functional area. For error code details, see :doc:`/reference/errors`. For driver lifecycle concepts, see :doc:`/reference/driver-lifecycle`.
 
 .. note::
 
@@ -60,7 +60,7 @@ Error handling
 
 Error codes returned by hipFile API calls, a combined error struct carrying both a ``hipFileOpError_t`` and a ``hipError_t``, and helper macros for classifying and describing errors.
 
-For the full list of error codes and their meanings, see :doc:`/reference/error-codes`.
+For the full list of error codes and their meanings, see :doc:`/reference/errors`.
 
 Types
 -----
@@ -73,7 +73,7 @@ Types
    - ``hipFileInvalidValue`` (5022): One or more arguments have an invalid value
    - ``hipFileInternalError`` (5030): Internal GPU I/O library error
 
-   See :doc:`/reference/error-codes` for the complete enumeration.
+   See :doc:`/reference/errors` for the complete enumeration.
 
 ``hipFileError_t``
    Error status returned from hipFile API calls. Contains two fields:
@@ -148,7 +148,7 @@ GPU I/O driver API
 
 Lifecycle and configuration of the GPU I/O driver for the current process. Controls reference counting, polling mode, maximum I/O sizes, cache sizes, and pinned memory limits. Also exposes properties describing supported file systems and transport features.
 
-For details on driver lifecycle semantics, see :doc:`/conceptual/driver-lifecycle`.
+For details on driver lifecycle semantics, see :doc:`/reference/driver-lifecycle`.
 
 .. note::
 
@@ -841,7 +841,7 @@ Statistics API (internal)
 
 .. note::
 
-   The functions in this section are defined in the internal header ``hipfile-stats.h``. They are not part of the public ``hipfile.h`` API. They are documented here because the ``ais-stats`` tool uses them. For tool usage, see :doc:`/reference/ais-stats-tool`.
+   The functions in this section are defined in the internal header ``hipfile-stats.h``. They are not part of the public ``hipfile.h`` API. They are documented here because the ``ais-stats`` tool uses them. For tool usage, see :doc:`/how-to/hipFile-ais-stats-tool`.
 
 Types
 -----

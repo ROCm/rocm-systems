@@ -10,7 +10,7 @@ Collect I/O statistics with ais-stats
 
 hipFile includes a built-in statistics collection framework and a companion tool, ``ais-stats``, that connects to a running hipFile process to report I/O bandwidth, latency, and error histograms. 
 
-:doc:`/conceptual/statistics-collection` describes how hipFile records I/O statistics inside the process. :doc:`/reference/ais-stats-tool` documents the ``ais-stats`` CLI and the fields in its report.
+:doc:`/reference/statistics-collection` describes how hipFile records I/O statistics inside the process. :doc:`/how-to/hipFile-ais-stats-tool` documents the ``ais-stats`` CLI and the fields in its report.
 
 Prerequisites
 *************
@@ -31,7 +31,7 @@ This is step 1 of the workflow. hipFile controls statistics collection through t
 
 .. code:: shell
 
-For background on ``HIPFILE_STATS_LEVEL`` and other environment variables, see :doc:`/conceptual/environment-variables`.
+For background on ``HIPFILE_STATS_LEVEL`` and other environment variables, see :doc:`/reference/hipFile-environment-variables`.
 
 .. note::
 
@@ -122,7 +122,7 @@ Level ``2`` and above are reserved for future releases. Setting a higher value d
 
    ais-stats -p <PID>
 
-See :doc:`/conceptual/statistics-collection` for the supported levels.
+See :doc:`/reference/statistics-collection` for the supported levels.
 
 Troubleshooting
 ***************

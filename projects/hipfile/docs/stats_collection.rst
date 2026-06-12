@@ -91,5 +91,5 @@ Related documentation
 ---------------------
 
 - See :doc:`/how-to/collect-io-statistics` for the canonical workflow.
-- See :doc:`/reference/ais-stats-tool` for the full tool reference.
+- See :doc:`/how-to/hipFile-ais-stats-tool` for the full tool reference.
 - See :doc:`fio` for a benchmark workflow that can generate I/O activity.
