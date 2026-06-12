@@ -748,7 +748,7 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command_;   //!< Current command
   hsa_agent_t gpu_device_;  //!< Physical device
   hsa_queue_t* gpu_queue_;  //!< Active queue associated with a vgpu
-  std::shared_ptr<amd::Monitor> ring_lock_;  //!< Per-ring lock, shared across VGPUs on the same HW queue; nullptr if unshared
+  std::shared_ptr<amd::Monitor> ring_lock_;  //!< Per-ring lock, shared across VGPUs on the same HW queue; nullptr only for unpooled (coop/CU-masked) queues
   hsa_barrier_and_packet_t barrier_packet_ {};
   hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 

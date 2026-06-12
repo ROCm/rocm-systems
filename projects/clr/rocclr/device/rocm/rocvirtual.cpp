@@ -1268,7 +1268,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
   const uint32_t sw_queue_size = queueMask;
 
   // Serialize reserve->write->doorbell against other VGPUs sharing this ring.
-  // Released before the blocking wait below; no-op when the ring is unshared.
+  // Released before the blocking wait below. ring is nullptr (a true no-op) only
+  // for unpooled queues; a pooled-but-unshared queue still locks, uncontended.
   amd::Monitor* ring = ring_lock_.get();
   if (ring) ring->lock();
 
@@ -1496,7 +1497,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const std::vector<uint8_t>& flatPack
 
   // Serialize reserve->chunked-publish->doorbell against other VGPUs sharing this
   // ring. Taken after dispatchBlockingWait above, which dispatches barriers under
-  // the same (non-recursive) lock; no-op when the ring is unshared.
+  // the same (non-recursive) lock. ring is nullptr (a true no-op) only for
+  // unpooled queues; a pooled-but-unshared queue still locks, uncontended.
   amd::Monitor* ring = ring_lock_.get();
   if (ring) ring->lock();
 
@@ -1731,8 +1733,9 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   }
 
   // Serialize reserve->write->doorbell against other VGPUs sharing this ring.
-  // Taken after the recursive flushes above (the Monitor is non-recursive);
-  // no-op when the ring is unshared.
+  // Taken after the recursive flushes above (the Monitor is non-recursive).
+  // ring is nullptr (a true no-op) only for unpooled queues; a pooled-but-
+  // unshared queue still locks, uncontended.
   amd::Monitor* ring = ring_lock_.get();
   if (ring) ring->lock();
 
@@ -1839,8 +1842,9 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
   }
 
   // Serialize reserve->write->doorbell against other VGPUs sharing this ring.
-  // Taken after the recursive flushes above (the Monitor is non-recursive);
-  // no-op when the ring is unshared.
+  // Taken after the recursive flushes above (the Monitor is non-recursive).
+  // ring is nullptr (a true no-op) only for unpooled queues; a pooled-but-
+  // unshared queue still locks, uncontended.
   amd::Monitor* ring = ring_lock_.get();
   if (ring) ring->lock();
 
