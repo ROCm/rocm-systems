@@ -857,14 +857,14 @@ class MetricCommands:
                                 aid_idx < len(current_vclk_clocks)
                                 and current_vclk_clocks[aid_idx] != "N/A"
                             ):
-                                aid_clocks["CLK_VCLK"] = self.helpers.unit_format(
+                                aid_clocks["vclk"] = self.helpers.unit_format(
                                     self.logger, current_vclk_clocks[aid_idx], clock_unit
                                 )
                                 if vclk0_limits:
-                                    aid_clocks["CLK_VCLK_MIN_LIMIT"] = self.helpers.unit_format(
+                                    aid_clocks["vclk_min_limit"] = self.helpers.unit_format(
                                         self.logger, vclk0_limits["min_clk"], clock_unit
                                     )
-                                    aid_clocks["CLK_VCLK_MAX_LIMIT"] = self.helpers.unit_format(
+                                    aid_clocks["vclk_max_limit"] = self.helpers.unit_format(
                                         self.logger, vclk0_limits["max_clk"], clock_unit
                                     )
 
@@ -873,39 +873,35 @@ class MetricCommands:
                                 current_dclk_clocks
                             ):
                                 if current_dclk_clocks[aid_idx] != "N/A":
-                                    aid_clocks["CLK_DCLK_LIMIT"] = self.helpers.unit_format(
+                                    aid_clocks["dclk"] = self.helpers.unit_format(
                                         self.logger, current_dclk_clocks[aid_idx], clock_unit
                                     )
                                     if dclk0_limits:
-                                        aid_clocks["CLK_DCLK_MIN_LIMIT"] = self.helpers.unit_format(
+                                        aid_clocks["dclk_min_limit"] = self.helpers.unit_format(
                                             self.logger, dclk0_limits["min_clk"], clock_unit
                                         )
-                                        aid_clocks["CLK_DCLK_MAX_LIMIT"] = self.helpers.unit_format(
+                                        aid_clocks["dclk_max_limit"] = self.helpers.unit_format(
                                             self.logger, dclk0_limits["max_clk"], clock_unit
                                         )
 
                             # SOCCLK for this AID
                             if isinstance(current_socclks, list) and aid_idx < len(current_socclks):
                                 if current_socclks[aid_idx] != "N/A":
-                                    aid_clocks["CLK_SOCCLK_LIMIT"] = self.helpers.unit_format(
+                                    aid_clocks["socclk"] = self.helpers.unit_format(
                                         self.logger, current_socclks[aid_idx], clock_unit
                                     )
                                     if soc_limits:
-                                        aid_clocks["CLK_SOCCLK_MIN_LIMIT"] = (
-                                            self.helpers.unit_format(
-                                                self.logger, soc_limits["min_clk"], clock_unit
-                                            )
+                                        aid_clocks["socclk_min_limit"] = self.helpers.unit_format(
+                                            self.logger, soc_limits["min_clk"], clock_unit
                                         )
-                                        aid_clocks["CLK_SOCCLK_MAX_LIMIT"] = (
-                                            self.helpers.unit_format(
-                                                self.logger, soc_limits["max_clk"], clock_unit
-                                            )
+                                        aid_clocks["socclk_max_limit"] = self.helpers.unit_format(
+                                            self.logger, soc_limits["max_clk"], clock_unit
                                         )
 
                             if aid_clocks:
                                 clocks[aid_key] = aid_clocks
 
-                        # Add XCP-level GFX clock data (GFX_CLK per XCP with limits and lock status)
+                        # Add XCP-level GFX clock data (gfx_clk per XCP with limits and lock status)
                         # Determine number of XCPs
                         num_xcps = 0
                         if isinstance(current_gfx_clocks, list) and current_gfx_clocks != "N/A":
@@ -931,33 +927,33 @@ class MetricCommands:
                                         # Array of engine clocks - take first valid value
                                         for clk in gfx_clk_data:
                                             if clk != "N/A":
-                                                xcp_clocks["GFX_CLK"] = self.helpers.unit_format(
+                                                xcp_clocks["gfx_clk"] = self.helpers.unit_format(
                                                     self.logger, clk, clock_unit
                                                 )
                                                 break
                                     else:
                                         # Single clock value
-                                        xcp_clocks["GFX_CLK"] = self.helpers.unit_format(
+                                        xcp_clocks["gfx_clk"] = self.helpers.unit_format(
                                             self.logger, gfx_clk_data, clock_unit
                                         )
 
                             # GFX min/max limits (same for all XCPs)
                             if gfx_limits:
-                                xcp_clocks["GFX_MIN_CLK"] = self.helpers.unit_format(
+                                xcp_clocks["gfx_min_clk"] = self.helpers.unit_format(
                                     self.logger, gfx_limits["min_clk"], clock_unit
                                 )
-                                xcp_clocks["GFX_MAX_CLK"] = self.helpers.unit_format(
+                                xcp_clocks["gfx_max_clk"] = self.helpers.unit_format(
                                     self.logger, gfx_limits["max_clk"], clock_unit
                                 )
 
                             # GFX clock lock status for this XCP's gfx domain
                             if gfxclk_lock_status != "N/A" and gfxclk_lock_status != 0:
                                 is_locked = (gfxclk_lock_status >> xcp_idx) & 1
-                                xcp_clocks["GFX_CLK_LOCKED"] = (
+                                xcp_clocks["gfx_clk_locked"] = (
                                     "ENABLED" if is_locked else "DISABLED"
                                 )
                             else:
-                                xcp_clocks["GFX_CLK_LOCKED"] = "DISABLED"
+                                xcp_clocks["gfx_clk_locked"] = "DISABLED"
 
                             if xcp_clocks:
                                 clocks[xcp_key] = xcp_clocks
