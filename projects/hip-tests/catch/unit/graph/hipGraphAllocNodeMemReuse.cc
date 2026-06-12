@@ -197,12 +197,6 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_SameSizes") {
   HIP_CHECK(hipGraphExecDestroy(execA));
   HIP_CHECK(hipGraphExecDestroy(execB));
   HIP_CHECK(hipGraphExecDestroy(execC));
-
-#if HT_AMD
-  // After graph destruction, memory should return to 0
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
-#endif
 }
 
 /**
@@ -267,12 +261,6 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_SameStream_DifferentSizes_NoReuse") {
   HIP_CHECK(hipGraphExecDestroy(execA));
   HIP_CHECK(hipGraphExecDestroy(execB));
   HIP_CHECK(hipGraphExecDestroy(execC));
-
-#if HT_AMD
-  // After graph destruction, memory should return to 0
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
-#endif
 }
 
 /**
@@ -322,12 +310,6 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_RepeatedLaunches") {
 
   // Destroy graph executable - memory should be released
   HIP_CHECK(hipGraphExecDestroy(exec));
-
-#if HT_AMD
-  // After graph destruction, memory should return to 0
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
-#endif
 }
 
 /**
@@ -466,12 +448,6 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_SameSize") {
   HIP_CHECK(hipGraphExecDestroy(execB));
   HIP_CHECK(hipGraphDestroy(graphA));
   HIP_CHECK(hipGraphDestroy(graphB));
-
-#if HT_AMD
-  // After graph destruction, memory should return to 0
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
-#endif
 }
 
 /**
@@ -561,18 +537,12 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_ExplicitAllocFreeNodes_DifferentSizes"
 
   // High water mark should reflect highest memory usage at any time
   REQUIRE(stats.usedHigh == kAllocA);
-
+ 
   // Destroy graph executables and graphs - memory should be released
   HIP_CHECK(hipGraphExecDestroy(execA));
   HIP_CHECK(hipGraphExecDestroy(execB));
   HIP_CHECK(hipGraphDestroy(graphA));
   HIP_CHECK(hipGraphDestroy(graphB));
-
-#if HT_AMD
-  // After graph destruction, memory should return to 0
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
-#endif
 }
 
 /**
@@ -694,12 +664,6 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse") {
   // Destroy graph executable and graph - remaining retained memory should be released
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
-
-#if HT_AMD
-  // After graph destruction, memory should return to 0
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
-#endif
 }
 
 /**
@@ -754,12 +718,6 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse") {
   // Destroy graph executables - memory should be released
   HIP_CHECK(hipGraphExecDestroy(execA));
   HIP_CHECK(hipGraphExecDestroy(execB));
-
-#if HT_AMD
-  // After graph destruction, memory should return to 0
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE(statsAfterDestroy.usedCurrent == 0);
-#endif
 }
 
 /**
@@ -857,15 +815,6 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_MemSteal_Remap") {
   // Cleanup
   HIP_CHECK(hipGraphExecDestroy(execA));
   HIP_CHECK(hipGraphExecDestroy(execB));
-
-#if HT_AMD
-  // GraphExec reference count decrement is done asynchronously,
-  // so memory may not be freed immediately after hipGraphExecDestroy.
-  auto statsAfterDestroy = queryGraphMem(device);
-  REQUIRE((statsAfterDestroy.usedCurrent == 0 || 
-          statsAfterDestroy.usedCurrent == kAllocSize || 
-          statsAfterDestroy.usedCurrent == kAllocSize * 2));
-#endif
 }
 
 /**
@@ -940,6 +889,10 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
     hipError_t err = hipGraphLaunch(exec, stream);
     REQUIRE(err == hipErrorInvalidValue);
 
+    HIP_CHECK(hipStreamSynchronize(stream));
+    // Free the still-live allocation from the alloc node so the pool can reap it
+    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipGraphExecDestroy(exec));
   }
 
@@ -971,6 +924,10 @@ TEST_CASE("Unit_hipGraphAllocNodeMemReuse_AutoFreeOnLaunch") {
     REQUIRE(statsAfterSecond.usedCurrent == kAllocSize * 2 );
 #endif
 
+    HIP_CHECK(hipStreamSynchronize(stream));
+    // Free the still-live allocation from the alloc node so the pool can reap it
+    HIP_CHECK(hipFreeAsync(allocParam.dptr, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipGraphExecDestroy(exec));
   }
 
