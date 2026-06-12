@@ -695,6 +695,11 @@ if (ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   if (ROCSHMEM_SDMA_SRC_DIR)
     target_include_directories(rccl PRIVATE ${ROCSHMEM_SDMA_SRC_DIR})
   endif()
+  # Sibling add_subdirectory(test) does not see src-scope variables; cache for
+  # GIN-only (ENABLE_ROCSHMEM_GIN without ENABLE_ROCSHMEM) test/tool links.
+  if(ROCSHMEM_LIBRARY)
+    set(ROCSHMEM_LIBRARY "${ROCSHMEM_LIBRARY}" CACHE INTERNAL "Path to librocshmem.a (GIN-only consumer links)")
+  endif()
 endif()
 if (ENABLE_ROCSHMEM)
   target_link_libraries(rccl PRIVATE ${IBVERBS})

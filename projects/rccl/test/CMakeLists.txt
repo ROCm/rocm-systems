@@ -385,6 +385,59 @@ if(BUILD_TESTS)
     rocm_install(TARGETS ${test_executable} COMPONENT tests)
   endforeach()
 
+  # ENABLE_ROCSHMEM_GIN without ENABLE_ROCSHMEM: librccl.so is built with
+  # unresolved rocshmem symbols (--allow-shlib-undefined). The dynamic linker
+  # resolves them from the executable (see rccl-tests alltoall_perf). Link
+  # librocshmem.a into every test binary that loads librccl.so.
+  if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_ROCSHMEM AND BUILD_SHARED_LIBS
+      AND ROCSHMEM_LIBRARY)
+    if(TARGET hsakmt::hsakmt)
+      set(_rccl_gin_test_hsakmt hsakmt::hsakmt)
+    else()
+      find_library(_RCCL_GIN_TEST_HSAKMT hsakmt)
+      set(_rccl_gin_test_hsakmt "${_RCCL_GIN_TEST_HSAKMT}")
+    endif()
+    if(TARGET numa::numa)
+      set(_rccl_gin_test_numa numa::numa)
+    else()
+      find_library(_RCCL_GIN_TEST_NUMA numa)
+      set(_rccl_gin_test_numa "${_RCCL_GIN_TEST_NUMA}")
+    endif()
+    find_library(_RCCL_GIN_TEST_IBVERBS ibverbs)
+    find_library(_RCCL_GIN_TEST_DRM drm PATHS "${ROCM_PATH}/lib" "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    find_library(_RCCL_GIN_TEST_DRM_AMDGPU drm_amdgpu PATHS "${ROCM_PATH}/lib" "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+    foreach(_rccl_gin_test_exe IN LISTS RCCL_TEST_EXECUTABLES)
+      if(TARGET ${_rccl_gin_test_exe})
+        if(TARGET rocshmem_ext)
+          add_dependencies(${_rccl_gin_test_exe} rocshmem_ext)
+        endif()
+        target_link_libraries(${_rccl_gin_test_exe} PRIVATE
+          "-Wl,--whole-archive"
+          "${ROCSHMEM_LIBRARY}"
+          "-Wl,--no-whole-archive"
+          ${_rccl_gin_test_hsakmt}
+        )
+        if(_rccl_gin_test_numa)
+          target_link_libraries(${_rccl_gin_test_exe} PRIVATE ${_rccl_gin_test_numa})
+        endif()
+        if(_RCCL_GIN_TEST_IBVERBS)
+          target_link_libraries(${_rccl_gin_test_exe} PRIVATE "${_RCCL_GIN_TEST_IBVERBS}")
+        endif()
+        if(_RCCL_GIN_TEST_DRM_AMDGPU)
+          target_link_libraries(${_rccl_gin_test_exe} PRIVATE "${_RCCL_GIN_TEST_DRM_AMDGPU}")
+        endif()
+        if(_RCCL_GIN_TEST_DRM)
+          target_link_libraries(${_rccl_gin_test_exe} PRIVATE "${_RCCL_GIN_TEST_DRM}")
+        endif()
+        if(UNIX AND NOT APPLE)
+          target_link_options(${_rccl_gin_test_exe} PRIVATE "LINKER:--export-dynamic")
+        endif()
+      endif()
+    endforeach()
+    unset(_rccl_gin_test_hsakmt)
+    unset(_rccl_gin_test_numa)
+  endif()
+
   # Create install-time test file for distribution
   set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
   file(WRITE "${INSTALL_TEST_FILE}"
