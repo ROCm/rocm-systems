@@ -43,10 +43,11 @@ namespace {
 using namespace rocjitsu;
 using Clock = std::chrono::steady_clock;
 
-constexpr uint32_t WF_SIZE = 32; // gfx1250 / RDNA4 WMMA is wave32.
-constexpr uint32_t SGPRS_PER_WF = 106;
-constexpr uint32_t VGPRS_PER_WF = 256;
-constexpr int ITERATIONS = 4000;
+// Shared with the MFMA benchmark via mma_test_util.h (single source of truth).
+constexpr uint32_t WF_SIZE = mma_test::WMMA_WF_SIZE;
+constexpr uint32_t SGPRS_PER_WF = mma_test::SGPRS_PER_WF;
+constexpr uint32_t VGPRS_PER_WF = mma_test::VGPRS_PER_WF;
+constexpr int ITERATIONS = mma_test::BENCH_ITERATIONS;
 
 // VGPR layout: A inputs at s0, B inputs at s1, accumulator/output at S2, sparse
 // metadata at INDEX. The 32-register spacing clears the per-operand footprint of

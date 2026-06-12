@@ -1293,13 +1293,16 @@ SIMD_VOP3P_DOT_INT: dict[str, str] = {
     'v_dot2_u32_u16_vop3p': '16, false',
 }
 
-# v_dot2_f32_f16 — two f16 products + an f32 accumulator into one f32 lane.
-# op_sel half-select (gated default), neg/neg_hi sign flips, optional clamp
-# to [0,1]. Functorless / fixed-op.
-SIMD_VOP3P_DOT_F16: set[str] = {
+# v_dot2_f32_{f16,bf16} — two half-precision products + an f32 accumulator into
+# one f32 lane. op_sel half-select (gated default), neg/neg_hi sign flips,
+# optional clamp to [0,1]. Functorless / fixed-op. The set spans BOTH 16-bit
+# float formats: v_dot2_f32_bf16's generated scalar body is byte-identical to the
+# f16 form (it widens each half via util::f16_to_f32 with the same
+# op_sel/neg/clamp handling, verified by diff), so both route through the same
+# glue. Named _F16_OR_BF16 to make that span explicit (the emitted macro keeps
+# the shorter ROCJITSU_TRY_SIMD_VOP3P_DOT_F16 name — the widening path is shared).
+SIMD_VOP3P_DOT_F16_OR_BF16: set[str] = {
     'v_dot2_f32_f16_vop3p',
-    # v_dot2_f32_bf16: generated scalar body is byte-identical to the f16 form
-    # (it widens via util::f16_to_f32, same op_sel/neg/clamp), verified by diff.
     'v_dot2_f32_bf16_vop3p',
 }
 
@@ -1750,38 +1753,16 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
         ' auto hi = b; util::stdx::where(b > 0xFFFFu, hi) = 0xFFFFu;'
         ' return (hi << 16) | lo; }',
     ),
-    # v_cvt_pk_i16_f32 / v_cvt_pk_u16_f32: despite the mnemonic, the generated
-    # scalar body reads src as int32 and signed-clamps to [-32768, 32767] — i.e.
-    # byte-for-byte the v_cvt_pk_i16_i32 body above (verified by diff). Reuse the
-    # identical signed-clamp functor (NOT the u16_u32 unsigned one).
-    'v_cvt_pk_i16_f32_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' using I = util::native<int32_t>;'
-        ' using U = util::native<uint32_t>;'
-        ' I lo = util::stdx::static_simd_cast<I>(a);'
-        ' util::stdx::where(lo < I(-32768), lo) = I(-32768);'
-        ' util::stdx::where(lo > I(32767), lo) = I(32767);'
-        ' I hi = util::stdx::static_simd_cast<I>(b);'
-        ' util::stdx::where(hi < I(-32768), hi) = I(-32768);'
-        ' util::stdx::where(hi > I(32767), hi) = I(32767);'
-        ' return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |'
-        ' (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }',
-    ),
-    'v_cvt_pk_u16_f32_vop3': (
-        'uint32_t',
-        '[](auto a, auto b) {'
-        ' using I = util::native<int32_t>;'
-        ' using U = util::native<uint32_t>;'
-        ' I lo = util::stdx::static_simd_cast<I>(a);'
-        ' util::stdx::where(lo < I(-32768), lo) = I(-32768);'
-        ' util::stdx::where(lo > I(32767), lo) = I(32767);'
-        ' I hi = util::stdx::static_simd_cast<I>(b);'
-        ' util::stdx::where(hi < I(-32768), hi) = I(-32768);'
-        ' util::stdx::where(hi > I(32767), hi) = I(32767);'
-        ' return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |'
-        ' (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu); }',
-    ),
+    # v_cvt_pk_i16_f32 / v_cvt_pk_u16_f32 are deliberately NOT SIMD-specialized.
+    # Their scalar bodies are FLOAT-input converts: bit_cast each src to f32, then
+    # clamp the float value (i16: [-32768, 32767]; u16: [0, 65535]) and truncate
+    # before packing the low/high 16-bit halves. The integer VOP3 binary glue
+    # (try_execute_binary_vop3_simd<uint32_t>) feeds the functor the raw 32-bit
+    # lane *bits*, so any int-domain functor here would clamp the float's bit
+    # pattern as an integer — a different result for essentially every finite
+    # input (e.g. 1.0f -> bits 0x3F800000 -> clamps to 32767 instead of 1). Leave
+    # them on the (correct) scalar path. Only the int-domain twins
+    # v_cvt_pk_i16_i32 / v_cvt_pk_u16_u32 above are safe to route through this glue.
     # Normalized f32 pack-converts. src read as raw f32 (bit_cast), scale by K,
     # clamp, isnan->0, truncate, pack 16|16. Helpers in util/simd.h.
     # QUIRK: only the no-underscore v_cvt_pknorm_i16_f32 uses the true i16 lambda
@@ -2732,7 +2713,7 @@ def simd_probe_line(template_name: str) -> str | None:
     specdot = SIMD_VOP3P_DOT_INT.get(template_name)
     if specdot is not None:
         return f'  ROCJITSU_TRY_SIMD_VOP3P_DOT_INT({specdot});'
-    if template_name in SIMD_VOP3P_DOT_F16:
+    if template_name in SIMD_VOP3P_DOT_F16_OR_BF16:
         return '  ROCJITSU_TRY_SIMD_VOP3P_DOT_F16();'
     # VOP3P mixed-sign integer dots (dot4 iu8, dot8 iu4).
     specdotm = SIMD_VOP3P_DOT_INT_MIXED.get(template_name)

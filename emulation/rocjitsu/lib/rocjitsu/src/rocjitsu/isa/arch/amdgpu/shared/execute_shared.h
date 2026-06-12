@@ -9696,35 +9696,6 @@ inline void execute_v_cvt_off_f32_i4_vop3([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
-inline void execute_v_cvt_pk_i16_f32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    using I = util::native<int32_t>;
-    using U = util::native<uint32_t>;
-    I lo = util::stdx::static_simd_cast<I>(a);
-    util::stdx::where(lo < I(-32768), lo) = I(-32768);
-    util::stdx::where(lo > I(32767), lo) = I(32767);
-    I hi = util::stdx::static_simd_cast<I>(b);
-    util::stdx::where(hi < I(-32768), hi) = I(-32768);
-    util::stdx::where(hi > I(32767), hi) = I(32767);
-    return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |
-           (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu);
-  });
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float f0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float f1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    int16_t lo = static_cast<int16_t>(std::clamp(f0, -32768.0f, 32767.0f));
-    int16_t hi = static_cast<int16_t>(std::clamp(f1, -32768.0f, 32767.0f));
-    inst.vdst.write_lane(wf, lane,
-                         (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
-                             static_cast<uint32_t>(static_cast<uint16_t>(lo)));
-  }
-}
-
-template <typename Inst>
 inline void execute_v_cvt_pk_i16_i32_vop3([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
@@ -9894,35 +9865,6 @@ inline void execute_v_cvt_pk_rtz_f16_f32_vop3([[maybe_unused]] Inst &inst,
     uint32_t lo = util::f32_to_f16(s0);
     uint32_t hi = util::f32_to_f16(s1);
     inst.vdst.write_lane(wf, lane, lo | (hi << 16));
-  }
-}
-
-template <typename Inst>
-inline void execute_v_cvt_pk_u16_f32_vop3([[maybe_unused]] Inst &inst,
-                                          [[maybe_unused]] Wavefront &wf) {
-  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(uint32_t, [](auto a, auto b) {
-    using I = util::native<int32_t>;
-    using U = util::native<uint32_t>;
-    I lo = util::stdx::static_simd_cast<I>(a);
-    util::stdx::where(lo < I(-32768), lo) = I(-32768);
-    util::stdx::where(lo > I(32767), lo) = I(32767);
-    I hi = util::stdx::static_simd_cast<I>(b);
-    util::stdx::where(hi < I(-32768), hi) = I(-32768);
-    util::stdx::where(hi > I(32767), hi) = I(32767);
-    return ((util::stdx::static_simd_cast<U>(hi) & 0xFFFFu) << 16) |
-           (util::stdx::static_simd_cast<U>(lo) & 0xFFFFu);
-  });
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
-      continue;
-    float f0 = std::bit_cast<float>(inst.src0.read_lane(wf, lane));
-    float f1 = std::bit_cast<float>(inst.src1.read_lane(wf, lane));
-    uint16_t lo = static_cast<uint16_t>(std::clamp(f0, 0.0f, 65535.0f));
-    uint16_t hi = static_cast<uint16_t>(std::clamp(f1, 0.0f, 65535.0f));
-    inst.vdst.write_lane(wf, lane,
-                         (static_cast<uint32_t>(static_cast<uint16_t>(hi)) << 16) |
-                             static_cast<uint32_t>(static_cast<uint16_t>(lo)));
   }
 }
 

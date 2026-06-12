@@ -567,6 +567,20 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
 /// integer MAC is exact, so the SIMD and scalar paths are bit-identical.
 /// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
 /// on a platform without <experimental/simd>.
+///
+/// Cbuf is the in/out accumulator: each (row,col) is read as the starting value,
+/// the K products are added, and the result written back. Callers come in two
+/// flavors — most pre-seed Cbuf with the hardware C accumulator (D = C + A*B in
+/// place), while the int32 WMMA paths instead leave Cbuf ZERO and add the
+/// hardware accumulator afterward in wider precision (for saturation). That is
+/// why the staging buffers are zero-initialized as a uniform convention: it is
+/// load-bearing for the zero-start callers and harmless (redundant) for the
+/// pre-seeded ones.
+///
+/// Read-bounds: only the used region is touched — Abuf[row*K+k] for row<M,k<K,
+/// and Bbuf/Cbuf[..*stride+col] for col<N (the vectorized loop is bounded by
+/// `col + W <= N`, the remainder is a scalar tail at col<N). The padding columns
+/// [N, stride) — present only so each row starts W-aligned — are never read.
 template <typename T>
 void wmma_simd_matmul(uint32_t M, uint32_t N, uint32_t K, uint32_t W, uint32_t stride,
                       const T *Abuf, const T *Bbuf, T *Cbuf) {
@@ -668,14 +682,21 @@ void exec_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_
     constexpr size_t MAX_AB = 2048;      // max M*K over all MFMA shapes
     constexpr size_t MAX_BSTRIDE = 4096; // max K*stride
     constexpr size_t MAX_C = 1024;       // max M*stride
+    // Combined stack frame for the three staging buffers below (currently 28
+    // KiB); tripwire so an added/larger shape can't silently blow the stack.
+    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
+                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
       run_scalar();
     } else {
-      alignas(64) float Abuf[MAX_AB];
-      alignas(64) float Bbuf[MAX_BSTRIDE];
-      alignas(64) float Cbuf[MAX_C];
+      // Zero-initialized as the uniform staging-buffer convention (see the
+      // zero-init policy on wmma_simd_matmul). C is pre-seeded just below, so the
+      // init is redundant here, but matching the WMMA paths keeps one rule.
+      alignas(64) float Abuf[MAX_AB] = {};
+      alignas(64) float Bbuf[MAX_BSTRIDE] = {};
+      alignas(64) float Cbuf[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
@@ -768,6 +789,11 @@ void exec_f32(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K, u
 constexpr size_t WMMA_SIMD_MAX_AB = 2048;      // max M*K
 constexpr size_t WMMA_SIMD_MAX_BSTRIDE = 4096; // max K*stride
 constexpr size_t WMMA_SIMD_MAX_C = 1024;       // max M*stride
+// Combined stack frame for the WMMA/SWMMAC staging buffers (currently 28 KiB for
+// the float and int32 paths); tripwire against silent stack-frame growth.
+static_assert((WMMA_SIMD_MAX_AB + WMMA_SIMD_MAX_BSTRIDE + WMMA_SIMD_MAX_C) * sizeof(float) <=
+                  48 * 1024,
+              "WMMA SIMD staging buffers exceed the 48 KiB stack budget");
 
 template <typename ExtractA, typename ExtractB>
 void exec_wmma_f32_mixed(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32_t K,
@@ -1968,14 +1994,18 @@ void exec_f32_scaled(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     constexpr size_t MAX_AB = 2048;
     constexpr size_t MAX_BSTRIDE = 4096;
     constexpr size_t MAX_C = 1024;
+    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(float) <= 48 * 1024,
+                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * N > MAX_C) {
       run_scalar();
     } else {
-      alignas(64) float Abuf[MAX_AB];
-      alignas(64) float Bbuf[MAX_BSTRIDE];
-      alignas(64) float Cacc[MAX_C];
+      // Zero-initialized staging buffers (uniform convention; see
+      // wmma_simd_matmul). Cacc is pre-seeded below.
+      alignas(64) float Abuf[MAX_AB] = {};
+      alignas(64) float Bbuf[MAX_BSTRIDE] = {};
+      alignas(64) float Cacc[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t k = 0; k < K; ++k) {
@@ -2128,14 +2158,18 @@ inline void exec_i32_i8(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uin
     constexpr size_t MAX_AB = 2048;
     constexpr size_t MAX_BSTRIDE = 4096;
     constexpr size_t MAX_C = 1024;
+    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(int32_t) <= 48 * 1024,
+                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
       run_scalar();
     } else {
-      alignas(64) int32_t Abuf[MAX_AB];
-      alignas(64) int32_t Bbuf[MAX_BSTRIDE];
-      alignas(64) int32_t Cbuf[MAX_C];
+      // Zero-initialized staging buffers (uniform convention; see
+      // wmma_simd_matmul). Cbuf is pre-seeded below.
+      alignas(64) int32_t Abuf[MAX_AB] = {};
+      alignas(64) int32_t Bbuf[MAX_BSTRIDE] = {};
+      alignas(64) int32_t Cbuf[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {
@@ -2506,14 +2540,18 @@ inline void exec_f64(amdgpu::ComputeUnitCore &cu, uint32_t M, uint32_t N, uint32
     constexpr size_t MAX_AB = 2048;
     constexpr size_t MAX_BSTRIDE = 2048;
     constexpr size_t MAX_C = 1024;
+    static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(double) <= 48 * 1024,
+                  "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
     if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
       run_scalar();
     } else {
-      alignas(64) double Abuf[MAX_AB];
-      alignas(64) double Bbuf[MAX_BSTRIDE];
-      alignas(64) double Cbuf[MAX_C];
+      // Zero-initialized staging buffers (uniform convention; see
+      // wmma_simd_matmul). Cbuf is pre-seeded below.
+      alignas(64) double Abuf[MAX_AB] = {};
+      alignas(64) double Bbuf[MAX_BSTRIDE] = {};
+      alignas(64) double Cbuf[MAX_C] = {};
       for (uint32_t b = 0; b < B; ++b) {
         for (uint32_t row = 0; row < M; ++row)
           for (uint32_t col = 0; col < N; ++col) {

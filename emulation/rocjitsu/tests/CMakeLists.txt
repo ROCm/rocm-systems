@@ -94,6 +94,7 @@ add_executable(
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
+    simd_correctness/vop3_cvt_pk_f32_rdna_correctness_test.cpp
     simd_correctness/vop3_ternary_fp_simd_correctness_test.cpp
     simd_correctness/vop3_fmac_simd_correctness_test.cpp
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp

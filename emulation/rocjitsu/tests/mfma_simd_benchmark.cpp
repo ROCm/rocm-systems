@@ -44,10 +44,11 @@ namespace {
 using namespace rocjitsu;
 using Clock = std::chrono::steady_clock;
 
-constexpr uint32_t WF_SIZE = 64;
-constexpr uint32_t SGPRS_PER_WF = 106;
-constexpr uint32_t VGPRS_PER_WF = 256;
-constexpr int ITERATIONS = 4000;
+// Shared with the WMMA benchmark via mma_test_util.h (single source of truth).
+constexpr uint32_t WF_SIZE = mma_test::MFMA_WF_SIZE;
+constexpr uint32_t SGPRS_PER_WF = mma_test::SGPRS_PER_WF;
+constexpr uint32_t VGPRS_PER_WF = mma_test::VGPRS_PER_WF;
+constexpr int ITERATIONS = mma_test::BENCH_ITERATIONS;
 
 // VGPR layout: A inputs at s0, B inputs at s1, output at DST. The 64-register
 // spacing comfortably clears the small per-operand register footprint of every
