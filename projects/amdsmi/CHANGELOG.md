@@ -39,6 +39,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `AMDSMI_LINK_TYPE_NUMA` and `AMDSMI_LINK_TYPE_XNUMA` to `amdsmi_link_type_t` enum**.  
   - Added the new types to `amdsmi_link_types` as part of support for NICs
 
+### Changed
+- **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
+
 ### Resolved Issues
 
 - **Fixed AMD GPU manufacturer name display in `amd-smi static --board`**.  

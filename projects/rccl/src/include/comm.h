@@ -553,6 +553,10 @@ struct ncclPeerInfo {
 #endif
   int cuMemSupport;
   int version;
+  ncclGinType_t supportedGinType;
+  bool crossNicSupport;
+  bool rmaPluginAvailable;
+  bool cuMemGdrSupport;
 };
 
 typedef enum ncclGroupTaskType {
@@ -595,6 +599,7 @@ struct ncclComm {
   ncclNet_t* ncclNet;
   void* netContext;
   void* ginContext;
+  void* rmaGinContext;
   int netPluginIndex;
   int ginPluginIndex;
   int ncclNetVer;

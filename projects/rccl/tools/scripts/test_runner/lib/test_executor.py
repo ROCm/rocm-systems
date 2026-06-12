@@ -470,7 +470,8 @@ class TestExecutor:
 
         The build_configuration in the JSON config specifies:
         - install_flags: List of install.sh command-line flags
-        - cmake_options: Optional string of additional CMake options (passed via --cmake-options)
+        - cmake_options: Optional CMake options, either a string (e.g. "-DFOO=BAR") or a
+          dict (e.g. {"FOO": "BAR"}); dicts are converted to "-DKEY=VAL" form (passed via --cmake-options)
         - env_variables: Environment variables to set during the build
         - parallel_jobs: Number of parallel compilation jobs (passed via -j)
 
@@ -498,6 +499,8 @@ class TestExecutor:
 
         install_flags = list(self.build_config.get("install_flags", []))
         cmake_options = self.build_config.get("cmake_options", "")
+        if isinstance(cmake_options, dict):
+            cmake_options = " ".join(f"-D{k}={v}" for k, v in cmake_options.items())
         build_env_vars = self.build_config.get("env_variables", {})
         parallel_jobs = self.build_config.get("parallel_jobs")
 

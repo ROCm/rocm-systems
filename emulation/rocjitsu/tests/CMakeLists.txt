@@ -86,6 +86,7 @@ add_executable(
     simd_correctness/vop3_carry_simd_correctness_test.cpp
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
+    simd_correctness/vop3_shift64_scalar_correctness_test.cpp
     simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
     simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
