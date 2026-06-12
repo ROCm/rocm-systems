@@ -258,6 +258,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
             v[u+1] = applyPreOp(redOp, v[u+1]);
         }
       }
+      // opt-in detector: local source operand (skip flag slot on flagThread).
+      #pragma unroll
+      for (int u=0; u<ELEMS_PER_THREAD; u+=2) {
+        RCCL_NANCHECK_WORD(v[u], RCCL_NANCHECK_INPUT, (long long)ll128Offset + u*WARP_SIZE);
+        if (!flagThread)
+          RCCL_NANCHECK_WORD(v[u+1], RCCL_NANCHECK_INPUT, (long long)ll128Offset + u*WARP_SIZE + 1);
+      }
     }
 
     /************************ Recv rest *********************/
@@ -265,6 +272,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       { // Consume data from first recv
         #pragma unroll
         for (int u=0; u<ELEMS_PER_THREAD; u+=2) {
+          // opt-in detector: peer operand (skip flag slot on flagThread).
+          RCCL_NANCHECK_WORD(vr[u], RCCL_NANCHECK_INPUT, (long long)ll128Offset + u*WARP_SIZE);
+          if (!flagThread)
+            RCCL_NANCHECK_WORD(vr[u+1], RCCL_NANCHECK_INPUT, (long long)ll128Offset + u*WARP_SIZE + 1);
           v[u]   = SRC ? applyReduce(redOp, vr[u], v[u]) : vr[u];
           v[u+1] = SRC ? applyReduce(redOp, vr[u+1], v[u+1]) : vr[u+1];
         }
@@ -293,6 +304,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
         #pragma unroll
         for (int u=0; u<ELEMS_PER_THREAD; u+=2) {
+          // opt-in detector: additional peer operand (skip flag slot on flagThread).
+          RCCL_NANCHECK_WORD(vr[u], RCCL_NANCHECK_INPUT, (long long)ll128Offset + u*WARP_SIZE);
+          if (!flagThread)
+            RCCL_NANCHECK_WORD(vr[u+1], RCCL_NANCHECK_INPUT, (long long)ll128Offset + u*WARP_SIZE + 1);
           v[u]   = applyReduce(redOp, vr[u], v[u]);
           v[u+1] = applyReduce(redOp, vr[u+1], v[u+1]);
         }
@@ -309,12 +324,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
 
 #ifdef RCCL_ENABLE_NAN_CHECK
-    // opt-in NaN/Inf detector on the reduced LL128 result words. v[u] is data;
-    // on flagThread v[u+1] is replaced by the flag at store time, so skip it.
-    // The reported offset is the fifo wire-word index of the value (v[u] stores
-    // to ll128Offset + u*WARP_SIZE), not a user-buffer element index: the LL128
-    // wire layout interleaves flag words, so there is no cheap element mapping
-    // here. The value + (block,thread) coordinates are the actionable signal.
+    // opt-in detector: reduced result (skip flag slot on flagThread). Offset is
+    // the fifo wire-word index, not a user element index (LL128 interleaves flags).
     #pragma unroll
     for (int u=0; u<ELEMS_PER_THREAD; u+=2) {
       RCCL_NANCHECK_WORD(v[u], RCCL_NANCHECK_OUTPUT, (long long)ll128Offset + u*WARP_SIZE);

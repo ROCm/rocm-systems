@@ -414,11 +414,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       if (RECV) {
         readLLBeginAll<1>(offset, line);
         peerData = readLL(offset, 0);
-        RCCL_NANCHECK_WORD(peerData, RCCL_NANCHECK_INPUT, (long long)offset*EltPerLine);  // opt-in NaN/Inf detector (offset is a fifo line, scale to elements)
+        RCCL_NANCHECK_WORD(peerData, RCCL_NANCHECK_INPUT, (long long)offset*EltPerLine);  // peer operand
       }
       if (SRC) {
         data = dl.loadFinish();
         if (SrcBuf == Input) data = applyPreOp(redOp, data);
+        RCCL_NANCHECK_WORD(data, RCCL_NANCHECK_INPUT, (long long)offset*EltPerLine);  // local source operand
       }
       if (RECV) {
         data = !SRC ? peerData : applyReduce(redOp, peerData, data);
@@ -427,12 +428,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
         // coverity[dead_error_line]
         for (int i=1; i < MaxRecv && i < fan.nrecv(); i++) {
           peerData = readLLFinish(offset, line, i);
+          RCCL_NANCHECK_WORD(peerData, RCCL_NANCHECK_INPUT, (long long)offset*EltPerLine);  // additional peer operand
           data = applyReduce(redOp, peerData, data);
         }
       }
 
       if (postOp) data = applyPostOp(redOp, data);
-      RCCL_NANCHECK_WORD(data, RCCL_NANCHECK_OUTPUT, (long long)offset*EltPerLine);  // opt-in NaN/Inf detector (reduced result; offset is a fifo line, scale to elements)
+      RCCL_NANCHECK_WORD(data, RCCL_NANCHECK_OUTPUT, (long long)offset*EltPerLine);  // opt-in detector: reduced result (offset = fifo line scaled to elements)
 
       // Send : inter-node, then intra-node, then local
       if (SEND) {

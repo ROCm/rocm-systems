@@ -35,6 +35,10 @@ struct IsFloatingPoint<float>: std::true_type {};
 template<>
 struct IsFloatingPoint<double>: std::true_type {};
 
+// Opt-in NaN/Inf detector (no-op unless RCCL_ENABLE_NAN_CHECK). Included after
+// IsFloatingPoint/op128 so applyReduce can hook the Simple-path combine point.
+#include "nan_check.h"
+
 ////////////////////////////////////////////////////////////////////////////////
 // The reduction function classes. All classes must:
 //  1. Expose the `EltType` typedef.
@@ -172,6 +176,7 @@ __device__ __forceinline__ BytePack<BytePackOf<PackA>::Size*sizeof(B)/sizeof(A)>
 
 template<typename Fn, typename Pack>
 __device__ __forceinline__ Pack applyReduce(Fn fn, Pack a, Pack b) {
+  RCCL_NANCHECK_REDUCE_INPUTS(fn, a, b);  // opt-in detector: Simple-path operands
   return fromPack<Pack>(
     Apply_Reduce_MaybeEmpty<Fn, BytePackOf<Pack>::Size/sizeof(typename Fn::EltType)>
       ::reduce(fn, toPack(a), toPack(b))

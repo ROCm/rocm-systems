@@ -183,6 +183,23 @@ __device__ __forceinline__ void rcclNanCheckWord(
   rcclNanCheckWordDispatch<T, IsFloatingPoint<T>::value>::run(w, kind, eltBase);
 }
 
+// --- Reduce combine-point hook ---------------------------------------------
+// Called from applyReduce() so Simple-path reduction operands are INPUT-checked
+// without instrumenting each load site in common_kernel.h. eltOffset is -1 (not
+// available here). Restricted to BytePack<N> (Simple + bias fold): the LL/LL128
+// paths reduce raw words whose flag/shuffled slots would false-positive, so they
+// keep their own flag-guarded RCCL_NANCHECK_WORD checks.
+template<typename Fn, typename Pack>
+__device__ __forceinline__ void rcclNanCheckReduceInput(Pack a, Pack b) {
+  if constexpr (!std::is_integral<Pack>::value) {
+    constexpr int Bytes = (int)BytePackOf<Pack>::Size;
+    using Disp = rcclNanCheckDispatch<Fn, Bytes,
+                   IsFloatingPoint<typename Fn::EltType>::value>;
+    Disp::run(toPack(a), RCCL_NANCHECK_INPUT, (long long)-1);
+    Disp::run(toPack(b), RCCL_NANCHECK_INPUT, (long long)-1);
+  }
+}
+
 // Convenience macros for the insertion sites.
 // RCCL_NANCHECK:      RedFn/BytePerPack in scope (common_kernel.h, Simple path).
 // RCCL_NANCHECK_WORD: element type T in scope (prims_ll.h / prims_ll128.h).
@@ -190,12 +207,16 @@ __device__ __forceinline__ void rcclNanCheckWord(
   rcclNanCheck<RedFn, BytePerPack>((pack), (kind), (long long)(eltBase))
 #define RCCL_NANCHECK_WORD(word, kind, eltBase) \
   rcclNanCheckWord<T>((unsigned long long)(word), (kind), (long long)(eltBase))
+// Used inside applyReduce(); `fn` is the redop functor in scope there.
+#define RCCL_NANCHECK_REDUCE_INPUTS(fn, a, b) \
+  rcclNanCheckReduceInput<decltype(fn)>((a), (b))
 
 #else // !RCCL_ENABLE_NAN_CHECK
 
 // Zero-overhead no-op when the detector is disabled.
 #define RCCL_NANCHECK(pack, kind, eltBase) do {} while (0)
 #define RCCL_NANCHECK_WORD(word, kind, eltBase) do {} while (0)
+#define RCCL_NANCHECK_REDUCE_INPUTS(fn, a, b) do {} while (0)
 
 #endif // RCCL_ENABLE_NAN_CHECK
 
