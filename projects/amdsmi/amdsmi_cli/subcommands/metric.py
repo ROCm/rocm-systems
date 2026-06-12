@@ -190,7 +190,6 @@ class MetricCommands:
                 "xgmi_err",
                 "energy",
                 "throttle",
-                "partition",
             ]
             current_platform_values += [
                 args.fan,
@@ -200,7 +199,6 @@ class MetricCommands:
                 args.xgmi_err,
                 args.energy,
                 args.throttle,
-                args.partition,
             ]
 
         if self.helpers.is_hypervisor():
