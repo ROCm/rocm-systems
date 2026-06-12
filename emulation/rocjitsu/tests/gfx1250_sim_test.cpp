@@ -1076,6 +1076,63 @@ TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
   EXPECT_EQ(inst->size(), sizeof(words));
 }
 
+TEST(Gfx1250DecodeTest, SWaitXcntHasWaitcntMetadata) {
+  const uint32_t words[] = {
+      0xBFC50000u, // s_wait_xcnt 0
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "s_wait_xcnt");
+  EXPECT_TRUE(inst->is_waitcnt());
+  EXPECT_EQ(inst->disassemble(), "s_wait_xcnt 0");
+}
+
+TEST(Gfx1250DecodeTest, BufferOffenUsesSingleVaddrRegister) {
+  const uint32_t words[] = {
+      0xC405C07Cu, // buffer_load_b128 v[32:35], v7, s[4:7], s0 offen
+      0x40800820u,
+      0x00000007u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
+  ASSERT_GE(inst->num_src_operands(), 1);
+
+  const Operand *vaddr = inst->src_operand(0);
+  ASSERT_NE(vaddr, nullptr);
+  EXPECT_EQ(vaddr->size_bits(), 32);
+  ASSERT_TRUE(vaddr->to_register_ref().has_value());
+  EXPECT_EQ(*vaddr->to_register_ref(), (RegisterRef{RegClass::VGPR, 7, 1}));
+  EXPECT_NE(inst->disassemble().find("v7"), std::string::npos);
+}
+
+TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
+  const uint32_t words[] = {
+      0xC405C07Cu, // buffer_load_b128 v[32:35], s[4:7], s0
+      0x00800820u,
+      0x00000007u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  ASSERT_EQ(inst->mnemonic(), "buffer_load_b128");
+  ASSERT_GE(inst->num_src_operands(), 1);
+
+  const Operand *vaddr = inst->src_operand(0);
+  ASSERT_NE(vaddr, nullptr);
+  EXPECT_EQ(vaddr->size_bits(), 0);
+  EXPECT_FALSE(vaddr->to_register_ref().has_value());
+  EXPECT_EQ(inst->disassemble().find("v7"), std::string::npos);
+}
+
 TEST(Gfx1250DecodeTest, WmmaF8f6f4UsesMatrixFormatOperandWidths) {
   const uint32_t words[] = {
       0xCC336010u,
@@ -1187,6 +1244,25 @@ TEST(Gfx1250DecodeTest, VopdLiteralConsumesThreeDwords) {
   EXPECT_EQ(inst->mnemonic(), "v_dual_mul_f32 :: v_dual_mov_b32");
   EXPECT_EQ(inst->size(), sizeof(words));
   EXPECT_NE(inst->disassemble().find("0x4f7ffffe"), std::string::npos);
+}
+
+TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
+  const uint32_t words[] = {
+      0xCF448082u, // v_dual_lshlrev_b32 v17, 2, v9 :: v_dual_mov_b32 v9, s11
+      0x0009000Bu,
+      0x09000011u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decoder->decode(words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->mnemonic(), "v_dual_lshlrev_b32 :: v_dual_mov_b32");
+  EXPECT_EQ(inst->num_src_operands(), 3);
+  ASSERT_NE(inst->src_operand(2), nullptr);
+  EXPECT_EQ(inst->src_operand(2)->name(), "s11");
+  ASSERT_TRUE(inst->src_operand(2)->to_register_ref().has_value());
+  EXPECT_EQ(*inst->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 11, 1}));
 }
 
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
