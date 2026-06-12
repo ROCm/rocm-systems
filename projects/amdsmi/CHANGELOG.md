@@ -47,6 +47,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `py-interface/amdsmi_wrapper.py` now auto-detects pip vs system install context and resolves the shared library accordingly (`lib64` first, then `lib`); a `_MissingLibrary` sentinel defers `OSError` to the first API call when no candidate is loadable.
   - New `AMDSMI_DEBUG_LOAD=1` env var prints the resolved `libamd_smi*.so` path (or every candidate the loader tried) to stderr at import time. `AMDSMI_LIB_OVERRIDE` (existing) now takes precedence over both pip and system context detection so an in-tree `.so` can be loaded without uninstalling either packaged variant.
   - Added `tools/build_wheel_debian.py` and `tools/build_wheel_rpm.py` plus a manylinux_2_28 CI workflow for producing PyPI-ready wheels.
+- **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
 
 ### Resolved Issues
 

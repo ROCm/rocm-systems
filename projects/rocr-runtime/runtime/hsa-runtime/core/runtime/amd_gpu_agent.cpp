@@ -143,7 +143,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
   num_p2p_engines_ =  properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
-                      : std::max(0U, properties_.NumSdmaEngines - 2);
+                      : (properties_.NumSdmaEngines > 2 ? properties_.NumSdmaEngines - 2 : 0);
 
   const core::Isa *isa_base;
 

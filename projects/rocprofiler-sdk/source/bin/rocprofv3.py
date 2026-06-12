@@ -2233,6 +2233,20 @@ def main(argv=None):
             "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
         )
 
+    def validate_selected_regions_conflicts(_args):
+        if getattr(_args, "selected_regions", False) and getattr(
+            _args, "att_consecutive_kernels", None
+        ):
+            fatal_error(
+                "--selected-regions and --att-consecutive-kernels are mutually exclusive"
+            )
+        if getattr(_args, "selected_regions", False) and getattr(
+            _args, "collection_period", None
+        ):
+            fatal_error(
+                "--selected-regions and --collection-period are mutually exclusive"
+            )
+
     # Check if we should use multi-pass mode:
     # 1. Multiple --pmc flags on CLI (cli_multipass)
     # 2. Multiple pmc lines in input file (len(inp_args) > 1)
@@ -2249,6 +2263,7 @@ def main(argv=None):
             cmd_args.pmc = cmd_args.pmc[0]
 
         args = get_args(cmd_args, inp_args[0])
+        validate_selected_regions_conflicts(args)
 
         if args.pid:
             # For reattachment support, args must be the same as previous rocprofv3 sessions
@@ -2330,6 +2345,8 @@ def main(argv=None):
             else:
                 # Input file pass: merge cmd_args with the full job config
                 pass_args = get_args(cmd_args, pass_config["config"])
+
+            validate_selected_regions_conflicts(pass_args)
 
             _ec = run(
                 app_args,

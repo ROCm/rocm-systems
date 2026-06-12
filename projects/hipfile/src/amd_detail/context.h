@@ -8,7 +8,6 @@
 #include "hipfile-cpp20.h"
 #include "hipfile-warnings.h"
 #include "stats.h"
-#include "thread-pool.h"
 
 #include <stdexcept>
 #ifdef AIS_TESTING
@@ -30,7 +29,6 @@ struct ContextDefaultImplChecked {
 
 template <typename T> struct ContextDefaultImpl : ContextDefaultImplChecked<T, T> {};
 HIPFILE_CONTEXT_DEFAULT_IMPL(IStatsServer, StatsServer);
-HIPFILE_CONTEXT_DEFAULT_IMPL(IThreadPool, ThreadPool);
 
 template <typename T> struct Context {
     using DefaultImpl = typename ContextDefaultImpl<T>::type;
