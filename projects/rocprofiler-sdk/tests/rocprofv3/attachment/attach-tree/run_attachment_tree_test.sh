@@ -164,9 +164,7 @@ fi
 # Locate the child process's output files. With default naming the files are
 # under a subdirectory named after the hostname and contain the PID in the
 # filename, e.g. attachment-output/<hostname>/<child_pid>_results.json
-# Reattach session appears after the PID in the basename, e.g. <pid>_1_results.json,
-# when another process in the same attach wave already advanced the session counter.
-CHILD_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ \( -name "${CHILD_PID}_results.json" -o -name "${CHILD_PID}_*_results.json" \) | head -1)
+CHILD_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ -name "${CHILD_PID}_results.json" | head -1)
 if [ -z "$CHILD_JSON" ]; then
     echo "Error: Could not find child (PID ${CHILD_PID}) JSON output in ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/"
     exit 1
@@ -179,8 +177,7 @@ CHILD_DIR=$(dirname "$CHILD_JSON")
 # reference them without knowing the hostname or PID at configure time.
 for src in "${CHILD_DIR}/${CHILD_PID}"_*.json "${CHILD_DIR}/${CHILD_PID}"_*.db; do
     [ -f "$src" ] || continue
-    dst_name=$(basename "$src" | sed "s/^${CHILD_PID}_/${OUTPUT_FILENAME}_/" |
-        sed -E "s/^${OUTPUT_FILENAME}_[0-9]+_/${OUTPUT_FILENAME}_/")
+    dst_name=$(basename "$src" | sed "s/^${CHILD_PID}_/${OUTPUT_FILENAME}_/")
     cp "$src" "${OUTPUT_DIR}/${OUTPUT_SUBDIR}/${dst_name}"
     echo "Copied $(basename $src) -> ${dst_name}"
 done

@@ -2404,7 +2404,7 @@ write_attach_session(const fs::path& path, uint64_t session)
 void
 assign_attach_output_session_suffix()
 {
-    const auto target_pid   = get_attach_target_pid();
+    const auto target_pid   = getppid();
     const auto session_path = attach_session_file_path(target_pid);
 
     auto session = uint64_t{0};
