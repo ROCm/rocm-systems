@@ -286,8 +286,11 @@ set(ALL_TEST_VARIANT_NAMES default_stream)
 function(generate_variant_combinations global_variants test_variants output_var)
     set(ALL_COMBINATIONS "")
 
-    # Always include base variant (no global variants, no test variants)
-    list(APPEND ALL_COMBINATIONS "base")
+    # When using SLR launcher, skip base variant (no difference from uuid variant in SLR mode)
+    # Only include base variant for MPI mode
+    if(NOT USE_SLR_LAUNCHER)
+        list(APPEND ALL_COMBINATIONS "base")
+    endif()
 
     # Add global-only variants
     foreach(global_var ${global_variants})
