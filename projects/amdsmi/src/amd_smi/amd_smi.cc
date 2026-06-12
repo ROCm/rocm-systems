@@ -3026,6 +3026,9 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(
 amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode) {
   AMDSMI_CHECK_INIT();
+  if (mode == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   std::ostringstream ss;
   auto status = rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_get, processor_handle, 0,
                              reinterpret_cast<rsmi_compute_partition_mem_alloc_mode_t*>(mode));
@@ -3038,6 +3041,10 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode) {
   AMDSMI_CHECK_INIT();
+  if (mode != AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING &&
+      mode != AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL) {
+    return AMDSMI_STATUS_INVAL;
+  }
   return rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_set, processor_handle, 0,
                       static_cast<rsmi_compute_partition_mem_alloc_mode_t>(mode));
 }
