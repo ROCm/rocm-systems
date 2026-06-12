@@ -123,7 +123,7 @@ include(rocprofiler_config_install_roctx)
 include(rocprofiler_config_install_rocpd)
 # rocattach is only supported on x86_64 for now
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-include(rocprofiler_config_install_rocattach)
+    include(rocprofiler_config_install_rocattach)
 endif()
 include(rocprofiler_config_install_tests)
 
