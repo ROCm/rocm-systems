@@ -26,6 +26,7 @@
 
 #include <gtest/gtest.h>
 #include <vector>
+#include <amdgpu.h>
 #include "OSWrapper.hpp"
 #include "GoogleTestExtension.hpp"
 #include "hsakmt/hsakmt.h"
@@ -78,6 +79,13 @@ HSAuint64 GetSystemTickCountInMicroSec();
 bool GPUMemCopy(
     void* dst, void* src, size_t size, unsigned int node,
     bool useSdma);
+int amdgpu_bo_alloc_and_map(amdgpu_device_handle dev, unsigned size,
+                            unsigned alignment, unsigned heap, uint64_t flags,
+                            amdgpu_bo_handle *bo, void **cpu, uint64_t *mc_address,
+                            amdgpu_va_handle *va_handle);
+int amdgpu_bo_unmap_and_free(amdgpu_bo_handle bo,
+                             amdgpu_va_handle va_handle,
+                             uint64_t mc_addr, uint64_t size);
 
 class HsaMemoryBuffer {
  public:
