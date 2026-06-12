@@ -78,8 +78,16 @@ constexpr int rcclShmemScratchWarpSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSi
 
 /* Copy of ncclShmemDynamicSize */
 constexpr int rcclShmemDynamicSize(int cudaArch = NCCL_CUDA_ARCH, int WarpSize = 32) {
+#ifdef RCCL_DEVICE_LINKER
+  // In device-linker builds the scratch/ncclShmem are static __shared__ (see device/common.h);
+  // requesting it as dynamic shmem too would double-count and overflow the per-block LDS budget.
+  (void)cudaArch;
+  (void)WarpSize;
+  return 0;
+#else
   const int maxNthreads = (cudaArch == 950) ? RCCL_GFX950_MAX_NTHREADS : RCCL_DEFAULT_MAX_NTHREADS;
   return cudaArch < 700 ? 0 : rcclShmemScratchWarpSize(cudaArch, WarpSize)*(maxNthreads/WarpSize);
+#endif
 }
 
 NCCL_PARAM(L1SharedMemoryCarveout, "L1_SHARED_MEMORY_CARVEOUT", 0);
@@ -2021,6 +2029,11 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
   int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
+#ifdef RCCL_DEVICE_LINKER
+  // In device-linker builds the per-warp scratch is static, so rcclShmemDynamicSize() is 0 above.
+  // Symmetric kernels still use dynamic shared memory (ncclSymkSmem[]) sized by kernelDynSmem.
+  if (plan->isSymColl) smem = plan->kernelDynSmem;
+#endif
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));

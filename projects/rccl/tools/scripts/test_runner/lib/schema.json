@@ -139,6 +139,30 @@
           "type": "integer",
           "minimum": 0,
           "description": "Timeout in seconds. 0 = unlimited."
+        },
+        "is_pytest": {
+          "type": "boolean",
+          "description": "True → run a pytest harness (in test_dir) instead of a gtest/plain binary; results are derived from a JUnit report. Default: false."
+        },
+        "test_dir": {
+          "type": "string",
+          "description": "For pytest tests: directory containing the harness (absolute, or relative to workdir). Supports ~ and $VAR expansion."
+        },
+        "python_bin": {
+          "type": "string",
+          "description": "For pytest tests: interpreter to use (default: <test_dir>/venv else python3, or the venv created by setup_venv)."
+        },
+        "setup_venv": {
+          "type": "boolean",
+          "description": "For pytest tests: create/reuse a venv and install requirements before running. Default: false."
+        },
+        "venv_dir": {
+          "type": "string",
+          "description": "For pytest tests with setup_venv: venv location (default: <test_dir>/venv)."
+        },
+        "requirements": {
+          "type": "string",
+          "description": "For pytest tests with setup_venv: requirements file to install (default: <test_dir>/requirements.txt)."
         }
       }
     },
@@ -161,6 +185,12 @@
         "num_nodes":   { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
         "num_gpus":    { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
         "timeout":     { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "is_pytest":    { "$ref": "#/$defs/test_defaults/properties/is_pytest" },
+        "test_dir":     { "$ref": "#/$defs/test_defaults/properties/test_dir" },
+        "python_bin":   { "$ref": "#/$defs/test_defaults/properties/python_bin" },
+        "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
+        "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
+        "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Environment variables applied to every test in this configuration (merged on top of global env_variables)"
@@ -223,6 +253,12 @@
         "num_nodes":   { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
         "num_gpus":    { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
         "timeout":     { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "is_pytest":    { "$ref": "#/$defs/test_defaults/properties/is_pytest" },
+        "test_dir":     { "$ref": "#/$defs/test_defaults/properties/test_dir" },
+        "python_bin":   { "$ref": "#/$defs/test_defaults/properties/python_bin" },
+        "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
+        "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
+        "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Test-specific environment variables (highest priority, merged on top of all other levels)"
@@ -262,6 +298,12 @@
         "num_nodes": { "$ref": "#/$defs/test_defaults/properties/num_nodes" },
         "num_gpus":  { "$ref": "#/$defs/test_defaults/properties/num_gpus" },
         "timeout":   { "$ref": "#/$defs/test_defaults/properties/timeout" },
+        "is_pytest":    { "$ref": "#/$defs/test_defaults/properties/is_pytest" },
+        "test_dir":     { "$ref": "#/$defs/test_defaults/properties/test_dir" },
+        "python_bin":   { "$ref": "#/$defs/test_defaults/properties/python_bin" },
+        "setup_venv":   { "$ref": "#/$defs/test_defaults/properties/setup_venv" },
+        "venv_dir":     { "$ref": "#/$defs/test_defaults/properties/venv_dir" },
+        "requirements": { "$ref": "#/$defs/test_defaults/properties/requirements" },
         "env_variables": {
           "$ref": "#/$defs/env_variables_map",
           "description": "Suite-level environment variable overrides (between configuration-level and test-level in priority)"
