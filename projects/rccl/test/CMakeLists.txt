@@ -222,6 +222,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      VersionInfoTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
       common/main_fixtures.cpp
