@@ -180,7 +180,8 @@ endif()
 #   3. /usr/lib/python3.X/site-packages       (RHEL/SLES/Fedora primary)
 # We avoid /usr/local/* because the system DEB/RPM owns /usr, and pip
 # manages /usr/local separately.
-set(_amdsmi_sitelib_query [[
+set(_amdsmi_sitelib_query
+    [[
 import site, sys
 candidates = [p for p in site.getsitepackages() if not p.startswith("/usr/local")]
 order = [
@@ -194,7 +195,8 @@ for pred in order:
             print(p); sys.exit(0)
 import sysconfig
 print(sysconfig.get_paths()["purelib"])
-]])
+]]
+)
 if(EXISTS "/usr/bin/python3")
     execute_process(
         COMMAND /usr/bin/python3 -c "${_amdsmi_sitelib_query}"
@@ -203,7 +205,10 @@ if(EXISTS "/usr/bin/python3")
         RESULT_VARIABLE _amdsmi_sitelib_rc
     )
     if(NOT _amdsmi_sitelib_rc EQUAL 0 OR AMDSMI_SYSTEM_PYTHON_SITELIB STREQUAL "")
-        message(WARNING "Could not query /usr/bin/python3 site-packages; falling back to Python3_SITELIB=${Python3_SITELIB}")
+        message(
+            WARNING
+            "Could not query /usr/bin/python3 site-packages; falling back to Python3_SITELIB=${Python3_SITELIB}"
+        )
         set(AMDSMI_SYSTEM_PYTHON_SITELIB "${Python3_SITELIB}")
     endif()
 else()

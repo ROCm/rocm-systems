@@ -34,7 +34,9 @@ try:
     from amdsmi import amdsmi_interface, amdsmi_exception
 except ImportError as e:
     print(f"Unhandled import error: {e}")
-    print("Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel.")
+    print(
+        "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
+    )
     sys.exit(1)
 
 # Using basic python logging for user errors and development
