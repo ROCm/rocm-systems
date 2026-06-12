@@ -51,5 +51,27 @@ add_executable(hotswap_test tests/hotswap_test.cpp hotswap.cpp)
 target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hotswap_test PRIVATE amd_comgr)
 
+# Tool-internal unit tests for the gfx1250-A0 agent gating logic. The test TU
+# #includes hotswap_tool.cpp directly and supplies its own stubs for the HSA,
+# libdrm and COMGR entry points, so this target needs the relevant headers but
+# must NOT link the real HSA / libdrm / COMGR libraries (doing so would clash
+# with the in-file stubs).
+if(NOT WIN32)
+  add_executable(hotswap_tool_test
+    tests/hotswap_tool_test.cpp
+    hotswap_platform_io_posix.cpp
+  )
+  target_include_directories(hotswap_tool_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${HSA_RUNTIME_INC}
+    ${HSA_RUNTIME_INC}/..
+    ${DRM_INCLUDE_DIRS}
+    ${DRM_AMDGPU_INCLUDE_DIRS}
+  )
+endif()
+
 enable_testing()
 add_test(NAME hotswap_test COMMAND hotswap_test)
+if(NOT WIN32)
+  add_test(NAME hotswap_tool_test COMMAND hotswap_tool_test)
+endif()

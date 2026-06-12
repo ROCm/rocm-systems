@@ -372,15 +372,21 @@ std::string get_agent_isa_name(hsa_agent_t agent) {
 }
 
 #if defined(__linux__)
+// Base directories that contain KFD topology node subdirectories. Exposed as a
+// mutable reference (rather than a hard-coded array) so unit tests can redirect
+// the sysfs parsing at a temporary directory without real hardware.
+std::vector<std::string> &topology_node_base_dirs() {
+  static std::vector<std::string> dirs = {
+      "/sys/devices/virtual/kfd/kfd/topology/nodes/",
+      "/sys/class/kfd/kfd/topology/nodes/"};
+  return dirs;
+}
+
 // Reads the DRM render minor for the given KFD topology node by parsing
 // /sys/devices/virtual/kfd/kfd/topology/nodes/<node>/properties (lines of the
 // form "<key> <value>"). Returns -1 on failure.
 int read_drm_render_minor(uint32_t kfd_node_id) {
-  static const char *const kTopologyDirs[] = {
-      "/sys/devices/virtual/kfd/kfd/topology/nodes/",
-      "/sys/class/kfd/kfd/topology/nodes/"};
-
-  for (const char *dir : kTopologyDirs) {
+  for (const std::string &dir : topology_node_base_dirs()) {
     std::ifstream props(dir + std::to_string(kfd_node_id) + "/properties");
     if (!props) {
       continue;
@@ -413,7 +419,7 @@ int query_chip_rev(int render_minor) {
     drm_amdgpu_info_device dev_info = {};
     if (amdgpu_query_info(dev, AMDGPU_INFO_DEV_INFO, sizeof(dev_info),
                           &dev_info) == 0) {
-      chip_rev = static_cast<int>(dev_info.chip_rev);
+      chip_rev = static_cast<int>(dev_info.pci_rev);
     }
     amdgpu_device_deinitialize(dev);
   }
@@ -442,7 +448,9 @@ bool agent_is_gfx1250_a0(hsa_agent_t agent) {
   }
 
   bool result = false;
-  if (get_agent_isa_name(agent).find("gfx1250") != std::string::npos) {
+  const std::string isa_name = get_agent_isa_name(agent);
+  int chip_rev = -1;
+  if (isa_name.find("gfx1250") != std::string::npos) {
     uint32_t kfd_node_id = 0;
     if (hsa_agent_get_info(
             agent,
@@ -450,10 +458,14 @@ bool agent_is_gfx1250_a0(hsa_agent_t agent) {
             &kfd_node_id) == HSA_STATUS_SUCCESS) {
       const int render_minor = read_drm_render_minor(kfd_node_id);
       if (render_minor >= 0) {
-        result = (query_chip_rev(render_minor) == 0);  // A0
+        chip_rev = query_chip_rev(render_minor);
+        result = (chip_rev == 0);  // A0
       }
     }
   }
+
+  fprintf(stderr, "hotswap: agent isa=%s chip_rev=%d -> gfx1250_A0=%s\n",
+          isa_name.c_str(), chip_rev, result ? "yes" : "no");
 
   {
     std::scoped_lock lock(cache_mutex);
