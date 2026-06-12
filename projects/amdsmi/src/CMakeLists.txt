@@ -229,13 +229,22 @@ if(BUILD_PYTHON_WHEEL)
     add_library(${AMD_SMI}_python ${SRC_LIST} ${INC_LIST})
     target_link_libraries(
         ${AMD_SMI}_python
-        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB}
+        PRIVATE rt Threads::Threads ${CMAKE_DL_LIBS} amdsminic ${FILESYSTEM_LIB} ${UALOE_LINK_LIBRARIES}
     )
     target_link_directories(${AMD_SMI}_python PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/)
+    # Apply the same UALOE netlink compile flags (e.g. -I.../libnl3 for
+    # <netlink/*.h> and -DUALOE_NETLINK) that the other amd_smi targets receive;
+    # this target is created after the shared _AMD_SMI_ALL_TARGETS loop above and
+    # would otherwise miss them, breaking the ualoe_lib netlink sources.
+    if(UALOE_COMPILE_FLAGS)
+        separate_arguments(UALOE_FLAGS_PYTHON NATIVE_COMMAND "${UALOE_COMPILE_FLAGS}")
+        target_compile_options(${AMD_SMI}_python PRIVATE ${UALOE_FLAGS_PYTHON})
+    endif()
     target_include_directories(
         ${AMD_SMI}_python
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../
             ${PROJECT_SOURCE_DIR}/rocm_smi/include
             ${PROJECT_SOURCE_DIR}/common/shared_mutex
             ${RAS_DECODE_INC_DIR}
@@ -244,6 +253,7 @@ if(BUILD_PYTHON_WHEEL)
             ${NIC_INCLUDE_DIRS}
             ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc
             ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface
+            ${UALOE_INCLUDE_DIR}
     )
     target_include_directories(
         ${AMD_SMI}_python

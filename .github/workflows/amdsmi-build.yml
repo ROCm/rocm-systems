@@ -56,7 +56,20 @@ jobs:
           set -euo pipefail
           PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi
           BUILD_DIR=/tmp/amdsmi-build
-          PY_BUILD=/opt/python/cp38-cp38/bin/python3
+          # The manylinux image periodically drops EOL interpreters
+          # (e.g. cp38 was removed once Python 3.8 reached end-of-life),
+          # so pick the newest available stable CPython rather than
+          # hardcoding a version that may vanish on the next image bump.
+          PY_BUILD=""
+          for _py in cp313 cp312 cp311 cp310 cp39; do
+            _cand="/opt/python/${_py}-${_py}/bin/python3"
+            if [ -x "$_cand" ]; then PY_BUILD="$_cand"; break; fi
+          done
+          if [ -z "$PY_BUILD" ]; then
+            echo "ERROR: no suitable CPython interpreter found under /opt/python" >&2
+            exit 1
+          fi
+          echo "Using build interpreter: $PY_BUILD ($("$PY_BUILD" --version 2>&1))"
 
           echo "Installing build prerequisites..."
           dnf -y install git make gcc gcc-c++ cmake ninja-build openssl-devel libnl3-devel libmnl-devel
@@ -230,6 +243,13 @@ jobs:
           ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1 || echo 'amdsmitst failed'
 
           cd /opt/rocm/share/amd_smi/tests/python_unittest
+          # The amdsmi package now installs into the system python's
+          # site-packages (not /opt/rocm/share/amd_smi). Point the test
+          # guard at the installed package's parent dir so it validates
+          # the freshly-installed module instead of rejecting it as a
+          # shadowing system install.
+          export AMDSMI_PATH="$(python3 -c 'import os, amdsmi; print(os.path.dirname(os.path.dirname(os.path.realpath(amdsmi.__file__))))')"
+          echo "AMDSMI_PATH=${AMDSMI_PATH}"
           ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1 || echo 'integration_test.py failed'
           ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1 || echo 'unit_tests.py failed'
           if [ -f ./perf_tests.py ]; then
