@@ -120,6 +120,46 @@ jobs:
               print(f"  amdsmi not importable on host: {e}")
           PY
 
+      # DEBUG (experiment only): de-risk "Option 1" before redesigning the NIC
+      # test leg. GitHub forbids --network in container.options, but that limit
+      # only applies to the container: key. If we launch the per-distro image
+      # ourselves with `docker run --network=host`, the container shares the
+      # host network namespace and /sys/class/net should then expose the NIC
+      # netdevs. This step confirms (a) docker is usable in a no-container: job
+      # on this runner and (b) host-netns actually surfaces the NICs in-image.
+      - name: Probe docker + --network=host NIC visibility
+        run: |
+          set +e
+          echo "===== docker availability on runner host ====="
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "  docker: <not on PATH> -- Option 1 (docker run --network=host) NOT viable here"
+            exit 0
+          fi
+          echo "  docker: $(command -v docker)"
+          docker version --format '  client={{.Client.Version}} server={{.Server.Version}}' 2>&1 || docker version 2>&1 | head -20
+          IMAGE="${{ vars.Ubuntu22_DOCKER_IMAGE }}"
+          echo "===== probe image: ${IMAGE:-<unset>} ====="
+          if [ -z "$IMAGE" ]; then
+            echo "  Ubuntu22_DOCKER_IMAGE var unset; skipping in-container probe"
+            exit 0
+          fi
+          echo "----- baseline: default netns (mirrors current container: behavior) -----"
+          docker run --rm "$IMAGE" sh -c 'ls /sys/class/net' 2>&1 | sed 's/^/  default-netns: /'
+          echo "----- host netns: docker run --network=host -----"
+          docker run --rm --network=host "$IMAGE" sh -c 'ls /sys/class/net' 2>&1 | sed 's/^/  host-netns: /'
+          echo "----- host netns NIC PCI vendor check (expect Pensando 0x1dd8) -----"
+          docker run --rm --network=host "$IMAGE" sh -c '
+            for n in /sys/class/net/*; do
+              iface=$(basename "$n")
+              [ -e "$n/device" ] || continue
+              tgt=$(readlink -f "$n/device" 2>/dev/null)
+              v=$(cat "$tgt/vendor" 2>/dev/null)
+              d=$(cat "$tgt/device" 2>/dev/null)
+              printf "    %-14s -> %s vendor=%s device=%s\n" "$iface" "$(basename "$tgt")" "$v" "$d"
+            done
+          ' 2>&1
+          echo "  (PASS criteria: host-netns lists more than eth0+lo, including 0x1dd8 ports)"
+
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the
