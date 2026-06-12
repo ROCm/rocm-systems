@@ -1,3 +1,14 @@
+# ---------------------------------------------------------------------------
+# AMD-SMI CI.
+#
+# Builds, installs, and tests AMD-SMI against AMD GPUs on self-hosted
+# runners BM/VM, using per-distro containers to cover a matrix of
+# Debian/RPM distros. TheRock CI only runs in containers so it doesn't cover
+# every scenario
+#
+# Aims to follow TheRock CI conventions as closely as possible.
+# ---------------------------------------------------------------------------
+
 name: AMDSMI CI
 
 on:
