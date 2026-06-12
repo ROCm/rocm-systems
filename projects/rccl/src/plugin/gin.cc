@@ -45,6 +45,15 @@ extern ncclGin_t ncclGinAnvilPlugin;
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
 #endif
 
+// Addresses of built-in plugins; nullptr when those objects are not linked in.
+#if RCCL_GIN_HAVE_BUILTIN_ROCSHMEM_PLUGINS
+static ncclGin_t* rcclGinBuiltinRocshmemAddr(void) { return &ncclGinRocshmem; }
+static ncclGin_t* rcclGinBuiltinAnvilAddr(void) { return &ncclGinAnvilPlugin; }
+#else
+static ncclGin_t* rcclGinBuiltinRocshmemAddr(void) { return nullptr; }
+static ncclGin_t* rcclGinBuiltinAnvilAddr(void) { return nullptr; }
+#endif
+
 typedef enum ncclGinPluginState {
   ncclGinPluginStateDisabled        = -2,       // Plugin library failed to initialize
   ncclGinPluginStateLoadFailed      = -1,       // Plugin library failed to load
@@ -222,15 +231,20 @@ static void initPluginLibsOnceFunc() {
     pluginCounter++;
   }
 
-#if RCCL_GIN_HAVE_BUILTIN_ROCSHMEM_PLUGINS
-  // Built-in ROCm GIN plugins (NCCL_GIN_TYPE=4 rocshmem, NCCL_GIN_TYPE=5 anvil)
-  ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmem;
-  ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-  pluginCounter++;
-  ginPluginLibs[pluginCounter].ncclGin = &ncclGinAnvilPlugin;
-  ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-  pluginCounter++;
-#endif
+  {
+    ncclGin_t* r = rcclGinBuiltinRocshmemAddr();
+    if (r) {
+      ginPluginLibs[pluginCounter].ncclGin = r;
+      ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+      pluginCounter++;
+    }
+    ncclGin_t* a = rcclGinBuiltinAnvilAddr();
+    if (a) {
+      ginPluginLibs[pluginCounter].ncclGin = a;
+      ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
+      pluginCounter++;
+    }
+  }
   // Add internal ib plugin
   ginPluginLibs[pluginCounter].ncclGin = &ncclGinIb;
   ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
@@ -244,24 +258,20 @@ static void initPluginLibsOnceFunc() {
 static bool ncclGinPluginMatchesRequest(ginPluginLib_t* pluginLib) {
   if (pluginLib->ncclGin == nullptr) return false;
   int64_t requested = ncclParamGinType();
-#if RCCL_GIN_HAVE_BUILTIN_ROCSHMEM_PLUGINS
+  ncclGin_t* pR = rcclGinBuiltinRocshmemAddr();
+  ncclGin_t* pA = rcclGinBuiltinAnvilAddr();
+
   if (requested == NCCL_NET_DEVICE_GIN_ROCSHMEM) {
-    return pluginLib->ncclGin == &ncclGinRocshmem;
+    return pR != nullptr && pluginLib->ncclGin == pR;
   }
   if (requested == NCCL_NET_DEVICE_GIN_ANVIL) {
-    return pluginLib->ncclGin == &ncclGinAnvilPlugin;
+    return pA != nullptr && pluginLib->ncclGin == pA;
   }
   if (requested == NCCL_GIN_TYPE_PROXY || requested == NCCL_GIN_TYPE_GDAKI) {
-    return pluginLib->ncclGin != &ncclGinRocshmem && pluginLib->ncclGin != &ncclGinAnvilPlugin;
+    return (pR == nullptr || pluginLib->ncclGin != pR) && (pA == nullptr || pluginLib->ncclGin != pA);
   }
   // Default: skip built-in ROCm plugins unless explicitly requested.
-  return pluginLib->ncclGin != &ncclGinRocshmem && pluginLib->ncclGin != &ncclGinAnvilPlugin;
-#else
-  if (requested == NCCL_NET_DEVICE_GIN_ROCSHMEM || requested == NCCL_NET_DEVICE_GIN_ANVIL) {
-    return false;
-  }
-  return true;
-#endif
+  return (pR == nullptr || pluginLib->ncclGin != pR) && (pA == nullptr || pluginLib->ncclGin != pA);
 }
 
 static ncclResult_t ncclGinPluginFinalize(struct ncclComm* comm, int pluginIndex) {
