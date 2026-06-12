@@ -133,8 +133,8 @@ class RasCommands:
             )
 
         if self.logger.is_json_format():
-            self.logger.output = results
-            self.logger.print_output()
+            self.logger.multiple_device_output = results
+            self.logger.print_output(multiple_device_enabled=True)
         else:
             print(f"{'file_name':<32} list of afids")
             for entry in results:
