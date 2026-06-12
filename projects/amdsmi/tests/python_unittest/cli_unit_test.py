@@ -1059,6 +1059,107 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
+    def test_json_single_document(self):
+        """B1 regression guard: each `--json` command must emit exactly ONE
+        JSON document.
+
+        `amd-smi list --json` currently prints two concatenated JSON documents
+        when a NIC is present (a GPU array followed by a NIC array), which
+        json.loads rejects. This asserts single-document output via plain
+        json.loads so the bug stays RED until the CLI is fixed to emit a single
+        combined document (e.g. {"gpu_data": [...], "nic_data": [...]}), as
+        static/metric/partition/xgmi already do via combine_arrays_to_json().
+        """
+        self.common.print_func_name("")
+        self.common.print(f"{self.tab}### amd-smi --json single-document check")
+
+        json_cmds = [
+            "amd-smi list --json",
+            "amd-smi static --json",
+            "amd-smi metric --json",
+            "amd-smi partition --current --json",
+        ]
+        errors = []
+        for cmd in json_cmds:
+            (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+            if rc:
+                # A non-zero rc is a different failure mode; skip (other tests
+                # cover command success). This guard is specifically about the
+                # shape of successful JSON output.
+                continue
+            try:
+                json.loads(std_out)
+                self.common.print(f"{self.tab}{cmd:50s}: Success: single JSON document")
+            except (json.JSONDecodeError, TypeError) as e:
+                errors.append(
+                    f"{cmd}: emitted non-single-document JSON (json.loads failed: {e})"
+                )
+        if errors:
+            msg = f"\n{self.tab}".join(errors)
+            self.fail(f"Fail (B1 multi-document JSON):\n{self.tab}{msg}")
+        return
+
+    def test_nic_unsupported_subcommands(self):
+        """B4 regression guard: subcommands that do NOT implement NIC handling
+        must not silently accept `-N/--nic`.
+
+        `_add_device_arguments` advertises -N/--nic on every subcommand that
+        calls it, but only static/firmware/metric/monitor/topology/list read
+        args.nic. The rest (bad-pages, process, xgmi, partition, fabric, ...)
+        currently accept `--nic <id>` and exit 0 while ignoring it, so the
+        auto-generated tests pass when they should not. Assert those reject
+        --nic (non-zero exit). Goes GREEN once the CLI stops advertising/
+        accepting --nic where it is unsupported.
+        """
+        self.common.print_func_name("")
+        self.common.print(f"{self.tab}### amd-smi --nic unsupported-subcommand check")
+
+        if not self.nics:
+            self.skipTest("No NICs enumerated; --nic is not advertised on this system")
+
+        # Subcommands whose handlers actually consume args.nic.
+        nic_supported = {
+            "static",
+            "firmware",
+            "ucode",  # firmware alias
+            "metric",
+            "monitor",
+            "dmon",  # monitor alias
+            "topology",
+            "list",
+        }
+        nic_sel = str(self.nics[0])
+        errors = []
+        for sub in [
+            "bad-pages",
+            "process",
+            "event",
+            "xgmi",
+            "partition",
+            "ras",
+            "fabric",
+            "node",
+        ]:
+            if sub in nic_supported:
+                continue
+            # Only assert on subcommands that actually advertise -N/--nic.
+            (_, help_out, _) = self.util.RunCmdSync(f"amd-smi {sub} --help")
+            if "--nic" not in help_out:
+                continue
+            (rc, _, _) = self.util.RunCmdSync(f"amd-smi {sub} --nic {nic_sel}")
+            if rc == 0:
+                errors.append(
+                    f"amd-smi {sub} --nic {nic_sel}: accepted (exit 0) but '{sub}' "
+                    f"does not support NIC selection"
+                )
+                self.common.print(f"{self.tab}amd-smi {sub} --nic: Failure: wrongly accepted")
+            else:
+                self.common.print(f"{self.tab}amd-smi {sub} --nic: Success: rejected")
+        if errors:
+            msg = f"\n{self.tab}".join(errors)
+            self.fail(f"Fail (B4 --nic on unsupported subcommands):\n{self.tab}{msg}")
+        return
+
     def test_static(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi static"
