@@ -595,8 +595,8 @@ perfetto_engine::preregister_pids(const std::vector<int>& source_pids)
 {
     if(m_collected_bytes_frozen.load(std::memory_order_acquire))
     {
-        LOG_ERROR("preregister_pids called after the map was frozen by the first "
-                  "emission; new pids cannot be added without restarting the engine");
+        LOG_ERROR("preregister_pids called after the collector map was frozen; "
+                  "new pids cannot be added without restarting the engine");
         return;
     }
 

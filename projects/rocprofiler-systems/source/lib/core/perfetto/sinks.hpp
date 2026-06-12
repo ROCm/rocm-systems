@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -206,11 +207,20 @@ private:
 // boundary without inheriting from a common base. The view does NOT
 // extend the target's lifetime — the caller keeps the target alive for
 // as long as the view is reachable.
+class polymorphic_sink_view;
+
+template <typename T>
+concept polymorphic_sink_target =
+    !std::same_as<std::remove_cvref_t<T>, polymorphic_sink_view> &&
+    requires(T& target, int source_id, std::vector<char> bytes) {
+        { target.on_source_drained(source_id, std::move(bytes)) } -> std::same_as<void>;
+        { target.finalize() } -> std::same_as<void>;
+    };
+
 class polymorphic_sink_view
 {
 public:
-    template <typename T, typename = std::enable_if_t<
-                              !std::is_same_v<std::decay_t<T>, polymorphic_sink_view>>>
+    template <polymorphic_sink_target T>
     explicit polymorphic_sink_view(T& target) noexcept
     : m_target{ &target }
     , m_drain_fn{ +[](void* p, int source_id, std::vector<char> bytes) {

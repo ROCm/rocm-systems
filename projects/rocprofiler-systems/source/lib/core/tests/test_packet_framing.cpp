@@ -86,6 +86,16 @@ TEST(packet_framing_varint, overlong_varint_returns_false)
     EXPECT_FALSE(read_varint(bytes.data(), bytes.size(), pos, v));
 }
 
+TEST(packet_framing_varint, ten_byte_payload_overflow_returns_false)
+{
+    std::vector<char> bytes(9, static_cast<char>(0x80));
+    bytes.push_back(static_cast<char>(0x02));
+
+    std::size_t   pos = 0;
+    std::uint64_t v   = 0;
+    EXPECT_FALSE(read_varint(bytes.data(), bytes.size(), pos, v));
+}
+
 // ----------------------------------------------------------------------------
 // rewrite_trace_packet
 // ----------------------------------------------------------------------------
@@ -274,6 +284,17 @@ TEST(packet_framing_rewrite, fixed64_wire_advances_eight_bytes)
     EXPECT_GE(inner.size(), 9u);  // 1 tag + 8 fixed + seq_id pair
 }
 
+TEST(packet_framing_rewrite, rejects_truncated_fixed64_field)
+{
+    std::vector<char> bytes;
+    bytes.push_back(static_cast<char>((1 << 3) | 1));
+    for(int i = 0; i < 7; ++i)
+        bytes.push_back(static_cast<char>(0xAA));
+
+    std::vector<char> dst;
+    EXPECT_FALSE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
+}
+
 TEST(packet_framing_rewrite, fixed32_wire_advances_four_bytes)
 {
     // field 1 wire 5 (32-bit fixed), 4 bytes of payload
@@ -284,6 +305,17 @@ TEST(packet_framing_rewrite, fixed32_wire_advances_four_bytes)
 
     std::vector<char> dst;
     EXPECT_TRUE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
+}
+
+TEST(packet_framing_rewrite, rejects_truncated_fixed32_field)
+{
+    std::vector<char> bytes;
+    bytes.push_back(static_cast<char>((1 << 3) | 5));
+    for(int i = 0; i < 3; ++i)
+        bytes.push_back(static_cast<char>(0xBB));
+
+    std::vector<char> dst;
+    EXPECT_FALSE(rewrite_trace_packet(dst, bytes.data(), bytes.size(), 5));
 }
 
 TEST(packet_framing_rewrite, empty_input_emits_offset_as_seq_id)

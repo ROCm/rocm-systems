@@ -82,6 +82,27 @@ TEST(locked_file_append, creates_parent_directory_and_appends_in_order)
     std::filesystem::remove_all(root);
 }
 
+TEST(locked_file_append, empty_filename_reports_open_failed)
+{
+    EXPECT_EQ(rocprofsys::core::append_with_file_lock("", "x", 1),
+              rocprofsys::core::locked_append_status::open_failed);
+}
+
+TEST(locked_file_append, status_name_handles_known_and_unknown_values)
+{
+    using rocprofsys::core::locked_append_status;
+
+    EXPECT_EQ(rocprofsys::core::status_name(locked_append_status::success), "success");
+    EXPECT_EQ(rocprofsys::core::status_name(locked_append_status::open_failed),
+              "open_failed");
+    EXPECT_EQ(rocprofsys::core::status_name(locked_append_status::lock_failed),
+              "lock_failed");
+    EXPECT_EQ(rocprofsys::core::status_name(locked_append_status::write_failed),
+              "write_failed");
+    EXPECT_EQ(rocprofsys::core::status_name(static_cast<locked_append_status>(999)),
+              "unknown");
+}
+
 // ----------------------------------------------------------------------------
 // per_pid_file_sink
 // ----------------------------------------------------------------------------
@@ -239,4 +260,74 @@ TEST(single_file_sink, same_source_shares_base_offset)
     EXPECT_EQ(marker_x, 'X');
     EXPECT_EQ(marker_y, 'Y');
     EXPECT_EQ(seq_id_x, seq_id_y);
+}
+
+TEST(single_file_sink, malformed_trace_packets_tag_drops_remainder)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+
+    auto bytes = build_framed_placeholder_packet('A');
+    bytes.push_back(static_cast<char>(0xFF));
+    auto ignored = build_framed_placeholder_packet('B');
+    bytes.insert(bytes.end(), ignored.begin(), ignored.end());
+
+    sink.on_source_drained(9, std::move(bytes));
+
+    const auto& buf = sink.buffer_for_testing();
+    ASSERT_FALSE(buf.empty());
+
+    std::uint64_t seq_id = 0;
+    char          marker = 0;
+    const auto    end    = read_framed_packet(buf, 0, seq_id, marker);
+    EXPECT_EQ(marker, 'A');
+    EXPECT_EQ(end, buf.size()) << "packets after malformed tag must be dropped";
+}
+
+TEST(single_file_sink, truncated_trace_packets_frame_drops_remainder)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+
+    auto bytes = build_framed_placeholder_packet('A');
+    bytes.push_back(static_cast<char>(TRACE_PACKETS_TAG));
+    append_varint(bytes, 100);
+    bytes.push_back('x');
+    auto ignored = build_framed_placeholder_packet('B');
+    bytes.insert(bytes.end(), ignored.begin(), ignored.end());
+
+    sink.on_source_drained(9, std::move(bytes));
+
+    const auto& buf = sink.buffer_for_testing();
+    ASSERT_FALSE(buf.empty());
+
+    std::uint64_t seq_id = 0;
+    char          marker = 0;
+    const auto    end    = read_framed_packet(buf, 0, seq_id, marker);
+    EXPECT_EQ(marker, 'A');
+    EXPECT_EQ(end, buf.size()) << "packets after truncated frame must be dropped";
+}
+
+TEST(single_file_sink, malformed_inner_trace_packet_drops_remainder)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+
+    auto bytes = build_framed_placeholder_packet('A');
+    bytes.push_back(static_cast<char>(TRACE_PACKETS_TAG));
+    append_varint(bytes, 1);
+    bytes.push_back(static_cast<char>((1 << 3) | 3));
+    auto ignored = build_framed_placeholder_packet('B');
+    bytes.insert(bytes.end(), ignored.begin(), ignored.end());
+
+    sink.on_source_drained(9, std::move(bytes));
+
+    const auto& buf = sink.buffer_for_testing();
+    ASSERT_FALSE(buf.empty());
+
+    std::uint64_t seq_id = 0;
+    char          marker = 0;
+    const auto    end    = read_framed_packet(buf, 0, seq_id, marker);
+    EXPECT_EQ(marker, 'A');
+    EXPECT_EQ(end, buf.size()) << "packets after malformed TracePacket must be dropped";
 }

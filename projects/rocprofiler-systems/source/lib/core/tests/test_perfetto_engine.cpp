@@ -76,6 +76,20 @@ protected:
 
     void TearDown() override { g_mock_session_backend.reset(); }
 };
+
+struct incomplete_session_backend
+{};
+
+static_assert(rocprofsys::core::trace_session_backend<mock_session_backend>);
+static_assert(rocprofsys::core::trace_session_backend_for<mock_session_backend, int,
+                                                          std::function<void(int)>>);
+static_assert(rocprofsys::core::flushable_trace_session_backend<mock_session_backend>);
+static_assert(!rocprofsys::core::trace_session_backend<incomplete_session_backend>);
+static_assert(
+    !rocprofsys::core::flushable_trace_session_backend<incomplete_session_backend>);
+static_assert(rocprofsys::core::stoppable_trace_session<mock_trace_session>);
+static_assert(
+    rocprofsys::core::trace_session<mock_trace_session, int, std::function<void(int)>>);
 }  // namespace
 
 TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
@@ -351,6 +365,71 @@ TEST(perfetto_engine_cached, multiple_emits_same_pid_concatenate)
     auto second_framed = frame_packet(second);
     expected.insert(expected.end(), second_framed.begin(), second_framed.end());
     EXPECT_EQ(rec.records()[0].second, expected);
+}
+
+TEST(perfetto_engine_cached, collect_before_preregister_is_dropped)
+{
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+
+    const std::vector<char> payload{ 1, 2, 3, 4 };
+    simulate_interceptor_emit(engine, 77, payload);
+
+    engine.stop();
+
+    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    EXPECT_TRUE(rec.records().empty());
+    EXPECT_TRUE(rec.finalized());
+}
+
+TEST(perfetto_engine_cached, collect_for_unregistered_pid_is_dropped)
+{
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 10 });
+
+    const std::vector<char> kept{ 5, 6, 7, 8 };
+    const std::vector<char> dropped{ 9, 10, 11, 12 };
+    simulate_interceptor_emit(engine, 10, kept);
+    simulate_interceptor_emit(engine, 11, dropped);
+
+    engine.stop();
+
+    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    ASSERT_EQ(rec.records().size(), 1u);
+    EXPECT_EQ(rec.records()[0].first, 10);
+    EXPECT_EQ(rec.records()[0].second, frame_packet(kept));
+    EXPECT_TRUE(rec.finalized());
+}
+
+TEST(perfetto_engine_cached, preregister_after_freeze_does_not_add_new_pid)
+{
+    rocprofsys::core::perfetto_engine engine{ make_test_config() };
+    engine.init_sdk();
+
+    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 1 });
+    engine.preregister_pids({ 2 });
+
+    const std::vector<char> first{ 13, 14, 15 };
+    const std::vector<char> second{ 16, 17, 18 };
+    simulate_interceptor_emit(engine, 1, first);
+    simulate_interceptor_emit(engine, 2, second);
+
+    engine.stop();
+
+    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    ASSERT_EQ(rec.records().size(), 1u);
+    EXPECT_EQ(rec.records()[0].first, 1);
+    EXPECT_EQ(rec.records()[0].second, frame_packet(first));
+    EXPECT_TRUE(rec.finalized());
 }
 
 // ----------------------------------------------------------------------------

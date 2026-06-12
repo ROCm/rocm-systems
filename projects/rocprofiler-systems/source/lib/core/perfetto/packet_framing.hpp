@@ -34,46 +34,48 @@ inline constexpr std::uint32_t WIRE_TYPE_MASK          = 0x7;
 inline constexpr std::size_t   WIRE_TYPE_FIXED64_BYTES = 8;
 inline constexpr std::size_t   WIRE_TYPE_FIXED32_BYTES = 4;
 
-// Decodes a protobuf varint from data[pos..size). Advances pos past the
+// Decodes a protobuf varint from data[offset..size). Advances offset past the
 // last byte read. Returns true on success, false on truncated input or
 // >64-bit overflow.
 inline bool
-read_varint(const char* data, std::size_t size, std::size_t& pos,
-            std::uint64_t& out) noexcept
+read_varint(const char* data, std::size_t size, std::size_t& offset,
+            std::uint64_t& decoded_value) noexcept
 {
-    out                 = 0;
+    decoded_value       = 0;
     std::uint32_t shift = 0;
-    while(pos < size)
+    while(offset < size)
     {
         // Reject before OR-ing payload bits so an attacker-controlled 10th
-        // byte cannot smuggle bits into the high end of `out`.
+        // byte cannot smuggle bits into the high end of `decoded_value`.
         if(shift >= VARINT_MAX_SHIFT_BITS) return false;
-        auto b = static_cast<std::uint8_t>(data[pos++]);
-        out |= static_cast<std::uint64_t>(b & VARINT_PAYLOAD_MASK) << shift;
-        if((b & VARINT_CONTINUATION_BIT) == 0) return true;
+        auto byte = static_cast<std::uint8_t>(data[offset++]);
+        if(shift == VARINT_MAX_SHIFT_BITS - 1 && (byte & VARINT_PAYLOAD_MASK) > 1)
+            return false;
+        decoded_value |= static_cast<std::uint64_t>(byte & VARINT_PAYLOAD_MASK) << shift;
+        if((byte & VARINT_CONTINUATION_BIT) == 0) return true;
         shift += VARINT_SHIFT_BITS;
     }
     return false;
 }
 
-// Appends `v` to `dst` in protobuf varint encoding.
+// Appends `value` to `output` in protobuf varint encoding.
 inline void
-append_varint(std::vector<char>& dst, std::uint64_t v)
+append_varint(std::vector<char>& output, std::uint64_t value)
 {
-    while(v >= VARINT_CONTINUATION_BIT)
+    while(value >= VARINT_CONTINUATION_BIT)
     {
-        dst.push_back(
-            static_cast<char>((v & VARINT_PAYLOAD_MASK) | VARINT_CONTINUATION_BIT));
-        v >>= VARINT_SHIFT_BITS;
+        output.push_back(
+            static_cast<char>((value & VARINT_PAYLOAD_MASK) | VARINT_CONTINUATION_BIT));
+        value >>= VARINT_SHIFT_BITS;
     }
-    dst.push_back(static_cast<char>(v));
+    output.push_back(static_cast<char>(value));
 }
 
 // Walks one TracePacket payload, copies every field verbatim EXCEPT
 // trusted_packet_sequence_id (field 10), then appends a fresh field 10
 // carrying `seq_id_offset + original_seq_id` (or just `seq_id_offset`
 // if the input had no seq_id field). Wraps the rewritten payload in
-// the Trace.packets length-delimited frame and appends it to `dst`.
+// the Trace.packets length-delimited frame and appends it to `output`.
 //
 // Offset (not replace) is the correct semantics because Perfetto's
 // interned-data namespace (event_categories[].iid, event_names[].iid,
@@ -85,70 +87,71 @@ append_varint(std::vector<char>& dst, std::uint64_t v)
 // the merged namespace.
 //
 // Returns false on malformed input (truncated varint, length overflow,
-// or unknown wire type). On false return, `dst` may have been partially
+// or unknown wire type). On false return, `output` may have been partially
 // modified — the caller should drop the remainder of the source's bytes
 // rather than risk emitting garbage.
 inline bool
-rewrite_trace_packet(std::vector<char>& dst, const char* packet, std::size_t size,
+rewrite_trace_packet(std::vector<char>& output, const char* packet, std::size_t size,
                      std::uint32_t seq_id_offset)
 {
-    std::vector<char> rewritten;
-    rewritten.reserve(size + 5);
+    std::vector<char> rewritten_packet;
+    rewritten_packet.reserve(size + 5);
 
     std::uint64_t original_seq_id = 0;
 
-    std::size_t pos = 0;
-    while(pos < size)
+    std::size_t offset = 0;
+    while(offset < size)
     {
-        std::size_t   tag_start = pos;
-        std::uint64_t tag       = 0;
-        if(!read_varint(packet, size, pos, tag)) return false;
-        const std::uint32_t wire = tag & WIRE_TYPE_MASK;
+        std::size_t   field_start = offset;
+        std::uint64_t field_tag   = 0;
+        if(!read_varint(packet, size, offset, field_tag)) return false;
+        const std::uint32_t wire_type = field_tag & WIRE_TYPE_MASK;
 
-        std::size_t value_end = pos;
-        switch(wire)
+        std::size_t field_end = offset;
+        switch(wire_type)
         {
             case 0:  // varint
             {
-                std::uint64_t v = 0;
-                if(!read_varint(packet, size, pos, v)) return false;
-                value_end = pos;
-                if(tag == TRUSTED_SEQ_ID_TAG) original_seq_id = v;
+                std::uint64_t field_value = 0;
+                if(!read_varint(packet, size, offset, field_value)) return false;
+                field_end = offset;
+                if(field_tag == TRUSTED_SEQ_ID_TAG) original_seq_id = field_value;
                 break;
             }
             case 2:  // length-delimited
             {
-                std::uint64_t len = 0;
-                if(!read_varint(packet, size, pos, len)) return false;
-                if(len > size - pos) return false;
-                pos += static_cast<std::size_t>(len);
-                value_end = pos;
+                std::uint64_t field_length = 0;
+                if(!read_varint(packet, size, offset, field_length)) return false;
+                if(field_length > size - offset) return false;
+                offset += static_cast<std::size_t>(field_length);
+                field_end = offset;
                 break;
             }
-            case 1:  // fixed64 — bounds-check before increment so pos cannot wrap
-                if(WIRE_TYPE_FIXED64_BYTES > size - pos) return false;
-                pos += WIRE_TYPE_FIXED64_BYTES;
-                value_end = pos;
+            case 1:  // fixed64 -- bounds-check before increment so offset cannot wrap
+                if(WIRE_TYPE_FIXED64_BYTES > size - offset) return false;
+                offset += WIRE_TYPE_FIXED64_BYTES;
+                field_end = offset;
                 break;
-            case 5:  // fixed32 — same bounds-check discipline as fixed64
-                if(WIRE_TYPE_FIXED32_BYTES > size - pos) return false;
-                pos += WIRE_TYPE_FIXED32_BYTES;
-                value_end = pos;
+            case 5:  // fixed32 -- same bounds-check discipline as fixed64
+                if(WIRE_TYPE_FIXED32_BYTES > size - offset) return false;
+                offset += WIRE_TYPE_FIXED32_BYTES;
+                field_end = offset;
                 break;
             default: return false;  // group/unknown wire types
         }
-        if(value_end > size) return false;
+        if(field_end > size) return false;
 
-        if(tag == TRUSTED_SEQ_ID_TAG) continue;  // re-emitted below
-        rewritten.insert(rewritten.end(), packet + tag_start, packet + value_end);
+        if(field_tag == TRUSTED_SEQ_ID_TAG) continue;  // re-emitted below
+        rewritten_packet.insert(rewritten_packet.end(), packet + field_start,
+                                packet + field_end);
     }
 
-    rewritten.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
-    append_varint(rewritten, original_seq_id + seq_id_offset);
+    rewritten_packet.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
+    append_varint(rewritten_packet, original_seq_id + seq_id_offset);
 
-    dst.push_back(static_cast<char>(TRACE_PACKETS_TAG));
-    append_varint(dst, rewritten.size());
-    dst.insert(dst.end(), rewritten.begin(), rewritten.end());
+    output.push_back(static_cast<char>(TRACE_PACKETS_TAG));
+    append_varint(output, rewritten_packet.size());
+    output.insert(output.end(), rewritten_packet.begin(), rewritten_packet.end());
     return true;
 }
 }  // namespace core
