@@ -50,6 +50,7 @@ FakeEnv g_env;
 #include "hotswap_gfx_query.hpp"
 
 using rocr::hotswap::AgentGfxRevision;
+using rocr::hotswap::gate_allows_hotswap;
 using rocr::hotswap::query_agent_gfx_revision;
 
 // ---------------------------------------------------------------------------
@@ -131,11 +132,9 @@ const char *kGfx1250IsaWithFeatures =
 const char *kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
 const char *kGfx1251Isa = "amdgcn-amd-amdhsa--gfx1251";
 
-// Mirrors the gate applied in hotswap_load_agent_code_object(): HotSwap runs
-// only for gfx1250 silicon at ASIC revision A0.
-bool gate_allows_hotswap(const AgentGfxRevision &g) {
-  return g.revision_valid && g.gfx_target == "gfx1250" && g.asic_revision == 0;
-}
+// The gate applied in hotswap_load_agent_code_object() is the shared
+// rocr::hotswap::gate_allows_hotswap(), exercised directly below so the tests
+// and the tool can never drift apart.
 
 // gfx1250 silicon at ASIC revision A0 -> parsed target + revision, gate passes.
 void test_Gfx1250A0Passes() {

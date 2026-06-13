@@ -93,4 +93,9 @@ AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
   return info;
 }
 
+bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
+  return gfx.revision_valid && gfx.gfx_target == "gfx1250" &&
+         gfx.asic_revision == 0; // A0
+}
+
 } // namespace rocr::hotswap

@@ -44,6 +44,7 @@ namespace {
 namespace hotswap_io = rocr::hotswap::platform_io;
 
 using rocr::hotswap::AgentGfxRevision;
+using rocr::hotswap::gate_allows_hotswap;
 using rocr::hotswap::get_agent_isa_name;
 using rocr::hotswap::query_agent_gfx_revision;
 
@@ -432,10 +433,7 @@ hsa_status_t HSA_API hotswap_load_agent_code_object(
     // Gate HotSwap to gfx1250 A0 silicon. On any other GPU or stepping, load
     // the original code object unchanged instead of routing through COMGR.
     const AgentGfxRevision gfx = query_agent_gfx_revision(agent);
-    const bool is_gfx1250_a0 = gfx.revision_valid &&
-                               gfx.gfx_target == "gfx1250" &&
-                               gfx.asic_revision == 0;  // A0
-    if (!is_gfx1250_a0) {
+    if (!gate_allows_hotswap(gfx)) {
       return load_original_reader(executable, agent, code_object_reader,
                                   options, loaded_code_object,
                                   reader_from_file);

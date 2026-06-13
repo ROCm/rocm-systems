@@ -5,9 +5,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Portable helpers for discovering an agent's gfx target and ASIC revision via
-// the HSA runtime (HSA_AMD_AGENT_INFO_ASIC_REVISION). These rely solely on HSA
-// and the standard library -- no <elf.h>, libdrm, or KFD sysfs access -- so the
-// unit builds and is unit-testable on both Linux and Windows.
+// the HSA runtime (HSA_AMD_AGENT_INFO_ASIC_REVISION). 
 //
 //===----------------------------------------------------------------------===//
 
@@ -43,9 +41,14 @@ std::string extract_gfx_target(const std::string &isa_name);
 
 // Queries the agent's gfx target and ASIC revision via the HSA runtime. The
 // result is cached per agent handle, since code-object loads can be frequent.
-// This function intentionally encodes no gating policy; callers decide which
-// gfx target / revision to act on.
+// This function intentionally encodes no gating policy; callers apply
+// gate_allows_hotswap() (below) to decide whether to act.
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent);
+
+// HotSwap's activation policy: rewriting is performed only for gfx1250 silicon
+// at ASIC revision A0 (and only when the revision was successfully queried).
+// This is the single source of truth shared by the tool and its unit tests.
+bool gate_allows_hotswap(const AgentGfxRevision &gfx);
 
 } // namespace rocr::hotswap
 
