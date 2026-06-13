@@ -119,10 +119,6 @@ void runAggregation(hiprtcProgram& prog, AggregationType aggType) {
   INFO("Type: " << typeToString<T>());
   for (auto tileSize : tileSizes) {
     for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
-      unsigned long long mask = ~0ull >> (64 - tileSize);
-
-      mask <<= (((laneId % wavefrontSize) / tileSize) * tileSize);
-
       if (tileSize <= wavefrontSize) {
         std::string inputStr;
 
