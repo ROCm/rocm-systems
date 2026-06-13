@@ -343,9 +343,17 @@ hsa_status_t MacOsDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   const auto& amd_region = static_cast<const AMD::MemoryRegion&>(mem_region);
   if (amd_region.IsLocalMemory()) {
     uint64_t gpu_addr = 0;
-    hsa_status_t status = AllocateVram(size, 4096, mem, &gpu_addr);
+    // Coherent-data (#2, default-on): device tensors come from a DART-mapped DMA
+    // buffer (host RAM, cache-coherent) so kernel output is host-visible WITHOUT a
+    // per-dispatch GL2 writeback. No silent VRAM fallback in coherent mode — the
+    // post-acquire is dropped, so a VRAM tensor would return stale data; fail
+    // cleanly instead. ROCR_MACOS_COHERENT_DATA=0 selects the VRAM+post-acquire path.
+    const bool coherent = CoherentDataEnabled();
+    hsa_status_t status = coherent ? AllocateCoherentDma(size, 4096, mem, &gpu_addr)
+                                   : AllocateVram(size, 4096, mem, &gpu_addr);
     if (status == HSA_STATUS_SUCCESS && TraceGpuAllocs()) {
-      std::fprintf(stderr, "ROCR macOS vram alloc %p gpu=0x%llx size=%zu flags=0x%x\n", *mem,
+      std::fprintf(stderr, "ROCR macOS %s alloc %p gpu=0x%llx size=%zu flags=0x%x\n",
+                   coherent ? "dma" : "vram", *mem,
                    static_cast<unsigned long long>(gpu_addr), size, alloc_flags);
     }
     return status;
@@ -377,6 +385,18 @@ hsa_status_t MacOsDriver::FreeMemory(void* mem, size_t /*size*/) {
   if (!mem) return HSA_STATUS_SUCCESS;
   {
     std::lock_guard<std::mutex> g(gpu_lock_);
+    auto dit = dma_allocations_.find(mem);
+    if (dit != dma_allocations_.end()) {
+      const uint64_t buffer_id = dit->second.buffer_id;
+      if (TraceGpuAllocs()) {
+        std::fprintf(stderr, "ROCR macOS dma free %p iova=0x%llx size=%llu\n", mem,
+                     static_cast<unsigned long long>(dit->second.iova),
+                     static_cast<unsigned long long>(dit->second.size));
+      }
+      dma_allocations_.erase(dit);
+      if (dev_ != nullptr) macgpu_free_dma(dev_, buffer_id);
+      return HSA_STATUS_SUCCESS;
+    }
     auto it = vram_allocations_.find(mem);
     if (it != vram_allocations_.end()) {
       if (TraceGpuAllocs()) {
@@ -468,10 +488,59 @@ hsa_status_t MacOsDriver::AllocateVram(size_t size, size_t align, void** cpu_add
   return HSA_STATUS_SUCCESS;
 }
 
+bool MacOsDriver::CoherentDataEnabled() {
+  // Default ON: device tensors live in cache-coherent DART DMA so the per-dispatch
+  // output post-acquire (whose cumulative full-L2 GL2_WB|GL2_INV stalled the CP
+  // after ~12 dispatches) is unnecessary. Set ROCR_MACOS_COHERENT_DATA=0 to revert
+  // to VRAM-BAR tensors + the post-acquire (the old path, which has the ceiling).
+  return std::getenv("ROCR_MACOS_COHERENT_DATA") == nullptr ||
+         EnvEnabled("ROCR_MACOS_COHERENT_DATA");
+}
+
+hsa_status_t MacOsDriver::AllocateCoherentDma(size_t size, size_t /*align*/, void** cpu_addr,
+                                              uint64_t* gpu_iova) {
+  if (cpu_addr == nullptr || gpu_iova == nullptr || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  *cpu_addr = nullptr;
+  *gpu_iova = 0;
+  if (dev_ == nullptr) return HSA_STATUS_ERROR;
+
+  macgpu_dma_buffer_t buf{};
+  if (macgpu_alloc_dma(dev_, static_cast<uint64_t>(size), 0, &buf) != MACGPU_SUCCESS) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  // The GPU addresses the buffer through one flat DART IOVA; a scatter-gather
+  // mapping can't serve as a contiguous tensor base, so reject it (caller falls
+  // back to VRAM). The contiguity probe showed allocs up to 16 MiB are 1 segment.
+  if (buf.segment_count != 1 || buf.cpu_addr == nullptr) {
+    macgpu_free_dma(dev_, buf.buffer_id);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  std::lock_guard<std::mutex> g(gpu_lock_);
+  DmaAllocation alloc;
+  alloc.buffer_id = buf.buffer_id;
+  alloc.iova = buf.segments[0].address;
+  alloc.size = buf.size;
+  dma_allocations_[buf.cpu_addr] = alloc;
+  *cpu_addr = buf.cpu_addr;
+  *gpu_iova = alloc.iova;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t MacOsDriver::HostToGpuAddress(const void* ptr, uint64_t* gpu_addr) const {
   if (ptr == nullptr || gpu_addr == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   *gpu_addr = 0;
   std::lock_guard<std::mutex> g(gpu_lock_);
+  // Coherent-data: a DART DMA buffer's GPU address is its IOVA + intra-buffer offset.
+  const auto dp = reinterpret_cast<uintptr_t>(ptr);
+  for (const auto& kv : dma_allocations_) {
+    const auto base = reinterpret_cast<uintptr_t>(kv.first);
+    if (dp >= base && dp < base + kv.second.size) {
+      *gpu_addr = kv.second.iova + (dp - base);
+      return HSA_STATUS_SUCCESS;
+    }
+  }
   if (vram_bar_ == nullptr || framebuffer_base_ == 0) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   const auto base = reinterpret_cast<uintptr_t>(vram_bar_);
   const auto p = reinterpret_cast<uintptr_t>(ptr);
@@ -484,6 +553,10 @@ bool MacOsDriver::IsRegisteredVramPointer(const void* ptr) const {
   if (ptr == nullptr) return false;
   std::lock_guard<std::mutex> g(gpu_lock_);
   const auto p = reinterpret_cast<uintptr_t>(ptr);
+  for (const auto& kv : dma_allocations_) {
+    const auto base = reinterpret_cast<uintptr_t>(kv.first);
+    if (p >= base && p < base + kv.second.size) return true;
+  }
   for (const auto& kv : vram_allocations_) {
     const auto base = reinterpret_cast<uintptr_t>(kv.first);
     const auto& alloc = kv.second;

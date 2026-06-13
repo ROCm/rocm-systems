@@ -183,6 +183,16 @@ class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform
 
   hsa_status_t AllocateVram(size_t size, size_t align, void** cpu_addr,
                             uint64_t* gpu_addr);
+  // macOS-egpu coherent-data (#2): allocate a DART-mapped DMA buffer (host RAM,
+  // cache-coherent, GPU-addressable via its IOVA) instead of the cache-inhibited
+  // VRAM BAR. The kernel's output then reaches the host WITHOUT a per-dispatch GL2
+  // writeback (the post-acquire that cumulatively stalls the CP), matching Linux's
+  // coherent-GTT model. *gpu_iova is the single-segment DART bus address.
+  hsa_status_t AllocateCoherentDma(size_t size, size_t align, void** cpu_addr,
+                                   uint64_t* gpu_iova);
+  // True if ROCR_MACOS_COHERENT_DATA is set (route IsLocalMemory tensors through
+  // AllocateCoherentDma and drop the per-dispatch output post-acquire).
+  static bool CoherentDataEnabled();
   hsa_status_t HostToGpuAddress(const void* ptr, uint64_t* gpu_addr) const;
   // macOS-egpu: true only if `ptr` lies inside a REGISTERED VRAM allocation
   // (vs HostToGpuAddress which accepts any address in the whole BAR window). Used
@@ -208,6 +218,13 @@ class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform
     uint64_t size = 0;
     uint64_t gpu_addr = 0;
     std::vector<uint8_t> shadow;
+  };
+
+  // Coherent-data (#2): a DART-mapped DMA buffer backing a device allocation.
+  struct DmaAllocation {
+    uint64_t buffer_id = 0;  // macgpu_free_dma handle
+    uint64_t iova = 0;       // single-segment DART bus address (GPU-addressable)
+    uint64_t size = 0;
   };
 
   hsa_status_t EnsureBarMappingsLocked();
@@ -236,6 +253,8 @@ class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform
   uint64_t next_vram_offset_ = 0;
   uint32_t next_direct_queue_index_ = 0;
   std::unordered_map<void*, VramAllocation> vram_allocations_;
+  // cpu_addr -> DART DMA buffer, for coherent-data device allocations.
+  std::unordered_map<void*, DmaAllocation> dma_allocations_;
 };
 
 }  // namespace AMD

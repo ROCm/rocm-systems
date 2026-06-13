@@ -780,7 +780,15 @@ hsa_status_t MacAqlQueue::SubmitKernel(const hsa_kernel_dispatch_packet_t& packe
   // stays in L2 and the host reads stale VRAM (e.g. hipBLAS SAXPY returns the
   // unmodified y). A tree update inverted this from the original SKIP-gated
   // default-on to an enable-gated default-off; restore default-on.
-  if (!EnvEnabled("ROCR_MACOS_AQL_SKIP_POST_ACQUIRE")) {
+  // Coherent-data (#2, default-on): when device tensors are cache-coherent DART
+  // DMA, the kernel's output is host-visible without an L2 writeback, so the
+  // per-dispatch post-acquire — whose cumulative full-L2 GL2_WB|GL2_INV completion
+  // handshake stalls the CP after ~12 dispatches over the uncached-BAR/DART
+  // topology — is dropped (the Linux coherent-GTT model). It is emitted only when
+  // coherent-data is disabled (ROCR_MACOS_COHERENT_DATA=0 -> VRAM-BAR tensors that
+  // still need the writeback for the host blit).
+  if (!MacOsDriver::CoherentDataEnabled() &&
+      !EnvEnabled("ROCR_MACOS_AQL_SKIP_POST_ACQUIRE")) {
     AcquireMemGfx10(pm4);
   }
   status = SubmitPm4AndWait(pm4);
