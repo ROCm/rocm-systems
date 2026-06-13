@@ -29,9 +29,6 @@
 #endif
 #include "nccl_tuner.h"
 #include "bitops.h"
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit_struct.h"
-#endif
 #include <algorithm>
 #include <stdint.h>
 #include <sys/types.h>
@@ -48,8 +45,6 @@ extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4];
 extern const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS];
 
 extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
-
-extern const char* funcNames[];
 
 #define NCCL_MAX_OPS 2048
 #define NCCL_STEPS 8
@@ -197,8 +192,6 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_DIRECT_NIC   0x04
 #define NCCL_NVLS_MIN_POLL 0x80
 
-
-
 #define NCCL_REGULAR_BUFFER 0x00
 #define NCCL_IPC_REG_BUFFER 0x01
 #define NCCL_NVLS_REG_BUFFER 0x02
@@ -274,7 +267,6 @@ struct ncclRing {
   int* rankToIndex;  // inverse lookup of userRanks, setup in setupChannel
   int index; // This rank's index in the ring
 };
-
 
 // The root of each tree only has one node down (+1 intra-node).
 #define NCCL_MAX_TREE_ARITY_TOP 2
@@ -463,7 +455,6 @@ struct alignas(16) ncclDevWorkColl {
 #endif
 };
 
-
 struct alignas(16) ncclDevWorkBcast {
   int ringDepth;
   int chunkSize;
@@ -569,79 +560,6 @@ struct ncclDevChannelPeer {
 };
 #pragma pack(pop)   /* restore original alignment from stack */
 
-#ifdef ENABLE_PROFILING
-#define PROFILE_NUM_ITEMS 31
-#define PROFILE_NUM_LAUNCHES 1024
-
-struct ncclProf {
-  uint32_t count;
-  uint32_t seq; // only entry from first launch is used
-  struct {
-    uint64_t line:16;
-    uint64_t timeStamp:48;
-  } elem[PROFILE_NUM_ITEMS];
-};
-static_assert(sizeof(struct ncclProf) == 256, "ncclProf must have size of 256");
-#endif
-
-#ifdef ENABLE_COLLTRACE
-typedef enum {
-  ncclCollTraceNotReady = 0,
-  ncclCollTraceKernelLaunchType = 1,
-  ncclCollTraceKernelEndType = 2,
-  ncclCollTraceCollLaunchType = 3,
-  ncclCollTraceAbortType = 4,
-  ncclCollTraceDataType = 5,
-  ncclCollTraceCollElemType = (1<<4),
-  ncclCollTraceP2pElemType = (1<<5),
-} ncclCollTraceDataType_t;
-
-struct ncclCollTrace {
-  int16_t funcIndex;
-  uint8_t xccId:4;
-  uint16_t data_0:12;
-  uint8_t type;
-  uint8_t batchIx;
-  uint8_t tid;
-  uint8_t channelId;
-  uint64_t timeStamp:56;
-  union {
-    uint64_t opCount;
-    uint32_t p2pOpCount[2];
-  };
-  union {
-    uint64_t data_1;
-    struct {
-      uint8_t nWarps;
-      uint8_t nChannels;
-      uint8_t bid;
-      uint8_t root;
-    } coll;
-    struct {
-      uint8_t sendRank;
-      uint8_t recvRank;
-      uint8_t nSendChannels;
-      uint8_t nRecvChannels;
-      uint8_t channelBase;
-      uint8_t sendConnIndex:2;
-      uint8_t recvConnIndex:2;
-      uint8_t sendProtoLL:1;
-      uint8_t recvProtoLL:1;
-      uint8_t sendRegistered:1;
-      uint8_t recvRegistered:1;
-    } p2p;
-  };
-};
-static_assert(sizeof(struct ncclCollTrace) == 8*sizeof(int), "ncclCollTrace must have a pow2 size");
-
-union ncclCollTraceTail{
-  uint32_t tail;
-  char padding[4096];
-};
-
-#define COLLTRACE_NUM_ITEMS 8192
-#endif
-
 struct alignas(16) ncclDevChannel {
   struct ncclDevChannelPeer** peers;
   struct ncclRing ring;
@@ -687,21 +605,6 @@ struct ncclKernelComm {
   struct ncclDevProfiler* workStarted/*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted/*[MAXCHANNELS]*/;
 
-#if defined(ENABLE_NPKIT)
-  NpKitEventCollectContext* npKitEventCollectContexts;
-  uint64_t* cpuTimestamp;
-#endif
-
-#ifdef ENABLE_COLLTRACE
-  struct ncclCollTrace* collTrace;
-  union ncclCollTraceTail *collTraceTail;
-  pthread_t collTraceThread;
-#endif
-
-#ifdef ENABLE_PROFILING
-  struct ncclProf* devProf;
-#endif
-
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
 #endif
@@ -744,7 +647,6 @@ struct alignas(16) ncclDevKernelArgsStorage {
     ulong2 storage[capacity/sizeof(ulong2)];
   };
 };
-
 
 typedef ncclDevKernelArgsStorage<(5<<10)> ncclDevKernelArgs5K;
 typedef ncclDevKernelArgsStorage<(4<<10)> ncclDevKernelArgs4K;

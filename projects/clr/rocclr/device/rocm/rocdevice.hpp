@@ -509,10 +509,6 @@ class Device : public NullDevice {
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
 
-  //! Symmetric counterpart to hostLock(): revoke this device's GPU access to the
-  //! pinned range (SVM-API/HMM path only) and then unlock it.
-  void hostUnlock(void* hostMem, size_t size) const;
-
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
 

@@ -76,7 +76,7 @@ typedef void (*rocprofiler_tool_detach_t)(void* tool_data);
  * @brief Callback function for iterating over the libraries which have registered
  * with rocprofiler-register. @see rocprofiler_iterate_runtime_registration_info
  *
- * @param [in] info Pointer to library registration instance. Invokee should make a copy
+ * @param [in] info Pointer to library registration instance. Caller should make a copy
  * for reference outside of callback.
  * @param [in] data User data passed to ::rocprofiler_iterate_runtime_registration_info
  * @return int

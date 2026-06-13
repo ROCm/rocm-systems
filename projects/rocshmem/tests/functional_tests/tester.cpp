@@ -73,6 +73,8 @@
 #include "tile_rma_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
+#include "team_split_2d_tester.hpp"
+#include "host_team_sync_barrier_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -177,7 +179,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
   std::vector<Tester*> testers;
   std::string test_name;
 
-  BackendType backend_type = get_backend_type();
+  BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
 
   switch (type) {
@@ -706,6 +708,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
       break;
+    case HostTeamSyncBarrierTestType:
+      test_name = "Host Team Sync/Barrier";
+      testers.push_back(new HostTeamSyncBarrierTester(args));
+      break;
     case ReduceOnStreamTestType:
       test_name = "Reduce On Stream";
       testers.push_back(new ReduceOnStreamTester(args));
@@ -713,6 +719,9 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
       testers.push_back(new HostCtxCreateTester(args));
+    case TeamSplit2DTestType:
+      test_name = "Team Split 2D";
+      testers.push_back(new TeamSplit2DTester(args));
       break;
     default:
       test_name = "Empty";
@@ -801,7 +810,8 @@ void Tester::execute() {
         _type != TeamCtxInfraOddEvenTestType &&
         _type != TeamCtxSharedInfraTestType &&
         _type != TeamCtxSubsetParentInfraTestType &&
-        _type != HostCtxCreateTestType) {
+        _type != HostCtxCreateTestType &&
+        _type != TeamSplit2DTestType  ) {
       print(size);
     }
   }
