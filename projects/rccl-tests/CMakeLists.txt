@@ -18,6 +18,9 @@ project(rccl-tests LANGUAGES CXX)
 # Build options
 #==================================================================================================
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
+# GIN mode (NCCL_GIN_TYPE) is chosen at runtime. TYPE=2 host proxy uses built-in Ib (IB/verbs in the
+# environment); TYPE=4/5 use rocSHMEM / Anvil paths when RCCL is built with ENABLE_ROCSHMEM_GIN — not
+# extra CMake flags beyond ENABLE_DEVICE_API / ENABLE_ROCSHMEM here.
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
 option(ENABLE_ROCSHMEM             "Build with rocshmem GIN backend support."     OFF)
 set(ROCSHMEM_SOURCE_DIR "" CACHE PATH "rocSHMEM source tree (Anvil SDMA device headers)")

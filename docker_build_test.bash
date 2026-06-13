@@ -32,6 +32,13 @@ MPIRUN_BASE_HFILE="-n ${NP} --hostfile /workspace/${HFILE} --allow-run-as-root -
 # Avoid a duplicate -D 0 run mixing NCCL_GIN_ENABLE=1 with -D 0 and NCCL_DEBUG=WARN (see ddai-a2a-1gb-perf-try2.log).
 RCCL_ENV_COMMON="-x HSA_FORCE_FINE_GRAIN_PCIE=1 -x NCCL_DEBUG=VERSION"
 
+# NCCL_GIN_TYPE=2 (host IB proxy via built-in ncclGinIb): RCCL otherwise prepends libnccl-gin.so to the
+# plugin list; if that DSO is absent, init noise / ordering can block a clean fallback to ncclGinIb.
+# NCCL_GIN_PLUGIN=none clears external slots so Ib is used (still requires IB verbs in the container:
+# DOCKER_GPU includes --device /dev/infiniband). GIN_ANVIL is NCCL_GIN_TYPE=5 (built-in); no IB needed.
+# Skip host-proxy stanzas with RUN_GIN_HOST_PROXY=0 (e.g. CI without HCAs).
+GIN_HOST_PROXY_EXTRA="-x NCCL_GIN_PLUGIN=none -x NCCL_IB_DISABLE=0"
+
 # rccl-tests alltoall_perf: -R is local_register (0=off, 1=local, 2=symmetric ncclCommWindowRegister).
 # common.cu requires -R 2 whenever -D>0 (device/GIN kernels use ncclWindow_t from symmetric collective windows).
 # GIN_ANVIL (NCCL_GIN_TYPE=5, -D 5) relies on that path; use the same -R for host -D 0 baselines so large-message
@@ -109,7 +116,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
 set +x
 fi
 
-if [ 0 -eq 1 ]; then
+if [ "${RUN_GIN_HOST_PROXY:-1}" -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 2, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only)
 echo "=== RCCL AlltoAll: -D 2, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -121,6 +128,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \
+  ${GIN_HOST_PROXY_EXTRA} \
   -x NCCL_DEBUG_SUBSYS=INIT,NET \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
@@ -129,13 +137,12 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 1 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 2 -A 1
 set +x
 fi
 
-# Optional: NCCL_GIN_TYPE=2 host-proxy + -D 3 needs a working external/IB GIN plugin; gin-anvil
-# typically validates TYPE 4/5. 
-if [ 1 -eq 1 ]; then
+# NCCL_GIN_TYPE=2 + -D 3: same host-proxy plugin as above; compare timing to GIN_ANVIL (-D 3/5, TYPE=5) below.
+if [ "${RUN_GIN_HOST_PROXY:-1}" -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only)
 echo "=== RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only) np=${NP} max_bytes=${MAX_BYTES} ==="
@@ -147,6 +154,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \
+  ${GIN_HOST_PROXY_EXTRA} \
   -x NCCL_DEBUG_SUBSYS=INIT,NET \
   -x NCCL_CUMEM_ENABLE=1 \
   -x RCCL_ENABLE_INTRANET=1 \
