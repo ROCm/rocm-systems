@@ -24,6 +24,7 @@
 
 #include "tester_arguments.hpp"
 
+#include <cerrno>
 #include <cstdlib>
 #include <iostream>
 #include <unordered_map>
@@ -86,7 +87,15 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       }
     } else if (arg == "-v") {
       i++;
-      max_volume_size = atoi(argv[i]);
+      errno = 0;
+      char* endptr = nullptr;
+      unsigned long long v = std::strtoull(argv[i], &endptr, 10);
+      if (errno == ERANGE || endptr == argv[i] || (endptr != nullptr && *endptr != '\0')) {
+        std::cerr << "Invalid -v (max per-origin volume in bytes): " << argv[i] << "\n";
+        show_usage(argv[0]);
+        exit(-1);
+      }
+      max_volume_size = static_cast<size_t>(v);
     } else if (arg == "-z") {
       i++;
       wg_size = atoi(argv[i]);

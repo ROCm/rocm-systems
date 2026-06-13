@@ -20,6 +20,13 @@ DOCKER_IMAGE="gin-anvil:latest"
 
 # Derived sizes / shared docker+mpirun settings (expand on host, not inside container).
 MAX_BYTES=$((${NP} * ${MSG_SIZE}))
+# rocshmem_functional_tests -a 19 (TeamAllToAll): symmetric heap holds source+dest buffers (~2x -v for char).
+# Default ROCSHMEM_HEAP_SIZE is 1GiB/pe — too small when -v is multi-GB (e.g. MAX_BYTES=2GiB needs ~4.5GiB heap).
+MIN_ROCSHMEM_HEAP=$((1 << 30))
+ROCSHMEM_HEAP_SIZE=$((2 * MAX_BYTES + 512 * 1024 * 1024))
+if [ "${ROCSHMEM_HEAP_SIZE}" -lt "${MIN_ROCSHMEM_HEAP}" ]; then
+  ROCSHMEM_HEAP_SIZE=${MIN_ROCSHMEM_HEAP}
+fi
 # No -it: script is often run over non-interactive SSH.
 # --init: PID 1 reaps children so ranks exit more cleanly (reduces NCCL IPC/socket teardown WARNs).
 DOCKER_GPU="--rm --init --shm-size 64G --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged"
@@ -87,6 +94,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x ROCSHMEM_TEST_UUID=1 \
   -x ROCSHMEM_BACKEND=ipc \
   -x ROCSHMEM_SDMA_ENABLED=1 \
+  -x ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE} \
   -x ROCSHMEM_DEBUG_LEVEL=info:noversion \
   /workspace/rocshmem/bin/rocshmem_functional_tests \
   -a 19 -w 1 -z 256 -v ${MAX_BYTES} -n 100 -noverif
