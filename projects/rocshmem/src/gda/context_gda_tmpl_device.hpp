@@ -682,8 +682,8 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
@@ -771,8 +771,8 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
     char* amo_dst = ((char*)&pSync[alltoall_pSync_offset + my_pe_in_team] + base_heap_offset);
     qps[dest_pe].atomic_nofetch_single(amo_dst, 1);
 
-    long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
@@ -846,8 +846,8 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
   for (int j = tid; j < pe_size; j+= step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
 
-    long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
-    while (uncached_load(vol_ivars) != 1) { }
+    long *sync_flags = &pSync[alltoall_pSync_offset + dest_pe];
+    while (uncached_load(sync_flags) != 1) { }
 
     qps[dest_pe].quiet_single();
 
