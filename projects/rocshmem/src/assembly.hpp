@@ -151,6 +151,9 @@ __device__ __forceinline__ void refresh_volatile_dwordx2([[maybe_unused]] volati
 
 template <typename T>
 __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
+  static_assert(sizeof(T) == 2 || sizeof(T) == 4 || 
+                sizeof(T) == 8 || sizeof(T) == 16, 
+                "uncached_load only supports 2/4/8/16-byte types");
   T ret{};
   switch (sizeof(T)) {
     case 2:
@@ -170,7 +173,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
           : "=v"(val32)
           : "v"(src)
           : "memory");
-      ret = static_cast<int16_t>(val32);
+      ret = static_cast<T>(val32);
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       asm volatile(
@@ -188,7 +191,7 @@ __device__ __forceinline__ T uncached_load([[maybe_unused]] T* src) {
           : "=v"(val32)
           : "v"(src)
           : "memory");
-      ret = static_cast<int16_t>(val32);
+      ret = static_cast<T>(val32);
 #endif
       break;
     case 4:
