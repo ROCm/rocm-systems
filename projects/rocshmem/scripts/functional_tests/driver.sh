@@ -1082,10 +1082,17 @@ case $TEST in
     if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
       TestTiles
     fi
-    TestHostRma
+    # Host non-MPI IPC tests are only supported on IPC backend
+    if [[ ! "$TEST" =~ ^(gda|ro) ]]; then
+      TestHostRma
+    fi
     ;;
   *"host")
-    TestHostRma
+    if [ -x "$ROCSHMEM_INFO" ] && "$ROCSHMEM_INFO" | grep -q "USE_IPC.*: ON"; then
+      TestHostRma
+    else
+      echo "Skip: host tests require IPC backend (USE_IPC=OFF in this build)"
+    fi
     ;;
   *"rma")
     TestRMA
