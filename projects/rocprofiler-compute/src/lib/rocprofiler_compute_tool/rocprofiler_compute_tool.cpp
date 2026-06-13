@@ -119,6 +119,7 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
+    assert(user_data);
     std::clog << "[rocprofiler-compute] In tool init\n";
     g_sdk_wrapper->create_context(&get_client_ctx());
 

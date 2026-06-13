@@ -215,7 +215,7 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_CreatesContext)
 TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
-    cfg->initialize(nullptr, cfg->tool_data);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
     ASSERT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
     const auto& args = m_sdk_wrapper->get_dispatch_counting_service_info()[0];
     EXPECT_EQ(args.context, m_sdk_wrapper->get_created_contexts()[0]);
