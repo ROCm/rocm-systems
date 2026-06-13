@@ -90,6 +90,12 @@ if (BUILD_TESTS_ONLY)
       $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../src>
   )
+elseif(BUILD_FUNCTIONAL_TESTS)
+  # find_package(PMIx) uses MPI_CXX_HEADER_DIR / MPI_ROOT hints (see FindPMIx.cmake).
+  # Without this, HAVE_PMIX is off, ROCSHMEM_TEST_UUID is ignored, and test_driver
+  # calls rocshmem_init() -> library_init(MPI_COMM_WORLD), which aborts when the
+  # library is built with USE_HEAP_DEVICE_VMM_POSIX (see rocshmem.cpp).
+  find_package(MPI REQUIRED COMPONENTS CXX)
 endif()
 
 find_package(PMIx)
