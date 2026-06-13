@@ -528,6 +528,45 @@ hsa_status_t MacOsDriver::AllocateCoherentDma(size_t size, size_t /*align*/, voi
   return HSA_STATUS_SUCCESS;
 }
 
+bool MacOsDriver::PreferAllocatedQueueMemory() const {
+  // Default ON: the direct queue's ring/MQD/rptr/wptr live in coherent DART DMA
+  // (like Linux's GTT) instead of the cache-inhibited VRAM BAR. This eliminated the
+  // intermittent host<->CP coherence races (op-1 activation timeout + mid-run
+  // completion timeout) that the non-coherent queue memory caused: 8/8 clean
+  // torch_baseline vs ~50% before. ROCR_MACOS_COHERENT_QUEUE=0 reverts to VRAM-BAR.
+  return std::getenv("ROCR_MACOS_COHERENT_QUEUE") == nullptr ||
+         EnvEnabled("ROCR_MACOS_COHERENT_QUEUE");
+}
+
+hsa_status_t MacOsDriver::AllocateQueueMemory(uint64_t size,
+                                              lite::DirectQueueMemory* memory) const {
+  if (memory == nullptr || size == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  *memory = {};
+  if (dev_ == nullptr) return HSA_STATUS_ERROR;
+  macgpu_dma_buffer_t buf{};
+  if (macgpu_alloc_dma(dev_, size, 0, &buf) != MACGPU_SUCCESS) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  if (buf.segment_count != 1 || buf.cpu_addr == nullptr) {
+    macgpu_free_dma(dev_, buf.buffer_id);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  memory->size = buf.size;
+  memory->gpu_addr = buf.segments[0].address;  // DART IOVA the CP fetches from
+  memory->cpu = buf.cpu_addr;
+  memory->platform_handle = buf.buffer_id;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t MacOsDriver::FreeQueueMemory(lite::DirectQueueMemory* memory) const {
+  if (memory == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (memory->platform_handle != 0 && dev_ != nullptr) {
+    macgpu_free_dma(dev_, memory->platform_handle);
+  }
+  *memory = {};
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t MacOsDriver::HostToGpuAddress(const void* ptr, uint64_t* gpu_addr) const {
   if (ptr == nullptr || gpu_addr == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   *gpu_addr = 0;

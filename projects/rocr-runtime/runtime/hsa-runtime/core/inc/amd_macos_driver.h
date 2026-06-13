@@ -237,6 +237,15 @@ class MacOsDriver final : public core::Driver, private lite::DirectQueuePlatform
   hsa_status_t ZeroGpuMemory(uint64_t offset, uint64_t size) const override;
   hsa_status_t WriteGpuMemory32(uint64_t offset, uint32_t value) const override;
   void* GpuMemoryCpuPointer(uint64_t offset) const override;
+  // Coherent-QUEUE experiment (ROCR_MACOS_COHERENT_QUEUE, default-off): put the
+  // direct queue's ring/MQD/rptr/wptr in a DART-coherent DMA buffer (like Linux's
+  // GTT) instead of the cache-inhibited VRAM BAR, to test whether host<->CP
+  // coherence races on the non-coherent queue memory cause the intermittent
+  // activation/completion timeouts (the op-1 flake).
+  bool PreferAllocatedQueueMemory() const override;
+  hsa_status_t AllocateQueueMemory(uint64_t size,
+                                   lite::DirectQueueMemory* memory) const override;
+  hsa_status_t FreeQueueMemory(lite::DirectQueueMemory* memory) const override;
   volatile uint64_t* DoorbellCpuPointer(uint32_t doorbell_index) const override;
   void SleepUs(uint32_t usec) const override;
 
