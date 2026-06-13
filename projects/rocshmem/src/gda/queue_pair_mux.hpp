@@ -29,6 +29,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
+#include "constmem.hpp"
 #include "gda_enums.hpp"
 #include "queue_pair.hpp"
 #include "util.hpp"
@@ -162,8 +163,6 @@ private:
      *
      * ~QueuePairUnion() is defined as empty;
      * destruction of the active subobject is delegated to QueuePairUnion::destruct.
-     * Once provider is in __constant__ memory,
-     * destruction can be done directly by ~QueuePairUnion().
      */
     __host__ ~QueuePairUnion() { }
 
@@ -185,6 +184,11 @@ private:
      */
     __host__ void destruct(GDAProvider provider);
   } qp;
+
+  /**
+   * @brief Underlying GDA Provider.
+   * Only used by __host__ code, __device__ code should use constmem.gda_provider instead.
+   */
   GDAProvider provider;
 
   /*
@@ -210,7 +214,7 @@ __host__ __device__ constexpr typename Provider::OpCode QueuePairMux::provider_o
 template <QueuePairMux::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairMux::post_wqe_rma(
     uintptr_t laddr, uintptr_t raddr, size_t size, const ActiveWFInfo& wf_info) {
-  switch (provider) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_rma<provider_op<Op, QueuePairIONIC>(),
@@ -235,7 +239,7 @@ __device__ void QueuePairMux::post_wqe_rma(
 template <QueuePairMux::OpCode Op, bool RingDB, bool ThreadSafe, bool CheckCQ>
 __device__ void QueuePairMux::post_wqe_rma_single(
     uintptr_t laddr, uintptr_t raddr, size_t size) {
-  switch (provider) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_rma_single<provider_op<Op, QueuePairIONIC>(),
@@ -262,7 +266,7 @@ template <QueuePairMux::OpCode Op, AMOFetchType Fetch,
 __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo(
     uintptr_t raddr, uint64_t value, uint64_t cond, const ActiveWFInfo& wf_info) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
-  switch (provider) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo<provider_op<Op, QueuePairIONIC>(), Fetch,
@@ -289,7 +293,7 @@ template <QueuePairMux::OpCode Op, AMOFetchType Fetch,
 __device__ QueuePairMux::amo_ret_t<Fetch> QueuePairMux::post_wqe_amo_single(
     uintptr_t raddr, uint64_t value, uint64_t cond) {
   static_assert(Fetch != AMOFetchType::NonBlocking);
-  switch (provider) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.post_wqe_amo_single<provider_op<Op, QueuePairIONIC>(), Fetch,
