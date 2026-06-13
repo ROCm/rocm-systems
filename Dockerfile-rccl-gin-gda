@@ -155,7 +155,7 @@ RUN cd rocshmem/src/projects/rocshmem \
  && mkdir -p build && cd build \
  && ../scripts/build_configs/all_backends \
       -DBUILD_DEBUG_TRACE_DEVICE=ON -DBUILD_DEBUG_DEVICE=ON -DBUILD_DEBUG_TRACE_HOST=ON \
-      -DMPI_ROOT=${MPI_INSTALL_DIR} \
+      -DMPI_ROOT=${MPI_INSTALL_PREFIX} \
       -DUSE_EXTERNAL_MPI=OFF \
       -DGPU_TARGETS=${GPU_TARGETS} \
       -DCMAKE_INSTALL_PREFIX=${ROCSHMEM_INSTALL_DIR} \

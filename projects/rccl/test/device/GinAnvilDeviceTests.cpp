@@ -216,7 +216,8 @@ TEST_F(GinAnvilDeviceTest, LocalSignalOp_Branches) {
 
   kLocalSignalOps<<<1, 1>>>(d_sig.ptr, 2);
   syncAndCheck();
-  EXPECT_EQ(d_sig.download(), 18ULL);
+  // ncclGinSignalAdd: *sig (10) += signalOpArg (7) → 17
+  EXPECT_EQ(d_sig.download(), 17ULL);
 }
 
 __global__ void kRemoteSignalOps(uint64_t* sig, int mode) {
@@ -234,6 +235,7 @@ __global__ void kRemoteSignalOps(uint64_t* sig, int mode) {
 
 TEST_F(GinAnvilDeviceTest, RemoteGpuSignalOp_Branches) {
   DeviceBuffer<uint64_t> d_sig(1);
+  d_sig.zero();
   kRemoteSignalOps<<<1, 1>>>(d_sig.ptr, 0);
   syncAndCheck();
   EXPECT_EQ(d_sig.download(), 0ULL);
@@ -244,7 +246,8 @@ TEST_F(GinAnvilDeviceTest, RemoteGpuSignalOp_Branches) {
 
   kRemoteSignalOps<<<1, 1>>>(d_sig.ptr, 2);
   syncAndCheck();
-  EXPECT_EQ(d_sig.download(), 10ULL);
+  // ncclGinSignalAdd: *sig (5) += signalOpArg (4) → 9
+  EXPECT_EQ(d_sig.download(), 9ULL);
 }
 
 // --- ncclGinApi_Put ----------------------------------------------------------
