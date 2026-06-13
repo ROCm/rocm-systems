@@ -100,6 +100,13 @@ endif()
 
 find_package(PMIx)
 
+# When PMIx is missing (common in minimal Open MPI installs), still support
+# ROCSHMEM_TEST_UUID via MPI_Bcast in test_driver.cpp so VMM-POSIX builds avoid
+# rocshmem_init() -> library_init(MPI_COMM_WORLD).
+if(MPI_CXX_FOUND AND NOT PMIx_FOUND)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE ROCSHMEM_TEST_UUID_USE_MPI=1)
+endif()
+
 target_compile_definitions(
   ${PROJECT_NAME}
   PRIVATE

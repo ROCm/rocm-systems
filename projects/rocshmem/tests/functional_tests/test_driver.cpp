@@ -28,6 +28,10 @@
 #include "tester.hpp"
 #include "tester_arguments.hpp"
 
+#if defined(ROCSHMEM_TEST_UUID_USE_MPI)
+#include <mpi.h>
+#endif
+
 #if defined(HAVE_PMIX)
 #include <pmix.h>
 
@@ -129,6 +133,10 @@ static void pmix_bcast(void *buf, size_t nbytes, char *key, int root)
 using namespace rocshmem;
 
 int main(int argc, char *argv[]) {
+#if defined(ROCSHMEM_TEST_UUID_USE_MPI)
+  bool mpi_started_for_uuid = false;
+#endif
+
   /**
    * Setup the tester arguments.
    */
@@ -193,6 +201,58 @@ int main(int argc, char *argv[]) {
   } else {
     rocshmem_init();
   }
+#elif defined(ROCSHMEM_TEST_UUID_USE_MPI)
+  int test_uuid = 0;
+  char *rocshmem_test_uuid = getenv("ROCSHMEM_TEST_UUID");
+  if (rocshmem_test_uuid != nullptr) {
+    test_uuid = atoi(rocshmem_test_uuid);
+  }
+
+  if (test_uuid) {
+    int ret;
+    int mpi_inited = 0;
+    MPI_Initialized(&mpi_inited);
+    if (!mpi_inited) {
+      MPI_Init(nullptr, nullptr);
+      mpi_started_for_uuid = true;
+    }
+
+    int rank, nranks;
+    MPI_Comm comm = MPI_COMM_WORLD;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &nranks);
+
+    rocshmem_uniqueid_t uid;
+    rocshmem_init_attr_t attr;
+
+    if (rank == 0) {
+      ret = rocshmem_get_uniqueid(&uid);
+      if (ret != ROCSHMEM_SUCCESS) {
+        std::cout << rank << ": Error in rocshmem_get_uniqueid. Aborting.\n";
+        abort();
+      }
+    }
+
+    MPI_Bcast(&uid, sizeof(rocshmem_uniqueid_t), MPI_BYTE, 0, comm);
+
+    ret = rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
+    if (ret != ROCSHMEM_SUCCESS) {
+      std::cout << rank << ": Error in rocshmem_set_attr_uniqueid_args. Aborting.\n";
+      abort();
+    }
+
+    ret = rocshmem_init_attr(ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
+    if (ret != ROCSHMEM_SUCCESS) {
+      std::cout << rank << ": Error in rocshmem_init_attr. Aborting.\n";
+      abort();
+    }
+
+#ifdef VERBOSE
+    std::cout << rank << ": rocshmem_init_attr (MPI uuid) SUCCESS\n";
+#endif
+  } else {
+    rocshmem_init();
+  }
 #else
   rocshmem_init();
 #endif
@@ -226,6 +286,12 @@ int main(int argc, char *argv[]) {
    * with the init function above.
    */
   rocshmem_finalize();
+
+#if defined(ROCSHMEM_TEST_UUID_USE_MPI)
+  if (mpi_started_for_uuid) {
+    MPI_Finalize();
+  }
+#endif
 
   return 0;
 }
