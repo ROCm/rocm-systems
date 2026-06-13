@@ -21,9 +21,13 @@ if [[ ! -f "${RS_DIR}/src/sdma/anvil_device.hpp" ]]; then
 fi
 
 RCCL_BUILD="${REPO_ROOT}/projects/rccl/build"
+# Default: build both MI300 (gfx950) and MI350-class (gfx942) code objects so the
+# same script works across lab nodes. Override for a faster single-ISA build, e.g.:
+#   GPU_TARGETS=gfx942 ./gin-anvil-build-test.bash
+GPU_TARGETS="${GPU_TARGETS:-gfx942;gfx950}"
 cmake -S "${REPO_ROOT}/projects/rccl" -B "${RCCL_BUILD}" \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
-  -DGPU_TARGETS=gfx950 \
+  "-DGPU_TARGETS=${GPU_TARGETS}" \
   -DBUILD_TESTS=ON \
   -DENABLE_ROCSHMEM_GIN=ON \
   -DROCSHMEM_SOURCE_DIR="${RS_DIR}"

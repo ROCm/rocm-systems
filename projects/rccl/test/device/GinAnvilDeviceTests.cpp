@@ -784,7 +784,7 @@ TEST_F(GinAnvilDeviceTest, Flush_NullCtx) {
   ncclGinCtx gin{};
   gin.handle = nullptr;
   gin.nRanks = 4;
-  kFlush<<<1, 32>>>(gin, d_abort.ptr);
+  kFlush<<<1, 1>>>(gin, d_abort.ptr);
   syncAndCheck();
 }
 
@@ -803,7 +803,7 @@ TEST_F(GinAnvilDeviceTest, Flush_DirtyMaskZero_Collective) {
 
   DeviceBuffer<uint32_t> d_abort(1);
   d_abort.zero();
-  kFlush<<<1, 32>>>(gin, d_abort.ptr);
+  kFlush<<<1, 1>>>(gin, d_abort.ptr);
   syncAndCheck();
   EXPECT_EQ(d_gctx.download().sdmaDirtyMask, 0u);
 }
