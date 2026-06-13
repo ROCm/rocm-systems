@@ -94,6 +94,30 @@ jobs:
           echo "Python wheel built: $(ls *.whl)"
           echo "Build gate passed"
 
+      - name: Loader ABI and SONAME tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi
+          BUILD_DIR=/tmp/amdsmi-build
+          PY_BUILD=""
+          for _py in cp313 cp312 cp311 cp310 cp39; do
+            _cand="/opt/python/${_py}-${_py}/bin/python3"
+            if [ -x "$_cand" ]; then PY_BUILD="$_cand"; break; fi
+          done
+          : "${PY_BUILD:?no suitable CPython interpreter found}"
+
+          echo "== ABI compatibility unit tests (no hardware needed) =="
+          "$PY_BUILD" "$PROJECT_DIR/tests/python_unittest/test_abi_compat.py" -v
+
+          echo "== system vs wheel SONAME distinctness =="
+          sys_lib=$(find "$BUILD_DIR/src" -maxdepth 1 -name 'libamd_smi.so.*' ! -type l | head -1)
+          wheel_lib=$(find "$BUILD_DIR/src" -maxdepth 1 -name 'libamd_smi_python.so.*' ! -type l | head -1)
+          : "${sys_lib:?main libamd_smi.so not found in build tree}"
+          : "${wheel_lib:?libamd_smi_python.so not found in build tree}"
+          "$PY_BUILD" "$PROJECT_DIR/tests/run_amdsmi_pkg_conflict_test.py" \
+            --system-lib "$sys_lib" --wheel-lib "$wheel_lib"
+
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the
@@ -240,7 +264,7 @@ jobs:
           source amdsmitst.exclude
           source detect_asic_filter.sh
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
-          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1 || echo 'amdsmitst failed'
+          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
 
           cd /opt/rocm/share/amd_smi/tests/python_unittest
           # The amdsmi package now installs into the system python's
@@ -248,10 +272,11 @@ jobs:
           # guard at the installed package's parent dir so it validates
           # the freshly-installed module instead of rejecting it as a
           # shadowing system install.
-          export AMDSMI_PATH="$(python3 -c 'import os, amdsmi; print(os.path.dirname(os.path.dirname(os.path.realpath(amdsmi.__file__))))')"
+          AMDSMI_PATH="$(python3 -c 'import os, amdsmi; print(os.path.dirname(os.path.dirname(os.path.realpath(amdsmi.__file__))))')"
+          export AMDSMI_PATH
           echo "AMDSMI_PATH=${AMDSMI_PATH}"
-          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1 || echo 'integration_test.py failed'
-          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1 || echo 'unit_tests.py failed'
+          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
+          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
           if [ -f ./perf_tests.py ]; then
             ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
           else

@@ -18,7 +18,6 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import os
-import sys
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: ['-I/usr/lib/llvm-16/lib/clang/16/include', '-DENABLE_ESMI_LIB']

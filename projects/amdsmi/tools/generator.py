@@ -46,7 +46,6 @@ HEADER = """# Copyright (C) Advanced Micro Devices. All rights reserved.
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import os
-import sys
 """
 
 
@@ -180,6 +179,16 @@ def main():
         arguments = [input_file, "-o", output_file, "-l", library]
         library_path = os.path.join(os.path.dirname(__file__), library)
         line_to_replace = "_libraries['{}'] = ctypes.CDLL('{}')".format(library_name, library_path)
+        # Derive the SONAME major from the header so the loader stays in sync
+        # with src/CMakeLists.txt SOVERSION across version bumps.
+        soversion_major = "26"
+        try:
+            for _hline in Path(input_file).read_text(encoding="utf-8").splitlines():
+                if _hline.startswith("#define AMDSMI_LIB_VERSION_MAJOR"):
+                    soversion_major = _hline.split()[2]
+                    break
+        except (OSError, IndexError):
+            pass
         new_line = f"""from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -207,7 +216,7 @@ _libraries = {{}}
 
 
 # Versioned SONAME the system package ships; matches src/CMakeLists.txt SOVERSION.
-_AMDSMI_LIB_SONAME = "{library_name}.26"
+_AMDSMI_LIB_SONAME = "{library_name}.{soversion_major}"
 
 
 def _load_library():

@@ -193,29 +193,28 @@ from your ROCm instance.
 Multiple ROCm installations may cause `amd-smi` failures.
 Installing multiple versions of ROCm on the same system can result in the `amd-smi` CLI not functioning correctly.
 
-Starting with ROCm 7.13, the `amd-smi-lib` rpm/deb package no longer
-runs `pip install` during postinst — it drops an `amdsmi.pth` into the
-system Python's `site-packages` instead. Removal steps must therefore
-strip both the (legacy) pip-registered install AND the `.pth` file.
+The `amd-smi-lib` rpm/deb package no longer runs `pip install` during
+postinst — it installs the `amdsmi` module directly into the system
+Python's `site-packages`. Removing the package removes that module, but a
+legacy or manual `pip install amdsmi` can still shadow it, so clear any
+pip-registered copy first.
 
 1. Remove previous AMD SMI installations.
 
    ```shell
-   # Legacy: pre-7.13 system packages and any user pip install
+   # Clear any pip-registered copy (user or manual install) that could
+   # shadow the system-package module.
    python3 -m pip list | grep amd
    python3 -m pip uninstall amdsmi
-
-   # Modern: 7.13+ system package drops a .pth pointer
-   sudo rm -f /usr/lib/python3*/site-packages/amdsmi.pth \
-              /usr/lib/python3/dist-packages/amdsmi.pth
    ```
 
 2. Install the AMD SMI Python library. Pick **one** of the two paths:
 
    - **System package** (recommended when you want the rpm/deb to manage the
      install). Install or reinstall `amd-smi-lib` from your target ROCm
-     instance; the postinst will drop the `.pth` and `import amdsmi` will
-     resolve `/opt/rocm/share/amd_smi/amdsmi/`.
+     instance; the package installs the `amdsmi` module into the system
+     Python's `site-packages`, so `import amdsmi` resolves it directly and
+     loads `libamd_smi.so.<MAJOR>` from `/opt/rocm/lib` via the dynamic linker.
    - **Pip wheel** (recommended for venvs, containers, or when ROCm is not
      installed on the host but the amdgpu kernel driver is present):
 
@@ -227,7 +226,8 @@ strip both the (legacy) pip-registered install AND the `.pth` file.
      the wrapper, so it does not depend on `/opt/rocm` being present.
 
    See `py-interface/README.md` in the source tree for the full
-   install-paths matrix and the `AMDSMI_DEBUG_LOAD` debug knob.
+   install-paths matrix, the loader resolution order, and the
+   `AMDSMI_LIB_OVERRIDE` development knob.
 
    > **Note:** `sudo` may be required for the system-package path. For pip,
    > use `--break-system-packages` only if installing into a non-venv

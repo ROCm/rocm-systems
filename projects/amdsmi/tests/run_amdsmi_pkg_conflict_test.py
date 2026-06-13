@@ -41,6 +41,7 @@ Run it from inside a freshly-built tree where both artifacts exist:
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -74,9 +75,22 @@ def find_wheel_lib(repo_root: Path) -> Path:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Check system vs wheel SONAME distinctness.")
+    parser.add_argument(
+        "--system-lib",
+        type=Path,
+        help="Path to libamd_smi.so.<MAJOR> (skips /opt/rocm/lib autodetect).",
+    )
+    parser.add_argument(
+        "--wheel-lib",
+        type=Path,
+        help="Path to libamd_smi_python.so.<MAJOR> (skips build-tree autodetect).",
+    )
+    args = parser.parse_args()
+
     repo_root = Path(__file__).resolve().parent.parent
-    sys_lib = find_system_lib()
-    wheel_lib = find_wheel_lib(repo_root)
+    sys_lib = args.system_lib if args.system_lib else find_system_lib()
+    wheel_lib = args.wheel_lib if args.wheel_lib else find_wheel_lib(repo_root)
 
     sys_son = soname(sys_lib)
     wheel_son = soname(wheel_lib)
