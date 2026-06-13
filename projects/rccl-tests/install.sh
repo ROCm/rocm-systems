@@ -11,6 +11,7 @@ function display_help()
     echo "    [-h|--help] Prints this help message."
     echo "    [-m|--mpi] Build RCCL-tests with MPI support. (see --mpi_home below.)"
     echo "    [-t|--test] Run unit-tests after building RCCL-Tests."
+    echo "    [--enable-device-api] Build RCCL-tests with the device API enabled (ENABLE_DEVICE_API=1)."
     echo "    [--rocm_home] Specify custom path for ROCm installation (default: /opt/rocm)"
     echo "    [--rccl_home] Specify custom path for RCCL installation (default: /opt/rocm)"
     echo "    [--mpi_home] Specify path to your MPI installation."
@@ -25,6 +26,7 @@ function display_help()
 run_tests=false
 build_release=true
 mpi_enabled=false
+device_api_enabled=false
 rocm_dir=${ROCM_PATH}
 rccl_dir=${rocm_dir}
 mpi_dir=""
@@ -40,7 +42,7 @@ gpu_targets=""
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,mpi,test,rocm_home:,rccl_home:,mpi_home:,hip_compiler:,gpu_targets: --options hmt -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,mpi,test,enable-device-api,rocm_home:,rccl_home:,mpi_home:,hip_compiler:,gpu_targets: --options hmt -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -63,6 +65,9 @@ while true; do
        shift ;;
     -t|--test)
        run_tests=true
+       shift ;;
+    --enable-device-api)
+       device_api_enabled=true
        shift ;;
     --rocm_home)
        rocm_dir=${2}
@@ -131,6 +136,12 @@ if [[ -n ${gpu_targets} ]]; then
   GPU_TARGETS="GPU_TARGETS=${gpu_targets}"
 fi
 
+DEVICE_API=""
+if ($device_api_enabled); then
+  echo "[INFO] Compiling with device API enabled (ENABLE_DEVICE_API=1)"
+  DEVICE_API="ENABLE_DEVICE_API=1"
+fi
+
 if ($mpi_enabled); then
   if [[ ${mpi_dir} == "" ]]; then
     echo "[ERROR] MPI flag enabled but path to MPI installation not specified.  See --mpi_home command line argument." >&2
@@ -138,12 +149,12 @@ if ($mpi_enabled); then
   else
     echo "[INFO] Compiling with MPI support (Using MPI from ${mpi_dir})"
     echo
-    make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so MPI=1 MPI_HOME=${mpi_dir} HIPCC=${hip_compiler} ${GPU_TARGETS} -j$(nproc)
+    make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so MPI=1 MPI_HOME=${mpi_dir} HIPCC=${hip_compiler} ${GPU_TARGETS} ${DEVICE_API} -j$(nproc)
   fi
 else
   echo "[INFO] Compiling without MPI support (MPI support requires -m and --mpi_home)"
   echo
-  make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so HIPCC=${hip_compiler} ${GPU_TARGETS} -j$(nproc)
+  make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so HIPCC=${hip_compiler} ${GPU_TARGETS} ${DEVICE_API} -j$(nproc)
 fi
 check_exit_code "$?"
 

@@ -24,7 +24,10 @@
     "source_dir": "${RCCL_TESTS_DIR:-$HOME/code/rocm-sparse/projects/rccl-tests}",
     "install_script": "install.sh",
     "install_flags": [
-      "--mpi"
+      "--mpi",
+      "--enable-device-api",
+      "--gpu_targets",
+      "gfx942"
     ],
     "rccl_home": "${RCCL_HOME:-${WORKDIR}/build/debug}",
     "parallel_jobs": 64,
@@ -2454,6 +2457,53 @@
           }
         }
       ]
+    },
+    "device_api_symmetric": {
+      "extends": "perf_base",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1 -R 2",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1"
+      },
+      "tests": [
+        { "name": "DeviceAPI_Symmetric_Broadcast", "description": "Symmetric-memory window (-R 2) device-API path on broadcast", "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/broadcast_perf" },
+        { "name": "DeviceAPI_Symmetric_Reduce",    "description": "Symmetric-memory window (-R 2) device-API path on reduce",    "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/reduce_perf" },
+        { "name": "DeviceAPI_Symmetric_SendRecv",  "description": "Symmetric-memory window (-R 2) device-API path on sendrecv",  "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/sendrecv_perf" },
+        { "name": "DeviceAPI_Symmetric_Scatter",   "description": "Symmetric-memory window (-R 2) device-API path on scatter",   "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/scatter_perf" },
+        { "name": "DeviceAPI_Symmetric_Gather",    "description": "Symmetric-memory window (-R 2) device-API path on gather",    "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/gather_perf" }
+      ]
+    },
+    "device_api_lsa": {
+      "extends": "perf_base",
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_reduce_perf",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1"
+      },
+      "tests": [
+        { "name": "DeviceAPI_LSA_D1", "description": "LSA device-API all_reduce, symmetric window + multimem depth 1 (-R 2 -D 1)", "command_args": "-R 2 -D 1" },
+        { "name": "DeviceAPI_LSA_D2", "description": "LSA device-API all_reduce, symmetric window + multimem depth 2 (-R 2 -D 2)", "command_args": "-R 2 -D 2" }
+      ]
+    },
+    "device_api_gin": {
+      "extends": "perf_base",
+      "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -n 5 -w 2 -c 1",
+      "env_variables": {
+        "NCCL_CUMEM_ENABLE": "1",
+        "HSA_FORCE_FINE_GRAIN_PCIE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "HSA_NO_SCRATCH_RECLAIM": "1",
+        "NCCL_ENV_PLUGIN": "none",
+        "RCCL_ENABLE_INTRANET": "1"
+      },
+      "tests": [
+        { "name": "DeviceAPI_GIN_D3", "description": "GIN device-API alltoall, symmetric window + multimem depth 3 (-R 2 -D 3), DMABUF enabled", "command_args": "-R 2 -D 3", "env_variables": { "NCCL_DMABUF_ENABLE": "1" } },
+        { "name": "DeviceAPI_GIN_D4", "description": "GIN device-API alltoall, symmetric window + multimem depth 4 (-R 2 -D 4), DMABUF enabled", "command_args": "-R 2 -D 4", "env_variables": { "NCCL_DMABUF_ENABLE": "1" } },
+        { "name": "DeviceAPI_GIN_D3_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 3 (-R 2 -D 3), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 3" },
+        { "name": "DeviceAPI_GIN_D4_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 4 (-R 2 -D 4), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 4" }
+      ]
     }
   },
   "test_suites": [
@@ -2971,6 +3021,24 @@
       "name": "rccl-tests - Registration Matrix (DMABUF enabled)",
       "description": "rccl-tests buffer registration matrix with DMABUF on (NCCL_DMABUF_ENABLE=1): local+legacy, local+cumem, graph+local+legacy, graph+local+cumem (NCCL_LOCAL_REGISTER, NCCL_GRAPH_REGISTER, NCCL_LEGACY_CUDA_REGISTER, NCCL_CUMEM_ENABLE; rccl-tests -R 1 and -G 2 flags)",
       "config": "registration_matrix",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Device API - Symmetric Memory",
+      "description": "Symmetric-memory window device-API path (rccl-tests -R 2) across broadcast/reduce/sendrecv/scatter/gather (NCCL_CUMEM_ENABLE, HSA_FORCE_FINE_GRAIN_PCIE). Requires rccl-tests built with --enable-device-api.",
+      "config": "device_api_symmetric",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Device API - LSA",
+      "description": "LSA device-API all_reduce sweeping multimem depth (rccl-tests -R 2 -D 1 / -D 2). Requires rccl-tests built with --enable-device-api.",
+      "config": "device_api_lsa",
+      "enabled": true
+    },
+    {
+      "name": "rccl-tests - Device API - GIN",
+      "description": "GIN device-API alltoall sweeping multimem depth (rccl-tests -R 2 -D 3 / -D 4) with GIN env (NCCL_DMABUF_ENABLE, NCCL_GIN_TYPE=2, HSA_NO_SCRATCH_RECLAIM, NCCL_ENV_PLUGIN=none, RCCL_ENABLE_INTRANET). Requires rccl-tests built with --enable-device-api.",
+      "config": "device_api_gin",
       "enabled": true
     }
   ]
