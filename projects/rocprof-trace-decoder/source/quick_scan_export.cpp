@@ -65,13 +65,21 @@ bool avx512_available()
 namespace
 {
 using quick_scan::QuickToken;
+using StatusToken = gfx9::build_standalone::StatusToken;
 
 size_t scan_none(const uint8_t* buf, size_t size, QuickToken* out, size_t out_cap) { return 0; };
+
+uint64_t load_header_word(const void* data)
+{
+    uint64_t header = 0;
+    std::memcpy(&header, data, sizeof(header));
+    return header;
+}
 
 rocprofiler_thread_trace_decoder_status_t process_events_none(
     CSRegisterHandler& csregister,
     const std::vector<QuickToken>& raw,
-    int n,
+    size_t n,
     uint64_t header_skip,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     void* userdata
@@ -80,9 +88,131 @@ rocprofiler_thread_trace_decoder_status_t process_events_none(
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 };
 
-// Status-token reconstruction (build_standalone) — see
-// source/gfx9/build_standalone.{h,cpp}. Per-arch builders live next to
-// the per-arch scanner; this TU only orchestrates.
+// Status-token reconstruction (build_standalone). gfx9 keeps its builder in
+// source/gfx9/build_standalone.{h,cpp}; RDNA status context is emitted here
+// because gfx12 and gfx1250 share the same REG token shape for the registers
+// that CSRegisterHandler tracks.
+
+constexpr uint16_t RDNA_USERDATA2_ADDR = 0xC342;
+
+inline StatusToken encode_rdna_reg(uint8_t me, uint8_t pipe, uint16_t regaddr, uint32_t regdata, bool cs)
+{
+    gfx10::reg_write_type r{};
+    r.header = 0b1001;
+    r.tm = 0;
+    r.pipe = pipe & 0x3;
+    r.me = me & 0x3;
+    r.RDP = 0;
+    r.context = 0;
+    r.CS = cs ? 1 : 0;
+    r.regaddr = regaddr;
+    r.regdata = regdata;
+    return {r.raw, sizeof(r.raw)};
+}
+
+inline void emit_rdna_codeobj_field(std::vector<StatusToken>& out, uint32_t marker_type, uint32_t payload)
+{
+    rocprof_trace_decoder_packet_header_t hdr{};
+    hdr.opcode = ROCPROF_TRACE_DECODER_PACKET_OPCODE_CODEOBJ;
+    hdr.type = marker_type;
+    hdr.data20 = 0;
+    out.push_back(encode_rdna_reg(0, 0, RDNA_USERDATA2_ADDR, hdr.u32All, false));
+    out.push_back(encode_rdna_reg(0, 0, RDNA_USERDATA2_ADDR, payload, false));
+}
+
+std::vector<StatusToken> build_rdna_status_tokens(const CSRegisterHandler& reg)
+{
+    std::vector<StatusToken> out;
+    out.reserve(32 + 6 + 1 + reg.active_codeobjs.read().size() * 14);
+
+    for (uint8_t me = 0; me < 2; ++me)
+    {
+        for (uint8_t pipe = 0; pipe < 4; ++pipe)
+        {
+            uint64_t pgm = reg.wave_start_addr.at(me).at(pipe);
+            if (pgm != 0)
+            {
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_PGM_LO, static_cast<uint32_t>(pgm), true));
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_PGM_HI, static_cast<uint32_t>(pgm >> 32), true));
+            }
+            uint64_t dpkt = reg.dispatch_pkt_addr.at(me).at(pipe);
+            if (dpkt != 0)
+            {
+                out.push_back(encode_rdna_reg(me, pipe, COMPUTE_DISPATCH_PKT_LO, static_cast<uint32_t>(dpkt), true));
+                out.push_back(
+                    encode_rdna_reg(me, pipe, COMPUTE_DISPATCH_PKT_HI, static_cast<uint32_t>(dpkt >> 32), true)
+                );
+            }
+        }
+    }
+
+    out.push_back(encode_rdna_reg(0, 0, COMPUTE_NUM_THREAD_X, reg.num_thread_x, true));
+    out.push_back(encode_rdna_reg(0, 0, COMPUTE_NUM_THREAD_Y, reg.num_thread_y, true));
+    out.push_back(encode_rdna_reg(0, 0, COMPUTE_NUM_THREAD_Z, reg.num_thread_z, true));
+    out.push_back(encode_rdna_reg(0, 0, COMPUTE_PGM_RSRC1, reg.rsrc1, true));
+    out.push_back(encode_rdna_reg(0, 0, COMPUTE_PGM_RSRC2, reg.rsrc2, true));
+    out.push_back(encode_rdna_reg(0, 0, COMPUTE_PGM_RSRC3, reg.rsrc3, true));
+
+    if (reg.bIsROCMFormat)
+    {
+        rocprof_trace_decoder_instrument_enable_t enable{};
+        enable.char1 = '\0';
+        enable.char2 = 'R';
+        enable.char3 = 'O';
+        enable.char4 = 'C';
+        out.push_back(encode_rdna_reg(0, 0, RDNA_USERDATA2_ADDR, enable.u32All, false));
+
+        for (const auto& co : reg.active_codeobjs.read())
+        {
+            uint64_t id = co.id;
+            uint64_t addr = co.addr;
+            uint64_t size = co.size;
+
+            emit_rdna_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_LO, static_cast<uint32_t>(id));
+            emit_rdna_codeobj_field(
+                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ID_HI, static_cast<uint32_t>(id >> 32)
+            );
+            emit_rdna_codeobj_field(
+                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_LO, static_cast<uint32_t>(size)
+            );
+            emit_rdna_codeobj_field(
+                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_SIZE_HI, static_cast<uint32_t>(size >> 32)
+            );
+            emit_rdna_codeobj_field(
+                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_LO, static_cast<uint32_t>(addr)
+            );
+            emit_rdna_codeobj_field(
+                out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_ADDR_HI, static_cast<uint32_t>(addr >> 32)
+            );
+
+            rocprof_trace_decoder_codeobj_marker_tail_t tail{};
+            tail.isUnload = 0;
+            tail.bFromStart = 1;
+            tail.legacy_id = 0;
+            emit_rdna_codeobj_field(out, ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_TAIL, tail.raw);
+        }
+    }
+
+    return out;
+}
+
+std::vector<StatusToken> build_status_tokens(int gfxip, const CSRegisterHandler& reg)
+{
+    if (gfxip == 9) return gfx9::build_standalone::build_status_tokens(reg);
+    if (gfxip == 12 || gfxip == 1250) return build_rdna_status_tokens(reg);
+    return {};
+}
+
+size_t write_status_tokens(uint8_t* out, const std::vector<StatusToken>& tokens)
+{
+    size_t off = 0;
+    for (const auto& t : tokens)
+    {
+        std::memcpy(out + off, &t.bits, t.bytes);
+        off += t.bytes;
+    }
+    return off;
+}
 
 inline int extract_gfxip(uint64_t header)
 {
@@ -95,6 +225,7 @@ inline int extract_gfxip(uint64_t header)
     auto hw_header = mi400::header_type{.raw = header};
 
     if (hw_header.version == 4) return 12;
+    if (hw_header.version == 5) return 1250;
     return 0;
 }
 
@@ -105,7 +236,7 @@ inline int extract_gfxip(uint64_t header)
 template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_events_gfx9(
     CSRegisterHandler& csregister,
     const std::vector<quick_scan::QuickToken>& raw,
-    int n,
+    size_t n,
     uint64_t header_skip,
     rocprof_trace_decoder_trace_callback_t trace_callback,
     void* userdata
@@ -153,7 +284,7 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
                     ev.type = ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH;
                     ev.me_id = static_cast<uint8_t>(r.me);
                     ev.pipe_id = static_cast<uint8_t>(r.pipe);
-                    ev.reserved = 0;
+                    ev.flags = ROCPROF_TRACE_DECODER_EVENT_FLAGS_NONE;
                     ev.payload = 0;
                     ev.byte_offset = static_cast<uint64_t>(tok.offset) + header_skip;
                     auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
@@ -175,6 +306,85 @@ template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_eve
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
+// Templated on whether to emit dispatch/event records. The state-update path
+// (UpdateRegCS / UpdateRegNoCS) runs unconditionally; build_standalone
+// instantiates with EmitEvents=false to advance a CSRegisterHandler over the
+// chunk prefix without surfacing events to a caller that didn't ask for them.
+template <bool EmitEvents> rocprofiler_thread_trace_decoder_status_t process_events_gfx12(
+    CSRegisterHandler& csregister,
+    const std::vector<quick_scan::QuickToken>& raw,
+    size_t n,
+    uint64_t header_skip,
+    rocprof_trace_decoder_trace_callback_t trace_callback,
+    void* userdata
+)
+{
+    if (n == 0) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto& tok = raw[i];
+
+        if (tok.type == RdnaType::REG)
+        {
+            gfx10::reg_write_type reg{.raw = tok.contents};
+
+            if (reg.CS)
+                csregister.UpdateRegCS(reg);
+            else
+                csregister.UpdateRegNoCS(reg);
+        }
+
+        if (!EmitEvents) continue;
+
+        if (tok.type == RdnaType::REG_INIT)
+        {
+            gfx10::reg_init_type reg{.raw = tok.contents};
+            if (reg.type != 2 || (reg.data & 1) == 0) continue;
+
+            rocprofiler_thread_trace_decoder_dispatch_t dispatch = csregister.PopulateDispatch(0, reg.me, reg.pipe);
+            dispatch.byte_offset = static_cast<uint64_t>(tok.offset);
+            auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, &dispatch, 1, userdata);
+            if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
+        }
+        else if (tok.type == RdnaType::EVENT)
+        {
+            gfx10::event_type event{.raw = tok.contents};
+
+            rocprofiler_thread_trace_decoder_event_type_t type{};
+
+            switch (event.id)
+            {
+                case EVENT_CS_PARTIAL_FLUSH: type = ROCPROF_TRACE_DECODER_EVENT_CS_PARTIAL_FLUSH; break;
+                case EVENT_CACHE_FLUSH:
+                case EVENT_CACHE_FLUSH_WR:
+                case EVENT_CACHE_FLUSH_INV:
+                case EVENT_CACHE_FLUSH_INV_WR: type = ROCPROF_TRACE_DECODER_EVENT_CACHE_FLUSH; break;
+                case EVENT_BOTTOM_OF_PIPE_WR: type = ROCPROF_TRACE_DECODER_EVENT_BOTTOM_OF_PIPE_TS; break;
+                case EVENT_TT_FLUSH: type = ROCPROF_TRACE_DECODER_EVENT_TT_FLUSH; break;
+                default: break;
+            }
+
+            if (type == ROCPROF_TRACE_DECODER_EVENT_NONE) continue;
+
+            rocprofiler_thread_trace_decoder_event_t ev{};
+            ev.size = sizeof(ev);
+            ev.time = 0;
+            ev.type = type;
+            ev.me_id = static_cast<uint8_t>(event.me & 1);
+            ev.pipe_id = static_cast<uint8_t>(event.pipe);
+            ev.flags = ROCPROF_TRACE_DECODER_EVENT_FLAGS_PER_PIPE;
+            if (event.bop) ev.flags |= ROCPROF_TRACE_DECODER_EVENT_FLAGS_BOP;
+            ev.payload = 0;
+            ev.byte_offset = static_cast<uint64_t>(tok.offset);
+            auto status = trace_callback(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, &ev, 1, userdata);
+            if (status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status;
+        }
+    }
+
+    return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+}
+
 } // namespace
 
 extern "C"
@@ -188,48 +398,40 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     void* userdata
 )
 {
-    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
     thread_local std::vector<quick_scan::QuickToken> raw{1u << 18};
 
-    if (!data || data_size == 0) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
-    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+    if (!quick_scan::avx512_available()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    if (!data || data_size == 0)
+    {
+        for (auto& r : raw) r = quick_scan::QuickToken{};
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+    }
+
+    // Every path below dereferences an 8-byte header word (load_header_word) and
+    // gfx9 chunk 0 subtracts an 8-byte header_skip; a chunk smaller than that
+    // word can't hold a header or a full token. Reject it before any 8-byte read.
+    if (data_size < sizeof(uint64_t)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
     TIMING(t0);
 
     int gfxip = 0;
-    // Local working copy of the entry-state register tracker. For chunk 0
-    // this stays default-constructed; for later chunks we copy the
-    // previous chunk's pipestate slot into it under the read lock below.
-    // CSRegisterHandler move/copy is cheap (scalars + std::array + CowPtr
-    // refcount bumps) so neither path allocates per-chunk.
     CSRegisterHandler local;
 
     const uint8_t* buf = static_cast<const uint8_t*>(data);
-    // Only chunk 0 carries the 8-byte arch header at the start of the
-    // buffer; later chunks are pure token streams. `header_skip` is the byte
-    // distance between the caller's `data` and the buffer the scanner sees,
-    // and is added back to tok.offset when reporting byte_offsets so they
-    // stay relative to the caller's `data`.
     uint64_t header_skip = 0;
 
     if (chunk_index == 0)
     {
-        uint64_t header_word = static_cast<const uint64_t*>(data)[0];
+        uint64_t header_word = load_header_word(data);
         gfxip = extract_gfxip(header_word);
 
         auto decoder = HandleData::get_write_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
         decoder->gfxip = gfxip;
-        // Snapshot the raw chunk-0 header so build_standalone can prepend it
-        // to the rebuilt buffer (it isn't reachable any other way once the
-        // caller's data buffer is gone).
-        if (gfxip == 9)
-        {
-            decoder->gfx9_header = header_word;
-            header_skip = 8;
-        }
+        if (gfxip != 0) decoder->trace_header = header_word;
+        if (gfxip == 9) header_skip = 8;
 
         if (data_size == header_skip)
         {
@@ -243,7 +445,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         auto decoder = HandleData::get_read_handle(handle);
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
-        if (decoder->gfxip == 0) decoder->gfxip = extract_gfxip(static_cast<const uint64_t*>(data)[0]);
+        if (decoder->gfxip == 0) decoder->gfxip = extract_gfxip(load_header_word(data));
 
         gfxip = decoder->gfxip;
     }
@@ -259,6 +461,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     {
         auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
         if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
+        if (gfxip == 1250) scanner = &quick_scan::scan_mi400;
 
         ntokens = scanner(buf, data_size, raw.data(), raw.size());
         while (ntokens == raw.size())
@@ -308,9 +511,13 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     TIMING(t3);
 
+    if (!trace_callback) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
     rocprofiler_thread_trace_decoder_status_t status;
     if (gfxip == 9)
         status = process_events_gfx9<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
+    else if (gfxip != 0)
+        status = process_events_gfx12<true>(local, raw, ntokens, header_skip, trace_callback, userdata);
     else
         status = process_events_none(local, raw, ntokens, header_skip, trace_callback, userdata);
 
@@ -352,6 +559,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     if (!data || data_size <= 8 || !data_out || !size_out || offset_begin + 8 >= offset_end || offset_end > data_size)
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    const uint8_t* buf = static_cast<const uint8_t*>(data);
+
     // Snapshot the gfxip, the saved arch header, and a copy of the
     // entry-state CSRegisterHandler under a single read lock. The local copy
     // owns its own state (CowPtr refcount bumps on the codeobj vector and
@@ -366,17 +575,24 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
         if (!decoder.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
 
         gfxip = decoder->gfxip;
-        header_word = decoder->gfx9_header;
+        header_word = decoder->trace_header;
 
-        if (const CSRegisterHandler* p = decoder->pipestate.get(chunk_index))
+        if (header_word == 0)
+        {
+            header_word = load_header_word(data);
+            if (gfxip == 0) gfxip = extract_gfxip(header_word);
+        }
+
+        if (chunk_index == 0)
+            temp = CSRegisterHandler{};
+        else if (const CSRegisterHandler* p = decoder->pipestate.get(chunk_index))
             temp = *p;
         else
             return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    if (gfxip != 9) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
-
-    const uint8_t* buf = static_cast<const uint8_t*>(data);
+    if (gfxip != 9 && gfxip != 12 && gfxip != 1250)
+        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     // Walk the prefix [0, offset_begin) through the private CSRegisterHandler
     // copy taken above. EmitEvents=false: this is a state-advance pass,
@@ -388,26 +604,29 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 
     size_t ntokens = 0;
 #if ROCPROF_TRACE_DECODER_QUICK_SCAN_HAS_SIMD
-    ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
+    auto scanner = (gfxip == 9) ? &quick_scan::scan_gfx9 : &scan_none;
+    if (gfxip == 12) scanner = &quick_scan::scan_gfx12;
+    if (gfxip == 1250) scanner = &quick_scan::scan_mi400;
+
+    ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
     while (ntokens == raw.size())
     {
         raw.resize(raw.size() * 2);
-        ntokens = quick_scan::scan_gfx9(buf, offset_begin, raw.data(), raw.size());
+        ntokens = scanner(buf, offset_begin, raw.data(), raw.size());
     }
 #else
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
 #endif
 
-    process_events_gfx9</*EmitEvents=*/false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
+    if (gfxip == 9)
+        process_events_gfx9<false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
+    else if (gfxip != 0)
+        process_events_gfx12<false>(temp, raw, static_cast<int>(ntokens), 0, nullptr, nullptr);
 
     // Materialise the synthetic context as SQTT tokens. Wrapped in a
     // gfxip-keyed dispatch so additional architectures can plug their own
     // BuildStatusTokens_* in later without touching this control flow.
-    std::vector<gfx9::build_standalone::StatusToken> status_tokens;
-    if (gfxip == 9)
-        status_tokens = gfx9::build_standalone::build_status_tokens(temp);
-    else
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED;
+    std::vector<StatusToken> status_tokens = build_status_tokens(gfxip, temp);
 
     // Output is always self-describing: [8B arch header] [synthetic context
     // tokens] [verbatim data slice]. The header is unconditional so every
@@ -428,7 +647,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     uint8_t* buf_out = static_cast<uint8_t*>(data_out);
     std::memcpy(buf_out, &header_word, header_bytes);
     size_t used = header_bytes;
-    used += gfx9::build_standalone::write_tokens(buf_out + used, status_tokens);
+    used += write_status_tokens(buf_out + used, status_tokens);
     std::memcpy(buf_out + used, buf + offset_begin, data_slice_bytes);
     used += data_slice_bytes;
 

@@ -104,6 +104,7 @@ add_executable(
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     data_types_test.cpp
+    drm_info_layout_test.cpp
 )
 target_link_libraries(
     rocjitsu_tests

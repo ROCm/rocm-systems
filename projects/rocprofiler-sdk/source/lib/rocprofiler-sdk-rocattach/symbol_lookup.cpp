@@ -119,7 +119,7 @@ get_library_handle(std::string_view _lib_name)
         }
     }
 
-    // try to load with the absoulte path
+    // try to load with the absolute path
     if(!_lib_handle)
     {
         _lib_path   = _lib_path_abs;
@@ -239,7 +239,7 @@ find_symbol(int target_pid, void*& addr, const std::string& library, const std::
         return false;
     }
 
-    // Caluclate the offset
+    // Calculate the offset
     size_t offset =
         reinterpret_cast<size_t>(symboladdr) - reinterpret_cast<size_t>(hostlibraryaddr);
     ROCP_TRACE << "[rocprofiler-sdk-rocattach] Offset of " << symbol << " into " << library
