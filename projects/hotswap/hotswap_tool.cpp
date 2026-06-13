@@ -14,6 +14,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "hotswap.hpp"
+#include "hotswap_gfx_query.hpp"
 #include "hotswap_platform_io.hpp"
 #include <algorithm>
 #include <cerrno>
@@ -33,15 +34,18 @@
 #include <vector>
 
 // The agent's gfx target and ASIC revision are read through the HSA runtime
-// (HSA_AMD_AGENT_INFO_ASIC_REVISION), which is portable across Linux and
-// Windows. No libdrm / KFD-sysfs access is required.
-#include <cctype>
+// (HSA_AMD_AGENT_INFO_ASIC_REVISION) in hotswap_gfx_query.{hpp,cpp}, which is
+// portable across Linux and Windows. No libdrm / KFD-sysfs access is required.
 
 #define HSA_HOTSWAP_EXPORT __attribute__((visibility("default")))
 
 namespace {
 
 namespace hotswap_io = rocr::hotswap::platform_io;
+
+using rocr::hotswap::AgentGfxRevision;
+using rocr::hotswap::get_agent_isa_name;
+using rocr::hotswap::query_agent_gfx_revision;
 
 using ByteVec = std::shared_ptr<std::vector<uint8_t>>;
 using OwnedElf = std::unique_ptr<void, decltype(&std::free)>;
@@ -334,104 +338,6 @@ hotswap_reader_destroy(hsa_code_object_reader_t code_object_reader) {
     }
   }
   return g_orig_reader_destroy(code_object_reader);
-}
-
-std::string get_agent_isa_name(hsa_agent_t agent) {
-  auto cb = [](hsa_isa_t isa, void *data) -> hsa_status_t {
-    try {
-      auto *name = static_cast<std::string *>(data);
-      uint32_t len = 0;
-      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
-          HSA_STATUS_SUCCESS) {
-        return HSA_STATUS_ERROR;
-      }
-      name->resize(len);
-      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name->data()) !=
-          HSA_STATUS_SUCCESS) {
-        name->clear();
-        return HSA_STATUS_ERROR;
-      }
-      if (!name->empty() && name->back() == '\0') {
-        name->pop_back();
-      }
-      return HSA_STATUS_INFO_BREAK;
-    } catch (const std::bad_alloc &) {
-      auto *name = static_cast<std::string *>(data);
-      name->clear();
-      return HSA_STATUS_ERROR;
-    }
-  };
-  std::string name;
-  hsa_agent_iterate_isas(agent, cb, &name);
-  return name;
-}
-
-// Extracts the gfx target (e.g. "gfx1250") from a full HSA ISA name such as
-// "amdgcn-amd-amdhsa--gfx1250:sramecc+:xnack-". Returns an empty string when no
-// gfx target is present. The returned token stops at the first non-alphanumeric
-// character so feature suffixes (":sramecc+", etc.) are dropped.
-std::string extract_gfx_target(const std::string &isa_name) {
-  const size_t pos = isa_name.find("gfx");
-  if (pos == std::string::npos) {
-    return {};
-  }
-  size_t end = pos;
-  while (end < isa_name.size() &&
-         std::isalnum(static_cast<unsigned char>(isa_name[end]))) {
-    ++end;
-  }
-  return isa_name.substr(pos, end - pos);
-}
-
-// Architecture-agnostic description of an agent: its gfx target and ASIC
-// revision (A0 == 0, A1 == 1, ...). revision_valid is false when the ASIC
-// revision could not be queried from the runtime.
-struct AgentGfxRevision {
-  std::string gfx_target;
-  uint32_t asic_revision = 0;
-  bool revision_valid = false;
-};
-
-// Queries the agent's gfx target and ASIC revision via the HSA runtime. This is
-// portable across Linux and Windows because it relies solely on HSA (which the
-// tool is already loaded into) instead of libdrm / KFD sysfs. The query is done
-// once per agent and cached, since code-object loads can be frequent.
-//
-// This function intentionally encodes no gating policy; callers decide which
-// gfx target / revision to act on.
-AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
-  static std::mutex cache_mutex;
-  static std::unordered_map<uint64_t, AgentGfxRevision> cache;
-
-  {
-    std::scoped_lock lock(cache_mutex);
-    const auto it = cache.find(agent.handle);
-    if (it != cache.end()) {
-      return it->second;
-    }
-  }
-
-  AgentGfxRevision info;
-  info.gfx_target = extract_gfx_target(get_agent_isa_name(agent));
-
-  uint32_t asic_revision = 0;
-  if (hsa_agent_get_info(
-          agent,
-          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION),
-          &asic_revision) == HSA_STATUS_SUCCESS) {
-    info.asic_revision = asic_revision;
-    info.revision_valid = true;
-  }
-
-  fprintf(stderr, "hotswap: agent gfx=%s asic_revision=%u (valid=%s)\n",
-          info.gfx_target.empty() ? "?" : info.gfx_target.c_str(),
-          info.asic_revision, info.revision_valid ? "yes" : "no");
-
-  {
-    std::scoped_lock lock(cache_mutex);
-    cache[agent.handle] = info;
-  }
-  return info;
 }
 
 hsa_status_t load_original_reader(hsa_executable_t executable, hsa_agent_t agent,

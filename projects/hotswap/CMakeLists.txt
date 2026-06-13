@@ -26,6 +26,7 @@ endif()
 add_library(hsa-hotswap SHARED
   hotswap_tool.cpp
   hotswap.cpp
+  hotswap_gfx_query.cpp
   ${HOTSWAP_PLATFORM_IO_SRC}
 )
 
@@ -44,25 +45,22 @@ add_executable(hotswap_test tests/hotswap_test.cpp hotswap.cpp)
 target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hotswap_test PRIVATE amd_comgr)
 
-# Tool-internal unit tests for the gfx-target / ASIC-revision query logic. The
-# test TU #includes hotswap_tool.cpp directly and supplies its own stubs for the
-# HSA and COMGR entry points, so this target needs the relevant headers but must
-# NOT link the real HSA / COMGR libraries (doing so would clash with the in-file
-# stubs).
-if(NOT WIN32)
-  add_executable(hotswap_tool_test
-    tests/hotswap_tool_test.cpp
-    hotswap_platform_io_posix.cpp
-  )
-  target_include_directories(hotswap_tool_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${HSA_RUNTIME_INC}
-    ${HSA_RUNTIME_INC}/..
-  )
-endif()
+# Unit tests for the gfx-target / ASIC-revision query logic. The test compiles
+# the portable hotswap_gfx_query.cpp unit alongside the test TU and supplies its
+# own stubs for the HSA entry points, so this target needs the relevant headers
+# but must NOT link the real HSA library (doing so would clash with the in-file
+# stubs). Because the test no longer pulls in the tool TU (and its <elf.h> /
+# platform-I/O dependencies), it builds on both Linux and Windows.
+add_executable(hotswap_tool_test
+  tests/hotswap_tool_test.cpp
+  hotswap_gfx_query.cpp
+)
+target_include_directories(hotswap_tool_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${HSA_RUNTIME_INC}
+  ${HSA_RUNTIME_INC}/..
+)
 
 enable_testing()
 add_test(NAME hotswap_test COMMAND hotswap_test)
-if(NOT WIN32)
-  add_test(NAME hotswap_tool_test COMMAND hotswap_tool_test)
-endif()
+add_test(NAME hotswap_tool_test COMMAND hotswap_tool_test)

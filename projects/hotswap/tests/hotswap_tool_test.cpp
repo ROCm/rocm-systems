@@ -4,21 +4,23 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Unit tests for query_agent_gfx_revision() in hotswap_tool.cpp, plus the
+// Unit tests for query_agent_gfx_revision() in hotswap_gfx_query.cpp, plus the
 // gfx1250-A0 gate that hotswap_load_agent_code_object() applies on top of it.
 //
-// The tool translation unit is #included directly so its internal
-// (anonymous-namespace) helpers — query_agent_gfx_revision(),
-// extract_gfx_target() and the AgentGfxRevision type — are reachable from the
-// tests. The HSA and COMGR entry points the tool calls are replaced with in-file
-// stubs (linked in place of the real libraries) so the query can be driven
-// entirely from the test without GPU hardware:
+// The query helpers — query_agent_gfx_revision(), extract_gfx_target() and the
+// AgentGfxRevision type — live in their own translation unit (compiled in
+// alongside this test), so the test includes only the small
+// hotswap_gfx_query.hpp header rather than the whole tool TU. The HSA entry
+// points the query calls are replaced with in-file stubs (linked in place of
+// the real libraries) so the query can be driven entirely from the test without
+// GPU hardware:
 //
 //   * ISA name        <- hsa_agent_iterate_isas / hsa_isa_get_info_alt
 //   * ASIC revision   <- hsa_agent_get_info(HSA_AMD_AGENT_INFO_ASIC_REVISION)
 //
-// This path is portable: it no longer depends on libdrm or KFD sysfs, so the
-// same query/gate logic is exercised for both Linux and Windows builds.
+// This path is portable: it depends only on HSA (not libdrm, KFD sysfs, or
+// <elf.h>), so the same query/gate logic is exercised for both Linux and
+// Windows builds.
 //
 //===----------------------------------------------------------------------===//
 
@@ -44,8 +46,11 @@ struct FakeEnv {
 FakeEnv g_env;
 }  // namespace
 
-// The tool TU (brings in hsa.h and the code under test).
-#include "hotswap_tool.cpp"
+// The unit under test (brings in hsa.h and the query helper declarations).
+#include "hotswap_gfx_query.hpp"
+
+using rocr::hotswap::AgentGfxRevision;
+using rocr::hotswap::query_agent_gfx_revision;
 
 // ---------------------------------------------------------------------------
 // Stubs replacing the real HSA symbols referenced by the tool.
@@ -92,21 +97,6 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
 }
 
 }  // extern "C"
-
-// COMGR rewrite is not exercised here; provide a stub so the tool TU links.
-namespace rocr::hotswap {
-int RetargetCodeObject(const void *elf_data, size_t elf_size,
-                       const char * /*source_isa*/, const char * /*target_isa*/,
-                       void **out_data, size_t *out_size) {
-  if (out_data) {
-    *out_data = const_cast<void *>(elf_data);
-  }
-  if (out_size) {
-    *out_size = elf_size;
-  }
-  return -1;
-}
-}  // namespace rocr::hotswap
 
 // ---------------------------------------------------------------------------
 // Minimal test harness.
