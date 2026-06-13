@@ -165,6 +165,14 @@ static inline void AlltoAllSetGinHybridDevCommReqs(ncclDevCommRequirements* reqs
   reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 }
 
+// ncclCommQueryProperties fills ginType via getGlobalGinType, which reports NCCL_GIN_TYPE_NONE
+// unless comm->globalGinSupport == NCCL_GIN_CONNECTION_FULL. Single-node jobs often use
+// NCCL_GIN_CONNECTION_RAIL; the active GIN type is then only visible on railedGinType
+// (getGlobalRailedGinType). Accept either field so -D 3/4/5 runs match real RCCL behavior.
+static inline bool AlltoAllCommHasGin(ncclCommProperties_t const* cp) {
+  return cp->ginType != NCCL_GIN_TYPE_NONE || cp->railedGinType != NCCL_GIN_TYPE_NONE;
+}
+
 // set devComm reqs for alltoall device kernels
 testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties) {
   if (!reqs || !commProperties) return testInternalError;
@@ -175,7 +183,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->lsaBarrierCount = deviceCtaCount;
       return testSuccess;
     case 3: // GinAlltoAllKernel — testLaunchDeviceKernel uses deviceCtaCount CTAs
-      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+      if (!AlltoAllCommHasGin(commProperties)) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
@@ -186,7 +194,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       }
       return testSuccess;
     case 4: // HybridAlltoAllKernel (LSA+GIN)
-      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+      if (!AlltoAllCommHasGin(commProperties)) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
@@ -196,7 +204,7 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
       return testSuccess;
     case 5: // GinAdaptiveAlltoAllKernel (LSA-only intra-node + hybrid inter-node)
-      if (commProperties->ginType == NCCL_GIN_TYPE_NONE) {
+      if (!AlltoAllCommHasGin(commProperties)) {
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
