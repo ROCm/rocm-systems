@@ -80,12 +80,18 @@ class AMDSmiSystem {
   */
   amdsmi_status_t get_gpu_socket_id(uint32_t index, std::string& socketid);
   amdsmi_status_t populate_amd_gpu_devices();
+  // WSL2 fallback: enumerate GPUs via the HIP runtime when the native
+  // amdgpu/KFD discovery is unavailable (see amd_smi_wsl.h).
+  amdsmi_status_t populate_amd_gpu_devices_wsl();
   amdsmi_status_t populate_amd_cpus();
   amdsmi_status_t populate_amd_ainic_devices();
   amdsmi_status_t populate_brcm_nic_devices();
   amdsmi_status_t populate_brcm_switch_devices();
   uint64_t init_flag_;
   AMDSmiDrm drm_;
+  // True when GPUs were enumerated through the WSL2 HIP fallback (rsmi was never
+  // initialized), so cleanup() must skip rsmi_shut_down(). See amd_smi_wsl.h.
+  bool gpu_wsl_mode_ = false;
   smi_nic_ctx_t ainic_ctx_;
   std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
 #ifdef BRCM_NIC

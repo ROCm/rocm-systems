@@ -49,6 +49,7 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi_ualoe.cc"
     "${SRC_DIR}/amd_smi_utils.cc"
     "${SRC_DIR}/amd_smi_uuid.cc"
+    "${SRC_DIR}/amd_smi_wsl.cc"
     "${SRC_DIR}/scoped_fd.cc"
     "${SRC_DIR}/fdinfo.cc"
     "${CMN_SRC_LIST}"

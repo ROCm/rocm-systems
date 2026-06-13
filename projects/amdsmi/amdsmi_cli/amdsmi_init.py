@@ -76,6 +76,27 @@ def check_amdgpu_driver():
     return False
 
 
+def check_wsl2_gpu():
+    """Returns true if running under WSL2 with an AMD GPU exposed via /dev/dxg.
+
+    Under WSL2 the GPU is presented through Microsoft's /dev/dxg paravirtual
+    device (WDDM/dxgkrnl) rather than the native amdgpu kernel driver, so
+    check_amdgpu_driver() above always fails. The amd-smi library, however, has
+    a HIP-runtime-backed fallback that enumerates the GPU on WSL2, so the CLI
+    should still request GPU initialization in this environment.
+
+    Detection mirrors the library's is_wsl2_environment(): a Microsoft/WSL
+    kernel marker AND /dev/dxg present AND /dev/kfd absent.
+    """
+    try:
+        proc_version = Path("/proc/version").read_text(encoding="ascii", errors="ignore").lower()
+    except OSError:
+        return False
+    if "microsoft" not in proc_version and "wsl" not in proc_version:
+        return False
+    return Path("/dev/dxg").exists() and not Path("/dev/kfd").exists()
+
+
 def check_amd_hsmp_driver():
     """Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules"""
     amd_cpu_status_file = Path("/dev/hsmp")
@@ -127,6 +148,9 @@ def amdsmi_cli_init():
     if check_amdgpu_driver():
         init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
         logging.debug("amdgpu driver's initstate is live")
+    elif check_wsl2_gpu():
+        init_flag |= amdsmi_interface.AmdSmiInitFlags.INIT_AMD_GPUS
+        logging.debug("WSL2 GPU detected via /dev/dxg; enabling GPU init (HIP fallback)")
     if cpu_init_disabled:
         logging.debug("CPU/ESMI init disabled via AMDSMI_DISABLE_CPU_INIT")
     elif check_amd_hsmp_driver() and hasattr(

@@ -44,6 +44,7 @@
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_test_flags.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "amd_smi/impl/amd_smi_wsl.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
@@ -362,6 +363,17 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
                             : 0ULL;
   rsmi_status_t ret = rsmi_init(rsmi_flags);
   if (ret != RSMI_STATUS_SUCCESS) {
+    // Under WSL2 the amdgpu kernel driver / KFD is not present (the GPU is
+    // exposed only through Microsoft's /dev/dxg), so rsmi/KFD discovery can
+    // never succeed. Fall back to a HIP-runtime-backed enumeration which does
+    // work on WSL2. This is gated on WSL2 detection so bare-metal Linux is
+    // unaffected.
+    if (is_wsl2_environment()) {
+      amdsmi_status_t wsl_status = populate_amd_gpu_devices_wsl();
+      if (wsl_status == AMDSMI_STATUS_SUCCESS) {
+        return AMDSMI_STATUS_SUCCESS;
+      }
+    }
     if (rsmi_driver_status(&state) == RSMI_STATUS_SUCCESS &&
         state != RSMI_DRIVER_MODULE_STATE_LIVE) {
       return AMDSMI_STATUS_DRIVER_NOT_LOADED;
@@ -401,6 +413,47 @@ amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {
     }
 
     AMDSmiProcessor* device = new AMDSmiGPUDevice(i, drm_);
+    socket->add_processor(device);
+    processors_.insert(device);
+  }
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices_wsl() {
+  std::vector<WslGpuInfo> wsl_gpus;
+  amdsmi_status_t status = wsl_discover_gpus(&wsl_gpus);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | WSL2 detected; HIP runtime reported " << wsl_gpus.size()
+     << " GPU(s).";
+  LOG_INFO(ss);
+
+  gpu_wsl_mode_ = true;
+
+  for (uint32_t i = 0; i < wsl_gpus.size(); i++) {
+    const WslGpuInfo& gpu = wsl_gpus[i];
+
+    // Use the BDF string as the socket id (mirrors the native path which keys
+    // sockets on the BDF); fall back to a synthetic id if unknown.
+    std::string socket_id =
+        gpu.bdf_string.empty() ? ("wsl-gpu-" + std::to_string(i)) : gpu.bdf_string;
+
+    AMDSmiSocket* socket = nullptr;
+    for (uint32_t j = 0; j < sockets_.size(); j++) {
+      if (sockets_[j]->get_socket_id() == socket_id) {
+        socket = sockets_[j];
+        break;
+      }
+    }
+    if (socket == nullptr) {
+      socket = new AMDSmiSocket(socket_id);
+      sockets_.push_back(socket);
+    }
+
+    AMDSmiProcessor* device = new AMDSmiGPUDevice(i, gpu, drm_);
     socket->add_processor(device);
     processors_.insert(device);
   }
@@ -701,10 +754,16 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
       sockets_.clear();
     }
     drm_.cleanup();
-    rsmi_status_t ret = rsmi_shut_down();
-    if (ret != RSMI_STATUS_SUCCESS) {
-      return amd::smi::rsmi_to_amdsmi_status(ret);
+    // On the WSL2 HIP fallback path rsmi_init() was never successfully called
+    // (the amdgpu/KFD driver is absent), so calling rsmi_shut_down() here would
+    // return an init error. Skip it in that case.
+    if (!gpu_wsl_mode_) {
+      rsmi_status_t ret = rsmi_shut_down();
+      if (ret != RSMI_STATUS_SUCCESS) {
+        return amd::smi::rsmi_to_amdsmi_status(ret);
+      }
     }
+    gpu_wsl_mode_ = false;
   }
   if (init_flag_ & AMDSMI_INIT_AMD_NICS) {
     smi_nic_destroy_context(ainic_ctx_);

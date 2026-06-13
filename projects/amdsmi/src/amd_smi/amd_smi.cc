@@ -68,6 +68,7 @@
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
+#include "amd_smi/impl/amd_smi_wsl.h"
 #include "amd_smi/impl/xf86drm.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -117,6 +118,15 @@ amdsmi_status_t rsmi_wrapper(F&& f, amdsmi_processor_handle processor_handle,
      << " | get_gpu_device_from_handle status = " << smi_amdgpu_get_status_string(r, false);
   LOG_INFO(ss);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  // On WSL2 the rsmi/KFD backend is never initialized (the GPU is reached via
+  // the HIP/DirectX paravirtualization layer and rsmi reports zero devices), so
+  // every rsmi-backed query would target an out-of-range index. Short-circuit
+  // to an explicit "not supported" instead of leaning on the device-count guard
+  // below, so the WSL safety guarantee cannot silently regress.
+  if (gpu_device->is_wsl()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
   uint32_t total_num_gpu_processors = 0;
   rsmi_num_monitor_devices(&total_num_gpu_processors);
@@ -1286,6 +1296,27 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
   amdsmi_status_t status;
   std::ostringstream ss;
 
+  // On WSL2 (HIP fallback) there is no rsmi/sysfs unique-id source, so the
+  // rsmi_wrapper() calls below would return NOT_FOUND. Synthesize a
+  // deterministic UUID from the PCI device id plus a per-device serial derived
+  // from the BDF, so that identity tooling such as `amd-smi list` works and
+  // multiple GPUs do not collide on an identical UUID.
+  {
+    amd::smi::AMDSmiGPUDevice* wsl_device = nullptr;
+    if (get_gpu_device_from_handle(processor_handle, &wsl_device) == AMDSMI_STATUS_SUCCESS &&
+        wsl_device->is_wsl()) {
+      const auto& w = wsl_device->get_wsl_info();
+      uint16_t wsl_dev_id = (w.device_id != 0) ? static_cast<uint16_t>(w.device_id & 0xFFFF)
+                                               : std::numeric_limits<uint16_t>::max();
+      // Pack domain:bus:device.function into the serial so each GPU is distinct.
+      uint64_t wsl_serial = (static_cast<uint64_t>(w.bdf.bdf.domain_number) << 24) |
+                            (static_cast<uint64_t>(w.bdf.bdf.bus_number) << 16) |
+                            (static_cast<uint64_t>(w.bdf.bdf.device_number) << 8) |
+                            (static_cast<uint64_t>(w.bdf.bdf.function_number));
+      return amdsmi_uuid_gen(uuid, wsl_serial, wsl_dev_id, /*partition=*/0xff);
+    }
+  }
+
   status = rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0, &device_id);
   if (status != AMDSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__
@@ -1345,6 +1376,19 @@ amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processo
   status = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
+  }
+
+  // On WSL2 there is no DRM/KFD enumeration to report (the GPU is reached via
+  // the DirectX paravirtualization layer), so return the documented "not
+  // supported" sentinels instead of invoking rsmi, which was never initialized.
+  if (gpu_device->is_wsl()) {
+    info->drm_card = std::numeric_limits<uint32_t>::max();
+    info->drm_render = std::numeric_limits<uint32_t>::max();
+    info->hsa_id = std::numeric_limits<uint32_t>::max();
+    info->hip_id = std::numeric_limits<uint32_t>::max();
+    info->oam_id = std::numeric_limits<uint32_t>::max();
+    info->hip_uuid[0] = '\0';
+    return AMDSMI_STATUS_SUCCESS;
   }
 
   // Retrieve DRM Card ID
@@ -1427,6 +1471,9 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
   amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+  if (gpu_device->is_wsl()) {
+    return amd::smi::wsl_fill_board_info(gpu_device->get_wsl_info(), board_info);
+  }
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
   status = smi_amdgpu_get_board_info(gpu_device, board_info);
@@ -1637,6 +1684,10 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) {
     return r;
+  }
+
+  if (gpu_device->is_wsl()) {
+    return amd::smi::wsl_fill_vram_usage(gpu_device->get_wsl_info(), vram_info);
   }
 
   std::ostringstream ss;
@@ -2317,6 +2368,9 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
   if (r != AMDSMI_STATUS_SUCCESS) {
     return r;
   }
+  if (gpu_device->is_wsl()) {
+    return amd::smi::wsl_fill_asic_info(gpu_device->get_wsl_info(), info);
+  }
   SMIGPUDEVICE_MUTEX(gpu_device->get_mutex())
 
   // ---- ASIC info cache ----
@@ -2677,6 +2731,10 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
   if (r != AMDSMI_STATUS_SUCCESS) {
     return r;
+  }
+
+  if (gpu_device->is_wsl()) {
+    return amd::smi::wsl_fill_vram_info(gpu_device->get_wsl_info(), info);
   }
 
   std::ostringstream ss;
@@ -4349,11 +4407,53 @@ amdsmi_status_t amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle pro
 }
 amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle,
                                             amdsmi_memory_type_t mem_type, uint64_t* total) {
+  {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    if (get_gpu_device_from_handle(processor_handle, &gpu_device) == AMDSMI_STATUS_SUCCESS &&
+        gpu_device->is_wsl()) {
+      if (total == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+      }
+      // HIP (hipMemGetInfo) only exposes the device VRAM pool on WSL2; there is
+      // no separate GTT accounting, so honor the requested type explicitly.
+      if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+      }
+      amdsmi_vram_usage_t vu{};
+      amdsmi_status_t wr = amd::smi::wsl_fill_vram_usage(gpu_device->get_wsl_info(), &vu);
+      if (wr != AMDSMI_STATUS_SUCCESS) {
+        return wr;
+      }
+      *total = static_cast<uint64_t>(vu.vram_total) * 1024ULL * 1024ULL;
+      return AMDSMI_STATUS_SUCCESS;
+    }
+  }
   return rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0,
                       static_cast<rsmi_memory_type_t>(mem_type), total);
 }
 amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle,
                                             amdsmi_memory_type_t mem_type, uint64_t* used) {
+  {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    if (get_gpu_device_from_handle(processor_handle, &gpu_device) == AMDSMI_STATUS_SUCCESS &&
+        gpu_device->is_wsl()) {
+      if (used == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+      }
+      // HIP (hipMemGetInfo) only exposes the device VRAM pool on WSL2; there is
+      // no separate GTT accounting, so honor the requested type explicitly.
+      if (mem_type != AMDSMI_MEM_TYPE_VRAM && mem_type != AMDSMI_MEM_TYPE_VIS_VRAM) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+      }
+      amdsmi_vram_usage_t vu{};
+      amdsmi_status_t wr = amd::smi::wsl_fill_vram_usage(gpu_device->get_wsl_info(), &vu);
+      if (wr != AMDSMI_STATUS_SUCCESS) {
+        return wr;
+      }
+      *used = static_cast<uint64_t>(vu.vram_used) * 1024ULL * 1024ULL;
+      return AMDSMI_STATUS_SUCCESS;
+    }
+  }
   return rsmi_wrapper(rsmi_dev_memory_usage_get, processor_handle, 0,
                       static_cast<rsmi_memory_type_t>(mem_type), used);
 }
@@ -5194,6 +5294,14 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
     return status_code;
   }
 
+  // WSL2 has no per-process GPU accounting source (dxg paravirt exposes no
+  // KFD/sysfs proc directory), so report zero processes instead of letting
+  // amdgpu_get_compute_process_list() fail trying to open a nonexistent path.
+  if (gpu_device->is_wsl()) {
+    *max_processes = 0;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
   // Get the list of compute processes running on the GPU
   auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
 
@@ -5249,6 +5357,9 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
     amdsmi_status_t r = get_gpu_device_from_handle(processor_handles[i], &gpu_device);
     if (r != AMDSMI_STATUS_SUCCESS) continue;
+
+    // WSL2 exposes no per-process GPU accounting; skip (no data source).
+    if (gpu_device->is_wsl()) continue;
 
     uint32_t gpu_index = gpu_device->get_gpu_id();
     auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();

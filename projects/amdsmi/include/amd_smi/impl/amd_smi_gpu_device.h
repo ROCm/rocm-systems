@@ -34,6 +34,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/amd_smi_wsl.h"
 
 // Forward declaration of UALoE handle type to keep ualoe_lib/ualoe_lib.h out
 // of the public install tree. Implementation file pulls in ualoe_lib.h.
@@ -135,6 +136,7 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   // otherwise ualoe_open is skipped and fabric queries return NOT_SUPPORTED.
   AMDSmiGPUDevice(uint32_t gpu_id, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm);
   AMDSmiGPUDevice(uint32_t gpu_id, AMDSmiDrm& drm);
+  AMDSmiGPUDevice(uint32_t gpu_id, const WslGpuInfo& wsl_info, AMDSmiDrm& drm);
   ~AMDSmiGPUDevice();
 
   amdsmi_status_t get_drm_data();
@@ -148,6 +150,12 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   amdsmi_bdf_t get_bdf();
   bool check_if_drm_is_supported() { return drm_.check_if_drm_is_supported(); }
   uint32_t get_vendor_id();
+
+  // WSL2 support: when true, this device is backed by the HIP runtime fallback
+  // (see amd_smi_wsl.h) rather than the amdgpu/KFD driver path.
+  bool is_wsl() const { return is_wsl_; }
+  const WslGpuInfo& get_wsl_info() const { return wsl_info_; }
+
   const GPUComputeProcessList_t& amdgpu_get_compute_process_list(
       ComputeProcessListType_t list_type = ComputeProcessListType_t::kAllProcessesOnDevice);
   amdsmi_status_t amdgpu_query_cpu_affinity(std::string& cpu_affinity) const;
@@ -179,11 +187,14 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   std::string path_;
   amdsmi_bdf_t bdf_;
   FabricBDFList_t fabric_bdf_list_;
-  uint32_t vendor_id_;
+  // POD members below are normally populated by get_drm_data() during the
+  // bare-metal construction path. The WSL2 constructor skips that path, so they
+  // carry default initializers here to avoid reading indeterminate values.
+  uint32_t vendor_id_ = 0;
   AMDSmiDrm& drm_;
-  uint32_t card_index_;
-  uint32_t drm_render_minor_;
-  uint64_t kfd_gpu_id_;  // Used to decode vram usage for KFD processes
+  uint32_t card_index_ = UINT32_MAX;
+  uint32_t drm_render_minor_ = UINT32_MAX;
+  uint64_t kfd_gpu_id_ = 0;  // Used to decode vram usage for KFD processes
   GPUComputeProcessList_t compute_process_list_;
   std::string gpu_uuid_;  // Device UUID for UALoE identification
   int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
@@ -193,6 +204,11 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   void open_ualoe_session();
   ualoe_handle_t ualoe_handle_ = (-1);
   std::once_flag ualoe_open_once_;
+
+  // WSL2 fallback state (see amd_smi_wsl.h). Declared last so the WSL2
+  // constructor's member-initializer order matches declaration order.
+  bool is_wsl_ = false;
+  WslGpuInfo wsl_info_{};
 };
 
 }  // namespace amd::smi

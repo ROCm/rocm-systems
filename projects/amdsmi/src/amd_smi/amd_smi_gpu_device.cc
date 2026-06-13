@@ -92,6 +92,14 @@ ualoe_handle_t AMDSmiGPUDevice::get_ualoe_handle() {
   return ualoe_handle_;
 }
 
+AMDSmiGPUDevice::AMDSmiGPUDevice(uint32_t gpu_id, const WslGpuInfo& wsl_info, AMDSmiDrm& drm)
+    : AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_GPU),
+      gpu_id_(gpu_id),
+      bdf_(wsl_info.bdf),
+      drm_(drm),
+      is_wsl_(true),
+      wsl_info_(wsl_info) {}
+
 AMDSmiGPUDevice::~AMDSmiGPUDevice() {
   if (ualoe_handle_ != -1) {
     ualoe_close(ualoe_handle_);
@@ -169,7 +177,19 @@ amdsmi_status_t AMDSmiGPUDevice::get_drm_data() {
   return AMDSMI_STATUS_SUCCESS;
 }
 
-pthread_mutex_t* AMDSmiGPUDevice::get_mutex() { return amd::smi::GetMutex(gpu_id_); }
+pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
+  // On the WSL2 HIP fallback path rsmi device discovery never ran, so the
+  // per-GPU mutex pool (amd::smi::GetMutex) has no entry for this index and
+  // would return nullptr -- locking it would crash. Hand out a process-wide
+  // fallback mutex instead. WSL2 GPU queries that reach the amdgpu sysfs
+  // helpers will simply find no sysfs nodes and return NOT_SUPPORTED, but they
+  // must still lock a valid mutex first.
+  if (is_wsl_) {
+    static pthread_mutex_t wsl_fallback_mutex = PTHREAD_MUTEX_INITIALIZER;
+    return &wsl_fallback_mutex;
+  }
+  return amd::smi::GetMutex(gpu_id_);
+}
 
 amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_cpu_affinity(std::string& cpu_affinity) const {
   char bdf_str[20];
