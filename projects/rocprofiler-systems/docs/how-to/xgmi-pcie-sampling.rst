@@ -1,39 +1,50 @@
 .. meta::
-   :description: ROCm Systems Profiler XGMI and PCIe metrics sampling and monitoring
-   :keywords: rocprof-sys, rocprofiler-systems, ROCm, tips, how to, profiler, tracking, XGMI, PCIe, GPU connectivity, AMD
+   :description: ROCm Systems Profiler XGMI, PCIe, and SDMA metrics sampling and
+      monitoring
+   :keywords: rocprof-sys, rocprofiler-systems, ROCm, tips, how to, profiler, tracking,
+      XGMI, PCIe, SDMA, GPU connectivity, AMD
 
-***********************************************
-XGMI and PCIe metrics sampling and monitoring
-***********************************************
+*************************************************************
+XGMI, PCIe, and SDMA metrics sampling and monitoring
+*************************************************************
 
-`ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports
-sampling of XGMI and PCIe interconnect metrics. It allows you to gather key performance metrics for
-GPU-to-GPU communication via XGMI links, and CPU-to-GPU communication via PCIe links. This information can be used
-to optimize multi-GPU workloads, identify communication bottlenecks, and analyze data transfer efficiency
-in high-performance computing applications.
+`ROCm Systems Profiler`__ supports sampling of XGMI and PCIe interconnect metrics and
+SDMA engine utilization via AMD SMI.
+
+It allows you to gather key performance metrics for GPU-to-GPU communication via XGMI
+links, CPU-to-GPU communication via PCIe links, and asynchronous copy activity handled by
+the SDMA engines. This information can be used to optimize multi-GPU workloads, identify
+communication bottlenecks, and analyze data transfer efficiency in high-performance
+computing applications.
+
+__ https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems
 
 Sampling support
 =================
 
-Sampling of XGMI and PCIe interconnect metrics is supported by leveraging `AMD SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_ which provides the interface for GPU metric collection. Follow the steps:
+Sampling of XGMI, PCIe, and SDMA metrics is supported by leveraging `AMD SMI
+<https://rocm.docs.amd.com/projects/amdsmi/en/latest/>`_ which provides the interface for
+GPU metric collection. Follow the steps:
 
-1. Set the ``ROCPROFSYS_USE_AMD_SMI`` environment variable to enable GPU metric collection:
+1. Set the ``ROCPROFSYS_USE_AMD_SMI`` environment variable to enable GPU metric
+   collection:
 
 .. code-block:: shell
 
   export ROCPROFSYS_USE_AMD_SMI=true
 
-2. Update the ``ROCPROFSYS_AMD_SMI_METRICS`` variable to collect the XGMI and PCIe metrics. The default value is:
+2. Update the ``ROCPROFSYS_AMD_SMI_METRICS`` variable to collect the XGMI, PCIe, and/or
+   SDMA metrics. The default value is:
 
 .. code-block:: shell
 
   ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,mem_usage
 
-To include XGMI and PCIe metrics, update it to:
+To include XGMI, PCIe, and SDMA usage metrics, update it to:
 
 .. code-block:: shell
 
-  ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,mem_usage,xgmi,pcie
+  ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,mem_usage,xgmi,pcie,sdma_usage
 
 Alternatively, you can use the following to collect all available GPU metrics:
 
@@ -71,12 +82,44 @@ PCIe (PCI Express) provides the connection between the CPU and GPU. The followin
 
 These metrics help analyze CPU-to-GPU data transfer efficiency and identify PCIe bottlenecks.
 
+SDMA metrics
+------------
+
+SDMA engines perform asynchronous memory copies and related DMA work on the GPU. When
+the ``sdma_usage`` metric is enabled, ROCm Systems Profiler samples **SDMA usage**:
+device-level SDMA utilization as a percentage (0-100), aggregated across processes on that
+GPU.
+
+These samples help correlate sustained ``hipMemcpy``-style traffic and other SDMA-backed
+transfers with engine load in Perfetto or ROCpd output.
+
+For a small workload that exercises H2D, D2D, and D2H copies for benchmarking and
+profiling, see `sdma_test on GitHub`_ and the `sdma_test README on GitHub`_ (build steps,
+flags, and ``rocprof-sys-run`` invocations).
+
+.. _`sdma_test on GitHub`:
+   https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/sdma_test
+
+.. _`sdma_test README on GitHub`:
+   https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-systems/examples/sdma_test/README.md
+
+.. note::
+
+   The ``sdma_usage`` metric requires AMD GPU driver 31.40 or higher and an Instinct-family
+   GPU.
+
+   If the driver or hardware does not expose SDMA usage, values may appear as ``N/A``.
+
 Using TransferBench for testing
 ================================
 
-For testing and benchmarking GPU connectivity, you can use the `TransferBench <https://rocm.docs.amd.com/projects/TransferBench/en/latest/index.html>`_.
-TransferBench is a benchmarking utility designed to measure the performance of simultaneous data transfers between user-specified devices, such as CPUs and GPUs.
-For this example, TransferBench is used to profile XGMI and PCIe traffic for analysis.
+For testing and benchmarking GPU connectivity, you can use the `TransferBench
+<https://rocm.docs.amd.com/projects/TransferBench/en/latest/index.html>`_.
+TransferBench is a benchmarking utility designed to measure the performance of
+simultaneous data transfers between user-specified devices, such as CPUs and GPUs.
+
+For this example, TransferBench is used to profile XGMI and PCIe traffic for analysis. For
+SDMA-focused runs, use the :ref:`sdma-test-example` workflow instead.
 
 1. Source the ROCm Systems Profiler Environment using:
 
@@ -121,9 +164,11 @@ At the end of the run, a similar message appears::
   (3124.52 KB / 3.12 MB / 0.00 GB)... Done
 
 
-To view the generated ``.proto`` file in the browser, open the
-`Perfetto UI page <https://ui.perfetto.dev/>`_. Then, click on
-``Open trace file`` and select the ``.proto`` file. In the browser, you can visualize the XGMI and PCIe metrics.
+To view the generated ``.proto`` file in the browser, open the `Perfetto UI page
+<https://ui.perfetto.dev/>`_.
+
+Then, click on ``Open trace file`` and select the ``.proto`` file. In the browser, you can
+visualize the XGMI and PCIe metrics.
 
 .. image:: ../data/rocprof-sys-xgmi.png
    :alt: Visualization of a performance graph in Perfetto with XGMI tracks
@@ -139,6 +184,48 @@ The visualization will show:
 - **PCIe Link Width** and **PCIe Link Speed** tracks showing PCIe link configuration
 
 
+.. _sdma-test-example:
+
+Using the sdma_test example for testing
+=========================================
+
+The `sdma_test on GitHub`_ tree contains the example that drives Host-to-Device,
+Device-to-Device, and Device-to-Host async copies so you can observe SDMA utilization
+alongside HIP memory-copy tracing. Build instructions, CLI flags (transfer size,
+iterations, infinite mode), and additional environment options are documented in the
+`sdma_test README on GitHub`_.
+
+1. Source the ROCm Systems Profiler environment:
+
+.. code-block:: shell
+
+   source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+
+2. Generate and point to a config file, then edit ``.rocprofsys.cfg`` with settings such
+   as:
+
+.. code-block:: shell
+
+   rocprof-sys-avail -G $HOME/.rocprofsys.cfg -F txt
+   export ROCPROFSYS_CONFIG_FILE=$HOME/.rocprofsys.cfg
+
+.. code-block:: shell
+
+  ROCPROFSYS_USE_AMD_SMI     = true
+  ROCPROFSYS_AMD_SMI_METRICS = busy,temp,power,mem_usage,sdma_usage
+  ROCPROFSYS_ROCM_DOMAINS    = hip_runtime_api,memory_copy
+
+3. Build ``sdma_test`` (see the README), then profile it, for example:
+
+.. code-block:: shell
+
+   rocprof-sys-run -- ./sdma_test -s 512 -n 5
+
+Open the resulting Perfetto trace as described above; when ``sdma_usage`` is supported on
+your system, look for **SDMA usage** / device SDMA utilization tracks in addition to HIP
+memory-copy activity.
+
+
 Tips for effective profiling
 =============================
 
@@ -146,14 +233,17 @@ Tips for effective profiling
 
 2. **Sampling frequency**: Adjust the sampling frequency using ``ROCPROFSYS_PROCESS_SAMPLING_FREQ`` (default is 50Hz) to capture more or fewer samples based on your analysis needs.
 
-3. **Focus on specific metrics**: If you only need XGMI or PCIe metrics, you can specify just those:
+3. **Focus on specific metrics**: If you only need XGMI, PCIe, or SDMA metrics, you can
+   specify just those:
 
    .. code-block:: shell
 
      ROCPROFSYS_AMD_SMI_METRICS=xgmi  # Only XGMI metrics
      ROCPROFSYS_AMD_SMI_METRICS=pcie  # Only PCIe metrics
+     ROCPROFSYS_AMD_SMI_METRICS=sdma_usage  # Only SDMA usage
 
-4. **Combine with API tracing**: For detailed analysis, combine XGMI/PCIe metrics with HIP/HSA API tracing to correlate data transfers with application behavior:
+4. **Combine with API tracing**: For detailed analysis, combine XGMI, PCIe, or SDMA
+   metrics with HIP/HSA API tracing to correlate data transfers with application behavior:
 
    .. code-block:: shell
 
