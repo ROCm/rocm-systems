@@ -245,4 +245,24 @@ __host__ int QueuePairMux::buffer_unregister(void *addr) {
   }
 }
 
+__host__ int QueuePairMux::buffer_unregister_all() {
+  switch (provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return qp.ionic.buffer_unregister_all();
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return qp.bnxt.buffer_unregister_all();
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return qp.mlx5.buffer_unregister_all();
+#endif
+  default:
+    assert(false /* invalid GDAProvider */);
+    __builtin_unreachable();
+  }
+}
+
 }  // namespace rocshmem

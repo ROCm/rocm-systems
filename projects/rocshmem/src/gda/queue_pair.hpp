@@ -1210,6 +1210,8 @@ __host__ int QueuePairBase<Provider>::buffer_unregister_all() {
 
   /* Clear all buffer info slots */
   CHECK_HIP(hipMemset(buffer_info, 0, sizeof(BufferInfo) * num_user_buffers));
+
+  return ROCSHMEM_SUCCESS;
 }
 
 template <typename Provider>

@@ -29,6 +29,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 
+#include "gda_enums.hpp"
 #include "queue_pair.hpp"
 #include "util.hpp"
 
@@ -117,6 +118,13 @@ public:
    * @retval ROCSHMEM_SUCCESS Buffer unregistered successfully.
    */
   __host__ int buffer_unregister(void *addr);
+
+  /**
+   * @brief Unregister all registered buffers.
+   *
+   * @retval ROCSHMEM_SUCCESS Buffers unregistered successfully.
+   */
+  __host__ int buffer_unregister_all();
 
 private:
   union QueuePairUnion {
