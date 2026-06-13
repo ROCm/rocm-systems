@@ -169,8 +169,27 @@ static inline void AlltoAllSetGinHybridDevCommReqs(ncclDevCommRequirements* reqs
 // unless comm->globalGinSupport == NCCL_GIN_CONNECTION_FULL. Single-node jobs often use
 // NCCL_GIN_CONNECTION_RAIL; the active GIN type is then only visible on railedGinType
 // (getGlobalRailedGinType). Accept either field so -D 3/4/5 runs match real RCCL behavior.
+//
+// If both stay NONE (e.g. NCCL_GIN_TYPE=2 host-proxy without a working external libnccl-gin.so /
+// IB GIN plugin, so globalGinSupport never leaves NCCL_GIN_CONNECTION_NONE), still allow the
+// device GIN test path when the user explicitly enabled GIN via env and the comm reports
+// device API / symmetric support — otherwise this check false-fails while the launcher
+// passes the intended NCCL_GIN_* configuration.
+static inline bool AlltoAllEnvRequestsDeviceGin() {
+  const char* ge = getenv("NCCL_GIN_ENABLE");
+  if (!ge || ge[0] != '1') return false;
+  const char* gt = getenv("NCCL_GIN_TYPE");
+  if (!gt) return false;
+  char* end = nullptr;
+  long v = strtol(gt, &end, 0);
+  if (end == gt) return false;
+  return v == NCCL_GIN_TYPE_PROXY || v == NCCL_GIN_TYPE_GDAKI || v == NCCL_GIN_TYPE_ROCSHMEM ||
+         v == NCCL_GIN_TYPE_ANVIL;
+}
+
 static inline bool AlltoAllCommHasGin(ncclCommProperties_t const* cp) {
-  return cp->ginType != NCCL_GIN_TYPE_NONE || cp->railedGinType != NCCL_GIN_TYPE_NONE;
+  if (cp->ginType != NCCL_GIN_TYPE_NONE || cp->railedGinType != NCCL_GIN_TYPE_NONE) return true;
+  return cp->deviceApiSupport && AlltoAllEnvRequestsDeviceGin();
 }
 
 // set devComm reqs for alltoall device kernels
