@@ -46,22 +46,35 @@ using KernelDescriptor = rocr::llvm::amdhsa::kernel_descriptor_t;
 static_assert(sizeof(KernelDescriptor) == 64, "AMDHSA kernel descriptor size changed");
 
 [[nodiscard]] bool is_supported_waitcheck_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA4;
+  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
 [[nodiscard]] bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
 }
 
-enum class WaitcntModel { SplitGfx12, LegacyGfx9 };
+enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
 
 [[nodiscard]] WaitcntModel waitcnt_model(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA4 ? WaitcntModel::LegacyGfx9 : WaitcntModel::SplitGfx12;
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return WaitcntModel::LegacyNoVscnt;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return WaitcntModel::LegacyVscnt;
+  default:
+    return WaitcntModel::SplitGfx12;
+  }
 }
 
 [[nodiscard]] bool uses_legacy_waitcnt(rj_code_arch_t arch) {
-  return waitcnt_model(arch) == WaitcntModel::LegacyGfx9;
+  return waitcnt_model(arch) != WaitcntModel::SplitGfx12;
+}
+
+[[nodiscard]] bool has_legacy_vscnt(rj_code_arch_t arch) {
+  return waitcnt_model(arch) == WaitcntModel::LegacyVscnt;
 }
 
 [[nodiscard]] bool supports_expert_scheduling(rj_code_arch_t arch) {
@@ -77,7 +90,8 @@ enum class WaitcntModel { SplitGfx12, LegacyGfx9 };
 }
 
 [[nodiscard]] WaitCounterKind vmem_store_wait_counter(rj_code_arch_t arch) {
-  return uses_legacy_waitcnt(arch) ? WaitCounterKind::Load : WaitCounterKind::Store;
+  return waitcnt_model(arch) == WaitcntModel::LegacyNoVscnt ? WaitCounterKind::Load
+                                                            : WaitCounterKind::Store;
 }
 
 [[nodiscard]] WaitCounterKind image_sample_wait_counter(rj_code_arch_t arch) {
@@ -102,6 +116,19 @@ struct LegacyWaitcnt {
   };
 }
 
+[[nodiscard]] LegacyWaitcnt decode_gfx11_waitcnt(uint32_t value) {
+  return {
+      (value >> 10u) & 0x3Fu,
+      value & 0x7u,
+      (value >> 4u) & 0x3Fu,
+  };
+}
+
+[[nodiscard]] LegacyWaitcnt decode_legacy_waitcnt(uint32_t value, rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 ? decode_gfx11_waitcnt(value)
+                                          : decode_legacy_waitcnt(value);
+}
+
 [[nodiscard]] std::string wait_expression(WaitCounterKind counter, uint32_t required_count,
                                           rj_code_arch_t arch) {
   std::ostringstream os;
@@ -116,6 +143,12 @@ struct LegacyWaitcnt {
     case WaitCounterKind::Exp:
       os << "s_waitcnt expcnt(" << required_count << ")";
       return os.str();
+    case WaitCounterKind::Store:
+      if (has_legacy_vscnt(arch)) {
+        os << "s_waitcnt_vscnt null, " << required_count;
+        return os.str();
+      }
+      break;
     default:
       break;
     }
@@ -925,14 +958,27 @@ private:
       return;
     }
 
-    const Operand *op = inst.src_operand(0);
-    const uint32_t value = op ? static_cast<uint32_t>(op->encoding_value()) : 0;
+    auto src_encoding = [&](int operand_index) {
+      const Operand *op = inst.src_operand(operand_index);
+      return op ? static_cast<uint32_t>(op->encoding_value()) : 0;
+    };
+    const bool legacy_sopk_wait = mnemonic == "s_waitcnt_vscnt" || mnemonic == "s_waitcnt_vmcnt" ||
+                                  mnemonic == "s_waitcnt_expcnt" || mnemonic == "s_waitcnt_lgkmcnt";
+    const uint32_t value = legacy_sopk_wait ? src_encoding(1) : src_encoding(0);
 
     if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt") {
-      const LegacyWaitcnt wait = decode_legacy_waitcnt(value);
+      const LegacyWaitcnt wait = decode_legacy_waitcnt(value, arch);
       apply_memory_wait(state, WaitCounterKind::Load, wait.vmcnt);
       apply_wait(state, WaitCounterKind::Exp, wait.expcnt);
       apply_memory_wait(state, WaitCounterKind::Ds, wait.lgkmcnt);
+    } else if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt_vmcnt") {
+      apply_memory_wait(state, WaitCounterKind::Load, value);
+    } else if (has_legacy_vscnt(arch) && mnemonic == "s_waitcnt_vscnt") {
+      apply_memory_wait(state, WaitCounterKind::Store, value);
+    } else if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt_expcnt") {
+      apply_wait(state, WaitCounterKind::Exp, value);
+    } else if (uses_legacy_waitcnt(arch) && mnemonic == "s_waitcnt_lgkmcnt") {
+      apply_memory_wait(state, WaitCounterKind::Ds, value);
     } else if (mnemonic == "s_wait_alu") {
       apply_sgpr_hazard_wait(state.sgpr_hazards, value);
       constexpr uint32_t kDepctrVmVsrcShift = 2;
@@ -2510,6 +2556,10 @@ std::string_view wait_counter_name(WaitCounterKind counter) {
 
 rj_code_arch_t waitcheck_arch_for_target(rj_code_target_id_t target) {
   switch (target) {
+  case ROCJITSU_CODE_TARGET_GFX942:
+    return ROCJITSU_CODE_ARCH_CDNA3;
+  case ROCJITSU_CODE_TARGET_GFX1100:
+    return ROCJITSU_CODE_ARCH_RDNA3;
   case ROCJITSU_CODE_TARGET_GFX1200:
   case ROCJITSU_CODE_TARGET_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
@@ -2561,7 +2611,8 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
   try {
     const auto entry_offsets = kernel_entry_offsets(code_object);
     if (entry_offsets.empty()) {
-      std::vector<std::unique_ptr<BasicBlock>> blocks = BasicBlock::build(code_object, *decoder);
+      std::vector<std::unique_ptr<BasicBlock>> blocks =
+          BasicBlock::build(code_object, *decoder, arch);
       analyzer.analyze_cfg(blocks, ".text", text_file_offset, arch);
     } else if (options.stop_after_first_diagnostic) {
       for (uint64_t entry_offset : entry_offsets) {
@@ -2587,7 +2638,10 @@ WaitcheckReport analyze_waitcnts(const CodeObject &code_object, rj_code_arch_t a
   if (report.stopped_early)
     return report;
 
-  for (const Section *section : code_object.code_sections()) {
+  for (const auto &owned_section : code_object.all_sections()) {
+    const Section *section = owned_section.get();
+    if ((section->flags() & SHF_EXECINSTR) == 0)
+      continue;
     if (std::ranges::find(code_object.text_sections(), section) !=
         code_object.text_sections().end())
       continue;
