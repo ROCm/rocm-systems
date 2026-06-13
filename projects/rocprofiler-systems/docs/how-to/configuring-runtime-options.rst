@@ -282,8 +282,9 @@ For example, the following is a valid configuration:
 
    ROCPROFSYS_AMD_SMI_METRICS=busy,temp,power,vcn_activity,mem_usage
 
-Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``busy``, ``jpeg_activity``,
-``mem_usage``, ``pcie``, ``power``, ``sdma_usage``, ``temp``, ``vcn_activity``, ``xgmi``.
+Supported values for ``ROCPROFSYS_AMD_SMI_METRICS`` are: ``all`` (or empty), ``none``, ``busy``,
+``gfx_clock``, ``jpeg_activity``, ``mem_clock``, ``mem_usage``, ``pcie``, ``power``,
+``sdma_usage``, ``temp``, ``vcn_activity``, ``xgmi``.
 
 .. note::
 
