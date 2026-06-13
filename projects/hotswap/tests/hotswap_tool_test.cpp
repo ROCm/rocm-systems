@@ -1,22 +1,24 @@
-//===- hotswap_tool_test.cpp - Tests for gfx1250-A0 agent gating ---------===//
+//===- hotswap_tool_test.cpp - Tests for gfx-target / ASIC-rev query ------===//
 //
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
-// Unit tests for agent_is_gfx1250_a0() in hotswap_tool.cpp.
+// Unit tests for query_agent_gfx_revision() in hotswap_tool.cpp, plus the
+// gfx1250-A0 gate that hotswap_load_agent_code_object() applies on top of it.
 //
 // The tool translation unit is #included directly so its internal
-// (anonymous-namespace) helpers — agent_is_gfx1250_a0() and
-// topology_node_base_dirs() — are reachable from the tests. The HSA, libdrm and
-// COMGR entry points the tool calls are replaced with in-file stubs (linked in
-// place of the real libraries) so the gating decision can be driven entirely
-// from the test without GPU hardware:
+// (anonymous-namespace) helpers — query_agent_gfx_revision(),
+// extract_gfx_target() and the AgentGfxRevision type — are reachable from the
+// tests. The HSA and COMGR entry points the tool calls are replaced with in-file
+// stubs (linked in place of the real libraries) so the query can be driven
+// entirely from the test without GPU hardware:
 //
-//   * ISA name              <- hsa_agent_iterate_isas / hsa_isa_get_info_alt
-//   * KFD node id           <- hsa_agent_get_info
-//   * DRM render minor      <- real sysfs parser pointed at a temp directory
-//   * chip revision         <- drmOpenRender / amdgpu_* stubs
+//   * ISA name        <- hsa_agent_iterate_isas / hsa_isa_get_info_alt
+//   * ASIC revision   <- hsa_agent_get_info(HSA_AMD_AGENT_INFO_ASIC_REVISION)
+//
+// This path is portable: it no longer depends on libdrm or KFD sysfs, so the
+// same query/gate logic is exercised for both Linux and Windows builds.
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,9 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <string>
-#include <sys/stat.h>
 
 // ---------------------------------------------------------------------------
 // Test-controlled fake environment. Set before each call into the tool.
@@ -34,28 +34,21 @@
 namespace {
 struct FakeEnv {
   std::string isa_name;          // ISA reported for the agent
-  bool node_id_ok = true;        // hsa_agent_get_info success
-  uint32_t node_id = 0;          // KFD topology node id
-  bool drm_open_ok = true;       // drmOpenRender success
-  bool device_init_ok = true;    // amdgpu_device_initialize success
-  bool query_info_ok = true;     // amdgpu_query_info success
-  int pci_rev = 0;               // PCI Config Space revision id read by the
-                                 // tool (drm_amdgpu_info_device::pci_rev;
-                                 // 0 == A0 for the gating logic)
+  bool asic_rev_ok = true;       // hsa_agent_get_info(ASIC_REVISION) success
+  uint32_t asic_revision = 0;    // reported ASIC revision (0 == A0)
 
   // Counters used to assert short-circuiting and caching behavior.
   int isa_query_calls = 0;       // get_agent_isa_name -> iterate_isas
-  int agent_get_info_calls = 0;  // node-id queries
-  int drm_open_calls = 0;        // query_chip_rev reached drmOpenRender
+  int asic_rev_calls = 0;        // ASIC revision queries
 };
 FakeEnv g_env;
 }  // namespace
 
-// The tool TU (brings in hsa.h / amdgpu.h / xf86drm.h and the code under test).
+// The tool TU (brings in hsa.h and the code under test).
 #include "hotswap_tool.cpp"
 
 // ---------------------------------------------------------------------------
-// Stubs replacing the real HSA / libdrm symbols referenced by the tool.
+// Stubs replacing the real HSA symbols referenced by the tool.
 // ---------------------------------------------------------------------------
 extern "C" {
 
@@ -84,49 +77,18 @@ hsa_status_t hsa_isa_get_info_alt(hsa_isa_t /*isa*/, hsa_isa_info_t attribute,
 }
 
 hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
-                                hsa_agent_info_t /*attribute*/, void *value) {
-  ++g_env.agent_get_info_calls;
-  if (!g_env.node_id_ok) {
-    return HSA_STATUS_ERROR;
+                                hsa_agent_info_t attribute, void *value) {
+  // The tool only queries the ASIC revision through this entry point.
+  if (attribute ==
+      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION)) {
+    ++g_env.asic_rev_calls;
+    if (!g_env.asic_rev_ok) {
+      return HSA_STATUS_ERROR;
+    }
+    *static_cast<uint32_t *>(value) = g_env.asic_revision;
+    return HSA_STATUS_SUCCESS;
   }
-  *static_cast<uint32_t *>(value) = g_env.node_id;
-  return HSA_STATUS_SUCCESS;
-}
-
-int drmOpenRender(int /*minor*/) {
-  ++g_env.drm_open_calls;
-  return g_env.drm_open_ok ? 42 : -1;
-}
-
-int drmClose(int /*fd*/) { return 0; }
-
-int amdgpu_device_initialize(int /*fd*/, uint32_t *major, uint32_t *minor,
-                             amdgpu_device_handle *handle) {
-  if (major) *major = 1;
-  if (minor) *minor = 0;
-  if (!g_env.device_init_ok) {
-    return -1;
-  }
-  static int dummy_device = 0;
-  *handle = reinterpret_cast<amdgpu_device_handle>(&dummy_device);
-  return 0;
-}
-
-int amdgpu_device_deinitialize(amdgpu_device_handle /*handle*/) { return 0; }
-
-int amdgpu_query_info(amdgpu_device_handle /*dev*/, unsigned info_id,
-                      unsigned size, void *value) {
-  if (!g_env.query_info_ok) {
-    return -1;
-  }
-  if (info_id == AMDGPU_INFO_DEV_INFO) {
-    std::memset(value, 0, size);
-    auto *info = static_cast<struct drm_amdgpu_info_device *>(value);
-    // Production query_chip_rev() reads dev_info.pci_rev, so drive that field.
-    info->pci_rev = static_cast<uint32_t>(g_env.pci_rev);
-    return 0;
-  }
-  return -1;
+  return HSA_STATUS_ERROR;
 }
 
 }  // extern "C"
@@ -174,156 +136,134 @@ hsa_agent_t fresh_agent() {
 }
 
 const char *kGfx1250Isa = "amdgcn-amd-amdhsa--gfx1250";
+const char *kGfx1250IsaWithFeatures =
+    "amdgcn-amd-amdhsa--gfx1250:sramecc+:xnack-";
 const char *kGfx942Isa = "amdgcn-amd-amdhsa--gfx942";
+const char *kGfx1251Isa = "amdgcn-amd-amdhsa--gfx1251";
 
-// Creates a temp topology base dir containing <node_id>/properties with the
-// given drm_render_minor, points the tool at it, and returns the base dir.
-std::string set_topology_with_minor(uint32_t node_id, int render_minor) {
-  char tmpl[] = "/tmp/hotswap_topo_XXXXXX";
-  const char *base = mkdtemp(tmpl);
-  if (!base) {
-    return {};
-  }
-  const std::string node_dir = std::string(base) + "/" + std::to_string(node_id);
-  mkdir(node_dir.c_str(), 0755);
-  std::ofstream props(node_dir + "/properties");
-  props << "cpu_cores_count 0\n"
-        << "drm_render_minor " << render_minor << "\n"
-        << "simd_count 4\n";
-  props.close();
-  const std::string base_with_slash = std::string(base) + "/";
-  topology_node_base_dirs() = {base_with_slash};
-  return base_with_slash;
+// Mirrors the gate applied in hotswap_load_agent_code_object(): HotSwap runs
+// only for gfx1250 silicon at ASIC revision A0.
+bool gate_allows_hotswap(const AgentGfxRevision &g) {
+  return g.revision_valid && g.gfx_target == "gfx1250" && g.asic_revision == 0;
 }
 
-// Points the tool at an empty temp dir (no node properties -> render minor
-// lookup fails).
-void set_empty_topology() {
-  char tmpl[] = "/tmp/hotswap_topo_XXXXXX";
-  const char *base = mkdtemp(tmpl);
-  if (base) {
-    topology_node_base_dirs() = {std::string(base) + "/"};
-  } else {
-    topology_node_base_dirs() = {"/nonexistent_hotswap_topo/"};
-  }
-}
-
-// (7) gfx1250 silicon at pci_rev A0 -> true.
-void test_Gfx1250A0IsTrue() {
-  printf("TEST Gfx1250A0IsTrue...\n");
+// gfx1250 silicon at ASIC revision A0 -> parsed target + revision, gate passes.
+void test_Gfx1250A0Passes() {
+  printf("TEST Gfx1250A0Passes...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
-  g_env.node_id = 3;
-  g_env.pci_rev = 0;
-  set_topology_with_minor(3, 128);
-  check(agent_is_gfx1250_a0(fresh_agent()) == true,
-        "gfx1250 + pci_rev A0 -> true");
+  g_env.asic_revision = 0;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  check(g.gfx_target == "gfx1250", "gfx target parsed as gfx1250");
+  check(g.revision_valid && g.asic_revision == 0, "ASIC revision is A0 (0)");
+  check(gate_allows_hotswap(g) == true, "gate allows gfx1250 A0");
 }
 
-// (8) Non-gfx1250 ISA -> false, and the DRM/node-id path is never touched.
-void test_NonGfx1250ShortCircuits() {
-  printf("TEST NonGfx1250ShortCircuits...\n");
+// Feature-suffixed ISA names still resolve to the bare gfx target.
+void test_Gfx1250FeatureSuffixParsed() {
+  printf("TEST Gfx1250FeatureSuffixParsed...\n");
+  reset_env();
+  g_env.isa_name = kGfx1250IsaWithFeatures;
+  g_env.asic_revision = 0;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  check(g.gfx_target == "gfx1250",
+        "feature suffix stripped -> gfx1250");
+  check(gate_allows_hotswap(g) == true, "gate allows suffixed gfx1250 A0");
+}
+
+// A different gfx target -> gate blocks (and the ASIC revision is irrelevant).
+void test_NonGfx1250Blocks() {
+  printf("TEST NonGfx1250Blocks...\n");
   reset_env();
   g_env.isa_name = kGfx942Isa;
-  check(agent_is_gfx1250_a0(fresh_agent()) == false, "non-gfx1250 -> false");
-  check(g_env.agent_get_info_calls == 0,
-        "non-gfx1250 does not query KFD node id");
-  check(g_env.drm_open_calls == 0, "non-gfx1250 does not query DRM");
+  g_env.asic_revision = 0;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  check(g.gfx_target == "gfx942", "gfx target parsed as gfx942");
+  check(gate_allows_hotswap(g) == false, "gate blocks gfx942");
 }
 
-// (9) gfx1250 but a non-A0 stepping (pci_rev != 0) -> false.
-void test_Gfx1250NonA0IsFalse() {
-  printf("TEST Gfx1250NonA0IsFalse...\n");
+// Exact-match gating: a near-miss target (gfx1251) must not be treated as
+// gfx1250 even though it shares a prefix.
+void test_NearMissTargetBlocks() {
+  printf("TEST NearMissTargetBlocks...\n");
+  reset_env();
+  g_env.isa_name = kGfx1251Isa;
+  g_env.asic_revision = 0;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  check(g.gfx_target == "gfx1251", "gfx target parsed as gfx1251");
+  check(gate_allows_hotswap(g) == false, "gate blocks gfx1251 (exact match)");
+}
+
+// gfx1250 but a non-A0 stepping -> gate blocks.
+void test_Gfx1250NonA0Blocks() {
+  printf("TEST Gfx1250NonA0Blocks...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
-  g_env.node_id = 5;
-  g_env.pci_rev = 1;  // A1
-  set_topology_with_minor(5, 128);
-  check(agent_is_gfx1250_a0(fresh_agent()) == false,
-        "gfx1250 + pci_rev != 0 -> false");
+  g_env.asic_revision = 1;  // A1
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  check(g.revision_valid && g.asic_revision == 1, "ASIC revision is A1 (1)");
+  check(gate_allows_hotswap(g) == false, "gate blocks gfx1250 A1");
 }
 
-// (10) Node-id query failure -> false, and DRM is not queried.
-void test_NodeIdQueryFailure() {
-  printf("TEST NodeIdQueryFailure...\n");
+// ASIC revision query failure -> revision_valid false and gate blocks, even for
+// gfx1250. The query is still attempted exactly once.
+void test_AsicRevisionQueryFailure() {
+  printf("TEST AsicRevisionQueryFailure...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
-  g_env.node_id_ok = false;
-  check(agent_is_gfx1250_a0(fresh_agent()) == false,
-        "node-id query failure -> false");
-  check(g_env.drm_open_calls == 0,
-        "no DRM query when node id is unavailable");
+  g_env.asic_rev_ok = false;
+  const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
+  check(g.gfx_target == "gfx1250", "gfx target still parsed");
+  check(g.revision_valid == false, "revision marked invalid on query failure");
+  check(gate_allows_hotswap(g) == false,
+        "gate blocks when ASIC revision is unavailable");
+  check(g.asic_revision == 0 && g_env.asic_rev_calls == 1,
+        "ASIC revision query was attempted once");
 }
 
-// (11) render-minor lookup failure (-1) -> false, and DRM is not queried.
-void test_RenderMinorUnavailable() {
-  printf("TEST RenderMinorUnavailable...\n");
-  reset_env();
-  g_env.isa_name = kGfx1250Isa;
-  g_env.node_id = 7;
-  set_empty_topology();
-  check(agent_is_gfx1250_a0(fresh_agent()) == false,
-        "render minor unavailable -> false");
-  check(g_env.drm_open_calls == 0,
-        "no DRM query when render minor is unavailable");
-}
-
-// (12) chip-rev query failure (query_chip_rev returns -1) -> false.
-void test_ChipRevQueryFailure() {
-  printf("TEST ChipRevQueryFailure...\n");
-  reset_env();
-  g_env.isa_name = kGfx1250Isa;
-  g_env.node_id = 9;
-  g_env.drm_open_ok = false;  // drmOpenRender fails -> chip_rev stays -1
-  set_topology_with_minor(9, 128);
-  check(agent_is_gfx1250_a0(fresh_agent()) == false,
-        "query_chip_rev failure -> false");
-  check(g_env.drm_open_calls == 1, "DRM open was attempted");
-}
-
-// (13) Result is cached per agent handle: a repeat call does not re-query.
+// Result is cached per agent handle: a repeat call does not re-query HSA.
 void test_ResultIsCachedPerHandle() {
   printf("TEST ResultIsCachedPerHandle...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
-  g_env.node_id = 11;
-  g_env.pci_rev = 0;
-  set_topology_with_minor(11, 128);
+  g_env.asic_revision = 0;
   const hsa_agent_t agent = fresh_agent();
-  const bool first = agent_is_gfx1250_a0(agent);
-  const int after_first = g_env.isa_query_calls;
-  const bool second = agent_is_gfx1250_a0(agent);
-  check(first && second, "cached result stays true");
-  check(g_env.isa_query_calls == after_first,
+  const AgentGfxRevision first = query_agent_gfx_revision(agent);
+  const int isa_after_first = g_env.isa_query_calls;
+  const int rev_after_first = g_env.asic_rev_calls;
+  const AgentGfxRevision second = query_agent_gfx_revision(agent);
+  check(first.gfx_target == "gfx1250" && second.gfx_target == "gfx1250",
+        "cached result stays gfx1250");
+  check(g_env.isa_query_calls == isa_after_first &&
+            g_env.asic_rev_calls == rev_after_first,
         "second call served from cache (no re-query)");
 }
 
-// (14) Distinct handles are evaluated independently (not conflated by cache).
+// Distinct handles are evaluated independently (not conflated by the cache).
 void test_DistinctHandlesIndependent() {
   printf("TEST DistinctHandlesIndependent...\n");
   reset_env();
   g_env.isa_name = kGfx1250Isa;
-  g_env.node_id = 13;
-  g_env.pci_rev = 0;
-  set_topology_with_minor(13, 128);
-  const bool a1 = agent_is_gfx1250_a0(fresh_agent());
+  g_env.asic_revision = 0;
+  const AgentGfxRevision a1 = query_agent_gfx_revision(fresh_agent());
 
   // Different agent, different ISA: must be re-evaluated, not cached as a1.
   g_env.isa_name = kGfx942Isa;
-  const bool a2 = agent_is_gfx1250_a0(fresh_agent());
-  check(a1 == true, "first handle (gfx1250 A0) -> true");
-  check(a2 == false, "distinct handle (gfx942) evaluated independently");
+  const AgentGfxRevision a2 = query_agent_gfx_revision(fresh_agent());
+  check(gate_allows_hotswap(a1) == true, "first handle (gfx1250 A0) passes");
+  check(a2.gfx_target == "gfx942" && gate_allows_hotswap(a2) == false,
+        "distinct handle (gfx942) evaluated independently");
 }
 
 }  // namespace
 
 int main() {
-  test_Gfx1250A0IsTrue();
-  test_NonGfx1250ShortCircuits();
-  test_Gfx1250NonA0IsFalse();
-  test_NodeIdQueryFailure();
-  test_RenderMinorUnavailable();
-  test_ChipRevQueryFailure();
+  test_Gfx1250A0Passes();
+  test_Gfx1250FeatureSuffixParsed();
+  test_NonGfx1250Blocks();
+  test_NearMissTargetBlocks();
+  test_Gfx1250NonA0Blocks();
+  test_AsicRevisionQueryFailure();
   test_ResultIsCachedPerHandle();
   test_DistinctHandlesIndependent();
 

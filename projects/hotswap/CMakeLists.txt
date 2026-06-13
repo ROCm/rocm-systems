@@ -13,13 +13,9 @@ find_package(amd_comgr CONFIG REQUIRED)
 
 find_path(HSA_INCLUDE_DIR hsa.h PATHS ${HSA_RUNTIME_INC} NO_DEFAULT_PATH REQUIRED)
 
-# libdrm / libdrm_amdgpu are used on Linux to read the GPU's internal chip
-# revision (chip_rev) so HotSwap can be gated to gfx1250 A0 silicon only.
-if(NOT WIN32)
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
-  pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
-endif()
+# The gfx target and ASIC revision used to gate HotSwap are read through the HSA
+# runtime (HSA_AMD_AGENT_INFO_ASIC_REVISION), so no libdrm / KFD-sysfs access is
+# needed and the gating logic builds identically on Linux and Windows.
 
 # Shared library for HSA_TOOLS_LIB usage
 set(HOTSWAP_PLATFORM_IO_SRC hotswap_platform_io_posix.cpp)
@@ -40,9 +36,6 @@ target_include_directories(hsa-hotswap PRIVATE
 )
 
 target_link_libraries(hsa-hotswap PRIVATE amd_comgr)
-if(NOT WIN32)
-  target_link_libraries(hsa-hotswap PRIVATE PkgConfig::DRM PkgConfig::DRM_AMDGPU)
-endif()
 set_target_properties(hsa-hotswap PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
 
@@ -51,11 +44,11 @@ add_executable(hotswap_test tests/hotswap_test.cpp hotswap.cpp)
 target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hotswap_test PRIVATE amd_comgr)
 
-# Tool-internal unit tests for the gfx1250-A0 agent gating logic. The test TU
-# #includes hotswap_tool.cpp directly and supplies its own stubs for the HSA,
-# libdrm and COMGR entry points, so this target needs the relevant headers but
-# must NOT link the real HSA / libdrm / COMGR libraries (doing so would clash
-# with the in-file stubs).
+# Tool-internal unit tests for the gfx-target / ASIC-revision query logic. The
+# test TU #includes hotswap_tool.cpp directly and supplies its own stubs for the
+# HSA and COMGR entry points, so this target needs the relevant headers but must
+# NOT link the real HSA / COMGR libraries (doing so would clash with the in-file
+# stubs).
 if(NOT WIN32)
   add_executable(hotswap_tool_test
     tests/hotswap_tool_test.cpp
@@ -65,8 +58,6 @@ if(NOT WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${HSA_RUNTIME_INC}
     ${HSA_RUNTIME_INC}/..
-    ${DRM_INCLUDE_DIRS}
-    ${DRM_AMDGPU_INCLUDE_DIRS}
   )
 endif()
 
