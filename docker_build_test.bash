@@ -36,7 +36,6 @@ RCCL_ENV_COMMON="-x HSA_FORCE_FINE_GRAIN_PCIE=1 -x NCCL_DEBUG=VERSION"
 # common.cu requires -R 2 whenever -D>0 (device/GIN kernels use ncclWindow_t from symmetric collective windows).
 # GIN_ANVIL (NCCL_GIN_TYPE=5, -D 5) relies on that path; use the same -R for host -D 0 baselines so large-message
 # numbers are comparable to symmetric-buffer runs (e.g. tuned -D 0 with -R 2), not dominated by unregistered buffers.
-ALLTOALL_LREG=2
 
 if [ -x scontrol ]; then
     scontrol show hostnames "$SLURM_JOB_NODELIST" | awk '{print $1 " slots='${PPN}'"}' > ${HFILE}
@@ -106,7 +105,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 0 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 0 -A 1
 set +x
 fi
 
@@ -118,6 +117,7 @@ set -x
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
   ${RCCL_ENV_COMMON} \
+  -x NCCL_DEBUG=VERSION \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \
@@ -129,10 +129,12 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 1 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 1 -A 1
 set +x
 fi
 
+# Optional: NCCL_GIN_TYPE=2 host-proxy + -D 3 needs a working external/IB GIN plugin; gin-anvil
+# typically validates TYPE 4/5. 
 if [ 1 -eq 1 ]; then
 #####
 # RCCL AlltoAll: -D 3, GIN host proxy (NCCL_GIN_TYPE=2, intra-node only)
@@ -141,6 +143,7 @@ set -x
 docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   mpirun ${MPIRUN_BASE} \
   ${RCCL_ENV_COMMON} \
+  -x NCCL_DEBUG=VERSION \
   -x RCCL_ROCSHMEM_ENABLE=0 \
   -x NCCL_GIN_ENABLE=1 \
   -x NCCL_GIN_TYPE=2 \
@@ -152,7 +155,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 3 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 3 -A 1
 set +x
 fi
 
@@ -179,7 +182,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 3 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 3 -A 1
 set +x
 fi
 
@@ -205,7 +208,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 4 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 4 -A 1
 set +x
 fi
 
@@ -228,7 +231,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 3 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 3 -A 1
 set +x
 fi
 
@@ -251,7 +254,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 4 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 4 -A 1
 set +x
 fi
 
@@ -279,7 +282,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 5 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 5 -A 1
 set +x
 fi
 
@@ -300,7 +303,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 5 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 5 -A 1
 set +x
 fi
 
@@ -327,7 +330,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 0 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 0 -A 1
 set +x
 else
 echo "=== RCCL AlltoAll: -D 5, GIN_ANVIL (NCCL_GIN_TYPE=5) nnodes=${NNODES} PPN=${PPN} max_bytes=${MAX_BYTES} ==="
@@ -348,7 +351,7 @@ docker run ${DOCKER_GPU} ${DOCKER_IMAGE} \
   -x HSA_NO_SCRATCH_RECLAIM=1 \
   -x LD_LIBRARY_PATH=${RCCL_LD_PATH} \
   /workspace/rccl-tests/alltoall_perf \
-  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R ${ALLTOALL_LREG} -D 5 -A 1
+  -b 128 -e ${MAX_BYTES} -f 2 -g 1 -R 2 -D 5 -A 1
 set +x
 fi
 fi
