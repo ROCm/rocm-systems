@@ -47,7 +47,6 @@ public:
     std::memcpy(data.get(), words.data(), byte_size);
     sections_.push_back(std::make_unique<TestTextSection>(std::move(data), byte_size));
     text_sections_.push_back(sections_.back().get());
-    code_sections_.push_back(sections_.back().get());
   }
 };
 
@@ -602,6 +601,83 @@ void append_gfx950_v_mov_b32_v8_v10(std::vector<uint32_t> &program) {
   program.push_back(0x7E10030Au);
 }
 
+void append_gfx942_s_waitcnt_vmcnt_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8C0F70u);
+}
+
+void append_gfx942_s_waitcnt_lgkmcnt_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8CC07Fu);
+}
+
+void append_gfx942_buffer_load_dword_v0_v8_s0_offen(std::vector<uint32_t> &program) {
+  program.push_back(0xE0501000u);
+  program.push_back(0x80000008u);
+}
+
+void append_gfx942_s_load_dword_s4_s0(std::vector<uint32_t> &program) {
+  program.push_back(0xC0020100u);
+  program.push_back(0x00000000u);
+}
+
+void append_gfx942_s_mov_b32_s8_s4(std::vector<uint32_t> &program) {
+  program.push_back(0xBE880004u);
+}
+
+void append_gfx942_v_mov_b32_v1_v0(std::vector<uint32_t> &program) {
+  program.push_back(0x7E020300u);
+}
+
+void append_gfx1100_s_waitcnt_vmcnt_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBF8903F7u);
+}
+
+void append_gfx1100_s_waitcnt_vscnt_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBC7C0000u);
+}
+
+void append_gfx1100_s_waitcnt_vmcnt_sopk_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBCFC0000u);
+}
+
+void append_gfx1100_s_waitcnt_vmcnt_sopk_1(std::vector<uint32_t> &program) {
+  program.push_back(0xBCFC0001u);
+}
+
+void append_gfx1100_s_waitcnt_expcnt_sopk_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBD7C0000u);
+}
+
+void append_gfx1100_s_waitcnt_lgkmcnt_sopk_0(std::vector<uint32_t> &program) {
+  program.push_back(0xBDFC0000u);
+}
+
+void append_gfx1100_global_load_b32_v0_v8_s0(std::vector<uint32_t> &program) {
+  program.push_back(0xDC520000u);
+  program.push_back(0x00000008u);
+}
+
+void append_gfx1100_global_load_b32_v2_v8_s0(std::vector<uint32_t> &program) {
+  program.push_back(0xDC520000u);
+  program.push_back(0x02000008u);
+}
+
+void append_gfx1100_s_load_b32_s4_s0(std::vector<uint32_t> &program) {
+  program.push_back(0xF4000100u);
+  program.push_back(0xF8000000u);
+}
+
+void append_gfx1100_s_mov_b32_s8_s4(std::vector<uint32_t> &program) {
+  program.push_back(0xBE880004u);
+}
+
+void append_gfx1100_v_mov_b32_v1_v0(std::vector<uint32_t> &program) {
+  program.push_back(0x7E020300u);
+}
+
+void append_gfx1100_v_mov_b32_v3_v2(std::vector<uint32_t> &program) {
+  program.push_back(0x7E060302u);
+}
+
 constexpr uint32_t kOverflowQueueSize = 40;
 constexpr uint32_t kOverflowRequiredCount = kOverflowQueueSize - 1;
 constexpr uint32_t kOverflowBaseVgpr = 32;
@@ -631,14 +707,22 @@ void expect_single_overflow_diagnostic(const WaitcheckReport &report, WaitCounte
 TEST(WaitcheckTest, ReportsUnsupportedArchitectures) {
   auto program = words({sopp(0)});
 
-  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RV32I);
 
   EXPECT_FALSE(report.supported);
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+TEST(WaitcheckTest, MapsGfx942TargetToCdna3) {
+  EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX942), ROCJITSU_CODE_ARCH_CDNA3);
+}
+
 TEST(WaitcheckTest, MapsGfx950TargetToCdna4) {
   EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX950), ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+TEST(WaitcheckTest, MapsGfx1100TargetToRdna3) {
+  EXPECT_EQ(waitcheck_arch_for_target(ROCJITSU_CODE_TARGET_GFX1100), ROCJITSU_CODE_ARCH_RDNA3);
 }
 
 TEST(WaitcheckTest, DecodesRdna4CombinedStoreDsWait) {
@@ -707,6 +791,177 @@ TEST(WaitcheckTest, AcceptsLoadcntZeroBeforeUse) {
   append_inst(program, v_mov_b32(1, 0));
 
   auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA4);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942ReportsMissingVmcntBeforeBufferLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx942_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx942_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt vmcnt(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx942AcceptsSWaitcntVmcntZeroBeforeBufferLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx942_buffer_load_dword_v0_v8_s0_offen(program);
+  append_gfx942_s_waitcnt_vmcnt_0(program);
+  append_gfx942_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx942ReportsMissingLgkmcntBeforeScalarLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx942_s_load_dword_s4_s0(program);
+  append_gfx942_s_mov_b32_s8_s4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::SGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt lgkmcnt(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx942AcceptsSWaitcntLgkmcntZeroBeforeScalarLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx942_s_load_dword_s4_s0(program);
+  append_gfx942_s_waitcnt_lgkmcnt_0(program);
+  append_gfx942_s_mov_b32_s8_s4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_CDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1100DecodesLegacyAndSopkWaitcnts) {
+  std::vector<uint32_t> program;
+  append_gfx1100_s_waitcnt_vmcnt_0(program);
+  append_gfx1100_s_waitcnt_vscnt_0(program);
+  append_gfx1100_s_waitcnt_vmcnt_sopk_0(program);
+  append_gfx1100_s_waitcnt_expcnt_sopk_0(program);
+  append_gfx1100_s_waitcnt_lgkmcnt_sopk_0(program);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  ASSERT_NE(decoder, nullptr);
+
+  const std::array<std::string_view, 5> expected = {
+      "s_waitcnt", "s_waitcnt_vscnt", "s_waitcnt_vmcnt", "s_waitcnt_expcnt", "s_waitcnt_lgkmcnt"};
+  size_t word_index = 0;
+  for (const std::string_view mnemonic : expected) {
+    std::unique_ptr<Instruction> inst(decoder->decode(&program[word_index]));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->mnemonic(), mnemonic);
+    EXPECT_TRUE(inst->is_waitcnt());
+    word_index += static_cast<size_t>(inst->size() / sizeof(uint32_t));
+  }
+  EXPECT_EQ(word_index, program.size());
+}
+
+TEST(WaitcheckTest, Gfx1100ReportsMissingVmcntBeforeGlobalLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 0u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt vmcnt(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1100AcceptsLegacySWaitcntVmcntZeroBeforeGlobalLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  append_gfx1100_s_waitcnt_vmcnt_0(program);
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1100AcceptsSopkSWaitcntVmcntZeroBeforeGlobalLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  append_gfx1100_s_waitcnt_vmcnt_sopk_0(program);
+  append_gfx1100_v_mov_b32_v1_v0(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3);
+
+  EXPECT_TRUE(report.supported) << report.analysis_error;
+  EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);
+}
+
+TEST(WaitcheckTest, Gfx1100SopkSWaitcntVmcntOneLeavesYoungerLoadPending) {
+  std::vector<uint32_t> program;
+  append_gfx1100_global_load_b32_v0_v8_s0(program);
+  append_gfx1100_global_load_b32_v2_v8_s0(program);
+  append_gfx1100_s_waitcnt_vmcnt_sopk_1(program);
+  append_gfx1100_v_mov_b32_v1_v0(program);
+  append_gfx1100_v_mov_b32_v3_v2(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Load);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::VGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 2u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+}
+
+TEST(WaitcheckTest, Gfx1100ReportsMissingLgkmcntBeforeScalarLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx1100_s_load_b32_s4_s0(program);
+  append_gfx1100_s_mov_b32_s8_s4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3);
+
+  ASSERT_TRUE(report.supported) << report.analysis_error;
+  ASSERT_EQ(report.diagnostics.size(), 1u) << diagnostic_summary(report);
+  EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccessKind::Use);
+  EXPECT_EQ(report.diagnostics[0].reg.cls, RegClass::SGPR);
+  EXPECT_EQ(report.diagnostics[0].reg.index, 4u);
+  EXPECT_EQ(report.diagnostics[0].required_count, 0u);
+  EXPECT_NE(report.diagnostics[0].message.find("s_waitcnt lgkmcnt(0)"), std::string::npos);
+}
+
+TEST(WaitcheckTest, Gfx1100AcceptsSopkSWaitcntLgkmcntZeroBeforeScalarLoadUse) {
+  std::vector<uint32_t> program;
+  append_gfx1100_s_load_b32_s4_s0(program);
+  append_gfx1100_s_waitcnt_lgkmcnt_sopk_0(program);
+  append_gfx1100_s_mov_b32_s8_s4(program);
+
+  auto report = analyze_waitcnts(program, ROCJITSU_CODE_ARCH_RDNA3);
 
   EXPECT_TRUE(report.supported) << report.analysis_error;
   EXPECT_TRUE(report.diagnostics.empty()) << diagnostic_summary(report);

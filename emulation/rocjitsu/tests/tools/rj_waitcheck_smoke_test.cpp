@@ -106,6 +106,76 @@ TEST(RjWaitcheck, ReportsMissingWait) {
   }
 }
 
+TEST(RjWaitcheck, AnalyzesGfx942CodeObject) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "missing_wait_gfx942.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+
+  ASSERT_TRUE(
+      write_binary_file(input, rocjitsu::waitcheck_test::make_gfx942_missing_wait_code_object()));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) + " --target gfx942 > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_exited_with(status, 4)) << "stderr:\n"
+                                              << stderr_text << "\nstdout:\n"
+                                              << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+
+  const std::array<std::string_view, 3> expected = {
+      "missing_wait_gfx942.co:gfx942[0]: instructions=2 memory-events=1 diagnostics=1",
+      "missing s_waitcnt vmcnt(0)", "diagnostics=1"};
+  for (const std::string_view needle : expected) {
+    EXPECT_TRUE(contains(stdout_text, needle))
+        << "missing expected output fragment: " << needle << "\noutput:\n"
+        << stdout_text;
+  }
+}
+
+TEST(RjWaitcheck, AnalyzesGfx1100CodeObject) {
+  const TempDir temp_dir(
+      std::filesystem::temp_directory_path() /
+      ("rj_waitcheck_smoke_" + std::to_string(static_cast<long long>(getpid()))));
+
+  const auto input = temp_dir.path / "missing_wait_gfx1100.co";
+  const auto output = temp_dir.path / "stdout.txt";
+  const auto error = temp_dir.path / "stderr.txt";
+
+  ASSERT_TRUE(
+      write_binary_file(input, rocjitsu::waitcheck_test::make_gfx1100_missing_wait_code_object()));
+
+  const std::string command = shell_quote(g_waitcheck_tool.string()) + " " +
+                              shell_quote(input.string()) + " --target gfx1100 > " +
+                              shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+
+  const int status = std::system(command.c_str());
+  const std::string stdout_text = read_text_file(output);
+  const std::string stderr_text = read_text_file(error);
+
+  ASSERT_TRUE(command_exited_with(status, 4)) << "stderr:\n"
+                                              << stderr_text << "\nstdout:\n"
+                                              << stdout_text;
+  EXPECT_TRUE(stderr_text.empty()) << stderr_text;
+
+  const std::array<std::string_view, 3> expected = {
+      "missing_wait_gfx1100.co:gfx1100[0]: instructions=2 memory-events=1 diagnostics=1",
+      "missing s_waitcnt vmcnt(0)", "diagnostics=1"};
+  for (const std::string_view needle : expected) {
+    EXPECT_TRUE(contains(stdout_text, needle))
+        << "missing expected output fragment: " << needle << "\noutput:\n"
+        << stdout_text;
+  }
+}
+
 TEST(RjWaitcheck, AnalyzesGfx1250CodeObject) {
   const TempDir temp_dir(
       std::filesystem::temp_directory_path() /

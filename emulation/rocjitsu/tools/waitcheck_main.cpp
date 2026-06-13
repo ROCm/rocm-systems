@@ -32,11 +32,13 @@ struct TargetInfo {
   rj_code_target_id_t target;
 };
 
-constexpr std::array<TargetInfo, 4> kSupportedTargets = {{
+constexpr std::array<TargetInfo, 6> kSupportedTargets = {{
+    {"gfx942", ROCJITSU_CODE_TARGET_GFX942},
+    {"gfx950", ROCJITSU_CODE_TARGET_GFX950},
+    {"gfx1100", ROCJITSU_CODE_TARGET_GFX1100},
     {"gfx1200", ROCJITSU_CODE_TARGET_GFX1200},
     {"gfx1201", ROCJITSU_CODE_TARGET_GFX1201},
     {"gfx1250", ROCJITSU_CODE_TARGET_GFX1250},
-    {"gfx950", ROCJITSU_CODE_TARGET_GFX950},
 }};
 
 struct CliOptions {

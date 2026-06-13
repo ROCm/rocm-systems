@@ -101,6 +101,12 @@ struct AmdLoaderTablePrefix {
 
 [[nodiscard]] const char *target_name(rj_code_target_id_t target) {
   switch (target) {
+  case ROCJITSU_CODE_TARGET_GFX942:
+    return "gfx942";
+  case ROCJITSU_CODE_TARGET_GFX950:
+    return "gfx950";
+  case ROCJITSU_CODE_TARGET_GFX1100:
+    return "gfx1100";
   case ROCJITSU_CODE_TARGET_GFX1200:
     return "gfx1200";
   case ROCJITSU_CODE_TARGET_GFX1201:

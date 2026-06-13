@@ -202,8 +202,26 @@ make_gfx1200_code_object(const std::vector<uint32_t> &text_words) {
 }
 
 [[nodiscard]] inline std::vector<uint8_t>
+make_gfx942_code_object(const std::vector<uint32_t> &text_words) {
+  return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX942);
+}
+
+[[nodiscard]] inline std::vector<uint8_t>
+make_gfx1100_code_object(const std::vector<uint32_t> &text_words) {
+  return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1100);
+}
+
+[[nodiscard]] inline std::vector<uint8_t>
 make_gfx1250_code_object(const std::vector<uint32_t> &text_words) {
   return make_gfx_code_object(text_words, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+}
+
+[[nodiscard]] inline std::vector<uint8_t> make_gfx942_missing_wait_code_object() {
+  return make_gfx942_code_object({0xE0501000u, 0x80000008u, 0x7E020300u});
+}
+
+[[nodiscard]] inline std::vector<uint8_t> make_gfx1100_missing_wait_code_object() {
+  return make_gfx1100_code_object({0xDC520000u, 0x00000008u, 0x7E020300u});
 }
 
 [[nodiscard]] inline std::vector<uint8_t> make_gfx1200_missing_wait_code_object() {
