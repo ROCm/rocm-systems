@@ -104,28 +104,22 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_instance*/,
                            void** /*tables*/,
                            uint64_t /*num_tables*/,
-                           void* user_data)
+                           void* /*user_data*/)
 {
-    // Counter collection and context start require HSA to be alive. Defer
-    // them until HSA actually loads so that LD_PRELOAD'd shells (which never
-    // touch HSA) do not initialize HSA worker threads, which would otherwise
-    // deadlock on fork() inside subshell/command-substitution.
+    // Defer start_context until HSA loads: it starts HSA worker threads, which
+    // would deadlock on fork() in non-GPU LD_PRELOAD'd shells.
     if (g_tool_shutting_down.load(std::memory_order_acquire))
         return;
 
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
-    g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                dispatch_callback,
-                                                                user_data,
-                                                                record_callback,
-                                                                user_data);
     g_sdk_wrapper->start_context(get_client_ctx());
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
+    assert(user_data);
     std::clog << "[rocprofiler-compute] In tool init\n";
     g_sdk_wrapper->create_context(&get_client_ctx());
 
@@ -135,6 +129,18 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       0,
                                                       tool_tracing_callback,
                                                       user_data);
+
+    // Declare counters before HSA loads so the SDK picks the legacy intercept path;
+    // queue interposition (the default) cannot collect counters.
+    auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(user_data);
+    if (!tool_data_ptr->get()->requested_counters.empty())
+    {
+        g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                    dispatch_callback,
+                                                                    user_data,
+                                                                    record_callback,
+                                                                    user_data);
+    }
     return 0;
 }
 
