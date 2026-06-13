@@ -104,23 +104,18 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_instance*/,
                            void** /*tables*/,
                            uint64_t /*num_tables*/,
-                           void* user_data)
+                           void* /*user_data*/)
 {
-    // Counter collection and context start require HSA to be alive. Defer
-    // them until HSA actually loads so that LD_PRELOAD'd shells (which never
-    // touch HSA) do not initialize HSA worker threads, which would otherwise
-    // deadlock on fork() inside subshell/command-substitution.
+    // start_context requires HSA to be alive. Defer it until HSA actually loads
+    // so LD_PRELOAD'd shells (which never touch HSA) do not initialize HSA worker
+    // threads, which would otherwise deadlock on fork() in subshells. The counting
+    // service itself is declared earlier in tool_init (see note there).
     if (g_tool_shutting_down.load(std::memory_order_acquire))
         return;
 
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
-    g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                dispatch_callback,
-                                                                user_data,
-                                                                record_callback,
-                                                                user_data);
     g_sdk_wrapper->start_context(get_client_ctx());
 }
 
@@ -135,6 +130,21 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       0,
                                                       tool_tracing_callback,
                                                       user_data);
+
+    // Declare counter-collection intent here (before HSA loads) so the SDK's
+    // queue-interposition gate, which runs at HSA-table registration, installs the
+    // legacy intercept path that counter collection needs. Configuring the service
+    // is HSA-free (no worker threads); the HSA-touching start_context stays deferred
+    // to on_hsa_runtime_loaded.
+    auto* tool_data = static_cast<std::unique_ptr<tool_data_t>*>(user_data);
+    if (tool_data && !tool_data->get()->requested_counters.empty())
+    {
+        g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                    dispatch_callback,
+                                                                    user_data,
+                                                                    record_callback,
+                                                                    user_data);
+    }
     return 0;
 }
 
