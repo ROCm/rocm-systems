@@ -464,6 +464,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
+  // HotSwap: also request the supported foreign source ISA so a mismatched
+  // fatbin lands in the code object map for forwarding (used only by the
+  // auto-forward branch below when no native/generic bundle matches).
+  static const char* kHotswapSourceGfx[] = {"gfx1250"};
+  for (const char* g : kHotswapSourceGfx) {
+    unique_isa_names.insert(std::string("amdgcn-amd-amdhsa--") + g);
+  }
+
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
   if (is_compressed) {
     if (!UncompressAndPopulateCodeObject(image_, unique_isa_names, code_obj_map)) {
@@ -490,6 +498,15 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
+      // HotSwap: first foreign gfx code object to forward when nothing matches.
+      auto hotswap_fwd_co = code_obj_map.end();
+      for (auto it = code_obj_map.begin(); it != code_obj_map.end(); ++it) {
+        if (it->first.rfind("amdgcn-amd-amdhsa--gfx", 0) == 0 &&
+            it->first != device_name && it->first != generic_target_name) {
+          hotswap_fwd_co = it;
+          break;
+        }
+      }
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
@@ -501,6 +518,16 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
         hip_status =
             AddDevProgram(device, generic_co->second.first, generic_co->second.second, fdesc);
+        if (hip_status != hipSuccess) {
+          break;
+        }
+      } else if (!HIP_FORCE_SPIRV_CODEOBJECT && hotswap_fwd_co != code_obj_map.end()) {
+        // HotSwap: no native/generic bundle matched; forward a foreign code
+        // object to the HSA loader for transpilation to the device ISA.
+        LogPrintfInfo("HotSwap: auto-forwarding foreign bundle %s for device %s",
+                      hotswap_fwd_co->first.c_str(), device_name.c_str());
+        hip_status = AddDevProgram(device, hotswap_fwd_co->second.first,
+                                   hotswap_fwd_co->second.second, fdesc);
         if (hip_status != hipSuccess) {
           break;
         }

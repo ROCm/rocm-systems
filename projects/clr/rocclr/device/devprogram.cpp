@@ -1780,9 +1780,19 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     }
 
     if (!amd::Isa::isCompatible(*binaryIsa, device().isa())) {
-      buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
-      buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
-      return false;
+      // HotSwap: let a foreign AMDGPU code object past the compat gate so the HSA
+      // loader can transpile it to the device ISA. Only reached on a real ISA
+      // mismatch; if no transpiler is loaded the loader fails later as before.
+      bool hotswap_ok =
+          std::string(binaryIsaName.data()).find("amdgcn-amd-amdhsa--gfx") != std::string::npos;
+      if (!hotswap_ok) {
+        buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
+        buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
+        return false;
+      }
+      buildLog_ += "HotSwap: allowing foreign program ISA " +
+                   std::string(binaryIsaName.data()) +
+                   " for transpilation to " + device().isa().isaName() + "\n";
     }
   }
 

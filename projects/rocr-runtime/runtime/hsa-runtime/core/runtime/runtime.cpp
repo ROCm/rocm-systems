@@ -2714,7 +2714,10 @@ void Runtime::LoadTools() {
               getpid(), rocp_reg_status, rocprofiler_register_error_string(rocp_reg_status));
     }
 
-    bool allow_v1_registration = false;
+    // HotSwap: load v1 HSA_TOOLS_LIB tools alongside rocprofiler-register (v3) so the
+    // hotswap tool loads without HSA_TOOLS_ROCPROFILER_V1_TOOLS. Scoped to when a tool
+    // lib is set, so the no-tool fast path is unchanged.
+    bool allow_v1_registration = !flag().tools_lib_names().empty();
     if (os::IsEnvVarSet("HSA_TOOLS_ROCPROFILER_V1_TOOLS")) {
       // assume true if env variable is set
       allow_v1_registration = true;
