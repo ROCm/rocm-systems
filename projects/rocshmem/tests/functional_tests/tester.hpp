@@ -161,7 +161,8 @@
   X(TileGetArbitrary,          116)  \
   X(ReduceOnStream,            117)  \
   X(HostCtxCreate,             118)  \
-  X(TeamSplit2D,               119)
+  X(TeamSplit2D,               119)  \
+  X(HostTeamSyncBarrier,       120)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

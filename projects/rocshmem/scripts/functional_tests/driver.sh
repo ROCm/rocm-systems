@@ -134,6 +134,7 @@ declare -A TEST_NUMBERS=(
   ["reduce_on_stream"]="117"
   ["host_ctx_create"]="118"
   ["teamsplit2d"]="119"
+  ["hostteamsyncbarrier"]="120"
 )
 
 # Detect which runtime to use
@@ -774,6 +775,11 @@ TestOther() {
   ExecTest  "teamctxsubsetparentinfra" 5  1            1
   export ROCSHMEM_MAX_NUM_HOST_CONTEXTS=1024
   ExecTest  "host_ctx_create"          2       1            1
+  if [[ $TEST != ro* ]]; then # host team sync/barrier hangs on RO
+  ExecTest  "hostteamsyncbarrier"      2  1            1
+  ExecTest  "hostteamsyncbarrier"      4  1            1
+  ExecTest  "hostteamsyncbarrier"      8  1            1
+  else echo "Skip:   hostteamsyncbarrier (host team sync/barrier hangs on RO)"; fi
   unset ROCSHMEM_MAX_NUM_CONTEXTS
   unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
   
@@ -835,7 +841,7 @@ TestHeatMapRMA() {
   NOTIMEOUT=1
   NOVERIF=1
   # Batch rotation allocates volume*batch*2 = 20 GiB; use 22 GiB to leave headroom
-  ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$((22*1024*1024*1024))}
+  ROCSHMEM_HEAP_SIZE=$(( ROCSHMEM_HEAP_SIZE > 22*1024*1024*1024 ? ROCSHMEM_HEAP_SIZE : 22*1024*1024*1024 ))
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
