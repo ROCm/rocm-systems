@@ -100,10 +100,12 @@ endif()
 
 find_package(PMIx)
 
-# When PMIx is missing (common in minimal Open MPI installs), still support
-# ROCSHMEM_TEST_UUID via MPI_Bcast in test_driver.cpp so VMM-POSIX builds avoid
-# rocshmem_init() -> library_init(MPI_COMM_WORLD).
-if(MPI_CXX_FOUND AND NOT PMIx_FOUND)
+# MPI_Bcast bootstrap for ROCSHMEM_TEST_UUID in test_driver.cpp whenever MPI is
+# available. HAVE_PMIX (below) still wins at compile time (#ifdef order), but
+# this covers builds where PMIx is "found" by CMake yet HAVE_PMIX does not end
+# up defined or PMIx runtime bootstrap is unusable — without this path, drivers
+# fall back to rocshmem_init() and abort with USE_HEAP_DEVICE_VMM_POSIX (E-001h).
+if(MPI_CXX_FOUND)
   target_compile_definitions(${PROJECT_NAME} PRIVATE ROCSHMEM_TEST_UUID_USE_MPI=1)
 endif()
 
