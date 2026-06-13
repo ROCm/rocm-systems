@@ -186,7 +186,7 @@ __host__ QueuePairMux::~QueuePairMux() {
 }
 
 __device__ void QueuePairMux::quiet_single() {
-  switch (provider) {
+  switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     return qp.ionic.quiet_single();
