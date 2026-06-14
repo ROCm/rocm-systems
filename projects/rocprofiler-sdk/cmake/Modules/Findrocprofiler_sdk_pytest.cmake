@@ -51,7 +51,8 @@ if(rocprofiler_sdk_pytest_FOUND AND NOT TARGET rocprofiler_sdk_pytest::Pytest)
     function(rocprofiler_sdk_pytest_discover_tests NAME)
         set(_BOOL_ARGS STRIP_PARAM_BRACKETS INCLUDE_FILE_PATH BUNDLE_TESTS)
 
-        set(_SINGLE_VALUE_ARGS WORKING_DIRECTORY TRIM_FROM_NAME TRIM_FROM_FULL_NAME)
+        set(_SINGLE_VALUE_ARGS WORKING_DIRECTORY TRIM_FROM_NAME TRIM_FROM_FULL_NAME
+                               PYTHON_EXECUTABLE)
 
         set(_MULTI_VALUE_ARGS
             TEST_PATHS LIBRARY_PATH_PREPEND PYTHON_PATH_PREPEND ENVIRONMENT PROPERTIES
@@ -97,6 +98,14 @@ if(rocprofiler_sdk_pytest_FOUND AND NOT TARGET rocprofiler_sdk_pytest::Pytest)
             endforeach()
         endif()
 
+        if(NOT _PYTHON_EXECUTABLE)
+            find_package(
+                Python3
+                COMPONENTS Interpreter
+                REQUIRED)
+            set(_PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+        endif()
+
         # Set default working directory if none is specified.
         if(NOT _WORKING_DIRECTORY)
             set(_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -119,6 +128,7 @@ if(rocprofiler_sdk_pytest_FOUND AND NOT TARGET rocprofiler_sdk_pytest::Pytest)
             DEPENDS ${_DEPENDS}
             COMMAND
                 ${CMAKE_COMMAND} -D "PYTEST_EXECUTABLE=${ROCPSDK_PYTEST_EXECUTABLE}" -D
+                "PYTEST_PYTHON_EXECUTABLE=${_PYTHON_EXECUTABLE}" -D
                 "TEST_PATHS=${_TEST_PATHS}" -D "TEST_GROUP_NAME=${NAME}" -D
                 "BUNDLE_TESTS=${_BUNDLE_TESTS}" -D "LIBRARY_ENV_NAME=${LIBRARY_ENV_NAME}"
                 -D "LIBRARY_PATH=${LIBRARY_PATH}" -D "PYTHON_PATH=${PYTHON_PATH}" -D

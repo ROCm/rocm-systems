@@ -26,7 +26,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.mi_gpu_spec import MIGPUSpecs, mi_gpu_specs
 from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
@@ -288,14 +288,9 @@ def extract_machine_info() -> dict[str, Any]:
 
 @demarcate
 def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
-    # Partition is only supported on >= MI 300 series
-    # (gpu_arch should be gfx940 or higher for MI300+)
-    is_partition_supported = False
-    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
-        try:
-            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
-        except ValueError:
-            pass  # Invalid hex string, keep is_partition_supported as False
+    is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
+        gpu_arch=gpu_arch, gpu_model=None
+    )
 
     result: dict[str, Optional[str]] = {
         "vbios": None,
@@ -958,17 +953,22 @@ def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, i
         console_error("Failed to retrieve GPU cache information from AMD-SMI.")
 
     cache_sizes = {}
+
+    # vL1D is the level-1 data cache with the most instances (one per CU).
+    # Match by instance count, not num_cu, to stay correct on harvested parts.
+    l1_data_caches = [
+        cache_values
+        for cache_values in cache_info["cache"]
+        if cache_values["cache_level"] == 1
+        and "DATA_CACHE" in cache_values["cache_properties"]
+    ]
+    if l1_data_caches:
+        vl1d = max(l1_data_caches, key=lambda cache: cache["num_cache_instance"])
+        cache_sizes["L1"] = vl1d["cache_size"] * 1024
+
+    # L2 and L3/MALL cache sizes
     for cache_values in cache_info["cache"]:
-        # Cache level is L1 and we are looking for vL1d which means
-        # there should be a cache instance per CU available on the GPU
-        if (
-            cache_values["cache_level"] == 1
-            and cache_values["num_cache_instance"] == num_cu
-        ):
-            cache_sizes["L1"] = cache_values["cache_size"] * 1024
-        # Cache levels L2 and L3/MALL are shared across all CUs
-        # therefore only have one cache instance
-        elif cache_values["cache_level"] == 2:
+        if cache_values["cache_level"] == 2:
             cache_sizes["L2"] = cache_values["cache_size"] * 1024
         elif cache_values["cache_level"] == 3 and num_dies > 0:
             cache_sizes["MALL"] = int(cache_values["cache_size"] * 1024 / num_dies)

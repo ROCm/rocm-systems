@@ -22,12 +22,44 @@
 
 #pragma once
 
+#include "cow_ptr.hpp"
 #include "rocprof_trace_decoder/cxx/common.hpp"
 #include "rocprof_trace_decoder/cxx/segment.hpp"
 
 // Pull the unified types into the global namespace for internal library use.
 using address_range_t = rocprof_trace_decoder::codeobj::address_range_t;
 using CodeobjTableTranslator = rocprof_trace_decoder::codeobj::CodeobjTableTranslator;
+
+// A CowPtr-shared CodeobjTableTranslator paired with a single-entry lookup cache.
+// The cache lives here, next to the CowPtr, not inside the shared translator: each
+// CSRegisterHandler owns its own CachedTable and is driven single-threaded, so the
+// cache is never shared across threads, while the underlying translator (handed out
+// as shared_ptr<const T> via read()) stays immutable and safe for concurrent reads.
+struct CachedTable
+{
+    // Cached lookup over the shared translator. Uses read() so it never forks the CowPtr.
+    bool find(uint64_t addr, address_range_t& out) const
+    {
+        if (!cached_segment.inrange(addr))
+            if (!table.read().find_codeobj_in_range(addr, cached_segment)) return false;
+        out = cached_segment;
+        return true;
+    }
+
+    const CodeobjTableTranslator& read() const { return table.read(); }
+
+    // Mutating access invalidates the cache, since the ranges may change.
+    CodeobjTableTranslator& write()
+    {
+        cached_segment = {};
+        return table.write();
+    }
+
+    bool null() const { return table.null(); }
+
+    CowPtr<CodeobjTableTranslator> table{};
+    mutable address_range_t cached_segment{};
+};
 
 inline bool operator==(const pcinfo_t& a, const pcinfo_t& b)
 {
@@ -46,5 +78,6 @@ template <> struct std::hash<pcinfo_t>
     }
 };
 
-/// Internal helper: translate a raw virtual address to a pcinfo_t using the table.
-pcinfo_t ToPcV2(CodeobjTableTranslator& table, uint64_t pc);
+/// Internal helper: translate a raw virtual address to a pcinfo_t, going through
+/// a CachedTable so repeated lookups hit the cache.
+pcinfo_t ToPcV2(const CachedTable& table, uint64_t pc);

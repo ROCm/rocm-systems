@@ -35,6 +35,16 @@ from vendored import yaml
 
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+
+
+def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
+    """Map GPU architectures to the shared analysis-config directory name."""
+    if gpu_arch is None:
+        return None
+    if gpu_arch.startswith("gfx115"):
+        return "gfx115x"
+    return gpu_arch
 
 
 def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
@@ -622,9 +632,10 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
 
 
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:
-    """Return True if all requested blocks are PC sampling (block 21)."""
+    """Return True if all requested blocks are PC sampling (block 21 or the
+    ``pc_sampling`` alias)."""
     return bool(filter_blocks) and all(
-        block in ["21", "pc_sampling"] for block in filter_blocks
+        block in PC_SAMPLING_BLOCK_IDS for block in filter_blocks
     )
 
 

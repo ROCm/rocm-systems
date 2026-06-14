@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
-import json
 import re
 import warnings
 from pathlib import Path
@@ -17,7 +16,7 @@ from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import schema, utils_analysis
 from utils.analysis_orm import Database
-from utils.file_io import process_pc_sampling_kernel_trace
+from utils.file_io import load_pc_sampling_results, process_pc_sampling_kernel_trace
 from utils.logger import (
     console_debug,
     console_error,
@@ -76,10 +75,19 @@ class db_analysis(OmniAnalyze_Base):
             )
 
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
-        self._pc_sampling_data_per_workload = self.calc_pc_sampling_data()
+        pc_sampling_tool_data = (
+            {path: load_pc_sampling_results(path) for path in self._runs}
+            if self.pc_sampling_only()
+            else {}
+        )
+        self._pc_sampling_data_per_workload = self.calc_pc_sampling_data(
+            pc_sampling_tool_data
+        )
         self._pmc_df_per_workload = self.calc_pmc_df_data()
         self._pmc_df_per_workload = self.apply_pmc_filters()
-        self._dispatch_data_per_workload = self.calc_dispatch_data()
+        self._dispatch_data_per_workload = self.calc_dispatch_data(
+            pc_sampling_tool_data
+        )
         (
             self._metrics_info_data_per_workload,
             self._metric_expression_data_per_workload,
@@ -370,18 +378,18 @@ class db_analysis(OmniAnalyze_Base):
             console_debug("Collected roofline ceilings")
         return roofline_ceilings_per_workload
 
-    def calc_pc_sampling_data(self) -> dict[str, pd.DataFrame]:
+    def calc_pc_sampling_data(
+        self,
+        tool_data_per_workload: dict[str, Optional[dict[str, Any]]],
+    ) -> dict[str, pd.DataFrame]:
         pc_sampling_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
-            if not (Path(workload_path) / "ps_file_results.json").exists():
+            pc_sampling_data = tool_data_per_workload.get(workload_path)
+            if pc_sampling_data is None:
                 console_warning(f"PC sampling data not found for {workload_path}.")
                 continue
 
-            pc_sampling_data = json.loads(
-                (Path(workload_path) / "ps_file_results.json").read_text()
-            )
-            pc_sampling_data = pc_sampling_data["rocprofiler-sdk-tool"][0]
             pc_sampling_stochastic = pc_sampling_data["buffer_records"][
                 "pc_sample_stochastic"
             ]
@@ -873,12 +881,16 @@ class db_analysis(OmniAnalyze_Base):
 
         return metrics_info_data_per_workload, metric_expression_data_per_workload
 
-    def calc_dispatch_data(self) -> dict[str, pd.DataFrame]:
+    def calc_dispatch_data(
+        self,
+        tool_data_per_workload: dict[str, Optional[dict[str, Any]]],
+    ) -> dict[str, pd.DataFrame]:
         dispatch_data_per_workload: dict[str, pd.DataFrame] = {}
 
         for workload_path in self._runs.keys():
             if self.pc_sampling_only():
-                trace_df = process_pc_sampling_kernel_trace(workload_path)
+                tool_data = tool_data_per_workload.get(workload_path)
+                trace_df = process_pc_sampling_kernel_trace(tool_data)
                 trace_df = pd.DataFrame({
                     "dispatch_id": trace_df["Dispatch_Id"],
                     "kernel_name": trace_df["Kernel_Name"],

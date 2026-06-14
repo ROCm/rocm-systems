@@ -212,13 +212,10 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_CreatesContext)
     EXPECT_EQ(m_sdk_wrapper->get_created_contexts().size(), 1u);
 }
 
-TEST_F(TestRocprofilerComputeTool, OnHsaInterceptCallback_ConfiguresDispatchCountingService)
+TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
-    cfg->initialize(nullptr, cfg->tool_data);
-    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
-    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
-    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
     ASSERT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
     const auto& args = m_sdk_wrapper->get_dispatch_counting_service_info()[0];
     EXPECT_EQ(args.context, m_sdk_wrapper->get_created_contexts()[0]);
@@ -263,15 +260,27 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_
     EXPECT_EQ(m_counters_writer->get_write_counters_info()[0].kernel_id, std::vector{kernel_id0});
 }
 
-// Regression guard for the HSA-init-in-shell-then-fork deadlock: tool_init
-// must not call into HSA-touching SDK services. Counter collection setup and
-// context activation must only happen via the HSA intercept callback.
-TEST_F(TestRocprofilerComputeTool, ToolInit_DoesNotStartContextOrConfigureCountingService)
+// Counter intent is declared in tool_init so the SDK queue-interposition gate
+// sees it before HSA loads. The HSA-touching start_context must stay deferred
+// to the intercept callback (regression guard for the fork deadlock when the
+// tool is preloaded into non-GPU processes).
+TEST_F(TestRocprofilerComputeTool, ToolInit_ConfiguresCountingServiceButDoesNotStartContext)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
     EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+}
+
+// Without requested counters there is nothing to collect, so tool_init must not
+// configure the counting service.
+TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_DoesNotConfigureCountingService)
+{
+    m_input_parameters->set_requested_counters("");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
     EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
+    EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
 }
 
 TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_RegistersHsaInterceptCallback)
@@ -282,7 +291,7 @@ TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_RegistersHsaInterceptCal
     EXPECT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info()[0].user_data, cfg->tool_data);
 }
 
-TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_StartsContextAndConfiguresCountingService)
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_StartsContext)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
     ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
@@ -290,13 +299,12 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_StartsContextAndConfigur
     const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
     EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
-    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
     compare_counter_config_ids(m_sdk_wrapper->get_created_contexts(),
                                m_sdk_wrapper->get_started_contexts());
 }
 
-// The SDK may fire the HSA intercept callback more than once. Counter setup
-// and context start must run exactly once per process.
+// The SDK may fire the HSA intercept callback more than once. Context start
+// must run exactly once per process.
 TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_IsIdempotent)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
@@ -306,11 +314,10 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_IsIdempotent)
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
     EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
-    EXPECT_EQ(m_sdk_wrapper->get_dispatch_counting_service_info().size(), 1u);
 }
 
-// If HSA loads after tool_fini has run, the callback must not dereference
-// the freed tool_data pointer it captured at registration time.
+// If HSA loads after tool_fini has run, the callback must not start a context
+// or dereference the freed tool_data pointer it captured at registration time.
 TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AfterToolFini_IsNoOp)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
@@ -320,7 +327,6 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AfterToolFini_IsNoOp)
     const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
     EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
-    EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
 }
 
 //////////////////////////////////////////////////////////////////////////

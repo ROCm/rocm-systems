@@ -2,6 +2,7 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
+
 ## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
 
 ### Added
@@ -11,6 +12,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added LDS arithmetic intensity as a roofline plot point and analysis database field.
 
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
+
+* Added support for GPU metrics on gfx1150 and gfx1152 hardware.
+
+* Added roofline benchmarking support for gfx1150 and gfx1152 hardware.
 
 ### Changed
 
@@ -25,11 +30,17 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Number of kernel dispatches
     * Min/Max/Mean and Total duration of kernel dispatches
 
+* `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed. The first run builds and caches a helper under `~/.cache/rocprofiler-compute/`, so it takes longer than later runs.
+
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 
 * Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
 
 * Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
+
+* PC sampling in profile mode now opts in via the `--experimental --pc-sampling` option. Explicit `-b 21` / `--block 21` is no longer accepted on its own.
+
+* PC sampling analysis without kernel filtering now reads the results JSON, as a prerequisite for showing the detailed per-instruction stall-reason view consistent with single-kernel filtering. This increases no-filter analysis time and memory for large workloads.
 
 ### Removed
 
@@ -54,6 +65,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Kernels with missing counter data after iteration multiplexing imputation are now excluded from metrics calculations. A warning at analysis time lists the affected kernels. Their execution times remain visible in Top Stats.
 
 * Fixed empirical roofline benchmark to correctly produce double the Matrix BF16 Gflop/s on gfx90a (MI 200 series) GPUs
+
+* PC sampling collection now runs when requested via the `pc_sampling` block alias (`--block pc_sampling`), instead of being silently skipped
 
 ### Upcoming changes
 

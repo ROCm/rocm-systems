@@ -18,13 +18,22 @@
 
 using namespace rocprofiler_compute_tool;
 
-static std::shared_ptr<InputParameters> g_input_parameters = std::make_shared<EnvInputParameters>();
-static std::shared_ptr<SdkWrapper>      g_sdk_wrapper      = std::make_shared<SdkWrapperImpl>();
-static std::shared_ptr<SdkCallbacks> g_sdk_callbacks = std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper);
-static std::shared_ptr<CountersWriter> g_counters_writer = std::make_shared<CsvCountersWriter>();
-static std::shared_ptr<rocprofiler_tool_configure_result_t> g_cfg;
-static std::atomic<bool>                                    g_tool_shutting_down{false};
-static std::atomic<bool>                                    g_hsa_intercept_done{false};
+// Heap-allocated and never destroyed on purpose: rocprofiler-sdk calls our
+// callbacks and tool_fini from its own _dl_fini, after this library's static
+// destructors would have freed them. Process lifetime avoids a teardown
+// use-after-destruction.
+static std::shared_ptr<InputParameters>& g_input_parameters = *new std::shared_ptr<InputParameters>(
+    std::make_shared<EnvInputParameters>());
+static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrapper>(
+    std::make_shared<SdkWrapperImpl>());
+static std::shared_ptr<SdkCallbacks>& g_sdk_callbacks = *new std::shared_ptr<SdkCallbacks>(
+    std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper));
+static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr<CountersWriter>(
+    std::make_shared<CsvCountersWriter>());
+static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
+    *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
+static std::atomic<bool> g_tool_shutting_down{false};
+static std::atomic<bool> g_hsa_intercept_done{false};
 
 void test_knobs::set_input_parameters(const std::shared_ptr<InputParameters>& input_parameters)
 {
@@ -95,28 +104,22 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_instance*/,
                            void** /*tables*/,
                            uint64_t /*num_tables*/,
-                           void* user_data)
+                           void* /*user_data*/)
 {
-    // Counter collection and context start require HSA to be alive. Defer
-    // them until HSA actually loads so that LD_PRELOAD'd shells (which never
-    // touch HSA) do not initialize HSA worker threads, which would otherwise
-    // deadlock on fork() inside subshell/command-substitution.
+    // Defer start_context until HSA loads: it starts HSA worker threads, which
+    // would deadlock on fork() in non-GPU LD_PRELOAD'd shells.
     if (g_tool_shutting_down.load(std::memory_order_acquire))
         return;
 
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
-    g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                dispatch_callback,
-                                                                user_data,
-                                                                record_callback,
-                                                                user_data);
     g_sdk_wrapper->start_context(get_client_ctx());
 }
 
 int tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
+    assert(user_data);
     std::clog << "[rocprofiler-compute] In tool init\n";
     g_sdk_wrapper->create_context(&get_client_ctx());
 
@@ -126,6 +129,18 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       0,
                                                       tool_tracing_callback,
                                                       user_data);
+
+    // Declare counters before HSA loads so the SDK picks the legacy intercept path;
+    // queue interposition (the default) cannot collect counters.
+    auto* tool_data_ptr = static_cast<std::unique_ptr<tool_data_t>*>(user_data);
+    if (!tool_data_ptr->get()->requested_counters.empty())
+    {
+        g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                    dispatch_callback,
+                                                                    user_data,
+                                                                    record_callback,
+                                                                    user_data);
+    }
     return 0;
 }
 
