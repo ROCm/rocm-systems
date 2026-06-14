@@ -897,6 +897,7 @@ def _emit_ctest_header_block() -> list[str]:
         "#   ROCPROFSYS_TEST_DIR         - Path to test package directory or .pyz file",
         "#   ROCPROFSYS_TEST_EXECUTABLE  - Python or pytest executable to use",
         "#   ROCPROFSYS_PYTHON_HINTS     - Additional search paths for versioned Python interpreters",
+        "#   LIBVA_DRIVERS_PATH          - Forwarded to subprocess tests (VA / rocJPEG); export before ctest",
         "#",
         "",
         "if(DEFINED ENV{ROCPROFSYS_TEST_DIR} AND NOT DEFINED ROCPROFSYS_TEST_DIR)",
