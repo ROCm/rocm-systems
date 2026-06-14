@@ -287,8 +287,12 @@ class TestConfigProcessor:
         Returns:
             list: Tests with defaults applied
         """
-        # Fields that can have defaults at config level
-        default_fields = ["is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout"]
+        # Fields that can have defaults at config level. is_pytest/test_dir/
+        # python_bin/setup_venv/venv_dir/requirements drive pytest-harness suites.
+        default_fields = [
+            "is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout",
+            "is_pytest", "test_dir", "python_bin", "setup_venv", "venv_dir", "requirements",
+        ]
 
         processed_tests = []
         for test in tests:
@@ -339,7 +343,13 @@ class TestConfigProcessor:
                 "num_ranks": combined_config.get("num_ranks"),
                 "num_nodes": combined_config.get("num_nodes"),
                 "num_gpus": combined_config.get("num_gpus", 8),
-                "timeout": combined_config.get("timeout")
+                "timeout": combined_config.get("timeout"),
+                "is_pytest": combined_config.get("is_pytest"),
+                "test_dir": combined_config.get("test_dir"),
+                "python_bin": combined_config.get("python_bin"),
+                "setup_venv": combined_config.get("setup_venv"),
+                "venv_dir": combined_config.get("venv_dir"),
+                "requirements": combined_config.get("requirements"),
             }
             # Remove None values
             config_defaults = {k: v for k, v in config_defaults.items() if v is not None}
@@ -351,7 +361,13 @@ class TestConfigProcessor:
                 "num_ranks": suite.get("num_ranks"),
                 "num_nodes": suite.get("num_nodes"),
                 "num_gpus": suite.get("num_gpus"),
-                "timeout": suite.get("timeout")
+                "timeout": suite.get("timeout"),
+                "is_pytest": suite.get("is_pytest"),
+                "test_dir": suite.get("test_dir"),
+                "python_bin": suite.get("python_bin"),
+                "setup_venv": suite.get("setup_venv"),
+                "venv_dir": suite.get("venv_dir"),
+                "requirements": suite.get("requirements"),
             }
             # Remove None values
             suite_defaults = {k: v for k, v in suite_defaults.items() if v is not None}

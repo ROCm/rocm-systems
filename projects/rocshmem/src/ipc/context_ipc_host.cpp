@@ -97,12 +97,25 @@ __host__ void IPCHostContext::sync_all() {
   host_interface->sync_all(context_window_info);
 }
 
+__host__ void IPCHostContext::sync(rocshmem_team_t team) {
+  host_interface->sync(team, context_window_info);
+}
+
 __host__ void IPCHostContext::barrier_all() {
   host_interface->barrier_all(context_window_info);
 }
 
+__host__ void IPCHostContext::barrier(rocshmem_team_t team) {
+  host_interface->barrier(team, context_window_info);
+}
+
 __host__ void IPCHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
+}
+
+__host__ void IPCHostContext::barrier_on_stream(rocshmem_team_t team,
+                                                hipStream_t stream) {
+  host_interface->barrier_on_stream(team, stream);
 }
 
 __host__ void IPCHostContext::quiet_on_stream(hipStream_t stream) {
@@ -112,6 +125,11 @@ __host__ void IPCHostContext::quiet_on_stream(hipStream_t stream) {
 
 __host__ void IPCHostContext::sync_all_on_stream(hipStream_t stream) {
   host_interface->sync_all_on_stream(stream);
+}
+
+__host__ void IPCHostContext::sync_on_stream(rocshmem_team_t team,
+                                             hipStream_t stream) {
+  host_interface->sync_on_stream(team, stream);
 }
 
 __host__ void IPCHostContext::alltoallmem_on_stream(rocshmem_team_t team,

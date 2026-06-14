@@ -46,6 +46,7 @@ env:
 
 jobs:
   core-deb:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
@@ -76,17 +77,6 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - &install_latest_nightly_rocm
-      name: Install Latest Nightly ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        mv "${{ env.ROCM_PATH }}-${{ matrix.system.gpu-target }}.tar.gz" .
-        rm -rf ${{ env.ROCM_PATH }}*
-        mkdir -p "${{ env.ROCM_PATH }}"
-        tar -xf "rocm-${{ matrix.system.gpu-target }}.tar.gz" -C "${{ env.ROCM_PATH }}"
-        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
     - name: Git Symlink
       shell: bash
       run: |
@@ -133,6 +123,7 @@ jobs:
           -S $(pwd)/projects/aqlprofile/dashboard.cmake
 
   core-rpm:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Core • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
@@ -165,8 +156,6 @@ jobs:
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
-
-    - *install_latest_nightly_rocm
 
     - name: Install requirements
       timeout-minutes: 10
