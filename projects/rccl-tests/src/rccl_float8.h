@@ -94,8 +94,8 @@ inline std::ostream& operator<<(std::ostream& os, const __hip_fp8_e5m2_fnuz& bf8
 
 extern bool rccl_float8_useFnuz;
 
-// For older versions of ROCm that do not include hip_fp8.h,
-// we provide a local version of the header file as a fallback.
+// For ROCm versions or target architectures that do not support hip_fp8.h,
+// we provide a local implementation as a fallback.
 #else
 
 #define HIP_HOST_DEVICE __host__ __device__
