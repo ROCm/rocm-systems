@@ -300,7 +300,8 @@ namespace RcclUnitTesting
                             size_t         const  numElements,
                             PtrUnion       const& expected,
                             bool           const  verbose,
-                            bool&                 isMatch)
+                            bool&                 isMatch,
+                            float          const  fp8Tolerance)
   {
     isMatch = true;
     size_t idx = 0;
@@ -314,11 +315,11 @@ namespace RcclUnitTesting
       case ncclUint32:  isMatch = (U4[idx] == expected.U4[idx]); break;
       case ncclInt64:   isMatch = (I8[idx] == expected.I8[idx]); break;
       case ncclUint64:  isMatch = (U8[idx] == expected.U8[idx]); break;
-      case ncclFloat8e4m3: isMatch = (fabs(float(F1[idx]) - float(expected.F1[idx])) < 9e-2); break;
+      case ncclFloat8e4m3: isMatch = (fabs(float(F1[idx]) - float(expected.F1[idx])) < fp8Tolerance); break;
       case ncclFloat16: isMatch = (fabs(__half2float(F2[idx]) - __half2float(expected.F2[idx])) < 9e-2); break;
       case ncclFloat32: isMatch = (fabs(F4[idx] - expected.F4[idx]) < 1e-5); break;
       case ncclFloat64: isMatch = (fabs(F8[idx] - expected.F8[idx]) < 1e-12); break;
-      case ncclFloat8e5m2: isMatch = (fabs(float(B1[idx]) - float(expected.B1[idx])) < 9e-2); break;
+      case ncclFloat8e5m2: isMatch = (fabs(float(B1[idx]) - float(expected.B1[idx])) < fp8Tolerance); break;
       case ncclBfloat16: isMatch = (fabs((float)B2[idx] - (float)expected.B2[idx]) < 9e-2); break;
       default:
         TEST_ERROR("Unsupported datatype");

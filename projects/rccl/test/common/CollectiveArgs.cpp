@@ -138,11 +138,23 @@ namespace RcclUnitTesting
     CHECK_HIP(hipMemcpy(this->outputCpu.ptr, this->outputGpu.ptr, numOutputBytes, hipMemcpyDeviceToHost));
 
     bool isMatch = true;
+    float fp8Tolerance = 9e-2f;
+    auto isPowerOfTwo = [](int value) { return value > 0 && (value & (value - 1)) == 0; };
+    // FP8 avg with fused bias on non-pow2 ranks can diverge from host expected path due to
+    // low-precision reciprocal quantization in device PreMulSum implementation.
+    if (this->options.useBias &&
+        this->options.redOp == ncclAvg &&
+        (this->dataType == ncclFloat8e4m3 || this->dataType == ncclFloat8e5m2) &&
+        !isPowerOfTwo(this->totalRanks))
+    {
+      fp8Tolerance = 0.13f;
+    }
     CHECK_CALL(this->outputCpu.IsEqual(this->dataType,
                                        this->numOutputElements,
                                        this->expected,
                                        true,
-                                       isMatch));
+                                       isMatch,
+                                       fp8Tolerance));
     if (!isMatch) TEST_ERROR("Mismatch for %s", this->GetDescription().c_str());
     return isMatch ? TEST_SUCCESS : TEST_FAIL;
   }
