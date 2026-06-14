@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
+from interface.pmc_frame import process_rocpd_csv as process_rocpd_csv
 from utils.logger import (
     console_debug,
     console_error,
@@ -17,7 +18,6 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.profile_artifacts.pmc_frame import process_rocpd_csv as process_rocpd_csv
 
 NS_TO_MS = 1.0 / 1_000_000.0
 

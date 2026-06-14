@@ -13,6 +13,8 @@ from typing import Any, Optional, TextIO
 import pandas as pd
 
 import config
+from interface.factory import create_profile_artifact_reader
+from interface.profile_artifacts import ArtifactReaderOptions
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.logger import (
@@ -23,8 +25,6 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.expression import build_metric_value_string
-from utils.profile_artifacts.factory import create_profile_artifact_reader
-from utils.profile_artifacts.interfaces import ArtifactReaderOptions
 from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     is_workload_empty,

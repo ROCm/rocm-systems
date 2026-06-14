@@ -26,10 +26,32 @@ def test_import_guard_allows_stdlib_and_project():
 
         # 2. Project modules (must succeed - sys.path includes src/)
         import config
+        import interface
+        import orchestrator
         import utils
 
         assert utils is not None
+        assert interface is not None
+        assert orchestrator is not None
         assert config is not None
+
+
+def test_import_guard_allows_artifact_writer_factory():
+    """Verify profile artifact writer imports stay profile-mode safe."""
+    from conftest import ProfileModeImportGuard
+
+    if "pandas" in sys.modules:
+        del sys.modules["pandas"]
+
+    with ProfileModeImportGuard():
+        from interface.factory import create_profile_artifact_writer
+
+        csv_writer = create_profile_artifact_writer("csv")
+        rocpd_writer = create_profile_artifact_writer("rocpd")
+
+    assert csv_writer is not None
+    assert rocpd_writer is not None
+    assert "pandas" not in sys.modules
 
 
 def test_import_guard_allows_rocm_modules():

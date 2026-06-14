@@ -982,7 +982,7 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
     # Stub the conversion so the test doesn't depend on csv_ops pivot logic,
     # but process_rocprofv3_output itself runs and exercises Path.glob.
     monkeypatch.setattr(
-        "utils.utils_profile.v3_counter_csv_to_v2_csv",
+        "interface.csv_data.v3_counter_csv_to_v2_csv",
         lambda *a, **k: converted_file.write_text(
             "GPU_ID,Kernel_Name,SQ_WAVES\n0,test_kernel,100\n"
         ),
@@ -1019,7 +1019,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: csv_files
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: csv_files
     )
 
     # Mock csv_ops functions to avoid disk I/O
@@ -1089,7 +1089,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -1118,7 +1118,7 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
@@ -1176,15 +1176,15 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "utils.profile_data.rocpd_data.update_rocpd_pmc_events",
+        "interface.rocpd_data.update_rocpd_pmc_events",
         lambda *a, **k: update_calls.append(a),
     )
     monkeypatch.setattr(
-        "utils.profile_data.rocpd_data.convert_dbs_to_csv",
+        "interface.rocpd_data.convert_dbs_to_csv",
         lambda *a, **k: None,
     )
     monkeypatch.setattr(
-        "utils.profile_data.rocpd_data.console_debug",
+        "interface.rocpd_data.console_debug",
         lambda msg, *a, **k: debug_msgs.append(msg),
     )
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -1221,7 +1221,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -1290,7 +1290,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
         "utils.utils_profile.capture_subprocess_output", mock_capture_subprocess_output
     )
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -1334,7 +1334,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: csv_files
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: csv_files
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -1406,7 +1406,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: [results_csv]
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: [results_csv]
     )
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
@@ -1517,7 +1517,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output", lambda *a, **k: []
+        "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
 
     capture_subprocess_called_with_env = None
@@ -1719,7 +1719,7 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
         lambda *a, **k: (True, "Success"),
     )
     monkeypatch.setattr(
-        "utils.utils_profile.process_rocprofv3_output",
+        "interface.csv_data.process_rocprofv3_output",
         lambda *a, **k: [results_csv],
     )
 
@@ -1730,7 +1730,7 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
         kokkos_trace_called_with = (wd, fb)
 
     monkeypatch.setattr(
-        "utils.utils_profile.process_kokkos_trace_output", mock_kokkos_trace
+        "interface.csv_data.process_kokkos_trace_output", mock_kokkos_trace
     )
 
     monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
@@ -1819,7 +1819,7 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
         Path(output_path).write_text("converted,data\ntest,value")
 
     monkeypatch.setattr(
-        "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
+        "interface.csv_data.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
     result = utils_profile.process_rocprofv3_output(workload_dir, False)
@@ -1860,12 +1860,12 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
         raise ValueError("Conversion failed")
 
     monkeypatch.setattr(
-        "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
+        "interface.csv_data.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
     warnings = []
     monkeypatch.setattr(
-        "utils.utils_profile.console_warning", lambda msg: warnings.append(msg)
+        "interface.csv_data.console_warning", lambda msg: warnings.append(msg)
     )
 
     result = utils_profile.process_rocprofv3_output(workload_dir, False)
@@ -1970,7 +1970,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
         Path(output_path).write_text(f"converted,data\n{Path(counter_path).stem},value")
 
     monkeypatch.setattr(
-        "utils.utils_profile.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
+        "interface.csv_data.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
     )
 
     result = utils_profile.process_rocprofv3_output(workload_dir, False)

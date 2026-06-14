@@ -49,6 +49,8 @@ class ProfileModeImportGuard:
         "rocprof_compute_soc",
         "rocprof_compute_tui",
         "utils",
+        "interface",
+        "orchestrator",
         "vendored",
         "roofline",
         "config",

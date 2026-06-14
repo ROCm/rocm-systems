@@ -10,14 +10,14 @@ import pandas as pd
 import yaml
 
 import config
+from interface.factory import create_profile_artifact_reader
+from interface.profile_artifacts import ArtifactReaderOptions
 from utils.logger import (
     console_error,
     console_log,
     console_warning,
     demarcate,
 )
-from utils.profile_artifacts.factory import create_profile_artifact_reader
-from utils.profile_artifacts.interfaces import ArtifactReaderOptions
 from utils.utils_common import canonical_config_arch, normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
