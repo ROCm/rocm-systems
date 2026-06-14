@@ -375,3 +375,5 @@ ROCP_SDK_ENFORCE_ABI(::PcSamplingExtTable, hsa_ven_amd_pcs_stop_fn, 6);
 ROCP_SDK_ENFORCE_ABI(::PcSamplingExtTable, hsa_ven_amd_pcs_flush_fn, 7);
 }  // namespace hsa
 }  // namespace rocprofiler
+
+// CI A/B baseline: intentional no-op to trigger the test matrix. No functional change. DO NOT MERGE.

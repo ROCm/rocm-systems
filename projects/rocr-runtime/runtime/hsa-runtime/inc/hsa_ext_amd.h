@@ -4699,3 +4699,5 @@ hsa_status_t hsa_amd_enable_logging(uint8_t* flags, void* file);
 #endif
 
 #endif  // header guard
+
+// CI A/B baseline: intentional no-op to trigger the test matrix. No functional change. DO NOT MERGE.

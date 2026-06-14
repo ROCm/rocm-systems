@@ -4943,3 +4943,5 @@ void VirtualGPU::MetaDataPreloader::SetPacket(
   metadata->header0 = metadata_header;
 }
 }  // End of roc namespace
+
+// CI A/B baseline: intentional no-op to trigger the test matrix. No functional change. DO NOT MERGE.
