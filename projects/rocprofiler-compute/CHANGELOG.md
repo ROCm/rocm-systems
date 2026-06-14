@@ -40,6 +40,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * PC sampling in profile mode now opts in via the `--experimental --pc-sampling` option. Explicit `-b 21` / `--block 21` is no longer accepted on its own.
 
+* PC sampling analysis without kernel filtering now reads the results JSON, as a prerequisite for showing the detailed per-instruction stall-reason view consistent with single-kernel filtering. This increases no-filter analysis time and memory for large workloads.
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.

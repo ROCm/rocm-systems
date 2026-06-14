@@ -17,17 +17,11 @@ num_devices = 1
 
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_host_trap.csv",
     "ps_file_results.json",
     "sysinfo.csv",
 ])
 
 PC_SAMPLING_STOCHASTIC_FILES = sorted([
-    "ps_file_agent_info.csv",
-    "ps_file_kernel_trace.csv",
-    "ps_file_pc_sampling_stochastic.csv",
     "ps_file_results.json",
     "sysinfo.csv",
 ])
