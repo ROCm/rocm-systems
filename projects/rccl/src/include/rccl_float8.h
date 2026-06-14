@@ -28,6 +28,10 @@
 typedef uint16_t fp8x2_storage_t;
 typedef uint64_t fp8x8_storage_t;
 
+#ifndef ENABLE_FP8_INTRINSICS
+#define ENABLE_FP8_INTRINSICS 1
+#endif
+
 #if __cplusplus < 201103L || (!defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__))
 /*! \brief Struct to represent a 8 bit floating-point number. */
 
@@ -66,7 +70,7 @@ typedef __hip_fp8_e5m2 rccl_bfloat8;
 #endif
 
 inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+#if ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
     typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
     typedef short shortx2_t __attribute__((ext_vector_type(2)));
     half2_t v1;
@@ -80,7 +84,7 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
     } u{0};
     u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
     return u.fp8[0];
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
     typedef float float2_t __attribute__((ext_vector_type(2)));
     float2_t v;
     uint32_t ival = 0;
@@ -95,7 +99,7 @@ inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
 }
 
 inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+#if ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
     typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
     typedef short shortx2_t __attribute__((ext_vector_type(2)));
     half2_t v1;
@@ -109,7 +113,7 @@ inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
     } u1{0};
     u1.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
     return u1.fp8[0];
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
     typedef float float2_t __attribute__((ext_vector_type(2)));
     float2_t v;
     uint32_t ival = 0;
@@ -124,7 +128,7 @@ inline __device__ rccl_bfloat8 hadd_b(rccl_bfloat8 x, rccl_bfloat8 y) {
 }
 
 inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+#if ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
     typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
     typedef short shortx2_t __attribute__((ext_vector_type(2)));
     half2_t v1;
@@ -138,7 +142,7 @@ inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
     } u{0};
     u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_fp8_f16(v1, v1, /* scale */ 1.f, 0);
     return u.fp8;
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
     typedef float float2_t __attribute__((ext_vector_type(2)));
     float2_t v;
     uint32_t ival = 0;
@@ -157,7 +161,7 @@ inline __device__ fp8x2_storage_t hadd2(fp8x2_storage_t x, fp8x2_storage_t y) {
 }
 
 inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
+#if ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
     typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
     typedef short shortx2_t __attribute__((ext_vector_type(2)));
     half2_t v1;
@@ -171,7 +175,7 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
     } u{0};
     u.i16_vec = __builtin_amdgcn_cvt_scalef32_pk_bf8_f16(v1, v1, /* scale */ 1.f, 0);
     return u.fp8;
-#elif __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
+#elif ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx942__)
     typedef float float2_t __attribute__((ext_vector_type(2)));
     float2_t v;
     uint32_t ival = 0;
@@ -195,7 +199,7 @@ inline __device__ fp8x2_storage_t hadd2_b(fp8x2_storage_t x, fp8x2_storage_t y) 
 // back in one cvt.
 
 inline __device__ fp8x8_storage_t hadd8(fp8x8_storage_t x, fp8x8_storage_t y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx1250__)
+#if ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx1250__)
     typedef float    v8f32_t  __attribute__((ext_vector_type(8)));
     typedef uint32_t v2u32_t  __attribute__((ext_vector_type(2)));
     union { fp8x8_storage_t u64; v2u32_t u32x2; } ux{x}, uy{y}, ur{0};
@@ -216,7 +220,7 @@ inline __device__ fp8x8_storage_t hadd8(fp8x8_storage_t x, fp8x8_storage_t y) {
 }
 
 inline __device__ fp8x8_storage_t hadd8_b(fp8x8_storage_t x, fp8x8_storage_t y) {
-#if __HIP_DEVICE_COMPILE__ && defined(__gfx1250__)
+#if ENABLE_FP8_INTRINSICS && __HIP_DEVICE_COMPILE__ && defined(__gfx1250__)
     typedef float    v8f32_t  __attribute__((ext_vector_type(8)));
     typedef uint32_t v2u32_t  __attribute__((ext_vector_type(2)));
     union { fp8x8_storage_t u64; v2u32_t u32x2; } ux{x}, uy{y}, ur{0};

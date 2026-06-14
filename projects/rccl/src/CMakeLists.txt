@@ -924,6 +924,13 @@ if (NOT DWORDX4_INTRINSICS)
   message(STATUS "Force disable dwordx4 intrinsics")
   target_compile_definitions(rccl PRIVATE DWORDX4_INTRINSICS_FORCE_OFF)
 endif()
+if(ENABLE_FP8_INTRINSICS)
+  message(STATUS "FP8 add intrinsics enabled")
+  target_compile_definitions(rccl PRIVATE ENABLE_FP8_INTRINSICS=1)
+else()
+  message(STATUS "FP8 add intrinsics disabled")
+  target_compile_definitions(rccl PRIVATE ENABLE_FP8_INTRINSICS=0)
+endif()
 ## Set RCCL linked library directories
 target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 
