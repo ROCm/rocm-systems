@@ -2121,17 +2121,7 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
     }
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        # Create stochastic PC sampling file to trigger single kernel path
-        stochastic_path = Path(temp_dir) / "test_pc_sampling_stochastic.csv"
-        stochastic_path.write_text("Correlation_Id,Instruction,Instruction_Comment\n")
-
-        # Create kernel trace file
-        kernel_trace_path = Path(temp_dir) / "test_kernel_trace.csv"
-        kernel_trace_path.write_text(
-            "Dispatch_Id,Kernel_Id,Kernel_Name\n1,0,kernel_a\n"
-        )
-
-        # Test with single kernel filter - valid index
+        # Test with single kernel filter - valid index, but results json missing
         workload.filter_kernel_ids = [0]  # kernel_a
         # Since json file is missing, it should return empty and warn
         with patch("utils.parser.console_warning") as mock_warning:
@@ -2142,9 +2132,12 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
         # Test kernel index out of bounds warning
         workload.filter_kernel_ids = [99]  # Out of bounds
 
-        # Create json file to trigger the bounds check
+        # Create results json so processing proceeds to the bounds check
         json_path = Path(temp_dir) / "test_results.json"
-        json_path.write_text("{}")
+        json_path.write_text(
+            '{"rocprofiler-sdk-tool": [{"buffer_records": '
+            '{"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}}]}'
+        )
 
         with patch("utils.parser.console_warning") as mock_warning:
             result = load_pc_sampling_data(workload, temp_dir, "test", "count")
