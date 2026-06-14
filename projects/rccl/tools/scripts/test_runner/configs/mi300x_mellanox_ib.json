@@ -939,6 +939,7 @@
         {"name": "AlltoAll.Channels", "description": "AlltoAll channels", "test_filter": "AlltoAll.Channels"},
         {"name": "AlltoAllv.OutOfPlace", "description": "AlltoAllv out-of-place", "test_filter": "AlltoAllv.OutOfPlace"},
         {"name": "AlltoAllv.OutOfPlaceGraph", "description": "AlltoAllv out-of-place graph", "test_filter": "AlltoAllv.OutOfPlaceGraph"},
+        {"name": "AlltoAllv.ManagedMem", "description": "AlltoAllv managed memory", "test_filter": "AlltoAllv.ManagedMem"},
         {"name": "Broadcast.OutOfPlace", "description": "Broadcast out-of-place", "test_filter": "Broadcast.OutOfPlace"},
         {"name": "Broadcast.OutOfPlaceGraph", "description": "Broadcast out-of-place graph", "test_filter": "Broadcast.OutOfPlaceGraph"},
         {"name": "Broadcast.InPlace", "description": "Broadcast in-place", "test_filter": "Broadcast.InPlace"},
