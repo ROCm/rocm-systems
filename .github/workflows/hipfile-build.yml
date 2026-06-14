@@ -40,7 +40,7 @@ on:
       cxx_standard:
         required: false
         type: number
-        default: 17
+        default: 20
       generate_coverage:
         default: true
         description: "Allow coverage to be generated"

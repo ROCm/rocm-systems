@@ -92,7 +92,7 @@ public:
         uint32_t dword3 = PACKET3_ACQUIRE_MEM__COHER_SIZE((uint32_t(size)));
         uint32_t dword4 = PACKET3_ACQUIRE_MEM__COHER_SIZE_HI((uint32_t(size >> 32)));
 
-        // Specify the poll interval for determing if operation is complete
+        // Specify the poll interval for determining if operation is complete
         uint32_t dword7 = PACKET3_ACQUIRE_MEM__POLL_INTERVAL(0x10);
 
         // Program GCR Control Register. Initialize L2 Cache flush

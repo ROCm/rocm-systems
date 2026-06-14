@@ -22,9 +22,6 @@
 #include "argcheck.h"
 #include "device.h"
 #include "collectives.h"
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit.h"
-#endif
 #include "tuner.h"
 #include "ras.h"
 #include "profiler.h"
@@ -70,7 +67,6 @@
 #include <rocshmem/rocshmem.hpp>
 #define NUM_SYM_BUF 2
 #endif
-
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
@@ -174,7 +170,6 @@ static void getEnvCtaPolicyOnce(){
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 ncclResult_t commReclaim(ncclComm_t comm);
 
-
 #ifdef ENABLE_ROCSHMEM
 RCCL_PARAM(RocshmemThreshold, "ROCSHMEM_THRESHOLD", (size_t)(262144));
 RCCL_PARAM(RocshmemEnabled, "ROCSHMEM_ENABLE", 1);
@@ -201,7 +196,6 @@ ncclResult_t initGdrCopy() {
   }
   return ncclSuccess;
 }
-
 
 // [RCCL] Upstream NCCL 2.29 moved the CPU stack-size handling into
 // ncclOsInitialize() (see src/os/linux.cc); we delegate to that here so the
@@ -366,7 +360,6 @@ extern int64_t ncclParamLaunchOrderImplicit();
 
 #undef NCCL_NO_OPTIMIZE
 
-
 static ncclResult_t ncclDestructorFnFree(struct ncclDestructor* dtor) {
   free(dtor->obj);
   return ncclSuccess;
@@ -490,7 +483,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
     }
   }
 
-
   free(comm->peerInfo);
   if (comm->topo)
     ncclTopoFree(comm->topo);
@@ -532,6 +524,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
       CUDACHECK(cudaEventDestroy(comm->sharedRes->launchEvent));
       CUDACHECK(cudaEventDestroy(comm->sharedRes->scratchEvent));
       NCCLCHECK(ncclProxyDestroy(comm));
+      NCCLCHECK(ncclGinFinalize(comm));
       delete comm->sharedRes;
     }
   }
@@ -596,7 +589,6 @@ NCCL_PARAM(GdrCopyFifoEnable, "GDRCOPY_FIFO_ENABLE", 1);
 NCCL_PARAM(WorkFifoBytes, "WORK_FIFO_BYTES", NCCL_WORK_FIFO_BYTES_DEFAULT);
 NCCL_PARAM(WorkArgsBytes, "WORK_ARGS_BYTES", INT64_MAX);
 enum ncclLaunchMode ncclParamLaunchMode;
-
 
 // Detect DMA-BUF support
 static ncclResult_t dmaBufSupported(struct ncclComm* comm) {
@@ -910,14 +902,6 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
     }
   }
 
-#if defined(ENABLE_NPKIT)
-  WARN("NPKIT is deprecated, please use Profiler Plugin instead!");
-  // Init NPKit
-  NCCLCHECK(NpKit::Init(comm->rank));
-  tmpCommAndChans.comm.npKitEventCollectContexts = NpKit::GetGpuEventCollectContexts();
-  tmpCommAndChans.comm.cpuTimestamp = NpKit::GetCpuTimestamp();
-#endif
-
 #ifdef ENABLE_FAULT_INJECTION
   tmpCommAndChans.comm.faults = comm->faults;
 #endif
@@ -934,40 +918,56 @@ fail:
 // Pre-process the string so that running "strings" on the lib can quickly reveal the version.
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #define VERSION_STRING "RCCL version : " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
-#define VERSION_STRING_EXTENDED "HIP version  : " HIP_BUILD_INFO "\nROCm version : " ROCM_BUILD_INFO
+#define HIP_VERSION_STRING  "HIP version  : " HIP_BUILD_INFO
+#define ROCM_VERSION_STRING "ROCm version : " ROCM_BUILD_INFO
+#define VERSION_STRING_EXTENDED HIP_VERSION_STRING "\n" ROCM_VERSION_STRING
 #else
 #define VERSION_STRING "NCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
 #define VERSION_STRING_EXTENDED "CUDA version " STR(CUDA_MAJOR) "." STR(CUDA_MINOR)
 #endif
 static void showVersion() {
-  char versionInfo[2048+2*HOST_NAME_MAX], hostInfo[HOST_NAME_MAX], libPathInfo[2048];
-
   // Retrieve Hostname info
-  if (gethostname(hostInfo, sizeof(hostInfo)-1) != 0) {
-    // Returns Unknown in hostInfo if function call unsuccessful
-    strncpy(hostInfo, "Unknown", sizeof(hostInfo)-1);
-  }
+  char hostBuf[HOST_NAME_MAX];
+  std::string hostInfo = (gethostname(hostBuf, sizeof(hostBuf)-1) == 0) ? hostBuf : "Unknown";
 
   // Retrieve librccl path
   Dl_info pathInfo;
-  if (dladdr((void*)ncclCommInitRank, &pathInfo)) {
-    strncpy(libPathInfo, pathInfo.dli_fname, sizeof(libPathInfo)-1);
-  } else {
-    // Sets libPath to Unknown if the above function call is not successful
-    strncpy(libPathInfo, "Unknown", sizeof(libPathInfo)-1);
-  }
+  std::string libPathInfo =
+      dladdr((void*)ncclCommInitRank, &pathInfo) ? pathInfo.dli_fname : "Unknown";
 
-  snprintf(versionInfo, sizeof(versionInfo),
-    "%s-%s\n%s\n"
-    "%-12s : %s\n%12s : %s",
-    VERSION_STRING, rcclGitHash, VERSION_STRING_EXTENDED,
-    "Hostname", hostInfo, "Librccl path", libPathInfo
-  );
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // Query the active HIP/ROCm runtime to report alongside the compile-time
+  // versions when they differ.
+  VersionInfo hipRt{};
+  int hipRuntimeVer = 0;
+  if (hipRuntimeGetVersion(&hipRuntimeVer) == hipSuccess)
+    hipRt = decodeHipVer(hipRuntimeVer);
+  const VersionInfo hipCt = {true, HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH};
+
+  VersionInfo rocmRt{}, rocmCt{};
+#if ROCM_VERSION >= 60000
+  // getROCmVersion() is provided by librocm-core.
+  unsigned int rocmMajor = 0, rocmMinor = 0, rocmPatch = 0;
+  if (getROCmVersion(&rocmMajor, &rocmMinor, &rocmPatch) == VerSuccess)
+    rocmRt = VersionInfo{true, rocmMajor, rocmMinor, rocmPatch};
+  rocmCt = VersionInfo{true, ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, ROCM_VERSION_PATCH};
+#endif
+
+  std::string extendedInfo = fmtExtVer(HIP_VERSION_STRING, hipRt, hipCt,
+                                       ROCM_VERSION_STRING, rocmRt, rocmCt);
+#else
+  std::string extendedInfo = VERSION_STRING_EXTENDED;
+#endif
+
+  std::string versionInfo = fmt::format(
+    "{}-{}\n{}\n{:<12} : {}\n{:>12} : {}",
+    VERSION_STRING, rcclGitHash, extendedInfo,
+    "Hostname", hostInfo, "Librccl path", libPathInfo);
 
   if (ncclDebugLevel == NCCL_LOG_VERSION || ncclDebugLevel == NCCL_LOG_WARN) {
-    VERSION("%s", versionInfo);
+    VERSION("%s", versionInfo.c_str());
   } else {
-    INFO(NCCL_ALL,"%s", versionInfo);
+    INFO(NCCL_ALL,"%s", versionInfo.c_str());
   }
 }
 
@@ -1413,13 +1413,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       ret = ncclInternalError;
       goto fail;
     }
-    #if defined(ENABLE_NPKIT)
-    if (intraProcRanks != 1) {
-      WARN("NPKit currently does not support more than 1 device per process");
-      ret = ncclInternalError;
-      goto fail;
-    }
-    #endif
     struct ncclComm* comm0 = comm->peerInfo[intraProcRank0].comm;
     assert(intraProcRank==0 ? comm==comm0 : true);
     comm->intraComm0 = comm0;
@@ -2061,7 +2054,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && !globalNicFused && globalCuMemGdrSupport;
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
     (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || (ncclTeamLsa(comm).nRanks == comm->nRanks));
-  comm->hostRmaSupport = comm->symmetricSupport && ((ncclTeamLsa(comm).nRanks == comm->nRanks) || comm->globalRmaProxySupport);
+  comm->hostRmaSupport = ((ncclTeamLsa(comm).nRanks == comm->nRanks) || comm->globalRmaProxySupport);
   if (!comm->symmetricSupport) {
     INFO(NCCL_INIT, "Symmetric memory is not supported. cuMemEnable %d, "
       "globalGinSupport %d, globalNicFused %d cuMemGdrSupport %d", ncclCuMemEnable(), comm->globalGinSupport, globalNicFused, globalCuMemGdrSupport);
@@ -2724,7 +2717,6 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
     comm->config.CTAPolicy &= ~NCCL_CTA_POLICY_EFFICIENCY;
   }
 
-
   // read non-config env settings
   comm->checkMode = ncclCheckModeDefault;
   if (ncclParamCheckPointers() == 1) { // @deprecated: use NCCL_CHECK_MODE instead
@@ -3234,23 +3226,6 @@ static ncclResult_t commCleanup(ncclComm_t comm) {
     NCCLCHECK(ncclTunerPluginUnload(comm));
   }
   NCCLCHECK(commFree(comm));
-
-#if defined(ENABLE_NPKIT)
-  // Dump NPKit events and shutdown
-  const char* npkitDumpDir = getenv("NPKIT_DUMP_DIR");
-  if (npkitDumpDir == nullptr) {
-    npkitDumpDir = "./npkit_dump";
-    INFO(NCCL_INIT, "NPKIT_DUMP_DIR is not set, using default directory: %s", npkitDumpDir);
-  }
-  struct stat st;
-  if (stat(npkitDumpDir, &st) != 0) {
-    if (mkdir(npkitDumpDir, 0755) != 0) {
-      WARN("Failed to create NPKIT_DUMP_DIR directory: %s", npkitDumpDir);
-    }
-  }
-  NCCLCHECK(NpKit::Dump(npkitDumpDir));
-  NCCLCHECK(NpKit::Shutdown());
-#endif
 
   return ncclSuccess;
 }

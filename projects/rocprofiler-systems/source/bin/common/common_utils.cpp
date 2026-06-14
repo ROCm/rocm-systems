@@ -530,6 +530,7 @@ get_help_topic_map()
         { "general", { "[GENERAL OPTIONS]" } },
         { "tracing", { "[TRACING OPTIONS]" } },
         { "profiling", { "[PROFILE OPTIONS]" } },
+        { "output", { "[OUTPUT FORMAT OPTIONS]" } },
         { "sampling",
           { "[GENERAL SAMPLING OPTIONS]", "[SAMPLING TIMER OPTIONS]",
             "[ADVANCED SAMPLING OPTIONS]" } },
@@ -576,8 +577,9 @@ const related_topics_map&
 get_related_topics_map()
 {
     static const related_topics_map map = {
-        { "tracing", { "rocm", "process", "backend" } },
-        { "profiling", { "sampling", "counters", "backend" } },
+        { "tracing", { "rocm", "process", "backend", "output" } },
+        { "profiling", { "sampling", "counters", "backend", "output" } },
+        { "output", { "tracing", "profiling", "backend" } },
         { "sampling", { "process", "profiling", "counters", "cpu" } },
         { "process", { "gpu", "sampling" } },
         { "counters", { "gpu", "cpu", "sampling" } },

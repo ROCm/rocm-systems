@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-import os
 from pathlib import Path
 
 import common
@@ -16,12 +15,6 @@ config["METRIC_COMPARE"] = False
 
 num_devices = 1
 
-_, soc = common.gpu_soc()
-
-if soc is None:
-    pytest.skip("GPU not supported", allow_module_level=True)
-
-os.environ["ROCPROF"] = "rocprofiler-sdk"
 
 PC_SAMPLING_HOST_TRAP_FILES = sorted([
     "ps_file_agent_info.csv",
@@ -54,13 +47,16 @@ def _skip_if_pc_sampling_unsupported(stdout, stderr, workload_dir):
         pytest.skip("PC sampling is not supported")
 
 
-def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
+def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute, monkeypatch):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method host_trap.
     """
-    common.skip_unsupported_pc_sampling_soc()
+    common.require_pc_sampling_gpu()
+    monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -90,13 +86,16 @@ def test_pc_sampling_host_trap(binary_handler_profile_rocprof_compute):
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
+def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute, monkeypatch):
     """
     Test that PC sampling works with --block 21 and --pc-sampling-method stochastic.
     """
-    common.skip_unsupported_pc_sampling_soc(is_stochastic=True)
+    common.require_pc_sampling_gpu(is_stochastic=True)
+    monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -133,7 +132,8 @@ def test_multi_rank_pc_sampling_only(
     Test that no multi-rank warning is printed when running with only
     --block 21 (PC sampling only mode requires a single pass) with multi-rank.
     """
-    common.skip_unsupported_pc_sampling_soc()
+    common.require_pc_sampling_gpu()
+    monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
     monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
@@ -141,6 +141,8 @@ def test_multi_rank_pc_sampling_only(
     workload_dir = common.get_output_dir()
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -174,7 +176,8 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     and another block (PC sampling with counters mode requires multiple passes)
     with multi-rank.
     """
-    common.skip_unsupported_pc_sampling_soc()
+    common.require_pc_sampling_gpu()
+    monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
 
     monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
     monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "2")
@@ -182,6 +185,8 @@ def test_multi_rank_warning_pc_sampling_with_counters(
     workload_dir = common.get_output_dir()
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "2",
@@ -216,14 +221,18 @@ def test_pc_sampling_profile_then_analyze(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     capsys,
+    monkeypatch,
 ):
     """
     End-to-end: profile with PC sampling (host_trap), then
     run analysis on the profiling output.
     """
-    common.skip_unsupported_pc_sampling_soc()
+    common.require_pc_sampling_gpu()
+    monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "--pc-sampling-method",
@@ -302,14 +311,19 @@ def test_pc_sampling_profile_then_analyze(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_pc_sampling_with_sol_block(binary_handler_profile_rocprof_compute):
+def test_pc_sampling_with_sol_block(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
     """
     Test that PC sampling works with --block 21 and --block 2
     (PC sampling with counter collection)
     """
-    common.skip_unsupported_pc_sampling_soc()
+    common.require_pc_sampling_gpu()
+    monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
 
     options = [
+        "--experimental",
+        "--pc-sampling",
         "--block",
         "21",
         "2",
