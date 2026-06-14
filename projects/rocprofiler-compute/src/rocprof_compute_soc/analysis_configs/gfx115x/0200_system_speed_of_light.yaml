@@ -1,0 +1,193 @@
+Panel Config:
+  id: 200
+  title: System Speed-of-Light
+  data source:
+  - metric_table:
+      id: 201
+      title: "System Speed-of-Light"
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+        peak: Peak
+        pop: Pct of Peak
+      metric:
+        VALU FLOPs:
+          value: SUM(SQ_INSTS_VALU_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GFLOP/s
+          peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
+          pop: true
+        VALU FLOPs (F64):
+          value: SUM(SQ_INSTS_VALU_DP_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GFLOP/s
+          peak: ((($max_sclk * $cu_per_gpu) * 4) / 1000)
+          pop: true
+        IPC:
+          value: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
+          unit: Instr/cycle
+          peak: 5
+          pop: true
+        Wavefront Occupancy:
+          value: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr)
+          unit: Wavefronts
+          peak: ($max_waves_per_cu * $cu_per_gpu)
+          pop: true
+        GL2 Cache Hit Rate:
+          value: SUM(100 * GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+          unit: Percent
+          peak: 100
+          pop: false
+        GL2-Fabric Read BW:
+          value: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          # peak: LPDDR5X - $max_mclk * QDR(4) * channels * 4 bytes/ch. Requires $max_mclk in sysinfo.
+          peak: ($max_mclk * 4 * $num_hbm_channels * 4 * 1e6)
+          pop: true
+        GL2-Fabric Write BW:
+          value: SUM((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32 + GL2C_EA_WRREQ_64B_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: ($max_mclk * 4 * $num_hbm_channels * 4 * 1e6)
+          pop: true
+        LDS Bank Conflicts:
+          value: AVG(SQC_LDS_BANK_CONFLICT)
+          unit: Conflicts
+          peak: None
+          pop: false
+        Wave Dependency Wait:
+          value: SUM(100 * SQ_WAIT_ANY) / SUM(SQ_WAVE_CYCLES)
+          unit: Percent
+          peak: 100
+          pop: false
+        Wave Issue Wait:
+          value: SUM(100 * SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)
+          unit: Percent
+          peak: 100
+          pop: false
+        GL0 Cache Hit Rate (TCP Cache):
+          value: SUM(100 * (TCP_REQ_sum - TCP_REQ_MISS_sum)) / SUM(TCP_REQ_sum)
+          unit: Percent
+          peak: 100
+          pop: false
+        GL0 Cache BW (TCP Cache):
+          value: SUM(TCP_REQ_sum * 64) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: ($cu_per_gpu * 128 * $max_sclk * 1e6)
+          pop: true
+        GL1 Cache Hit Rate:
+          value: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
+          unit: Percent
+          peak: 100
+          pop: false
+        GL1 Cache Read BW:
+          value: SUM(GL1C_GL2_REQ_READ_32B_sum*32 + GL1C_GL2_REQ_READ_64B_sum*64 + GL1C_GL2_REQ_READ_128B_sum*128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: (($cu_per_gpu / 8) * 128 * $max_sclk * 1e6)
+          pop: true
+        GL2 Cache BW:
+          value: SUM(GL2C_READ_32_REQ_sum*32 + GL2C_READ_64_REQ_sum*64 + GL2C_READ_128_REQ_sum*128 + GL2C_COMPRESSED_READ_96_REQ_sum*96) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: ($total_l2_chan * 128 * $max_sclk * 1e6)
+          pop: true
+        Scalar Data Cache Hit Rate:
+          value: SUM(100 * SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
+          unit: Percent
+          peak: 100
+          pop: false
+        Scalar Data Cache BW:
+          value: SUM(SQC_TC_DATA_READ_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: ($sqc_per_gpu * 64 * $max_sclk * 1e6)
+          pop: true
+        Instruction Cache Hit Rate:
+          value: SUM(100 * SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+          unit: Percent
+          peak: 100
+          pop: false
+        Instruction Cache BW:
+          value: SUM(SQC_TC_INST_REQ_sum * 128) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+          unit: Bytes/s
+          peak: ($sqc_per_gpu * 64 * $max_sclk * 1e6)
+          pop: true
+
+  metrics_description:
+    VALU FLOPs: >-
+      Floating-point operations per second on the VALU. Peak is based on
+      FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles
+      throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses
+      aggregate instruction counter.
+    VALU FLOPs (F64): >-
+      64-bit floating-point operations per second on the VALU. Peak is
+      4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction
+      counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    IPC: >-
+      Instructions executed per cycle, measuring overall instruction throughput efficiency.
+      Higher IPC indicates better utilization of the shader pipeline. Low IPC may indicate
+      stalls due to memory latency, register dependencies, or insufficient wavefront
+      occupancy to hide latencies.
+    Wavefront Occupancy: >-
+      Average number of wavefronts resident on the GPU during kernel execution. Higher
+      occupancy provides more opportunities to hide memory latency through wavefront
+      switching. However, maximum occupancy is not always optimal. Excessive register
+      or LDS usage per wavefront may limit occupancy.
+    GL2 Cache Hit Rate: >-
+      Percentage of GL2 cache requests that are serviced from cache without accessing
+      system memory. Higher hit rates reduce memory bandwidth pressure and improve
+      performance. Low hit rates may indicate poor data locality or working sets that
+      exceed cache capacity.
+    GL2-Fabric Read BW: >-
+      Read bandwidth between the GL2 cache and the memory fabric/system memory. High
+      bandwidth utilization indicates memory-intensive read patterns. This metric helps
+      identify when memory bandwidth is a performance bottleneck.
+      Requires $max_mclk populated in sysinfo (max MEM clock from amd-smi).
+    GL2-Fabric Write BW: >-
+      Write bandwidth between the GL2 cache and the memory fabric/system memory. High
+      values indicate write-intensive workloads. Combined with read bandwidth, this
+      shows total memory traffic leaving the GPU caches.
+    LDS Bank Conflicts: >-
+      Number of Local Data Share bank conflicts during execution. Bank conflicts occur
+      when multiple work-items in a wavefront access the same LDS bank simultaneously,
+      causing serialized accesses. Reducing conflicts improves shared memory throughput.
+    Wave Dependency Wait: >-
+      Percentage of wavefront execution time spent waiting for data dependencies to
+      resolve, such as pending memory operations or prior instruction results. High
+      values indicate latency-bound execution that could benefit from increased
+      occupancy or reduced dependency chains.
+    Wave Issue Wait: >-
+      Percentage of wavefront execution time spent waiting for instructions to become
+      ready for issue. High values may indicate instruction cache misses, complex
+      control flow, or pipeline stalls preventing instruction dispatch.
+    GL0 Cache Hit Rate (TCP Cache): >-
+      Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache
+      is the first-level cache for vector memory operations. High hit rates reduce
+      traffic to the GL1 cache and improve memory access latency.
+    GL0 Cache BW (TCP Cache): >-
+      Bandwidth of requests to the GL0 vector cache (TCP Cache). This represents the rate
+      at which the shader cores are requesting data from the cache hierarchy.
+      High bandwidth indicates memory-intensive workloads.
+    GL1 Cache Hit Rate: >-
+      Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared
+      across multiple workgroup processors within a shader engine. Higher hit rates
+      reduce traffic to the L2 cache and improve performance.
+    GL1 Cache Read BW: >-
+      Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache
+      miss traffic from L1 that must be serviced by L2. Lower values indicate
+      better L1 cache efficiency.
+    GL2 Cache BW: >-
+      Bandwidth of read operations at the L2 cache level. This metric shows
+      overall L2 cache utilization and helps identify memory subsystem bottlenecks.
+    Scalar Data Cache Hit Rate: >-
+      Percentage of scalar data cache accesses that hit in cache. The scalar cache
+      stores uniform data accessed by scalar instructions. High hit rates indicate
+      efficient reuse of constant and uniform data across wavefronts.
+    Scalar Data Cache BW: >-
+      Bandwidth of scalar data cache requests to the GL1 cache. Scalar operations
+      load uniform data shared across all threads in a wavefront, making efficient
+      caching critical for performance.
+    Instruction Cache Hit Rate: >-
+      Percentage of instruction fetch requests that hit in the instruction cache.
+      High hit rates are essential for sustained instruction throughput. Low hit
+      rates may indicate large kernel code size or divergent control flow.
+    Instruction Cache BW: >-
+      Bandwidth of instruction cache requests to the GL1 cache. High values may
+      indicate instruction cache pressure from large kernels or frequent
+      instruction cache misses.
