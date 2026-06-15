@@ -2260,6 +2260,9 @@ hipError_t hipDriverGetVersion(int* driverVersion);
 hipError_t hipRuntimeGetVersion(int* runtimeVersion);
 /**
  * @brief Returns a handle to a compute device
+ * Returns in @p device the handle of the device with ordinal @p ordinal, for use with the
+ * driver-style device APIs. @p ordinal must be in the range [0, device count).
+ *
  * @param [out] device Handle of device
  * @param [in] ordinal Device ordinal
  *
@@ -2269,6 +2272,9 @@ hipError_t hipDeviceGet(hipDevice_t* device, int ordinal);
 
 /**
  * @brief Returns the compute capability of the device
+ * Returns the device's compute capability as a major/minor version pair in @p major and @p
+ * minor, identifying its hardware feature level.
+ *
  * @param [out] major Major compute capability version number
  * @param [out] minor Minor compute capability version number
  * @param [in] device Device ordinal
@@ -2283,6 +2289,9 @@ hipError_t hipDeviceComputeCapability(int* major, int* minor, hipDevice_t device
  * @param [in] device Device ordinal
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
+ *
+ * The returned string is null-terminated. If the device name is longer than @p len, it is
+ * truncated to fit within @p len bytes, including the terminating null byte.
  */
 hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
 /**
@@ -2299,6 +2308,9 @@ hipError_t hipDeviceGetName(char* name, int len, hipDevice_t device);
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
 /**
  * @brief Returns a value for attribute of link between two devices
+ * Returns in @p value the requested peer attribute @p attr (such as link performance rank or
+ * whether peer access is supported) for the ordered pair (@p srcDevice, @p dstDevice).
+ *
  * @param [out] value Pointer of the value for the attrubute
  * @param [in] attr enum of hipDeviceP2PAttr to query
  * @param [in] srcDevice The source device of the link
@@ -2315,6 +2327,10 @@ hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDe
  * @param [in] device The device ordinal
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice
+ *
+ * The identifier is written in the form @c domain:bus:device.function, with each field in
+ * hexadecimal. A buffer of at least 13 bytes is recommended to hold the full identifier
+ * including the terminating null byte; if @p len is smaller, the string is truncated.
  */
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
 /**
@@ -2323,10 +2339,15 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
  * @param [in] pciBusId The string of PCI Bus Id for the device
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
+ *
+ * @p pciBusId is a null-terminated string in the form @c domain:bus:device.function, with each
+ * field given in hexadecimal. The leading @c domain field may be omitted.
  */
 hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId);
 /**
  * @brief Returns the total amount of memory on the device.
+ * Returns in @p bytes the total amount of physical global memory on @p device.
+ *
  * @param [out] bytes The size of memory in bytes, on the device
  * @param [in] device The ordinal of the device
  *
@@ -2435,10 +2456,17 @@ hipError_t hipGetDevice(int* deviceId);
  * Returns in @p *count the number of devices that have ability to run compute commands.  If there
  * are no such devices, then @ref hipGetDeviceCount will return #hipErrorNoDevice. If 1 or more
  * devices can be found, then hipGetDeviceCount returns #hipSuccess.
+ *
+ * The returned count reflects only the devices made visible to the process; visibility can be
+ * restricted through environment configuration such as @c HIP_VISIBLE_DEVICES.
  */
 hipError_t hipGetDeviceCount(int* count);
 /**
  * @brief Query for a specific device attribute.
+ *
+ * Returns in @p pi the integer value of device attribute @p attr for @p deviceId. See
+ * hipDeviceAttribute_t for the queryable attributes; an unsupported attribute returns
+ * #hipErrorInvalidValue.
  *
  * @param [out] pi pointer to value to return
  * @param [in] attr attribute to query
@@ -2608,6 +2636,10 @@ hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig);
 /**
  * @brief Gets the flags set for current device
  *
+ * Returns in @p flags the flags currently in effect for the calling thread's active device (as
+ * set by hipSetDeviceFlags()), such as the host scheduling policy used while waiting on the
+ * device.
+ *
  * @param [out] flags Pointer of the flags
  *
  * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
@@ -2664,6 +2696,9 @@ hipError_t hipSetDeviceFlags(unsigned flags);
  * @param [in]  prop Pointer of the properties
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * This function only identifies the device that best matches the requested properties; it does
+ * not make that device current. Call hipSetDevice() with the returned identifier to use it.
  */
 hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop);
 /**
@@ -2845,6 +2880,9 @@ hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKer
 /**
  * @brief Function will be extracted for specific kernel
  *
+ * Returns in @p function the device function handle for @p kernel, usable with the
+ * function-handle launch APIs.
+ *
  * @param [out] pFunc  Pointer to function handle for the kernel
  * @param [in] kernel  kernel to get handle for
  *
@@ -2947,6 +2985,10 @@ const char* hipGetErrorString(hipError_t hipError);
 /**
  * @brief Return hip error as text string form.
  *
+ * Returns in @p errorString a pointer to a static, null-terminated string naming the error
+ * code @p hipError (for example "hipErrorInvalidValue"). The string is owned by the runtime
+ * and must not be freed; an unrecognized code yields #hipErrorInvalidValue.
+ *
  * @param [in] hipError Error code to convert to string.
  * @param [out] errorString char pointer to the NULL-terminated error string
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -2956,6 +2998,9 @@ const char* hipGetErrorString(hipError_t hipError);
 hipError_t hipDrvGetErrorName(hipError_t hipError, const char** errorString);
 /**
  * @brief Return handy text string message to explain the error which occurred
+ *
+ * Returns in @p errorString a pointer to a static, null-terminated human-readable description
+ * of @p hipError. The string is owned by the runtime and must not be freed.
  *
  * @param [in] hipError Error code to convert to string.
  * @param [out] errorString char pointer to the NULL-terminated error string
@@ -3139,12 +3184,18 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  * does not implicitly wait for commands in the default stream to complete, even if the specified
  * stream is created with hipStreamNonBlocking = 0.
  *
+ * The wait is satisfied by the work captured in @p event at the time of this call; work
+ * recorded into the event afterward does not extend the wait.
+ *
  * @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamCreateWithPriority,
  * hipStreamSynchronize, hipStreamDestroy
  */
 hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags __dparm(0));
 /**
  * @brief Returns flags associated with this stream.
+ *
+ * Returns in @p flags the creation flags of @p stream, indicating for example whether it is
+ * non-blocking with respect to the default stream.
  *
  * @param[in] stream  Stream to be queried
  * @param[in,out] flags  Pointer to an unsigned integer in which the stream's flags are returned
@@ -3156,6 +3207,8 @@ hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
 /**
  * @brief Queries the Id of a stream.
  *
+ * Returns in @p id a unique identifier for @p stream that is stable for the stream's lifetime.
+ *
  * @param[in] stream  Stream to be queried
  * @param[in,out] flags  Pointer to an unsigned long long in which the stream's id is returned
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
@@ -3165,6 +3218,9 @@ hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
 hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
 /**
  * @brief Queries the priority of a stream.
+ *
+ * Returns in @p priority the priority @p stream was created with. Lower numerical values
+ * denote higher priority; the valid range is reported by hipDeviceGetStreamPriorityRange().
  *
  * @param[in] stream  Stream to be queried
  * @param[in,out] priority  Pointer to an unsigned integer in which the stream's priority is
@@ -3234,6 +3290,9 @@ typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status, void*
  * @param[in] flags    - Reserved for future use, must be 0
  * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorNotSupported
  *
+ * The callback must not call any HIP runtime API, either directly or indirectly, and must not
+ * perform blocking operations, otherwise the behavior is undefined.
+ *
  * @see hipStreamCreate, hipStreamCreateWithFlags, hipStreamQuery, hipStreamSynchronize,
  * hipStreamWaitEvent, hipStreamDestroy, hipStreamCreateWithPriority
  *
@@ -3243,6 +3302,9 @@ hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback
 
 /**
  *@brief Sets stream attribute. Updated attribute is applied to work submitted to the stream.
+ * Sets stream attribute @p attr of @p hStream from @p value. The value is copied in. See
+ * hipStreamGetAttribute() for the readable form.
+ *
  * @param[in] stream - Stream to set attributes to
  * @param[in] attr   - Attribute ID for the attribute to set
  * @param[in] value  - Attribute value for the attribute to set
@@ -3253,7 +3315,9 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
 /**
  *@brief queries stream attribute.
- * @param[in] stream - Stream to geet attributes from
+ * Returns in @p value the current value of stream attribute @p attr for @p hStream.
+ *
+ * @param[in] stream - Stream to get attributes from
  * @param[in] attr   - Attribute ID for the attribute to query
  * @param[out] value  - Attribute value output
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidResourceHandle
@@ -3263,6 +3327,9 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
 /**
  *@brief Copies attributes from source stream to destination stream.
+ * Copies all attribute values from stream @p src to stream @p dst, overwriting @p dst's
+ * current attributes.
+ *
  * @param[in] dst - Destination stream
  * @param[in] src - Source stream
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -3555,6 +3622,9 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned flags);
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  * #hipErrorLaunchFailure, #hipErrorOutOfMemory
  *
+ * The event is created with default behavior, supporting timing and using active (polling)
+ * synchronization. This is equivalent to calling hipEventCreateWithFlags() with #hipEventDefault.
+ *
  * @see hipEventCreateWithFlags, hipEventRecord, hipEventQuery, hipEventSynchronize,
  * hipEventDestroy, hipEventElapsedTime
  */
@@ -3664,6 +3734,10 @@ hipError_t hipEventDestroy(hipEvent_t event);
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized,
  * #hipErrorInvalidHandle, #hipErrorLaunchFailure
  *
+ *  If the event was created with #hipEventBlockingSync, the calling host thread is suspended
+ *  until the event completes; otherwise the thread polls on the event, which lowers latency at
+ *  the cost of occupying a CPU core.
+ *
  *  @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventDestroy, hipEventRecord,
  * hipEventElapsedTime
  */
@@ -3692,6 +3766,11 @@ hipError_t hipEventSynchronize(hipEvent_t event);
  * returned. If hipEventRecord() has been called on both events, but the timestamp has not yet been
  * recorded on one or both events (that is, hipEventQuery() would return #hipErrorNotReady on at
  * least one of the events), then #hipErrorNotReady is returned.
+ *
+ * Both events must have been created with timing enabled, that is, without
+ * #hipEventDisableTiming; if either event has timing disabled, #hipErrorInvalidHandle is
+ * returned. The two events should also be associated with the same device, otherwise the
+ * computed time is undefined.
  *
  * @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventDestroy, hipEventRecord,
  * hipEventSynchronize
@@ -3815,12 +3894,19 @@ hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_att
 /**
  *  @brief Imports an external semaphore.
  *
+ *  Imports a semaphore created by another API or process, described by @p semHandleDesc, and
+ *  returns a HIP handle in @p extSem_out usable with hipSignalExternalSemaphoresAsync() and
+ *  hipWaitExternalSemaphoresAsync(). The imported handle takes its own reference to the
+ *  underlying OS resource, so the original handle may be closed after import. The returned
+ *  object is owned by the caller and must be released with hipDestroyExternalSemaphore().
+ *
  *  @param[out] extSem_out  External semaphores to be waited on
  *  @param[in] semHandleDesc Semaphore import handle descriptor
  *
  *  @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
- *  @see
+ *  @see hipSignalExternalSemaphoresAsync, hipWaitExternalSemaphoresAsync,
+ *  hipDestroyExternalSemaphore
  *
  *  @note  This API is currently not supported on Linux.
  *
@@ -3830,6 +3916,12 @@ hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
 /**
  *  @brief Signals a set of external semaphore objects.
  *
+ *  Enqueues a signal operation on each of the @p numExtSems semaphores in @p extSemArray into
+ *  @p stream. The signal is ordered after all work previously submitted to @p stream and is
+ *  performed asynchronously; this call may return before the signal completes. @p paramsArray
+ *  supplies a per-semaphore parameter entry (for example the value to post for a timeline-type
+ *  semaphore) and must have @p numExtSems elements.
+ *
  *  @param[in] extSemArray  External semaphores to be waited on
  *  @param[in] paramsArray Array of semaphore parameters
  *  @param[in] numExtSems Number of semaphores to wait on
@@ -3837,7 +3929,7 @@ hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
  *
  *  @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
- *  @see
+ *  @see hipWaitExternalSemaphoresAsync, hipImportExternalSemaphore
  *
  *  @note  This API is currently not supported on Linux.
  *
@@ -3848,6 +3940,12 @@ hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSem
 /**
  *  @brief Waits on a set of external semaphore objects
  *
+ *  Enqueues a wait on each of the @p numExtSems semaphores in @p extSemArray into @p stream.
+ *  Subsequent work in @p stream is deferred until every waited semaphore reaches its
+ *  signaled state; the wait itself is asynchronous, so this call may return before the wait
+ *  is satisfied. @p paramsArray supplies a per-semaphore parameter entry and must have
+ *  @p numExtSems elements.
+ *
  *  @param[in] extSemArray  External semaphores to be waited on
  *  @param[in] paramsArray Array of semaphore parameters
  *  @param[in] numExtSems Number of semaphores to wait on
@@ -3855,7 +3953,7 @@ hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t* extSem
  *
  *  @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
- *  @see
+ *  @see hipSignalExternalSemaphoresAsync, hipImportExternalSemaphore
  *
  *  @note  This API is currently not supported on Linux.
  *
@@ -3881,12 +3979,20 @@ hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem);
 /**
  *  @brief Imports an external memory object.
  *
+ *  Imports a memory allocation owned by another API or process, described by @p memHandleDesc,
+ *  and returns a handle in @p extMem_out. Importing only registers the allocation; a usable
+ *  device pointer is obtained separately with hipExternalMemoryGetMappedBuffer(), or a
+ *  mipmapped array with hipExternalMemoryGetMappedMipmappedArray(). The import holds its own
+ *  reference to the underlying resource and must be released with hipDestroyExternalMemory(),
+ *  which invalidates every buffer or array mapped from it.
+ *
  *  @param[out] extMem_out  Returned handle to an external memory object
  *  @param[in]  memHandleDesc Memory import handle descriptor
  *
  *  @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
- *  @see
+ *  @see hipExternalMemoryGetMappedBuffer, hipExternalMemoryGetMappedMipmappedArray,
+ *  hipDestroyExternalMemory
  *
  */
 hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
@@ -3894,24 +4000,33 @@ hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
 /**
  *  @brief Maps a buffer onto an imported memory object.
  *
+ *  Returns in @p devPtr a device pointer to a sub-region of the imported allocation @p extMem,
+ *  with the offset and size given by @p bufferDesc. The returned pointer stays valid until
+ *  @p extMem is destroyed with hipDestroyExternalMemory(); it must not be released with
+ *  hipFree(). The described range must lie within the bounds of the imported allocation.
+ *
  *  @param[out] devPtr Returned device pointer to buffer
  *  @param[in]  extMem  Handle to external memory object
  *  @param[in]  bufferDesc  Buffer descriptor
  *
  *  @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
- *  @see
+ *  @see hipImportExternalMemory, hipDestroyExternalMemory
  */
 hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t extMem,
                                             const hipExternalMemoryBufferDesc* bufferDesc);
 /**
  *  @brief Destroys an external memory object.
  *
+ *  Releases the import @p extMem and HIP's reference to the underlying resource. Any device
+ *  pointers or mipmapped arrays previously mapped from this object become invalid and must
+ *  not be used afterward. This does not free the memory in the owning API.
+ *
  *  @param[in] extMem  External memory object to be destroyed
  *
  *  @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidValue
  *
- *  @see
+ *  @see hipImportExternalMemory, hipExternalMemoryGetMappedBuffer
  */
 hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem);
 /**
@@ -3944,6 +4059,9 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
  *  If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
  *
  *  @returns #hipSuccess, #hipErrorOutOfMemory, #hipErrorInvalidValue (bad context, null *ptr)
+ *
+ *  The returned pointer is suitably aligned for any built-in type. The allocation is not
+ *  cleared, so its contents are undefined until the application writes to it.
  *
  *  @see hipMallocPitch, hipFree, hipMallocArray, hipFreeArray, hipMalloc3D, hipMalloc3DArray,
  * hipHostFree, hipHostMalloc
@@ -4041,6 +4159,13 @@ hipError_t hipMemAllocHost(void** ptr, size_t size);
  *
  *  If no input for flags, it will be the default pinned memory allocation on the host.
  *
+ *  Valid values for @p flags are #hipHostMallocDefault, #hipHostMallocPortable,
+ *  #hipHostMallocMapped, #hipHostMallocWriteCombined, #hipHostMallocNumaUser,
+ *  #hipHostMallocCoherent, and #hipHostMallocNonCoherent, combined with a bitwise OR.
+ *  #hipHostMallocCoherent and #hipHostMallocNonCoherent are mutually exclusive. When
+ *  #hipHostMallocMapped is set, the mapped device pointer can be retrieved with
+ *  hipHostGetDevicePointer().
+ *
  *  @returns #hipSuccess, #hipErrorOutOfMemory
  *
  *
@@ -4093,12 +4218,19 @@ hipError_t hipMallocManaged(void** dev_ptr, size_t size,
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * The range must lie within a managed allocation. Pass #hipCpuDeviceId as @p device to prefetch
+ * the range back to host memory.
+ *
  * @note  This API is implemented on Linux and is under development on Microsoft Windows.
  */
 hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
                                hipStream_t stream __dparm(0));
 /**
  * @brief Prefetches memory to the specified destination device using HIP.
+ *
+ * Asynchronously prefetches the managed range starting at @p dev_ptr to the destination
+ * described by @p location, ordered into @p stream. @p flags is reserved. Prefetching is a
+ * performance hint and does not change which processors may access the data.
  *
  * @param [in] dev_ptr    pointer to be prefetched
  * @param [in] count      size in bytes for prefetching
@@ -4115,6 +4247,10 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
 
 /**
  * @brief Prefetches a batch of memory ranges to the specified locations using HIP.
+ *
+ * Asynchronously prefetches several managed ranges in one call, each to its specified
+ * destination, ordered into the given stream, with lower per-range overhead than issuing the
+ * prefetches individually.
  *
  * @param [in] dev_ptrs      pointers to the memory ranges to prefetch
  * @param [in] sizes      sizes in bytes of the memory ranges to prefetch
@@ -4658,13 +4794,34 @@ hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
 /**
  * @brief Sets memory pool for memory location and allocation type.
  *
+ * Designates @p pool as the pool used to satisfy stream-ordered allocations of the given
+ * @p type that target @p location. After this call, hipMallocAsync() requests resolving to
+ * @p location draw from @p pool until a different pool is set. @p pool must be a pool whose
+ * backing location matches @p location.
  *
+ * @param [in] location  Memory location the pool applies to.
+ * @param [in] type      Allocation type the pool applies to.
+ * @param [in] pool      Memory pool to associate with @p location and @p type.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipMemGetMemPool, hipMallocAsync, hipMemPoolCreate, hipDeviceSetMemPool
  */
 hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
 /**
  * @brief Retrieves memory pool for memory location and allocation type.
  *
+ * Returns in @p pool the memory pool currently associated with allocations of @p type that
+ * target @p location. If no pool has been set explicitly with hipMemSetMemPool(), the
+ * location's default pool is returned.
  *
+ * @param [out] pool     Returned memory pool for @p location and @p type.
+ * @param [in] location  Memory location being queried.
+ * @param [in] type      Allocation type being queried.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipMemSetMemPool, hipMallocAsync, hipMemPoolCreate, hipDeviceGetMemPool
  */
 hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
                             hipMemAllocationType type);
@@ -4702,11 +4859,18 @@ hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags);
  *
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorOutOfMemory
  *
+ *  The host allocation must have been made mappable into the device address space (for example
+ *  with #hipHostMallocMapped), and @p flags is reserved and must be 0. On systems with a unified
+ *  address space the returned device pointer may be identical to @p hstPtr.
+ *
  *  @see hipSetDeviceFlags, hipHostMalloc
  */
 hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int flags);
 /**
  *  @brief Return flags associated with host pointer
+ *
+ * Returns in @p flagsPtr the allocation flags that host pointer @p hostPtr was created with by
+ * hipHostMalloc().
  *
  *  @param[out] flagsPtr Memory location to store flags
  *  @param[in]  hostPtr Host Pointer allocated through hipHostMalloc
@@ -4750,11 +4914,19 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr);
  *
  *  @returns #hipSuccess, #hipErrorOutOfMemory
  *
+ *  Valid values for @p flags are #hipHostRegisterDefault, #hipHostRegisterPortable,
+ *  #hipHostRegisterMapped, and #hipExtHostRegisterUncached, combined with a bitwise OR. The
+ *  registered range must not overlap a range that is already registered.
+ *
  *  @see hipHostUnregister, hipHostGetFlags, hipHostGetDevicePointer
  */
 hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags);
 /**
  *  @brief Un-register host pointer
+ *
+ * Unregisters host memory previously registered with hipHostRegister() and removes its device
+ * mapping. The host memory itself is not freed and remains owned by the application; any
+ * device pointer obtained for the range becomes invalid.
  *
  *  @param[in] hostPtr Host pointer previously registered with #hipHostRegister
  *  @returns Error code
@@ -4776,6 +4948,11 @@ hipError_t hipHostUnregister(void* hostPtr);
  *  If size is 0, no memory is allocated, *ptr returns nullptr, and hipSuccess is returned.
  *
  *  @returns Error code
+ *
+ *  The runtime may pad each row so that it meets the device's alignment requirements for
+ *  efficient 2D access. Always compute element addresses using the returned @p pitch rather than
+ *  @p width: for an element of type T at a given row and column,
+ *  @p T* p = (T*)((char*)base + row * pitch) + column.
  *
  *  @see hipMalloc, hipFree, hipMallocArray, hipFreeArray, hipHostFree, hipMalloc3D,
  * hipMalloc3DArray, hipHostMalloc
@@ -4869,6 +5046,9 @@ hipError_t hipHostFree(void* ptr);
  *  @param[in]  sizeBytes Data size in bytes
  *  @param[in]  kind Kind of transfer
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorUnknown
+ *
+ *  Passing #hipMemcpyDefault as @p kind lets the runtime infer the transfer direction from the
+ *  virtual addresses of @p src and @p dst, which requires a unified virtual address space.
  *
  *  @see hipArrayCreate, hipArrayDestroy, hipArrayGetDescriptor, hipMemAlloc, hipMemAllocHost,
  * hipMemAllocPitch, hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy2DUnaligned, hipMemcpyAtoA,
@@ -5136,6 +5316,9 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
 /**
  *  @brief Gets device pointer associated with symbol on the device.
  *
+ * Returns in @p devPtr the device address of the global symbol @p symbol (a __device__ or
+ * __constant__ variable), suitable for use with the memory-copy APIs.
+ *
  *  @param[out]  devPtr  pointer to the device associated the symbole
  *  @param[in]   symbol  pointer to the symbole of the device
  *
@@ -5147,6 +5330,8 @@ hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol);
 
 /**
  *  @brief Gets the size of the given symbol on the device.
+ *
+ * Returns in @p size the size in bytes of the global symbol @p symbol.
  *
  *  @param[in]   symbol  pointer to the device symbole
  *  @param[out]  size  pointer to the size
@@ -5206,6 +5391,9 @@ hipError_t hipMemcpyToSymbol(const void* symbol, const void* src, size_t sizeByt
 /**
  *  @brief Copies data to the given symbol on the device asynchronously.
  *
+ * Asynchronous form of hipMemcpyToSymbol(): copies @p count bytes from @p src into the global
+ * symbol @p symbol starting at byte @p offset, ordered into @p stream.
+ *
  *  @param[out]  symbol  pointer to the device symbole
  *  @param[in]   src  pointer to the source address
  *  @param[in]   sizeBytes  size in bytes to copy
@@ -5222,6 +5410,9 @@ hipError_t hipMemcpyToSymbolAsync(const void* symbol, const void* src, size_t si
 /**
  *  @brief Copies data from the given symbol on the device.
  *
+ * Copies @p count bytes from the global symbol @p symbol (starting at byte @p offset) into @p
+ * dst, in the direction given by @p kind. The host blocks until the copy completes.
+ *
  *  @param[out]  dst  Returns pointer to destinition memory address
  *  @param[in]   symbol  Pointer to the symbole address on the device
  *  @param[in]   sizeBytes  Size in bytes to copy
@@ -5237,6 +5428,9 @@ hipError_t hipMemcpyFromSymbol(void* dst, const void* symbol, size_t sizeBytes,
 
 /**
  *  @brief Copies data from the given symbol on the device asynchronously.
+ *
+ * Asynchronous form of hipMemcpyFromSymbol(): copies from the global symbol into @p dst,
+ * ordered into @p stream.
  *
  *  @param[out]  dst  Returns pointer to destinition memory address
  *  @param[in]   symbol  pointer to the symbole address on the device
@@ -5288,6 +5482,9 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t sizeBytes, hipMemcp
  *  @param[in]  value  Value to be set
  *  @param[in]  sizeBytes  Data size in bytes
  *  @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
+ *
+ *  Only the least significant 8 bits of @p value are used; every byte in the range is set to
+ *  that byte value.
  */
 hipError_t hipMemset(void* dst, int value, size_t sizeBytes);
 /**
@@ -5368,6 +5565,9 @@ hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count);
  *  @param[in]  sizeBytes  Size in bytes to set
  *  @param[in]  stream  Stream identifier
  *  @return #hipSuccess, #hipErrorInvalidValue
+ *
+ *  Only the least significant 8 bits of @p value are used; every byte in the range is set to
+ *  that byte value.
  */
 hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes, hipStream_t stream __dparm(0));
 /**
@@ -5390,6 +5590,10 @@ hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count,
 /**
  *  @brief Fills the memory area pointed to by dst with the constant value.
  *
+ * Sets a 2D region to @p value: @p width bytes in each of @p height rows, starting at @p dst
+ * whose rows are @p pitch bytes apart. Padding bytes between rows are not modified. The host
+ * blocks until the operation completes.
+ *
  *  @param[out] dst Pointer to 2D device memory
  *  @param[in]  pitch  Pitch size in bytes of 2D device memory, unused if height equals 1
  *  @param[in]  value  Constant value to set for each byte of specified memory
@@ -5400,6 +5604,8 @@ hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count,
 hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t height);
 /**
  *  @brief Fills asynchronously the memory area pointed to by dst with the constant value.
+ *
+ * Asynchronous form of hipMemset2D(), ordered into @p stream.
  *
  *  @param[in]  dst Pointer to 2D device memory
  *  @param[in]  pitch  Pitch size in bytes of 2D device memory, unused if height equals 1
@@ -5414,6 +5620,9 @@ hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, si
 /**
  *  @brief Fills synchronously the memory area pointed to by pitchedDevPtr with the constant value.
  *
+ * Sets every byte of the 3D region described by @p pitchedDevPtr and @p extent to @p value.
+ * The host blocks until the operation completes.
+ *
  *  @param[in] pitchedDevPtr  Pointer to pitched device memory
  *  @param[in]  value  Value to set for each byte of specified memory
  *  @param[in]  extent  Size parameters for width field in bytes in device memory
@@ -5422,6 +5631,8 @@ hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, si
 hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent);
 /**
  *  @brief Fills asynchronously the memory area pointed to by pitchedDevPtr with the constant value.
+ *
+ * Asynchronous form of hipMemset3D(), ordered into @p stream.
  *
  *  @param[in] pitchedDevPtr  Pointer to pitched device memory
  *  @param[in]  value  Value to set for each byte of specified memory
@@ -5555,12 +5766,19 @@ hipError_t hipMemPtrGetInfo(void* ptr, size_t* size);
  *  @param[in]   flags  Requested properties of allocated array
  *  @returns     #hipSuccess, #hipErrorOutOfMemory
  *
+ *  Valid values for @p flags are #hipArrayDefault, #hipArrayLayered, #hipArraySurfaceLoadStore,
+ *  #hipArrayCubemap, and #hipArrayTextureGather, combined with a bitwise OR. #hipArrayDefault
+ *  requests an ordinary array suitable for texture binding.
+ *
  *  @see hipMalloc, hipMallocPitch, hipFree, hipFreeArray, hipHostMalloc, hipHostFree
  */
 hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, size_t width,
                           size_t height __dparm(0), unsigned int flags __dparm(hipArrayDefault));
 /**
  *  @brief Create an array memory pointer on the device.
+ *
+ * Creates a 1D or 2D HIP array as described by @p pAllocateArray and returns it in @p pHandle.
+ * The array owns device memory and must be released with hipArrayDestroy().
  *
  *  @param[out]  pHandle  Pointer to the array memory
  *  @param[in]   pAllocateArray   Requested array desciptor
@@ -5573,6 +5791,9 @@ hipError_t hipArrayCreate(hipArray_t* pHandle, const HIP_ARRAY_DESCRIPTOR* pAllo
 /**
  *  @brief Destroy an array memory pointer on the device.
  *
+ * Destroys HIP array @p array and frees its device memory. Texture or surface objects still
+ * referencing it must not be used afterward.
+ *
  *  @param[in]  array  Pointer to the array memory
  *
  *  @returns     #hipSuccess, #hipErrorInvalidValue
@@ -5582,6 +5803,9 @@ hipError_t hipArrayCreate(hipArray_t* pHandle, const HIP_ARRAY_DESCRIPTOR* pAllo
 hipError_t hipArrayDestroy(hipArray_t array);
 /**
  *  @brief Create a 3D array memory pointer on the device.
+ *
+ * Creates a 1D, 2D, or 3D HIP array as described by @p pAllocateArray and returns it in @p
+ * array. Release with hipArrayDestroy().
  *
  *  @param[out]  array  Pointer to the 3D array memory
  *  @param[in]   pAllocateArray   Requested array desciptor
@@ -5594,6 +5818,10 @@ hipError_t hipArray3DCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAl
 /**
  *  @brief Create a 3D memory pointer on the device.
  *
+ * Allocates at least @p extent of linear device memory, choosing a row pitch for efficient
+ * access, and returns the base pointer, pitch, and dimensions in @p pitchedDevPtr. Free with
+ * hipFree().
+ *
  *  @param[out]  pitchedDevPtr  Pointer to the 3D memory
  *  @param[in]   extent   Requested extent
  *
@@ -5605,6 +5833,9 @@ hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
 /**
  *  @brief Frees an array on the device.
  *
+ * Frees a HIP array previously created with the array-creation APIs and releases its device
+ * memory.
+ *
  *  @param[in]  array  Pointer to array to free
  *  @returns    #hipSuccess, #hipErrorInvalidValue, #hipErrorNotInitialized
  *
@@ -5613,6 +5844,9 @@ hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent);
 hipError_t hipFreeArray(hipArray_t array);
 /**
  *  @brief Allocate an array on the device.
+ *
+ * Allocates a 1D/2D/3D HIP array with channel format @p desc, dimensions @p extent, and @p
+ * flags, returning it in @p array. Release with hipFreeArray().
  *
  *  @param[out]  array  Pointer to allocated array in device memory
  *  @param[in]   desc   Requested channel format
@@ -5626,6 +5860,9 @@ hipError_t hipMalloc3DArray(hipArray_t* array, const struct hipChannelFormatDesc
                             struct hipExtent extent, unsigned int flags);
 /**
  * @brief Gets info about the specified array
+ *
+ * Returns the channel format, extent, and creation flags of HIP array @p array in @p desc, @p
+ * extent, and @p flags respectively; any of the output pointers may be NULL.
  *
  * @param[out] desc   - Returned array type
  * @param[out] extent - Returned array shape. 2D arrays will have depth of zero
@@ -5704,6 +5941,9 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
  *  @param[in]   kind   Type of transfer
  *  @returns     #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidPitchValue,
  * #hipErrorInvalidDevicePointer, #hipErrorInvalidMemcpyDirection
+ *
+ *  The @p width (in bytes) of each copied row must not exceed either @p dpitch or @p spitch;
+ *  these pitches are typically the values returned by hipMallocPitch() for the two allocations.
  *
  *  @see hipMemcpy, hipMemcpyToArray, hipMemcpy2DToArray, hipMemcpyFromArray, hipMemcpyToSymbol,
  * hipMemcpyAsync
@@ -6007,6 +6247,10 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
 /**
  * @brief Perform Batch of 1D copies
  *
+ * Issues a batch of memory copies described by the parameter arrays in a single call, ordered
+ * into the given stream, reducing per-copy submission overhead versus issuing them
+ * individually.
+ *
  * @param [in] dsts      - Array of destination pointers
  * @param [in] srcs      - Array of source pointers.
  * @param [in] sizes     - Array of sizes for memcpy operations
@@ -6050,6 +6294,9 @@ hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
 
 /**
  * @brief Performs 3D memory copies between devices asynchronously
+ *
+ * Asynchronously copies a 3D region between two devices as described by @p p, ordered into @p
+ * stream.
  *
  * @param [in] p  - Parameters for memory copy
  * @param [in] stream - Stream to enqueue operation in.
@@ -6141,6 +6388,10 @@ hipError_t hipDeviceDisablePeerAccess(int peerDeviceId);
 /**
  * @brief Copies memory between two peer accessible devices.
  *
+ * Copies @p sizeBytes from device @p srcDeviceId to device @p dstDeviceId. The host blocks
+ * until the copy completes; peer access need not be enabled, as the runtime stages the
+ * transfer when necessary.
+ *
  * @param [out] dst - Destination device pointer
  * @param [in] dstDeviceId - Destination device
  * @param [in] src - Source device pointer
@@ -6153,6 +6404,8 @@ hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src, int srcDev
                          size_t sizeBytes);
 /**
  * @brief Copies memory between two peer accessible devices asynchronously.
+ *
+ * Asynchronous form of hipMemcpyPeer(), ordered into @p stream.
  *
  * @param [out] dst - Destination device pointer
  * @param [in] dstDeviceId - Destination device
@@ -6176,32 +6429,265 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src, int s
  *  @defgroup ExecutionContext Execution Context Management
  *  @{
  *  This section describes execution context management functions of HIP runtime API.
+ *
+ *  An execution context (also called a green context) runs work on a chosen subset of a
+ *  device's compute resources, allowing several contexts to share one device with partitioned
+ *  rather than competing resources. The typical workflow is: query a device's resources with
+ *  hipDeviceGetDevResource(), partition the SM resource into groups with
+ *  hipDevSmResourceSplitByCount() or hipDevSmResourceSplit(), build a resource descriptor from
+ *  the chosen group with hipDevResourceGenerateDesc(), and create a context from that descriptor
+ *  with hipGreenCtxCreate(). Streams and events are then created against the context, and the
+ *  context is released with hipExecutionCtxDestroy().
+ */
+/**
+ * @brief Queries a resource of the given type from a device.
+ *
+ * @param [in]  device   Device to query.
+ * @param [out] resource Returns the requested resource descriptor.
+ * @param [in]  type     Resource type to query, for example #hipDevResourceTypeSm for the
+ *                       device's streaming-multiprocessor (compute unit) resource.
+ *
+ * The returned resource describes the full set of resources of @p type on the device and can be
+ * passed to hipDevSmResourceSplitByCount() or hipDevSmResourceSplit() to partition it.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice, #hipErrorNotSupported
+ *
+ * @see hipDevSmResourceSplitByCount, hipDevResourceGenerateDesc, hipStreamGetDevResource
  */
 hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
                                    hipDevResourceType type);
+/**
+ * @brief Splits an SM resource into a number of groups of a minimum size.
+ *
+ * @param [out]    result    Array that receives the resulting resource groups. May be NULL to
+ *                           only query the number of groups that would be produced.
+ * @param [in,out] nbGroups  On input, the number of entries available in @p result; on output,
+ *                           the number of groups produced. When @p result is NULL, returns the
+ *                           number of groups that the split would create.
+ * @param [in]     input     SM resource to split, obtained from hipDeviceGetDevResource() with
+ *                           #hipDevResourceTypeSm.
+ * @param [out]    remainder Optional resource receiving any SMs left over after forming the
+ *                           groups. May be NULL.
+ * @param [in]     flags     Combination of #hipDevSmResourceSplitByCount_flags values, or 0 for
+ *                           default behavior.
+ * @param [in]     minCount  Minimum number of SMs each group must contain. The actual group size
+ *                           may be rounded up to satisfy device alignment requirements.
+ *
+ * Each produced group, and the optional @p remainder, can be passed to
+ * hipDevResourceGenerateDesc() to build a descriptor for hipGreenCtxCreate().
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipDeviceGetDevResource, hipDevSmResourceSplit, hipDevResourceGenerateDesc
+ */
 hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
                                         const hipDevResource* input, hipDevResource* remainder,
                                         unsigned int flags, unsigned int minCount);
+/**
+ * @brief Splits an SM resource into groups described by explicit parameters.
+ *
+ * @param [out]    result      Array of @p nbGroups entries that receives the resulting resource
+ *                             groups.
+ * @param [in]     nbGroups    Number of groups to produce.
+ * @param [in]     input       SM resource to split, obtained from hipDeviceGetDevResource() with
+ *                             #hipDevResourceTypeSm.
+ * @param [out]    remainder   Optional resource receiving any SMs left over after forming the
+ *                             groups. May be NULL.
+ * @param [in]     flags       Combination of #hipDevSmResourceGroup_flags values, or 0 for
+ *                             default behavior. #hipDevSmResourceGroupBackfill allows leftover
+ *                             SMs to be distributed back into the groups.
+ * @param [in]     groupParams Array of @p nbGroups parameter structures giving the requested SM
+ *                             count and co-scheduling preferences for each group.
+ *
+ * This gives finer control than hipDevSmResourceSplitByCount() by specifying the size and
+ * co-scheduling layout of each group individually.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipDevSmResourceSplitByCount, hipDeviceGetDevResource, hipDevResourceGenerateDesc
+ */
 hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
                                  const hipDevResource* input, hipDevResource* remainder,
                                  unsigned int flags,
                                  hipDevSmResourceGroupParams* groupParams);
+/**
+ * @brief Generates a resource descriptor from a set of resources.
+ *
+ * @param [out] phDesc      Returns the generated resource descriptor handle.
+ * @param [in]  resources   Array of resources, typically groups produced by a split, that the
+ *                          descriptor should cover.
+ * @param [in]  nbResources Number of entries in @p resources.
+ *
+ * The resulting descriptor is consumed by hipGreenCtxCreate() to create a context bound to the
+ * given resources.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipDevSmResourceSplitByCount, hipDevSmResourceSplit, hipGreenCtxCreate
+ */
 hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* phDesc, hipDevResource* resources,
                                        unsigned int nbResources);
+/**
+ * @brief Creates an execution (green) context bound to a set of device resources.
+ *
+ * @param [out] ctx    Returns the newly created execution context.
+ * @param [in]  desc   Resource descriptor produced by hipDevResourceGenerateDesc() describing the
+ *                     resources the context may use.
+ * @param [in]  device Device on which the context is created.
+ * @param [in]  flags  Flags controlling context creation, or 0 for default behavior.
+ *
+ * Work submitted through streams created against the returned context is confined to the
+ * resources named by @p desc. The context must be released with hipExecutionCtxDestroy().
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice, #hipErrorNotSupported,
+ * #hipErrorOutOfMemory
+ *
+ * @see hipDevResourceGenerateDesc, hipExecutionCtxStreamCreate, hipExecutionCtxDestroy
+ */
 hipError_t hipGreenCtxCreate(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                              unsigned int flags);
+/**
+ * @brief Destroys an execution context.
+ *
+ * @param [in] ctx Execution context to destroy.
+ *
+ * Releases the context and the resources it holds. Streams and events created against the
+ * context must not be used after it is destroyed.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipGreenCtxCreate
+ */
 hipError_t hipExecutionCtxDestroy(hipExecutionCtx_t ctx);
+/**
+ * @brief Returns the device's default execution context.
+ *
+ * @param [out] ctx    Returns the device's default execution context, which covers all of the
+ *                     device's resources.
+ * @param [in]  device Device to query.
+ *
+ * The returned context is owned by the runtime and must not be passed to hipExecutionCtxDestroy().
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice, #hipErrorNotSupported
+ *
+ * @see hipGreenCtxCreate, hipExecutionCtxGetDevice
+ */
 hipError_t hipDeviceGetExecutionCtx(hipExecutionCtx_t* ctx, int device);
+/**
+ * @brief Creates a stream that submits work within an execution context.
+ *
+ * @param [out] stream   Returns the new stream.
+ * @param [in]  greenctx Execution context the stream belongs to; work on the stream uses only the
+ *                       context's resources.
+ * @param [in]  flags    Stream behavior flags, #hipStreamDefault or #hipStreamNonBlocking.
+ * @param [in]  priority Stream priority, following the convention that lower numbers represent
+ *                       higher priorities; out-of-range values are clamped to the valid range.
+ *
+ * The stream must be released with hipStreamDestroy().
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipGreenCtxCreate, hipStreamDestroy, hipDeviceGetStreamPriorityRange
+ */
 hipError_t hipExecutionCtxStreamCreate(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                         unsigned int flags, int priority);
+/**
+ * @brief Queries a resource of the given type from an execution context.
+ *
+ * @param [in]  ctx      Execution context to query.
+ * @param [out] resource Returns the requested resource descriptor for the context.
+ * @param [in]  type     Resource type to query, for example #hipDevResourceTypeSm.
+ *
+ * The returned resource reflects the subset of the device's resources assigned to @p ctx, and may
+ * itself be split further.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipDeviceGetDevResource, hipDevSmResourceSplitByCount
+ */
 hipError_t hipExecutionCtxGetDevResource(hipExecutionCtx_t ctx, hipDevResource* resource,
                                           hipDevResourceType type);
+/**
+ * @brief Returns the device an execution context belongs to.
+ *
+ * Returns the device that the given execution context belongs to.
+ *
+ * @param [out] device Returns the device ordinal associated with the context.
+ * @param [in]  ctx    Execution context to query.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipGreenCtxCreate, hipDeviceGetExecutionCtx
+ */
 hipError_t hipExecutionCtxGetDevice(int* device, hipExecutionCtx_t ctx);
+/**
+ * @brief Returns a unique identifier for an execution context.
+ *
+ * Returns a unique identifier for the given execution context.
+ *
+ * @param [in]  ctx   Execution context to query.
+ * @param [out] ctxId Returns an identifier that is unique among execution contexts.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipGreenCtxCreate
+ */
 hipError_t hipExecutionCtxGetId(hipExecutionCtx_t ctx, unsigned long long* ctxId);
+/**
+ * @brief Queries the resource of the given type that a stream runs on.
+ *
+ * @param [in]  hStream  Stream to query.
+ * @param [out] resource Returns the resource descriptor the stream's work is confined to.
+ * @param [in]  type     Resource type to query, for example #hipDevResourceTypeSm.
+ *
+ * For a stream created against an execution context, this returns that context's portion of the
+ * resource.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipExecutionCtxStreamCreate, hipExecutionCtxGetDevResource
+ */
 hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource,
                                     hipDevResourceType type);
+/**
+ * @brief Records an event capturing the pending work of an execution context.
+ *
+ * @param [in] ctx   Execution context whose work is captured.
+ * @param [in] event Event to record.
+ *
+ * The event completes once all work outstanding in @p ctx at the time of the call has finished.
+ * It can later be waited on with hipExecutionCtxWaitEvent() or hipStreamWaitEvent().
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipExecutionCtxWaitEvent, hipExecutionCtxSynchronize, hipEventRecord
+ */
 hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+/**
+ * @brief Blocks the calling host thread until an execution context's work completes.
+ *
+ * @param [in] ctx Execution context to wait on.
+ *
+ * Returns once all work submitted to the context has finished.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipExecutionCtxRecordEvent, hipDeviceSynchronize
+ */
 hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
+/**
+ * @brief Makes future work in an execution context wait on an event.
+ *
+ * @param [in] ctx   Execution context that should wait.
+ * @param [in] event Event to wait on.
+ *
+ * All work subsequently submitted to @p ctx begins only after @p event reports completion. The
+ * wait is satisfied by the state captured in @p event at the time of this call.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @see hipExecutionCtxRecordEvent, hipStreamWaitEvent
+ */
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 /**
  * @}
@@ -6604,6 +7090,13 @@ hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags);
 /**
  * @brief Loads fatbin object
  *
+ * Loads the device code object embedded in @p fatbin and returns a module handle in
+ * @p module. The bytes referenced by @p fatbin need only remain valid for the duration
+ * of this call; the loaded module owns its own copy of the resident code. The returned
+ * module is owned by the caller and must be released with hipModuleUnload(); doing so
+ * invalidates every hipFunction_t previously obtained from it. Loading targets the
+ * calling thread's current context.
+ *
  * @param [in] fatbin  fatbin to be loaded as a module
  * @param [out] module  Module
  *
@@ -6639,6 +7132,11 @@ hipError_t hipModuleUnload(hipModule_t module);
 /**
  * @brief Function with kname will be extracted if present in module
  *
+ * Looks up the kernel named @p kname in @p module and returns its handle in @p function.
+ * The lookup uses the mangled symbol name as it appears in the code object. The returned
+ * handle remains valid until @p module is unloaded and does not need to be released
+ * individually. #hipErrorNotFound is returned if no matching symbol exists.
+ *
  * @param [in] module  Module to get function from
  * @param [in] kname  Pointer to the name of function
  * @param [out] function  Pointer to function handle
@@ -6650,6 +7148,9 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
 
 /**
  * @brief Returns the number of functions within a module.
+ *
+ * Returns in @p count the number of kernel entry points contained in @p mod. This count
+ * can be used to size buffers before enumerating the individual functions.
  *
  * @param [in] mod  Module to get function count from
  * @param [out] count  function count from module
@@ -6692,6 +7193,11 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
 /**
  * @brief Load hip Library from inmemory object
  *
+ * Loads the code object pointed to by @p code and returns a library handle in @p library.
+ * The library owns the resident code; the input buffer need only remain valid for the
+ * duration of the call. The returned library is owned by the caller and must be released
+ * with hipLibraryUnload(). Kernels are subsequently retrieved with hipLibraryGetKernel().
+ *
  * @param [out] library Output Library
  * @param [in] code In memory object
  * @param [in] jitOptions JIT options, CUDA only
@@ -6709,6 +7215,11 @@ hipError_t hipLibraryLoadData(hipLibrary_t* library, const void* code, hipJitOpt
 
 /**
  * @brief Load hip Library from file
+ *
+ * Loads the code object stored in @p fileName and returns a library handle in @p library.
+ * The returned library is owned by the caller and must be released with hipLibraryUnload().
+ * #hipErrorFileNotFound-class failures surface as #hipErrorInvalidValue if the file cannot
+ * be read.
  *
  * @param [out] library Output Library
  * @param [in] fileName file which contains code object
@@ -6728,6 +7239,11 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
 /**
  * @brief Unload HIP Library
  *
+ * Releases @p library and all resources associated with it. Any hipKernel_t handles
+ * obtained from this library through hipLibraryGetKernel() or hipLibraryEnumerateKernels()
+ * become invalid once the library is unloaded and must not be used afterward. Behavior is
+ * undefined if the library is unloaded while a kernel from it is still executing.
+ *
  * @param [in] library Input created hip library
  * @return #hipSuccess, #hipErrorInvalidValue
  */
@@ -6735,6 +7251,11 @@ hipError_t hipLibraryUnload(hipLibrary_t library);
 
 /**
  * @brief Get Kernel object from library
+ *
+ * Returns in @p pKernel the kernel named @p name from @p library. The returned handle is
+ * owned by the library and remains valid until the library is unloaded; it must not be
+ * released independently. #hipErrorInvalidValue is returned if the kernel name is not
+ * found in the library.
  *
  * @param [out] pKernel Output kernel object
  * @param [in] library Input hip library
@@ -6745,6 +7266,9 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 
 /**
  * @brief Get Kernel count in library
+ *
+ * Returns in @p count the total number of kernels contained in @p library. Use this value
+ * to size the buffer passed to hipLibraryEnumerateKernels().
  *
  * @param [out] count Count of kernels in library
  * @param [in] library Input created hip library
@@ -6791,6 +7315,10 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
 /**
  * @brief Retrieve kernel handles within a library
  *
+ * Fills @p kernels with up to @p numKernels kernel handles drawn from @p library. The
+ * caller must allocate the buffer; size it using hipLibraryGetKernelCount(). The returned
+ * handles are owned by the library and stay valid until the library is unloaded.
+ *
  * @param [out] kernels Buffer for kernel handles
  * @param [in] numKernels Maximum number of kernel handles to return to buffer
  * @oaram [in] library Library handle to query from
@@ -6802,6 +7330,10 @@ hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKern
 /**
  * @brief Returns a Library Handle
  *
+ * Returns in @p library the library that @p kernel belongs to. The returned handle refers
+ * to the same library object that produced the kernel and remains valid for that library's
+ * lifetime.
+ *
  * @param [out] library Returned Library handle
  * @param [in] kernel Kernel to retrieve library Handle
  * @return #hipSuccess, #hipErrorInvalidValue
@@ -6811,6 +7343,10 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
 /**
  * @brief Returns a Kernel Name
  *
+ * Returns in @p name a pointer to the null-terminated symbol name of @p kernel. The string
+ * is owned by the runtime and remains valid for the lifetime of the kernel's library; the
+ * caller must not free or modify it.
+ *
  * @param [out] name Returned Kernel Name
  * @param [in] kernel Kernel handle to retrieve name
  * @return #hipSuccess, #hipErrorInvalidValue
@@ -6819,6 +7355,11 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel);
 
 /**
  * @brief Returns the offset and size of a kernel parameter
+ *
+ * Returns the byte offset of parameter @p paramIndex within the kernel's argument buffer in
+ * @p paramOffset, and optionally its size in @p paramSize. @p paramIndex is zero-based;
+ * #hipErrorInvalidValue is returned if it is out of range. @p paramSize may be NULL when the
+ * size is not needed. The offset accounts for the kernel's natural argument alignment.
  *
  * @param [in] kernel       Kernel handle to retrieve parameter info
  * @param [in] paramIndex   Index of the parameter
@@ -6833,6 +7374,13 @@ hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* 
 /**
  * @brief Find out attributes for a given function.
  * @ingroup Execution
+ *
+ * Fills @p attr with the resource usage and launch limits of the kernel referenced by the
+ * device entry-point pointer @p func: register and shared/local/constant memory usage,
+ * maximum threads per block, and the maximum dynamic shared memory that may be opted into.
+ * @p func must name a kernel compiled for the current device, otherwise
+ * #hipErrorInvalidDeviceFunction is returned.
+ *
  * @param [out] attr  Attributes of funtion
  * @param [in] func  Pointer to the function handle
  *
@@ -6842,6 +7390,11 @@ hipError_t hipFuncGetAttributes(struct hipFuncAttributes* attr, const void* func
 /**
  * @brief Find out a specific attribute for a given function.
  * @ingroup Execution
+ *
+ * Returns in @p value the single attribute @p attrib of the kernel @p hfunc. This is the
+ * scalar-query form of hipFuncGetAttributes(); see hipFunction_attribute for the set of
+ * queryable attributes. Returns #hipErrorInvalidValue for an unsupported attribute.
+ *
  * @param [out] value  Pointer to the value
  * @param [in]  attrib  Attributes of the given funtion
  * @param [in]  hfunc  Function to get attributes from
@@ -6852,6 +7405,11 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
 /**
  * @brief Gets pointer to device entry function that matches entry function symbolPtr.
  *
+ * Resolves the host-side kernel symbol @p symbolPtr (the address of a __global__ function)
+ * to its device entry-point handle in @p functionPtr, allowing a kernel declared in host
+ * code to be launched through the function-handle launch APIs. #hipErrorInvalidDeviceFunction
+ * is returned if @p symbolPtr does not correspond to a known kernel.
+ *
  * @param [out] functionPtr  Device entry function
  * @param [in]  symbolPtr  Pointer to device entry function to search for
  *
@@ -6861,6 +7419,10 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
 hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr);
 /**
  * @brief Gets function pointer of a requested HIP API
+ *
+ * Returns in @p funcPtr the address of the runtime entry point named @p symbol, with lookup
+ * governed by @p flags and the optional outcome reported in @p driverStatus. Lets applications
+ * resolve API entry points dynamically.
  *
  * @param [in]  symbol  The API base name
  * @param [out] funcPtr  Pointer to the requested function
@@ -6874,6 +7436,11 @@ hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned l
                                   hipDriverEntryPointQueryResult* driverStatus);
 /**
  * @brief returns the handle of the texture reference with the name from the module.
+ *
+ * Returns in @p texRef the texture reference bound to the symbol @p name within @p hmod.
+ * The returned reference is owned by the module and stays valid until the module is
+ * unloaded; it must not be freed by the caller. #hipErrorNotFound is returned when the
+ * named texture reference is not present in the module.
  *
  * @param [in] hmod  Module
  * @param [in] name  Pointer of name of texture reference
@@ -6910,6 +7477,12 @@ hipError_t hipModuleLoadData(hipModule_t* module, const void* image);
  * @brief builds module from code object which resides in host memory. Image is pointer to that
  * location. Options are not used. hipModuleLoadData is called.
  *
+ * The bytes referenced by @p image need only be valid for the duration of the call; the
+ * returned module owns its own copy of the resident code and must be released with
+ * hipModuleUnload(). The JIT @p options / @p optionValues arrays are accepted for source
+ * compatibility but are not currently interpreted; behavior is identical to
+ * hipModuleLoadData().
+ *
  * @param [in] image  The pointer to the location of data
  * @param [out] module  Retuned module
  * @param [in] numOptions Number of options
@@ -6933,6 +7506,10 @@ hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned 
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle
  *
+ * The input @p data is consumed during this call into the link state @p state; the caller's
+ * buffer does not need to persist afterward. Inputs accumulate in the order added and are
+ * resolved together by hipLinkComplete().
+ *
  * If adding the file fails, it will
  * @return #hipErrorInvalidConfiguration
  *
@@ -6953,6 +7530,10 @@ hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * The file at @p path is read during this call and its contents added to the link state
+ * @p state; the file need not remain present after the call returns. Inputs are resolved
+ * together by hipLinkComplete().
+ *
  * If adding the file fails, it will
  * @return #hipErrorInvalidConfiguration
  *
@@ -6963,6 +7544,13 @@ hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char
 
 /**
  * @brief Completes the linking of the given program.
+ *
+ * Finalizes the link of all inputs previously added to @p state and returns the resulting
+ * code object in @p hipBinOut, with its size optionally in @p sizeOut. The returned binary
+ * remains valid until the link state is destroyed with hipLinkDestroy(); copy it out before
+ * destroying the state if it must outlive it. The buffer may then be handed to
+ * hipModuleLoadData().
+ *
  * @param [in]   state hip link state
  * @param [out]  hipBinOut  Upon success, points to the output binary
  * @param [out]  sizeOut  Size of the binary is stored (optional)
@@ -6979,6 +7567,12 @@ hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeO
 
 /**
  * @brief Creates a linker instance with options.
+ *
+ * Creates a JIT linker instance in @p stateOut configured by the given option arrays. The
+ * returned state accumulates inputs added through hipLinkAddData() / hipLinkAddFile(), is
+ * finalized by hipLinkComplete(), and must ultimately be released with hipLinkDestroy().
+ * @p options and @p optionValues are parallel arrays of length @p numOptions.
+ *
  * @param [in] numOptions  Number of options
  * @param [in] options  Array of options
  * @param [in] optionValues  Array of option values cast to void*
@@ -6992,6 +7586,10 @@ hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** 
                          hipLinkState_t* stateOut);
 /**
  * @brief Deletes the linker instance.
+ *
+ * Releases the linker @p state and any intermediate buffers it holds, including the output
+ * binary returned by hipLinkComplete(). After this call @p state must not be reused.
+ *
  * @param [in] state link state instance
  *
  * @returns #hipSuccess #hipErrorInvalidValue
@@ -7237,6 +7835,10 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* 
 /**
  * @brief Returns occupancy for a device function.
  *
+ * Returns in @p numBlocks the maximum number of resident blocks per multiprocessor for kernel
+ * @p f at block size @p blockSize using @p dynSharedMemPerBlk bytes of dynamic shared memory.
+ * Higher occupancy does not always translate to higher performance.
+ *
  * @param [out] numBlocks        Returned occupancy
  * @param [in]  f                Kernel function (hipFunction) for which occupancy is calculated
  * @param [in]  blockSize        Block size the kernel is intended to be launched with
@@ -7248,6 +7850,9 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hi
                                                               size_t dynSharedMemPerBlk);
 /**
  * @brief Returns occupancy for a device function.
+ *
+ * As hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(), but @p flags can relax the analysis
+ * (for example disabling the default caching-behavior assumption).
  *
  * @param [out] numBlocks        Returned occupancy
  * @param [in]  f                Kernel function(hipFunction_t) for which occupancy is calculated
@@ -7261,6 +7866,9 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
 /**
  * @brief Returns occupancy for a device function.
  *
+ * Returns in @p numBlocks the maximum number of resident blocks per multiprocessor for kernel
+ * @p f at the given block size and dynamic shared memory.
+ *
  * @param [out] numBlocks        Returned occupancy
  * @param [in]  f                Kernel function for which occupancy is calculated
  * @param [in]  blockSize        Block size the kernel is intended to be launched with
@@ -7271,6 +7879,9 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const vo
                                                         int blockSize, size_t dynSharedMemPerBlk);
 /**
  * @brief Returns occupancy for a device function.
+ *
+ * As hipOccupancyMaxActiveBlocksPerMultiprocessor(), but @p flags can relax the analysis used
+ * to compute occupancy.
  *
  * @param [out] numBlocks        Returned occupancy
  * @param [in]  f                Kernel function for which occupancy is calculated
@@ -7403,6 +8014,10 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem __dpar
 /**
  * @brief Set a kernel argument.
  *
+ * Pushes @p size bytes of argument data from @p arg into the pending launch's argument space
+ * at byte @p offset, as part of the legacy push/launch interface used together with
+ * hipConfigureCall() and hipLaunchByPtr().
+ *
  * @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue
  *
  * @param [in] arg    Pointer the argument in host memory.
@@ -7413,6 +8028,9 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem __dpar
 hipError_t hipSetupArgument(const void* arg, size_t size, size_t offset);
 /**
  * @brief Launch a kernel.
+ *
+ * Launches the kernel identified by host function pointer @p func using the configuration and
+ * arguments previously established with hipConfigureCall() and hipSetupArgument().
  *
  * @param [in] func Kernel to launch.
  *
@@ -7562,6 +8180,10 @@ hipError_t hipExtLaunchKernel(const void* function_address, dim3 numBlocks, dim3
  *
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported, #hipErrorOutOfMemory
  *
+ * @p pResViewDesc may be NULL when no resource view is required; it applies only to texture
+ * objects backed by a HIP array or mipmapped array. The texture object must be released with
+ * hipDestroyTextureObject() when it is no longer needed.
+ *
  * @note 3D linear filter isn't supported on GFX90A boards, on which the API @p
  * hipCreateTextureObject will return hipErrorNotSupported.
  *
@@ -7573,18 +8195,27 @@ hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResou
 /**
  * @brief Destroys a texture object.
  *
+ * Releases @p textureObject created by hipCreateTextureObject(). The backing HIP array or
+ * memory is not freed by this call and remains the caller's responsibility. Destroying an
+ * object while a kernel that references it is still executing results in undefined behavior.
+ *
  * @param [in] textureObject  texture object to destroy
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * @see hipCreateTextureObject
  */
 hipError_t hipDestroyTextureObject(hipTextureObject_t textureObject);
 
 /**
  * @brief Gets the channel descriptor in an array.
  *
- * @param [in] desc  pointer to channel format descriptor
- * @param [out] array  memory array on the device
+ * Returns in @p desc the channel format (component count, bit widths, and kind) that @p array
+ * was created with. This is useful when building a resource descriptor for an array obtained
+ * from elsewhere.
+ *
+ * @param [out] desc  pointer to channel format descriptor
+ * @param [in] array  memory array on the device
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -7593,6 +8224,9 @@ hipError_t hipGetChannelDesc(hipChannelFormatDesc* desc, hipArray_const_t array)
 
 /**
  * @brief Gets resource descriptor for the texture object.
+ *
+ * Returns in @p pResDesc the resource descriptor that @p textureObject was created with,
+ * identifying the array or linear memory the object reads from.
  *
  * @param [out] pResDesc  pointer to resource descriptor
  * @param [in] textureObject  texture object
@@ -7606,6 +8240,9 @@ hipError_t hipGetTextureObjectResourceDesc(hipResourceDesc* pResDesc,
 /**
  * @brief Gets resource view descriptor for the texture object.
  *
+ * Returns in @p pResViewDesc the resource view descriptor that @p textureObject was created
+ * with.
+ *
  * @param [out] pResViewDesc  pointer to resource view descriptor
  * @param [in] textureObject  texture object
  *
@@ -7617,6 +8254,9 @@ hipError_t hipGetTextureObjectResourceViewDesc(struct hipResourceViewDesc* pResV
 
 /**
  * @brief Gets texture descriptor for the texture object.
+ *
+ * Returns in @p pTexDesc the texture sampling descriptor (addressing, filtering,
+ * normalization) that @p textureObject was created with.
  *
  * @param [out] pTexDesc  pointer to texture descriptor
  * @param [in] textureObject  texture object
@@ -7630,6 +8270,11 @@ hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc,
 /**
  * @brief Creates a texture object.
  *
+ * Driver-style variant of hipCreateTextureObject() that takes the @p HIP_RESOURCE_DESC,
+ * @p HIP_TEXTURE_DESC, and @p HIP_RESOURCE_VIEW_DESC descriptor structures. @p pResViewDesc
+ * may be NULL when no resource view is required. The returned object must be released with
+ * hipTexObjectDestroy(); the backing array is not owned by the object.
+ *
  * @param [out] pTexObject  pointer to texture object to create
  * @param [in] pResDesc  pointer to resource descriptor
  * @param [in] pTexDesc  pointer to texture descriptor
@@ -7637,6 +8282,7 @@ hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc* pTexDesc,
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * @see hipTexObjectDestroy, hipCreateTextureObject
  */
 hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE_DESC* pResDesc,
                               const HIP_TEXTURE_DESC* pTexDesc,
@@ -7645,15 +8291,20 @@ hipError_t hipTexObjectCreate(hipTextureObject_t* pTexObject, const HIP_RESOURCE
 /**
  * @brief Destroys a texture object.
  *
+ * Releases @p texObject created by hipTexObjectCreate(). The backing array is not freed.
+ *
  * @param [in] texObject  texture object to destroy
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * @see hipTexObjectCreate
  */
 hipError_t hipTexObjectDestroy(hipTextureObject_t texObject);
 
 /**
  * @brief Gets resource descriptor of a texture object.
+ *
+ * Returns in @p pResDesc the driver-style resource descriptor of @p texObject.
  *
  * @param [out] pResDesc  pointer to resource descriptor
  * @param [in] texObject  texture object
@@ -7665,6 +8316,8 @@ hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC* pResDesc, hipTextureOb
 
 /**
  * @brief Gets resource view descriptor of a texture object.
+ *
+ * Returns in @p pResViewDesc the driver-style resource view descriptor of @p texObject.
  *
  * @param [out] pResViewDesc  pointer to resource view descriptor
  * @param [in] texObject  texture object
@@ -7678,6 +8331,8 @@ hipError_t hipTexObjectGetResourceViewDesc(HIP_RESOURCE_VIEW_DESC* pResViewDesc,
 /**
  * @brief Gets texture descriptor of a texture object.
  *
+ * Returns in @p pTexDesc the driver-style texture descriptor of @p texObject.
+ *
  * @param [out] pTexDesc  pointer to texture descriptor
  * @param [in] texObject  texture object
  *
@@ -7688,6 +8343,11 @@ hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC* pTexDesc, hipTextureObje
 
 /**
  * @brief Allocate a mipmapped array on the device.
+ *
+ * Allocates a mipmapped array of @p numLevels levels with channel format @p desc and base
+ * dimensions @p extent. The returned handle owns device memory for all levels and must be
+ * released with hipFreeMipmappedArray(). Individual levels are accessed as HIP arrays via
+ * hipGetMipmappedArrayLevel(). @p flags is reserved for extensions.
  *
  * @param[out] mipmappedArray  - Pointer to allocated mipmapped array in device memory
  * @param[in]  desc            - Requested channel format
@@ -7707,6 +8367,9 @@ hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
 /**
  * @brief Frees a mipmapped array on the device.
  *
+ * Releases @p mipmappedArray and the device memory backing all of its levels. Any per-level
+ * HIP arrays obtained with hipGetMipmappedArrayLevel() become invalid.
+ *
  * @param[in] mipmappedArray - Pointer to mipmapped array to free
  *
  * @return #hipSuccess, #hipErrorInvalidValue
@@ -7718,6 +8381,11 @@ hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray);
 
 /**
  * @brief Gets a mipmap level of a HIP mipmapped array.
+ *
+ * Returns in @p levelArray a HIP array aliasing level @p level of @p mipmappedArray. The
+ * returned array is owned by the mipmapped array and is valid only until the mipmapped array
+ * is freed; it must not be freed independently. @p level must be less than the level count
+ * the array was created with.
  *
  * @param[out] levelArray     - Returned mipmap level HIP array
  * @param[in]  mipmappedArray - HIP mipmapped array
@@ -7734,6 +8402,10 @@ hipError_t hipGetMipmappedArrayLevel(hipArray_t* levelArray,
 /**
  * @brief Create a mipmapped array.
  *
+ * Driver-style allocation of a mipmapped array described by @p pMipmappedArrayDesc with
+ * @p numMipmapLevels levels, returning the handle in @p pHandle. The handle owns the backing
+ * device memory and must be released with hipMipmappedArrayDestroy().
+ *
  * @param [out] pHandle  pointer to mipmapped array
  * @param [in] pMipmappedArrayDesc  mipmapped array descriptor
  * @param [in] numMipmapLevels  mipmap level
@@ -7749,7 +8421,10 @@ hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t* pHandle,
 /**
  * @brief Destroy a mipmapped array.
  *
- * @param [out] hMipmappedArray  pointer to mipmapped array to destroy
+ * Releases @p hMipmappedArray created with hipMipmappedArrayCreate() and the device memory
+ * backing all of its levels.
+ *
+ * @param [in] hMipmappedArray  mipmapped array to destroy
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -7760,6 +8435,9 @@ hipError_t hipMipmappedArrayDestroy(hipMipmappedArray_t hMipmappedArray);
 
 /**
  * @brief Get a mipmapped array on a mipmapped level.
+ *
+ * Returns in @p pLevelArray a HIP array aliasing level @p level of @p hMipMappedArray. The
+ * returned array is owned by the mipmapped array and valid only until it is destroyed.
  *
  * @param [in] pLevelArray Pointer of array
  * @param [out] hMipMappedArray Pointer of mipmapped array on the requested mipmap level
@@ -8323,6 +9001,10 @@ int hipGetStreamDeviceId(hipStream_t stream);
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * @p mode is one of #hipStreamCaptureModeGlobal, #hipStreamCaptureModeThreadLocal, or
+ * #hipStreamCaptureModeRelaxed, and determines how concurrent potentially-unsafe API calls are
+ * tracked while capture is active. The legacy default (null) stream cannot be captured.
+ *
  */
 hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode);
 
@@ -8353,6 +9035,11 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
 /**
  * @brief Ends capture on a stream, returning the captured graph.
  *
+ * Ends a capture sequence begun with hipStreamBeginCapture() on @p stream and returns the
+ * captured graph in @p pGraph. The returned graph is owned by the caller and must be destroyed
+ * with hipGraphDestroy(). If an error invalidated the capture, capture is ended and @p pGraph
+ * is set to NULL.
+ *
  * @param [in] stream - Stream to end capture.
  * @param [out] pGraph - Captured graph.
  *
@@ -8363,6 +9050,9 @@ hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph);
 
 /**
  * @brief Get capture status of a stream.
+ *
+ * Reports whether @p stream is currently capturing and, if so, an opaque id identifying the
+ * in-progress capture. The status reflects the moment of the call.
  *
  * @param [in] stream - Stream of which to get capture status from.
  * @param [out] pCaptureStatus - Returns current capture status.
@@ -8376,6 +9066,11 @@ hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptureStatus* p
 
 /**
  * @brief Get stream's capture state
+ *
+ * Extended query that, in addition to the capture status and id, returns the graph under
+ * construction and the set of nodes on which the next captured node would depend. The returned
+ * dependency array is owned by the runtime and valid until the next capture operation on the
+ * stream.
  *
  * @param [in] stream - Stream of which to get capture status from.
  * @param [out] captureStatus_out - Returns current capture status.
@@ -8396,6 +9091,9 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus
 
 /**
  * @brief Get stream's capture state
+ *
+ * Returns in @p pCaptureStatus whether @p stream is currently in capture mode. Useful for
+ * guarding API calls that are unsafe to issue while a capture is active.
  *
  * @param [in] stream - Stream of which to get capture status from.
  * @param [out] pCaptureStatus - Returns current capture status.
@@ -8423,6 +9121,10 @@ hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t
 /**
  * @brief Swaps the stream capture mode of a thread.
  *
+ * Atomically swaps the calling thread's stream-capture interaction mode with the value pointed
+ * to by @p mode, returning the previous mode in the same location. This governs how the
+ * thread's potentially-unsafe API calls are treated relative to concurrent captures.
+ *
  * @param [in] mode - Pointer to mode value to swap with the current mode.
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -8431,6 +9133,10 @@ hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode);
 
 /**
  * @brief Creates a graph
+ *
+ * Creates an empty graph in @p pGraph. @p flags must be 0. The returned graph is owned by the
+ * caller and must be released with hipGraphDestroy(); destroying it also destroys every node
+ * added to it.
  *
  * @param [out] pGraph - pointer to graph to create.
  * @param [in] flags - flags for graph creation, must be 0.
@@ -8443,6 +9149,10 @@ hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
 /**
  * @brief Destroys a graph
  *
+ * Destroys @p graph and all nodes it contains. Executable graphs previously instantiated from
+ * it remain valid and are unaffected; they must be destroyed separately with
+ * hipGraphExecDestroy().
+ *
  * @param [in] graph - instance of graph to destroy.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -8452,6 +9162,10 @@ hipError_t hipGraphDestroy(hipGraph_t graph);
 
 /**
  * @brief Adds dependency edges to a graph.
+ *
+ * Adds edges making each node in @p to depend on the corresponding node in @p from (both
+ * arrays have @p numDependencies entries). All nodes must belong to @p graph, and the added
+ * edges must not introduce a cycle.
  *
  * @param [in] graph - Instance of the graph to add dependencies to.
  * @param [in] from - Pointer to the graph nodes with dependencies to add from.
@@ -8465,6 +9179,9 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
 
 /**
  * @brief Removes dependency edges from a graph.
+ *
+ * Removes the edges previously created between the corresponding entries of @p from and @p to.
+ * Each specified edge must currently exist in @p graph.
  *
  * @param [in] graph - Instance of the graph to remove dependencies from.
  * @param [in] from - Array of nodes that provide the dependencies.
@@ -8565,6 +9282,9 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
 /**
  * @brief Returns a node's type.
  *
+ * Returns in @p pType the kind of operation that @p node represents (kernel, memcpy, memset,
+ * host, child-graph, event, etc.).
+ *
  * @param [in] node - Node to get type of.
  * @param [out] pType - Returns the node's type.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -8575,6 +9295,9 @@ hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
 /**
  * @brief Remove a node from the graph.
  *
+ * Removes @p node from its graph and destroys it, also removing every dependency edge incident
+ * to it. Other nodes in the graph are unaffected.
+ *
  * @param [in] node - graph node to remove
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
@@ -8583,6 +9306,10 @@ hipError_t hipGraphDestroyNode(hipGraphNode_t node);
 
 /**
  * @brief Clones a graph.
+ *
+ * Creates a deep copy of @p originalGraph in @p pGraphClone, duplicating all nodes and edges.
+ * The clone is independent and must be destroyed separately. Use hipGraphNodeFindInClone() to
+ * map a node from the original to its counterpart in the clone.
  *
  * @param [out] pGraphClone - Returns newly created cloned graph.
  * @param [in] originalGraph - original graph to clone from.
@@ -8593,6 +9320,10 @@ hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
 
 /**
  * @brief Finds a cloned version of a node.
+ *
+ * Returns in @p pNode the node in @p clonedGraph that corresponds to @p originalNode from the
+ * graph that was cloned. The clone must have been produced from that original by
+ * hipGraphClone().
  *
  * @param [out] pNode - Returns the cloned node.
  * @param [in] originalNode - original node handle.
@@ -8622,6 +9353,10 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
 /**
  * @brief Creates an executable graph from a graph.
  *
+ * Instantiates @p graph into an executable graph in @p pGraphExec, with behavior controlled by
+ * @p flags. The executable graph is a separate object owned by the caller and must be released
+ * with hipGraphExecDestroy(); it is not affected by later edits to the source graph.
+ *
  * @param [out] pGraphExec - Pointer to instantiated executable graph.
  * @param [in] graph - Instance of graph to instantiate.
  * @param [in] flags - Flags to control instantiation.
@@ -8634,6 +9369,10 @@ hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t* pGraphExec, hipGraph_t g
 
 /**
  * @brief Creates an executable graph from a graph.
+ *
+ * Instantiates @p graph into an executable graph in @p pGraphExec using the options in @p
+ * instantiateParams, which also receives result and error information. The executable graph is
+ * owned by the caller and released with hipGraphExecDestroy().
  *
  * @param [out] pGraphExec - Pointer to instantiated executable graph.
  * @param [in] graph - Instance of graph to instantiate.
@@ -8650,11 +9389,20 @@ hipError_t hipGraphInstantiateWithParams(hipGraphExec_t* pGraphExec, hipGraph_t 
  * @param [in] stream - Instance of stream in which to launch executable graph.
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * The launch is ordered with respect to other work in @p stream. An executable graph may be
+ * launched repeatedly, but only one instance of a given @p graphExec may be in flight at a
+ * time; a subsequent launch of the same executable graph is ordered after the previous one
+ * completes.
+ *
  */
 hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream);
 
 /**
  * @brief Uploads an executable graph to a stream
+ *
+ * Uploads @p graphExec to the device associated with @p stream ahead of launch, so that a
+ * subsequent hipGraphLaunch() on the same stream incurs lower latency. The upload is ordered
+ * within @p stream.
  *
  * @param [in] graphExec - Instance of executable graph to be uploaded.
  * @param [in] stream - Instance of stream to which the executable graph is uploaded to.
@@ -8665,6 +9413,11 @@ hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream);
 
 /**
  * @brief Creates a kernel execution node and adds it to a graph.
+ *
+ * Adds a node described by @p pNodeParams to @p graph, depending on the @p numDependencies
+ * nodes in @p pDependencies, and returns its handle in @p pGraphNode. The node type is taken
+ * from the parameter structure and its contents are copied at add time. The node is owned by
+ * @p graph.
  *
  * @param [out] pGraphNode - Pointer to kernel graph node that is created.
  * @param [in] graph - Instance of graph to add the created node to.
@@ -8681,6 +9434,8 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Return the flags of an executable graph.
  *
+ * Returns in @p flags the instantiation flags that @p graphExec was created with.
+ *
  * @param [in] graphExec - Executable graph to get the flags from.
  * @param [out] flags - Flags used to instantiate this executable graph.
  * @returns #hipSuccess, #hipErrorInvalidValue.
@@ -8690,6 +9445,10 @@ hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* fl
 
 /**
  * @brief Updates parameters of a graph's node.
+ *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
  *
  * @param [in] node - Instance of the node to set parameters for.
  * @param [in] nodeParams - Pointer to the parameters to be set.
@@ -8701,6 +9460,11 @@ hipError_t hipGraphNodeSetParams(hipGraphNode_t node, hipGraphNodeParams* nodePa
 
 /**
  * @brief Updates parameters of an executable graph's node.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] graphExec - Instance of the executable graph.
  * @param [in] node - Instance of the node to set parameters to.
@@ -8715,6 +9479,10 @@ hipError_t hipGraphExecNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t no
 /**
  * @brief Destroys an executable graph
  *
+ * Destroys the executable graph @p graphExec and releases its resources. The source graph it
+ * was instantiated from is unaffected. Destroying an executable graph while a launch of it is
+ * still in flight is undefined behavior.
+ *
  * @param [in] graphExec - Instance of executable graph to destroy.
  *
  * @returns #hipSuccess.
@@ -8726,6 +9494,11 @@ hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec);
 /**
  * @brief Check whether an executable graph can be updated with a graph and perform the update if  *
  * possible.
+ *
+ * Attempts to apply the topology and parameters of @p hGraph to the already-instantiated @p
+ * hGraphExec without a full re-instantiation. On success the executable graph is updated in
+ * place; on failure @p hErrorNode_out and @p updateResult_out identify why the update could
+ * not be applied (for example a changed topology).
  *
  * @param [in] hGraphExec - instance of executable graph to update.
  * @param [in] hGraph - graph that contains the updated parameters.
@@ -8740,6 +9513,11 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
 
 /**
  * @brief Creates a kernel execution node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created
  * @param [in] graph - Instance of graph to add the created node to.
@@ -8756,6 +9534,9 @@ hipError_t hipGraphAddKernelNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Gets kernel node's parameters.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node - instance of the node to get parameters from.
  * @param [out] pNodeParams - pointer to the parameters
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -8766,6 +9547,10 @@ hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node, hipKernelNodeParams*
 /**
  * @brief Sets a kernel node's parameters.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set parameters of.
  * @param [in] pNodeParams - const pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -8775,6 +9560,11 @@ hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeP
 
 /**
  * @brief Sets the parameters for a kernel node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - Instance of the executable graph with the node.
  * @param [in] node - Instance of the node to set parameters of.
@@ -8787,6 +9577,11 @@ hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
 
 /**
  * @brief Creates a memcpy node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] phGraphNode - Pointer to graph node that is created.
  * @param [in] hGraph - Instance of graph to add the created node to.
@@ -8803,6 +9598,11 @@ hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
 /**
  * @brief Creates a memcpy node and adds it to a graph.
  *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
+ *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of graph to add the created node to.
  * @param [in] pDependencies - const pointer to the dependencies of the memcpy execution node.
@@ -8817,6 +9617,9 @@ hipError_t hipGraphAddMemcpyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Gets a memcpy node's parameters.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node - instance of the node to get parameters from.
  * @param [out] pNodeParams - pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -8827,6 +9630,10 @@ hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node, hipMemcpy3DParms* pN
 /**
  * @brief Sets a memcpy node's parameters.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - instance of the node to set parameters to.
  * @param [in] pNodeParams - const pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -8836,6 +9643,10 @@ hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node, const hipMemcpy3DPar
 
 /**
  * @brief Sets a node's attribute.
+ *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
  *
  * @param [in] hNode - Instance of the node to set parameters of.
  * @param [in] attr - The attribute type to be set.
@@ -8848,6 +9659,9 @@ hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
 /**
  * @brief Gets a node's attribute.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] hNode - Instance of the node to set parameters of.
  * @param [in] attr - The attribute type to be set.
  * @param [in] value - const pointer to the parameters.
@@ -8858,6 +9672,11 @@ hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipKernelNodeAtt
                                           hipKernelNodeAttrValue* value);
 /**
  * @brief Sets the parameters of a memcpy node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - Instance of the executable graph with the node.
  * @param [in] node - Instance of the node to set parameters of.
@@ -8870,6 +9689,11 @@ hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
 
 /**
  * @brief Creates a 1D memcpy node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of graph to add the created node to.
@@ -8889,6 +9713,10 @@ hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Sets a memcpy node's parameters to perform a 1-dimensional copy.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set parameters of.
  * @param [in] dst - Pointer to memory address of the destination.
  * @param [in] src - Pointer to memory address of the source.
@@ -8903,6 +9731,11 @@ hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst, const v
 /**
  * @brief Sets the parameters for a memcpy node in the given graphExec to perform a 1-dimensional
  * copy.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - Instance of the executable graph with the node.
  * @param [in] node - Instance of the node to set parameters of.
@@ -8919,6 +9752,11 @@ hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraph
 
 /**
  * @brief Creates a memcpy node to copy from a symbol on the device and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of graph to add the created node to.
@@ -8940,6 +9778,10 @@ hipError_t hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t* pGraphNode, hipGraph_
 /**
  * @brief Sets a memcpy node's parameters to copy from a symbol on the device.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set parameters of.
  * @param [in] dst - Pointer to memory address of the destination.
  * @param [in] symbol - Device symbol address.
@@ -8955,6 +9797,11 @@ hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(hipGraphNode_t node, void* dst,
 /**
  * @brief Sets the parameters for a memcpy node in the given graphExec to copy from a symbol on the
  * * device.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - Instance of the executable graph with the node.
  * @param [in] node - Instance of the node to set parameters of.
@@ -8972,6 +9819,11 @@ hipError_t hipGraphExecMemcpyNodeSetParamsFromSymbol(hipGraphExec_t hGraphExec, 
 
 /**
  * @brief Creates a memcpy node to copy to a symbol on the device and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of graph to add the created node to.
@@ -8994,6 +9846,10 @@ hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t 
 /**
  * @brief Sets a memcpy node's parameters to copy to a symbol on the device.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set parameters of.
  * @param [in] symbol - Device symbol address.
  * @param [in] src - Pointer to memory address of the src.
@@ -9011,6 +9867,11 @@ hipError_t hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void* 
 /**
  * @brief Sets the parameters for a memcpy node in the given graphExec to copy to a symbol on the
  * device.
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
+ *
  * @param [in] hGraphExec - Instance of the executable graph with the node.
  * @param [in] node - Instance of the node to set parameters of.
  * @param [in] symbol - Device symbol address.
@@ -9028,6 +9889,11 @@ hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hi
 /**
  * @brief Creates a memset node and adds it to a graph.
  *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
+ *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of the graph to add the created node to.
  * @param [in] pDependencies - const pointer to the dependencies on the memset execution node.
@@ -9043,6 +9909,9 @@ hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Gets a memset node's parameters.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node - Instance of the node to get parameters of.
  * @param [out] pNodeParams - Pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9053,6 +9922,10 @@ hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams* pNo
 /**
  * @brief Sets a memset node's parameters.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set parameters of.
  * @param [in] pNodeParams - Pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9062,6 +9935,11 @@ hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParam
 
 /**
  * @brief Sets the parameters for a memset node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - Instance of the executable graph with the node.
  * @param [in] node - Instance of the node to set parameters of.
@@ -9074,6 +9952,11 @@ hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNo
 
 /**
  * @brief Creates a host execution node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of the graph to add the created node to.
@@ -9090,6 +9973,9 @@ hipError_t hipGraphAddHostNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Returns a host node's parameters.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node - Instance of the node to get parameters of.
  * @param [out] pNodeParams - Pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9100,6 +9986,10 @@ hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node, hipHostNodeParams* pNo
 /**
  * @brief Sets a host node's parameters.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set parameters of.
  * @param [in] pNodeParams - Pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9109,6 +9999,11 @@ hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParam
 
 /**
  * @brief Sets the parameters for a host node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - Instance of the executable graph with the node.
  * @param [in] node - Instance of the node to set parameters of.
@@ -9121,6 +10016,11 @@ hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode
 
 /**
  * @brief Creates a child graph node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of the graph to add the created node.
@@ -9137,6 +10037,9 @@ hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t grap
 /**
  * @brief Gets a handle to the embedded graph of a child graph node.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node - Instance of the node to get child graph of.
  * @param [out] pGraph - Pointer to get the graph.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9146,6 +10049,11 @@ hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGrap
 
 /**
  * @brief Updates node parameters in the child graph node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - instance of the executable graph with the node.
  * @param [in] node - node from the graph which was used to instantiate graphExec.
@@ -9158,6 +10066,11 @@ hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGra
 
 /**
  * @brief Creates an empty node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of the graph the node is added to.
@@ -9172,6 +10085,11 @@ hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 
 /**
  * @brief Creates an event record node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of the graph the node is added to.
@@ -9188,6 +10106,9 @@ hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t gra
 /**
  * @brief Returns the event associated with an event record node.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node -  Instance of the node to get event of.
  * @param [out] event_out - Pointer to return the event.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9198,6 +10119,10 @@ hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node, hipEvent_t* even
 /**
  * @brief Sets an event record node's event.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set event to.
  * @param [in] event - Pointer to the event.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9207,6 +10132,11 @@ hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node, hipEvent_t event
 
 /**
  * @brief Sets the event for an event record node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - instance of the executable graph with the node.
  * @param [in] hNode - node from the graph which was used to instantiate graphExec.
@@ -9219,6 +10149,11 @@ hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t hGraphExec, hipGra
 
 /**
  * @brief Creates an event wait node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode - Pointer to graph node that is created.
  * @param [in] graph - Instance of the graph the node to be added.
@@ -9236,6 +10171,9 @@ hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph
 /**
  * @brief Returns the event associated with an event wait node.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node -  Instance of the node to get event of.
  * @param [out] event_out - Pointer to return the event.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9246,6 +10184,10 @@ hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node, hipEvent_t* event_
 /**
  * @brief Sets an event wait node's event.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] node - Instance of the node to set event of.
  * @param [in] event - Pointer to the event.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9255,6 +10197,11 @@ hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node, hipEvent_t event);
 
 /**
  * @brief Sets the event for an event record node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - instance of the executable graph with the node.
  * @param [in] hNode - node from the graph which was used to instantiate graphExec.
@@ -9284,6 +10231,9 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Returns parameters for memory allocation node
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node         - Memory allocation node to query
  * @param [out] pNodeParams - Parameters for the specified memory allocation node
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9293,6 +10243,11 @@ hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodePar
 
 /**
  * @brief Creates a memory free node and adds it to a graph
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] pGraphNode      - Pointer to the graph node to create and add to the graph
  * @param [in] graph            - Instance of the graph node to be added
@@ -9309,6 +10264,9 @@ hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
 /**
  * @brief Returns parameters for memory free node
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] node     - Memory free node to query
  * @param [out] dev_ptr - Device pointer of the specified memory free node
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9318,6 +10276,9 @@ hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void* dev_ptr);
 
 /**
  * @brief Get the mem attribute for graphs.
+ *
+ * Returns in @p value the requested graph-memory attribute @p attr (such as current or
+ * high-water reserved/used bytes) for the graph memory pool of @p device.
  *
  * @param [in] device - Device to get attributes from
  * @param [in] attr - Attribute type to be queried
@@ -9330,6 +10291,9 @@ hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType at
 /**
  * @brief Set the mem attribute for graphs.
  *
+ * Sets the writable graph-memory attribute @p attr for @p device from @p value, for example to
+ * reset the recorded high-water mark.
+ *
  * @param [in] device - Device to set attribute of.
  * @param [in] attr - Attribute type to be set.
  * @param [in] value - Value of the attribute.
@@ -9341,6 +10305,9 @@ hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType at
 /**
  * @brief Free unused memory reserved for graphs on a specific device and return it back to the OS.
  *
+ * Releases unused graph-memory allocations on @p device back to the operating system. Memory
+ * backing graphs that still hold outstanding allocations is retained.
+ *
  * @param [in] device - Device for which memory should be trimmed
  * @returns #hipSuccess, #hipErrorInvalidDevice
  *
@@ -9349,6 +10316,11 @@ hipError_t hipDeviceGraphMemTrim(int device);
 
 /**
  * @brief Create an instance of userObject to manage lifetime of a resource.
+ *
+ * Creates a user object in @p object_out wrapping @p ptr with destructor @p destroy, an
+ * initial reference count of @p initialRefcount, and @p flags. The destructor is invoked once
+ * the object's references reach zero. User objects let a graph keep an external resource alive
+ * for the graph's lifetime.
  *
  * @param [out] object_out - pointer to instace of userobj.
  * @param [in] ptr - pointer to pass to destroy function.
@@ -9364,6 +10336,9 @@ hipError_t hipUserObjectCreate(hipUserObject_t* object_out, void* ptr, hipHostFn
 /**
  * @brief Release number of references to resource.
  *
+ * Releases @p count references on @p object. When the last reference is dropped the object's
+ * destructor runs.
+ *
  * @param [in] object - pointer to instace of userobj.
  * @param [in] count - reference to resource to be retained.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9374,6 +10349,9 @@ hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count __dpa
 /**
  * @brief Retain number of references to resource.
  *
+ * Acquires @p count additional references on @p object, preventing its destructor from running
+ * until they are released.
+ *
  * @param [in] object - pointer to instace of userobj.
  * @param [in] count - reference to resource to be retained.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9383,6 +10361,10 @@ hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count __dpar
 
 /**
  * @brief Retain user object for graphs.
+ *
+ * Transfers @p count references on @p object to @p graph, so the object stays alive at least
+ * as long as the graph. @p flags may request that the references move to graphs cloned from @p
+ * graph as well.
  *
  * @param [in] graph - pointer to graph to retain the user object for.
  * @param [in] object - pointer to instace of userobj.
@@ -9397,6 +10379,8 @@ hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object,
 /**
  * @brief Release user object from graphs.
  *
+ * Releases @p count references on @p object that were previously held by @p graph.
+ *
  * @param [in] graph - pointer to graph to retain the user object for.
  * @param [in] object - pointer to instace of userobj.
  * @param [in] count - reference to resource to be retained.
@@ -9408,6 +10392,9 @@ hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object,
 
 /**
  * @brief Write a DOT file describing graph structure.
+ *
+ * Writes a Graphviz DOT description of @p graph to the file @p path, with verbosity selected
+ * by @p flags. Intended for debugging and visualization of graph topology.
  *
  * @param [in] graph - graph object for which DOT file has to be generated.
  * @param [in] path - path to write the DOT file.
@@ -9480,6 +10467,11 @@ hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
 /**
  * @brief Creates a external semaphor wait node and adds it to a graph.
  *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
+ *
  * @param [out] pGraphNode - pointer to the graph node to create.
  * @param [in] graph - instance of the graph to add the created node.
  * @param [in] pDependencies - const pointer to the dependencies on the memset execution node.
@@ -9495,6 +10487,11 @@ hipError_t hipGraphAddExternalSemaphoresWaitNode(
 /**
  * @brief Creates a external semaphor signal node and adds it to a graph.
  *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
+ *
  * @param [out] pGraphNode - pointer to the graph node to create.
  * @param [in] graph - instance of the graph to add the created node.
  * @param [in] pDependencies - const pointer to the dependencies on the memset execution node.
@@ -9509,6 +10506,10 @@ hipError_t hipGraphAddExternalSemaphoresSignalNode(
 /**
  * @brief Updates node parameters in the external semaphore signal node.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
  * @param [in]  nodeParams  - Pointer to the params to be set.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9518,6 +10519,10 @@ hipError_t hipGraphExternalSemaphoresSignalNodeSetParams(
     hipGraphNode_t hNode, const hipExternalSemaphoreSignalNodeParams* nodeParams);
 /**
  * @brief Updates node parameters in the external semaphore wait node.
+ *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
  *
  * @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
  * @param [in]  nodeParams  - Pointer to the params to be set.
@@ -9529,6 +10534,9 @@ hipError_t hipGraphExternalSemaphoresWaitNodeSetParams(
 /**
  * @brief Returns external semaphore signal node params.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in]   hNode       - Node from the graph from which graphExec was instantiated.
  * @param [out]  params_out  - Pointer to params.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9539,6 +10547,9 @@ hipError_t hipGraphExternalSemaphoresSignalNodeGetParams(
 /**
  * @brief Returns external semaphore wait node params.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in]   hNode       - Node from the graph from which graphExec was instantiated.
  * @param [out]  params_out  - Pointer to params.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9548,6 +10559,11 @@ hipError_t hipGraphExternalSemaphoresWaitNodeGetParams(
     hipGraphNode_t hNode, hipExternalSemaphoreWaitNodeParams* params_out);
 /**
  * @brief Updates node parameters in the external semaphore signal node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in]  hGraphExec - The executable graph in which to set the specified node.
  * @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
@@ -9560,6 +10576,11 @@ hipError_t hipGraphExecExternalSemaphoresSignalNodeSetParams(
     const hipExternalSemaphoreSignalNodeParams* nodeParams);
 /**
  * @brief Updates node parameters in the external semaphore wait node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in]  hGraphExec - The executable graph in which to set the specified node.
  * @param [in]  hNode      - Node from the graph from which graphExec was instantiated.
@@ -9574,6 +10595,9 @@ hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(
 /**
  * @brief Gets a memcpy node's parameters.
  *
+ * Copies the node's current parameters out into the caller-provided structure. The returned
+ * values are a snapshot; they do not alias the node's internal state.
+ *
  * @param [in] hNode - instance of the node to get parameters from.
  * @param [out] nodeParams - pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9584,6 +10608,10 @@ hipError_t hipDrvGraphMemcpyNodeGetParams(hipGraphNode_t hNode, HIP_MEMCPY3D* no
 /**
  * @brief Sets a memcpy node's parameters.
  *
+ * Updates the parameters of the node in the (non-instantiated) graph. The new values are
+ * copied into the node and affect graphs instantiated afterward; executable graphs already
+ * created from this graph are not changed.
+ *
  * @param [in] hNode - instance of the node to Set parameters for.
  * @param [out] nodeParams - pointer to the parameters.
  * @returns #hipSuccess, #hipErrorInvalidValue
@@ -9593,6 +10621,11 @@ hipError_t hipDrvGraphMemcpyNodeSetParams(hipGraphNode_t hNode, const HIP_MEMCPY
 
 /**
  * @brief Creates a memset node and adds it to a graph.
+ *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
  *
  * @param [out] phGraphNode - pointer to graph node to create.
  * @param [in] hGraph - instance of graph to add the created node to.
@@ -9610,6 +10643,11 @@ hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGra
 /**
  * @brief Creates a memory free node and adds it to a graph
  *
+ * Adds a new node of this type to the graph and returns its handle in the node out-parameter.
+ * The node depends on the nodes listed in the dependency array (which may be empty), and its
+ * parameters are copied into the node at add time, so the caller's structures need not
+ * persist. The node is owned by the graph and is destroyed when the graph is destroyed.
+ *
  * @param [out] phGraphNode - Pointer to the graph node to create and add to the graph
  * @param [in]  hGraph - Instance of the graph the node to be added
  * @param [in]  dependencies - Const pointer to the node dependencies
@@ -9625,6 +10663,11 @@ hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGr
 /**
  * @brief Sets the parameters for a memcpy node in the given graphExec.
  *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
+ *
  * @param [in] hGraphExec - instance of the executable graph with the node.
  * @param [in] hNode - instance of the node to set parameters to.
  * @param [in] copyParams - const pointer to the memcpy node params.
@@ -9637,6 +10680,11 @@ hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGrap
 
 /**
  * @brief Sets the parameters for a memset node in the given graphExec.
+ *
+ * Updates the parameters of the corresponding node within the already-instantiated executable
+ * graph, without re-instantiating it. The graph topology must be unchanged; only this node's
+ * parameters are modified. The new values are copied in and take effect on subsequent launches
+ * of the executable graph.
  *
  * @param [in] hGraphExec - instance of the executable graph with the node.
  * @param [in] hNode - instance of the node to set parameters to.
@@ -9689,6 +10737,10 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
 /**
  * @brief Frees an address range reservation made via hipMemAddressReserve
  *
+ * Returns the virtual address range to the system. @p devPtr and @p size must exactly match
+ * a range previously returned by hipMemAddressReserve(); partial frees are not permitted. The
+ * range must first be fully unmapped with hipMemUnmap(), otherwise behavior is undefined.
+ *
  * @param [in] devPtr - starting address of the range.
  * @param [in] size - size of the range.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
@@ -9708,6 +10760,12 @@ hipError_t hipMemAddressFree(void* devPtr, size_t size);
  * @param [in] addr - requested starting address of the range.
  * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * @p size must be a multiple of the allocation granularity reported by
+ * hipMemGetAllocationGranularity(). Pass 0 for @p alignment to use the default; a non-zero
+ * @p alignment must also be a multiple of that granularity. @p addr is only a hint for the
+ * starting address and may be ignored, in which case the runtime selects the address.
+ *
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  *
@@ -9731,6 +10789,9 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
  * The prop location type must be specified as #hipMemLocationTypeDevice or #hipMemLocationTypeHost.
  * Any other value results in #hipErrorInvalidValue.
  *
+ * @p size must be a multiple of the allocation granularity for @p prop, as reported by
+ * hipMemGetAllocationGranularity(); otherwise #hipErrorInvalidValue is returned.
+ *
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.
  *
@@ -9741,6 +10802,11 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
 
 /**
  * @brief Exports an allocation to a requested shareable handle type.
+ *
+ * Produces an OS-level shareable handle for @p handle that can be transferred to another
+ * process and re-imported with hipMemImportFromShareableHandle(). The allocation must have
+ * been created with a @p prop requesting an exportable handle of @p handleType. Ownership of
+ * the returned OS handle passes to the caller, who is responsible for closing it.
  *
  * @param [out] shareableHandle - value of the returned handle.
  * @param [in] handle - handle to share.
@@ -9760,6 +10826,10 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
 /**
  * @brief Get the access flags set for the given location and ptr.
  *
+ * Returns in @p flags the access permission (one of the #hipMemAccessFlags values) that
+ * @p location currently has for the mapped address @p ptr. This reflects the most recent
+ * hipMemSetAccess() applied to the range covering @p ptr.
+ *
  * @param [out] flags - flags for this location.
  * @param [in] location - target location.
  * @param [in] ptr - address to check the access flags.
@@ -9773,6 +10843,12 @@ hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* loca
 
 /**
  * @brief Calculates either the minimal or recommended granularity.
+ *
+ * Returns in @p granularity the granularity for allocations described by @p prop. @p option
+ * selects #hipMemAllocationGranularityMinimum (the smallest legal size/alignment) or
+ * #hipMemAllocationGranularityRecommended (the size/alignment giving best performance).
+ * Sizes passed to hipMemCreate() and reservations made with hipMemAddressReserve() must be
+ * multiples of this value.
  *
  * @param [out] granularity - returned granularity.
  * @param [in] prop - location properties.
@@ -9790,6 +10866,9 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
 /**
  * @brief Retrieve the property structure of the given handle.
  *
+ * Returns in @p prop the allocation properties (type, location, and requested handle
+ * capabilities) that @p handle was created with by hipMemCreate().
+ *
  * @param [out] prop - properties of the given handle.
  * @param [in] handle - handle to perform the query on.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
@@ -9803,6 +10882,12 @@ hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
 
 /**
  * @brief Imports an allocation from a requested shareable handle type.
+ *
+ * Re-creates an allocation handle in @p handle from the OS-level @p osHandle previously
+ * produced by hipMemExportToShareableHandle() in another process. @p shHandleType must match
+ * the exported handle's type. The returned handle is an independent reference and must be
+ * released with hipMemRelease(); it can then be mapped with hipMemMap() like a locally
+ * created allocation.
  *
  * @param [out] handle - returned value.
  * @param [in] osHandle - shareable handle representing the memory allocation.
@@ -9818,6 +10903,12 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
 
 /**
  * @brief Maps an allocation handle to a reserved virtual address range.
+ *
+ * Backs the virtual range starting at @p ptr with the physical allocation @p handle. @p ptr
+ * and @p size must lie within a range previously reserved by hipMemAddressReserve(), and
+ * @p size must match the size of @p handle. Mapping alone does not grant access; call
+ * hipMemSetAccess() afterward before the range is dereferenced on a device. The range is
+ * later released with hipMemUnmap().
  *
  * @param [in] ptr - address where the memory will be mapped.
  * @param [in] size - size of the mapping.
@@ -9850,6 +10941,10 @@ hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int count,
  * @brief Release a memory handle representing a memory allocation which was previously allocated
  * through hipMemCreate.
  *
+ * Drops the caller's reference to @p handle. The underlying physical memory is not actually
+ * freed until it is also unmapped from every virtual range (hipMemUnmap()) and all references
+ * are released, so the order of hipMemRelease() and hipMemUnmap() is not significant.
+ *
  * @param [in] handle - handle of the memory allocation.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
  * @warning This API is marked as Beta. While this feature is complete, it can
@@ -9861,6 +10956,10 @@ hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle);
 
 /**
  * @brief Returns the allocation handle of the backing memory allocation given the address.
+ *
+ * Returns in @p handle the allocation currently backing the mapped address @p addr, taking an
+ * additional reference on it. The caller must balance this with a hipMemRelease() when done.
+ * @p addr must be an address that is currently mapped.
  *
  * @param [out] handle - handle representing addr.
  * @param [in] addr - address to look up.
@@ -9876,6 +10975,11 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
  * @brief Set the access flags for each location specified in desc for the given virtual address
  * range.
  *
+ * Grants or revokes access to the mapped range [@p ptr, @p ptr + @p size) for each device or
+ * host described in @p desc (an array of @p count #hipMemAccessDesc entries). The range must
+ * already be mapped with hipMemMap(); this call is what makes a freshly mapped range usable
+ * from a given device. Re-issuing it can change permissions later.
+ *
  * @param [in] ptr - starting address of the virtual address range.
  * @param [in] size - size of the range.
  * @param [in] desc - array of hipMemAccessDesc.
@@ -9890,6 +10994,11 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
 
 /**
  * @brief Unmap memory allocation of a given address range.
+ *
+ * Removes the physical backing from the range [@p ptr, @p ptr + @p size), which must
+ * correspond exactly to a range established by hipMemMap(). The virtual reservation itself
+ * remains and can be remapped or returned with hipMemAddressFree(); the physical allocation
+ * is freed once it is unmapped everywhere and released with hipMemRelease().
  *
  * @param [in] ptr - starting address of the range to unmap.
  * @param [in] size - size of the virtual address range.
@@ -9916,6 +11025,11 @@ hipError_t hipMemUnmap(void* ptr, size_t size);
 /**
  * @brief Maps a graphics resource for access.
  *
+ * Maps the @p count registered graphics resources in @p resources so their memory can be
+ * accessed by HIP. The map is ordered into @p stream; any HIP work in @p stream issued after
+ * this call sees the mapped resources. While mapped, a resource must not be accessed through
+ * its originating graphics API. Release with hipGraphicsUnmapResources().
+ *
  * @param [in] count - Number of resources to map.
  * @param [in] resources - Pointer of resources to map.
  * @param [in] stream - Stream for synchronization.
@@ -9927,6 +11041,10 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
                                    hipStream_t stream __dparm(0));
 /**
  * @brief Get an array through which to access a subresource of a mapped graphics resource.
+ *
+ * Returns in @p array a HIP array aliasing the (@p arrayIndex, @p mipLevel) subresource of the
+ * mapped @p resource. The array is owned by the resource and is valid only while the resource
+ * remains mapped; it must not be freed by the caller.
  *
  * @param [out] array - Pointer of array through which a subresource of resource may be accessed.
  * @param [in] resource - Mapped resource to access.
@@ -9943,6 +11061,10 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
 /**
  * @brief Gets device accessible address of a graphics resource.
  *
+ * Returns in @p devPtr a device pointer to the mapped @p resource and its accessible byte
+ * size in @p size. The pointer is valid only while the resource is mapped and must not be
+ * released with hipFree().
+ *
  * @param [out] devPtr - Pointer of device through which graphic resource may be accessed.
  * @param [out] size - Size of the buffer accessible from devPtr.
  * @param [in] resource - Mapped resource to access.
@@ -9955,6 +11077,10 @@ hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
 /**
  * @brief Unmaps graphics resources.
  *
+ * Unmaps the @p count resources in @p resources, ordered into @p stream, after which they may
+ * again be accessed by the originating graphics API. Any device pointers or arrays obtained
+ * while mapped become invalid.
+ *
  * @param [in] count - Number of resources to unmap.
  * @param [in] resources - Pointer of resources to unmap.
  * @param [in] stream - Stream for synchronization.
@@ -9966,6 +11092,9 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
                                      hipStream_t stream __dparm(0));
 /**
  * @brief Unregisters a graphics resource.
+ *
+ * Releases the registration of @p resource, removing HIP's reference to the underlying
+ * graphics object. The resource must be unmapped before it is unregistered.
  *
  * @param [in] resource - Graphics resources to unregister.
  *
@@ -9993,19 +11122,30 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource);
 /**
  * @brief Create a surface object.
  *
+ * Creates a surface object in @p pSurfObject for read-write access to the resource described
+ * by @p pResDesc, which must reference a HIP array. Unlike a texture object, a surface object
+ * allows in-kernel writes to the backing array. The object must be released with
+ * hipDestroySurfaceObject(); the backing array is not owned by the object.
+ *
  * @param [out] pSurfObject  Pointer of surface object to be created.
  * @param [in] pResDesc  Pointer of suface object descriptor.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
  *
+ * @see hipDestroySurfaceObject
  */
 hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject, const hipResourceDesc* pResDesc);
 /**
  * @brief Destroy a surface object.
  *
+ * Releases @p surfaceObject created by hipCreateSurfaceObject(). The backing array is not
+ * freed. Destroying an object still referenced by executing kernels is undefined behavior.
+ *
  * @param [in] surfaceObject  Surface object to be destroyed.
  *
  * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * @see hipCreateSurfaceObject
  */
 hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject);
 // end of surface
