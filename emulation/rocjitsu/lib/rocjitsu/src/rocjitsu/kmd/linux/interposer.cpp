@@ -197,6 +197,23 @@ public:
     return (fd >= 0 && fd == remote_kfd_fd_ && remote_) ? remote_ : nullptr;
   }
 
+  int close_remote() {
+    if (!remote_)
+      return 0;
+
+    int rc = remote_->close();
+    delete remote_;
+    remote_ = nullptr;
+    if (remote_kfd_fd_ >= 0) {
+      int close_rc = static_cast<int>(InterposerContext::real.close(remote_kfd_fd_));
+      if (rc == 0)
+        rc = close_rc;
+      remote_kfd_fd_ = -1;
+    }
+    clear_dups();
+    return rc;
+  }
+
   /// @brief Get the daemon's sysfs topology directory path.
   /// @returns The topology path string, or empty if not connected.
   std::string remote_topology_path() {
@@ -633,8 +650,8 @@ int openat64(int dirfd, const char *path, int flags, ...) {
 
 int close(int fd) {
   assert(InterposerContext::real.ready());
-  if (auto *remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->close();
+  if (InterposerContext::ctx.remote_lookup(fd))
+    return InterposerContext::ctx.close_remote();
   InterposerContext::ctx.untrack_sysfs(fd);
   if (InterposerContext::ctx.untrack_drm(fd)) {
     InterposerContext::real.close(fd);
