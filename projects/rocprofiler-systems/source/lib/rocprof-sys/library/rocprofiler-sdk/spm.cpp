@@ -16,12 +16,6 @@ namespace spm
 {
 namespace
 {
-#if __has_include(<rocprofiler-sdk/experimental/spm.h>)
-constexpr bool sdk_spm_header_available = true;
-#else
-constexpr bool sdk_spm_header_available = false;
-#endif
-
 constexpr auto beta_env_name  = "ROCPROFILER_SPM_BETA_ENABLED";
 constexpr auto beta_env_value = "1";
 
@@ -44,8 +38,6 @@ get_request()
         ::rocprofsys::rocprofiler_sdk::get_rocm_spm_sample_interval();
     request.sample_interval_unit =
         ::rocprofsys::rocprofiler_sdk::get_rocm_spm_sample_interval_unit();
-    request.sdk_header_available = sdk_spm_header_available;
-
     if(!request.events.empty()) request.enabled = true;
 
     return request;
@@ -58,13 +50,6 @@ validate_beta_request(const beta_request&             request,
     // Backstop for direct library load paths. rocprof-sys-run/sample reject SPM
     // earlier in the launcher, but tool_init must also fail closed for PR1.
     if(!request.requested()) return true;
-
-    if(!request.sdk_header_available)
-    {
-        LOG_WARNING("SPM counter collection was requested, but this build was compiled "
-                    "without rocprofiler-sdk experimental SPM header support");
-        return false;
-    }
 
     if(!runtime_collection_available)
     {

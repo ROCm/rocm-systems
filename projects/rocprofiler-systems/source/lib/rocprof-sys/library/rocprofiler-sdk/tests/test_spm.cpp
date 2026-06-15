@@ -19,7 +19,7 @@ make_valid_requested_spm_request()
 {
     const auto unit =
         std::string{ rocprofsys::common::rocm_spm_sample_interval_unit_sclk_cycles };
-    return beta_request{ true, true, { "SQ_WAVES" }, 4200, unit };
+    return beta_request{ true, { "SQ_WAVES" }, 4200, unit };
 }
 }  // namespace
 

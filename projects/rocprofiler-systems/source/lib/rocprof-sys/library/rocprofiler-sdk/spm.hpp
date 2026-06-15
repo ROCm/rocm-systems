@@ -17,7 +17,6 @@ namespace spm
 struct beta_request
 {
     bool                     enabled              = false;
-    bool                     sdk_header_available = false;
     std::vector<std::string> events               = {};
     std::uint64_t            sample_interval      = 0;
     std::string              sample_interval_unit = {};
