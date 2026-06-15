@@ -19,11 +19,20 @@
 /// via the standard dynamic-linker search path, validates its ABI, resolves
 /// the supplied configuration against the plugin's schema (filling in
 /// defaults), instantiates the plugin, and adds it to the supplied group.
+///
+/// Output sinks and the profiling group are also configured from the same
+/// config file (see configure_plugin_group()):
+///
+/// @code{.json}
+///   "profiled": true,
+///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
+/// @endcode
 
 #pragma once
 
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
+#include <memory>
 #include <string>
 
 namespace rocjitsu {
@@ -35,11 +44,21 @@ public:
   /// `plugins` object, and load each listed plugin into @p group.
   ///
   /// Loaded shared objects are kept open for the lifetime of the process.
-  /// Failures (missing library, ABI mismatch, bad config) are reported to
-  /// stderr and skip that plugin without aborting the others.
+  /// Failures (missing library, ABI mismatch, bad config) are reported to the
+  /// plugin log and skip that plugin without aborting the others.
   ///
   /// @returns The number of plugins successfully added to @p group.
   static int load_from_config(const std::string &config_json, ExecutionPluginGroup &group);
+
+  /// Build a fully configured plugin group from @p config_json: selects the
+  /// plain or profiled group (`"profiled"` flag), wires output sinks
+  /// (`"sinks"` object), and loads the plugins (`"plugins"` object). Shared by
+  /// the local (interposer) and daemon launch paths so a given config behaves
+  /// identically regardless of how the VM is brought up.
+  ///
+  /// @returns A non-null group (empty if the config declares no plugins).
+  static std::shared_ptr<ExecutionPluginGroup>
+  configure_plugin_group(const std::string &config_json);
 };
 
 } // namespace rocjitsu

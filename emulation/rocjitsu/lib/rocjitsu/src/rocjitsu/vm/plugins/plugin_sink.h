@@ -25,12 +25,19 @@
 /// If a plugin is used without a group (unusual), it falls back to a
 /// static StderrSink so output is never silently lost.
 ///
-/// ## Environment variables (production path)
+/// ## Configuration (production path)
 ///
-///   RJ_SINKS=stderr,file   Comma-separated sink types: stderr, stdout, file
-///                          (default: stderr).
-///   RJ_SINK_DIR=/tmp/out   Directory for file sinks. Each plugin writes
-///                          to <dir>/<plugin_name>.log.
+/// Sinks are configured from the top-level `sinks` object in the rocjitsu
+/// config (parsed by PluginLoader::configure_plugin_group):
+///
+/// @code{.json}
+///   "sinks": { "types": ["stderr", "file"], "dir": "/tmp/out" }
+/// @endcode
+///
+///   types   Array of sink types: "stderr", "stdout", "file"
+///           (default: ["stderr"]).
+///   dir     Directory for file sinks. Each plugin writes to
+///           <dir>/<plugin_name>.log.
 
 #pragma once
 

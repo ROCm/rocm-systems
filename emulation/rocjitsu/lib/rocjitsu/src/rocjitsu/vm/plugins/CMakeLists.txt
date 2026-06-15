@@ -4,8 +4,8 @@
 # Plugin logic as object libraries. These are linked both into the runtime
 # plugin shared objects (below) and into the unit-test binary, so they must
 # NOT contain the ABI export symbols (rocjitsu_plugin_metadata /
-# rocjitsu_plugin_create) — those live in the separate plugin_export.cpp
-# sources compiled only into the shared objects.
+# rocjitsu_plugin_create / rocjitsu_plugin_destroy) — those live in the
+# separate plugin_export.cpp sources compiled only into the shared objects.
 rj_add_object_library(
     rocjitsu_plugin_logging
     logging/plugin.cpp
@@ -23,13 +23,14 @@ rj_add_object_library(
 rj_add_object_library(
     rocjitsu_plugin_loader
     plugin_loader.cpp
+    plugin_config_resolver.cpp
 )
 target_link_libraries(rocjitsu_plugin_loader PRIVATE flatbuffers)
 
 # Runtime plugin shared objects are only meaningful on Linux (the interposer
 # platform). Each plugin is a self-contained `librocjitsu_plugin_<name>.so`:
 # host symbols are hidden, so the plugin statically bundles the simulator code
-# it references and exports only the two ABI entry points.
+# it references and exports only the three ABI entry points.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Same object-library closure as the main shared library, minus the plugin
     # object libraries themselves (each plugin links only its own logic).
@@ -80,11 +81,31 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PRIVATE ${object_lib} ${RJ_PLUGIN_RUNTIME_LIBS}
         )
         add_dependencies(${target} flatbuffers_schemas)
+        # Hide everything except the ABI exports (which carry an explicit
+        # default-visibility attribute via ROCJITSU_DEFINE_PLUGIN). This keeps
+        # the bundled simulator/C++ symbols private to the plugin .so.
         set_target_properties(
             ${target}
             PROPERTIES
                 OUTPUT_NAME rocjitsu_plugin_${name}
                 LIBRARY_OUTPUT_DIRECTORY ${RJ_PLUGIN_OUTPUT_DIR}
+                CXX_VISIBILITY_PRESET hidden
+                C_VISIBILITY_PRESET hidden
+                VISIBILITY_INLINES_HIDDEN ON
+        )
+        # Restrict the dynamic symbol table to the three ABI entry points. The
+        # bundled static libraries (rocjitsu_code C API, flatbuffers reflection)
+        # export default-visibility symbols that the visibility preset cannot
+        # hide; the version script makes everything but the ABI exports local.
+        target_link_options(
+            ${target}
+            PRIVATE
+                "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/plugin_export.map"
+        )
+        set_property(
+            TARGET ${target}
+            APPEND
+            PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/plugin_export.map
         )
         # The interposer must exist alongside the plugins at runtime.
         add_dependencies(rocjitsu_kmd_shim ${target})

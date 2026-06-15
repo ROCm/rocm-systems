@@ -51,17 +51,23 @@ The bundled plugins are `race` (`RaceDetectorPlugin`) and `logging`
 
 ### Plugin ABI
 
-Each plugin `.so` exports two `extern "C"` functions:
+The plugin boundary is a C-shaped ABI. Each plugin `.so` exports three
+`extern "C"` functions:
 
 - `const PluginMetadata *rocjitsu_plugin_metadata()` — returns a pointer
   to static metadata: `abi` version, `name`, `contact`, `version`, and a
   `config_schema` JSON string.
-- `std::unique_ptr<ExecutionPlugin> rocjitsu_plugin_create(const char *config_json)`
-  — constructs the plugin from its resolved JSON configuration string.
+- `PluginHandle rocjitsu_plugin_create(const char *config_json)` —
+  constructs the plugin from its resolved JSON configuration string and
+  returns an opaque handle.
+- `void rocjitsu_plugin_destroy(PluginHandle handle)` — destroys an
+  instance previously returned by `rocjitsu_plugin_create`.
 
-Use the `ROCJITSU_DEFINE_PLUGIN` macro from `plugin_abi.h` to emit both
-functions. The host validates the reported `abi` against the loader's
-expected version before use.
+Allocation and deallocation stay on the plugin side of the boundary: the
+host destroys each instance through the plugin's own
+`rocjitsu_plugin_destroy` export. Use the `ROCJITSU_DEFINE_PLUGIN` macro
+from `plugin_abi.h` to emit all three functions. The host validates the
+reported `abi` against the loader's expected version before use.
 
 ### Config schema
 
@@ -86,36 +92,65 @@ Plugins write diagnostic output (race reports, profiling data, kernel
 logs) through a configurable sink system rather than directly to stderr.
 This makes output testable and redirectable.
 
-### Environment variables
+### Sink configuration
 
-| Variable | Default | Description |
+Sinks are configured from an optional top-level `sinks` object in the
+rocjitsu config (the same file that lists the `plugins`). There are no
+sink-related environment variables.
+
+| Key | Default | Description |
 |---|---|---|
-| `RJ_SINKS` | `stderr` | Comma-separated list of sink types: `stderr`, `stdout`, `file` |
-| `RJ_SINK_DIR` | *(none)* | Directory for file sinks. Required when `file` is in `RJ_SINKS` |
+| `types` | `["stderr"]` | Array of sink types: `stderr`, `stdout`, `file` |
+| `dir` | *(none)* | Directory for file sinks. Required when `file` is in `types` |
 
-When `file` is in `RJ_SINKS`, each plugin writes to
-`<RJ_SINK_DIR>/<plugin_name>.log`. Plugin names are fixed:
+When `file` is in `types`, each plugin writes to
+`<dir>/<plugin_name>.log`. Plugin names are fixed:
 `race` for `RaceDetectorPlugin`, `logging` for `KernelLoggingPlugin`.
+
+### Profiled execution
+
+Set the top-level `"profiled": true` key to wrap the plugins in a
+profiled execution group, which emits per-hook timing data
+(`HOOK_PROFILE` lines) to stderr.
 
 ### Examples
 
-With a config file `my_config.json` that contains a `plugins` section:
+Interactive use — output goes to stderr (the default):
 
 ```json
 { "plugins": { "race": {} } }
 ```
 
 ```bash
-# Interactive use (default) — output goes to stderr
 rocjitsu --config my_config.json -- ./my_app
-
-# Save race reports to files (for test harnesses)
-RJ_SINKS=file RJ_SINK_DIR=/tmp/output rocjitsu --config my_config.json -- ./my_app
-# Race reports are in /tmp/output/race.log
-
-# Both stderr and file simultaneously
-RJ_SINKS=stderr,file RJ_SINK_DIR=/tmp/output rocjitsu --config my_config.json -- ./my_app
 ```
+
+Save race reports to files (for test harnesses):
+
+```json
+{
+  "plugins": { "race": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/output" }
+}
+```
+
+```bash
+rocjitsu --config my_config.json -- ./my_app
+# Race reports are in /tmp/output/race.log
+```
+
+Send output to both stderr and a file simultaneously:
+
+```json
+{
+  "plugins": { "race": {} },
+  "sinks": { "types": ["stderr", "file"], "dir": "/tmp/output" }
+}
+```
+
+> Note: command-line options for selecting plugins and sinks are planned
+> in a separate mirage CLI change; today they are driven entirely by the
+> config file.
 
 ### Writing a plugin that uses sinks
 

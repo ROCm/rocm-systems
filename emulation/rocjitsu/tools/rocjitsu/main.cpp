@@ -13,6 +13,8 @@
 
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/version.h"
+#include "rocjitsu/vm/plugins/plugin_loader.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 
 #include <cerrno>
 #include <csignal>
@@ -21,6 +23,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stop_token>
 #include <string_view>
 #include <sys/mman.h>
@@ -205,6 +208,15 @@ static int run_daemon_server(const char *config_path) {
   if (rj_vm_create(config_path, RJ_VM_MODE_DAEMON, &vm) != ROCJITSU_STATUS_SUCCESS) {
     std::cerr << std::format("rocjitsu: failed to create VM from {}\n", config_path);
     return 1;
+  }
+
+  // Configure plugins/sinks from the same config the interposer would use, so
+  // a config that enables plugins behaves identically in daemon mode.
+  if (vm->soc) {
+    std::ifstream cfg(config_path, std::ios::binary);
+    std::string config_json((std::istreambuf_iterator<char>(cfg)),
+                            std::istreambuf_iterator<char>());
+    vm->soc->set_plugin_group(PluginLoader::configure_plugin_group(config_json));
   }
 
   std::jthread engine_thread([vm]() { rj_vm_run(vm, nullptr); });

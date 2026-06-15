@@ -28,6 +28,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_vm_amdgpu
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
+    rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
 )
@@ -104,6 +105,7 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    plugin_config_resolver_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
     data_types_test.cpp
@@ -755,22 +757,34 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     rj_add_hip_test_case(hip_bfe_2d_test "BfeRegressionTest.ThreadIdxY")
 
     # --- Logging plugin end-to-end test ---
+    # The config selects the logging plugin and a file sink. The sink dir is
+    # build-specific, so it is templated into the config via configure_file.
+    # RJ_SINK_DIR is passed only so the test binary can locate the log file it
+    # asserts on; the emulator reads sink settings exclusively from the config.
     rj_add_hip_test(hip_logging_test SOURCE logging/hip_logging_test.hip)
     set(LOGGING_SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/logging_test_output)
     set(LOGGING_RUNTIME_DIR ${LOGGING_SINK_DIR}/runtime)
     file(MAKE_DIRECTORY ${LOGGING_SINK_DIR})
     file(MAKE_DIRECTORY ${LOGGING_RUNTIME_DIR})
+    set(RJ_TEST_SINK_DIR ${LOGGING_SINK_DIR})
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json.in
+        ${LOGGING_SINK_DIR}/config.json
+        @ONLY
+    )
     rj_add_hip_test_case(
         hip_logging_test "LoggingTest.dispatch_logged"
-        CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/logging_test_config.json
+        CONFIG ${LOGGING_SINK_DIR}/config.json
         TIMEOUT 30
         ENVIRONMENT
             "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
-            "RJ_SINKS=file"
             "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
     )
 
     # --- Profiled plugin group end-to-end test ---
+    # The profiled group is selected via "profiled": true in the config. Its
+    # HOOK_PROFILE output goes to stderr, which the test captures directly;
+    # RJ_SINK_DIR is only a scratch directory for that capture file.
     rj_add_hip_test(
         hip_profiled_plugin_test
         SOURCE logging/hip_profiled_plugin_test.hip
@@ -781,11 +795,10 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     file(MAKE_DIRECTORY ${PROFILED_RUNTIME_DIR})
     rj_add_hip_test_case(
         hip_profiled_plugin_test "ProfiledPluginTest.hook_profile_output"
+        CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/logging/profiled_test_config.json
         TIMEOUT 30
         ENVIRONMENT
             "ROCJITSU_RUNTIME_DIR=${PROFILED_RUNTIME_DIR}"
-            "RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP=1"
-            "RJ_SINKS=file"
             "RJ_SINK_DIR=${PROFILED_SINK_DIR}"
     )
 

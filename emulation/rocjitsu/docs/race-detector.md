@@ -108,11 +108,17 @@ $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- python my_script.p
 ```
 
 To capture reports to a file instead of stderr (useful for CI or
-scripted workflows), set `RJ_SINKS=file` and `RJ_SINK_DIR`:
+scripted workflows), add a `sinks` section to your config:
+
+```json
+{
+  "plugins": { "race": {} },
+  "sinks": { "types": ["file"], "dir": "/tmp/output" }
+}
+```
 
 ```bash
-RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  $BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- ./my_app
 # Reports are written to /tmp/output/race.log
 ```
 

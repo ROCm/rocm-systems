@@ -15,8 +15,6 @@
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
-#include "rocjitsu/vm/plugins/plugin_sink.h"
-#include "rocjitsu/vm/plugins/profiled_execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
@@ -54,24 +52,6 @@
 using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedDriver;
 using rocjitsu::Sysfs;
-
-// Read an entire text file via raw syscalls. Used during driver construction
-// to avoid re-entering the interposed libc I/O path. Returns empty on failure.
-static std::string read_text_file_raw(const char *path) {
-  int fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, path, O_RDONLY, 0));
-  if (fd < 0)
-    return {};
-  std::string out;
-  char buf[4096];
-  for (;;) {
-    auto n = syscall(SYS_read, fd, buf, sizeof(buf));
-    if (n <= 0)
-      break;
-    out.append(buf, static_cast<size_t>(n));
-  }
-  syscall(SYS_close, fd);
-  return out;
-}
 
 static int connect_to_daemon() {
   auto path = rocjitsu::rpc_default_socket_path();
@@ -126,6 +106,7 @@ public:
   int (*access)(const char *, int) = nullptr;
   int (*fstat_fn)(int, struct stat *) = nullptr;
   ssize_t (*readlink_fn)(const char *, char *, size_t) = nullptr;
+  ssize_t (*read)(int, void *, size_t) = nullptr;
   pid_t (*fork)() = nullptr;
 
   bool ready() const { return initialized_; }
@@ -151,10 +132,11 @@ public:
     access = util::lookup_symbol<decltype(access)>(handle, "access");
     fstat_fn = util::lookup_symbol<decltype(fstat_fn)>(handle, "fstat");
     readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
+    read = util::lookup_symbol<decltype(read)>(handle, "read");
     fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
     assert(openat && close && ioctl && mmap && munmap && mprotect && madvise);
     assert(dup && dup2 && fcntl && fopen && freopen && opendir && fork);
-    assert(stat && lstat && access && fstat_fn && readlink_fn);
+    assert(stat && lstat && access && fstat_fn && readlink_fn && read);
     initialized_ = true;
   }
 
@@ -340,69 +322,68 @@ public:
     std::lock_guard lock(init_mutex_);
     if (!rj_vm_) {
       in_construction = true;
-      auto cfg_file = rocjitsu::rpc_default_config_file_path();
-      char cfg_buf[4096]{};
-      int cfg_fd = static_cast<int>(syscall(SYS_openat, AT_FDCWD, cfg_file.c_str(), O_RDONLY, 0));
-      if (cfg_fd < 0) {
-        util::Logger::debug_print("rocjitsu: no config file at ", cfg_file);
+      auto cfg_pointer_file = rocjitsu::rpc_default_config_file_path();
+      // The pointer file's contents are the path to the actual JSON config.
+      std::string cfg_path = read_file_passthrough(cfg_pointer_file.c_str());
+      while (!cfg_path.empty() &&
+             (cfg_path.back() == '\n' || cfg_path.back() == '\r' || cfg_path.back() == ' '))
+        cfg_path.pop_back();
+      if (cfg_path.empty()) {
+        util::Logger::debug_print("rocjitsu: no config file at ", cfg_pointer_file);
         in_construction = false;
         return nullptr;
       }
-      auto n = syscall(SYS_read, cfg_fd, cfg_buf, sizeof(cfg_buf) - 1);
-      syscall(SYS_close, cfg_fd);
-      if (n <= 0) {
-        in_construction = false;
-        return nullptr;
-      }
-      while (n > 0 && (cfg_buf[n - 1] == '\n' || cfg_buf[n - 1] == '\r'))
-        cfg_buf[--n] = '\0';
-      if (rj_vm_create(cfg_buf, RJ_VM_MODE_LOCAL, &rj_vm_) != ROCJITSU_STATUS_SUCCESS) {
+      if (rj_vm_create(cfg_path.c_str(), RJ_VM_MODE_LOCAL, &rj_vm_) != ROCJITSU_STATUS_SUCCESS) {
         util::Logger::debug_print("rocjitsu: failed to create VM");
         in_construction = false;
         return nullptr;
       }
 
-      // Set up the execution plugin group, its output sinks, and load any
-      // plugins declared in the config file's "plugins" section.
+      // Configure the execution plugin group (profiling group, output sinks,
+      // and plugins) from the same JSON config the VM was built from, so the
+      // local (interposer) and daemon launch paths behave identically.
       if (rj_vm_->soc) {
-        std::shared_ptr<rocjitsu::ExecutionPluginGroup> pg;
-        if (std::getenv("RJ_USE_PROFILED_EXECUTION_PLUGIN_GROUP"))
-          pg = std::make_shared<rocjitsu::ProfiledExecutionPluginGroup>();
-        else
-          pg = std::make_shared<rocjitsu::ExecutionPluginGroup>();
-
-        std::string sinks_str = "stderr";
-        if (const char *s = std::getenv("RJ_SINKS"))
-          sinks_str = s;
-        {
-          std::istringstream ss(sinks_str);
-          std::string token;
-          while (std::getline(ss, token, ',')) {
-            if (token == "stderr")
-              pg->add_sink(&rocjitsu::StderrSink::instance());
-            else if (token == "stdout")
-              pg->add_sink(&rocjitsu::StdoutSink::instance());
-            else if (token == "file") {
-              const char *dir = std::getenv("RJ_SINK_DIR");
-              if (dir)
-                pg->set_sink_dir(dir);
-            }
-          }
-        }
-
-        // Discover and load execution plugins declared in the config file's
-        // "plugins" section. cfg_buf holds the path to the JSON config.
-        std::string config_json = read_text_file_raw(cfg_buf);
-        if (!config_json.empty())
-          rocjitsu::PluginLoader::load_from_config(config_json, *pg);
-
-        rj_vm_->soc->set_plugin_group(pg);
+        std::string config_json = read_file_passthrough(cfg_path.c_str());
+        rj_vm_->soc->set_plugin_group(rocjitsu::PluginLoader::configure_plugin_group(config_json));
       }
 
       std::thread([vm = rj_vm_]() { rj_vm_run(vm, nullptr); }).detach();
       in_construction = false;
     }
     return driver();
+  }
+
+  /// @brief Read an entire file via the libc passthrough (real openat/read/
+  /// close), retrying on EINTR.
+  /// @details Used during driver construction where re-entering our interposed
+  /// I/O path could recurse. Read errors (other than EINTR) are reported and
+  /// yield an empty string, distinct from a successfully read empty file.
+  static std::string read_file_passthrough(const char *path) {
+    if (!real.ready())
+      return {};
+    int fd;
+    do {
+      fd = real.openat(AT_FDCWD, path, O_RDONLY, 0);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0)
+      return {};
+    std::string out;
+    char buf[4096];
+    for (;;) {
+      ssize_t n = real.read(fd, buf, sizeof(buf));
+      if (n < 0) {
+        if (errno == EINTR)
+          continue;
+        util::Logger::warn("rocjitsu: read error on '", path, "': ", std::strerror(errno));
+        real.close(fd);
+        return {};
+      }
+      if (n == 0)
+        break; // EOF.
+      out.append(buf, static_cast<size_t>(n));
+    }
+    real.close(fd);
+    return out;
   }
 
   static int fopen_flags_from_mode(const char *mode) {

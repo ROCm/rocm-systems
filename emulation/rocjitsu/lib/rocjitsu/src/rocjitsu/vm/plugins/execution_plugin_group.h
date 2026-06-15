@@ -27,6 +27,27 @@
 
 namespace rocjitsu {
 
+/// @brief Deleter for owned plugin instances.
+///
+/// For host/in-tree plugins created with `new`/`make_unique`, @c destroy is
+/// null and the instance is freed with `delete`. For plugins loaded across the
+/// C ABI, @c destroy points at the plugin library's `rocjitsu_plugin_destroy`
+/// export so allocation and deallocation stay on the same side of the boundary.
+struct PluginDeleter {
+  void (*destroy)(void *) = nullptr;
+  void operator()(ExecutionPlugin *p) const {
+    if (!p)
+      return;
+    if (destroy)
+      destroy(static_cast<void *>(p));
+    else
+      delete p;
+  }
+};
+
+/// @brief Owning pointer to a plugin instance with a boundary-aware deleter.
+using OwnedPlugin = std::unique_ptr<ExecutionPlugin, PluginDeleter>;
+
 class ExecutionPluginGroup {
 public:
   ExecutionPluginGroup() = default;
@@ -43,7 +64,8 @@ public:
   /// this call gets a FileSink at <dir>/<plugin_name>.log.
   void set_sink_dir(const std::string &dir) { sink_dir_ = dir; }
 
-  bool add(std::unique_ptr<ExecutionPlugin> p) {
+  /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
+  bool add(OwnedPlugin p) {
     if (!p)
       return false;
     for (const auto &existing : plugins_)
@@ -53,6 +75,11 @@ public:
     build_sink_for(*p);
     plugins_.push_back(std::move(p));
     return true;
+  }
+
+  /// Add an in-tree plugin freed with `delete` (host/test convenience).
+  bool add(std::unique_ptr<ExecutionPlugin> p) {
+    return add(OwnedPlugin(p.release(), PluginDeleter{}));
   }
 
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
@@ -180,7 +207,7 @@ private:
       p.sink_ = s;
   }
 
-  std::vector<std::unique_ptr<ExecutionPlugin>> plugins_;
+  std::vector<std::unique_ptr<ExecutionPlugin, PluginDeleter>> plugins_;
 };
 
 } // namespace rocjitsu

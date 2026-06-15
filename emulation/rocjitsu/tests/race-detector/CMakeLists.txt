@@ -9,20 +9,29 @@
 # race detector only needs a few CUs to exercise cross-wave and
 # cross-workgroup synchronization checking.
 rj_add_hip_test(hip_race_tests SOURCE hip_race_tests.hip)
-set(RJ_RACE_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)
+set(RJ_RACE_CONFIG_TEMPLATE ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json.in)
 
 function(rj_add_race_test_case TEST_CASE)
     set(SINK_DIR ${CMAKE_CURRENT_BINARY_DIR}/racetest_${TEST_CASE})
     set(RUNTIME_DIR ${SINK_DIR}/runtime)
     file(MAKE_DIRECTORY ${SINK_DIR})
     file(MAKE_DIRECTORY ${RUNTIME_DIR})
+    # Each case writes race.log to its own directory. The sink dir is
+    # build-specific, so it is templated into a per-case config. RJ_SINK_DIR is
+    # passed only so the test binary can locate the log; the emulator reads the
+    # sink configuration exclusively from the config file.
+    set(RJ_TEST_SINK_DIR ${SINK_DIR})
+    configure_file(
+        ${RJ_RACE_CONFIG_TEMPLATE}
+        ${SINK_DIR}/config.json
+        @ONLY
+    )
     rj_add_hip_test_case(
         hip_race_tests "RaceTest.${TEST_CASE}"
-        CONFIG ${RJ_RACE_CONFIG}
+        CONFIG ${SINK_DIR}/config.json
         TIMEOUT 30
         ENVIRONMENT
             "ROCJITSU_RUNTIME_DIR=${RUNTIME_DIR}"
-            "RJ_SINKS=file"
             "RJ_SINK_DIR=${SINK_DIR}"
     )
 endfunction()

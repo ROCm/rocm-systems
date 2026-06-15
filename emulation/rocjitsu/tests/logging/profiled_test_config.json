@@ -84,7 +84,5 @@
       }
     ]
   },
-  "plugins": {
-    "race": {}
-  }
+  "profiled": true
 }

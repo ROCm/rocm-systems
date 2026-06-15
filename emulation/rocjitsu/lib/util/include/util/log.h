@@ -41,6 +41,7 @@ public:
     GROUP_VM = 0,        ///< Instruction execution, VGPR dumps, memory access.
     GROUP_CP = 1,        ///< Command processor: doorbell, dispatch, completion.
     GROUP_DBT_HOOKS = 2, ///< ROCR HSA tools DBT hook tracing.
+    GROUP_PLUGINS = 3,   ///< Plugin discovery, loading, and configuration.
   };
 
   /// @brief Human-readable group name for log prefixes.
@@ -52,6 +53,8 @@ public:
       return "CP";
     case GROUP_DBT_HOOKS:
       return "DBT_HOOKS";
+    case GROUP_PLUGINS:
+      return "PLUGINS";
     default:
       return " ";
     }
@@ -176,6 +179,18 @@ public:
     requires std::invocable<Fn, std::ostringstream &>
   static void dbt_hooks(Fn &&fn) {
     print<GROUP_DBT_HOOKS>(std::forward<Fn>(fn));
+  }
+
+  /// @brief Convenience for logging plugin discovery/loading, variadic.
+  template <typename... Args> static void plugins(Args &&...args) {
+    print<GROUP_PLUGINS>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Lambda overload for plugin discovery/loading logging.
+  template <typename Fn>
+    requires std::invocable<Fn, std::ostringstream &>
+  static void plugins(Fn &&fn) {
+    print<GROUP_PLUGINS>(std::forward<Fn>(fn));
   }
 
 private:

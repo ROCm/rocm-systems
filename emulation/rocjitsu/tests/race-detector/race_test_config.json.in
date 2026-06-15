@@ -85,6 +85,10 @@
     ]
   },
   "plugins": {
-    "logging": {}
+    "race": {}
+  },
+  "sinks": {
+    "types": ["file"],
+    "dir": "@RJ_TEST_SINK_DIR@"
   }
 }

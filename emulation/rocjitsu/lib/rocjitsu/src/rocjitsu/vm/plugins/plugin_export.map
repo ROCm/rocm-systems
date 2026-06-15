@@ -1,0 +1,16 @@
+# Linker version script for rocjitsu plugin shared objects.
+#
+# A plugin .so statically bundles the simulator/C++ runtime it depends on
+# (rocjitsu_code, flatbuffers, ...). Those libraries deliberately export C-ABI
+# and weak template symbols with default visibility, so the per-target
+# CXX_VISIBILITY_PRESET=hidden alone is not enough to keep them out of the
+# plugin's dynamic symbol table. This script makes the three plugin ABI entry
+# points the ONLY globally visible symbols; everything else is local.
+{
+  global:
+    rocjitsu_plugin_metadata;
+    rocjitsu_plugin_create;
+    rocjitsu_plugin_destroy;
+  local:
+    *;
+};
