@@ -738,7 +738,6 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 520)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 535)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 537)
-// Step 30 is enum-only (#6596); table size unchanged from step 29.
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 537)
 #else
