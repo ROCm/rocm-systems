@@ -121,16 +121,17 @@ inline constexpr const char *kPluginDestroySymbol = "rocjitsu_plugin_destroy";
 /// @code
 ///   ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myplugin", "team@amd.com", "1.0", "{}")
 /// @endcode
-#define ROCJITSU_DEFINE_PLUGIN(PluginClass, NAME, CONTACT, VERSION, CONFIG_SCHEMA)                  \
+#define ROCJITSU_DEFINE_PLUGIN(PluginClass, NAME, CONTACT, VERSION, CONFIG_SCHEMA)                 \
   extern "C" ROCJITSU_PLUGIN_EXPORT const ::rocjitsu::PluginMetadata *rocjitsu_plugin_metadata() { \
-    static const ::rocjitsu::PluginMetadata kMetadata{                                              \
-        ::rocjitsu::kPluginAbiVersion, NAME, CONTACT, VERSION, CONFIG_SCHEMA};                      \
-    return &kMetadata;                                                                              \
-  }                                                                                                 \
-  extern "C" ROCJITSU_PLUGIN_EXPORT ::rocjitsu::PluginHandle rocjitsu_plugin_create(                \
-      const char *config_json) {                                                                    \
-    return static_cast<::rocjitsu::ExecutionPlugin *>(new PluginClass(config_json));                \
-  }                                                                                                 \
-  extern "C" ROCJITSU_PLUGIN_EXPORT void rocjitsu_plugin_destroy(::rocjitsu::PluginHandle handle) { \
-    delete static_cast<::rocjitsu::ExecutionPlugin *>(handle);                                      \
+    static const ::rocjitsu::PluginMetadata kMetadata{::rocjitsu::kPluginAbiVersion, NAME,         \
+                                                      CONTACT, VERSION, CONFIG_SCHEMA};            \
+    return &kMetadata;                                                                             \
+  }                                                                                                \
+  extern "C" ROCJITSU_PLUGIN_EXPORT ::rocjitsu::PluginHandle rocjitsu_plugin_create(               \
+      const char *config_json) {                                                                   \
+    return static_cast<::rocjitsu::ExecutionPlugin *>(new PluginClass(config_json));               \
+  }                                                                                                \
+  extern "C" ROCJITSU_PLUGIN_EXPORT void rocjitsu_plugin_destroy(                                  \
+      ::rocjitsu::PluginHandle handle) {                                                           \
+    delete static_cast<::rocjitsu::ExecutionPlugin *>(handle);                                     \
   }

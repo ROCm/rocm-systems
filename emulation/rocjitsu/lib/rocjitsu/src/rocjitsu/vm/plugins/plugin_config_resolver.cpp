@@ -143,8 +143,7 @@ bool resolve_config_json(const std::string &plugin_name, const char *schema_json
     flexbuffers::Builder empty;
     empty.Map([&] {});
     empty.Finish();
-    return resolve_config(plugin_name, schema_json,
-                          flexbuffers::GetRoot(empty.GetBuffer()), out);
+    return resolve_config(plugin_name, schema_json, flexbuffers::GetRoot(empty.GetBuffer()), out);
   }
 
   flexbuffers::Builder user_fbb;

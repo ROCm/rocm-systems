@@ -36,8 +36,7 @@ TEST(PluginConfigResolver, EmptySchemaWithEmptyUserConfigYieldsEmptyObject) {
   std::string out;
   EXPECT_TRUE(resolve("{}", "", out));
   // An empty object may be rendered with insignificant whitespace.
-  out.erase(std::remove_if(out.begin(), out.end(),
-                           [](unsigned char c) { return std::isspace(c); }),
+  out.erase(std::remove_if(out.begin(), out.end(), [](unsigned char c) { return std::isspace(c); }),
             out.end());
   EXPECT_EQ(out, "{}");
 }
@@ -103,8 +102,7 @@ TEST(PluginConfigResolver, InvalidUserJsonFails) {
 
 TEST(PluginConfigResolver, TypeMatchesValidatesAgainstValueKinds) {
   flexbuffers::Builder fbb;
-  ASSERT_TRUE(flexbuffer_from_json(
-      R"({"s": "hello", "n": 42, "f": 1.5, "b": true})", fbb));
+  ASSERT_TRUE(flexbuffer_from_json(R"({"s": "hello", "n": 42, "f": 1.5, "b": true})", fbb));
   auto root = flexbuffers::GetRoot(fbb.GetBuffer()).AsMap();
 
   EXPECT_TRUE(type_matches("string", root["s"]));

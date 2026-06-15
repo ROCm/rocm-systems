@@ -139,8 +139,7 @@ std::string formatTrace(const RingBuffer<uint64_t, 256> &trace,
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/)
-    : ExecutionPlugin("race") {}
+RaceDetectorPlugin::RaceDetectorPlugin(const char * /*config_json*/) : ExecutionPlugin("race") {}
 
 RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
 

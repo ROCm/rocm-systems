@@ -106,8 +106,7 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
   }
 
   open_handles().push_back(handle);
-  util::Logger::plugins("plugin '", name, "' loaded",
-                        (meta->version && *meta->version) ? " v" : "",
+  util::Logger::plugins("plugin '", name, "' loaded", (meta->version && *meta->version) ? " v" : "",
                         (meta->version && *meta->version) ? meta->version : "");
   return true;
 }
