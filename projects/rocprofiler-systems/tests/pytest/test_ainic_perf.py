@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 """
-AI NIC tests using AMD SMI Phase 2 RDMA metrics (amdsmi_get_nic_rdma_dev_info).
+AI NIC tests using AMD SMI RDMA metrics (amdsmi_get_nic_rdma_dev_info).
 
-These tests verify that rocprofiler-systems correctly collects all 10 AI NIC
+These tests verify that rocprofiler-systems correctly collects all AI NIC
 RDMA counters per device and writes them to both the Perfetto (.proto) trace
 and the ROCpd (.db) database.
 
@@ -47,7 +47,7 @@ AINIC_PERFETTO_COUNTER_NAMES = [
 
 
 @pytest.fixture
-def ainic_perf_env(rocprof_config) -> dict[str, str]:
+def ainic_perf_env() -> dict[str, str]:
     """Environment variables for AI NIC performance tests."""
     env = {
         "ROCPROFSYS_USE_PID": "OFF",
@@ -99,13 +99,9 @@ class TestAINIC(RocprofsysTest):
     @pytest.mark.rocpd("ainic_perf_env")
     def test_performance_tracks(
         self,
-        rocprof_config,
         ainic_perf_env,
         ainic_download_url_1,
         ainic_download_url_2,
-        test_output_dir,
-        subtests,
-        record_subtest_failure,
         ainic_rocpd_rules,
     ):
         target = shutil.which("wget")

@@ -1371,14 +1371,14 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Ptrace scope:", cap.ptrace_scope),
         _row("Is inside docker:", rocprof_config.capabilities.is_inside_docker),
         _row("PAPI available:", cap.papi_availability),
-        _row("Default NIC:", cap.default_nic),
         _row("AI NIC devices:", cap.ai_nic_devices),
+        _row("Default NIC:", cap.default_nic),
         *(
             lambda evts: (
-                [_subrow("PAPI NIC events:", evts[0])]
-                + [_subrow("", e) for e in evts[1:]]
+                [_row("PAPI NIC events:", evts[0])]
+                + [_row("", e) for e in evts[1:]]
                 if evts
-                else [_subrow("PAPI NIC events:", "None")]
+                else [_row("PAPI NIC events:", "None")]
             )
         )(cap.papi_nic_events.split() if cap.papi_nic_events else []),
         "-" * 70,
