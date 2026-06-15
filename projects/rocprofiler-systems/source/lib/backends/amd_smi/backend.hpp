@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "backends/amd_smi/amdsmi_backend.hpp"
 #include "backends/amd_smi/gpu_types.hpp"
 #include "backends/amd_smi/nic_types.hpp"
 #include "backends/amd_smi/sdma_feature.hpp"
@@ -42,7 +41,7 @@ using gpu::populate_if_supported;
  *                        Defaults to the real @c amdsmi_backend; swap for a mock in
  * tests.
  */
-template <typename AmdsmiBackend = amdsmi_backend>
+template <typename AmdsmiBackend>
 class backend
 {
 public:
@@ -358,20 +357,19 @@ private:
 
     // ── Members ───────────────────────────────────────────────────────────────
 
-    AmdsmiBackend m_amdsmi{};  ///< Policy (stateless — zero overhead)
-    typename AmdsmiBackend::processor_handle m_handle;
+    AmdsmiBackend                   m_amdsmi{};  ///< Policy (stateless — zero overhead)
+    AmdsmiBackend::processor_handle m_handle;
 };
 
-/**
- * @brief Factory exposing backend<amdsmi_backend> as the canonical backend type.
- *
- * The provider uses BackendFactory::backend_t for static lifecycle and enumeration.
- * backend<amdsmi_backend> provides initialize(), shutdown(), get_lib_version(),
- * and enumerate_*_handles() as statics — no instance needed.
- */
+template <typename Backend>
 struct backend_factory
 {
-    using backend_t = backend<amdsmi_backend>;
+    using backend_t = backend<Backend>;
+
+    static std::shared_ptr<backend_t> create_backend()
+    {
+        return std::make_shared<backend_t>();
+    }
 };
 
 }  // namespace rocprofsys::backends::amd_smi

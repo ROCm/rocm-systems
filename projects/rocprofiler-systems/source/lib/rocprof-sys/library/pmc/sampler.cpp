@@ -25,6 +25,7 @@
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
+#include "backends/amd_smi/amdsmi_backend.hpp"
 #include "backends/amd_smi/backend.hpp"
 #include "core/agent.hpp"
 #include "core/common.hpp"
@@ -98,11 +99,11 @@ struct cpu_production_config
     using CacheApi    = collectors::cpu::cache_policy;
 };
 
-using provider_factory_t =
-    device_providers::amd_smi::provider_factory<backends::amd_smi::backend_factory>;
+using provider_factory_t = device_providers::amd_smi::provider_factory<
+    backends::amd_smi::backend_factory<backends::amd_smi::amdsmi_backend>>;
 using provider_t = provider_factory_t::provider_t;
 
-using gpu_device_backend_t = backends::amd_smi::backend<>;
+using gpu_device_backend_t = provider_factory_t::provider_t::backend_t;
 using gpu_device_t         = collectors::gpu::device<gpu_device_backend_t>;
 using gpu_collector_t =
     collectors::gpu::collector<provider_t, gpu_device_t, gpu_production_config>;
