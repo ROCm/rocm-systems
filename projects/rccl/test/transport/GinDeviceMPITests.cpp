@@ -80,6 +80,17 @@ std::string crossNodeReason() {
   return "";
 }
 
+std::string intraNodeSymReason() {
+  MPI_Comm nodeComm;
+  MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &nodeComm);
+  int nodeSize = 0;
+  MPI_Comm_size(nodeComm, &nodeSize);
+  MPI_Comm_free(&nodeComm);
+  if (nodeSize < 2)
+    return "Symmetric ReduceScatter requires >=2 ranks per node";
+  return "";
+}
+
 // First failing prerequisite, or "" if all met.
 std::string ginProxyTestSkipReason() {
   for (auto check : {ginEnvDisabledReason, ginTypeReason, cuMemReason, intranetReason}) {
@@ -2553,6 +2564,9 @@ TEST_F(GinMPIDeviceTests, ReduceScatter_Symmetric) {
     GTEST_SKIP() << reason;
 
   if (auto reason = crossNodeReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (auto reason = intraNodeSymReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))

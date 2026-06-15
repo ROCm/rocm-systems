@@ -104,7 +104,10 @@ def enumerate_kernels():
         # ReduceScatter emits sum and avg for every float type.
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
       # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
+      # Sum only: the GIN kernel has no avg (post-divide) accumulator path.
       for algo in ["RailA2A_LsaLD"]:
+        if red == "avg":
+          continue
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):
