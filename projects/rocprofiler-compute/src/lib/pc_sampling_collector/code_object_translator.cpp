@@ -40,6 +40,11 @@ const std::vector<size_t>& code_object_translator_impl_t::get_code_object_ids() 
     return m_obj_ids;
 }
 
+uint64_t code_object_translator_impl_t::get_load_base(size_t object_id) const
+{
+    return m_obj_id_to_load_addr.at(object_id);
+}
+
 std::vector<symbol_t> code_object_translator_impl_t::get_symbols(size_t object_id) const
 {
     Expects(m_obj_id_to_load_addr.find(object_id) != m_obj_id_to_load_addr.end());

@@ -4,8 +4,10 @@
 #include "code_object_translator.h"
 #include "code_object_writer.h"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 class mock_code_object_translator_t : public rocprofiler_compute_tool::code_object_translator_t
@@ -39,19 +41,28 @@ public:
     std::vector<rocprofiler_compute_tool::symbol_t> get_symbols(size_t object_id) const override;
     rocprofiler_compute_tool::instruction_t get_instruction(size_t object_id,
                                                             uint64_t virtual_address) const override;
+    uint64_t get_load_base(size_t object_id) const override;
 
     void add_symbols(size_t object_id, const std::vector<rocprofiler_compute_tool::symbol_t>& symbols);
     void add_instruction(const rocprofiler_compute_tool::instruction_t& instruction);
 
+    // When set, get_instruction throws std::out_of_range for this virtual
+    // address, modelling a PC that resolves to no decoded instruction.
+    void throw_for_virtual_address(uint64_t virtual_address);
+
     const std::vector<mem_code_object_info_t>&  get_mem_code_object_info() const;
     const std::vector<file_code_object_info_t>& get_file_code_object_info() const;
+    // get_instruction queries, in call order.
+    const std::vector<std::pair<size_t, uint64_t>>& get_instruction_queries() const;
 
 private:
     std::vector<mem_code_object_info_t>  m_mem_code_obj_info;
     std::vector<file_code_object_info_t> m_file_code_obj_info;
     std::vector<size_t>                  m_code_object_ids;
     std::unordered_map<size_t, std::vector<rocprofiler_compute_tool::symbol_t>> m_symbols_per_obj;
-    rocprofiler_compute_tool::instruction_t m_instruction = {"", "", 0, 0, 1};
+    rocprofiler_compute_tool::instruction_t          m_instruction = {"", "", 0, 0, 1};
+    mutable std::vector<std::pair<size_t, uint64_t>> m_instruction_queries;
+    std::optional<uint64_t>                          m_throw_virtual_address;
 };
 
 class mock_code_object_writer_t : public rocprofiler_compute_tool::code_object_writer_t

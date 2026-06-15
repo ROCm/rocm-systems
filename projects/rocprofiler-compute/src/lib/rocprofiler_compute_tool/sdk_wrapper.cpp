@@ -100,3 +100,99 @@ void SdkWrapperImpl::at_intercept_table_registration_hsa(rocprofiler_intercept_l
     ROCPROFILER_CALL(rocprofiler_at_intercept_table_registration(callback, ROCPROFILER_HSA_TABLE, user_data),
                      "register HSA intercept table callback");
 }
+
+void SdkWrapperImpl::query_available_gpu_agents(std::vector<rocprofiler_agent_id_t>& out_gpu_agents)
+{
+    ROCPROFILER_CALL(
+        rocprofiler_query_available_agents(
+            ROCPROFILER_AGENT_INFO_VERSION_0,
+            [](rocprofiler_agent_version_t, const void** agents, size_t num_agents, void* user_data)
+            {
+                auto* out = static_cast<std::vector<rocprofiler_agent_id_t>*>(user_data);
+                for (size_t i = 0; i < num_agents; ++i)
+                {
+                    const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
+                    if (agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                        out->push_back(agent->id);
+                }
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            sizeof(rocprofiler_agent_v0_t),
+            static_cast<void*>(&out_gpu_agents)),
+        "query available agents");
+}
+
+void SdkWrapperImpl::query_pc_sampling_configs(rocprofiler_agent_id_t agent_id,
+                                               rocprofiler_available_pc_sampling_configurations_cb_t cb,
+                                               void* user_data)
+{
+    ROCPROFILER_CALL(rocprofiler_query_pc_sampling_agent_configurations(agent_id, cb, user_data),
+                     "query pc sampling agent configurations");
+}
+
+void SdkWrapperImpl::create_buffer(rocprofiler_context_id_t        context_id,
+                                   size_t                          size,
+                                   size_t                          watermark,
+                                   rocprofiler_buffer_policy_t     policy,
+                                   rocprofiler_buffer_tracing_cb_t callback,
+                                   void*                           callback_data,
+                                   rocprofiler_buffer_id_t*        buffer_id)
+{
+    ROCPROFILER_CALL(
+        rocprofiler_create_buffer(context_id, size, watermark, policy, callback, callback_data, buffer_id),
+        "create buffer");
+}
+
+rocprofiler_status_t SdkWrapperImpl::configure_pc_sampling_service(rocprofiler_context_id_t context_id,
+                                                                   rocprofiler_agent_id_t agent_id,
+                                                                   rocprofiler_pc_sampling_method_t method,
+                                                                   rocprofiler_pc_sampling_unit_t unit,
+                                                                   uint64_t interval,
+                                                                   rocprofiler_buffer_id_t buffer_id,
+                                                                   int flags)
+{
+    return rocprofiler_configure_pc_sampling_service(context_id, agent_id, method, unit, interval, buffer_id, flags);
+}
+
+void SdkWrapperImpl::flush_buffer(rocprofiler_buffer_id_t buffer_id)
+{
+    ROCPROFILER_CALL(rocprofiler_flush_buffer(buffer_id), "flush buffer");
+}
+
+void SdkWrapperImpl::configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
+                                                      rocprofiler_buffer_tracing_kind_t kind,
+                                                      rocprofiler_buffer_id_t           buffer_id)
+{
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(context_id, kind, nullptr, 0, buffer_id),
+                     "configure buffer tracing service");
+}
+
+void SdkWrapperImpl::query_agent_records(std::vector<agent_record_t>& out_agents)
+{
+    ROCPROFILER_CALL(
+        rocprofiler_query_available_agents(
+            ROCPROFILER_AGENT_INFO_VERSION_0,
+            [](rocprofiler_agent_version_t, const void** agents, size_t num_agents, void* user_data)
+            {
+                auto* out = static_cast<std::vector<agent_record_t>*>(user_data);
+                for (size_t i = 0; i < num_agents; ++i)
+                {
+                    const auto*    agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
+                    agent_record_t rec{};
+                    rec.size            = agent->size;
+                    rec.id_handle       = agent->id.handle;
+                    rec.type            = static_cast<uint32_t>(agent->type);
+                    rec.node_id         = agent->node_id;
+                    rec.logical_node_id = agent->logical_node_id;
+                    rec.cu_count        = agent->cu_count;
+                    rec.gpu_id          = agent->gpu_id;
+                    rec.wave_front_size = agent->wave_front_size;
+                    rec.simd_count      = agent->simd_count;
+                    out->push_back(rec);
+                }
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            sizeof(rocprofiler_agent_v0_t),
+            static_cast<void*>(&out_agents)),
+        "query available agents");
+}

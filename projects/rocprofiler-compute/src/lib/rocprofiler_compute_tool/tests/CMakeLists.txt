@@ -10,6 +10,10 @@ add_executable(
     test_sdk_callbacks.cpp
     test_environ_cache.h
     test_environ_cache.cpp
+    test_pc_sampling_input.h
+    test_pc_sampling_input.cpp
+    test_pc_sampling_gpu.h
+    test_pc_sampling_gpu.cpp
     mocks.h
     mocks.cpp
     main.cpp

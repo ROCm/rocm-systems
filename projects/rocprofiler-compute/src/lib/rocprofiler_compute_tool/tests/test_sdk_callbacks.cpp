@@ -5,6 +5,11 @@
 #include "fmt/format.h"
 #include "rocprofiler_compute_tool.h"
 
+#include <unistd.h>
+
+#include <filesystem>
+#include <string>
+
 using namespace rocprofiler_compute_tool;
 
 TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
@@ -167,8 +172,12 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
 
 TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToCollector)
 {
-    auto collector = std::make_shared<MockPcSamplingCollector>();
-    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap, "unused.json", collector};
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
 
     rocprofiler_callback_tracing_record_t                record  = {};
     rocprofiler_callback_tracing_code_object_load_data_t payload = {};
@@ -180,6 +189,38 @@ TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToC
     m_sdk_callbacks->tool_tracing_callback(record, &m_tool_data);
 
     EXPECT_EQ(collector->load_count, 1);
+}
+
+TEST_F(TestSdkCallbacks, FeatureDelegatesSampleIngestionAndFinalizeToCollector)
+{
+    namespace fs            = std::filesystem;
+    const fs::path out_root = fs::temp_directory_path() /
+                              ("rpc_feature_finalize_" + std::to_string(::getpid()));
+    fs::create_directories(out_root);
+
+    auto                  collector = std::make_shared<MockPcSamplingCollector>();
+    pc_sampling_feature_t feature{PcSamplingMode::HostTrap,
+                                  out_root,
+                                  out_root / "code_obj.json",
+                                  out_root / "ps_file_results.json",
+                                  collector};
+
+    pc_sample_record_t sample{};
+    feature.append_sample(sample);
+    feature.add_kernel_symbol(42, "kernel_name", 7);
+    feature.finalize();
+
+    EXPECT_EQ(collector->append_sample_count, 1);
+    ASSERT_EQ(collector->added_kernel_symbols.size(), 1u);
+    EXPECT_EQ(collector->added_kernel_symbols[0].first, 42u);
+    EXPECT_EQ(collector->added_kernel_symbols[0].second, "kernel_name");
+    ASSERT_EQ(collector->added_kernel_ids.size(), 1u);
+    EXPECT_EQ(collector->added_kernel_ids[0], 7u);
+    EXPECT_EQ(collector->write_samples_count, 1);
+    EXPECT_EQ(collector->snapshot_sources_count, 1);
+
+    std::error_code ec;
+    fs::remove_all(out_root, ec);
 }
 
 TEST_P(TestSdkCallbacksKernelFiltering, ProvidedKernelFilteringEnabled_ReturnsKernelIdsOnlyForMathing)

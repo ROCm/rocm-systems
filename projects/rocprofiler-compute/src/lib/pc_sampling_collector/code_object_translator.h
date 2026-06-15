@@ -46,6 +46,7 @@ public:
     virtual const std::vector<size_t>& get_code_object_ids() const                          = 0;
     virtual std::vector<symbol_t>      get_symbols(size_t object_id) const                  = 0;
     virtual instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const = 0;
+    virtual uint64_t      get_load_base(size_t object_id) const                             = 0;
 };
 
 class code_object_translator_impl_t : public code_object_translator_t
@@ -63,6 +64,7 @@ public:
     const std::vector<size_t>& get_code_object_ids() const override;
     std::vector<symbol_t>      get_symbols(size_t object_id) const override;
     instruction_t get_instruction(size_t object_id, uint64_t virtual_address) const override;
+    uint64_t      get_load_base(size_t object_id) const override;
 
 private:
     std::unique_ptr<rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate> m_translator;

@@ -8,7 +8,7 @@ extern "C" char** environ;
 
 namespace
 {
-constexpr std::string_view kRocprofPrefix{"ROCPROF_"};
+constexpr std::string_view kRocprofPrefix{"ROCPROF"};
 
 bool has_rocprof_prefix(std::string_view name)
 {

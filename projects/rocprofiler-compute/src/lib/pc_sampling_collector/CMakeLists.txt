@@ -10,6 +10,12 @@ add_library(
     code_object_translator.cpp
     code_object_writer.h
     code_object_writer.cpp
+    file_writer.h
+    file_writer.cpp
+    pc_sample_writer.h
+    pc_sample_writer.cpp
+    source_snapshot.h
+    source_snapshot.cpp
 )
 
 target_include_directories(${target} PUBLIC .)

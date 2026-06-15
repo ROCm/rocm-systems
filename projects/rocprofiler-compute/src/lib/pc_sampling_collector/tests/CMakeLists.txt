@@ -9,6 +9,14 @@ add_executable(
     test_pc_sampling_collector.cpp
     test_code_object_writer.h
     test_code_object_writer.cpp
+    test_pc_sample_writer.h
+    test_pc_sample_writer.cpp
+    test_pc_sample_decode.h
+    test_pc_sample_decode.cpp
+    test_pc_string_table.h
+    test_pc_string_table.cpp
+    test_source_snapshot.h
+    test_source_snapshot.cpp
     mocks.h
     mocks.cpp
 )

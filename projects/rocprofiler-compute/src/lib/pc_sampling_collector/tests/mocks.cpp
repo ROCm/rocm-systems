@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #include "mocks.h"
 
+#include <stdexcept>
+#include <utility>
+
 using namespace rocprofiler_compute_tool;
 
 void mock_code_object_translator_t::add_code_object(const char* filepath,
@@ -37,9 +40,25 @@ std::vector<symbol_t> mock_code_object_translator_t::get_symbols(size_t object_i
     return {};
 }
 
-instruction_t mock_code_object_translator_t::get_instruction(size_t, uint64_t) const
+instruction_t mock_code_object_translator_t::get_instruction(size_t object_id, uint64_t virtual_address) const
 {
+    m_instruction_queries.emplace_back(object_id, virtual_address);
+    if (m_throw_virtual_address && *m_throw_virtual_address == virtual_address)
+    {
+        throw std::out_of_range("mock: no instruction at virtual address");
+    }
     return m_instruction;
+}
+
+uint64_t mock_code_object_translator_t::get_load_base(size_t object_id) const
+{
+    for (const auto& info : m_mem_code_obj_info)
+        if (info.id == object_id)
+            return info.load_base;
+    for (const auto& info : m_file_code_obj_info)
+        if (info.id == object_id)
+            return info.load_base;
+    return 0;
 }
 
 void mock_code_object_translator_t::add_symbols(size_t object_id,
@@ -51,6 +70,16 @@ void mock_code_object_translator_t::add_symbols(size_t object_id,
 void mock_code_object_translator_t::add_instruction(const rocprofiler_compute_tool::instruction_t& instruction)
 {
     m_instruction = instruction;
+}
+
+void mock_code_object_translator_t::throw_for_virtual_address(uint64_t virtual_address)
+{
+    m_throw_virtual_address = virtual_address;
+}
+
+const std::vector<std::pair<size_t, uint64_t>>& mock_code_object_translator_t::get_instruction_queries() const
+{
+    return m_instruction_queries;
 }
 
 const std::vector<mock_code_object_translator_t::mem_code_object_info_t>&

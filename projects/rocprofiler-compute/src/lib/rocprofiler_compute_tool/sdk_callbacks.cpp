@@ -341,6 +341,26 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         // if matches store kernel id
         // Lock before modifying target_kernel_ids
         std::lock_guard<std::mutex> lock(tool->mut);
+
+        // Demangled+truncated name for PC sampling attribution; fall back to raw on failure.
+        if (tool->pc_sampling.enabled())
+        {
+            std::string formatted_name;
+            try
+            {
+                int  demangle_status = 0;
+                auto demangled       = cxa_demangle(data->kernel_name, &demangle_status);
+                formatted_name       = truncate_name(demangled);
+            }
+            catch (...)
+            {
+                formatted_name.clear();
+            }
+            if (formatted_name.empty() && data->kernel_name != nullptr)
+                formatted_name = data->kernel_name;
+            tool->pc_sampling.add_kernel_symbol(data->code_object_id, formatted_name, data->kernel_id);
+        }
+
         if (!tool->kernel_filter_include_regex.empty())
         {
             try

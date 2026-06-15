@@ -2,10 +2,11 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-
 ## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
 
 ### Added
+
+* Added native PC sampling collection. rocprof-compute captures stochastic and host-trap PC samples on every supporting GPU agent and writes them to a PID-prefixed ``<pid>_ps_file_results.json``. The source files referenced by the sampled ISA are snapshotted into a ``code_obj_sources/`` directory alongside the results.
 
 * Added ``--bench-only`` profile mode option to run the roofline microbenchmark standalone (without profiling an application or collecting performance counters). No application run is required. Useful for regenerating ``roofline.csv`` in an existing workload directory or running the microbenchmark on systems where only HIP is available but rocprofiler-sdk is not.
 
