@@ -94,6 +94,8 @@ struct InstrumentationPoint {
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
   bool force_full_exec = false;
+  // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
+  // (e.g. probe_consumes_scc) since the probe call clobbers it
 };
 
 /// @brief Per-site record produced after validation and byte capture.
