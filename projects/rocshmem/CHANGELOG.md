@@ -1,4 +1,5 @@
 # Changelog for rocSHMEM
+## Unreleased - rocSHMEM 3.6.0 for ROCm x.x.x
 ## rocSHMEM 3.5.0 for ROCm 7.14
 
 ### Added
