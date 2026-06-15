@@ -16,6 +16,7 @@
 
 #include <array>
 #include <cstring>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
@@ -58,6 +59,25 @@ struct AppliedSite {
   uint64_t trampoline_offset;
   TrampolineBytes bytes;
 };
+
+// Human-readable single-lane register name for spill diagnostics.
+std::string reg_name(RegisterRef ref) {
+  const char *prefix = "?";
+  switch (ref.cls) {
+  case RegClass::SGPR:
+    prefix = "s";
+    break;
+  case RegClass::VGPR:
+    prefix = "v";
+    break;
+  case RegClass::ACC_VGPR:
+    prefix = "acc";
+    break;
+  default:
+    break;
+  }
+  return std::string(prefix) + std::to_string(ref.index);
+}
 
 } // namespace
 
@@ -163,6 +183,31 @@ bool validate_inline_nop_plan(const TrampolinePlan &plan, std::string *error_out
       plan.before_items[0].words[0] != build_s_nop(0, plan.arch)) {
     report(error_out, "trampoline plan: before_items must be exactly { { s_nop 0 } } "
                       "for the inlined nop");
+    return false;
+  }
+  return true;
+}
+
+RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
+                                             const RegisterSet &builder_clobbers) {
+  return probe_summary.ordinary_clobbers | builder_clobbers;
+}
+
+RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
+                              const RegisterSet &instrumentation_clobbers) {
+  return live_at_anchor & instrumentation_clobbers;
+}
+
+bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy, std::string *error_out) {
+  if (policy == SpillPolicy::NoSpillsSupported && !spill_set.none()) {
+    std::string msg = "probe-call requires spilling live registers, unsupported as of 06/15/2026:";
+    bool first = true;
+    spill_set.for_each([&](RegisterRef ref) {
+      msg += first ? " " : ", ";
+      msg += reg_name(ref);
+      first = false;
+    });
+    report(error_out, msg.c_str());
     return false;
   }
   return true;

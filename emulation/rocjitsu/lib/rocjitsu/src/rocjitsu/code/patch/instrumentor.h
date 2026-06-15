@@ -39,8 +39,10 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
 #include <memory>
@@ -200,6 +202,53 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// TODO: delete this when DBI supports more plans
 [[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
                                             std::string *error_out = nullptr);
+
+//==============================================================================
+// Spill formula and policy (orchestrator-owned).
+//
+// The probe-call spill set is the live registers an instrumentation envelope
+// would clobber:
+//
+//   instrument_clobbers = probe_clobbers | builder_clobbers
+//   spill_set           = live_at_anchor & instrument_clobbers
+//
+// The two inputs come from different owners: `probe_clobbers` is the callee fact
+// from ProbeClobberSummary (probe_clobber.h); `builder_clobbers` is the
+// call-envelope fact the builder's resource plan reports (link pair,
+// target-address pair, SCC temp, ...). That builder plan and its dead-register
+// selection land in a later slice; these helpers take `builder_clobbers` as a
+// plain RegisterSet so the formula and v0 policy are testable now. Combining the
+// two and applying policy is the Instrumentor's job, so it lives here rather
+// than in the callee-only probe_clobber unit.
+//==============================================================================
+
+/// @brief What the builder will do about registers that are simultaneously live
+///        at the anchor and clobbered by instrumentation.
+///
+/// Currently implements only the no-spill path: a non-empty spill set is a hard
+/// failure rather than something the builder saves and restores. The enum exists
+/// now so the contract has a name and a later spill-capable slice can add a
+/// value without a rename.
+enum class SpillPolicy {
+  NoSpillsSupported, ///< Any non-empty spill set is a hard failure.
+  // TODO: SpillsSupported once a bootstrap save/restore sequence exists.
+};
+
+/// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
+[[nodiscard]] RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
+                                                           const RegisterSet &builder_clobbers);
+
+/// @brief spill_set = live_at_anchor & instrumentation_clobbers.
+[[nodiscard]] RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
+                                            const RegisterSet &instrumentation_clobbers);
+
+/// @brief Enforce the current spill policy, NoSpillsSupported.
+///
+/// Under @ref SpillPolicy::NoSpillsSupported a non-empty @p spill_set fails
+/// closed: returns false and writes a diagnostic naming the live, clobbered
+/// registers. An empty spill set always succeeds.
+[[nodiscard]] bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy,
+                                      std::string *error_out = nullptr);
 
 /// @brief DBI orchestrator. Collects InstrumentationPoints, validates each
 ///        anchor, plans + builds per-site trampolines, and drives the
