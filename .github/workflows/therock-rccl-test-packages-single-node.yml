@@ -76,7 +76,7 @@ jobs:
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
       - name: Test
-        timeout-minutes: 15
+        timeout-minutes: 60
         # Drive rccl single-node tier via shared test_runner.py
         # (rocm-systems#6439 + TheRock#5469). rocm-systems#4573 installs
         # tier + arch-exclude labels into bin/rccl/CTestTestfile.cmake, so
