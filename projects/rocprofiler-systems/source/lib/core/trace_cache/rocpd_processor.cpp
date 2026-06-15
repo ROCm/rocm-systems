@@ -817,6 +817,7 @@ rocpd_processor_t::post_process_metadata()
         {
             case agent_type::GPU: return "GPU";
             case agent_type::CPU: return "CPU";
+            case agent_type::NIC: return "NIC";
             default: return std::nullopt;
         }
     };
@@ -934,17 +935,18 @@ rocpd_processor_t::post_process_metadata()
     auto pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        constexpr std::array<agent_type, 2> agent_types = {
+        constexpr std::array<agent_type, 3> agent_types = {
             agent_type::GPU,
             agent_type::CPU,
+            agent_type::NIC,
         };
 
         size_t agent_primary_key;
 
-        const bool is_cpu_gpu_agent = std::find(agent_types.begin(), agent_types.end(),
+        const bool agent_type_found = std::find(agent_types.begin(), agent_types.end(),
                                                 pmc_info.type) != agent_types.end();
 
-        if(is_cpu_gpu_agent)
+        if(agent_type_found)
         {
             agent_primary_key =
                 m_agent_manager
@@ -959,7 +961,7 @@ rocpd_processor_t::post_process_metadata()
         }
 
         const auto* target_arch = pmc_info.target_arch.c_str();
-        if(!is_cpu_gpu_agent)
+        if(!agent_type_found)
         {
             target_arch = nullptr;
         }
