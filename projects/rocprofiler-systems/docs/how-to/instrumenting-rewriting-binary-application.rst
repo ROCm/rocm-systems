@@ -173,7 +173,7 @@ view the help menu.
       -M, --mode [ coverage | sampling | trace ]
                                     Instrumentation mode. 'trace' mode instruments the selected functions, 'sampling' mode
                                     only instruments the main function to start and stop the sampler. (count: 1)
-      -f, --force                    Force the command-line argument configuration, i.e. don't get cute. Useful for forcing
+      -f, --force                    Force the command-line argument configuration, i.e. don’t get cute. Useful for forcing
                                     runtime instrumentation of an executable that [A] Dyninst thinks is a library after
                                     reading ELF and [B] whose name makes it look like a library (e.g. starts with 'lib'
                                     and/or ends in '.so', '.so.*', or '.a') (max: 1, dtype: bool)
@@ -477,6 +477,8 @@ the instrumented ``libfoo.so.2``:
          ...
          libfoo.so.2 => /home/user/libfoo.so.2 (...)
          ...
+
+.. _selective-instrumentation:
 
 Selective instrumentation
 ========================================

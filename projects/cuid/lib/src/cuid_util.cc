@@ -388,7 +388,7 @@ CuidUtilities::generate_derived_cuid(const amdcuid_primary_id *primary_id,
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 
-  uint8_t hash[EVP_MAX_MD_SIZE];
+  uint8_t hash[hash_length];
   size_t hash_len = 0;
 
   amdcuid_status_t status =

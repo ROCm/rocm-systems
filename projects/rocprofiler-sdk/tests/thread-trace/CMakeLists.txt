@@ -77,7 +77,7 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "TRIPLEBUFFER=1;ATT_NODETAIL=1;ATT_SLOW_CALLBACK=0"
     DISABLED ${TRIPLE_BUFFER_DISABLED})
 
-# Collects a lot of data, and check if parsering works successfully
+# Collects a lot of data, and check if parsing works successfully
 rocprofiler_add_integration_execute_test(
     thread-trace-api-triple-buffer-hammer-test
     TARGET thread-trace-test-app

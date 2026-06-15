@@ -17,6 +17,8 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include "rocjitsu/vm/plugins/race_detector/plugin.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -66,6 +68,8 @@ struct HookEvent {
   uint32_t dispatch_id = 0;
   uint32_t wg_id = 0;
   uint32_t wf_id = 0;
+  uint32_t physical_vgpr_count = 0;
+  uint32_t sgpr_count = 0;
   uint64_t pc = 0;
   std::string mnemonic;
 };
@@ -98,11 +102,14 @@ public:
     events.push_back(e);
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t, uint32_t,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
+                                   uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                    std::span<amdgpu::Wavefront *>) override {
     HookEvent e{HookEvent::WORKGROUP_DISPATCHED};
     e.dispatch_id = dispatch_id;
     e.wg_id = wg_id;
+    e.physical_vgpr_count = physical_vgpr_count;
+    e.sgpr_count = sgpr_count;
     events.push_back(e);
   }
 
@@ -486,6 +493,22 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
 }
 
+TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalVgprBlockSize) {
+  PluginFixture f;
+  auto *p = f.attach_ordering_plugin();
+  const uint32_t code[] = {S_ENDPGM};
+  f.run_kernel(code, 1);
+  f.shutdown();
+
+  auto it = std::find_if(p->events.begin(), p->events.end(), [](const HookEvent &e) {
+    return e.kind == HookEvent::WORKGROUP_DISPATCHED;
+  });
+  ASSERT_NE(it, p->events.end());
+  EXPECT_EQ(it->physical_vgpr_count, f.cu()->vgpr_allocation_block_size());
+  EXPECT_GT(it->physical_vgpr_count, f.cu()->config().vgprs_per_wf);
+  EXPECT_EQ(it->sgpr_count, f.cu()->config().sgprs_per_wf);
+}
+
 TEST(HookOrderingTest, FiveDispatchLifecycle) {
   PluginFixture f(/*num_wf_slots=*/1);
   auto *p = f.attach_ordering_plugin();
@@ -597,6 +620,64 @@ TEST(HookOrderingTest, FiveDispatchLifecycle) {
     log.assertLastBeforeFirst(HookEvent::DISPATCH_EXECUTION_END, dispatches[i],
                               HookEvent::DISPATCH_EXECUTION_BEGIN, dispatches[i + 1]);
   }
+}
+
+// -- formatTrace tests -------------------------------------------------------
+
+auto make_trace(std::initializer_list<uint64_t> pcs) {
+  plugins::race_detector::RingBuffer<uint64_t, 256> rb;
+  for (auto pc : pcs)
+    rb.push(pc);
+  return rb;
+}
+
+TEST(FormatTraceTest, WaveLaneAnnotations) {
+  auto trace = make_trace({0x100, 0x108, 0x10c});
+  std::unordered_map<uint64_t, std::string> disasm = {
+      {0x100, "ds_write_b32 v9, v12"},
+      {0x108, "s_nop 0"},
+      {0x10c, "ds_read_b32 v8, v9"},
+  };
+  plugins::race_detector::MarkedPc conflict{0x100, 3, -1};
+  plugins::race_detector::MarkedPc read{0x10c, 0, 5};
+  auto result = formatTrace(trace, disasm, conflict, read);
+  EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
+  EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
+}
+
+TEST(FormatTraceTest, NoLineBeforeFirstMarker) {
+  auto trace = make_trace({0x100, 0x104, 0x108, 0x10c, 0x110});
+  std::unordered_map<uint64_t, std::string> disasm = {
+      {0x100, "s_nop 0"},
+      {0x104, "s_nop 0"},
+      {0x108, "ds_write_b32 v9, v12"},
+      {0x10c, "s_nop 0"},
+      {0x110, "ds_read_b32 v8, v9"},
+  };
+  plugins::race_detector::MarkedPc conflict{0x108, 2, -1};
+  plugins::race_detector::MarkedPc read{0x110, 1, 3};
+  auto result = formatTrace(trace, disasm, conflict, read);
+  EXPECT_EQ(result.substr(0, 5), "  ==>");
+  EXPECT_EQ(result.find("0x100"), std::string::npos);
+  EXPECT_EQ(result.find("0x104"), std::string::npos);
+}
+
+TEST(FormatTraceTest, ConflictBeforeTraceWindow) {
+  auto trace = make_trace({0x200, 0x204, 0x208});
+  std::unordered_map<uint64_t, std::string> disasm = {
+      {0x100, "buffer_load_dwordx4 v[148:151], v0, s[8:11], 0"},
+      {0x200, "s_nop 0"},
+      {0x204, "s_nop 0"},
+      {0x208, "ds_read_b32 v8, v9"},
+  };
+  plugins::race_detector::MarkedPc conflict{0x100, 3, -1};
+  plugins::race_detector::MarkedPc read{0x208, 0, 5};
+  auto result = formatTrace(trace, disasm, conflict, read);
+  EXPECT_NE(result.find("before trace window"), std::string::npos);
+  EXPECT_NE(result.find("buffer_load_dwordx4"), std::string::npos);
+  EXPECT_NE(result.find("; <-- wave 3"), std::string::npos);
+  EXPECT_NE(result.find("not recorded"), std::string::npos);
+  EXPECT_NE(result.find("; <-- wave 0 lane 5"), std::string::npos);
 }
 
 } // namespace

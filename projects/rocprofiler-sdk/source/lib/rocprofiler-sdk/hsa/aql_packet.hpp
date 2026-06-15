@@ -92,7 +92,7 @@ public:
     AQLPacket()          = default;
     virtual ~AQLPacket() = default;
 
-    // Keep move constuctors (i.e. std::move())
+    // Keep move constructors (i.e. std::move())
     AQLPacket(AQLPacket&& other) = default;
     AQLPacket& operator=(AQLPacket&& other) = default;
 

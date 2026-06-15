@@ -1,0 +1,6 @@
+jobs:
+- pmc:
+  - TCP_TCC_NC_READ_REQ_sum
+  - TCP_TCC_NC_WRITE_REQ_sum
+  - TCP_TCC_READ_REQ_LATENCY_sum
+  - TCP_TCC_READ_REQ_sum

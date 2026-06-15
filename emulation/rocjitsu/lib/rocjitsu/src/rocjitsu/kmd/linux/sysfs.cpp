@@ -355,7 +355,20 @@ void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
       write_file(device_dir + "/vendor", vendor_hex.str());
       write_file(device_dir + "/device", device_hex.str());
       write_file(device_dir + "/uevent", uevent.str());
+      // drmParseSubsystemType does readlink("subsystem") then strncmp for "/pci"
+      std::filesystem::create_symlink("../../../bus/pci", device_dir + "/subsystem");
+      // drmParsePciDeviceInfo reads all five files; missing any causes -ENODEV
+      write_file(device_dir + "/revision", "0x00\n");
+      write_file(device_dir + "/subsystem_vendor", vendor_hex.str());
+      write_file(device_dir + "/subsystem_device", device_hex.str());
     }
+  }
+
+  make_dir(drm_dir_ + "/dev_dri");
+  for (size_t i = 0; i < gpus.size(); ++i) {
+    auto &gpu = gpus[i];
+    write_file(drm_dir_ + "/dev_dri/card" + std::to_string(i), "");
+    write_file(drm_dir_ + "/dev_dri/renderD" + std::to_string(gpu.drm_render_minor), "");
   }
 
   write_file(drm_dir_ + "/version", "drm 1.1.0\n");

@@ -720,7 +720,7 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
 TEST_F(device_counting_service_test, sync_sq_waves_verify_non_intercept)
 {
     // If this test fails, device counters will not be read correctly by a system-wide profiler
-    // deamon.
+    // daemon.
     if(!counters::counter_collection_has_device_lock())
     {
         ROCP_INFO << "Unsupported kernel driver version, skipping test";

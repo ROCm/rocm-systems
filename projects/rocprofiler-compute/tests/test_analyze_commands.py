@@ -259,8 +259,9 @@ def test_roof_mem_levels(binary_handler_analyze_rocprof_compute, mem_level):
 def test_roofline_missing_file_handling():
     """cli_generate_plot with empty ai_data returns None."""
 
+    import pandas as pd
+
     from roofline.roofline_main import Roofline
-    from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
     class MockArgs:
@@ -272,7 +273,7 @@ def test_roofline_missing_file_handling():
 
     args = MockArgs()
     workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
+    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
 
@@ -295,8 +296,9 @@ def test_roofline_missing_file_handling():
 def test_roofline_invalid_datatype_cli():
     """cli_generate_plot with invalid datatype returns None."""
 
+    import pandas as pd
+
     from roofline.roofline_main import Roofline
-    from utils.file_io import load_sys_info
     from utils.specs import generate_machine_specs
 
     class MockArgs:
@@ -309,7 +311,7 @@ def test_roofline_invalid_datatype_cli():
     args = MockArgs()
 
     workload_dir = common.setup_workload_dir(roofline_dir)
-    sys_info = load_sys_info(f"{workload_dir}/sysinfo.csv")
+    sys_info = pd.read_csv(f"{workload_dir}/sysinfo.csv")
     sys_info_dict = {key: value[0] for key, value in sys_info.to_dict("list").items()}
     mspec = generate_machine_specs(args, sys_info_dict)
 
@@ -565,7 +567,7 @@ def test_filter_block_5(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.filter_block
-def test_filter_block_6(binary_handler_analyze_rocprof_compute):
+def test_filter_block_6(binary_handler_analyze_rocprof_compute, capsys):
     for dir in indirs:
         workload_dir = common.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
@@ -575,7 +577,10 @@ def test_filter_block_6(binary_handler_analyze_rocprof_compute):
             "--block",
             "100",
         ])
-        assert code == 0
+        captured = capsys.readouterr()
+        error_output = captured.err + captured.out
+        assert code != 0
+        assert "Invalid --block value 100" in error_output
 
         common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -715,9 +720,14 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         if (
-            dir == "tests/workloads/vcopy/MI350"
+            dir == "tests/workloads/vcopy/MI100"
+            or dir == "tests/workloads/vcopy/MI200"
+            or dir == "tests/workloads/vcopy/MI350"
             or dir == "tests/workloads/vcopy/RDNA35_HALO"
         ):
+            # MI100/MI200 workloads (rocpd format) have GPU IDs re-ranked to
+            # 0-based consecutive integers by process_rocpd_csv(). MI350 and
+            # RDNA35_HALO also use GPU ID 0.
             gpu_id = "0"
         else:
             gpu_id = "2"
@@ -1212,7 +1222,7 @@ def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
+def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute, capsys):
     """Test basic filters that should work"""
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:
         if os.path.exists(dir):
@@ -1232,7 +1242,10 @@ def test_filter_combinations_coverage(binary_handler_analyze_rocprof_compute):
                 "--block",
                 "SQ",
             ])
-            assert code == 0
+            captured = capsys.readouterr()
+            error_output = captured.err + captured.out
+            assert code != 0
+            assert "Invalid --block value SQ" in error_output
 
             common.clean_output_dir(config["cleanup"], workload_dir)
             break
