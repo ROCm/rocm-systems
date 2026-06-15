@@ -308,6 +308,9 @@ struct formatter<hipMemAllocationHandleType> : rocprofiler::hip::details::base_f
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemHandleType, PosixFileDescriptor);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemHandleType, Win32);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemHandleType, Win32Kmt);
+#if HIP_VERSION >= 71400000
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemHandleType, Fabric);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemHandleType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
