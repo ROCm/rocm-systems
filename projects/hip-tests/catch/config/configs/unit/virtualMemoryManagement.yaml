@@ -23,16 +23,27 @@ virtualMemoryManagement:
   Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl: *level_2
   Unit_hipMemImportFromShareableHandle_Capture: *level_2
   Unit_hipMemGetHandleForAddressRange_Negative: *level_2
-  Unit_hipMemGetHandleForAddressRange_DeviceMemory: *level_2
+  Unit_hipMemGetHandleForAddressRange_DeviceMemory:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
   Unit_hipMemGetHandleForAddressRange_VM: *level_2
   Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [multigpu]
   Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem: *level_2
-  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM: *level_2
+  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
+  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM:
+    <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
   Unit_hipMemGetHandleForAddressRange_MultipleThreads: *level_2
   Unit_hipMemGetHandleForAddressRange_DifferentOffsets: *level_2
   Unit_hipMemExportToShareableHandle_Positive_Basic: *level_2

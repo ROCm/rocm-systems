@@ -57,6 +57,8 @@ add_executable(
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
+    mfma_simd_benchmark.cpp
+    wmma_simd_benchmark.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -86,11 +88,13 @@ add_executable(
     simd_correctness/vop3_carry_simd_correctness_test.cpp
     simd_correctness/vop_alias_rdna_simd_correctness_test.cpp
     simd_correctness/vop3_shift64_simd_correctness_test.cpp
+    simd_correctness/vop3_shift64_scalar_correctness_test.cpp
     simd_correctness/vop3_fp16_unary_simd_correctness_test.cpp
     simd_correctness/vop3_fp16_transcendental_simd_correctness_test.cpp
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
+    simd_correctness/vop3_cvt_pk_f32_rdna_correctness_test.cpp
     simd_correctness/vop3_ternary_fp_simd_correctness_test.cpp
     simd_correctness/vop3_fmac_simd_correctness_test.cpp
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
@@ -102,7 +106,17 @@ add_executable(
     execution_plugin_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
+    data_types_test.cpp
+    drm_info_layout_test.cpp
 )
+if(RJ_ENABLE_EXPENSIVE_CHECKS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            simd_correctness/mfma_simd_exact_test.cpp
+            simd_correctness/wmma_simd_exact_test.cpp
+    )
+endif()
 target_link_libraries(
     rocjitsu_tests
     PRIVATE
@@ -116,7 +130,10 @@ target_link_libraries(
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
-gtest_discover_tests(rocjitsu_tests)
+# Benchmarks are timing tools, not correctness tests; keep them out of the
+# default ctest run (invoke them directly via
+# ./rocjitsu_tests --gtest_filter='*Benchmark*').
+gtest_discover_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
 
 add_executable(
     rj_dbt_translate_smoke_test
@@ -777,4 +794,28 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
     message(STATUS "HIP tests enabled (found ${HIPCC_EXECUTABLE})")
 else()
     message(STATUS "HIP tests disabled (hipcc or libhsa-runtime64 not found)")
+endif()
+
+# --- Narrow conversion HIP CTS tests ---
+# Uses hipcc (rocjitsu emulator does not yet support amdclang++ -x hip binaries).
+if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
+    set(CVT_NARROW_BIN ${CMAKE_CURRENT_BINARY_DIR}/hip_cvt_narrow_test)
+    add_custom_command(
+        OUTPUT ${CVT_NARROW_BIN}
+        COMMAND
+            ${HIPCC_EXECUTABLE} --offload-arch=gfx950 -std=c++20
+            -I${CMAKE_SOURCE_DIR}/lib/util/include -o ${CVT_NARROW_BIN}
+            ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/hip_cvt_narrow_test.cpp
+        COMMENT "Building hip_cvt_narrow_test with hipcc (gfx950)"
+        VERBATIM
+    )
+    add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
+    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_kmd_shim)
+
+    add_test(
+        NAME "CvtNarrow.AllTests"
+        COMMAND ${RJ_CLI} --config ${RJ_CDNA4_KMD_CONFIG} -- ${CVT_NARROW_BIN}
+    )
+    set_tests_properties("CvtNarrow.AllTests" PROPERTIES TIMEOUT 300)
 endif()

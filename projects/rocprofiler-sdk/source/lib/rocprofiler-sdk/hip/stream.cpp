@@ -147,8 +147,10 @@ get_stream_id(hipStream_t stream)
     // Stream ID already exists
     if(stream_id) return *stream_id;
 
-    ROCP_CI_LOG_IF(WARNING, !rocprofiler::registration::supports_attachment()) << fmt::format(
-        "Stream ID is not present in {} when attach feature is not being used", __FUNCTION__);
+    ROCP_INFO_IF(!rocprofiler::registration::supports_attachment())
+        << fmt::format("Stream ID is not present in {}, registering hipStream_t ({}) lazily",
+                       __FUNCTION__,
+                       sdk::utility::as_hex(static_cast<void*>(stream)));
     return add_stream(stream, false);
 }
 
