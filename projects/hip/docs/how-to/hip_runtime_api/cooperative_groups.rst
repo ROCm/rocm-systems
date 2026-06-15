@@ -476,16 +476,13 @@ With each group type, the synchronization requires using the correct cooperative
       multi_grid_group multi_grid = this_multi_grid();
       multi_grid.sync();
 
+.. _scan_operations
 Operations
 ==========
 
-HIP has one group-wide operation for now: ``reduce()``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+All cooperative groups operations receive the same arguments:
 
 .. code-block:: cpp
-
-  auto reduce(const TyGroup& group, T&& val, Operation&& op)
-
-Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`` on the specified group, contributing the value ``val``
 
 * ``group`` is either a ``coalesced_group`` or a ``thread_block_tile``
 
@@ -505,8 +502,18 @@ Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`
 
   + ``cooperative_groups::bit_xor`` (bitwise xor)
 
-Performance
---------------
+Reduce
+---------
+Performs a group-wide reduce. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+
+.. code-block:: cpp
+
+  auto reduce(const TyGroup& group, T&& val, Operation&& op)
+
+Defined in cooperative_groups/hip_reduce.h. Performs a reduction operation ``op`` on the specified group, contributing the value ``val``
+The parameters are described here: :ref:`scan_operations`
+
+**Performance**
 
 On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
 
@@ -514,13 +521,66 @@ For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
 * On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
 
-* On AMD platform: there is hardware acceleration for ``int`` or ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``unsigned long long``, ``long long``, ``half``/``single``/``double`` precision floating point types will also receive hardware acceleration.
+* On AMD platform: there is hardware acceleration for ``int`` or ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision floating point types will also receive hardware acceleration.
 
 For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
 
 * On Nvidia platform: ``unsigned int``
 
 * On AMD platform: ``unsigned int``, and if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then ``int``, ``unsigned long long`` or ``long long`` are also hardware-accelerated.
+
+inclusive_scan
+-----------------
+
+.. code-block:: cpp
+
+  auto inclusive_scan(const TyGroup& group, TyVal&& val, Operation&& op)
+
+Defined in cooperative_groups/hip_scan.h. Performs an inclusive scan using the operation ``op`` on the specified group, contributing the value ``val``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+
+The parameters are described here: :ref:`scan_operations`
+
+**Performance**
+On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
+
+For arithmetic reduces (``plus``, ``less`` and ``greater``):
+
+* On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
+
+* On AMD platform: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
+
+For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
+
+* On Nvidia platform: ``unsigned int``
+
+* On AMD platform: ``unsigned int``, ``int``, ``unsigned long long`` or ``long long``
+
+exclusive_scan
+-----------------
+.. code-block:: cpp
+
+  auto exclusive_scan(const TyGroup& group, TyVal&& val, Operation&& op)
+
+Defined in cooperative_groups/hip_scan.h. Performs an exclusive scan using the operation ``op`` on the specified group, contributing the value ``val``. Participation of all the threads belonging to the group is expected, with each thread contributing the same per-thread value. Behaviour is undefined if one of the threads of the group does not participate.
+
+The parameters are described here: :ref:`scan_operations`
+
+The value returned for the first active lane is platform dependant, and the programmer should not depend on one value or another being returned. e.g. on AMD currently the "identity" value is returned, according to the operation (e.g. 0 for cg::plus). But this might be different on Nvidia platforms and could change in the future.
+
+**Performance**
+On AMD, when ``group`` is of the same size as the warp size and ``T`` primitive type, DPP instructions will be used, which means the operation would be significantly faster than with other group sizes. The primitive types are:
+
+For arithmetic reduces (``plus``, ``less`` and ``greater``):
+
+* On Nvidia platform: there is hardware acceleration for ``int`` or ``unsigned int``
+
+* On AMD platform: there is hardware acceleration for ``int``, ``unsigned int``, ``unsigned long long``, ``long long``, ``half``/``float``/``double`` 
+
+For bitwise-reduces: (``bit_and``, ``bit_or``, ``bit_xor``)
+
+* On Nvidia platform: ``unsigned int``
+
+* On AMD platform: ``unsigned int``, ``int``, ``unsigned long long`` or ``long long``
 
 Unsupported NVIDIA CUDA features
 ================================
@@ -541,4 +601,3 @@ HIP doesn't support the following CUDA functions/operators in ``cooperative_grou
 * ``wait`` and ``wait_prior``
 * ``invoke_one`` and ``invoke_one_broadcast``
 * ``reduce_update_async`` and ``reduce_store_async``
-* ``inclusive_scan`` and ``exclusive_scan``
