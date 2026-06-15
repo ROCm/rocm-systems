@@ -352,10 +352,10 @@ class db_analysis(OmniAnalyze_Base):
             gpu_arch = sys_row["gpu_arch"]
 
             if gpu_arch not in ROOFLINE_SUPPORTED:
-                console_warning(f"Roofline not supported for {workload_path}.")
+                console_warning(f"Roofline not supported for {gpu_arch}.")
                 continue
             if not (Path(workload_path) / "roofline.csv").exists():
-                console_warning(f"Roofline ceilings not found for {gpu_arch}.")
+                console_warning(f"Roofline ceilings not found for {workload_path}.")
                 continue
 
             roofline_dict = (
