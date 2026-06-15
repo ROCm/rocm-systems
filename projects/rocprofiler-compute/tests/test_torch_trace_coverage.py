@@ -31,6 +31,7 @@ COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 # Set default profiler
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
+
 @pytest.fixture
 def torch_trace_coverage_sampling(request):
     """Return ``(seed, sample_budget)`` for the coverage test."""
