@@ -111,6 +111,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_vmem_get_access)
   GET_ROCR_SYMBOL(hsa_amd_vmem_export_shareable_handle)
   GET_ROCR_SYMBOL(hsa_amd_vmem_import_shareable_handle)
+  GET_ROCR_SYMBOL(hsa_amd_vmem_export_fabric_handle)
+  GET_ROCR_SYMBOL(hsa_amd_vmem_import_fabric_handle)
   GET_ROCR_SYMBOL(hsa_amd_vmem_retain_alloc_handle)
   GET_ROCR_SYMBOL(hsa_amd_agent_set_async_scratch_limit)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve_align)
