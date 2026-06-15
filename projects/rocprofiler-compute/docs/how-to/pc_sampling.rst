@@ -28,13 +28,13 @@ Profiling options
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--pc-sampling-method``: Should be either ``stochastic`` or ``host_trap``, (DEFAULT: stochastic)
-* ``--pc-sampling-interval``: For stochastic sampling, the interval is in cycles. The finest granularity is 1 cycle. For ``host_trap`` sampling, the interval is in microsecond (DEFAULT: 1048576). The interval should be the power of 2. You are recommended try starting from 1048576, and lowering until reaching 65536.
+* ``--pc-sampling-interval``: For ``stochastic`` sampling, the interval is in cycles; it must be a power of 2 and at least 65536 (DEFAULT: 1048576). These are hardware limits reported by the driver. For ``host_trap`` sampling, the interval is in microseconds and may be any positive integer (DEFAULT: 512). When omitted, the method-appropriate default is used.
 
 **Sample command:**
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
+   $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic -VVV -- target_app
 
 Analysis options
 ================
