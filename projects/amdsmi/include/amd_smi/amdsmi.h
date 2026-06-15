@@ -3543,6 +3543,61 @@ amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle proce
 amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
                                                    amdsmi_virtualization_mode_t* mode);
 
+/**
+ *  @brief Get the list of the NIC processor handles associated to a socket.
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details This function retrieves the processor handles of a socket. The
+ *  @p socket_handle must be provided for the processor.
+ *
+ *  @note Sockets are not supported on the @platform{host}.
+ *
+ *  The number of processor count is returned through @p processor_count
+ *  if @p processor_handles is NULL. Then the number of @p processor_count can be pass
+ *  as input to retrieval all processors on the socket to @p processor_handles.
+ *
+ *  @param[in] socket_handle The socket to query
+ *
+ *  @param[in,out] processor_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_processor_handle's that
+ *  may be safely written to the memory pointed to by @p processor_handles. This is the
+ *  limit on how many processor handles will be written to @p processor_handles. On return, @p
+ *  processor_count will contain the number of processor handles written to @p processor_handles,
+ *  or the number of processor handles that could have been written if enough memory had been
+ *  provided.
+ *  If @p processor_handles is NULL, as output, @p processor_count will contain
+ *  how many processors are available to read for the socket.
+ *
+ *  @param[in,out] processor_handles A pointer to a block of memory to which the
+ *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many processors are
+ *  available to read.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_processor_handles(amdsmi_socket_handle socket_handle,
+                                                 uint32_t* processor_count,
+                                                 amdsmi_processor_handle* processor_handles);
+
+/**
+ *  @brief Returns BDF of the given NIC device
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] bdf Reference to BDF. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,
+                                          amdsmi_bdf_t* bdf);
+
 /** @} End tagProcDiscovery */
 
 /*****************************************************************************/
@@ -6683,6 +6738,13 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
  *  between the device @p processor_handle_src and @p processor_handle_dst to the memory
  *  pointed to by @p hops and @p type.
  *
+ *  @note This is a lightweight query that returns only the link type and
+ *  hop count, and is available on both @platform{gpu_bm_linux} and
+ *  @platform{host} for GPU-to-GPU, NIC-to-GPU and NIC-to-NIC pairs.  On
+ *  @platform{host}, ::amdsmi_get_link_topology returns a richer
+ *  GPU-to-GPU-only description (link weight, HW link status and framebuffer
+ *  sharing flag in addition to link type and hop count).
+ *
  *  @param[in] processor_handle_src the source processor handle
  *
  *  @param[in] processor_handle_dst the destination processor handle
@@ -6920,6 +6982,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
  */
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode);
+
 /** @} End tagComputePartition */
 
 /*****************************************************************************/
@@ -9402,6 +9465,82 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
                                                     uint32_t rdma_port_index, uint32_t* num_stats,
                                                     amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Retrieves firmware version information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @note This API depends on libmnl. If libmnl is not installed on the
+ *  system, this function returns ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic firmware info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
+                                       amdsmi_nic_fw_info_t* info);
+
+/**
+ *  @brief Retrieve PORT statistics for the specified NIC port
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  This function follows a two-call pattern:
+ *  1. First call with stats=NULL to get the count of available statistics
+ *  2. Second call with allocated array to retrieve all statistics
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] port_index index of the NIC port to query
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold
+ *    - Output: actual number of statistics available/returned
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
+                                               uint32_t port_index, uint32_t* num_stats,
+                                               amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Retrieve vendor specific statistics for the NIC port
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  This function follows a two-call pattern:
+ *  1. First call with stats=NULL to get the count of available statistics
+ *  2. Second call with allocated array to retrieve all statistics
+ *
+ *  This API provides access to vendor/driver specific statistics that may vary
+ *  between different NIC vendors and driver/fw versions. The statistic names are
+ *  preserved as provided by the underlying driver implementation.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] port_index index of the NIC port to query
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold
+ *    - Output: actual number of statistics available/returned
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
+                                                 uint32_t port_index, uint32_t* num_stats,
+                                                 amdsmi_nic_stat_t* stats);
 
 /** @} End tagNicInfo */
 
