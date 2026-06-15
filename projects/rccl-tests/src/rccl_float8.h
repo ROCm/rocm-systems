@@ -23,7 +23,10 @@
 #ifndef ROCBLAS_FLOAT8_H
 #define ROCBLAS_FLOAT8_H
 
+#include <cmath>
 #include <stdint.h>
+#include <ostream>
+#include <type_traits>
 #include <hip/hip_version.h>
 
 #if __cplusplus < 201103L || (!defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__))
