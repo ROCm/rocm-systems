@@ -192,6 +192,17 @@ TEST(MI400WaveTest, MapToCommonTypeBlockStore)
     EXPECT_EQ(mapped2.cycles, 4);
 }
 
+TEST(MI400WaveTest, MapToCommonTypeWmma)
+{
+    auto xdl4 = mi400::map_to_common_type(184, 0);
+    EXPECT_EQ(xdl4.category, WaveInstCategory::VALU);
+    EXPECT_EQ(xdl4.cycles, 4);
+
+    auto dp32 = mi400::map_to_common_type(187, 0);
+    EXPECT_EQ(dp32.category, WaveInstCategory::VALU);
+    EXPECT_EQ(dp32.cycles, 32);
+}
+
 //=============================================================================
 // MI400 Token Generator Tests
 //=============================================================================

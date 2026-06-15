@@ -169,7 +169,25 @@ inline namespace config
 namespace
 {
 auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
+
+bool
+json_has_project_name_root(const std::string& json_path)
+{
+    std::ifstream ifs{ json_path };
+    if(!ifs.is_open())
+    {
+        return false;
+    }
+    try
+    {
+        const auto json = nlohmann::json::parse(ifs);
+        return json.is_object() && json.contains(TIMEMORY_PROJECT_NAME);
+    } catch(const nlohmann::json::exception&)
+    {
+        return false;
+    }
 }
+}  // namespace
 
 void
 finalize()
@@ -264,12 +282,6 @@ configure_settings(bool _init)
                               "Enable some runtime validation checks (typically enabled "
                               "for continuous integration)",
                               false, "debugging", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK",
-        "Skip CI validation check for push/pop trace count mismatch "
-        "(used only for tests with known imbalances)",
-        false, "debugging", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MONOCHROME", "Disable colorized logging",
                               false, "debugging", "advanced");
@@ -1088,18 +1100,32 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& itr :
+    for(auto&& filename :
         tim::delimit(_config->get<std::string>("ROCPROFSYS_CONFIG_FILE"), ";:"))
     {
         if(_config->get_suppress_config()) continue;
 
-        LOG_DEBUG("Reading config file {}", itr);
-        if(_config->read(itr) && _main_proc &&
+        const auto expanded_filename = settings::format(filename, _config->get_tag());
+
+        // Prevent Timemory's read() silently dropping JSON config files without proper
+        // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
+        // includes '~/.rocprofiler-systems.json' that can be missing
+        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+           !json_has_project_name_root(expanded_filename))
+        {
+            throw std::runtime_error(
+                fmt::format("Config file '{}' is missing the expected '{}' root object "
+                            "and cannot be loaded. If this is a hierarchical preset "
+                            "configuration, pass it via --preset instead.",
+                            expanded_filename, TIMEMORY_PROJECT_NAME));
+        }
+
+        LOG_DEBUG("Reading config file {}", filename);
+        if(_config->read(filename) && _main_proc &&
            ((_config->get<bool>("ROCPROFSYS_CI") && settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
         {
-            auto              fitr = settings::format(itr, _config->get_tag());
-            std::ifstream     _in{ fitr };
+            std::ifstream     _in{ expanded_filename };
             std::stringstream _iss{};
             while(_in)
             {
@@ -1109,7 +1135,7 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                LOG_DEBUG("config file '{}': {}", fitr, _iss.str());
+                LOG_DEBUG("config file '{}': {}", expanded_filename, _iss.str());
             }
         }
     }
@@ -1278,7 +1304,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(!_config->get_enabled())
     {
-        _set("ROCPROFSYS_USE_TRACE", false);
+        _set("ROCPROFSYS_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
@@ -1459,7 +1485,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("ROCPROFSYS_USE_PROCESS_SAMPLING", "process_sampling");
     _handle_use_option("ROCPROFSYS_USE_CAUSAL", "causal");
     _handle_use_option("ROCPROFSYS_USE_KOKKOSP", "kokkos");
-    _handle_use_option("ROCPROFSYS_USE_TRACE", "perfetto");
+    _handle_use_option("ROCPROFSYS_TRACE", "perfetto");
     _handle_use_option("ROCPROFSYS_PROFILE", "timemory");
     _handle_use_option("ROCPROFSYS_USE_OMPT", "ompt");
     _handle_use_option("ROCPROFSYS_USE_RCCLP", "rcclp");

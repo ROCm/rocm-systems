@@ -5,35 +5,42 @@
 #
 # Single source of truth for the ci_images jq used by the Precheck job in
 # .github/workflows/hipfile-ci-toplevel.yml ("Compute CI image names" step).
-# ci_images consumes build_ci_image_matrix.include and emits the keyed map of
+# ci_images consumes full_CI_images_matrix.include and emits the keyed map of
 # image names (and caches) used by the downstream build/test jobs.
 #
 # Two ways to use it:
 #   Sourced (CI):  source ci-images.sh
 #                  -> sets shell var ci_images from the env vars REGISTRY_URL,
-#                     tag, BUILD_CI_IMAGE_MATRIX
+#                     tag, NIGHTLY_BUILD, FULL_CI_IMAGES_MATRIX
 #   Tests:         bash ci-images.sh --test
 #
 # Because the same jq is both shipped to CI and exercised by --test, the two
 # can never drift. The tests are self-contained: they feed literal
-# build_ci_image_matrix fixtures into compute_ci_images and assert the map, so
+# full_CI_images_matrix fixtures into compute_ci_images and assert the map, so
 # they do not depend on ci-matrices.sh or on any env vars.
 
 # --- pure functions: the jq, one copy -------------------------------------
 
-# Consume build_ci_image_matrix.include directly: it is already the
+# Consume full_CI_images_matrix.include directly: it is already the
 # deduplicated set of (platform, version) pairs to build. Single source of
 # truth -- no parallel exclude/include logic here. A partial-axis include row
 # (missing rocm_versions) produces a malformed image URL (e.g. "...:latest-rocm"
 # with no version); the resulting docker-pull failure surfaces the malformed
 # include to the maintainer.
-# Args: registry tag build_ci_image_matrix (JSON)
+#
+# Nightly: the version axis is the literal "nightly". The image tag carries the
+# resolved YYYYMMDD-XXX build id for diagnosability
+# (e.g. :latest-rocm-nightly-20260602-26796279962), while the cache ref stays
+# floating (:latest-rocm-nightly-cache) so successive nightly builds share cache
+# layers.
+# Args: registry tag nightly_build full_CI_images_matrix (JSON)
 compute_ci_images() {
-  local registry="$1" tag="$2" build_ci_image_matrix="$3"
+  local registry="$1" tag="$2" nightly_build="$3" full_CI_images_matrix="$4"
   jq -c -n \
     --arg registry "${registry}" \
     --arg tag "${tag}" \
-    --argjson build_matrix "${build_ci_image_matrix}" \
+    --arg nightly_build "${nightly_build}" \
+    --argjson build_matrix "${full_CI_images_matrix}" \
     '
       $build_matrix.include
       | map({ platform: .supported_platforms,
@@ -42,11 +49,19 @@ compute_ci_images() {
           {}; . + {
             ($combo.platform + "-" + $combo.version): (
               ( $combo
+                # Versions concatenate after the "rocm" prefix without a
+                # separator ("latest-rocm7.2.2"). For nightly, insert a hyphen
+                # so the tag reads "latest-rocm-nightly[-BUILD]" rather than
+                # "latest-rocmnightly".
+                | .version_for_tag = (if .version == "nightly" then "-nightly" else .version end)
+                | .build_suffix    = (if .version == "nightly" and ($nightly_build | length) > 0
+                                      then "-" + $nightly_build
+                                      else "" end)
                 | .image_name    = ($registry + "/hipfile/ais_ci_" + .platform)
-                | .image         = (.image_name + ":" + $tag + .version)
-                | .cache         = (.image_name + ":latest-rocm" + .version + "-cache")
-                | .image_nvidia  = (.image_name + ":" + $tag + .version + "-nvidia")
-                | .cache_nvidia  = (.image_name + ":latest-rocm" + .version + "-nvidia-cache")
+                | .image         = (.image_name + ":" + $tag + .version_for_tag + .build_suffix)
+                | .cache         = (.image_name + ":latest-rocm" + .version_for_tag + "-cache")
+                | .image_nvidia  = (.image_name + ":" + $tag + .version_for_tag + .build_suffix + "-nvidia")
+                | .cache_nvidia  = (.image_name + ":latest-rocm" + .version_for_tag + "-nvidia-cache")
               ) | {
                 ci_image:              (.image        | ascii_downcase),
                 ci_image_cache:        (.cache        | ascii_downcase),
@@ -82,14 +97,14 @@ _run_tests() {
 
   echo "Test 1: single (ubuntu, 7.2.2) row -> one keyed entry, all 4 URL fields"
   bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}'
-  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "$bm")
+  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
     '{"ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 2: multiple rows -> one entry per (platform, version)"
   bm='{"include":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.13.0"}]}'
-  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "$bm")
+  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
     '{"rocky-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2-nvidia-cache"},"ubuntu-7.13.0":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0-nvidia-cache"}}' || failures=$((failures+1))
 
@@ -98,7 +113,7 @@ _run_tests() {
   # When a DOCKERFILE changes, CI passes a per-ref tag instead of latest-rocm.
   # The cache fields are pinned to latest-rocm regardless (warm-cache reuse).
   bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}'
-  out=$(compute_ci_images "ghcr.io/testorg" "refs-pull-42-merge-rocm" "$bm")
+  out=$(compute_ci_images "ghcr.io/testorg" "refs-pull-42-merge-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
     '{"ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:refs-pull-42-merge-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:refs-pull-42-merge-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia-cache"}}' || failures=$((failures+1))
 
@@ -108,14 +123,14 @@ _run_tests() {
   # key is built from the raw matrix values so it round-trips with the GHA
   # format('{0}-{1}', ...) lookup, which also uses raw matrix values.
   bm='{"include":[{"supported_platforms":"Ubuntu","rocm_versions":"7.2.2"}]}'
-  out=$(compute_ci_images "ghcr.io/TestOrg" "latest-rocm" "$bm")
+  out=$(compute_ci_images "ghcr.io/TestOrg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
     '{"Ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 5: empty include -> empty map"
   bm='{"include":[]}'
-  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "$bm")
+  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" '{}' || failures=$((failures+1))
 
   echo
@@ -124,9 +139,27 @@ _run_tests() {
   # image ref. The pull fails downstream, surfacing the bad include rather
   # than silently dropping it.
   bm='{"include":[{"supported_platforms":"rocky"}]}'
-  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "$bm")
+  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
     '{"rocky-":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm-nvidia-cache"}}' || failures=$((failures+1))
+
+  echo
+  echo "Test 7: nightly version -> hyphenated tag + build-id suffix; cache stays floating"
+  # The image tag carries the resolved build id; the cache ref drops it so
+  # successive nightly builds share cache layers.
+  bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}'
+  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "20260602-26796279962" "$bm")
+  _assert_eq "  output" "$out" \
+    '{"ubuntu-nightly":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-20260602-26796279962","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-20260602-26796279962-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-nvidia-cache"}}' || failures=$((failures+1))
+
+  echo
+  echo "Test 8: nightly version, empty build id -> bare -nightly tag (suffix omitted)"
+  # When the resolver yields no build id, build_suffix is empty so the tag is
+  # the floating ":latest-rocm-nightly" rather than a malformed trailing dash.
+  bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}'
+  out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
+  _assert_eq "  output" "$out" \
+    '{"ubuntu-nightly":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-nvidia-cache"}}' || failures=$((failures+1))
 
   echo
   if [ "${failures}" -eq 0 ]; then
@@ -143,9 +176,10 @@ _run_tests() {
 # Do NOT set shell options here: sourcing must not mutate the caller's shell.
 if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
   # SC2034: ci_images is consumed by the sourcing CI step.
-  # SC2153: BUILD_CI_IMAGE_MATRIX is a CI env var, not a typo of build_ci_image_matrix.
+  # SC2153: NIGHTLY_BUILD / FULL_CI_IMAGES_MATRIX are CI env vars, not typos of
+  # the lowercase args.
   # shellcheck disable=SC2034,SC2153
-  ci_images=$(compute_ci_images "${REGISTRY_URL}" "${tag}" "${BUILD_CI_IMAGE_MATRIX}")
+  ci_images=$(compute_ci_images "${REGISTRY_URL}" "${tag}" "${NIGHTLY_BUILD}" "${FULL_CI_IMAGES_MATRIX}")
 else
   set -euo pipefail
   case "${1:-}" in

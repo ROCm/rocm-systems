@@ -361,8 +361,6 @@ class QueuePair {
   __device__ void ionic_ring_doorbell_single(uint32_t pos);
 #endif
 
-  int gda_provider_{0};
-
   /* GDAProvider::BNXT START */
   uint64_t *bnxt_dbr;
   struct bnxt_device_cq bnxt_cq;
@@ -485,6 +483,7 @@ class QueuePair {
 
   struct user_buf_info_t *user_buf_info = nullptr;
   size_t num_user_buffers = 0;
+  int gda_provider_{0};  // host-side only; device dispatch uses constmem.gda_provider
 
   int buffer_register(uintptr_t addr, size_t length);
   int buffer_unregister(uintptr_t addr);

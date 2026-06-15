@@ -227,6 +227,7 @@ def gen_vector_unary(
         'ffbh_u32',
         'ffbl',
         'ffbh_i32',
+        'cls_i32',
         'bcnt',
         'mbcnt_lo',
         'mbcnt_hi',
@@ -249,6 +250,12 @@ def gen_vector_unary(
             L.append('    uint32_t abs_val = sv < 0 ? ~s : s;')
             L.append(
                 f'    {dst[0]}.write_lane(wf, lane, abs_val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(abs_val)));'
+            )
+        elif op == 'cls_i32':
+            L.append('    int32_t sv = static_cast<int32_t>(s);')
+            L.append('    uint32_t abs_val = sv < 0 ? ~s : s;')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, abs_val == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(abs_val)) - 1);'
             )
         elif op in int_op_map:
             L.append(f'    {dst[0]}.write_lane(wf, lane, {int_op_map[op]});')
@@ -959,7 +966,9 @@ def gen_vector_ternary(
             f'    int32_t b = static_cast<int32_t>({s1}.read_lane(wf, lane) << 8) >> 8;'
         )
         L.append(f'    int32_t c = static_cast<int32_t>({s2}.read_lane(wf, lane));')
-        L.append(f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(a * b + c));')
+        L.append(
+            f'    {d}.write_lane(wf, lane, static_cast<uint32_t>(static_cast<int64_t>(a) * b + c));'
+        )
     elif dtype in ('u24',):
         L.append(f'    uint32_t a = {s0}.read_lane(wf, lane) & 0x00FFFFFFu;')
         L.append(f'    uint32_t b = {s1}.read_lane(wf, lane) & 0x00FFFFFFu;')

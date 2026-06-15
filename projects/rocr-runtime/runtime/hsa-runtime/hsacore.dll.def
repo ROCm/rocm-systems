@@ -163,8 +163,10 @@ EXPORTS
   hsa_amd_memory_pool_can_migrate
   hsa_amd_memory_migrate
   hsa_amd_interop_map_buffer
+  hsa_amd_interop_map_buffer_with_size
   hsa_amd_interop_unmap_buffer
   hsa_amd_image_create
+  hsa_amd_image_create_v2
   hsa_ext_image_get_capability
   hsa_ext_image_data_get_info
   hsa_ext_image_create

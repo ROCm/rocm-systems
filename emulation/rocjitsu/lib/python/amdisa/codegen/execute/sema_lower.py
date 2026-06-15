@@ -59,29 +59,45 @@ class OperandMap:
         dst_ops: list[str],
         exec_model: ExecModel,
         dtype: str | None = None,
-        src_width: int | None = None,
-        dst_width: int | None = None,
-        src_widths: dict[int, int] | None = None,
-        dst_widths: dict[int, int] | None = None,
+        op_widths: dict[str, int] | None = None,
         src_reg_classes: dict[int, RegClass] | None = None,
         dst_reg_classes: dict[int, RegClass] | None = None,
+        src_widths: dict[int, int] | None = None,
+        dst_widths: dict[int, int] | None = None,
     ) -> OperandMap:
         is_64 = dtype in ('b64', 'i64', 'u64', 'f64')
         is_scalar = exec_model == ExecModel.SCALAR
         reg = RegClass.SGPR if is_scalar else RegClass.VGPR
-        default_width = 64 if is_64 else 32
-        sw = src_width if src_width is not None else default_width
-        dw = dst_width if dst_width is not None else default_width
-        src_widths = src_widths or {}
-        dst_widths = dst_widths or {}
+        width = 64 if is_64 else 32
+
+        def _bw(name: str, explicit_width: int | None = None) -> int:
+            # Prefer the operand's own declared bit size so mixed-width
+            # instructions (e.g. the f64<->32-bit conversions, where one side is
+            # 64-bit and the other 32-bit) get the correct per-operand lane
+            # width instead of a single instruction-level dtype width. Only the
+            # 64-bit case matters for read_lane64/write_lane64 selection; every
+            # narrower size (8/16/32) reads/writes through the 32-bit path.
+            if explicit_width is not None:
+                return 64 if explicit_width == 64 else 32
+            size = op_widths.get(name) if op_widths else None
+            if size is None:
+                return width
+            return 64 if size == 64 else 32
+
         src_reg_classes = src_reg_classes or {}
         dst_reg_classes = dst_reg_classes or {}
+        src_widths = src_widths or {}
+        dst_widths = dst_widths or {}
         src_b = {
-            i: OperandBinding(name, src_reg_classes.get(i, reg), src_widths.get(i, sw))
+            i: OperandBinding(
+                name, src_reg_classes.get(i, reg), _bw(name, src_widths.get(i))
+            )
             for i, name in enumerate(src_ops)
         }
         dst_b = {
-            i: OperandBinding(name, dst_reg_classes.get(i, reg), dst_widths.get(i, dw))
+            i: OperandBinding(
+                name, dst_reg_classes.get(i, reg), _bw(name, dst_widths.get(i))
+            )
             for i, name in enumerate(dst_ops)
         }
         return OperandMap(src_bindings=src_b, dst_bindings=dst_b)
@@ -148,8 +164,12 @@ _STD_MATH: dict[SemaNodeKind, str] = {
     SemaNodeKind.SIN: 'std::sin',
     SemaNodeKind.COS: 'std::cos',
     SemaNodeKind.LOG2: 'std::log2',
-    SemaNodeKind.FLOOR: 'std::floor',
-    SemaNodeKind.TRUNC: 'std::trunc',
+    # floor/trunc go through util:: wrappers that quiet a signaling NaN so the
+    # generated scalar bodies agree with the SIMD fast paths (and the GPU) under
+    # gcc, whose glibc floorf/truncf pass sNaN through unquieted (clang's
+    # roundss/roundsd quiet it). See util::floor_scalar in util/simd.h.
+    SemaNodeKind.FLOOR: 'util::floor_scalar',
+    SemaNodeKind.TRUNC: 'util::trunc_scalar',
 }
 
 
@@ -231,13 +251,7 @@ def _writes_vcc(node: SemaNode) -> bool:
 
 def _vcc_init_expr(ctx: LoweringContext) -> str:
     """Return the C++ expression to initialize the vcc local variable."""
-    if ctx.vcc_dst:
-        return 'wf.vcc()'
-    if ctx.operand_map:
-        dst = ctx.operand_map.dst(0)
-        if dst:
-            return f'{dst.name}.read_scalar64(wf)'
-    return 'wf.vcc()'
+    return '0'
 
 
 def _vcc_write_stmt(ctx: LoweringContext) -> str:
@@ -881,6 +895,23 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     Checks if the RHS expression evaluates to a float in C++, meaning the
     dst write needs bit_cast<uint32_t> to store it as a register value.
     """
+    # VOP3 result modifiers (apply_omod/apply_clamp) always emit a float/double
+    # lambda regardless of the declared dst type, so a write to a non-float
+    # register (e.g. v_mov_b32 with omod/clamp) still needs the bit_cast back —
+    # without it the float is truncated float->int at the integer write_lane.
+    # apply_src_mod only produces a float lambda when it actually applies abs/neg
+    # to a float source; otherwise it passes its operand through unchanged.
+    if node.kind == SemaNodeKind.CALL:
+        if node.call_name in ('apply_omod', 'apply_clamp'):
+            return 64 if (node.ty and node.ty.size == 64) else 32
+        if node.call_name == 'apply_src_mod':
+            src = node.children[1] if len(node.children) > 1 else None
+            has_neg = len(node.children) > 3 and node.children[3].lit_value == '1'
+            has_abs = len(node.children) > 4 and node.children[4].lit_value == '1'
+            src_is_int = src is not None and src.ty and src.ty.base in ('I', 'U')
+            if (has_neg or has_abs) and not src_is_int:
+                return 64 if (node.ty and node.ty.size == 64) else 32
+            return _rhs_is_float_expr(src) if src is not None else 0
     if node.ty and node.ty.base in ('F', 'BF') and node.ty.size in (32, 64):
         if node.kind in (
             SemaNodeKind.ADD,
@@ -1039,7 +1070,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
     ' : static_cast<uint32_t>(v)); }}()',
     'rndne': 'std::nearbyint({0})',
-    'ceil': 'std::ceil({0})',
+    'ceil': 'util::ceil_scalar({0})',
     'exp2': 'amdgpu::transcendental::exp_f32({0})',
     'bcnt': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt1': 'static_cast<uint32_t>(std::popcount({0}))',
@@ -1079,7 +1110,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return s == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'cls': '[&]() {{ int32_t sv = static_cast<int32_t>({0});'
-    ' if (sv == 0 || sv == -1) return 32u;'
+    ' if (sv == 0 || sv == -1) return 31u;'
     ' uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);'
     ' return static_cast<uint32_t>(std::countl_zero(u)) - 1u; }}()',
     'wqm': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
@@ -1346,12 +1377,14 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i32': '[&]() {{ uint32_t base = {0}, field = {1};'
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' uint32_t extracted = (base >> offset) & mask;'
     ' if (width < 32 && (extracted & (1u << (width - 1))))'
@@ -1362,6 +1395,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<uint64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i64': '[&]() {{ uint64_t base = {0};'
@@ -1369,6 +1403,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<int64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' uint64_t extracted = (base >> offset) & mask;'
     ' if (width < 64 && (extracted & (1ULL << (width - 1))))'

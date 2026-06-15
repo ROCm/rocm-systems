@@ -25,6 +25,7 @@
 #include "device/rocm/rocprintf.hpp"
 #include "device/rocm/rocglinterop.hpp"
 
+
 #include <atomic>
 #include <iostream>
 #include <vector>
@@ -474,11 +475,14 @@ class Device : public NullDevice {
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) override;
+  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
+                                        amd::Memory::HandleType handle_type) override;
 
-  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const;
+  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
+                                amd::Memory::HandleType handle_type) const;
 
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) override;
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle,
+                                                amd::Memory::HandleType handle_type) override;
 
   virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                             cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override;
@@ -508,10 +512,6 @@ class Device : public NullDevice {
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
-
-  //! Symmetric counterpart to hostLock(): revoke this device's GPU access to the
-  //! pinned range (SVM-API/HMM path only) and then unlock it.
-  void hostUnlock(void* hostMem, size_t size) const;
 
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
@@ -547,6 +547,12 @@ class Device : public NullDevice {
 
   //! Returns the lock object for the virtual gpus list
   std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
+
+#ifdef _WIN32
+  //! D3D interop accessors - return adapter LUID for device matching
+  const LUID& getDeviceLUID() const { return deviceLuid_; }
+  bool hasValidLUID() const { return luidValid_; }
+#endif
 
   typedef std::vector<VirtualGPU*> VirtualGPUs;
   //! Returns the list of all virtual GPUs running on this device
@@ -694,6 +700,12 @@ class Device : public NullDevice {
   //! Pre-computed metadata packet version header bits
   uint32_t metadata_version_header_ = 0;
   bool metadata_version_queried_ = false;
+
+#ifdef _WIN32
+  // D3D interop device properties
+  LUID deviceLuid_;     //!< Adapter LUID for D3D interop validation
+  bool luidValid_;      //!< True if LUID was successfully extracted from HSA
+#endif
 
   struct QueueInfo {
     int refCount;             //! Reference counter. Shows how many time the queue was shared

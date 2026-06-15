@@ -163,7 +163,7 @@ public:
 
     // Tracks the number of in flight kernel executions we
     // are waiting on. We cannot destroy Queue until all kernels
-    // have comleted.
+    // have completed.
     void    async_started() { _core_api.hsa_signal_add_relaxed_fn(_active_kernels, 1); }
     void    async_complete() { _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1); }
     int64_t active_async_packets() const
@@ -180,6 +180,10 @@ public:
     const AmdExtTable&  ext_api() const { return _ext_api; }
     queue_state         get_state() const;
     void                set_state(queue_state state);
+
+    void invoke_write_interceptor(const void*                           packets,
+                                  uint64_t                              pkt_count,
+                                  hsa_amd_queue_intercept_packet_writer writer) const;
 
     mutable std::mutex              cv_mutex        = {};
     mutable std::condition_variable cv_ready_signal = {};
