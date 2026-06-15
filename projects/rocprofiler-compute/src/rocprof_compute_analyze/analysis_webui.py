@@ -234,18 +234,23 @@ class webui_analysis(OmniAnalyze_Base):
                     }
 
                 # All filtering will occur here
+                gpu_arch = run_workload.sys_info.iloc[0]["gpu_arch"]
                 parser.load_table_data(
                     workload=run_workload,
                     dir_path=self.dest_dir,
                     is_gui=True,
                     args=args,
+                    dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
                 )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
             # Generate GUI content
             # ~~~~~~~~~~~~~~~~~~~~~~~
             div_children = [
-                get_memchart(panel_configs[300]["data source"], base_data[base_run])
+                get_memchart(
+                    panel_configs.get(300, {}).get("data source"),
+                    base_data[base_run],
+                )
             ]
 
             is_roofline_valid, roofline_error_msg = validate_roofline_csv(
@@ -330,6 +335,8 @@ class webui_analysis(OmniAnalyze_Base):
                 # Iterate over each table per section
                 for data_source in panel["data source"]:
                     for t_type, table_config in data_source.items():
+                        if table_config["id"] not in base_data[base_run].dfs:
+                            continue
                         original_df = base_data[base_run].dfs[table_config["id"]]
 
                         # The sys info table need to add index back

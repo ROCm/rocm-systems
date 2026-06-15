@@ -84,7 +84,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   if (prop->requestedHandleTypes != hipMemHandleTypeNone &&
-      prop->requestedHandleTypes != hipMemHandleTypePosixFileDescriptor) {
+      prop->requestedHandleTypes != hipMemHandleTypePosixFileDescriptor &&
+      prop->requestedHandleType  != hipMemHandleTypeFabric) {
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -166,8 +167,10 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  amd::Memory::HandleType htype = static_cast<amd::Memory::HandleType>(handleType);
+
   if (!ga->asAmdMemory().getContext().devices()[0]->ExportShareableVMMHandle(
-          ga->asAmdMemory(), flags, shareableHandle)) {
+          ga->asAmdMemory(), flags, shareableHandle, htype)) {
     LogPrintfError("Exporting Handle failed with flags: %d", flags);
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -247,7 +250,8 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  amd::Memory* phys_mem_obj = device->ImportShareableVMMHandle(osHandle);
+  amd::Memory::HandleType htype = static_cast<amd::Memory::HandleType>(shHandleType);
+  amd::Memory* phys_mem_obj = device->ImportShareableVMMHandle(osHandle, htype);
 
   if (phys_mem_obj == nullptr) {
     LogError("failed to new a va range curr_mem_obj object!");
