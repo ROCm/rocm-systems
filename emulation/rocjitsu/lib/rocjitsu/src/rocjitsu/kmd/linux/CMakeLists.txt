@@ -18,33 +18,21 @@ target_include_directories(
         ${ROCJITSU_SRC_DIR}
         ${HSA_INCLUDE_DIR}
         ${GENERATED_DIR}
+        # librocjitsu.so keeps util/simdojo PRIVATE, so pull in their public
+        # header paths here for the interposer's compile.
+        $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
+        $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
 )
+# The shim is a thin LD_PRELOAD interposer: it only provides interposed
+# libc entry points (ioctl/open/...) and delegates all emulation to the
+# shared simulator library. Rather than statically bundling the simulator
+# (which produced a ~60MB shim with its own private copy of every
+# singleton), it dynamically links librocjitsu.so so there is exactly one
+# copy of the simulator in the process, shared with the plugin modules.
 target_link_libraries(
     rocjitsu_kmd_shim
     PRIVATE
-        rocjitsu_kmd
-        rocjitsu_analysis
-        rocjitsu_code
-        rocjitsu_isa
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        rocjitsu_isa_risc_v
-        simdojo
-        rocjitsu_vm
-        rocjitsu_vm_amdgpu
-        rocjitsu_plugin_loader
-        rocjitsu_vm_risc_v
-        rocjitsu_config
-        util
-        flatbuffers
+        rocjitsu_shared
         Threads::Threads
         dl
 )
@@ -53,4 +41,12 @@ target_compile_options(
     rocjitsu_kmd_shim
     PRIVATE -Wall -Wextra -Wpedantic -Werror
 )
-set_target_properties(rocjitsu_kmd_shim PROPERTIES OUTPUT_NAME "rocjitsu_kmd")
+set_target_properties(
+    rocjitsu_kmd_shim
+    PROPERTIES
+        OUTPUT_NAME "rocjitsu_kmd"
+        # Locate librocjitsu.so next to the shim when installed/extracted
+        # (mirage co-locates both under <cache>/emulator/rocjitsu/). The
+        # build tree gets its rpath automatically from CMake.
+        INSTALL_RPATH "$ORIGIN"
+)

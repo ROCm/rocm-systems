@@ -28,38 +28,12 @@ rj_add_object_library(
 target_link_libraries(rocjitsu_plugin_loader PRIVATE flatbuffers)
 
 # Runtime plugin shared objects are only meaningful on Linux (the interposer
-# platform). Each plugin is a self-contained `librocjitsu_plugin_<name>.so`:
-# host symbols are hidden, so the plugin statically bundles the simulator code
-# it references and exports only the three ABI entry points.
+# platform). Each plugin is a `librocjitsu_plugin_<name>.so` that dynamically
+# links the shared simulator library (librocjitsu.so) for the simulator code
+# it references, rather than statically bundling its own copy. It carries only
+# its own plugin logic plus the three ABI entry points, which a linker version
+# script restricts to be the only exported symbols.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Same object-library closure as the main shared library, minus the plugin
-    # object libraries themselves (each plugin links only its own logic).
-    set(RJ_PLUGIN_RUNTIME_LIBS
-        rocjitsu_analysis
-        rocjitsu_code
-        rocjitsu_isa
-        rocjitsu_isa_cdna1
-        rocjitsu_isa_cdna2
-        rocjitsu_isa_cdna3
-        rocjitsu_isa_cdna4
-        rocjitsu_isa_rdna1
-        rocjitsu_isa_rdna2
-        rocjitsu_isa_rdna3
-        rocjitsu_isa_rdna3_5
-        rocjitsu_isa_rdna4
-        rocjitsu_isa_gfx1250
-        rocjitsu_isa_risc_v
-        simdojo
-        rocjitsu_kmd
-        rocjitsu_vm
-        rocjitsu_vm_amdgpu
-        rocjitsu_vm_risc_v
-        rocjitsu_config
-        util
-        flatbuffers
-        Threads::Threads
-    )
-
     # Build plugin shared objects next to the interposer so the standard
     # dynamic-linker search path finds them when the launcher adds that
     # directory to LD_LIBRARY_PATH.
@@ -75,15 +49,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${target}
             PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${HSA_INCLUDE_DIR}
                     ${GENERATED_DIR}
+                    # librocjitsu.so keeps util/simdojo PRIVATE, so pull in
+                    # their public header paths for the plugin's compile.
+                    $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
+                    $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
+        # Link only the plugin's own logic plus the shared simulator library;
+        # the simulator code lives once in librocjitsu.so and is resolved at
+        # load time.
         target_link_libraries(
             ${target}
-            PRIVATE ${object_lib} ${RJ_PLUGIN_RUNTIME_LIBS}
+            PRIVATE ${object_lib} rocjitsu_shared
         )
         add_dependencies(${target} flatbuffers_schemas)
         # Hide everything except the ABI exports (which carry an explicit
         # default-visibility attribute via ROCJITSU_DEFINE_PLUGIN). This keeps
-        # the bundled simulator/C++ symbols private to the plugin .so.
+        # the plugin's own C++ symbols private to the plugin .so.
         set_target_properties(
             ${target}
             PROPERTIES
@@ -92,11 +73,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 CXX_VISIBILITY_PRESET hidden
                 C_VISIBILITY_PRESET hidden
                 VISIBILITY_INLINES_HIDDEN ON
+                # Resolve librocjitsu.so next to the plugin when
+                # installed/extracted (mirage co-locates them under
+                # <cache>/emulator/rocjitsu/).
+                INSTALL_RPATH "$ORIGIN"
         )
         # Restrict the dynamic symbol table to the three ABI entry points. The
-        # bundled static libraries (rocjitsu_code C API, flatbuffers reflection)
-        # export default-visibility symbols that the visibility preset cannot
-        # hide; the version script makes everything but the ABI exports local.
+        # plugin's own default-visibility C API/flatbuffers symbols that the
+        # visibility preset cannot hide are made local by the version script.
         target_link_options(
             ${target}
             PRIVATE
