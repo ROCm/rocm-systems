@@ -48,8 +48,6 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-// Step 30 marks the hipMemHandleTypeFabric enumerator (#6596); no new table
-// member, so the layout is unchanged.
 #define HIP_RUNTIME_API_TABLE_STEP_VERSION 30
 
 // HIP API interface
