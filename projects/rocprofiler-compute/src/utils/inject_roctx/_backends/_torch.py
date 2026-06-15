@@ -63,33 +63,10 @@ _TORCH_ROOT: str = ""
 _thread_local = threading.local()
 _active_dispatch_mode: Any = None
 
-_ROCTX_CANDIDATE_PATHS: list[str] = []
-
-
-def _prime_roctx_sys_path() -> None:
-    """Prepend ROCm Python site directories so roctx is importable."""
-    global _ROCTX_CANDIDATE_PATHS
-    rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
-    py = f"python{sys.version_info.major}.{sys.version_info.minor}"
-    _ROCTX_CANDIDATE_PATHS = [
-        f"{rocm_root}/lib/{py}/site-packages",
-        f"{rocm_root}/libexec/rocprofiler-sdk/python",
-    ]
-    for candidate in _ROCTX_CANDIDATE_PATHS:
-        if candidate not in sys.path:
-            sys.path.insert(0, candidate)
-
-
-_prime_roctx_sys_path()
-
-try:
-    _roctx_mod = importlib.import_module("roctx")
-    rangePush = _roctx_mod.rangePush
-    rangePop = _roctx_mod.rangePop
-    _core.set_python_tier_io(rangePush, rangePop)
-    _ROCTX_AVAILABLE = True
-except ImportError:
-    _ROCTX_AVAILABLE = False
+# Wire the Python tier via _core and reuse its roctx handles below.
+_ROCTX_AVAILABLE = _core.ensure_python_tier()
+if _ROCTX_AVAILABLE:
+    rangePush, rangePop = _core.get_python_tier_io()
 
 
 # torch.distributed.* collectives; entries not listed here are not wrapped.
@@ -1133,7 +1110,7 @@ class TorchBackend:
         if not _ROCTX_AVAILABLE:
             console_warning(
                 "ml api trace",
-                f"ROCTX bindings not found in {_ROCTX_CANDIDATE_PATHS}; "
+                f"ROCTX bindings not found in {_core.roctx_candidate_paths()}; "
                 "skipping torch instrumentation.",
             )
             return

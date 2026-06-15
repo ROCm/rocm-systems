@@ -14,6 +14,7 @@ from typing import Any
 from utils.inject_roctx._core import (
     _pop_scope,
     _push_scope,
+    ensure_python_tier,
     resolve_user_caller_location,
 )
 from utils.logger import console_log, console_warning
@@ -87,6 +88,12 @@ class TritonBackend:
             console_warning(
                 "ml api trace",
                 "Triton is not installed; skipping triton instrumentation.",
+            )
+            return
+        if not ensure_python_tier():
+            console_warning(
+                "ml api trace",
+                "ROCTX bindings not found; skipping triton instrumentation.",
             )
             return
         patch_triton_launcher()
