@@ -9,6 +9,7 @@
 
 #include "hip_internal.hpp"
 
+#include <atomic>
 #include <cstdint>
 
 #if defined(HIP_ROCPROFILER_REGISTER) && HIP_ROCPROFILER_REGISTER > 0
@@ -1546,11 +1547,23 @@ template <typename Tp> Tp& GetDispatchTableImpl() {
   // Change all the function pointers to point to the HIP runtime implementation functions
   UpdateDispatchTable(&dispatch_table);
 
-  // Profiler Registration, may wrap the function pointers
-  ToolsInit(&dispatch_table);
-
+  // ToolsInit deferred to RegisterDispatchTableOnce()
   return dispatch_table;
 }
+
+// Register profiler once, after the getter's static guard is released. Uses a namespace-scope
+// atomic claimed by a single CAS (not a function-local once-flag, whose own guard would re-enter
+// the same way), so a re-entrant call sees the initialized table and returns without recursing.
+template <typename Tp> void RegisterDispatchTableOnce(Tp* table, std::atomic<bool>& registered) {
+  bool expected = false;
+  if (registered.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+    ToolsInit(table);
+  }
+}
+
+std::atomic<bool> hip_dispatch_registered{false};
+std::atomic<bool> hip_compiler_dispatch_registered{false};
+std::atomic<bool> hip_tools_dispatch_registered{false};
 }  // namespace
 
 // At the -O3 optimization level, these functions are vectorized (gcc 11.4.1),
@@ -1565,14 +1578,17 @@ template <typename Tp> Tp& GetDispatchTableImpl() {
 #endif
 NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
   static auto* _v = &GetDispatchTableImpl<HipDispatchTable>();
+  RegisterDispatchTableOnce(_v, hip_dispatch_registered);
   return _v;
 }
 NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
   static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
+  RegisterDispatchTableOnce(_v, hip_compiler_dispatch_registered);
   return _v;
 }
 const HipToolsDispatchTable* GetHipToolsDispatchTable() {
   static auto* _v = &GetDispatchTableImpl<HipToolsDispatchTable>();
+  RegisterDispatchTableOnce(_v, hip_tools_dispatch_registered);
   return _v;
 }
 }  // namespace hip
