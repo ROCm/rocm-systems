@@ -278,6 +278,13 @@ if(NOT STANDALONEBINARY)
             ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_import_guard.xml
             ${COV_OPTION} tests/test_import_guard.py ${WORKING_DIR_OPTION}
     )
+    add_test(
+        NAME test_interface_artifacts
+        COMMAND
+            ${PYTHON_TEST_COMMAND} -m pytest
+            --junitxml=tests/test_interface_artifacts.xml ${COV_OPTION}
+            tests/test_interface_artifacts.py ${WORKING_DIR_OPTION}
+    )
 endif()
 
 # ---------------------------
