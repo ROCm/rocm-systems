@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch};
-use mirage_core::emulator::{Emulator, EmulatorDef, EmulatorDescription, SupportStatus};
+use mirage_core::emulator::{EmulatorBackend, EmulatorDef, EmulatorDescription, SupportStatus};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
@@ -93,7 +93,7 @@ pub struct Hotswap {
     profile: ProfileDef,
 }
 
-impl Emulator for Hotswap {
+impl EmulatorBackend for Hotswap {
     fn description() -> EmulatorDescription {
         describe()
     }

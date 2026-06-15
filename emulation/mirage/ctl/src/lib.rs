@@ -70,7 +70,7 @@ pub fn init_logging(verbose: u8) {
 /// and resolved runtime path, so building the registry probes the
 /// machine.
 pub fn registry() -> Vec<EmulatorDescription> {
-    use mirage_core::emulator::Emulator;
+    use mirage_core::emulator::EmulatorBackend;
     vec![
         mirage_core::emulator::Noop::description(),
         mirage_rocjitsu::Rocjitsu::description(),
@@ -181,7 +181,7 @@ pub fn ensure_builtins_present() {
 /// Shared by the CLI profile commands and the daemon's profile
 /// endpoint so both validate identically.
 pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
-    use mirage_core::emulator::{Emulator, EmulatorKind, Noop};
+    use mirage_core::emulator::{EmulatorBackend, EmulatorKind, Noop};
     match def.emulator.emulator {
         EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::validate_profile(def),
         EmulatorKind::Hotswap => mirage_hotswap::Hotswap::validate_profile(def),

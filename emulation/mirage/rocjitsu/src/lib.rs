@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
 use mirage_core::config::OptionDef;
-use mirage_core::emulator::{Emulator, EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
+use mirage_core::emulator::{EmulatorBackend, EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
@@ -37,7 +37,7 @@ pub struct Rocjitsu {
     profile: ProfileDef,
 }
 
-impl Emulator for Rocjitsu {
+impl EmulatorBackend for Rocjitsu {
     fn description() -> EmulatorDescription {
         describe()
     }

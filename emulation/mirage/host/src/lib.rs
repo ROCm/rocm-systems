@@ -41,7 +41,7 @@ use mirage_core::common::MaybeRef;
 use mirage_core::container::{
     ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_RANK, container_name,
 };
-use mirage_core::emulator::{Emulator, EmulatorKind};
+use mirage_core::emulator::{EmulatorBackend, EmulatorKind};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};

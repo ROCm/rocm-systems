@@ -22,57 +22,11 @@ pub enum ExecMode {
     Clocked,
 }
 
-/// The set of emulator backends mirage knows how to drive. Stored as a
-/// closed enum (rather than a free-form string) so the host and control
-/// plane dispatch over a fixed set of variants and an unknown emulator
-/// name is rejected at deserialization time. Serializes as its
-/// lowercase canonical name (`"noop"`, `"rocjitsu"`, `"hotswap"`) to
-/// keep the on-disk/wire format unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum EmulatorKind {
-    /// Pass-through: run the workload directly with no GPU emulation.
-    #[default]
-    Noop,
-    /// rocjitsu software GPU emulator.
-    Rocjitsu,
-    /// HotSwap load-time ISA rewriter.
-    Hotswap,
-}
-
-impl EmulatorKind {
-    /// The canonical lowercase name of this emulator.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            EmulatorKind::Noop => "noop",
-            EmulatorKind::Rocjitsu => "rocjitsu",
-            EmulatorKind::Hotswap => "hotswap",
-        }
-    }
-}
-
-impl std::fmt::Display for EmulatorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for EmulatorKind {
-    type Err = String;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "noop" => Ok(EmulatorKind::Noop),
-            "rocjitsu" => Ok(EmulatorKind::Rocjitsu),
-            "hotswap" => Ok(EmulatorKind::Hotswap),
-            other => Err(format!("unknown emulator `{other}`")),
-        }
-    }
-}
+pub type EmulatorKind = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorDef {
-    /// which emulator backend to use, e.g. [`EmulatorKind::Rocjitsu`]
+    /// which emulator backend to use, e.g. "rocjitsu"
     pub emulator: EmulatorKind,
 
     /// plugins to use with the emulator, e.g. "rocjitsu" plugin for AMD GPU simulation
@@ -123,63 +77,47 @@ impl SupportStatus {
 }
 
 /// A description of an emulator backend: its identity (name, version,
-/// blurb) plus its current runtime status on this machine (whether it
-/// is installed and, if so, the resolved path to its runtime library).
-///
-/// This is the single descriptor the registry exposes for every
-/// backend; the generic pass-through `noop` and each emulator-specific
-/// crate produce one of these.
+/// blurb)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorDescription {
     pub name: String,
     pub version: String,
     pub description: String,
-    /// `true` if this emulator's runtime is present on this machine.
-    pub installed: bool,
-    /// Resolved path to the emulator's runtime library, when installed
-    /// and locatable. `None` for backends without an external runtime
-    /// (e.g. `noop`) or when the library could not be found.
-    pub path: Option<PathBuf>,
-    /// Whether this host's hardware/environment can run the emulator
-    /// (some backends require specific physical GPUs). Reported
-    /// independently of `installed`.
-    pub support: SupportStatus,
+    pub options_schema: Vec<OptionDef>,
 }
 
-pub trait Emulator {
+pub trait EmulatorBackend : Sync + Send {
     /// Returns a description of the emulator, including its name, version, and a brief description.
-    fn description() -> EmulatorDescription;
+    fn description(&self) -> EmulatorDescription;
 
     /// Creates a new instance of the emulator bound to the given
     /// profile. The profile is retained so instance methods
     /// ([`Emulator::def`], [`Emulator::injection_def`], …) can resolve
     /// against it.
-    fn new(def: ProfileDef) -> Self
-    where
-        Self: Sized;
+    fn boot(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
     /// Schema for the options that this emulator supports. Empty when
     /// the emulator takes no options.
-    fn options() -> Vec<OptionDef>;
+    fn options(&self) -> Vec<OptionDef>;
 
     /// shuts down the emulator and releases any resources it holds.
-    fn shutdown(self);
+    fn shutdown(&self, session: &SessionId);
 
     /// Validate that `def` can be used with this emulator before it is
     /// persisted. Returns a human-readable reason on rejection.
-    fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String>;
-
-    /// Returns the definition of the emulator, which includes its name, plugins, and options.
-    fn def(&self) -> &EmulatorDef;
+    fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
     /// Returns true if the emulator is properly installed and can be used.
-    fn installed() -> bool;
+    fn installed(&self) -> bool;
+
+    /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported (e.g. HotSwap installed on a machine with no compatible physical GPU), or supported but not installed.
+    fn supported(&self) -> SupportStatus;
 
     /// Discovers available plugins for the emulator.
-    fn discover_plugins() -> Vec<PluginsDef>;
+    fn discover_plugins(&self) -> Vec<PluginsDef>;
 
     /// get health status of the emulator, e.g. check if the underlying runtime is responsive
-    fn health(&self) -> SessionHealth;
+    fn health(&self, session: &SessionId) -> SessionHealth;
 
     /// Compute the env vars / `LD_PRELOAD` / files to inject into a
     /// workload run under this emulator. Returns an error when the
@@ -193,54 +131,18 @@ pub trait Emulator {
     fn injection_def(&self, session: &SessionId) -> Result<InjectionDef>;
 }
 
-/// The built-in pass-through emulator: runs the workload directly with
-/// no GPU emulation. Needs no injection and accepts any profile.
-pub struct Noop {
-    profile: ProfileDef,
+pub struct EmulatorBackendDef {
+    pub kind: EmulatorKind,
+    pub backend : Box<dyn EmulatorBackend>,
 }
 
-impl Emulator for Noop {
-    fn description() -> EmulatorDescription {
-        crate::registry::noop()
-    }
+inventory::collect!(EmulatorBackendDef);
 
-    fn new(def: ProfileDef) -> Self {
-        Self { profile: def }
-    }
-
-    fn options() -> Vec<OptionDef> {
-        Vec::new()
-    }
-
-    fn shutdown(self) {}
-
-    fn validate_profile(_def: &ProfileDef) -> std::result::Result<(), String> {
-        Ok(())
-    }
-
-    fn def(&self) -> &EmulatorDef {
-        &self.profile.emulator
-    }
-
-    fn installed() -> bool {
-        true
-    }
-
-    fn discover_plugins() -> Vec<PluginsDef> {
-        Vec::new()
-    }
-
-    fn health(&self) -> SessionHealth {
-        SessionHealth {
-            healthy: true,
-            state: Some("ready".to_string()),
-            terminal: false,
-            message: None,
-            ..Default::default()
+pub fn get_emulator_backend(kind: &EmulatorKind) -> Option<&'static Box<dyn EmulatorBackend>> {
+    for def in inventory::iter::<EmulatorBackendDef> {
+        if &def.kind == kind {
+            return Some(&def.backend);
         }
     }
-
-    fn injection_def(&self, _session: &SessionId) -> Result<InjectionDef> {
-        Ok(InjectionDef::default())
-    }
+    None
 }
