@@ -31,10 +31,7 @@ target_include_directories(
 # copy of the simulator in the process, shared with the plugin modules.
 target_link_libraries(
     rocjitsu_kmd_shim
-    PRIVATE
-        rocjitsu_shared
-        Threads::Threads
-        dl
+    PRIVATE rocjitsu_shared Threads::Threads dl
 )
 target_compile_definitions(rocjitsu_kmd_shim PRIVATE _GNU_SOURCE)
 target_compile_options(

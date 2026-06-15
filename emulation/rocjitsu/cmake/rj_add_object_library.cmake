@@ -26,9 +26,6 @@ function(rj_add_object_library name)
     if(MSVC)
         target_compile_options(${name} PRIVATE /W4 /WX)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-        target_compile_options(
-            ${name}
-            PRIVATE -Wall -Wextra -Wpedantic -Werror
-        )
+        target_compile_options(${name} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()
 endfunction()

@@ -47,20 +47,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_library(${target} MODULE ${export_src})
         target_include_directories(
             ${target}
-            PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${HSA_INCLUDE_DIR}
-                    ${GENERATED_DIR}
-                    # librocjitsu.so keeps util/simdojo PRIVATE, so pull in
-                    # their public header paths for the plugin's compile.
-                    $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
-                    $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
+            PRIVATE
+                ${ROCJITSU_INCLUDE_DIR}
+                ${ROCJITSU_SRC_DIR}
+                ${HSA_INCLUDE_DIR}
+                ${GENERATED_DIR}
+                # librocjitsu.so keeps util/simdojo PRIVATE, so pull in
+                # their public header paths for the plugin's compile.
+                $<TARGET_PROPERTY:util,INTERFACE_INCLUDE_DIRECTORIES>
+                $<TARGET_PROPERTY:simdojo,INTERFACE_INCLUDE_DIRECTORIES>
         )
         # Link only the plugin's own logic plus the shared simulator library;
         # the simulator code lives once in librocjitsu.so and is resolved at
         # load time.
-        target_link_libraries(
-            ${target}
-            PRIVATE ${object_lib} rocjitsu_shared
-        )
+        target_link_libraries(${target} PRIVATE ${object_lib} rocjitsu_shared)
         add_dependencies(${target} flatbuffers_schemas)
         # Hide everything except the ABI exports (which carry an explicit
         # default-visibility attribute via ROCJITSU_DEFINE_PLUGIN). This keeps
