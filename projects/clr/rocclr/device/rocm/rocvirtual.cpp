@@ -1972,7 +1972,10 @@ VirtualGPU::~VirtualGPU() {
   }
 
   // Release any retained coalescing-window signal not freed via releaseGpuMemoryFence.
-  SetCoalesceWindow(0, nullptr);
+  {
+    std::scoped_lock l(execution());
+    SetCoalesceWindow(0, nullptr);
+  }
 
   if (timestamp_ != nullptr) {
     timestamp_->release();
