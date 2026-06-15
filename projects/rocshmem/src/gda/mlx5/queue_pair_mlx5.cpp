@@ -296,10 +296,12 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
 }
 
 // precondition: called with all active lanes using different QPs
-__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr, uintptr_t raddr,
-                                                    uint8_t opcode, bool ring_db) {
+__device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
+                                                    uint32_t lkey, uintptr_t raddr,
+                                                    uint32_t rkey, uint8_t opcode,
+                                                    bool ring_db) {
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
-  uint32_t lkey_val = send_inline ? 0 : byteswap<uint32_t>(get_lkey(laddr));
+  uint32_t lkey_val = send_inline ? 0 : byteswap<uint32_t>(lkey);
 
   // get SQ lock
   acquire_lock(&mlx5_sq.lock);
@@ -387,7 +389,8 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
 }
 
 // precondition: called with all active lanes using different QPs
-__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
+__device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr,
+                                                        uint32_t rkey, uint8_t opcode,
                                                         int64_t atomic_data, int64_t atomic_cmp,
                                                         bool fetching) {
   // get SQ lock

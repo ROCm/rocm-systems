@@ -349,7 +349,8 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
 }
 
 __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+    uint32_t rkey, uint8_t opcode) {
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
@@ -390,7 +391,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(laddr ? get_lkey(laddr) : 0);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(laddr ? lkey : 0);
     }
   }
 
@@ -475,7 +476,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey
 }
 
 __device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching) {
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
