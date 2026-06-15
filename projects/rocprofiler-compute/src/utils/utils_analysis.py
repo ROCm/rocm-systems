@@ -205,7 +205,7 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
 def build_call_trees(
     df: pd.DataFrame,
 ) -> dict[str, CallTreeNode]:
-    """Build per-source-location call trees from a consolidated API trace DataFrame.
+    """Build per-source-location call trees from a consolidated ML API trace DataFrame.
 
     Returns a dict mapping ``file:line`` to a CallTreeNode root whose
     children form the full operator/kernel hierarchy.
@@ -290,12 +290,12 @@ def build_call_trees(
     return call_trees
 
 
-def write_api_trace_consolidated_csv(
+def write_ml_api_trace_consolidated_csv(
     consolidated_df: pd.DataFrame,
-    api_trace_path: Path,
+    ml_api_trace_path: Path,
 ) -> None:
-    """Write the consolidated API trace DataFrame to consolidated.csv."""
-    output_file = api_trace_path / "consolidated.csv"
+    """Write the consolidated ML API trace DataFrame to consolidated.csv."""
+    output_file = ml_api_trace_path / "consolidated.csv"
     consolidated_df.sort_values("Operator_Name", ignore_index=True).to_csv(
         output_file, index=False
     )
@@ -434,21 +434,21 @@ def build_operator_summary(
 
 
 @demarcate
-def process_api_trace_output(
+def process_ml_api_trace_output(
     workload_dir: str,
 ) -> tuple[pd.DataFrame, Path]:
     """
-    Build consolidated API trace rows and prepare output directory.
+    Build consolidated ML API trace rows and prepare output directory.
 
     - Performs inner join on Correlation_ID, filtering out unmatched entries
     - Consolidates data across passes and normalizes required columns
-    - Prepares a clean workload_dir/api_trace/ directory for output files
+    - Prepares a clean workload_dir/ml_api_trace/ directory for output files
 
-    Returns (consolidated_df, api_trace_path) on success.
+    Returns (consolidated_df, ml_api_trace_path) on success.
     """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
-        Path(workload_dir).glob("**/api_trace*_marker_api_trace.csv")
+        Path(workload_dir).glob("**/ml_api_trace*_marker_api_trace.csv")
     )
     counter_collection_csvs = [
         markers_file.parent
@@ -466,13 +466,13 @@ def process_api_trace_output(
             "No marker files with corresponding counter files found. "
             "Ensure profiling was done with '--torch-trace'."
         )
-        return pd.DataFrame(), Path(f"{workload_dir}/api_trace")
+        return pd.DataFrame(), Path(f"{workload_dir}/ml_api_trace")
 
-    api_trace_path = Path(f"{workload_dir}/api_trace")
-    if api_trace_path.exists():
-        shutil.rmtree(api_trace_path)
-        console_log(f"Removed previous api_trace directory: {api_trace_path}")
-    api_trace_path.mkdir(parents=True, exist_ok=True)
+    ml_api_trace_path = Path(f"{workload_dir}/ml_api_trace")
+    if ml_api_trace_path.exists():
+        shutil.rmtree(ml_api_trace_path)
+        console_log(f"Removed previous ml_api_trace directory: {ml_api_trace_path}")
+    ml_api_trace_path.mkdir(parents=True, exist_ok=True)
 
     # Join marker and counter data
     def _merge_pair(
@@ -527,10 +527,10 @@ def process_api_trace_output(
     ]
     if missing_columns:
         console_error(
-            f"Consolidated API trace is missing required columns {missing_columns}"
+            f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
         raise ValueError(
-            f"Consolidated API trace is missing required columns {missing_columns}"
+            f"Consolidated ML API trace is missing required columns {missing_columns}"
         )
     # Backend is added by utils_profile._augment_marker_csv. When absent,
     # default to "torch".
@@ -540,8 +540,8 @@ def process_api_trace_output(
     if not has_backend:
         consolidated_df = consolidated_df.assign(Backend="torch")
     if consolidated_df.drop(columns=["Backend"]).isnull().values.any():
-        console_warning("Consolidated API trace contains missing values")
-        raise ValueError("Consolidated API trace contains missing values")
+        console_warning("Consolidated ML API trace contains missing values")
+        raise ValueError("Consolidated ML API trace contains missing values")
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = (
@@ -567,12 +567,12 @@ def process_api_trace_output(
     ]
     if consolidated_df.isnull().values.any():
         console_error(
-            "Missing values in consolidated API trace after splitting ",
+            "Missing values in consolidated ML API trace after splitting ",
             "the Function name.",
         )
-        raise ValueError("Missing values in consolidated API trace after splitting")
+        raise ValueError("Missing values in consolidated ML API trace after splitting")
 
-    return consolidated_df, api_trace_path
+    return consolidated_df, ml_api_trace_path
 
 
 def is_workload_empty(path: str) -> None:

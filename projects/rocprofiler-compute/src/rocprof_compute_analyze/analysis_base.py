@@ -294,12 +294,12 @@ class OmniAnalyze_Base:
         )
         profiling_config = self.get_profiling_config()
 
-        needs_api_trace = getattr(args, "torch_operator", None) is not None or getattr(
-            args, "list_torch_operators", False
-        )
-        if needs_api_trace and not profiling_config.get("torch_trace", False):
+        needs_ml_api_trace = getattr(
+            args, "torch_operator", None
+        ) is not None or getattr(args, "list_torch_operators", False)
+        if needs_ml_api_trace and not profiling_config.get("torch_trace", False):
             console_error(
-                "api trace",
+                "ml api trace",
                 'Workload was not profiled with "--torch-trace". '
                 "Cannot use --torch-operator or --list-torch-operators.",
             )

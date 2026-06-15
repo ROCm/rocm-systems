@@ -666,7 +666,7 @@ Examples:
         help=(
             "\t\tList PyTorch operators as a unified call tree grouped by "
             "source location with kernel launch stats. "
-            "Recreates api_trace output directory."
+            "Recreates ml_api_trace output directory."
         ),
     )
     analyze_group.add_argument(

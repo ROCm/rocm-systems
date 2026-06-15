@@ -70,11 +70,11 @@ def patch_triton_launcher() -> None:
     try:
         CompiledKernel.__call__ = call_with_roctx
         console_log(
-            "api trace", "Wrapped triton.CompiledKernel.__call__ with ROCTX markers"
+            "ml api trace", "Wrapped triton.CompiledKernel.__call__ with ROCTX markers"
         )
     except Exception as exc:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"Could not patch triton.CompiledKernel.__call__: {exc}",
         )
 
@@ -85,7 +85,7 @@ class TritonBackend:
     def install(self) -> None:
         if not _resolve_triton():
             console_warning(
-                "api trace",
+                "ml api trace",
                 "Triton is not installed; skipping triton instrumentation.",
             )
             return
