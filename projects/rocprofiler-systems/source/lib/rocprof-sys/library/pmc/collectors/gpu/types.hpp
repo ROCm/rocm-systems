@@ -127,22 +127,6 @@ gpu_temperature_track_label(const enabled_metrics& enabled)
     return enabled.bits.hotspot_temperature != 0 ? "Hotspot Temp" : "Edge Temp";
 }
 
-template <typename T>
-[[nodiscard]] constexpr bool
-is_metric_supported(T value, T invalid_sentinel = std::numeric_limits<T>::max())
-{
-    return value != invalid_sentinel;
-}
-
-template <typename T>
-constexpr bool
-populate_if_supported(T& dest, T src, T invalid_sentinel = std::numeric_limits<T>::max())
-{
-    const bool valid = is_metric_supported(src, invalid_sentinel);
-    dest             = valid ? src : T{ 0 };
-    return valid;
-}
-
 }  // namespace gpu
 }  // namespace collectors
 }  // namespace pmc

@@ -24,6 +24,7 @@ using gpu::asic_info;
 using gpu::MAX_NUM_JPEG_V1;
 using gpu::MAX_NUM_XCP;
 using gpu::MAX_NUM_XGMI_LINKS;
+using gpu::METRIC_VALUE_NOT_SUPPORTED_16;
 using gpu::metrics;
 using gpu::populate_if_supported;
 

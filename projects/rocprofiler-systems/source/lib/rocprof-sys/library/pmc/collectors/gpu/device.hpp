@@ -22,6 +22,8 @@ concept gpu_backend_contract = requires(const Backend backend) {
     { backend.get_gpu_asic_info() } -> std::same_as<asic_info>;
     { backend.get_gpu_metrics() } -> std::same_as<metrics>;
     { backend.get_memory_usage() } -> std::same_as<std::uint64_t>;
+    { backend.get_hotspot_temperature() } -> std::same_as<std::uint32_t>;
+    { backend.get_edge_temperature() } -> std::same_as<std::uint32_t>;
     { backend.get_raw_sdma_usage() } -> std::same_as<std::uint64_t>;
     { backend.is_sdma_supported() } -> std::same_as<bool>;
 };
@@ -164,7 +166,7 @@ public:
         {
             try
             {
-                gpu_metrics.hotspot_temperature = m_driver->get_hotspot_temperature();
+                gpu_metrics.hotspot_temperature = m_backend->get_hotspot_temperature();
             } catch(const std::runtime_error& e)
             {
                 LOG_DEBUG("GPU device [{}] hotspot temperature query failed: {}", m_index,
@@ -175,7 +177,7 @@ public:
         {
             try
             {
-                gpu_metrics.edge_temperature = m_driver->get_edge_temperature();
+                gpu_metrics.edge_temperature = m_backend->get_edge_temperature();
             } catch(const std::runtime_error& e)
             {
                 LOG_DEBUG("GPU device [{}] edge temperature query failed: {}", m_index,
@@ -219,12 +221,12 @@ private:
         }
 
         {
-            const auto hotspot = m_driver->get_hotspot_temperature();
+            const auto hotspot = m_backend->get_hotspot_temperature();
             m_supported_metrics.bits.hotspot_temperature =
                 is_metric_supported(hotspot, METRIC_VALUE_NOT_SUPPORTED_16) ? 1 : 0;
         }
         {
-            const auto edge = m_driver->get_edge_temperature();
+            const auto edge = m_backend->get_edge_temperature();
             m_supported_metrics.bits.edge_temperature =
                 is_metric_supported(edge, METRIC_VALUE_NOT_SUPPORTED_16) ? 1 : 0;
         }
