@@ -2714,7 +2714,14 @@ void Runtime::LoadTools() {
               getpid(), rocp_reg_status, rocprofiler_register_error_string(rocp_reg_status));
     }
 
-    bool allow_v1_registration = false;
+    // rocprofiler-register (v3) provides tracing only; the comgr hotswap tool must
+    // intercept and modify HSA calls (it wraps hsa_code_object_reader_create_from_memory),
+    // which requires the v1 HSA_TOOLS_LIB path. Allow v1 registration specifically for
+    // that first-party tool so it loads via HSA_TOOLS_LIB alone, without re-enabling v1
+    // for other tools. General v1 behavior is otherwise unchanged.
+    static constexpr const char* kHotswapToolLib = "libamd_comgr_hotswap_tool.so";
+    bool allow_v1_registration =
+        flag().tools_lib_names().find(kHotswapToolLib) != std::string::npos;
     if (os::IsEnvVarSet("HSA_TOOLS_ROCPROFILER_V1_TOOLS")) {
       // assume true if env variable is set
       allow_v1_registration = true;
