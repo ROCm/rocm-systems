@@ -263,9 +263,20 @@ if(ROCTX_ENABLE)
   target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
 endif()
 
-# [NCCL src/CMakeLists.txt L92-102] UNMAPPED in this file -- implemented in the RCCL top-level
-# projects/rccl/CMakeLists.txt (configure_file src/nccl.h.in -> rccl.h / nccl.h). The generated
-# header dir is added to the include paths above. Verbatim NCCL block kept for merge reference:
+# [NCCL src/CMakeLists.txt L92-102] Generate the public header from nccl.h.in. NCCL does this via
+# an add_custom_command(OUTPUT nccl.h ... sed ...) wired into the nccl_header target.
+# >>> RCCL-DELTA: COPIED FROM projects/rccl/CMakeLists.txt (the RCCL top-level, where this block
+# also still lives and runs before add_subdirectory(src)). Brought in here to mirror NCCL, which
+# generates the header inside src/CMakeLists.txt. RCCL uses configure_file on nccl.h.in (no sed)
+# and emits both rccl.h (external linking) and nccl.h (used by some internal files). The .in path
+# is adapted to the src/ scope (${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in instead of the root-relative
+# src/nccl.h.in). The generated include dir is on the rccl include paths above.
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
+# <<< RCCL-DELTA
+# Verbatim NCCL block kept for merge reference:
 #[[ >>> RCCL-DELTA
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/include/nccl.h
@@ -333,6 +344,19 @@ add_dependencies(copy_nccl_device_headers hipify_all)
 #endforeach()
 #add_custom_target(net_ib_header_symlinks DEPENDS ${NET_IB_HEADER_SYMLINKS})
 
+# [NCCL src/CMakeLists.txt L121-122] add_dependencies(nccl nccl_header) / add_dependencies(nccl_device
+# nccl_header). RCCL's analog wires the rccl target to copy_nccl_device_headers (the nccl_header
+# equivalent). RCCL has no separate nccl_device target (it is handled in src/device/CMakeLists.txt),
+# so NCCL's second line (L122) has no equivalent here.
+## Set RCCL dependencies
+add_dependencies(rccl copy_nccl_device_headers) # net_ib_header_symlinks)
+
+# [NCCL src/CMakeLists.txt L124-130] Library VERSION / SOVERSION / OUTPUT_NAME. NCCL uses
+# set_target_properties; RCCL uses rocm_set_soversion. NCCL sets this right after the nccl_header
+# dependency (before the git-version block); placed here to match that ordering. (NCCL's output-
+# directory block L176-179 is documented separately near the link/RAS section below.)
+## Setup librccl.so version
+rocm_set_soversion(rccl "1.0")
 
 # [NCCL src/CMakeLists.txt L132-142] Generate git version (NCCL: generate_git_version.py ->
 # nccl_git_version.h). RCCL generates git_version.cpp via the update_git_version target.
@@ -352,6 +376,11 @@ add_custom_target(update_git_version
 )
 target_sources(rccl PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 
+# [NCCL src/CMakeLists.txt L142] add_dependencies(nccl generate_git_version). RCCL's analog wires
+# the rccl target to update_git_version so git_version.cpp is regenerated before rccl is built.
+## Ensure git version is updated before building rccl
+add_dependencies(rccl update_git_version)
+
 # [NCCL src/CMakeLists.txt L144-152] UNMAPPED -- NCCL-only. RCCL has no git branch/commit override
 # cache vars. (NCCL emits these as target_compile_definitions after its target exists; placed here
 # next to the git-version block to preserve NCCL's git-version -> overrides adjacency.) Verbatim
@@ -365,24 +394,6 @@ target_sources(rccl PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 # | if(NCCL_GIT_COMMIT_HASH)
 # |     target_compile_definitions(nccl PRIVATE NCCL_GIT_COMMIT_HASH="${NCCL_GIT_COMMIT_HASH}")
 # | endif()
-
-# [NCCL src/CMakeLists.txt L121-122] Add dependencies to the library target.
-# add_dependencies(... nccl_header). RCCL passes HIP_SOURCES directly and depends on its
-# hipify/header/symlink prep targets. NCCL builds shared + static as two targets; RCCL builds
-# a single rccl target toggled by BUILD_SHARED_LIBS (see static-lib block near the end).
-# Set up RCCL library
-#==================================================================================================
-## Set RCCL dependencies
-## Ensure git version is updated before building rccl
-add_dependencies(rccl update_git_version copy_nccl_device_headers) # net_ib_header_symlinks)
-
-# [NCCL src/CMakeLists.txt L124-130] Library VERSION / SOVERSION / OUTPUT_NAME. NCCL uses
-# set_target_properties; RCCL uses rocm_set_soversion. NCCL sets this right after include dirs
-# (before flags/links); RCCL historically set it just before the static-lib block -- moved up
-# here to match NCCL ordering. (NCCL's output-directory block L176-179 is documented separately
-# near the link/RAS section below.)
-## Setup librccl.so version
-rocm_set_soversion(rccl "1.0")
 
 # [NCCL src/CMakeLists.txt -- no direct equivalent] RCCL-specific compile definitions. The
 # closest NCCL blocks are "Set CUDA specific flags" (L154-160, target properties) and the git
@@ -890,9 +901,28 @@ if(NOT BUILD_SHARED_LIBS)
   set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_CXX_COMPILER> ${flags_str} -o <TARGET> <OBJECTS>")
 endif()
 
-# [NCCL src/CMakeLists.txt L260-281] UNMAPPED in this file -- RCCL performs installation in the
-# top-level projects/rccl/CMakeLists.txt (rocm_install_targets / rocm_install). Verbatim NCCL
-# block kept for merge reference:
+# [NCCL src/CMakeLists.txt L260-281] Install targets / headers / pkg-config. NCCL installs the
+# nccl + nccl_static libs, the ncclras tool, the generated/public headers, and the pkg-config file.
+# >>> RCCL-DELTA: COPIED FROM projects/rccl/CMakeLists.txt (the RCCL top-level, where these rules
+# also still live and run after add_subdirectory(src)). Brought in here to mirror NCCL, which
+# installs from within src/CMakeLists.txt. RCCL uses rocm-cmake's rocm_install* macros instead of
+# raw install(); it has no nccl_static target or nccl.pc, and installs rccl.h plus a few RCCL-only
+# headers (nccl_net.h, api_trace.h, nccl_device.h). Header source paths are adapted to the src/
+# scope (${CMAKE_CURRENT_SOURCE_DIR}/include/... instead of root-relative src/include/...).
+rocm_install_targets(TARGETS rccl)
+rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/rccl/rccl.h ${CMAKE_CURRENT_SOURCE_DIR}/include/plugin/nccl_net.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+rocm_install(FILES       ${CMAKE_CURRENT_SOURCE_DIR}/include/api_trace.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl/amd_detail)
+rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
+                         ${PROJECT_BINARY_DIR}/include/nccl_device.h
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
+             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
+## Install RCCL RAS client (rcclras is built above; NCCL installs ncclras at L268-271)
+rocm_install(TARGETS rcclras)
+# <<< RCCL-DELTA
+# Verbatim NCCL block kept for merge reference:
 # | ###################### Install targets / headers / pkg-config ############################
 # | install(TARGETS nccl nccl_static
 # |   EXPORT NCCLTargets
