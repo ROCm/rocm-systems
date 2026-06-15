@@ -197,9 +197,9 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     target_include_directories(rocprofiler-sdk-rocpd-python-bindings-${_VERSION} SYSTEM
                                PRIVATE ${Python3_INCLUDE_DIRS})
 
-    # do not link to sqlite3 library here. Python will import the _sqlite3 extension
-    # module which links to sqlite3, and we want to avoid mixed-lib symbol collisions by
-    # ensuring Python and librocpd use the same sqlite3 library.
+    # do not link directly to SQLite::SQLite3 here. Use the project sqlite3 interface
+    # target so librocpd resolves its sqlite3 symbols against the same library selected
+    # for the build.
     target_link_libraries(
         rocprofiler-sdk-rocpd-python-bindings-${_VERSION}
         PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
@@ -211,6 +211,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
                 rocprofiler-sdk::rocprofiler-sdk-perfetto
                 rocprofiler-sdk::rocprofiler-sdk-otf2
                 rocprofiler-sdk::rocprofiler-sdk-pybind11
+                rocprofiler-sdk::rocprofiler-sdk-sqlite3
                 rocprofiler-sdk::rocprofiler-sdk-gotcha
                 rocprofiler-sdk::rocprofiler-sdk-dw
                 rocprofiler-sdk::rocprofiler-sdk-static-library
