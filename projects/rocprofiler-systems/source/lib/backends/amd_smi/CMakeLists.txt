@@ -21,3 +21,5 @@ if(ROCPROFSYS_BUILD_AINIC)
         INTERFACE ROCPROFSYS_BUILD_AINIC=1
     )
 endif()
+
+add_subdirectory(tests)

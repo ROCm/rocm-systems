@@ -32,6 +32,8 @@ template <gpu_backend_contract Backend>
 class device
 {
 public:
+    using backend_type = Backend;
+
     device(std::shared_ptr<Backend> backend, size_t logical_index)
     : m_backend{ std::move(backend) }
     , m_index{ logical_index }

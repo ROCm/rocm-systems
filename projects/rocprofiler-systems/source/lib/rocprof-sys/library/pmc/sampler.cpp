@@ -100,8 +100,12 @@ struct cpu_production_config
 
 using provider_factory_t =
     device_providers::amd_smi::provider_factory<backends::amd_smi::backend_factory>;
-using provider_t      = provider_factory_t::provider_t;
-using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
+using provider_t = provider_factory_t::provider_t;
+
+using gpu_device_backend_t = backends::amd_smi::backend<>;
+using gpu_device_t         = collectors::gpu::device<gpu_device_backend_t>;
+using gpu_collector_t =
+    collectors::gpu::collector<provider_t, gpu_device_t, gpu_production_config>;
 
 #if ROCPROFILER_VERSION >= 600
 using gpu_perf_counter_provider_t = device_providers::rocprofiler_sdk::provider<
@@ -111,7 +115,10 @@ using gpu_perf_counter_collector_t =
 #endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC)
-using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
+using nic_device_backend_t = backends::amd_smi::backend<>;
+using nic_device_t         = collectors::nic::device<nic_device_backend_t>;
+using nic_collector_t =
+    collectors::nic::collector<provider_t, nic_device_t, nic_production_config>;
 #endif
 
 using cpu_provider_factory_t =
