@@ -16,7 +16,7 @@ ARG ROCM_VERSION=7.2.2
 ARG ROCM_PKG_REPO_OVERRIDE
 
 # Nightly ROCm build id (YYYYMMDD-<gha_run_id>). When set, ROCm is installed from
-# the unsigned nightly repo at rocm.nightlies.amd.com/deb/<ROCM_NIGHTLY_BUILD>
+# the unsigned nightly repo at rocm.nightlies.amd.com/packages-multi-arch/deb/<ROCM_NIGHTLY_BUILD>
 # and ROCM_VERSION is expected to be the clean MAJOR.MINOR.PATCH that build pins.
 ARG ROCM_NIGHTLY_BUILD
 
@@ -66,7 +66,7 @@ RUN . /etc/rocm-build.env && \
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/ubuntu${UBUNTU_MAJOR_VERSION}${UBUNTU_MINOR_VERSION} stable main" \
             > /etc/apt/sources.list.d/amdrocm.list; \
     elif [ "${ROCM_BUILD_TYPE}" = "nightly" ]; then \
-        echo "deb [arch=amd64 trusted=yes] https://rocm.nightlies.amd.com/deb/${ROCM_NIGHTLY_BUILD} stable main" \
+        echo "deb [arch=amd64 trusted=yes] https://rocm.nightlies.amd.com/packages-multi-arch/deb/${ROCM_NIGHTLY_BUILD} stable main" \
             > /etc/apt/sources.list.d/amdrocm-nightly.list; \
     else \
         ROCM_PKG_REPO_VERSION="$(echo ${ROCM_PKG_REPO_OVERRIDE:-$ROCM_VERSION} | sed -E 's|([^.]+\.[^.]+)\.0$|\1|')"; \
