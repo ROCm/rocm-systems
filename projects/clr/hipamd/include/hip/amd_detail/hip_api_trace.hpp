@@ -48,7 +48,9 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 29
+// Step 30 marks the hipMemHandleTypeFabric enumerator (#6596); no new table
+// member, so the layout is unchanged.
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 30
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1798,8 +1800,10 @@ struct HipDispatchTable {
   t_hipLibraryGetGlobal hipLibraryGetGlobal_fn;
   t_hipLibraryGetManaged hipLibraryGetManaged_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30: enum-only (#6596), no member.
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
 
   // ******************************************************************************************* //
   //
