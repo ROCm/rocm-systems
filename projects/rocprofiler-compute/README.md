@@ -73,6 +73,8 @@ Common CMake options:
 - `-D ENABLE_COVERAGE=ON` - Enable code coverage reporting
 - `-D TEST_FROM_INSTALL=ON` - Enable testing from installation directory instead of build directory
 - `-D SKIP_NATIVE_TOOL_BUILD=ON` - Skip building the native profiling tool (enables runtime compilation instead), useful when rocprofiler-sdk is not available during build time
+- `-D TORCH_TRACE_PYTHON=/path/to/python3` - Select the Python interpreter for the `roctx_recordfn` build when `ENABLE_TESTS=ON`
+- `-D ENABLE_SANITIZER=ASAN|HOST_ASAN|TSAN` - Build with sanitizer instrumentation for development (default OFF); cannot be combined with `STANDALONEBINARY=ON`
 
 Note that per the above command, build assets will be stored under `build` directory and installed assets will be stored under `install` directory.
 
