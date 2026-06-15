@@ -1,8 +1,15 @@
+//! `mirage_dashboard`: the bundled web UI single-page app.
+//!
+//! The compiled SPA assets are embedded into the binary behind the
+//! `webui` feature. Without that feature this crate is empty and its
+//! `build.rs` is a no-op, so building mirage never requires Node.js.
+
+#[cfg(feature = "webui")]
 pub mod spa {
     include!(concat!(env!("OUT_DIR"), "/dashboard_assets.rs"));
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "webui"))]
 mod tests {
     use super::*;
 

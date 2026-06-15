@@ -18,6 +18,7 @@ use clap::{Args, Parser, Subcommand};
 use mirage_core::ctl::FileCtl;
 use mirage_core::session::SessionId;
 use mirage_ctl::CtlCmd;
+#[cfg(feature = "daemon")]
 use mirage_daemon::WebuiArgs;
 use mirage_host::{HostConfig, run as host_run};
 use tokio::sync::Notify;
@@ -68,6 +69,7 @@ enum TopCmd {
 
     /// Run the web UI server (formerly `daemon`). Use `mirage webui
     /// install` to register it as a systemd service.
+    #[cfg(feature = "daemon")]
     #[command(alias = "daemon")]
     Webui(WebuiArgs),
 
@@ -124,6 +126,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
             })?;
             Ok(ExitCode::from(0))
         }
+        #[cfg(feature = "daemon")]
         TopCmd::Webui(args) => {
             mirage_daemon::run(args)?;
             Ok(ExitCode::from(0))

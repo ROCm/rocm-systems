@@ -11,7 +11,10 @@ path = "src/main.rs"
 mirage_core = { workspace = true }
 mirage_ctl = { workspace = true }
 mirage_host = { workspace = true }
-mirage_daemon = { workspace = true }
+# The web UI server (HTTP/WebSocket dashboard). Optional and off by
+# default — pulled in by the `daemon` feature (and transitively by
+# `webui`, which also enables the bundled SPA).
+mirage_daemon = { workspace = true, optional = true }
 # Emulator backends. Each is an optional, link-only dependency pulled in
 # by its matching feature below; the binary never references them
 # directly — they register themselves into the emulator registry via
@@ -29,10 +32,21 @@ tracing-subscriber = { workspace = true }
 # All backends are compiled in by default. Disable a backend by
 # building with `--no-default-features` and selecting the subset you
 # want, e.g. `cargo build --no-default-features --features rocjitsu`.
+#
+# The web UI is OFF by default. Enable just the HTTP API server with
+# `--features daemon`, or the full dashboard (API + bundled SPA, needs
+# the Node.js toolchain) with `--features webui`.
 default = ["noop", "rocjitsu", "hotswap"]
 noop = ["dep:mirage_noop"]
 rocjitsu = ["dep:mirage_rocjitsu"]
 hotswap = ["dep:mirage_hotswap"]
+# Compile in the `mirage webui` server (the cross-session HTTP/WS
+# daemon over the control plane). No SPA, no Node.js.
+daemon = ["dep:mirage_daemon"]
+# Everything in `daemon` plus the embedded dashboard SPA and its
+# client-side routing (via `mirage_daemon/webui` ->
+# `mirage_dashboard/webui`).
+webui = ["daemon", "mirage_daemon/webui"]
 
 [dev-dependencies]
 mirage_builtin = { workspace = true }

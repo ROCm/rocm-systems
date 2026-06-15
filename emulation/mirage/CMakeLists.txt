@@ -14,16 +14,24 @@
 #                           `cargo test --release --workspace`
 #
 # Options:
-#   * `MIRAGE_BUILD_DASHBOARD` (ON)   — set OFF (or define the env
-#                                       var MIRAGE_DASHBOARD_SKIP_NPM_CI=1)
-#                                       to skip the SPA build
+#   * `MIRAGE_ENABLE_DAEMON`  (OFF)   — compile in the `mirage webui`
+#                                       HTTP/WS API server (cargo
+#                                       feature `daemon`)
+#   * `MIRAGE_ENABLE_WEBUI`   (OFF)   — compile in the full web UI:
+#                                       the daemon plus the bundled
+#                                       dashboard SPA (cargo feature
+#                                       `webui`; requires the Node.js
+#                                       toolchain). Implies the daemon.
 #   * `MIRAGE_CARGO_PROFILE`  (release)
 #   * `MIRAGE_CARGO`          (auto)  — override cargo binary
 #
 cmake_minimum_required(VERSION 3.20)
 project(mirage NONE)
 
-option(MIRAGE_BUILD_DASHBOARD "Build the web dashboard SPA" ON)
+# Web UI is opt-in and off by default: a plain build/test never needs
+# Node.js or builds the daemon/dashboard crates.
+option(MIRAGE_ENABLE_DAEMON "Build the mirage webui HTTP/WS API server" OFF)
+option(MIRAGE_ENABLE_WEBUI "Build the full web UI (daemon + dashboard SPA; needs Node.js)" OFF)
 # HotSwap is a full LLVM + COMGR + ROCR source build, so it is opt-in. When ON,
 # cmake/Hotswap.cmake builds and stages the HotSwap artifacts mirage discovers.
 option(MIRAGE_BUILD_HOTSWAP "Build HotSwap (COMGR + patched ROCR + intercept) from source" OFF)
@@ -37,9 +45,16 @@ endif()
 message(STATUS "mirage: using cargo at ${MIRAGE_CARGO}")
 
 set(_mirage_env)
-if(NOT MIRAGE_BUILD_DASHBOARD)
-    list(APPEND _mirage_env "MIRAGE_DASHBOARD_SKIP_NPM_CI=1")
-    message(STATUS "mirage: dashboard build skipped (MIRAGE_BUILD_DASHBOARD=OFF)")
+# Select the cargo feature flags for the (optional) web UI. `webui`
+# pulls in the daemon plus the bundled SPA; `daemon` is just the API
+# server. Both are off by default.
+set(_mirage_features)
+if(MIRAGE_ENABLE_WEBUI)
+    list(APPEND _mirage_features "--features" "webui")
+    message(STATUS "mirage: web UI enabled (cargo --features webui)")
+elseif(MIRAGE_ENABLE_DAEMON)
+    list(APPEND _mirage_features "--features" "daemon")
+    message(STATUS "mirage: daemon enabled (cargo --features daemon)")
 endif()
 
 set(_mirage_profile_flag "")
@@ -54,7 +69,7 @@ set(_mirage_bin "${_mirage_target_dir}/mirage")
 
 add_custom_target(mirage_build ALL
     COMMAND ${CMAKE_COMMAND} -E env ${_mirage_env}
-            ${MIRAGE_CARGO} build ${_mirage_profile_flag}
+            ${MIRAGE_CARGO} build ${_mirage_profile_flag} ${_mirage_features}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     BYPRODUCTS ${_mirage_bin}
     COMMENT "Building mirage with cargo (${MIRAGE_CARGO_PROFILE})"
@@ -78,7 +93,7 @@ enable_testing()
 # auto-skip when their prerequisites are missing).
 add_test(NAME cargo_test
     COMMAND ${CMAKE_COMMAND} -E env ${_mirage_env}
-            ${MIRAGE_CARGO} test ${_mirage_profile_flag} --workspace
+            ${MIRAGE_CARGO} test ${_mirage_profile_flag} --workspace ${_mirage_features}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(cargo_test PROPERTIES TIMEOUT 1800)
