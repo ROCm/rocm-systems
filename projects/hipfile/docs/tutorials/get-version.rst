@@ -143,5 +143,5 @@ The two version strings are identical when the header and the shared library com
 Next steps
 **********
 
-- See :doc:`/reference/api-reference` for the full Core and versioning API group, including ``hipFileGetVersion()`` and the version macros.
-- To start performing direct-to-GPU I/O after confirming your version, explore the GPU I/O driver lifecycle functions such as ``hipFileDriverOpen()`` in :doc:`/reference/api-reference`.
+- See :doc:`/reference/api-driver` for the full driver lifecycle and configuration API group, including ``hipFileGetVersion()`` and the version macros.
+- To start performing direct-to-GPU I/O after confirming your version, explore the GPU I/O driver lifecycle functions such as ``hipFileDriverOpen()`` in :doc:`/reference/api-driver`.

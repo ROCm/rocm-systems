@@ -158,7 +158,7 @@ For synchronous I/O functions such as ``hipFileRead()`` and ``hipFileWrite()``, 
        }
    }
 
-For the complete list of error codes and their descriptions, see the :doc:`/reference/api-reference`.
+For the complete list of error codes and their descriptions, see the :doc:`/reference/api-errors`.
 
 Teardown
 ********
@@ -260,4 +260,4 @@ Related resources
 *****************
 
 - :doc:`/tutorials/copy-a-file`: A complete tutorial that uses registered files and buffers to copy a file through GPU memory.
-- :doc:`/reference/api-reference`: Full API reference for hipFile, including the file handle API group and error handling macros.
+- :doc:`/reference/api-file-and-buffer`: File handle, buffer, and RDMA API reference for hipFile.

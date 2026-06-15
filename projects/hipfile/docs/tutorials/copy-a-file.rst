@@ -369,8 +369,8 @@ If it does, ``HIPFILE_ERRSTR`` converts it to a human-readable string via
 ``hipFileGetOpErrorString()``. Otherwise, the program falls back to
 ``strerror(errno)`` for standard system errors.
 
-For a full list of error codes, see the error handling section of the
-:doc:`/reference/api-reference`.
+For a full list of error codes, see the
+:doc:`/reference/api-errors`.
 
 Truncate the destination file
 -----------------------------
@@ -406,8 +406,8 @@ Next steps
 **********
 
 - Explore asynchronous and batch I/O operations for overlapping transfers with
-  computation. See the Async API and Batch API sections of the
-  :doc:`/reference/api-reference`. On the AMD backend, batch status and cancel
+  computation. See the :doc:`/reference/api-async` and
+  :doc:`/reference/api-batch`. On the AMD backend, batch status and cancel
   return ``hipFileInternalError``; ``hipFileBatchIODestroy`` is a no-op.
   Synchronous I/O, batch setup/submit, and async read/write are available.
 - Learn more about registering files and buffers in

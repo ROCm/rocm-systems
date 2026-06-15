@@ -29,6 +29,10 @@ subtrees:
       - file: reference/hipFile-buffer-registration
       - file: reference/statistics-collection
       - file: reference/hipFile-environment-variables
-      - file: reference/api-reference
-      - file: reference/errors
-      - file: reference/python-api-reference
+      - file: reference/api-synchronous-io
+      - file: reference/api-driver
+      - file: reference/api-file-and-buffer
+      - file: reference/api-async
+      - file: reference/api-batch
+      - file: reference/api-errors
+      - file: reference/api-python

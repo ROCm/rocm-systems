@@ -101,7 +101,7 @@ Import modules
 
 The Python package name is ``hipfile``. ``hipMalloc`` and ``hipFree`` live in
 ``hipfile.hipMalloc``, not the top-level package. For the full API, see
-:doc:`/reference/python-api-reference`.
+:doc:`/reference/api-python`.
 
 Initialize the driver
 ---------------------
@@ -196,7 +196,7 @@ On success, the script prints the number of bytes copied:
 Next steps
 **********
 
-- Explore the full :doc:`/reference/python-api-reference` for ``FileHandleType``,
+- Explore the full :doc:`/reference/api-python` for ``FileHandleType``,
   ``OpError``, ``get_version``, and ``Driver.use_count()``.
 - Review :doc:`/install/python-bindings` if you need to customize build paths
   or install an editable development version of the package.
