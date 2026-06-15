@@ -180,30 +180,31 @@ namespace RcclUnitTesting
     TestBed testBed;
     BIAS_SKIP_CHECK();
 
-    if(testBed.ev.maxGpus >= 8) {
-      if(testBed.ev.isGfx94) {
+    // Architecture (gfx942/gfx950) is already validated by BIAS_SKIP_CHECK above.
+    // NCCL_MIN_NCHANNELS values below are minimum-channel requests clamped to
+    // MAXCHANNELS, so they are valid on both gfx942 and gfx950.
+    if (testBed.ev.maxGpus < 8)
+      GTEST_SKIP() << "AllReduceBias::Channels requires at least 8 gfx942/gfx950 GPUs.";
 
-        using namespace BiasTestConstants;
+    using namespace BiasTestConstants;
 
-        // Configuration
-        std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-        std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclBfloat16});
-        std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
-        std::vector<int>            const roots           = {0};
-        std::vector<int>            const numElements     = testBed.ev.GetElements({64 * 1024 * 1024, 1024});
-        std::vector<bool>           const inPlaceList     = {false};
-        std::vector<bool>           const managedMemList  = {false};
-        std::vector<bool>           const useHipGraphList = {false, true};
-        std::vector<const char *>   const channelList     = {"84", "112"};
-        bool                        const enableSweep     = false;
-        for (auto channel : channelList) {
-          setenv("NCCL_MIN_NCHANNELS", channel, 1);
-          testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                                inPlaceList, managedMemList, useHipGraphList, enableSweep, biasOptions());
-          testBed.Finalize();
-          unsetenv("NCCL_MIN_NCHANNELS");
-        }
-      }
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclBfloat16});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = testBed.ev.GetElements({64 * 1024 * 1024, 1024});
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false, true};
+    std::vector<const char *>   const channelList     = {"84", "112"};
+    bool                        const enableSweep     = false;
+    for (auto channel : channelList) {
+      setenv("NCCL_MIN_NCHANNELS", channel, 1);
+      testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                            inPlaceList, managedMemList, useHipGraphList, enableSweep, biasOptions());
+      testBed.Finalize();
+      unsetenv("NCCL_MIN_NCHANNELS");
     }
   }
 
