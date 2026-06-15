@@ -538,7 +538,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("int and/or range")
             .action([&](parser_t& p) {
                 update_env(
-                    _data, "ROCPROFSYS_RANK_FILTER_LOGS",
+                    _data, env_vars::RANK_FILTER_LOGS,
                     fmt::format("{}",
                                 fmt::join(p.get<strvec_t>("rank-filter-logs"), ",")));
             });

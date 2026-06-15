@@ -307,8 +307,8 @@ configure_settings(bool _init)
         "threads that get sampled, rocprof-sys can start all the background threads "
         "during "
         "initialization",
-        get_env<size_t>(env_vars::NUM_THREADS.data(), 1), "threading", "performance",
-        "sampling", "parallelism", "advanced");
+        get_env<size_t>(env_vars::NUM_THREADS, 1), "threading", "performance", "sampling",
+        "parallelism", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
                               "Enable perfetto backend for tracing", _default_perfetto_v,
@@ -919,7 +919,7 @@ configure_settings(bool _init)
         std::string{}, "data", "io", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(
-        std::string, "ROCPROFSYS_RANK_FILTER_LOGS",
+        std::string, env_vars::RANK_FILTER_LOGS,
         "Ranks for which console output is generated. Values should be separated by "
         "commas and can be explicit or ranges, e.g. 0,1,5-8. An empty value enables "
         "output for all ranks",
@@ -1026,9 +1026,9 @@ configure_settings(bool _init)
     if(!output_filtering::is_log_output_enabled_for_current_mpi_rank())
     {
         logger_t::instance().set_level(spdlog::level::err);
-        setenv("ROCPROFSYS_LOG_LEVEL", "error", 1);
-        setenv("ROCPROFSYS_DL_VERBOSE", "-1", 1);
-        setenv("ROCPROFSYS_VERBOSE", "-1", 1);
+        setenv(env_vars::LOG_LEVEL, "error", 1);
+        setenv(env_vars::DL_VERBOSE, "-1", 1);
+        setenv(env_vars::VERBOSE, "-1", 1);
     }
 
 #if defined(TIMEMORY_USE_PAPI)
@@ -1105,8 +1105,8 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& filename :
-        tim::delimit(_config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
+    for(auto&& filename : tim::delimit(
+            _config->get<std::string>(std::string{ env_vars::CONFIG_FILE }), ";:"))
     {
         if(_config->get_suppress_config()) continue;
 
@@ -1127,7 +1127,8 @@ configure_settings(bool _init)
 
         LOG_DEBUG("Reading config file {}", filename);
         if(_config->read(filename) && _main_proc &&
-           ((_config->get<bool>(std::string{ env_vars::CI }) && settings::verbose() >= 0) ||
+           ((_config->get<bool>(std::string{ env_vars::CI }) &&
+             settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
         {
             std::ifstream     _in{ expanded_filename };
@@ -1152,7 +1153,7 @@ configure_settings(bool _init)
     if(auto opt = get_setting_value<bool>(std::string{ env_vars::DEBUG_MODE }); opt)
         debug_value = *opt;
 
-    if(get_env(env_vars::MONOCHROME.data(),
+    if(get_env(env_vars::MONOCHROME,
                _config->get<bool>(std::string{ env_vars::MONOCHROME })))
         tim::log::monochrome() = true;
 
@@ -1320,7 +1321,8 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     // recycle all subsequent thread ids
     threading::recycle_ids() = rocprofsys::get_env<bool>(
-        env_vars::RECYCLE_TIDS, !_config->get<bool>(std::string{ env_vars::USE_SAMPLING }));
+        env_vars::RECYCLE_TIDS,
+        !_config->get<bool>(std::string{ env_vars::USE_SAMPLING }));
 
     if(!_config->get_enabled())
     {
@@ -1692,9 +1694,8 @@ print_settings(
 
     std::stringstream _os{};
 
-    bool _print_desc =
-        get_debug() || rocprofsys::get_env(env_vars::SETTINGS_DESC, false);
-    bool _md = rocprofsys::get_env<bool>(env_vars::SETTINGS_DESC_MARKDOWN, false);
+    bool _print_desc = get_debug() || rocprofsys::get_env(env_vars::SETTINGS_DESC, false);
+    bool _md         = rocprofsys::get_env<bool>(env_vars::SETTINGS_DESC_MARKDOWN, false);
 
     constexpr size_t nfields = 3;
     using str_array_t        = std::array<std::string, nfields>;
@@ -1948,9 +1949,8 @@ get_debug_sampling()
 int
 get_verbose_env()
 {
-    return (settings_are_configured())
-               ? get_verbose()
-               : rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
+    return (settings_are_configured()) ? get_verbose()
+                                       : rocprofsys::get_env<int>(env_vars::VERBOSE, 0);
 }
 
 int
@@ -2295,7 +2295,7 @@ get_perfetto_output_filename()
 {
     const auto*  pwd     = getenv("PWD");
     static auto  setting = get_config()->find(std::string{ env_vars::PERFETTO_FILE });
-    static auto* attach_add_session_id = getenv(env_vars::REATTACH_ADD_SESSION_ID.data());
+    static auto* attach_add_session_id = getenv(env_vars::REATTACH_ADD_SESSION_ID);
 
     if(setting == get_config()->end())
     {
@@ -2504,7 +2504,7 @@ get_sampling_gpus()
 std::string
 get_gpu_perf_counters()
 {
-    static auto _v = get_config()->find("ROCPROFSYS_GPU_PERF_COUNTERS");
+    static auto _v = get_config()->find(std::string{ env_vars::GPU_PERF_COUNTERS });
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
@@ -2793,7 +2793,7 @@ get_rank_filter_output()
 std::string
 get_rank_filter_logs()
 {
-    static auto _v = get_config()->at("ROCPROFSYS_RANK_FILTER_LOGS");
+    static auto _v = get_config()->at(std::string{ env_vars::RANK_FILTER_LOGS });
     return static_cast<tim::tsettings<std::string>&>(*_v).get();
 }
 

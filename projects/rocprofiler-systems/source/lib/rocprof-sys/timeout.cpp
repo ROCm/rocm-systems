@@ -81,8 +81,7 @@ ensure_ci_timeout_backtrace(double             _ci_timeout_seconds,
 
     std::uint64_t _ci_timeout_nitr    = 0;
     std::int64_t  _ci_timeout_nanosec = (_ci_timeout_seconds - _factor) * units::sec;
-    auto          _ci_timeout_total_count =
-        get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
+    auto _ci_timeout_total_count = get_env<std::uint64_t>(env_vars::CI_TIMEOUT_COUNT, 1);
     const auto root_pid = get_env<pid_t>(env_vars::ROOT_PROCESS, process::get_id());
 
     while(get_state() < State::Finalized && _ci_timeout_nitr < _ci_timeout_total_count)

@@ -308,7 +308,7 @@ tool_runner::print_usage() const
 void
 tool_runner::update_verbose_from_env()
 {
-    const auto* log_level = std::getenv(env::LOG_LEVEL.data());
+    const auto* log_level = std::getenv(env::LOG_LEVEL);
     if(log_level != nullptr) data.out.verbose = env::log_level_to_verbose(log_level);
 }
 

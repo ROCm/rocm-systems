@@ -55,7 +55,7 @@ auto         experiment_history        = std::vector<experiment>{};
 std::int64_t global_scaling            = 1;
 std::int64_t global_scaling_increments = 0;
 bool         use_exp_speedup_scaling =
-    get_env<bool>(env_vars::CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP.data(), false);
+    get_env<bool>(env_vars::CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP, false);
 }  // namespace
 
 experiment::sample::sample(const base_type& _b, std::uint64_t _c)

@@ -159,11 +159,11 @@ TEST_F(preset_registry_test, explain_finds_by_name)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv(env_vars::PRESET_DIR.data(), dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     bool               found = registry.explain("balanced", "run", oss);
-    ::unsetenv(env_vars::PRESET_DIR.data());
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_TRUE(found);
     EXPECT_NE(oss.str().find("balanced"), std::string::npos);
@@ -173,11 +173,11 @@ TEST_F(preset_registry_test, explain_returns_false_for_unknown_preset)
 {
     temp_dir dir;
 
-    ::setenv(env_vars::PRESET_DIR.data(), dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     bool               found = registry.explain("nonexistent-preset", "run", oss);
-    ::unsetenv(env_vars::PRESET_DIR.data());
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_FALSE(found);
 }
@@ -187,11 +187,11 @@ TEST_F(preset_registry_test, load_all_from_directory)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv(env_vars::PRESET_DIR.data(), dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     registry.list("run", oss);
-    ::unsetenv(env_vars::PRESET_DIR.data());
+    ::unsetenv(env_vars::PRESET_DIR);
 
     auto output = oss.str();
     EXPECT_NE(output.find("balanced"), std::string::npos);
@@ -250,11 +250,11 @@ TEST_F(preset_registry_test, list_output_content)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv(env_vars::PRESET_DIR.data(), dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     registry.list("run", oss);
-    ::unsetenv(env_vars::PRESET_DIR.data());
+    ::unsetenv(env_vars::PRESET_DIR);
 
     auto output = oss.str();
     EXPECT_NE(output.find("Available Presets:"), std::string::npos);
@@ -267,11 +267,11 @@ TEST_F(preset_registry_test, explain_output_content)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv(env_vars::PRESET_DIR.data(), dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry    registry;
     std::ostringstream oss;
     bool               result = registry.explain("balanced", "run", oss);
-    ::unsetenv(env_vars::PRESET_DIR.data());
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_TRUE(result);
     auto output = oss.str();
@@ -292,10 +292,10 @@ TEST_F(preset_registry_test, describe_generates_output_tree)
     temp_dir dir;
     dir.write_file("balanced.json", balanced_json);
 
-    ::setenv(env_vars::PRESET_DIR.data(), dir.path().c_str(), 1);
+    ::setenv(env_vars::PRESET_DIR, dir.path().c_str(), 1);
     preset_registry registry;
     auto            desc = registry.describe("balanced");
-    ::unsetenv(env_vars::PRESET_DIR.data());
+    ::unsetenv(env_vars::PRESET_DIR);
 
     EXPECT_NE(desc.find("Tracing:"), std::string::npos);
     EXPECT_NE(desc.find("Profiling:"), std::string::npos);

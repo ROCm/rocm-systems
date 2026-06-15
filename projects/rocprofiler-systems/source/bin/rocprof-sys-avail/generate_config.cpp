@@ -355,13 +355,11 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                 if(_romni && !_lomni) return false;
                 namespace env_vars = rocprofsys::env_vars;
                 for(const auto* itr :
-                    { env_vars::CONFIG.data(), env_vars::MODE.data(),
-                      env_vars::TRACE.data(), env_vars::TRACE_LEGACY.data(),
-                      env_vars::PROFILE.data(), env_vars::USE_SAMPLING.data(),
-                      env_vars::USE_PROCESS_SAMPLING.data(), env_vars::USE_AMD_SMI.data(),
-                      env_vars::USE_AINIC.data(), env_vars::USE_KOKKOSP.data(),
-                      env_vars::USE_OMPT.data(), "ROCPROFSYS_USE",
-                      env_vars::OUTPUT.data() })
+                    { env_vars::CONFIG, env_vars::MODE, env_vars::TRACE,
+                      env_vars::TRACE_LEGACY, env_vars::PROFILE, env_vars::USE_SAMPLING,
+                      env_vars::USE_PROCESS_SAMPLING, env_vars::USE_AMD_SMI,
+                      env_vars::USE_AINIC, env_vars::USE_KOKKOSP, env_vars::USE_OMPT,
+                      "ROCPROFSYS_USE", env_vars::OUTPUT })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)
@@ -370,8 +368,8 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
                        _lhs->get_env_name().find(itr) != 0)
                         return false;
                 }
-                for(const auto* itr : { env_vars::SUPPRESS_PARSING.data(),
-                                        env_vars::SUPPRESS_CONFIG.data() })
+                for(const auto* itr :
+                    { env_vars::SUPPRESS_PARSING, env_vars::SUPPRESS_CONFIG })
                 {
                     if(_lhs->get_env_name().find(itr) == 0 &&
                        _rhs->get_env_name().find(itr) != 0)

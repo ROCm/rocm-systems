@@ -93,7 +93,7 @@ forward_signal(int sig)
 int
 get_verbose()
 {
-    const auto* _log_level = std::getenv(env::LOG_LEVEL.data());
+    const auto* _log_level = std::getenv(env::LOG_LEVEL);
     if(_log_level != nullptr) verbose = env::log_level_to_verbose(_log_level);
     return verbose;
 }
@@ -154,8 +154,7 @@ get_initial_environment()
     update_env(_env, env::TRACE, false);
     update_env(_env, env::PROFILE, false);
     update_env(_env, env::USE_PROCESS_SAMPLING, false);
-    update_env(_env, env::THREAD_POOL_SIZE,
-               get_env<int>(env::THREAD_POOL_SIZE.data(), 0));
+    update_env(_env, env::THREAD_POOL_SIZE, get_env<int>(env::THREAD_POOL_SIZE, 0));
     update_env(_env, env::LAUNCHER, "rocprof-sys-causal");
 
     // Ensure libomptarget.so can be found by the target (OpenMP/HIP apps)

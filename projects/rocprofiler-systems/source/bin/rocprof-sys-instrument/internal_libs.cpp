@@ -181,10 +181,9 @@ get_library_search_paths_impl()
     for(const auto& itr : delimit(get_env("LD_LIBRARY_PATH", std::string{}, false), ":"))
         _emplace_if_exists(itr);
 
-    for(const auto& itr :
-        { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH.data(), ""),
-          get_env<std::string>("ROCM_PATH", ""),
-          std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
+    for(const auto& itr : { get_env<std::string>(rocprofsys::env_vars::ROCM_PATH, ""),
+                            get_env<std::string>("ROCM_PATH", ""),
+                            std::string{ ROCPROFSYS_DEFAULT_ROCM_PATH } })
     {
         if(!itr.empty())
         {

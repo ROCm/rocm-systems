@@ -99,7 +99,7 @@ main(int argc, char** argv)
         _completed.set_value();
     };
 
-    for(const auto* itr : { "CI", rocprofsys::env_vars::CI.data() })
+    for(const auto* itr : { "CI", rocprofsys::env_vars::CI })
     {
         if(_get_env(itr)) _env_failure(itr);
     }

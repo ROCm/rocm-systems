@@ -132,7 +132,7 @@ inline pid_t
 get_rocprofsys_root_pid()
 {
     auto _pid = getpid();
-    setenv(env_vars::ROOT_PROCESS.data(), std::to_string(_pid).c_str(), 0);
+    setenv(env_vars::ROOT_PROCESS, std::to_string(_pid).c_str(), 0);
     return get_env(env_vars::ROOT_PROCESS, _pid);
 }
 

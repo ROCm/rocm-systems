@@ -59,14 +59,13 @@ namespace
 using random_engine_t    = std::mt19937_64;
 using progress_bundles_t = component_bundle_cache<component::progress_point>;
 
-auto speedup_seeds = std::vector<size_t>{};
-auto speedup_divisions =
-    get_env<std::uint16_t>(env_vars::CAUSAL_SPEEDUP_DIVISIONS.data(), 5);
-auto speedup_dist = []() {
+auto speedup_seeds     = std::vector<size_t>{};
+auto speedup_divisions = get_env<std::uint16_t>(env_vars::CAUSAL_SPEEDUP_DIVISIONS, 5);
+auto speedup_dist      = []() {
     size_t                     _n = std::max<size_t>(1, 100 / speedup_divisions);
     std::vector<std::uint16_t> _v(_n, std::uint16_t{ 0 });
     std::generate(_v.begin(), _v.end(),
-                  [_value = 0]() mutable { return (_value += speedup_divisions); });
+                       [_value = 0]() mutable { return (_value += speedup_divisions); });
     // approximately 25% of bins should be zero speedup
     size_t _nzero = std::ceil(_v.size() / 4.0);
     _v.resize(_v.size() + _nzero, 0);
@@ -622,8 +621,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
                 // if launched via rocprof-sys-causal, allow end-to-end runs that do not
                 // start experiments
                 auto _omni_causal_launcher =
-                    get_env<std::string>(env_vars::LAUNCHER, "") ==
-                    "rocprof-sys-causal";
+                    get_env<std::string>(env_vars::LAUNCHER, "") == "rocprof-sys-causal";
 
                 if(!(get_causal_end_to_end() && _omni_causal_launcher))
                 {

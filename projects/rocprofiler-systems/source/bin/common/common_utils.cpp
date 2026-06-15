@@ -184,8 +184,7 @@ translate_arguments(int argc, char** argv, preset_registry& registry,
 std::string
 get_output_directory(const char* env_var = nullptr)
 {
-    const char* output_path =
-        std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH.data());
+    const char* output_path = std::getenv(env_var ? env_var : env_vars::OUTPUT_PATH);
     if(output_path && std::strlen(output_path) > 0) return std::string(output_path);
 
     return "rocprof-sys-output";
@@ -308,8 +307,8 @@ void
 validate_configuration()
 {
     // Check for conflicting ENABLE/DISABLE categories (causes std::abort() at runtime)
-    const char* enable_cats  = std::getenv(env_vars::ENABLE_CATEGORIES.data());
-    const char* disable_cats = std::getenv(env_vars::DISABLE_CATEGORIES.data());
+    const char* enable_cats  = std::getenv(env_vars::ENABLE_CATEGORIES);
+    const char* disable_cats = std::getenv(env_vars::DISABLE_CATEGORIES);
     if(enable_cats && std::strlen(enable_cats) > 0 && disable_cats &&
        std::strlen(disable_cats) > 0)
     {
@@ -321,7 +320,7 @@ validate_configuration()
     }
 
     // Check ROCPROFSYS_TMPDIR writability
-    const char* tmpdir     = std::getenv(env_vars::TMPDIR.data());
+    const char* tmpdir     = std::getenv(env_vars::TMPDIR);
     auto        tmpdir_str = std::string{ tmpdir ? tmpdir : "/tmp" };
     if(!check_directory_writable(tmpdir_str))
     {

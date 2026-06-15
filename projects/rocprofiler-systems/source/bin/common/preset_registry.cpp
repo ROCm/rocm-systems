@@ -22,7 +22,7 @@ namespace
 std::string
 find_preset_directory()
 {
-    const auto* preset_dir_env = std::getenv(env_vars::PRESET_DIR.data());
+    const auto* preset_dir_env = std::getenv(env_vars::PRESET_DIR);
     if(preset_dir_env && std::strlen(preset_dir_env) > 0)
     {
         auto dir = std::string{ preset_dir_env };

@@ -61,8 +61,8 @@ auto
 get_default_min_instructions()
 {
     // default to 1024
-    return tim::get_env<size_t>(rocprofsys::env_vars::DEFAULT_MIN_INSTRUCTIONS.data(),
-                                (1 << 10), false);
+    return tim::get_env<size_t>(rocprofsys::env_vars::DEFAULT_MIN_INSTRUCTIONS, (1 << 10),
+                                false);
 }
 auto
 get_default_min_address_range()
@@ -94,10 +94,10 @@ bool   instr_print                  = false;
 bool   simulate                     = false;
 bool   include_uninstr              = false;
 bool   include_internal_linked_libs = false;
-int verbose_level = tim::get_env<int>(rocprofsys::env_vars::VERBOSE_INSTRUMENT.data(), 0);
-int num_log_entries = tim::get_env<int>(
-    rocprofsys::env_vars::LOG_COUNT.data(),
-    tim::get_env<bool>(rocprofsys::env_vars::CI.data(), false) ? 20 : 50);
+int    verbose_level = tim::get_env<int>(rocprofsys::env_vars::VERBOSE_INSTRUMENT, 0);
+int    num_log_entries =
+    tim::get_env<int>(rocprofsys::env_vars::LOG_COUNT,
+                      tim::get_env<bool>(rocprofsys::env_vars::CI, false) ? 20 : 50);
 string_t main_fname     = "main";
 string_t argv0          = {};
 string_t cmdv0          = {};
@@ -291,7 +291,7 @@ main(int argc, char** argv)
 
     auto _omni_root = tim::get_env<std::string>(
         "rocprofiler_systems_ROOT",
-        tim::get_env<std::string>(rocprofsys::env_vars::ROOT.data(), ""));
+        tim::get_env<std::string>(rocprofsys::env_vars::ROOT, ""));
     if(!_omni_root.empty() && exists(_omni_root))
     {
         bin_search_paths.emplace_back(JOIN('/', _omni_root, "bin"));
@@ -1280,33 +1280,30 @@ main(int argc, char** argv)
         };
 
         add_regex(func_include,
-                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_INCLUDE.data(), ""));
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_INCLUDE, ""));
         add_regex(func_exclude,
-                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_EXCLUDE.data(), ""));
-        add_regex(func_restrict, tim::get_env<string_t>(
-                                     rocprofsys::env_vars::REGEX_RESTRICT.data(), ""));
-        add_regex(caller_include, tim::get_env<string_t>(
-                                      rocprofsys::env_vars::REGEX_CALLER_INCLUDE.data()));
-        add_regex(func_internal_include,
-                  tim::get_env<string_t>(
-                      rocprofsys::env_vars::REGEX_INTERNAL_INCLUDE.data(), ""));
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_EXCLUDE, ""));
+        add_regex(func_restrict,
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_RESTRICT, ""));
+        add_regex(caller_include,
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_CALLER_INCLUDE));
+        add_regex(
+            func_internal_include,
+            tim::get_env<string_t>(rocprofsys::env_vars::REGEX_INTERNAL_INCLUDE, ""));
 
         add_regex(file_include,
-                  tim::get_env<string_t>(
-                      rocprofsys::env_vars::REGEX_MODULE_INCLUDE.data(), ""));
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_MODULE_INCLUDE, ""));
         add_regex(file_exclude,
-                  tim::get_env<string_t>(
-                      rocprofsys::env_vars::REGEX_MODULE_EXCLUDE.data(), ""));
-        add_regex(file_restrict,
-                  tim::get_env<string_t>(
-                      rocprofsys::env_vars::REGEX_MODULE_RESTRICT.data(), ""));
+                  tim::get_env<string_t>(rocprofsys::env_vars::REGEX_MODULE_EXCLUDE, ""));
+        add_regex(file_restrict, tim::get_env<string_t>(
+                                     rocprofsys::env_vars::REGEX_MODULE_RESTRICT, ""));
         add_regex(file_internal_include,
                   tim::get_env<string_t>(
-                      rocprofsys::env_vars::REGEX_MODULE_INTERNAL_INCLUDE.data(), ""));
+                      rocprofsys::env_vars::REGEX_MODULE_INTERNAL_INCLUDE, ""));
 
-        add_regex(instruction_exclude,
-                  tim::get_env<string_t>(
-                      rocprofsys::env_vars::REGEX_INSTRUCTION_EXCLUDE.data(), ""));
+        add_regex(
+            instruction_exclude,
+            tim::get_env<string_t>(rocprofsys::env_vars::REGEX_INSTRUCTION_EXCLUDE, ""));
 
         //  Helper function for parsing the regex options
         auto _parse_regex_option = [&parser, &add_regex](const string_t& _option,
