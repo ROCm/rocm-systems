@@ -177,10 +177,6 @@ class QueuePair {
   __device__ void put_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);
 
-  __device__ void put_nbi_single(void *raddr, uint32_t rkey,
-      const void *laddr, uint32_t lkey,
-      size_t length, bool ring_db = true);
-
   /**
    * @brief Create and enqueue a non-blocking put with explicit rkey/lkey.
    *
@@ -252,9 +248,6 @@ class QueuePair {
       ActiveWFInfo &wf_info);
 
   __device__ void atomic_nofetch_single(void *dest, int64_t value);
-
-  __device__ void atomic_add_single(void *raddr, uint32_t rkey,
-      int64_t value);
 
   /**
    * @brief Non-fetching atomic add with explicit remote key.
@@ -332,8 +325,7 @@ class QueuePair {
 #endif
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
-      uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-      bool fetching);
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
 
   /**
    * @brief Build and post an RMA work queue entry with explicit keys.
@@ -353,16 +345,15 @@ class QueuePair {
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 
   __device__ __attribute__((noinline)) void
-  post_wqe_rma_single(int32_t size, uintptr_t laddr, uint32_t lkey,
-      uintptr_t raddr, uint32_t rkey, uint8_t opcode, bool ring_db);
+  post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
+      uint8_t opcode, bool ring_db);
 
 #if defined(GDA_MLX5)
-  __device__ uint64_t mlx5_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+  __device__ uint64_t mlx5_post_wqe_amo_single(uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch);
   __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
-      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, bool ring_db);
+      uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
@@ -377,11 +368,10 @@ class QueuePair {
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetching, bool fence);
 
-  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
+  __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
+      int64_t atomic_data, int64_t atomic_cmp, bool fetching);
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
-      uint32_t lkey, uintptr_t raddr, uint32_t rkey,
-      uint8_t opcode, bool ring_db);
+      uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void bnxt_post_wqe_rma(int32_t length, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
@@ -389,12 +379,11 @@ class QueuePair {
   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
-  __device__ uint64_t ionic_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+  __device__ uint64_t ionic_post_wqe_amo_single(uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch);
   __device__ void ionic_post_wqe_rma_single(int32_t size,
-      uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
-      uint32_t rkey, uint8_t opcode);
+      uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
   __device__ void ionic_post_wqe_rma(int32_t length, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
