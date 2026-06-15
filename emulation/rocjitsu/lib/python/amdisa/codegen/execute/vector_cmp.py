@@ -15,6 +15,8 @@ from amdisa.codegen.execute.vop3_modifiers import (
 
 
 def _write_mask_to_explicit_dst(lines: list[str], dst: str, value: str) -> None:
+    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
+    # sema_lower.py.
     lines.append('  if (wf.wf_size() <= 32)')
     lines.append(f'    {dst}.write_scalar(wf, static_cast<uint32_t>({value}));')
     lines.append('  else')

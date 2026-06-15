@@ -924,6 +924,28 @@ TEST(Gfx1250ExecutionTest, VFmacF16Vop3HighVdstUsesHighHalfAddend) {
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x42003C00u);
 }
 
+TEST(Gfx1250ExecutionTest, VFmacF16Vop2HighVdstUsesHighHalfAddend) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 0, kLane, 0x00003C00u);
+  cu->write_vgpr(vgpr_base + 1, kLane, 0x40003C00u);
+  cu->write_vgpr(vgpr_base + 2, kLane, 0x00003C00u);
+  cu->write_vgpr(vgpr_base + 129, kLane, 0x3C003C00u);
+
+  const std::array<uint32_t, 1> words = {0x6D020500u}; // v_fmac_f16_e32 v1.h, v0.l, v2.l
+  gfx1250::VFmacF16Vop2 high_half_fmac(words.data());
+  high_half_fmac.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x42003C00u);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0x3C003C00u);
+}
+
 TEST(Gfx1250ExecutionTest, VMadU32LiteralTimesScalarAddsVector) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();

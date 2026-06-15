@@ -255,6 +255,8 @@ def _vcc_init_expr(ctx: LoweringContext) -> str:
 
 
 def _write_vcc_mask_to_explicit_dst(dst: str) -> str:
+    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
+    # vector_cmp.py.
     return (
         f'if (wf.wf_size() <= 32)\n'
         f'    {dst}.write_scalar(wf, static_cast<uint32_t>(vcc));\n'
@@ -892,6 +894,11 @@ def _lower_instoperand_read(node: SemaNode, ctx: LoweringContext) -> str:
             and ctx.true16_dst_select is not None
             and ((node.ty and node.ty.size == 16) or binding.bit_width == 16)
         ):
+            if ctx.true16_dst_reg is not None:
+                value = (
+                    'wf.cu().read_vgpr(wf.vgpr_alloc().base + '
+                    f'({ctx.true16_dst_reg}), lane)'
+                )
             return f'(({ctx.true16_dst_select}) != 0 ? ({value} >> 16) : {value})'
         if tag != 'D' and idx in ctx.true16_src_selects:
             select = ctx.true16_src_selects[idx]

@@ -34,9 +34,6 @@ namespace rocjitsu {
 namespace {
 
 constexpr bool has_embedded_pointers(unsigned long request) {
-  if (is_svm_ioctl(request))
-    return true;
-
   switch (request) {
   case AMDKFD_IOC_WAIT_EVENTS:
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:

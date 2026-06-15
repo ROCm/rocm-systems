@@ -37,6 +37,8 @@ inline bool simd_force_scalar() { return util::force_scalar(); }
 
 template <typename Op>
 inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
+  // Keep this wave32/wave64 mask-width rule in sync with the Python emitters
+  // in sema_lower.py and vector_cmp.py.
   if (wf.wf_size() <= 32)
     op.write_scalar(wf, static_cast<uint32_t>(mask));
   else
@@ -2591,18 +2593,15 @@ enum class FmaMixDst { F32, F16_LO, F16_HI };
 
 inline util::native<float> fma_mix_mul_add(util::native<float> a, util::native<float> b,
                                            util::native<float> c) {
-#if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
-  return util::stdx::fma(a, b, c);
-#else
   return a * b + c;
-#endif
 }
 
 /// VOP3P fma_mix / mad_mix SIMD fast path. Six ops share one body because all
 /// six differ only in (a) the f16-vs-f32 widening shape per source and (b) the
-/// f16-lo/f16-hi/f32 narrowing shape on the destination. When the host compiler
-/// enables FMA contraction for the scalar `a * b + c` reference, the SIMD path
-/// uses `stdx::fma`; otherwise it keeps the same separate multiply/add shape.
+/// f16-lo/f16-hi/f32 narrowing shape on the destination. The generated scalar
+/// bodies use `a * b + c`, so this keeps the SIMD path in the same expression
+/// shape instead of forcing a fused stdx::fma and shifting finite results by an
+/// ulp on some hosts.
 ///
 /// Per-source data fetch is gated by `op_sel_hi` (src0/src1) and
 /// `op_sel_hi_2` (src2): when the bit is 0 the source is read as f32; when
@@ -2621,6 +2620,13 @@ template <FmaMixDst DstMode, typename Inst>
   if (simd_force_scalar() || !inst.src0.simd_capable() || !inst.src1.simd_capable() ||
       !inst.src2.simd_capable() || !inst.vdst.simd_capable())
     return false;
+#if defined(__clang__) && defined(__FMA__)
+  if constexpr (DstMode == FmaMixDst::F32) {
+    // Clang contracts native SIMD a*b+c on FMA hosts for this shape while the
+    // generated scalar bodies remain bit-exact with separate multiply/add.
+    return false;
+  }
+#endif
   using T = float32_t;
   const uint32_t op_sel = inst.inst_.op_sel;
   const uint32_t op_sel_hi = inst.inst_.op_sel_hi;

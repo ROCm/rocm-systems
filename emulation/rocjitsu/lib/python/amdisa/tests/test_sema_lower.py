@@ -435,11 +435,16 @@ class TestLowerVectorAdd:
             exec_model=ExecModel.VECTOR,
             operand_map=omap,
             true16_dst_select='inst_.opsel & 0x8u',
+            true16_dst_reg='inst_.vdst & 0x7fu',
         )
 
         result = lower_sema_block(block, ctx)
 
-        assert '((inst_.opsel & 0x8u) != 0 ? (vdst.read_lane(wf, lane) >> 16)' in result
+        assert (
+            '((inst_.opsel & 0x8u) != 0 ? '
+            '(wf.cu().read_vgpr(wf.vgpr_alloc().base + (inst_.vdst & 0x7fu), lane) >> 16)'
+            in result
+        )
 
 
 class TestLowerCast:

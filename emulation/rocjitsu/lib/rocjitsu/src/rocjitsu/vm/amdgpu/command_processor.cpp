@@ -1324,6 +1324,10 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
     }
     write_gpu_block(queue.read_ptr_va, &rptr_val, sizeof(rptr_val), queue.process_id);
   };
+  // Publish the unchanged read pointer before retrying a wait/poll packet or an
+  // SDMA packet whose translated VA is not ready yet. The queue owner still sees
+  // the packet as pending, and the doorbell reschedule gives later mappings or
+  // signal writes a chance to make the same packet executable.
   auto reschedule_current_packet = [&] {
     write_read_ptr();
     engine()->schedule_event_now(&doorbell_event_);

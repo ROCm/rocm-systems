@@ -4266,6 +4266,21 @@ class CodeGenerator:
             return True
         return False
 
+    def _e32_true16_dst_reg_expr(
+        self, inst: Instruction | None, enc_name: str | None = None
+    ) -> str:
+        if inst is None or self.isa_spec.arch_name.lower() != 'gfx1250':
+            return 'inst_.vdst'
+        enc_upper = (enc_name or inst.enc_name).upper()
+        if enc_upper not in ('ENC_VOP1', 'ENC_VOP2'):
+            return 'inst_.vdst'
+        if any(
+            op.is_output and op.size == 16 and op.operand_type == 'OPR_VGPR'
+            for op in inst.operands
+        ):
+            return '(inst_.vdst & 0x7fu)'
+        return 'inst_.vdst'
+
     def _can_share_execute(
         self,
         mnemonic: str,
@@ -4891,6 +4906,9 @@ class CodeGenerator:
                                 _src_inputs[1] if len(_src_inputs) > 1 else None
                             )
                             _is_vopc = enc.enc_name.upper() == 'ENC_VOPC'
+                            _dst_reg_expr = self._e32_true16_dst_reg_expr(
+                                inst, enc.enc_name
+                            )
                             _dpp_preamble = ''
                             if _is_vopc:
                                 _dpp_preamble += (
@@ -4916,7 +4934,7 @@ class CodeGenerator:
                                     '    uint64_t ex = wf.exec();\n'
                                     '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln)\n'
                                     '      if (ex & (1ULL << ln))\n'
-                                    '        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                    f'        sdwa_old_dst_[ln] = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                     '  }\n'
                                 )
                             _dpp_preamble += (
@@ -4985,9 +5003,9 @@ class CodeGenerator:
                                 '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                 '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                 '      if (!(ex & (1ULL << ln))) continue;\n'
-                                '      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                f'      uint32_t dv = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                 '      dv = amdgpu::sdwa::sdwa_dst_merge(dv, sdwa_old_dst_[ln], sdwa_dst_sel_, sdwa_dst_unused_);\n'
-                                '      wf.cu().write_vgpr(vb + inst_.vdst, ln, dv);\n'
+                                f'      wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln, dv);\n'
                                 '    }\n'
                                 '  }\n'
                             )
@@ -4998,10 +5016,10 @@ class CodeGenerator:
                                     '    uint32_t vb = wf.vgpr_alloc().base;\n'
                                     '    for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                     '      if (!(ex & (1ULL << ln))) continue;\n'
-                                    '      uint32_t dv = wf.cu().read_vgpr(vb + inst_.vdst, ln);\n'
+                                    f'      uint32_t dv = wf.cu().read_vgpr(vb + {_dst_reg_expr}, ln);\n'
                                     '      float fv = std::bit_cast<float>(dv);\n'
                                     '      fv = std::clamp(fv, 0.0f, 1.0f);\n'
-                                    '      wf.cu().write_vgpr(vb + inst_.vdst, ln, std::bit_cast<uint32_t>(fv));\n'
+                                    f'      wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln, std::bit_cast<uint32_t>(fv));\n'
                                     '    }\n'
                                     '  }\n'
                                 )
@@ -5038,7 +5056,7 @@ class CodeGenerator:
                                     '      uint32_t vb = wf.vgpr_alloc().base;\n'
                                     '      for (uint32_t ln = 0; ln < wf.wf_size(); ++ln) {\n'
                                     '        if ((ex & (1ULL << ln)) && !(dpp_write_mask & (1ULL << ln)))\n'
-                                    '          wf.cu().write_vgpr(vb + inst_.vdst, ln,\n'
+                                    f'          wf.cu().write_vgpr(vb + {_dst_reg_expr}, ln,\n'
                                     '              sdwa_old_dst_[ln]);\n'
                                     '      }\n'
                                     '    }\n'

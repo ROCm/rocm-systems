@@ -359,9 +359,10 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
 /// (b) mangle the payload/quiet bit of a NaN input instead of returning it
 /// unchanged. The scalar generated bodies these SIMD fast paths must match use
 /// the compiler's scalar std:: functions. Clang lowers signaling NaNs to quiet
-/// NaNs here. GCC does that when it lowers to SSE4.1 round instructions, and for
-/// nearbyint otherwise. The NaN repair is selected per operation and target
-/// feature instead of hardcoding one libc policy. We run the stdx intrinsic for
+/// NaNs here, and GCC scalar wrappers below quiet them explicitly so the scalar
+/// and SIMD paths keep the same lane bits. The NaN repair is selected per
+/// operation and compiler policy instead of hardcoding one libc policy. We run
+/// the stdx intrinsic for
 /// the finite, nonzero-result lanes and then repair the two edge cases by blend:
 ///   - NaN input lane: return the scalar-compiler-matching NaN bits.
 ///   - zero-magnitude result lane: copy the input's sign bit onto the +0 the
@@ -369,7 +370,7 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
 ///     a zero result, so this is exactly the sign of the *input*).
 /// Bit-identical to the scalar reference at every native width.
 template <class Float, bool QuietNan, class Round>
-inline native<Float> round_fixup_simd(native<Float> a, Round round) {
+native<Float> round_fixup_simd(native<Float> a, Round round) {
   using F = native<Float>;
   using U = std::conditional_t<sizeof(Float) == 4, native<uint32_t>, native<uint64_t>>;
   using Bits = typename U::value_type;
@@ -388,10 +389,9 @@ inline native<Float> round_fixup_simd(native<Float> a, Round round) {
   const F signed_zero = std::bit_cast<F>(ai & U(kSign));
   stdx::where(r == F(Float(0)), r) = signed_zero;
   // NaN input: repair to the scalar path for this compiler and operation.
-  // Clang quiets sNaNs for these scalar std:: calls. GCC also quiets them when
-  // SSE4.1 round instructions are enabled (for example under -march=native on
-  // hosts with SSE4.1); otherwise it preserves floor/ceil/trunc input bits.
-#if defined(__clang__) || defined(__SSE4_1__)
+  // Clang quiets sNaNs for these scalar std:: calls. GCC's scalar wrappers
+  // below quiet explicitly, so the SIMD repair follows that same policy.
+#if defined(__clang__) || defined(__GNUC__)
   constexpr bool kQuietNan = true;
 #else
   constexpr bool kQuietNan = QuietNan;
