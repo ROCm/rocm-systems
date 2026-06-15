@@ -873,10 +873,11 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
 }
 
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
-                                 hsa_interop_map_flag_t flags, size_t* size, void** ptr,
-                                 size_t* metadata_size, const void** metadata) {
+                                 hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
+                                 void** ptr, size_t* metadata_size, const void** metadata) {
   constexpr int tinyArraySize = 8;
-  HsaGraphicsResourceInfo info;
+  HsaGraphicsResourceInfo info{};
+  info.SizeHintInBytes = size_hint;
 
   HSAuint32 short_nodes[tinyArraySize];
   HSAuint32* nodes = short_nodes;

@@ -91,8 +91,10 @@ struct RocrEntryPoints {
   decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_;
   decltype(hsa_amd_memory_unlock)* hsa_amd_memory_unlock_;
   decltype(hsa_amd_interop_map_buffer)* hsa_amd_interop_map_buffer_;
+  decltype(hsa_amd_interop_map_buffer_with_size)* hsa_amd_interop_map_buffer_with_size_;
   decltype(hsa_amd_interop_unmap_buffer)* hsa_amd_interop_unmap_buffer_;
   decltype(hsa_amd_image_create)* hsa_amd_image_create_;
+  decltype(hsa_amd_image_create_v2)* hsa_amd_image_create_v2_;
   decltype(hsa_amd_pointer_info)* hsa_amd_pointer_info_;
   decltype(hsa_amd_ipc_memory_create)* hsa_amd_ipc_memory_create_;
   decltype(hsa_amd_ipc_memory_attach)* hsa_amd_ipc_memory_attach_;
@@ -395,6 +397,14 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_interop_map_buffer)(num_agents, agents, interop_handle, flags, size, ptr,
                                                 metadata_size, metadata);
   }
+  static hsa_status_t interop_map_buffer_with_size(uint32_t num_agents, hsa_agent_t* agents,
+                                                   hsa_handle_t interop_handle, uint32_t flags,
+                                                   size_t size_hint, size_t* size, void** ptr,
+                                                   size_t* metadata_size, const void** metadata) {
+    return ROCR_DYN(hsa_amd_interop_map_buffer_with_size)(num_agents, agents, interop_handle,
+                                                          flags, size_hint, size, ptr,
+                                                          metadata_size, metadata);
+  }
   static hsa_status_t interop_unmap_buffer(void* ptr) {
     return ROCR_DYN(hsa_amd_interop_unmap_buffer)(ptr);
   }
@@ -550,10 +560,8 @@ class Hsa : public amd::AllStatic {
     const hsa_amd_image_descriptor_t* image_layout,
     const void* image_data, hsa_access_permission_t access_permission,
     hsa_ext_image_t* image) {
-    assert(image_descriptor->mipmap_levels == 1);
-    return ROCR_DYN(hsa_amd_image_create)(agent,
-                   reinterpret_cast<const hsa_ext_image_descriptor_t*>(image_descriptor),
-                   image_layout, image_data, access_permission, image);
+    return ROCR_DYN(hsa_amd_image_create_v2)(agent,
+                   image_descriptor, image_layout, image_data, access_permission, image);
   }
   static hsa_status_t image_data_get_info(
     hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor,

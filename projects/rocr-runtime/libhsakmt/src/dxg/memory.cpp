@@ -555,7 +555,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   wsl::thunk::GpuMemoryHandle mem_handle;
 
   ret = import_dmabuf_fd(GraphicsResourceHandle, NodeArray[0], RegisterFlags.ui32.requiresVAddr,
-                         false, &mem_handle, RegisterFlags.ui32.kmtHandle);
+                         false, &mem_handle, RegisterFlags.ui32.kmtHandle,
+                         GraphicsResourceInfo->SizeHintInBytes);
   if (ret != HSAKMT_STATUS_SUCCESS) {
     pr_err("hsaKmtRegisterGraphicsHandleToNodesExt: import_dmabuf_fd failed, "
            "GraphicsResourceHandle: %" PRIu64 ", NodeId: %u\n",
@@ -610,7 +611,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 
 
 HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
-                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle) {
+                               wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
+                               uint64_t size_hint) {
   CHECK_DXG_OPEN();
 
   *GpuMemHandle = nullptr;
@@ -620,6 +622,7 @@ HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va
   create_info.dmabuf_fd = DMABufFd;
   create_info.flags.alloc_va = alloc_va;
   create_info.flags.kmt_handle_importer = is_kmt_handle ? 1 : 0;
+  create_info.size = size_hint;
 
 #if defined(__linux__)
   if (is_ipc_memfd) {

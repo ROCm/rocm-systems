@@ -87,7 +87,7 @@ void HsaApiTable::Init() {
   // they can add preprocessor macros on the new functions
 
   constexpr size_t expected_core_api_table_size = 1016;
-  constexpr size_t expected_amd_ext_table_size = 704;
+  constexpr size_t expected_amd_ext_table_size = 720;
   constexpr size_t expected_image_ext_table_size = 128;
   constexpr size_t expected_finalizer_ext_table_size = 64;
   constexpr size_t expected_tools_table_size = 64;
@@ -393,7 +393,7 @@ void HsaApiTable::UpdateCore() {
 
 // Update Api table for Amd Extensions.
 // @note: Current implementation will initialize the
-// member variable hsa_amd_image_create_fn while loading
+// member variables hsa_amd_image_create_fn and hsa_amd_image_create_v2_fn while loading
 // Image extension library
 void HsaApiTable::UpdateAmdExts() {
 
@@ -430,6 +430,7 @@ void HsaApiTable::UpdateAmdExts() {
   amd_ext_api.hsa_amd_memory_unlock_fn = AMD::hsa_amd_memory_unlock;
   amd_ext_api.hsa_amd_memory_fill_fn = AMD::hsa_amd_memory_fill;
   amd_ext_api.hsa_amd_interop_map_buffer_fn = AMD::hsa_amd_interop_map_buffer;
+  amd_ext_api.hsa_amd_interop_map_buffer_with_size_fn = AMD::hsa_amd_interop_map_buffer_with_size;
   amd_ext_api.hsa_amd_interop_unmap_buffer_fn = AMD::hsa_amd_interop_unmap_buffer;
   amd_ext_api.hsa_amd_pointer_info_fn = AMD::hsa_amd_pointer_info;
   amd_ext_api.hsa_amd_pointer_info_set_userdata_fn = AMD::hsa_amd_pointer_info_set_userdata;

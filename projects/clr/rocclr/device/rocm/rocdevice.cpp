@@ -28,6 +28,13 @@
 #include "device/rocm/rocsignal.hpp"
 #include "platform/sampler.hpp"
 
+#ifdef _WIN32
+#include "device/rocm/rocd3d10interop.hpp"
+#include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d10.hpp"
+#include "platform/interop_d3d11.hpp"
+#endif
+
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
 #include "device/rocm/rocurilocator.hpp"
@@ -674,6 +681,17 @@ bool Device::create() {
     return false;
   }
   info_.pciDomainID = pci_domain_id;
+
+#ifdef _WIN32
+  // Extract adapter LUID for D3D interop validation
+  hsa_status_t luid_status = Hsa::agent_get_info(
+      bkendDevice_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_LUID),
+      &deviceLuid_);
+  luidValid_ = luid_status == HSA_STATUS_SUCCESS;
+  if (!luidValid_) {
+    LogWarning("Could not extract LUID from HSA agent - D3D interop may not work correctly");
+  }
+#endif
 
   if (populateOCLDeviceConstants() == false) {
     LogPrintfError("populateOCLDeviceConstants failed for HSA device %s (PCI ID %x)", agent_name,
@@ -1878,30 +1896,69 @@ bool Device::amdFileWrite(amd::Os::FileDesc handle, void* devicePtr, uint64_t si
 // ================================================================================================
 bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                 bool validateOnly) {
-  if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
+  bool success = true;
 
-  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-  if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
-    LogError("Failed GlInterop::glAssociate()");
-    return false;
+#ifdef _WIN32
+  // Handle D3D10 device binding
+  if (flags & amd::Context::Flags::D3D10DeviceKhr) {
+    void* d3d10Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D10DeviceKhrIdx];
+    if (!D3D10Interop::associateD3D10Device(this, static_cast<ID3D10Device*>(d3d10Device))) {
+      LogError("Failed D3D10Interop::associateD3D10Device()");
+      success = false;
+    }
   }
 
-  return true;
+  // Handle D3D11 device binding
+  if (flags & amd::Context::Flags::D3D11DeviceKhr) {
+    void* d3d11Device = gfxDevice[amd::Context::DeviceFlagIdx::D3D11DeviceKhrIdx];
+    if (!D3D11Interop::associateD3D11Device(this, static_cast<ID3D11Device*>(d3d11Device))) {
+      LogError("Failed D3D11Interop::associateD3D11Device()");
+      success = false;
+    }
+  }
+#endif  // _WIN32
+
+  // Handle GL device binding (existing code)
+  if (flags & amd::Context::Flags::GLDeviceKhr) {
+    void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    if (!GlInterop::glAssociate(this, flags, gfxContext, glDevice)) {
+      LogError("Failed GlInterop::glAssociate()");
+      success = false;
+    }
+  }
+
+  return success;
 }
 
 // ================================================================================================
 bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfxContext,
                                   bool validateOnly) {
-  if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
+  bool success = true;
 
-  void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
-  if (glDevice != nullptr) {
-    if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
-      LogWarning("Failed GlInterop::glDissociate()");
-      return false;
+#ifdef _WIN32
+  // Handle D3D10 device cleanup
+  if (flags & amd::Context::Flags::D3D10DeviceKhr) {
+    D3D10Interop::dissociateD3D10Device(this);
+  }
+
+  // Handle D3D11 device cleanup
+  if (flags & amd::Context::Flags::D3D11DeviceKhr) {
+    D3D11Interop::dissociateD3D11Device(this);
+  }
+#endif  // _WIN32
+
+  // Handle GL device cleanup (existing code)
+  if (flags & amd::Context::Flags::GLDeviceKhr) {
+    void* glDevice = gfxDevice[amd::Context::DeviceFlagIdx::GLDeviceKhrIdx];
+    if (glDevice != nullptr) {
+      if (!GlInterop::glDissociate(this, gfxContext, glDevice)) {
+        LogWarning("Failed GlInterop::glDissociate()");
+        success = false;
+      }
     }
   }
-  return true;
+
+  return success;
 }
 
 amd::Memory* Device::findMapTarget(size_t size) const {
