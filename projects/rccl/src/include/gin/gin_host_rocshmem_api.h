@@ -15,26 +15,26 @@
 #include "plugin/nccl_net.h"
 
 // Called from gin_host.cc (with ncclComm context)
-ncclResult_t ncclGinRocshmemCreateContext(struct ncclComm *comm, void *collComm, int devId,
+ncclResult_t ncclGinRocshmemApiCreateContext(struct ncclComm *comm, void *collComm, int devId,
                                           int nSignals, int nCounters, void **outGinCtx,
                                           ncclNetDeviceHandle_v11_t **outDevHandle);
-ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *addr, size_t size,
+ncclResult_t ncclGinRocshmemApiRegister(ncclGin_t *ginComm, void *ginCtx, void *addr, size_t size,
                                      int type, int mr_flags, void **mhandle, void **ginHandle);
-ncclResult_t ncclGinRocshmemDeregister(ncclGin_t *ginComm, void *ginCtx, void *mhandle);
-ncclResult_t ncclGinRocshmemDestroyContext(ncclGin_t *ginComm, void *ginCtx);
-ncclResult_t ncclGinRocshmemProgress(ncclGin_t *ginComm, void *ginCtx);
-ncclResult_t ncclGinRocshmemQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError);
+ncclResult_t ncclGinRocshmemApiDeregister(ncclGin_t *ginComm, void *ginCtx, void *mhandle);
+ncclResult_t ncclGinRocshmemApiDestroyContext(ncclGin_t *ginComm, void *ginCtx);
+ncclResult_t ncclGinRocshmemApiProgress(ncclGin_t *ginComm, void *ginCtx);
+ncclResult_t ncclGinRocshmemApiQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError);
 
 // Called from gin_plugin_rocshmem_api.cc (plugin interface, no ncclComm)
-ncclResult_t ncclGinRocshmemCreateContextFromPlugin(int nSignals, int nCounters,
+ncclResult_t ncclGinRocshmemApiCreateContextFromPlugin(int nSignals, int nCounters,
                                                      void **outGinCtx,
                                                      ncclNetDeviceHandle_v11_t **outDevHandle);
-ncclResult_t ncclGinRocshmemRegisterFromPlugin(void *addr, size_t size, int type,
+ncclResult_t ncclGinRocshmemApiRegisterFromPlugin(void *addr, size_t size, int type,
                                                 uint64_t mr_flags, void **mhandle, void **ginHandle);
-ncclResult_t ncclGinRocshmemDeregisterFromPlugin(void *mhandle);
-ncclResult_t ncclGinRocshmemDestroyContextFromPlugin(void *ginCtx);
+ncclResult_t ncclGinRocshmemApiDeregisterFromPlugin(void *mhandle);
+ncclResult_t ncclGinRocshmemApiDestroyContextFromPlugin(void *ginCtx);
 
 // The built-in plugin instance
-extern ncclGin_v11_t ncclGinRocshmemPlugin;
+extern ncclGin_v11_t ncclGinRocshmemApiPlugin;
 
 #endif

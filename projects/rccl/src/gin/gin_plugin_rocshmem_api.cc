@@ -21,7 +21,7 @@
 
 #include "gin/gin_host_rocshmem_api.h"
 #include "comm.h"
-#include "nccl_device/gin/rocshmem/gin_rocshmem_api_device_host_common.h"
+#include "nccl_device/gin/rocshmem_api/gin_rocshmem_api_device_host_common.h"
 #include "plugin/nccl_net.h"
 
 #include <rocshmem/rocshmem.hpp>
@@ -101,13 +101,13 @@ static ncclResult_t ginRocshmemFinalize(void* ctx) {
 
 static ncclResult_t ginRocshmemCreateContext(void* collComm, ncclGinConfig_v13_t* config,
                                               void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle) {
-  return ncclGinRocshmemCreateContextFromPlugin(config->nSignals, config->nCounters, ginCtx, devHandle);
+  return ncclGinRocshmemApiCreateContextFromPlugin(config->nSignals, config->nCounters, ginCtx, devHandle);
 }
 
 static ncclResult_t ginRocshmemRegMrSym(void* collComm, void* data, size_t size,
                                          int type, uint64_t mrFlags,
                                          void** mhandle, void** ginHandle) {
-  return ncclGinRocshmemRegisterFromPlugin(data, size, type, mrFlags, mhandle, ginHandle);
+  return ncclGinRocshmemApiRegisterFromPlugin(data, size, type, mrFlags, mhandle, ginHandle);
 }
 
 static ncclResult_t ginRocshmemRegMrSymDmaBuf(void* collComm, void* data, size_t size,
@@ -118,11 +118,11 @@ static ncclResult_t ginRocshmemRegMrSymDmaBuf(void* collComm, void* data, size_t
 }
 
 static ncclResult_t ginRocshmemDeregMrSym(void* collComm, void* mhandle) {
-  return ncclGinRocshmemDeregisterFromPlugin(mhandle);
+  return ncclGinRocshmemApiDeregisterFromPlugin(mhandle);
 }
 
 static ncclResult_t ginRocshmemDestroyContext(void* ginCtx) {
-  return ncclGinRocshmemDestroyContextFromPlugin(ginCtx);
+  return ncclGinRocshmemApiDestroyContextFromPlugin(ginCtx);
 }
 
 static ncclResult_t ginRocshmemGinProgress(void* ginCtx) {
@@ -135,7 +135,7 @@ static ncclResult_t ginRocshmemQueryLastError(void* ginCtx, bool* hasError) {
 }
 
 __attribute__((visibility("default")))
-ncclGin_t ncclGinRocshmem = {
+ncclGin_t ncclGinRocshmemApi = {
   .name            = "rocshmem",
   .init            = ginRocshmemInit,
   .devices         = ginRocshmemDevices,

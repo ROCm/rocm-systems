@@ -9,7 +9,7 @@
 #include "gin/gin_host_rocshmem_api.h"
 #include "comm.h"
 #include "dev_runtime.h"
-#include "nccl_device/gin/rocshmem/gin_rocshmem_api_device_host_common.h"
+#include "nccl_device/gin/rocshmem_api/gin_rocshmem_api_device_host_common.h"
 
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>
@@ -41,7 +41,7 @@ struct ginRocshmemMemHandle {
   size_t size;
 };
 
-ncclResult_t ncclGinRocshmemCreateContext(struct ncclComm *comm, void *collComm, int devId,
+ncclResult_t ncclGinRocshmemApiCreateContext(struct ncclComm *comm, void *collComm, int devId,
                                           int nSignals, int nCounters, void **outGinCtx,
                                           ncclNetDeviceHandle_v11_t **outDevHandle) {
   ncclResult_t ret = ncclSuccess;
@@ -124,7 +124,7 @@ fail:
   return ret;
 }
 
-ncclResult_t ncclGinRocshmemDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
+ncclResult_t ncclGinRocshmemApiDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
   struct ginRocshmemCtx *ctx = (struct ginRocshmemCtx *)ginCtx;
   if (ctx == NULL) return ncclSuccess;
 
@@ -136,7 +136,7 @@ ncclResult_t ncclGinRocshmemDestroyContext(ncclGin_t *ginComm, void *ginCtx) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *addr, size_t size,
+ncclResult_t ncclGinRocshmemApiRegister(ncclGin_t *ginComm, void *ginCtx, void *addr, size_t size,
                                      int type, int mr_flags, void **mhandle, void **ginHandle) {
   struct ginRocshmemCtx *ctx = (struct ginRocshmemCtx *)ginCtx;
   struct ginRocshmemMemHandle *mh = NULL;
@@ -200,7 +200,7 @@ ncclResult_t ncclGinRocshmemRegister(ncclGin_t *ginComm, void *ginCtx, void *add
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinRocshmemDeregister(ncclGin_t *ginComm, void *ginCtx, void *mhandle) {
+ncclResult_t ncclGinRocshmemApiDeregister(ncclGin_t *ginComm, void *ginCtx, void *mhandle) {
   struct ginRocshmemMemHandle *mh = (struct ginRocshmemMemHandle *)mhandle;
   if (mh == NULL) return ncclSuccess;
 
@@ -218,11 +218,11 @@ ncclResult_t ncclGinRocshmemDeregister(ncclGin_t *ginComm, void *ginCtx, void *m
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinRocshmemProgress(ncclGin_t *ginComm, void *ginCtx) {
+ncclResult_t ncclGinRocshmemApiProgress(ncclGin_t *ginComm, void *ginCtx) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclGinRocshmemQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError) {
+ncclResult_t ncclGinRocshmemApiQueryLastError(ncclGin_t *ginComm, void *ginCtx, bool *hasError) {
   struct ginRocshmemCtx *ctx = (struct ginRocshmemCtx *)ginCtx;
   *hasError = ctx ? ctx->hasError : false;
   return ncclSuccess;
@@ -235,17 +235,17 @@ ncclResult_t ncclGinRocshmemQueryLastError(ncclGin_t *ginComm, void *ginCtx, boo
 // listen/connect/closeListen are stubs.
 ////////////////////////////////////////////////////////////////////////////////
 
-static ncclResult_t ncclGinRocshmemInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
+static ncclResult_t ncclGinRocshmemApiInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
   *ctx = nullptr;
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinRocshmemDevices(int* ndev) {
+static ncclResult_t ncclGinRocshmemApiDevices(int* ndev) {
   *ndev = 1;
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinRocshmemGetProperties(int dev, ncclNetProperties_t* props) {
+static ncclResult_t ncclGinRocshmemApiGetProperties(int dev, ncclNetProperties_t* props) {
   memset(props, 0, sizeof(*props));
   props->name = (char*)"rocshmem";
   props->pciPath = NULL;
@@ -256,26 +256,26 @@ static ncclResult_t ncclGinRocshmemGetProperties(int dev, ncclNetProperties_t* p
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinRocshmemListen(void* ctx, int dev, void* handle, void** listenComm) {
+static ncclResult_t ncclGinRocshmemApiListen(void* ctx, int dev, void* handle, void** listenComm) {
   *listenComm = (void*)0x1;
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinRocshmemConnect(void* ctx, void* handles[], int nranks, int rank,
+static ncclResult_t ncclGinRocshmemApiConnect(void* ctx, void* handles[], int nranks, int rank,
                                            void* listenComm, void** collComm) {
   *collComm = (void*)0x1;
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinRocshmemCloseListen(void* listenComm) {
+static ncclResult_t ncclGinRocshmemApiCloseListen(void* listenComm) {
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinRocshmemCloseColl(void* collComm) {
+static ncclResult_t ncclGinRocshmemApiCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGinRocshmemFinalize(void* ctx) {
+static ncclResult_t ncclGinRocshmemApiFinalize(void* ctx) {
   return ncclSuccess;
 }
 
@@ -283,24 +283,24 @@ static ncclResult_t ncclGinRocshmemFinalize(void* ctx) {
 // Plugin-facing variants (no ncclComm available)
 ///////////////////////////////////////////////////////////////////////////////
 
-ncclResult_t ncclGinRocshmemCreateContextFromPlugin(int nSignals, int nCounters,
+ncclResult_t ncclGinRocshmemApiCreateContextFromPlugin(int nSignals, int nCounters,
                                                      void **outGinCtx,
                                                      ncclNetDeviceHandle_v11_t **outDevHandle) {
   // Delegate to the full version with NULL comm — only needs rocshmem symmetric heap
-  return ncclGinRocshmemCreateContext(NULL, NULL, 0, nSignals, nCounters, outGinCtx, outDevHandle);
+  return ncclGinRocshmemApiCreateContext(NULL, NULL, 0, nSignals, nCounters, outGinCtx, outDevHandle);
 }
 
-ncclResult_t ncclGinRocshmemRegisterFromPlugin(void *addr, size_t size, int type,
+ncclResult_t ncclGinRocshmemApiRegisterFromPlugin(void *addr, size_t size, int type,
                                                 uint64_t mr_flags, void **mhandle, void **ginHandle) {
-  return ncclGinRocshmemRegister(NULL, NULL, addr, size, type, mr_flags, mhandle, ginHandle);
+  return ncclGinRocshmemApiRegister(NULL, NULL, addr, size, type, mr_flags, mhandle, ginHandle);
 }
 
-ncclResult_t ncclGinRocshmemDeregisterFromPlugin(void *mhandle) {
-  return ncclGinRocshmemDeregister(NULL, NULL, mhandle);
+ncclResult_t ncclGinRocshmemApiDeregisterFromPlugin(void *mhandle) {
+  return ncclGinRocshmemApiDeregister(NULL, NULL, mhandle);
 }
 
-ncclResult_t ncclGinRocshmemDestroyContextFromPlugin(void *ginCtx) {
-  return ncclGinRocshmemDestroyContext(NULL, ginCtx);
+ncclResult_t ncclGinRocshmemApiDestroyContextFromPlugin(void *ginCtx) {
+  return ncclGinRocshmemApiDestroyContext(NULL, ginCtx);
 }
 
 #endif // ENABLE_ROCSHMEM_GIN

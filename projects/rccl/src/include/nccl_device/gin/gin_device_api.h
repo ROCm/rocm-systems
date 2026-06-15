@@ -16,8 +16,8 @@
 #include "proxy/gin_proxy.h"
 #endif
 #if NCCL_GIN_ROCSHMEM_ENABLE
-#include "rocshmem/gin_rocshmem_api.h"
-#include "rocshmem/gin_rocshmem_gda.h"
+#include "rocshmem_api/gin_rocshmem_api.h"
+#include "rocshmem_gda/gin_rocshmem_gda.h"
 #endif
 
 #endif

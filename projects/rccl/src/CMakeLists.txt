@@ -205,11 +205,11 @@ set(SRC_FILES
   include/nccl_device/gin/gin_device_host_common.h
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
-  include/nccl_device/gin/rocshmem/gin_rocshmem_api.h
-  include/nccl_device/gin/rocshmem/gin_rocshmem_api_device_host_common.h
-  include/nccl_device/gin/rocshmem/gin_rocshmem_gda.h
-  include/nccl_device/gin/rocshmem/gin_rocshmem_device_host_common_gda.h
-  include/nccl_device/gin/rocshmem/queue_pair_device.h
+  include/nccl_device/gin/rocshmem_api/gin_rocshmem_api.h
+  include/nccl_device/gin/rocshmem_api/gin_rocshmem_api_device_host_common.h
+  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_gda.h
+  include/nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h
+  include/nccl_device/gin/rocshmem_gda/queue_pair_device.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h

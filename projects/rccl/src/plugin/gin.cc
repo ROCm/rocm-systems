@@ -257,15 +257,15 @@ static void initPluginLibsOnceFunc() {
 #ifdef ENABLE_ROCSHMEM_GIN
   // Add internal rocshmem API plugin (device-initiated, no RMA proxy)
   {
-    extern ncclGin_t ncclGinRocshmem;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmem;
+    extern ncclGin_t ncclGinRocshmemApi;
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemApi;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     pluginCounter++;
   }
   // Add internal rocshmem GDA plugin (device-initiated, no RMA proxy)
   {
-    extern ncclGin_t ncclGinRocshmemGdaPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
+    extern ncclGin_t ncclGinRocshmemApiGdaPlugin;
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemApiGdaPlugin;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     pluginCounter++;
   }

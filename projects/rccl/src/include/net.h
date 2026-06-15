@@ -35,7 +35,7 @@ extern ncclGin_t ncclGinIbGdaki;
 #endif
 extern ncclGin_v12_t ncclGinIbProxy;
 #if defined(ENABLE_ROCSHMEM_GIN)
-extern ncclGin_t ncclGinRocshmem;
+extern ncclGin_t ncclGinRocshmemApi;
 #endif
 
 extern ncclResult_t rcclNetP2pPolicy(void* handle, int isP2p);
