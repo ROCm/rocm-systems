@@ -700,7 +700,8 @@ namespace RcclUnitTesting
                                std::vector<bool>           const& managedMemList,
                                std::vector<bool>           const& useHipGraphList,
                                bool                        const& enableSweep,
-                               OptionalColArgs             const& options)
+                               OptionalColArgs             const& options,
+                               int                         const  minNonSweepGpus)
   {
     // Sort numElements in descending order to cut down on # of allocations
     std::vector<int> sortedN = numElements;
@@ -728,7 +729,7 @@ namespace RcclUnitTesting
       // Test either single process all GPUs, or 1 process per GPU
       int const numChildren = isMultiProcess ? numGpus : 1;
       int const numRanks    = numGpus*ranksPerGpu;
-      if(enableSweep == false && (numGpus < 8 || numRanks < 8)) {
+      if(enableSweep == false && (numGpus < minNonSweepGpus || numRanks < minNonSweepGpus)) {
         continue;
       }
       const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();

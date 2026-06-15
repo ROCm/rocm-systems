@@ -125,27 +125,32 @@ namespace RcclUnitTesting
   TEST(AllReduce, Channels)
   {
     TestBed testBed;
-    if(testBed.ev.maxGpus >= 8) {
-      if(testBed.ev.isGfx94) {
-        // Configuration
-        std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
-        std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclBfloat16});
-        std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
-        std::vector<int>            const roots           = {0};
-        std::vector<int>            const numElements     = testBed.ev.GetElements({64 * 1024 * 1024, 1024});
-        std::vector<bool>           const inPlaceList     = {false};
-        std::vector<bool>           const managedMemList  = {false};
-        std::vector<bool>           const useHipGraphList = {false, true};
-        std::vector<const char *>   const channelList     = {"84", "112"};
-        bool                        const enableSweep     = false;
-        for (auto channel : channelList) {
-          setenv("NCCL_MIN_NCHANNELS", channel, 1);
-          testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                                inPlaceList, managedMemList, useHipGraphList, enableSweep);
-          testBed.Finalize();
-          unsetenv("NCCL_MIN_NCHANNELS");
-        }
-      }
+
+    if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95 && !testBed.ev.isGfx125)
+      GTEST_SKIP() << "AllReduce::Channels requires gfx94x, gfx95x, or gfx125x architecture.";
+
+    // gfx125x runs at 4 GPUs; gfx94x/gfx95x run at 8 GPUs.
+    int const requiredGpus = testBed.ev.isGfx125 ? 4 : 8;
+    if (testBed.ev.maxGpus < requiredGpus)
+      GTEST_SKIP() << "AllReduce::Channels requires at least " << requiredGpus
+                   << " GPUs on this architecture.";
+
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce};
+    std::vector<ncclDataType_t> const dataTypes       = testBed.ev.GetDataTypes({ncclBfloat16});
+    std::vector<ncclRedOp_t>    const redOps          = testBed.ev.GetRedOps({ncclSum});
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = testBed.ev.GetElements({64 * 1024 * 1024, 1024});
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false, true};
+    std::vector<const char *>   const channelList     = {"84", "112"};
+    bool                        const enableSweep     = false;
+    for (auto channel : channelList) {
+      setenv("NCCL_MIN_NCHANNELS", channel, 1);
+      testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                            inPlaceList, managedMemList, useHipGraphList, enableSweep, {}, requiredGpus);
+      testBed.Finalize();
+      unsetenv("NCCL_MIN_NCHANNELS");
     }
   }
 

@@ -10,14 +10,14 @@
 // AllReduceBias tests mirror the AllReduce test structure exactly.
 // The only difference is options.useBias = true, which causes RunSimpleSweep
 // to set biasNumElements on each collective call.
-// All tests require gfx942 or gfx950 architecture.
+// All tests require gfx942, gfx950, or gfx125x architecture.
 
 namespace RcclUnitTesting
 {
 #define BIAS_SKIP_CHECK() \
   do { \
-    if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95) \
-      GTEST_SKIP() << "Requires gfx942 or gfx950 architecture."; \
+    if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95 && !testBed.ev.isGfx125) \
+      GTEST_SKIP() << "Requires gfx942, gfx950, or gfx125x architecture."; \
   } while (0)
 
   namespace BiasTestConstants
@@ -180,11 +180,14 @@ namespace RcclUnitTesting
     TestBed testBed;
     BIAS_SKIP_CHECK();
 
-    // Architecture (gfx942/gfx950) is already validated by BIAS_SKIP_CHECK above.
+    // Architecture (gfx942/gfx950/gfx125x) is already validated by BIAS_SKIP_CHECK above.
     // NCCL_MIN_NCHANNELS values below are minimum-channel requests clamped to
-    // MAXCHANNELS, so they are valid on both gfx942 and gfx950.
-    if (testBed.ev.maxGpus < 8)
-      GTEST_SKIP() << "AllReduceBias::Channels requires at least 8 gfx942/gfx950 GPUs.";
+    // MAXCHANNELS, so they are valid on all supported architectures.
+    // gfx125x runs at 4 GPUs; gfx94x/gfx95x run at 8 GPUs.
+    int const requiredGpus = testBed.ev.isGfx125 ? 4 : 8;
+    if (testBed.ev.maxGpus < requiredGpus)
+      GTEST_SKIP() << "AllReduceBias::Channels requires at least " << requiredGpus
+                   << " GPUs on this architecture.";
 
     using namespace BiasTestConstants;
 
@@ -202,7 +205,7 @@ namespace RcclUnitTesting
     for (auto channel : channelList) {
       setenv("NCCL_MIN_NCHANNELS", channel, 1);
       testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
-                            inPlaceList, managedMemList, useHipGraphList, enableSweep, biasOptions());
+                            inPlaceList, managedMemList, useHipGraphList, enableSweep, biasOptions(), requiredGpus);
       testBed.Finalize();
       unsetenv("NCCL_MIN_NCHANNELS");
     }

@@ -8,6 +8,7 @@
 #include "CollectiveArgs.hpp"
 #include "ProcessIsolatedTestRunner.hpp"
 #include <cstdlib>
+#include <cstring>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <algorithm>
@@ -42,7 +43,7 @@ namespace RcclUnitTesting
           CHECK_HIP(hipGetDeviceProperties(&devProp, deviceId));
           char *gcnArchNameToken = strtok(devProp.gcnArchName, ":");
           strcpy(gcn, gcnArchNameToken);
-          if(std::strncmp(gfx, gcn, 5) == 0) {
+          if(std::strncmp(gfx, gcn, std::strlen(gfx)) == 0) {
             isGfxTest = true;
           } else {
             isGfxTest = false;
@@ -224,6 +225,8 @@ namespace RcclUnitTesting
     if(!isIsolatedChild) getArchInfo(&isGfx95, "gfx95");
     isGfx12 = false;
     if(!isIsolatedChild) getArchInfo(&isGfx12, "gfx12");
+    isGfx125 = false;
+    if(!isIsolatedChild) getArchInfo(&isGfx125, "gfx125");
     isGfx90 = false;
     if(!isIsolatedChild) getArchInfo(&isGfx90, "gfx90");
 

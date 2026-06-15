@@ -174,7 +174,8 @@ namespace RcclUnitTesting
                         std::vector<bool>           const& managedMemList,
                         std::vector<bool>           const& useHipGraphList,
                         bool                        const& enableSweep = true,
-                        OptionalColArgs             const& options = {});
+                        OptionalColArgs             const& options = {},
+                        int                         const  minNonSweepGpus = 8);
 
     // Wait for user-input if in interactive mode
     void InteractiveWait(std::string message);
