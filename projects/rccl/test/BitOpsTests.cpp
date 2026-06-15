@@ -67,9 +67,8 @@ TEST(u32fpEncode, u32fpEncodeSuccess) {
 }
 
 TEST(u32fpDecode, u32fpDecodeSuccess) {
-    // log2x is 1, use bitsPerPow2 = 1
-    uint32_t u32Val{0xFFFFFFFF}; // 32 bits set to 1
-    uint32_t u32ExpectVal = 63;
+    uint32_t u32Val{63};
+    uint32_t u32ExpectVal = 1073741824; // 0x40000000
     int bitsPerPow2 = 1;
     EXPECT_EQ(u32fpDecode(u32Val, bitsPerPow2), u32ExpectVal);
 }
