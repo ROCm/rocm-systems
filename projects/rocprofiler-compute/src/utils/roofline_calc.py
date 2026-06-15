@@ -204,7 +204,7 @@ def sanitize_ai_value(value: float) -> float:
 def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list[str]:
     """
     Ensure cache level requests through --mem-level roofline analysis option
-    are supported on the architecture, and have been normalized."
+    are supported on the architecture, and have been normalized.
     """
     # Make mem_level a list if not already one
     levels_raw = mem_level if isinstance(mem_level, list) else [mem_level]
@@ -219,14 +219,13 @@ def sanitize_mem_level(mem_level: Union[list[str], str], gpu_model: str) -> list
 
     if levels_raw != ["ALL"] and levels != levels_raw:
         console_warning(
-            "roofline",
             f"Cache levels requested with --mem-level for {gpu_model} are not valid- "
-            "unsupported cache levels will not be displayed.",
+            "unsupported cache levels will not be displayed."
         )
 
-    # Step above removes all mem levels, including "ALL" which is the default.
     # An empty list means the mem_level was originally ALL, or the user requested
-    # only unsupported levels and we should default back to ALL.
+    # unsupported levels and we should default back to complete list of all
+    # memory levels for the arch (ALL).
     levels = model_memory_levels if levels == [] else levels
 
     # Skip MALL since we do not benchmark for this at this time
@@ -315,7 +314,8 @@ def calc_ceilings(
         x1 = float(XMIN)
         y1 = float(XMIN) * peak_bw
 
-        x1_matrix = x2_matrix = float(XMIN)
+        x1_matrix = float(XMIN)
+        x2_matrix = 0.0
         y1_matrix = y2_matrix = 0.0
 
         if dtype in PEAK_OPS_DATATYPES:

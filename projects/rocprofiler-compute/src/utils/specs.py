@@ -992,13 +992,19 @@ def set_cache_sizes(
     # number of shader arrays- this is the GL1 cache shared across all CUs within
     # a single Shader Array
     if "L0" in memory_levels and "L1" in memory_levels:
-        sa_level_cache = [
-            c
-            for c in l1_data_caches
-            if c["num_cache_instance"] == int(num_se) * int(num_sa_se)
-        ]
-        if sa_level_cache:
-            cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
+        if num_sa_se is None:
+            console_warning(
+                "Shader Arrays per Shader Engine spec is not available; "
+                "skipping GL1 cache size detection"
+            )
+        else:
+            sa_level_cache = [
+                c
+                for c in l1_data_caches
+                if c["num_cache_instance"] == int(num_se) * int(num_sa_se)
+            ]
+            if sa_level_cache:
+                cache_sizes["L1"] = int(sa_level_cache[0]["cache_size"]) * 1024
 
     # L2 and L3/MALL cache sizes
     for cache_values in cache_info["cache"]:

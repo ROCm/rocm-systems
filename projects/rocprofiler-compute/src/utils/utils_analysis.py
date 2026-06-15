@@ -864,8 +864,8 @@ def get_matrix_ops_type(gpu_series: str) -> str:
     """
     Set the matrix operation type supported by the profiled hardware in roofline
     run_parameters.
-    For the supported architecture of this tool, CDNA2/3/4 supports Matrix
-    Fused Multiply-Add instructions, all other architectures support Warp
+    For the supported architecture of this tool, only CDNA2/3/4 supports Matrix
+    Fused Multiply-Add instructions; all other architectures support Warp
     Matrix Multiply-Accumulate operations.
     """
     if gpu_series in ["MI200", "MI300", "MI350"]:

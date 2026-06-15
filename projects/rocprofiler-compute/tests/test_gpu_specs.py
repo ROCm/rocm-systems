@@ -464,6 +464,36 @@ def test_set_cache_sizes_l2_and_mall():
 
 
 @pytest.mark.misc
+def test_set_cache_sizes_selects_vl1d_by_max_instance_count():
+    """Harvested GPU: num_cu reported by rocminfo may be less than the max
+    num_cache_instance in amd-smi. set_cache_sizes must select vL1D by the
+    highest num_cache_instance, not by exact match to num_cu.
+    """
+    cache_info = {
+        "cache": [
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": 16,
+                "num_cache_instance": 228,  # max instances (some CUs harvested)
+            },
+            {
+                "cache_level": 1,
+                "cache_properties": ["DATA_CACHE"],
+                "cache_size": 16,
+                "num_cache_instance": 190,  # lower instance count entry
+            },
+        ]
+    }
+    # num_cu=224 simulates harvested GPU (fewer than 228 active CUs)
+    result = specs.set_cache_sizes(
+        "mi300x_a1", 224, cache_info, num_dies=4, num_se=8, num_sa_se=2
+    )
+    assert "L1" in result
+    assert result["L1"] == 16 * 1024
+
+
+@pytest.mark.misc
 def test_normal_functionality_still_works():
     """Ensure that normal paths still work after adding error handling tests"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
