@@ -103,14 +103,15 @@ After building the example, profile it with unified memory profiling enabled:
    <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems/examples/unified-memory#readme>`_
    for the full option table and default values.
 
-Use ``ROCPROFSYS_OUTPUT_PATH`` when you want a predictable output directory:
+Use ``ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH`` when you want a predictable output
+directory for the unified-memory text and JSON reports:
 
 .. code-block:: shell
 
    HSA_XNACK=1 \
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
    ROCPROFSYS_TRACE=ON \
-   ROCPROFSYS_OUTPUT_PATH=ump-output \
+   ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH=ump-output \
    rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
 
 Set ``ROCPROFSYS_USE_PID=NO`` if you want stable output filenames without the
@@ -121,7 +122,7 @@ process ID suffix:
    HSA_XNACK=1 \
    ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON \
    ROCPROFSYS_TRACE=ON \
-   ROCPROFSYS_OUTPUT_PATH=ump-output \
+   ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH=ump-output \
    ROCPROFSYS_USE_PID=NO \
    rocprof-sys-run -- ./build-unified-memory/unified-memory -s 32 -p 256 -i 4
 

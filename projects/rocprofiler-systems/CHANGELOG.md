@@ -23,6 +23,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   bandwidth. Enable with `ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON`; requires
   `HSA_XNACK=1` on an XNACK-capable AMD GPU and ROCProfiler-SDK 1.2.2 or
   later. The required KFD tracing domains are enabled automatically.
+- Dedicated `ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH` setting for routing
+  unified-memory profiling reports to an explicit output directory.
 - MPI-rank-based console output filtering features controlled with CLI arguments:
   `--rank-filter-logs` and `--rank-filter-id`.
 - GPU Hardware Performance Counter (PMC) sampling via the ROCProfiler-SDK device

@@ -90,6 +90,33 @@ struct ScopedOutputPath
     ~ScopedOutputPath() { tim::settings::output_path() = previous; }
 };
 
+struct ScopedEnv
+{
+    explicit ScopedEnv(std::string name, std::string desired)
+    : env_name(std::move(name))
+    {
+        const auto* current = getenv(env_name.c_str());
+        if(current != nullptr)
+        {
+            previous = current;
+            had_env  = true;
+        }
+        setenv(env_name.c_str(), desired.c_str(), 1);
+    }
+
+    ~ScopedEnv()
+    {
+        if(had_env)
+            setenv(env_name.c_str(), previous.c_str(), 1);
+        else
+            unsetenv(env_name.c_str());
+    }
+
+    std::string env_name;
+    std::string previous;
+    bool        had_env = false;
+};
+
 class UnifiedMemoryProcessorTest : public ::testing::Test
 {
 protected:
@@ -403,6 +430,58 @@ TEST_F(UnifiedMemoryProcessorTest, PidSuffixedPathsRegistered)
     }
     EXPECT_TRUE(saw_txt) << "text file not registered";
     EXPECT_TRUE(saw_json) << "json file not registered";
+}
+
+TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath)
+{
+    auto explicit_dir = tmp_dir + "/ump-explicit";
+    ASSERT_FALSE(test_common::fs::exists(explicit_dir));
+    ScopedEnv ump_output_path{ "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", explicit_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(explicit_dir));
+        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+}
+
+TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
+{
+    const auto* pwd = std::getenv("PWD");
+    ASSERT_NE(pwd, nullptr);
+    const auto relative_dir = std::string{ "ump-relative" };
+    const auto expected_dir = std::string{ pwd } + "/" + relative_dir;
+    test_common::fs::remove_all(expected_dir);
+    ASSERT_FALSE(test_common::fs::exists(expected_dir));
+    ScopedEnv ump_output_path{ "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", relative_dir };
+    rebuild_processor();
+
+    processor->handle(make_kfd_page_migrate_sample(kCpu0, kGpu1, 1024, 100, /*dev=*/0));
+    processor->finalize_processing();
+
+    bool saw_txt  = false;
+    bool saw_json = false;
+    for(const auto& e : registered_files())
+    {
+        EXPECT_THAT(e.path, ::testing::HasSubstr(expected_dir));
+        EXPECT_TRUE(test_common::fs::exists(e.path)) << "missing file: " << e.path;
+        if(e.format == output_format::text) saw_txt = true;
+        if(e.format == output_format::json) saw_json = true;
+    }
+    EXPECT_TRUE(saw_txt) << "text file not registered";
+    EXPECT_TRUE(saw_json) << "json file not registered";
+
+    test_common::fs::remove_all(expected_dir);
 }
 
 TEST_F(UnifiedMemoryProcessorTest, FaultsOnlyEmitsOutput)

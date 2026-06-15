@@ -92,7 +92,9 @@ constexpr std::string_view USE_SHMEM   = "ROCPROFSYS_USE_SHMEM";
 constexpr std::string_view USE_UCX     = "ROCPROFSYS_USE_UCX";
 
 // --- Output ---
-constexpr std::string_view OUTPUT_PATH   = "ROCPROFSYS_OUTPUT_PATH";
+constexpr std::string_view OUTPUT_PATH = "ROCPROFSYS_OUTPUT_PATH";
+constexpr std::string_view UNIFIED_MEMORY_OUTPUT_PATH =
+    "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH";
 constexpr std::string_view OUTPUT_PREFIX = "ROCPROFSYS_OUTPUT_PREFIX";
 constexpr std::string_view USE_PID       = "ROCPROFSYS_USE_PID";
 constexpr std::string_view TIME_OUTPUT   = "ROCPROFSYS_TIME_OUTPUT";

@@ -343,6 +343,13 @@ configure_settings(bool _init)
         "enabled automatically)",
         false, "backend", "unified_memory", "kfd");
 
+    ROCPROFSYS_CONFIG_SETTING(
+        std::string, "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH",
+        "Explicitly specify the output folder for unified memory profiling reports. "
+        "When empty, unified memory reports are written next to the active trace "
+        "backend output.",
+        std::string{}, "output", "unified_memory", "backend", "kfd");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AMD_SMI",
                               "Enable sampling GPU power, temp, utilization, "
                               "vcn_activity, jpeg_activity and memory usage",
@@ -2703,7 +2710,47 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 std::string
 get_ump_absolute_path()
 {
-    if(!settings_are_configured()) return settings::output_path();
+    auto ensure_dir = [](const std::string& path) {
+        if(!path.empty() && !tim::filepath::direxists(path))
+        {
+            tim::filepath::makedir(path);
+        }
+        return path;
+    };
+
+    auto make_absolute = [](const std::string& path) {
+        if(path.empty()) return path;
+        if(path.at(0) == '/')
+        {
+            return (settings_are_configured())
+                       ? settings::format(path, get_config()->get_tag())
+                       : path;
+        }
+
+        const auto* pwd    = getenv("PWD");
+        auto        result = fmt::format("{}/{}", (pwd ? pwd : "."), path);
+        return (settings_are_configured())
+                   ? settings::format(std::move(result), get_config()->get_tag())
+                   : result;
+    };
+
+    if(settings_are_configured())
+    {
+        auto explicit_path =
+            get_setting_value<std::string>("ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH");
+        if(explicit_path && !explicit_path->empty())
+            return ensure_dir(make_absolute(*explicit_path));
+    }
+
+    // Support early calls before settings have folded in env vars.
+    auto env_path =
+        rocprofsys::get_env<std::string>("ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", "");
+    if(!env_path.empty()) return ensure_dir(make_absolute(env_path));
+
+    if(!settings_are_configured())
+    {
+        return settings::output_path();
+    }
 
     // Co-locate UMP output with the active backend: rocpd's .db dir when
     // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
