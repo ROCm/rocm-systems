@@ -29,7 +29,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                 "version of rocprof-compute. This functionality is planned for a "
                 "future release. Please adjust your profiling options accordingly."
             )
-        elif getattr(args, "torch_trace", False):
+        elif getattr(self, "_selected_frameworks", set()):
             trace_option = "--marker-trace"
         else:
             trace_option = "--kernel-trace"
