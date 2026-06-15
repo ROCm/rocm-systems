@@ -757,7 +757,7 @@ _BACKEND_SUFFIX_RE = re.compile(
 def _parse_function_backend(function_value: Optional[str]) -> tuple[str, str]:
     """Return (clean_function, backend) for one Function cell.
 
-    Untagged or unrecognized values return "unknown".
+    Values with no recognized backend suffix return "unknown".
     """
     if function_value is None:
         return "", _UNKNOWN_BACKEND
@@ -768,16 +768,16 @@ def _parse_function_backend(function_value: Optional[str]) -> tuple[str, str]:
     return raw[: match.start()], match.group(1)
 
 
-def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
-    """Copy src_marker to dst_marker, moving the wire backend suffix out of
-    Function into a dedicated Backend column. Untagged rows are tagged
-    Backend="unknown".
+def _augment_marker_rows(
+    rows: list[dict], fieldnames: list[str]
+) -> tuple[list[dict], list[str], int, list[str]]:
+    """Move the wire backend suffix from the Function column into a Backend
+    column.
+
+    Returns the rows, the field names including Backend, the count of rows whose
+    Function has no recognized backend suffix, and up to three sample Function
+    values from those rows.
     """
-    rows, fieldnames = csv_ops.read_csv_as_dicts(src_marker)
-    if "Function" not in fieldnames:
-        # Unrecognized schema: copy verbatim.
-        shutil.copyfile(src_marker, dst_marker)
-        return
     augmented_fieldnames = list(fieldnames)
     if "Backend" not in augmented_fieldnames:
         augmented_fieldnames.append("Backend")
@@ -789,8 +789,30 @@ def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
         row["Backend"] = backend
         if backend == _UNKNOWN_BACKEND:
             unknown_count += 1
-            if len(unknown_samples) < 3:
-                unknown_samples.append(clean_function or "<empty>")
+            sample = clean_function or "<empty>"
+            if len(unknown_samples) < 3 and sample not in unknown_samples:
+                unknown_samples.append(sample)
+    return rows, augmented_fieldnames, unknown_count, unknown_samples
+
+
+def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
+    """Copy src_marker to dst_marker, moving the wire backend suffix out of
+    Function into a dedicated Backend column. Rows whose Function has no
+    recognized backend suffix are tagged Backend="unknown".
+    """
+    rows, fieldnames = csv_ops.read_csv_as_dicts(src_marker)
+    if "Function" not in fieldnames:
+        # Unrecognized schema: copy verbatim.
+        console_warning(
+            "ml api trace",
+            f"{dst_marker} has no 'Function' column (columns: {fieldnames}); "
+            "copying verbatim without backend augmentation.",
+        )
+        shutil.copyfile(src_marker, dst_marker)
+        return
+    rows, augmented_fieldnames, unknown_count, unknown_samples = _augment_marker_rows(
+        rows, fieldnames
+    )
     csv_ops.write_csv_from_dicts(dst_marker, rows, fieldnames=augmented_fieldnames)
     if unknown_count:
         console_warning(
@@ -824,7 +846,7 @@ def save_ml_api_trace_inputs(
             Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
         )
         dst_marker = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
-        # These files are expected to exist; let underlying IO raise on miss.
+        # These files are expected to exist.
         shutil.copyfile(src_counter, dst_counter)
         _augment_marker_csv(str(src_marker), str(dst_marker))
         console_log(
@@ -839,9 +861,9 @@ def save_ml_api_trace_inputs(
         counter_files = list(src_dir.glob("*/*_counter_collection.csv"))
         marker_files = list(src_dir.glob("*/*_marker_api_trace.csv"))
         (Path(workload_dir) / f"{fbase}").mkdir(parents=True, exist_ok=True)
-        # Expecting the files to be present; let underlying IO raise on miss.
-        # Path: workload_dir/fbase/ml_api_trace_<src_basename> (discovered by
-        # process_ml_api_trace_output via glob **/ml_api_trace*_marker_api_trace.csv)
+        # These files are expected to exist.
+        # Output path: workload_dir/fbase/ml_api_trace_<src_basename>, discovered
+        # by process_ml_api_trace_output.
         for src_counter in counter_files:
             dst_counter = str(
                 Path(workload_dir)
