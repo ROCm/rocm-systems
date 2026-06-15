@@ -5,7 +5,7 @@ import ast
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional
 
 import astunparse
 import numpy as np
@@ -46,9 +46,7 @@ from utils.metrics.noise_clamper import (
     to_noise_clamp,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.parser import (
-    PC_SAMPLING_NOT_ISSUE_PREFIX,
-)
+from utils.pc_sampling_analysis import load_aggregated_pc_sampling
 from utils.roofline_calc import (
     CACHE_HIERARCHY,
     MATRIX_DATATYPES,
@@ -390,96 +388,24 @@ class db_analysis(OmniAnalyze_Base):
                 console_warning(f"PC sampling data not found for {workload_path}.")
                 continue
 
-            pc_sampling_stochastic = pc_sampling_data["buffer_records"][
-                "pc_sample_stochastic"
-            ]
-            pc_sampling_host_trap = pc_sampling_data["buffer_records"][
-                "pc_sample_host_trap"
-            ]
-            pc_sampling_instruction = pc_sampling_data["strings"][
-                "pc_sample_instructions"
-            ]
-            pc_sampling_comments = pc_sampling_data["strings"]["pc_sample_comments"]
-            pc_sampling_kernel_name_dict = {
-                symbol["code_object_id"]: symbol["formatted_kernel_name"]
-                for symbol in pc_sampling_data["kernel_symbols"]
-            }
-
-            pc_df = pd.DataFrame([
-                {
-                    "inst_index": pc_sample["inst_index"],
-                    "code_object_id": pc_sample["record"]["pc"]["code_object_id"],
-                    "code_object_offset": pc_sample["record"]["pc"][
-                        "code_object_offset"
-                    ],
-                    "stall_reason": pc_sample["record"]
-                    .get("snapshot", {})
-                    .get("stall_reason"),
-                    "wave_issued": pc_sample["record"].get("wave_issued"),
-                }
-                for pc_sample in pc_sampling_stochastic + pc_sampling_host_trap
-            ])
-
-            def custom_aggregator(
-                column_name: str,
-            ) -> Callable[[pd.Series], Union[int, dict[str, int], None]]:
-                if column_name == "count_issued":
-
-                    def aggregator(series: pd.Series) -> Optional[int]:
-                        return None if series.isnull().all() else series.sum()
-
-                    return aggregator
-                if column_name == "count_stalled":
-
-                    def aggregator(series: pd.Series) -> Optional[int]:
-                        if series.isnull().all():
-                            return None
-                        return series.count() - series.sum()
-
-                    return aggregator
-                if column_name == "stall_reason":
-
-                    def aggregator(series: pd.Series) -> Optional[dict[str, int]]:
-                        if series.isnull().all():
-                            return None
-                        cleaned_series = series.dropna().str[
-                            len(PC_SAMPLING_NOT_ISSUE_PREFIX) :
-                        ]
-                        return cleaned_series.value_counts().to_dict()
-
-                    return aggregator
-                raise ValueError(f"Unknown column name: {column_name}")
-
-            grouped_df = (
-                pc_df
-                .groupby(["code_object_id", "code_object_offset"])
-                .agg(
-                    count=("code_object_id", "size"),
-                    inst_index=("inst_index", "last"),
-                    count_issued=("wave_issued", custom_aggregator("count_issued")),
-                    count_stalled=("wave_issued", custom_aggregator("count_stalled")),
-                    stall_reason=("stall_reason", custom_aggregator("stall_reason")),
-                )
-                .reset_index()
-            )
-
-            grouped_df["instruction"] = grouped_df["inst_index"].apply(
-                lambda x: (
-                    pc_sampling_instruction[x]
-                    if x < len(pc_sampling_instruction)
-                    else None
-                )
-            )
-            grouped_df["source_line"] = grouped_df["inst_index"].apply(
-                lambda x: (
-                    pc_sampling_comments[x] if x < len(pc_sampling_comments) else None
-                )
-            )
-            grouped_df["kernel_name"] = grouped_df["code_object_id"].apply(
-                lambda x: pc_sampling_kernel_name_dict.get(x)
+            grouped_df = load_aggregated_pc_sampling(
+                pc_sampling_data,
+                group_by=["code_object_id", "code_object_offset"],
+                attach={"instruction", "source_line", "kernel_name"},
             )
             grouped_df = grouped_df.rename(columns={"code_object_offset": "offset"})
-            grouped_df = grouped_df.drop(columns=["code_object_id", "inst_index"])
+            grouped_df = grouped_df[
+                [
+                    "offset",
+                    "count",
+                    "count_issued",
+                    "count_stalled",
+                    "stall_reason",
+                    "instruction",
+                    "source_line",
+                    "kernel_name",
+                ]
+            ]
 
             pc_sampling_data_per_workload[workload_path] = grouped_df
 
