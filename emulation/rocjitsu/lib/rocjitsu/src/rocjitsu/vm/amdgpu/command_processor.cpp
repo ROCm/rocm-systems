@@ -699,6 +699,11 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   // capacity before dispatching to guarantee all-or-nothing placement.
   uint32_t dispatched = 0;
   auto dispatch_to_cu = [&](uint32_t local_wg_id, uint32_t global_wg_id, ComputeUnitCore *cu) {
+    if (!entry.execution_begun) {
+      entry.execution_begun = true;
+      plugin_group_->onAmdgpuDispatchExecutionBegin(entry.dispatch_id);
+    }
+
     uint32_t lds_base = cu->allocate_lds(entry.group_segment_fixed_size);
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
@@ -800,6 +805,11 @@ void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) 
     completion_->notify_wg_complete(dispatch_id, wg_id, new_queue_states_);
 }
 
+// INVARIANT: on_cu_idle() runs on the owning partition's engine thread — it is
+// invoked from CU::execute_quantum() (the CU's own per-partition tick event), so
+// the CU, this CP, and doorbell_event_ all share one partition. schedule_event()
+// (same-partition, non-thread-safe) is correct here; schedule_event_now() would
+// collapse ticks and break causal ordering.
 void CommandProcessor::on_cu_idle() {
   if (cus_.empty())
     return;
@@ -809,43 +819,8 @@ void CommandProcessor::on_cu_idle() {
   if (completion_)
     completion_->drain_completions(new_queue_states_);
 
-  for (auto &qs : new_queue_states_) {
-    while (qs.next_dispatch_idx < qs.entries.size()) {
-      auto &e = qs.entries[qs.next_dispatch_idx];
-      if (e.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
-        break;
-      if (!e.is_non_kernel())
-        break;
-      e.completed_wgs = e.total_wgs;
-      ++qs.next_dispatch_idx;
-    }
-  }
-  if (completion_)
-    completion_->drain_completions(new_queue_states_);
-
-  std::vector<bool> was_idle(cus_.size());
-  for (size_t i = 0; i < cus_.size(); ++i)
-    was_idle[i] = !cus_[i]->has_active_wfs();
-
-  for (auto &qs : new_queue_states_) {
-    if (qs.next_dispatch_idx < qs.entries.size()) {
-      auto &entry = qs.entries[qs.next_dispatch_idx];
-      if (entry.barrier_bit && !barrier_satisfied(qs, qs.next_dispatch_idx))
-        continue;
-      if (!entry.is_non_kernel() && !entry.fully_dispatched()) {
-        if (entry.dispatched_wgs == 0)
-          plugin_group_->onAmdgpuDispatchExecutionBegin(entry.dispatch_id);
-        uint32_t sent = dispatch_workgroups(entry);
-        if (sent > 0 && entry.fully_dispatched())
-          ++qs.next_dispatch_idx;
-      }
-    }
-  }
-
-  for (size_t i = 0; i < cus_.size(); ++i) {
-    if (was_idle[i] && cus_[i]->has_active_wfs())
-      cus_[i]->activate();
-  }
+  auto now = engine()->context(partition_id()).current_tick();
+  schedule_event(&doorbell_event_, now + 1);
 }
 
 bool CommandProcessor::step() {
@@ -1351,8 +1326,6 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
         // NOTE: drain_completions may pop entries, so we must re-check indices
         // after each drain and not hold stale references.
         uint32_t dispatch_id = entry.dispatch_id;
-        if (entry.dispatched_wgs == 0)
-          plugin_group_->onAmdgpuDispatchExecutionBegin(dispatch_id);
         bool backpressure = false;
         for (;;) {
           if (qs.next_dispatch_idx >= qs.entries.size())
@@ -1436,7 +1409,7 @@ void CommandProcessor::handle_doorbell(simdojo::Tick) {
       if (dispatch_ports_[i]->link())
         dispatch_ports_[i]->send(std::make_unique<simdojo::Message>(simdojo::MessageHeader{}));
       else
-        cus_[i]->activate();
+        cus_[i]->schedule_work();
     }
   }
 

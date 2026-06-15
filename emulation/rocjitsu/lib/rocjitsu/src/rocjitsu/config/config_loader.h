@@ -47,7 +47,7 @@ struct TopologyBuildResult {
 ///   SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
 ///   loaded.wire_links(engine.topology());
-///   engine.build();
+///   engine.create();
 /// @endcode
 /// @brief KFD device identity extracted from vm.gpu.device in the config.
 /// All values use the same names as Sysfs::GpuInfo fields for easy mapping.

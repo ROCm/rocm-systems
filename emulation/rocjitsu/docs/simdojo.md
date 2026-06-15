@@ -68,10 +68,9 @@ registered directly on ports via `Port::set_handler()`. Key virtual
 methods:
 
 - `initialize()` / `startup()` / `shutdown()` - lifecycle hooks called by
-  the engine
-- `step()` - execute one logical step; return true to continue
-- `run()` - default loops `while (step()) {}`; override for custom
-  lifecycle (e.g., blocking on a condition variable)
+  the engine during `create()`, `run()`, and `shutdown()` respectively
+- `step()` - execute one unit of component-specific work (domain-level
+  API for concrete types, not called by the engine)
 - `is_composite()` - returns false for leaves, true for composites
 
 **CompositeComponent** extends Component with a child list. Critically, a
@@ -80,13 +79,9 @@ container. This lets you model a block that both contains sub-blocks
 and directly handles some events (e.g., routing, arbitration) without
 introducing artificial wrapper components.
 
-`CompositeComponent` overrides `run()` and `step()` with default
-delegation behavior: `run()` calls `run()` on each child, and `step()`
-calls `step()` on each child, returning true if any child is still active.
-Subclasses (e.g., SoC) override these for custom lifecycle
-logic. This means a `CompositeComponent` can serve as the topology root
-directly - the engine calls `root->run()` and the composite delegates to
-its children automatically.
+`CompositeComponent` can serve as the topology root directly. All
+execution is event-driven — components schedule events during `startup()`
+and respond to them via event handlers.
 
 `collect_components()` flattens the entire subtree including composites,
 so the engine initializes and dispatches to all components uniformly.
@@ -290,7 +285,7 @@ engine.topology().set_root(std::move(root));
 engine.topology().add_link(pipe_req_port, mem_req_port, /*latency=*/10);
 engine.topology().add_link(mem_resp_port, pipe_resp_port, /*latency=*/5);
 
-engine.build();
+engine.create();
 auto exit = engine.run();
 ```
 
@@ -315,7 +310,7 @@ library dependencies.
 
 The `SimulationEngine` owns the simulation `Topology` and drives the full
 lifecycle: build, run/step, and shutdown. Components participate by
-scheduling events during `initialize()` or `startup()`:
+scheduling events during `startup()`:
 
 - A `Clocked` component schedules clock-edge events (timing simulation).
 - A `Functional` component self-schedules a timer callback and re-enqueues
@@ -506,11 +501,11 @@ injected events realistic timestamps instead of tick 0.
 ### Interactive Stepping (`step()`)
 
 For GUI, debugger, or test harness use. Single-threaded only. On the first
-call, starts all components (initialization happens in `build()`). Each
-subsequent call drains async events and processes all events at the next
-timestamp (one tick step). Returns true if the simulation can continue.
-If the queue is empty but primaries are registered, returns true so the
-caller can poll.
+call, starts all components (initialization happens in `create()`). Each
+subsequent call drains async events and advances to the next event time,
+processing all events at that timestamp. Ticks without scheduled events
+are skipped. Returns true if the simulation can continue. If the queue is
+empty but primaries are registered, returns true so the caller can poll.
 
 ---
 
@@ -520,13 +515,13 @@ caller can poll.
 SimulationEngine engine({.max_ticks = 10000, .num_threads = 4});
 engine.topology().set_root(std::move(my_model));
 engine.topology().add_link(src_port, dst_port, latency);
-engine.build();       // partitions, initializes components
+engine.create();       // partitions, initializes components
 // (user enqueues work via CP)
 auto exit = engine.run();   // starts up components, runs to completion
 engine.shutdown();    // called automatically by destructor if needed
 ```
 
-`build()` partitions the topology and calls `initialize()` on all
+`create()` partitions the topology and calls `initialize()` on all
 components. `run()` calls `startup()` on all components and enters the
 event loop. `shutdown()` is called automatically by the destructor if the
 engine is still built.
