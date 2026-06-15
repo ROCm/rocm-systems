@@ -17,7 +17,7 @@
 #include "comm.h"
 #include "nccl_device/gin/rocshmem/gin_rocshmem_device_host_common_gda.h"
 #include "plugin/nccl_net.h"
-#include <gda/gin_qp_factory.hpp>
+#include "gin/gin_qp_factory.h"
 
 struct ginRocshmemGdaListenCtx {
   int dev;

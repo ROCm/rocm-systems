@@ -9,7 +9,8 @@ if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
         ${CMAKE_CURRENT_SOURCE_DIR}/gin_host_rocshmem_api.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/gin_plugin_rocshmem_api.cc
         ${CMAKE_CURRENT_SOURCE_DIR}/gin_host_rocshmem_gda.cc
-        ${CMAKE_CURRENT_SOURCE_DIR}/gin_plugin_rocshmem_gda.cc)
+        ${CMAKE_CURRENT_SOURCE_DIR}/gin_plugin_rocshmem_gda.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/gin_qp_factory.cpp)
 endif()
 
 # Add gin sources to parent scope

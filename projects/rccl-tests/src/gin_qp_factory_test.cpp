@@ -21,8 +21,8 @@
 #include <cstring>
 #include <cassert>
 
-#include "gin/gin_qp_factory.h"
-#include "gda/queue_pair.hpp"
+#include <gin/gin_qp_factory.h>
+#include <nccl_device/gin/rocshmem/queue_pair_device.h>
 
 #define HIP_CHECK(cmd) do {                                      \
   hipError_t e = (cmd);                                          \

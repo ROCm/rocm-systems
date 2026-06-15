@@ -35,7 +35,6 @@ target_sources(
     ibv_wrapper.cpp
     gda_team.cpp
     queue_pair.cpp
-    gin_qp_factory.cpp
     numa_wrapper.cpp
     topology.cpp
 )
@@ -44,7 +43,3 @@ add_subdirectory(mlx5)
 add_subdirectory(bnxt)
 add_subdirectory(ionic)
 
-install(
-  FILES ${CMAKE_CURRENT_SOURCE_DIR}/gin_qp_factory.hpp
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gda
-)

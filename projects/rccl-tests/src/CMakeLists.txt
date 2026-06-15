@@ -153,6 +153,23 @@ if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY)
     # leaves rocshmem host symbols unresolved)
     target_link_options(alltoall_perf PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags} -rdynamic)
 endif()
+if (ENABLE_ROCSHMEM AND ROCSHMEM_LIBRARY AND RCCL_SOURCE_DIR)
+    add_executable(gin_qp_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/gin_qp_factory_test.cpp)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/gin_qp_factory_test.cpp PROPERTIES LANGUAGE CXX)
+    target_include_directories(gin_qp_factory_test PRIVATE
+        ${ROCM_PATH}/include
+        ${RCCL_SOURCE_DIR}/src/include
+        ${ROCSHMEM_SOURCE_DIR}/src
+        ${ROCSHMEM_SOURCE_DIR}/include
+        ${ROCSHMEM_INSTALL_DIR}/include
+    )
+    target_compile_options(gin_qp_factory_test PRIVATE -fgpu-rdc --offload-arch=${GPU_TARGETS} -xhip)
+    target_link_libraries(gin_qp_factory_test PRIVATE
+        roc::rccl ${ROCSHMEM_LIBRARY} ibverbs hsa-runtime64 hsakmt numa ${_DRM} ${_DRM_AMDGPU}
+        $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>)
+    target_link_options(gin_qp_factory_test PRIVATE -fgpu-rdc --hip-link --offload-arch=${GPU_TARGETS} -rdynamic)
+    set_target_properties(gin_qp_factory_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endif()
 add_rccl_test(alltoallv)
 add_rccl_test(broadcast)
 add_rccl_test(gather)

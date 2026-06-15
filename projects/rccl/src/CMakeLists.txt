@@ -139,6 +139,7 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_api.h
   include/gin/gin_host_rocshmem_gda.h
+  include/gin/gin_qp_factory.h
   include/hip_rocm_version_info.h
   include/ibvcore.h
   include/ibvsymbols.h
@@ -208,6 +209,7 @@ set(SRC_FILES
   include/nccl_device/gin/rocshmem/gin_rocshmem_api_device_host_common.h
   include/nccl_device/gin/rocshmem/gin_rocshmem_gda.h
   include/nccl_device/gin/rocshmem/gin_rocshmem_device_host_common_gda.h
+  include/nccl_device/gin/rocshmem/queue_pair_device.h
   include/nccl_device/ll_a2a.h
   include/nccl_device/lsa_barrier.h
   include/nccl_device/ptr.h
@@ -412,6 +414,7 @@ set(SRC_FILES
   gin/gin_plugin_rocshmem_api.cc
   gin/gin_host_rocshmem_gda.cc
   gin/gin_plugin_rocshmem_gda.cc
+  gin/gin_qp_factory.cpp
   transport/net_ib/gdaki/gin_host_gdaki.h
   include/latency_profiler/CollTrace.h
   include/latency_profiler/CollTraceEvent.h

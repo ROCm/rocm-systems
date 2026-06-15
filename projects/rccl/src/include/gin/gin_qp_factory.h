@@ -22,8 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_GDA_GIN_QP_FACTORY_HPP_
-#define LIBRARY_SRC_GDA_GIN_QP_FACTORY_HPP_
+#ifndef GIN_QP_FACTORY_H_
+#define GIN_QP_FACTORY_H_
 
 #include <stdint.h>
 #include <stddef.h>
@@ -43,6 +43,8 @@
  *   4. rocshmem_gin_dereg_mr()    — deregister buffers
  *   5. rocshmem_gin_destroy_qps() — tear down everything
  */
+
+#define GIN_QP_API __attribute__((visibility("default")))
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,7 +76,7 @@ typedef struct rocshmem_gin_qp_set* rocshmem_gin_qp_set_t;
  *
  * @return 0 on success, non-zero on failure.
  */
-int rocshmem_gin_create_qps(int nRanks, int myRank,
+GIN_QP_API int rocshmem_gin_create_qps(int nRanks, int myRank,
                              int (*allgather)(void* ctx, void* buf, size_t size),
                              void* allgather_ctx,
                              rocshmem_gin_qp_set_t* out_qp_set,
@@ -85,7 +87,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank,
  *
  * @param[in] qp_set Handle returned by rocshmem_gin_create_qps.
  */
-void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set);
+GIN_QP_API void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set);
 
 /**
  * @brief Register a memory buffer for RDMA using a QP set's PD.
@@ -100,7 +102,7 @@ void rocshmem_gin_destroy_qps(rocshmem_gin_qp_set_t qp_set);
  *
  * @return 0 on success, non-zero on failure.
  */
-int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
+GIN_QP_API int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
                          void* addr, size_t size, int atomic,
                          void** out_mr, uint32_t* out_lkey, uint32_t* out_rkey);
 
@@ -111,7 +113,7 @@ int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
  * for both hipMalloc and VMM allocations), then ibv_reg_dmabuf_mr.
  * Falls back to ibv_reg_mr_iova2. Both use iova=VA.
  */
-int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
+GIN_QP_API int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
                               void* addr, size_t size, int atomic,
                               void** out_mr, uint32_t* out_lkey, uint32_t* out_rkey);
 
@@ -120,7 +122,7 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
  *
  * @param[in] mr Handle returned by rocshmem_gin_reg_mr.
  */
-void rocshmem_gin_dereg_mr(void* mr);
+GIN_QP_API void rocshmem_gin_dereg_mr(void* mr);
 
 /**
  * @brief Query the GDA provider type from a QP set.
@@ -128,7 +130,7 @@ void rocshmem_gin_dereg_mr(void* mr);
  * @param[in] qp_set QP set to query.
  * @return Provider enum value (GDAProvider::IONIC/BNXT/MLX5), or -1 if invalid.
  */
-int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set);
+GIN_QP_API int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set);
 
 /**
  * @brief Probe for usable IB devices with active ports and recognized vendor IDs.
@@ -138,11 +140,11 @@ int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set);
  *
  * @return Number of usable devices (0 if none found).
  */
-int rocshmem_gin_probe_devices(void);
+GIN_QP_API int rocshmem_gin_probe_devices(void);
 
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // LIBRARY_SRC_GDA_GIN_QP_FACTORY_HPP_
+#endif  // GIN_QP_FACTORY_H_

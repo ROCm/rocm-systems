@@ -8,8 +8,8 @@
  * Link against rocshmem's device bitcode for the definitions.
  */
 
-#ifndef LIBRARY_SRC_GDA_QUEUE_PAIR_DEVICE_HPP_
-#define LIBRARY_SRC_GDA_QUEUE_PAIR_DEVICE_HPP_
+#ifndef NCCL_DEVICE_GIN_ROCSHMEM_QUEUE_PAIR_DEVICE_H_
+#define NCCL_DEVICE_GIN_ROCSHMEM_QUEUE_PAIR_DEVICE_H_
 
 #include <hip/hip_runtime.h>
 #include <stdint.h>
@@ -126,4 +126,4 @@ class QueuePair {
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_GDA_QUEUE_PAIR_DEVICE_HPP_
+#endif  // NCCL_DEVICE_GIN_ROCSHMEM_QUEUE_PAIR_DEVICE_H_
