@@ -8,6 +8,14 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- `--output-format` flag for `rocprof-sys-run` and `rocprof-sys-sample` to select
+  output format(s) in a single, intuitive option: `proto` (Perfetto), `rocpd`
+  (RocPD database), and `json` / `text` (Timemory profile; `txt` aliases `text`).
+  Tokens are space- or comma-separated and authoritative — only the listed
+  formats are produced. The existing `--trace`, `--profile`, `--flat-profile`,
+  and `--profile-format` flags and their environment variables remain available,
+  but cannot be combined with `--output-format` on the same command line.
+
 - Unified-memory profiling reports (`unified_memory.txt` and
   `unified_memory.json`) summarizing KFD page-fault and page-migration events,
   including per-GPU counts, trigger breakdown (`gpu_page_fault`,
@@ -44,6 +52,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+- Split PMC AMD SMI, ROCProfiler-SDK, and procfs wrappers into standalone
+  internal backend targets under `source/lib/backends`, replacing the old
+  PMC `drivers` layout.
 - Remove Boost as a Dyninst dependency by replacing Boost usage with in-tree
   `dyncompat` shims and C++17 standard library equivalents; Bundled Dyninst now
   requires **GCC ≥ 10**.

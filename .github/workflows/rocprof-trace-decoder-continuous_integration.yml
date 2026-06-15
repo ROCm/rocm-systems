@@ -39,7 +39,6 @@ env:
   ENABLE_AQLPROFILE_BUILD: "true"
   ENABLE_ROCDECODE_BUILD: "true"
   ENABLE_ROCJPEG_BUILD: "true"
-  INSTALL_NIGHTLY_ROCM: "true"
 
   CI_MODE: "Continuous"
 
@@ -47,6 +46,7 @@ env:
 
 jobs:
   build-and-test-ubuntu:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Build & Test • mi325 • Ubuntu 22.04
 
     runs-on: linux-gfx942-1gpu-core42-ossci-rocm
@@ -63,16 +63,6 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
-    - name: Install Latest Nightly ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        mv "${{ env.ROCM_PATH }}-gfx94X.tar.gz" .
-        rm -rf ${{ env.ROCM_PATH }}*
-        mkdir -p "${{ env.ROCM_PATH }}"
-        tar -xf "rocm-gfx94X.tar.gz" -C "${{ env.ROCM_PATH }}"
-        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
-
     - uses: actions/checkout@v5
       with:
         sparse-checkout: projects/rocprof-trace-decoder
@@ -124,6 +114,7 @@ jobs:
   # Mirrors the rocprofiler-sdk core-rpm job for rhel-9.5 / sles-15.6 on mi325.
   # ---------------------------------------------------------------------------
   build-and-test-rocprofiler-sdk-rpm:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     name: Build & Test rocprofiler-sdk • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}
     timeout-minutes: 90
     strategy:
@@ -211,12 +202,11 @@ jobs:
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
           enable-rocprof-trace-decoder-build: 'true'
-          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
           ccache-key: sccache-trace-decoder-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
       - name: Configure, Build, and Test
-        timeout-minutes: 45
+        timeout-minutes: 30
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |

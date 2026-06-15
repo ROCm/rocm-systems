@@ -134,6 +134,13 @@ main(int argc, char *argv[])
         goto free_devbuf;
     }
 
+    /* hipMemset is async w.r.t. the host; block until it completes (testing). */
+    hip_err = hipDeviceSynchronize();
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not synchronize after memset (%d)\n", hip_err);
+        goto free_devbuf;
+    }
+
     /* 4. Chunk-read loop. The host pointer passed to hipFileRead advances by
      *    `bytes_read` each iteration; the file_offset advances in lockstep. */
     {

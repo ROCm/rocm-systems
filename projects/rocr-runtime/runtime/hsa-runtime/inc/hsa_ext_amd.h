@@ -77,6 +77,7 @@
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
+ * - 1.26 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
 #define HSA_AMD_INTERFACE_VERSION_MINOR 25
@@ -1586,7 +1587,7 @@ typedef struct hsa_amd_image_descriptor_s {
  *
  * @param agent[in] Agent on which to create the image
  *
- * @param[in] image_descriptor[in] Vendor specific image format
+ * @param[in] image_descriptor Vendor specific image format
  *
  * @param[in] image_data Pointer to image backing store
  *
@@ -1612,6 +1613,42 @@ hsa_status_t HSA_API hsa_amd_image_create(
     hsa_access_permission_t access_permission,
     hsa_ext_image_t *image
 );
+
+/**
+ * @brief Creates an image from an opaque vendor specific image format.
+ * Does not modify data at image_data.  Intended initially for
+ * accessing interop images.
+ *
+ * @param agent[in] Agent on which to create the image
+ *
+ * @param[in] image_descriptor Vendor specific image format
+ *
+ * @param[in] image_layout Opaque vendor-specific image layout descriptor (may be NULL
+ *                         when image metadata is not available from an interop source)
+ *
+ * @param[in] image_data Pointer to image backing store
+ *
+ * @param[in] access_permission Access permissions for the image object
+ *
+ * @param[out] image Created image object.
+ *
+ * @retval HSA_STATUS_SUCCESS Image created successfully
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT Bad or mismatched descriptor,
+ * null image_data, or mismatched access_permission.
+ */
+hsa_status_t HSA_API hsa_amd_image_create_v2(
+    hsa_agent_t agent,
+    const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    const hsa_amd_image_descriptor_t* image_layout,
+    const void* image_data,
+    hsa_access_permission_t access_permission,
+    hsa_ext_image_t* image);
 
 /**
  * @brief Query image limits.
@@ -2886,6 +2923,55 @@ hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t
                                                 hsa_handle_t interop_handle, uint32_t flags,
                                                 size_t* size, void** ptr, size_t* metadata_size,
                                                 const void** metadata);
+
+/**
+ * @brief Maps an interop object into the HSA flat address space with a
+ * caller-supplied size hint and establishes memory residency.
+ * The metadata pointer is valid during the lifetime of the
+ * map (until hsa_amd_interop_unmap_buffer is called).
+ * Multiple calls to hsa_amd_interop_map_buffer with the same interop_handle
+ * result in multiple mappings with potentially different addresses and
+ * different metadata pointers.  Concurrent operations on these addresses are
+ * not coherent.  Memory must be fenced to system scope to ensure consistency,
+ * between mappings and with any views of this buffer in the originating
+ * software stack.
+ * It is identical to hsa_amd_interop_map_buffer except that @p size_hint provides
+ * the known byte size of the resource to the runtime.  Use this variant when
+ * the resource was created by a foreign API (e.g. D3D11 USAGE_DYNAMIC constant
+ * buffer) whose KMD private data does not encode the allocation size in a
+ * format the runtime can parse.  Pass 0 when the size is unknown and will be deduced.
+ *
+ * @param[in] num_agents Number of agents which require access to the memory
+ *
+ * @param[in] agents List of accessing agents.
+ *
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
+ *
+ * @param [in] flags Reserved, must be 0
+ *
+ * @param [in] size_hint the hinted size of the buffer.
+ *
+ * @param[out] size Size in bytes of the mapped object
+ *
+ * @param[out] ptr Base address of the mapped object
+ *
+ * @param[out] metadata_size Size of metadata in bytes, may be NULL
+ *
+ * @param[out] metadata Pointer to metadata, may be NULL
+ *
+ * @retval HSA_STATUS_SUCCESS if successfully mapped
+ *
+ * @retval HSA_STATUS_ERROR_NOT_INITIALIZED if HSA is not initialized
+ *
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES if there is a failure in allocating
+ * necessary resources
+ *
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT all other errors
+ */
+hsa_status_t HSA_API hsa_amd_interop_map_buffer_with_size(
+    uint32_t num_agents, hsa_agent_t* agents, hsa_handle_t interop_handle, uint32_t flags,
+    size_t size_hint, size_t* size, void** ptr, size_t* metadata_size, const void** metadata);
 
 /**
  * @brief Removes a previously mapped interop object from HSA's flat address space.
