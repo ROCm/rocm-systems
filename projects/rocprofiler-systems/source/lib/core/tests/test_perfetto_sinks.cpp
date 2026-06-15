@@ -141,11 +141,11 @@ using rocprofsys::core::TRUSTED_SEQ_ID_TAG;
 // is a single length-delimited field 11 carrying `marker`. Matches the
 // shape that single_file_sink::on_source_drained walks.
 std::vector<char>
-build_framed_placeholder_packet(char marker)
+build_framed_packet(std::uint64_t seq_id, char marker)
 {
     std::vector<char> inner;
     inner.push_back(static_cast<char>(TRUSTED_SEQ_ID_TAG));
-    append_varint(inner, 1);
+    append_varint(inner, seq_id);
     inner.push_back(static_cast<char>((11 << 3) | 2));
     append_varint(inner, 1);
     inner.push_back(marker);
@@ -155,6 +155,12 @@ build_framed_placeholder_packet(char marker)
     append_varint(framed, inner.size());
     framed.insert(framed.end(), inner.begin(), inner.end());
     return framed;
+}
+
+std::vector<char>
+build_framed_placeholder_packet(char marker)
+{
+    return build_framed_packet(1, marker);
 }
 
 // Decodes the seq_id and payload-marker of the framed packet at `start`
@@ -260,6 +266,168 @@ TEST(single_file_sink, same_source_shares_base_offset)
     EXPECT_EQ(marker_x, 'X');
     EXPECT_EQ(marker_y, 'Y');
     EXPECT_EQ(seq_id_x, seq_id_y);
+}
+
+TEST(single_file_sink, append_mode_splits_rank_window_across_declared_sources)
+{
+    // Regression: fixed 1<<16 source strides collide with rank+1 after the
+    // 16th cached pid. With 20 declared sources, the per-source stride must be
+    // derived from the rank window so every source stays below rank 1's window.
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+    sink.set_append_mode(
+        rocprofsys::core::append_mode_config{ .seq_id_base = 0, .source_count = 20 });
+
+    for(int source = 0; source < 20; ++source)
+    {
+        sink.on_source_drained(1000 + source, build_framed_placeholder_packet(
+                                                  static_cast<char>('A' + source)));
+    }
+
+    const auto& buf = sink.buffer_for_testing();
+    ASSERT_FALSE(buf.empty());
+
+    std::size_t                pos = 0;
+    std::vector<std::uint64_t> seq_ids;
+    std::vector<char>          markers;
+    while(pos < buf.size())
+    {
+        std::uint64_t seq_id = 0;
+        char          marker = 0;
+        pos                  = read_framed_packet(buf, pos, seq_id, marker);
+        seq_ids.push_back(seq_id);
+        markers.push_back(marker);
+    }
+
+    ASSERT_EQ(seq_ids.size(), 20u);
+    for(std::size_t i = 1; i < seq_ids.size(); ++i)
+    {
+        EXPECT_GT(seq_ids[i], seq_ids[i - 1]);
+        EXPECT_LT(
+            seq_ids[i],
+            static_cast<std::uint64_t>(rocprofsys::core::MERGED_SEQ_ID_RANK_STRIDE) + 1);
+    }
+    EXPECT_EQ(markers.front(), 'A');
+    EXPECT_EQ(markers.back(), 'T');
+}
+
+TEST(single_file_sink, append_mode_single_source_keeps_legacy_base_offset)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+    sink.set_append_mode(
+        rocprofsys::core::append_mode_config{ .seq_id_base = 128, .source_count = 1 });
+
+    sink.on_source_drained(7, build_framed_placeholder_packet('L'));
+
+    std::uint64_t seq_id = 0;
+    char          marker = 0;
+    read_framed_packet(sink.buffer_for_testing(), 0, seq_id, marker);
+
+    EXPECT_EQ(marker, 'L');
+    EXPECT_EQ(seq_id, 130u);
+}
+
+TEST(single_file_sink, append_mode_drops_sources_beyond_declared_window)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+    sink.set_append_mode(rocprofsys::core::append_mode_config{
+        .seq_id_base = 0, .seq_id_window_size = 4, .source_count = 2 });
+
+    sink.on_source_drained(1, build_framed_placeholder_packet('A'));
+    sink.on_source_drained(2, build_framed_placeholder_packet('B'));
+    sink.on_source_drained(3, build_framed_placeholder_packet('C'));
+
+    const auto& buf = sink.buffer_for_testing();
+    ASSERT_FALSE(buf.empty());
+
+    std::uint64_t seq_id = 0;
+    char          marker = 0;
+    auto          pos    = read_framed_packet(buf, 0, seq_id, marker);
+    EXPECT_EQ(marker, 'A');
+    pos = read_framed_packet(buf, pos, seq_id, marker);
+    EXPECT_EQ(marker, 'B');
+    EXPECT_EQ(pos, buf.size()) << "third source must be dropped outside declared window";
+}
+
+TEST(single_file_sink, append_mode_rejects_slice_too_small_for_placeholder_seq_id)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+    sink.set_append_mode(rocprofsys::core::append_mode_config{
+        .seq_id_base = 0, .seq_id_window_size = 5, .source_count = 5 });
+
+    sink.on_source_drained(1, build_framed_packet(0, 'A'));
+
+    EXPECT_TRUE(sink.buffer_for_testing().empty())
+        << "stride-1 slices must be rejected during append-mode setup";
+}
+
+TEST(single_file_sink, append_mode_drops_packet_exceeding_source_slice)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+    sink.set_append_mode(rocprofsys::core::append_mode_config{
+        .seq_id_base = 0, .seq_id_window_size = 4, .source_count = 2 });
+
+    auto bytes       = build_framed_placeholder_packet('A');
+    auto overflowing = build_framed_packet(2, 'B');
+    bytes.insert(bytes.end(), overflowing.begin(), overflowing.end());
+
+    sink.on_source_drained(1, std::move(bytes));
+
+    std::uint64_t seq_id = 0;
+    char          marker = 0;
+    const auto    end = read_framed_packet(sink.buffer_for_testing(), 0, seq_id, marker);
+    EXPECT_EQ(marker, 'A');
+    EXPECT_EQ(end, sink.buffer_for_testing().size())
+        << "packet outside the source slice must be dropped before append";
+}
+
+TEST(single_file_sink, append_rank_base_helper_rejects_overflowing_rank_window)
+{
+    EXPECT_TRUE(rocprofsys::core::append_seq_id_base_for_rank(0).has_value());
+    EXPECT_TRUE(rocprofsys::core::append_seq_id_base_for_rank(4094).has_value());
+    EXPECT_FALSE(rocprofsys::core::append_seq_id_base_for_rank(4095).has_value());
+    EXPECT_FALSE(rocprofsys::core::append_seq_id_base_for_rank(1, 0).has_value());
+}
+
+TEST(single_file_sink, append_mode_zero_declared_sources_disables_output)
+{
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry };
+    sink.set_append_mode(rocprofsys::core::append_mode_config{ .source_count = 0 });
+
+    sink.on_source_drained(1, build_framed_placeholder_packet('A'));
+
+    EXPECT_TRUE(sink.buffer_for_testing().empty());
+}
+
+TEST(single_file_sink, finalize_creates_parent_directories)
+{
+    const auto root = std::filesystem::path{ ::testing::TempDir() } /
+                      "rocprofsys-single-file-sink-test";
+    const auto path = root / "nested" / "trace.proto";
+    std::filesystem::remove_all(root);
+
+    rocprofsys::output_file_registry   registry;
+    rocprofsys::core::single_file_sink sink{ registry, path.string() };
+    sink.on_source_drained(1, build_framed_placeholder_packet('A'));
+    sink.finalize();
+
+    ASSERT_TRUE(std::filesystem::exists(path));
+    std::ifstream           file{ path, std::ios::binary };
+    const std::vector<char> contents{ std::istreambuf_iterator<char>{ file },
+                                      std::istreambuf_iterator<char>{} };
+    EXPECT_FALSE(contents.empty());
+
+    std::uint64_t seq_id = 0;
+    char          marker = 0;
+    read_framed_packet(contents, 0, seq_id, marker);
+    EXPECT_EQ(marker, 'A');
+
+    std::filesystem::remove_all(root);
 }
 
 TEST(single_file_sink, malformed_trace_packets_tag_drops_remainder)

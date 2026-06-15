@@ -9,16 +9,18 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
-#include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdio>
+#include <exception>
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <string>
 #include <utility>
 
+#include <system_error>
 namespace rocprofsys
 {
 namespace core
@@ -30,8 +32,14 @@ namespace
 [[nodiscard]] bool
 stderr_log_allowed() noexcept
 {
-    return config::get_verbose() >= 0 &&
-           config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
+    try
+    {
+        return config::get_verbose() >= 0 &&
+               config::output_filtering::is_log_output_enabled_for_current_mpi_rank();
+    } catch(const std::exception&)
+    {
+        return false;
+    }
 }
 
 void
@@ -57,16 +65,30 @@ emit_open_error_line(const std::string& filename)
 
 bool
 write_proto_to(const std::string& filename, const char* data, std::size_t size,
-               output_file_registry* registry)
+               output_file_registry* registry, bool emit_status = true)
 {
-    std::ofstream ofs{};
-    if(!filepath::open(ofs, filename, std::ios::out | std::ios::binary))
+    const auto parent = std::filesystem::path{ filename }.parent_path();
+    if(!parent.empty())
     {
-        emit_open_error_line(filename);
+        std::error_code ec{};
+        std::filesystem::create_directories(parent, ec);
+        if(ec)
+        {
+            LOG_ERROR("write_proto_to: could not create directory '{}': {}",
+                      parent.string(), ec.message());
+            if(emit_status) emit_open_error_line(filename);
+            return false;
+        }
+    }
+
+    std::ofstream ofs{ filename, std::ios::out | std::ios::binary };
+    if(!ofs.is_open() || !ofs.good())
+    {
+        if(emit_status) emit_open_error_line(filename);
         return false;
     }
     ofs.write(data, static_cast<std::streamsize>(size));
-    emit_size_line(filename, size);
+    if(emit_status) emit_size_line(filename, size);
     if(registry) registry->register_file(filename, output_format::perfetto);
     return true;
 }
@@ -170,13 +192,45 @@ single_file_sink::single_file_sink(output_file_registry& registry,
 {}
 
 void
-single_file_sink::set_append_mode(std::uint32_t seq_id_base) noexcept
+single_file_sink::set_append_mode(append_mode_config config) noexcept
 {
-    m_append_mode = true;
+    m_append_mode     = true;
+    m_output_disabled = false;
+
+    const auto seq_id_base64 = static_cast<std::uint64_t>(config.seq_id_base);
+    const auto window_size64 = static_cast<std::uint64_t>(config.seq_id_window_size);
+    if(config.source_count == 0 || config.seq_id_window_size == 0 ||
+       window_size64 < config.source_count ||
+       seq_id_base64 + window_size64 >= TRUSTED_SEQ_ID_MAX_EXCLUSIVE)
+    {
+        LOG_ERROR("single_file_sink append mode disabled: invalid seq_id window "
+                  "base={} window={} sources={}",
+                  config.seq_id_base, config.seq_id_window_size, config.source_count);
+        m_output_disabled = true;
+        return;
+    }
+
     // Shift this process's seq_id namespace so concurrent appenders do not
     // collide on trusted_packet_sequence_id. The +1 preserves the existing
     // "seq_id starts at 1" invariant downstream consumers may rely on.
-    m_next_source_base = seq_id_base + 1;
+    m_next_source_base = config.seq_id_base + 1;
+    m_source_stride =
+        config.seq_id_window_size / static_cast<std::uint32_t>(config.source_count);
+    m_seq_id_window_limit_exclusive = seq_id_base64 + window_size64 + 1;
+
+    // Rewriting adds each packet's original seq_id to the source base. A
+    // one-wide source slice can only hold original seq_id 0, while cached
+    // packets normally carry placeholder seq_id 1. Reject that unusable setup
+    // before accepting any source.
+    constexpr auto MIN_SOURCE_SEQ_ID_SLICE = std::uint32_t{ 2 };
+    if(m_source_stride < MIN_SOURCE_SEQ_ID_SLICE)
+    {
+        LOG_ERROR("single_file_sink append mode disabled: source_count {} leaves "
+                  "seq_id slice {} below minimum {} in window {}",
+                  config.source_count, m_source_stride, MIN_SOURCE_SEQ_ID_SLICE,
+                  config.seq_id_window_size);
+        m_output_disabled = true;
+    }
 }
 
 void
@@ -184,6 +238,13 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
 {
     if(bytes.empty()) return;
 
+    if(m_output_disabled)
+    {
+        LOG_ERROR("single_file_sink: output disabled after invalid append-mode setup; "
+                  "dropping source {}",
+                  source_id);
+        return;
+    }
     // Rewriting preserves payload size and adds a small per-packet header,
     // so each source contributes at most slightly more than bytes.size() to
     // the buffer. Reserve up front to skip the geometric-growth realloc
@@ -205,9 +266,23 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
     // add this base to the packet's original seq_id, preserving the
     // per-source iid namespace structure that Perfetto's interned-data
     // resolution depends on.
-    auto [it, inserted] =
-        m_source_seq_id_bases.try_emplace(source_id, m_next_source_base);
-    if(inserted) m_next_source_base += PER_SOURCE_SEQ_ID_BASE_STRIDE;
+    auto [it, inserted] = m_source_seq_id_bases.try_emplace(source_id, 0);
+    if(inserted)
+    {
+        const auto source_base64 = static_cast<std::uint64_t>(m_next_source_base);
+        if(source_base64 + m_source_stride > m_seq_id_window_limit_exclusive)
+        {
+            m_source_seq_id_bases.erase(it);
+            LOG_ERROR("single_file_sink: source {} would exceed append-mode seq_id "
+                      "window (base={} stride={} limit={}); dropping source",
+                      source_id, source_base64, m_source_stride,
+                      m_seq_id_window_limit_exclusive);
+            return;
+        }
+
+        it->second = static_cast<std::uint32_t>(m_next_source_base);
+        m_next_source_base += m_source_stride;
+    }
     const auto seq_id_offset = it->second;
 
     std::size_t pos = 0;
@@ -232,12 +307,24 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
             return;
         }
 
-        if(!rewrite_trace_packet(m_buffer, bytes.data() + pos,
-                                 static_cast<std::size_t>(len), seq_id_offset))
+        const auto rewrite_status = rewrite_trace_packet_checked(
+            m_buffer, bytes.data() + pos, static_cast<std::size_t>(len), seq_id_offset,
+            static_cast<std::uint64_t>(seq_id_offset) + m_source_stride);
+        if(rewrite_status != rewrite_trace_packet_status::success)
         {
-            LOG_ERROR("single_file_sink: source {} TracePacket malformed at "
-                      "offset {}; dropping remainder",
-                      source_id, pos);
+            if(rewrite_status == rewrite_trace_packet_status::seq_id_out_of_range)
+            {
+                LOG_ERROR("single_file_sink: source {} TracePacket at offset {} "
+                          "exceeds seq_id slice [base={}, limit={}); dropping remainder",
+                          source_id, pos, seq_id_offset,
+                          static_cast<std::uint64_t>(seq_id_offset) + m_source_stride);
+            }
+            else
+            {
+                LOG_ERROR("single_file_sink: source {} TracePacket malformed at "
+                          "offset {}; dropping remainder",
+                          source_id, pos);
+            }
             return;
         }
         pos += static_cast<std::size_t>(len);
@@ -251,10 +338,22 @@ single_file_sink::finalize()
                         ? config::get_perfetto_output_filename()
                         : m_output_filename_override;
 
-    if(!config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
+    if(m_output_disabled)
     {
         m_buffer.clear();
         m_source_seq_id_bases.clear();
+        m_output_disabled = false;
+        return;
+    }
+
+    const auto explicit_non_append_output =
+        !m_output_filename_override.empty() && !m_append_mode;
+    if(!explicit_non_append_output &&
+       !config::output_filtering::is_file_output_enabled_for_current_mpi_rank())
+    {
+        m_buffer.clear();
+        m_source_seq_id_bases.clear();
+        m_output_disabled = false;
         return;
     }
 
@@ -263,6 +362,7 @@ single_file_sink::finalize()
         if(dmp::rank() == 0)
             LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
                       filename);
+        m_output_disabled = false;
         return;
     }
 
@@ -283,13 +383,15 @@ single_file_sink::finalize()
                       status_name(status));
         }
     }
-    else if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry))
+    else if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry,
+                            !explicit_non_append_output))
     {
         LOG_ERROR("single_file_sink: failed to open '{}'", filename);
     }
 
     m_buffer.clear();
     m_source_seq_id_bases.clear();
+    m_output_disabled = false;
 }
 
 // ----------------------------------------------------------------------------

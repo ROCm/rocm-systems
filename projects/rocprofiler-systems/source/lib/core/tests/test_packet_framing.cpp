@@ -11,6 +11,8 @@
 using rocprofsys::core::append_varint;
 using rocprofsys::core::read_varint;
 using rocprofsys::core::rewrite_trace_packet;
+using rocprofsys::core::rewrite_trace_packet_checked;
+using rocprofsys::core::rewrite_trace_packet_status;
 using rocprofsys::core::TRACE_PACKETS_TAG;
 using rocprofsys::core::TRUSTED_SEQ_ID_TAG;
 
@@ -241,6 +243,26 @@ TEST(packet_framing_rewrite, offset_zero_leaves_seq_id_unchanged)
     append_varint(expected, 1u);
 
     EXPECT_EQ(inner, expected);
+}
+
+TEST(packet_framing_rewrite, checked_rewrite_rejects_seq_id_outside_limit)
+{
+    auto in = build_packet_with_placeholder_seq_id(0xBEEF, { 'q' });
+
+    std::vector<char> dst;
+    EXPECT_EQ(rewrite_trace_packet_checked(dst, in.data(), in.size(), 7, 8),
+              rewrite_trace_packet_status::seq_id_out_of_range);
+    EXPECT_TRUE(dst.empty()) << "failed checked rewrite must not append partial output";
+}
+
+TEST(packet_framing_rewrite, checked_rewrite_accepts_seq_id_below_limit)
+{
+    auto in = build_packet_with_placeholder_seq_id(0xBEEF, { 'q' });
+
+    std::vector<char> dst;
+    EXPECT_EQ(rewrite_trace_packet_checked(dst, in.data(), in.size(), 7, 9),
+              rewrite_trace_packet_status::success);
+    EXPECT_FALSE(dst.empty());
 }
 
 TEST(packet_framing_rewrite, rejects_truncated_varint_tag)

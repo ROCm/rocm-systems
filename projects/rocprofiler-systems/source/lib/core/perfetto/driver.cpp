@@ -10,18 +10,22 @@
 #include "core/perfetto/engine.hpp"
 #include "core/perfetto/fwd.hpp"
 #include "core/perfetto/sinks.hpp"
-#include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "library/runtime.hpp"
+#include <spdlog/fmt/fmt.h>
+
 #include "logger/debug.hpp"
 
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <fcntl.h>
+#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -78,14 +82,6 @@ std::atomic<live_perfetto_driver*> g_active_driver{ nullptr };
 // owning process, matching the threat model that profiling data may carry
 // callstacks the user does not want world-readable on shared workstations.
 constexpr ::mode_t TMP_FILE_PERMS = 0600;
-
-// Stride between per-process seq_id ranges in the cross-process merged
-// output. Each rocprof-sys instance (one per launcher rank) gets a
-// disjoint slice [rank*STRIDE+1, (rank+1)*STRIDE] of the
-// trusted_packet_sequence_id space when writing to the shared merged file
-// under append-with-flock mode. 1<<20 leaves room for ~1M unique
-// sources per rank, well past anything a single trace would produce.
-constexpr std::uint32_t MERGED_SEQ_ID_RANK_STRIDE = 1u << 20;
 
 }  // namespace
 
@@ -192,12 +188,37 @@ live_perfetto_driver::post_process(bool&                 perfetto_output_error,
         // against MPI. The shared filename is a literal so every rank
         // targets the same path.
         const auto base_filename = config::get_perfetto_output_filename();
-        const auto merged_path   = filepath::dirname(base_filename) + "/merged.proto";
-        const auto env_rank      = static_cast<std::uint32_t>(mpi::rank_from_env());
-        auto       sink          = core::single_file_sink{ registry, merged_path };
-        sink.set_append_mode(env_rank * MERGED_SEQ_ID_RANK_STRIDE);
-        sink.on_source_drained(static_cast<int>(env_rank), std::move(bytes));
-        sink.finalize();
+        const auto merged_path =
+            (std::filesystem::path{ base_filename }.parent_path() / "merged.proto")
+                .string();
+        const auto env_rank_raw = mpi::rank_from_env();
+        auto       seq_id_base  = std::optional<std::uint32_t>{};
+        if(env_rank_raw >= 0)
+        {
+            const auto env_rank = static_cast<std::uint32_t>(env_rank_raw);
+            seq_id_base         = core::append_seq_id_base_for_rank(env_rank);
+            if(!seq_id_base)
+            {
+                LOG_ERROR("live Perfetto merged output skipped: launcher rank {} exceeds "
+                          "the trusted_packet_sequence_id merge window",
+                          env_rank);
+            }
+        }
+        else
+        {
+            LOG_ERROR("live Perfetto merged output skipped: launcher rank {} is invalid",
+                      env_rank_raw);
+        }
+
+        if(seq_id_base)
+        {
+            const auto env_rank = static_cast<std::uint32_t>(env_rank_raw);
+            auto       sink     = core::single_file_sink{ registry, merged_path };
+            sink.set_append_mode(core::append_mode_config{ .seq_id_base  = *seq_id_base,
+                                                           .source_count = 1 });
+            sink.on_source_drained(static_cast<int>(env_rank), std::move(bytes));
+            sink.finalize();
+        }
     }
 
     if(m_tmp_file)

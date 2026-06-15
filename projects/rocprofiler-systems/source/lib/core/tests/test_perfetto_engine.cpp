@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <thread>
 #include <variant>
 #include <vector>
@@ -153,6 +154,29 @@ TEST(perfetto_engine, stop_without_start_is_noop)
 
     EXPECT_NO_THROW(engine.stop());
     EXPECT_FALSE(engine.is_running());
+}
+
+TEST(perfetto_engine, cached_start_with_system_backend_warns_and_stays_stopped)
+{
+    auto cfg    = make_test_config();
+    cfg.backend = rocprofsys::core::engine_config::backend_t::system;
+
+    rocprofsys::core::perfetto_engine engine{ cfg };
+    rocprofsys::core::trace_sink      sink{ rocprofsys::core::recording_sink{} };
+
+    ::testing::internal::CaptureStdout();
+    ::testing::internal::CaptureStderr();
+    engine.start(rocprofsys::core::perfetto_engine::mode::cached_interceptor, sink);
+    const auto stderr_output = ::testing::internal::GetCapturedStderr();
+    const auto stdout_output = ::testing::internal::GetCapturedStdout();
+
+    EXPECT_FALSE(engine.is_running());
+    EXPECT_THAT(stderr_output + stdout_output,
+                ::testing::HasSubstr("cached output is unsupported"));
+
+    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    EXPECT_FALSE(rec.finalized()) << "early-return warning path must not bind the sink";
+    EXPECT_TRUE(rec.records().empty());
 }
 
 TEST(perfetto_engine, read_trace_without_session_returns_empty)

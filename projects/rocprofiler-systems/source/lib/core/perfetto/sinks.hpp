@@ -6,6 +6,8 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -21,6 +23,38 @@ class output_file_registry;
 
 namespace core
 {
+// Stride between per-process seq_id ranges in the cross-process merged output.
+// Each rocprof-sys instance (one per launcher rank) gets a disjoint slice of
+// the trusted_packet_sequence_id space when writing to the shared merged file.
+inline constexpr std::uint32_t MERGED_SEQ_ID_RANK_STRIDE = 1u << 20;
+
+struct append_mode_config
+{
+    std::uint32_t seq_id_base        = 0;
+    std::uint32_t seq_id_window_size = MERGED_SEQ_ID_RANK_STRIDE;
+    std::size_t   source_count       = 1;
+};
+
+[[nodiscard]] constexpr std::optional<std::uint32_t>
+append_seq_id_base_for_rank(
+    std::uint32_t rank, std::uint32_t rank_stride = MERGED_SEQ_ID_RANK_STRIDE) noexcept
+{
+    if(rank_stride == 0) return std::nullopt;
+
+    constexpr auto max_exclusive =
+        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+
+    const auto base = static_cast<std::uint64_t>(rank) * rank_stride;
+    if(base > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+
+    // set_append_mode starts the process slice at base+1, so a full rank window
+    // is valid only when the last possible id (base + rank_stride) is still a
+    // std::uint32_t value.
+    if(base + rank_stride >= max_exclusive) return std::nullopt;
+
+    return static_cast<std::uint32_t>(base);
+}
+
 // Live-mode sink: writes the engine's drained bytes to the configured
 // per-rank output filename. Used by live_perfetto_driver for the per-rank
 // file under the per_process_only and full layouts; cross-rank merging
@@ -121,7 +155,7 @@ public:
     // used by the live + cached MPI merge paths so the same mechanism
     // works whether rocprof-sys is linked against MPI or only built with
     // MPI headers (and the workload is launched under mpiexec/srun).
-    void set_append_mode(std::uint32_t seq_id_base) noexcept;
+    void set_append_mode(append_mode_config config) noexcept;
 
     // Test-only inspector: exposes the accumulated rewritten bytes before
     // finalize() so unit tests can assert per-source seq_id offsetting
@@ -141,12 +175,17 @@ private:
     // inside the 1<<20 per-rank window the MPI merge path uses.
     static constexpr std::uint32_t PER_SOURCE_SEQ_ID_BASE_STRIDE = 1u << 16;
 
+    static constexpr std::uint64_t TRUSTED_SEQ_ID_MAX_EXCLUSIVE =
+        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
     output_file_registry*                  m_registry{ nullptr };
     std::string                            m_output_filename_override{};
     std::vector<char>                      m_buffer{};
     std::unordered_map<int, std::uint32_t> m_source_seq_id_bases{};
-    std::uint32_t                          m_next_source_base{ 1 };
+    std::uint64_t                          m_next_source_base{ 1 };
     bool                                   m_append_mode{ false };
+    std::uint32_t m_source_stride{ PER_SOURCE_SEQ_ID_BASE_STRIDE };
+    std::uint64_t m_seq_id_window_limit_exclusive{ TRUSTED_SEQ_ID_MAX_EXCLUSIVE };
+    bool          m_output_disabled{ false };
 };
 
 // Composite sink that fans every drained source out to both wrapped sinks.

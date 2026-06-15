@@ -304,8 +304,8 @@ perfetto_engine::start(mode m, int fd)
 
     if(is_system_backend())
     {
-        // System backend owns the session; engine has nothing to drive.
-        // Match perfetto.cpp:start() pre-refactor behaviour (early return).
+        LOG_WARNING(
+            "Perfetto's system backend owns the session - Engine has nothing to drive");
         return;
     }
 
@@ -338,6 +338,10 @@ perfetto_engine::start(mode m, trace_sink& sink)
     {
         // System backend can't drive an interceptor-routed cached session;
         // mirror live-mode early return.
+        LOG_WARNING("Perfetto cached output is unsupported with the system/all "
+                    "backend; no cached Perfetto trace will be produced. Use the "
+                    "inprocess backend for ROCPROFSYS_PERFETTO_OUTPUT_LAYOUT "
+                    "single-file or full cached output.");
         return;
     }
 
