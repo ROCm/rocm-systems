@@ -153,11 +153,7 @@ def generate_machine_specs(
                     "You need to reprofile to update data."
                 )
 
-            # Normalize arch aliases to canonical config targets
-            sysinfo_norm = dict(sysinfo)
-            gpu_arch = sysinfo_norm.get("gpu_arch")
-            sysinfo_norm["gpu_arch"] = {"gfx1152": "gfx1151"}.get(gpu_arch, gpu_arch)
-            return MachineSpecs(**sysinfo_norm)
+            return MachineSpecs(**sysinfo)
         except KeyError:
             console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile "
@@ -411,14 +407,6 @@ class MachineSpecs:
             "doc": "The version of the machine specification file format.",
             "name": "MachineSpecs Version",
             "intable": False,
-            "show_in_table": True,
-        },
-    )
-    timestamp: Optional[str] = field(
-        default=None,
-        metadata={
-            "doc": "The time (in local system time) when data was collected",
-            "name": "Timestamp",
             "show_in_table": True,
         },
     )
