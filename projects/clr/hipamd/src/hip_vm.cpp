@@ -516,6 +516,7 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
 
   // Pass 3: Sub-buffer unmap loop. Pass 1 validated every entry, so the only
   // remaining failure mode here is a HW virtualUnmap failure.
+  cl_int first_cl_err = CL_SUCCESS;
   address end_address = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) + size;
   while (vaddr_sub_obj && NextSubBufferPtr(vaddr_sub_obj) <= end_address) {
     amd::Memory* phys_mem_obj = vaddr_sub_obj->getUserData().phys_mem_obj;
@@ -530,11 +531,11 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
     cl_int cl_err = sub_dev->virtualUnmap(sub_va, sub_size);
     if (cl_err != CL_SUCCESS) {
       LogPrintfError("hipMemUnmap: virtualUnmap failed for va: %p", sub_va);
-      // Backend keeps bookkeeping intact on failure, but the ga retain is a
-      // HIP-layer ref owned by the caller-visible mapping; release it here so
-      // it does not leak.
-      ga->release();
-      HIP_RETURN(ConvertCLErrorIntoHIPError(cl_err));
+      if (first_cl_err == CL_SUCCESS) {
+        first_cl_err = cl_err;
+      }
+      vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
+      continue;
     }
 
     // Release the ga ref only on successful HW unmap.
@@ -543,6 +544,10 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
     // sub_obj already released inside UnmapMemObjBookkeeping (called from
     // virtualUnmap on success).
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(next_ptr);
+  }
+
+  if (first_cl_err != CL_SUCCESS) {
+    HIP_RETURN(ConvertCLErrorIntoHIPError(first_cl_err));
   }
 
   HIP_RETURN(hipSuccess);
