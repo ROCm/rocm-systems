@@ -2232,7 +2232,6 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetManaged_fn, 536);
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
 HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 537)
 
-// Step 30 is enum-only (#6596); no new function pointer, so 537 is unchanged.
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 30,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
