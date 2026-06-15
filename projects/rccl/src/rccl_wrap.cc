@@ -410,6 +410,7 @@ static int symkHostRedOpToDev(ncclRedOp_t op) {
   case ncclProd: return (int)ncclDevProd;
   case ncclMin:
   case ncclMax:  return (int)ncclDevMinMax;
+  case ncclAvg:  return (int)ncclDevSumPostDiv;
   default:       return -1;
   }
 }
