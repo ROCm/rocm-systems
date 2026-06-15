@@ -95,12 +95,17 @@ The relationship is therefore:
 ```text
 System
  └── Socket 0  (physical GPU / OAM)      ← amdsmi_socket_handle
-      ├── Processor 0  (XCP 0 / logical GPU)  ← amdsmi_processor_handle
-      ├── Processor 1  (XCP 1 / logical GPU)  ← amdsmi_processor_handle
+      ├── Processor 0  (XCP 0 / logical GPU / primary)    ← amdsmi_processor_handle: gpu_metrics + xcp_metrics (e.g. renderD128)
+      ├── Processor 1  (XCP 1 / logical GPU / secondary)  ← amdsmi_processor_handle: xcp_metrics only         (e.g. renderD129)
       └── ...  (count depends on active partition mode)
  └── Socket 1  (physical GPU / OAM)
       └── ...
 ```
+
+AMD SMI treats Processor 0 (XCP 0) as the device's **primary partition**. The primary
+partition has full visibility into **both device-level and partition-level metrics** and can
+manage the whole physical GPU. All other partitions are **secondary partitions**, scoped to
+their own resources.
 
 **Practical implications**
 
@@ -113,6 +118,12 @@ System
 - Metrics such as socket power (`socket_power`, `average_socket_power`) are reported at
   the socket level and reflect the total physical GPU. Per-XCP metrics (clocks, utilization,
   violations) are reported at the processor handle level.
+- Partition (XCP) and device-level metrics come from **separate sysfs sources**. The
+  device-wide `gpu_metrics` node exists only on the **primary partition** (XCP 0, e.g.
+  `renderD128/device/gpu_metrics`), so only the primary partition can report whole-GPU
+  values such as board power. **Secondary partitions** expose only their own `xcp_metrics`
+  (e.g. `renderD129/device/xcp/xcp_metrics`) and therefore report metrics scoped to that
+  partition — the device-wide set is not present on their node.
 - On a bare-metal system `amdsmi_get_socket_handles()` returns one handle per physical
   GPU. On a hypervisor host the socket model reflects the physical topology. Inside an
   SR-IOV guest, each assigned VF appears as a separate processor handle, but the socket
@@ -706,25 +717,25 @@ APIs, see
 [`example/amd_smi_drm_example.cc`](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/example/amd_smi_drm_example.cc).
 
 **Bare metal and SR-IOV host:**
-- `amdsmi_get_gpu_accelerator_partition_profile_config()` -- Get all supported accelerator
+- {c:func}`amdsmi_get_gpu_accelerator_partition_profile_config` -- Get all supported accelerator
   partition profiles and their valid profile indexes.
-- `amdsmi_get_gpu_accelerator_partition_profile()` -- Get the current accelerator partition
+- {c:func}`amdsmi_get_gpu_accelerator_partition_profile` -- Get the current accelerator partition
   profile and partition IDs.
-- `amdsmi_set_gpu_accelerator_partition_profile()` -- Set an accelerator partition by profile
-  index (obtained from `amdsmi_get_gpu_accelerator_partition_profile_config()`).
-- `amdsmi_get_gpu_memory_partition_config()` -- Query the current NPS mode and supported NPS modes.
-- `amdsmi_set_gpu_memory_partition_mode()` -- Set the NPS memory partition mode.
-- `amdsmi_gpu_driver_reload()` -- Reload the amdgpu driver to apply memory partition changes.
+- {c:func}`amdsmi_set_gpu_accelerator_partition_profile` -- Set an accelerator partition by profile
+  index (obtained from {c:func}`amdsmi_get_gpu_accelerator_partition_profile_config`).
+- {c:func}`amdsmi_get_gpu_memory_partition_config` -- Query the current NPS mode and supported NPS modes.
+- {c:func}`amdsmi_set_gpu_memory_partition_mode` -- Set the NPS memory partition mode.
+- {c:func}`amdsmi_gpu_driver_reload` -- Reload the amdgpu driver to apply memory partition changes.
 
 **Bare metal only:**
-- `amdsmi_get_gpu_compute_partition()` -- Query the current compute partition setting as a string.
-- `amdsmi_set_gpu_compute_partition()` -- Set the compute partition mode by enum.
-- `amdsmi_get_gpu_memory_partition()` -- Query the current memory partition mode as a string.
-- `amdsmi_set_gpu_memory_partition()` -- Set the memory partition mode by enum.
+- {c:func}`amdsmi_get_gpu_compute_partition` -- Query the current compute partition setting as a string.
+- {c:func}`amdsmi_set_gpu_compute_partition` -- Set the compute partition mode by enum.
+- {c:func}`amdsmi_get_gpu_memory_partition` -- Query the current memory partition mode as a string.
+- {c:func}`amdsmi_set_gpu_memory_partition` -- Set the memory partition mode by enum.
 
-See [Compute Partition Functions](/doxygen/docBin/html/group__tagComputePartition),
-[Memory Partition Functions](/doxygen/docBin/html/group__tagMemoryPartition), and
-[Accelerator Partition Profile Functions](/doxygen/docBin/html/group__tagAcceleratorPartition)
+See {ref}`Compute Partition Functions <tagComputePartition>`,
+{ref}`Memory Partition Functions <tagMemoryPartition>`, and
+{ref}`Accelerator Partition Profile Functions <tagAcceleratorPartition>`
 for the full API reference.
 ::::
 

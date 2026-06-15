@@ -1,0 +1,13 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471691980,8496986471711980,0,CPC_CPC_STAT_STALL,9370.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471691980,8496986471711980,0,CPC_CPC_TCIU_BUSY,352.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471691980,8496986471711980,0,CPF_CPF_STAT_IDLE,0.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,1,0,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471691980,8496986471711980,0,CPF_CPF_STAT_STALL,0.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471879341,8496986471895821,0,CPC_CPC_STAT_STALL,8361.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471879341,8496986471895821,0,CPC_CPC_TCIU_BUSY,302.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471879341,8496986471895821,0,CPF_CPF_STAT_IDLE,0.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,2,1,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986471879341,8496986471895821,0,CPF_CPF_STAT_STALL,0.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986472103823,8496986472120143,0,CPC_CPC_STAT_STALL,8591.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986472103823,8496986472120143,0,CPC_CPC_TCIU_BUSY,302.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986472103823,8496986472120143,0,CPF_CPF_STAT_IDLE,0.0
+2,0001fa75-b7aa-77aa-982c-92dab8af76e7,3,2,1048576,256,0,0,8,0,16,"vecCopy(double*, double*, double*, int, int)",8496986472103823,8496986472120143,0,CPF_CPF_STAT_STALL,0.0

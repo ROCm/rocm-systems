@@ -34,13 +34,13 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
       upload_artifacts: true
 
-  build_and_test_cxx20:
+  build_and_test_cxx23:
     if: ${{ inputs.platform != 'rocky8' }}
     uses: ./.github/workflows/hipfile-build.yml
     with:
       ci_image: ${{ inputs.ci_image }}
       cxx_compiler: amdclang++
-      cxx_standard: 20
+      cxx_standard: 23
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
       upload_artifacts: false

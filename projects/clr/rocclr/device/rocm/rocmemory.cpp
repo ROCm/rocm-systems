@@ -706,7 +706,7 @@ void Buffer::destroy() {
       if (memFlags & CL_MEM_USE_HOST_PTR) {
         // unlock svm host pointer from memory pool
         if (!dev().info().hmmSupported_) {
-          dev().hostUnlock(owner()->getSvmPtr(), size());
+          Hsa::memory_unlock(owner()->getSvmPtr());
         }
         // destroy system memory
         if (!(amd::Os::releaseMemory(deviceMemory_, size()))) {
@@ -749,8 +749,7 @@ void Buffer::destroy() {
 
     if (needUnlockHostMem) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-        if (dev().agent_profile() != HSA_PROFILE_FULL)
-          dev().hostUnlock(owner()->getHostMem(), size());
+        if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
     }
   }
@@ -808,7 +807,8 @@ bool Buffer::create(bool alloc_local) {
     if (memFlags & ROCCLR_MEM_INTERPROCESS) {
       // if interprocess flag is set, then the memory is importable.
       if (!dev().ImportShareableHSAHandle(owner()->getSvmPtr(),
-                                          &owner()->getUserData().hsa_handle)) {
+                                          &owner()->getUserData().hsa_handle,
+                                          owner()->getUserData().hsa_handle_type)) {
         LogPrintfError("Importing Shareable Memory failed with os_handle: 0x%x",
                        owner()->getSvmPtr());
         return false;

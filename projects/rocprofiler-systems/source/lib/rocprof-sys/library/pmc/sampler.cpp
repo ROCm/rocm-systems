@@ -25,13 +25,13 @@
 #include "library/pmc/collectors/cpu/perfetto_policy.hpp"
 #include "library/pmc/device_providers/procfs/provider.hpp"
 
+#include "backends/amd_smi/backend.hpp"
 #include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/state.hpp"
-#include "library/pmc/device_providers/amd_smi/drivers/driver.hpp"
 #if ROCPROFILER_VERSION >= 600
-#    include "library/pmc/device_providers/rocprofiler_sdk/drivers/driver.hpp"
+#    include "backends/rocprofiler_sdk/backend.hpp"
 #endif
 #include "library/runtime.hpp"
 
@@ -39,7 +39,6 @@
 
 #include "logger/debug.hpp"
 
-#include <amd_smi/amdsmi.h>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/mpl/type_traits.hpp>
@@ -100,13 +99,13 @@ struct cpu_production_config
 };
 
 using provider_factory_t =
-    device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
+    device_providers::amd_smi::provider_factory<backends::amd_smi::backend_factory>;
 using provider_t      = provider_factory_t::provider_t;
 using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
 
 #if ROCPROFILER_VERSION >= 600
-using gpu_perf_counter_provider_t =
-    device_providers::rocprofiler_sdk::provider<drivers::rocprofiler_sdk::driver_factory>;
+using gpu_perf_counter_provider_t = device_providers::rocprofiler_sdk::provider<
+    backends::rocprofiler_sdk::backend_factory>;
 using gpu_perf_counter_collector_t =
     collectors::gpu_perf_counter::collector<gpu_perf_counter_provider_t>;
 #endif
@@ -116,7 +115,7 @@ using nic_collector_t = collectors::nic::collector<provider_t, nic_production_co
 #endif
 
 using cpu_provider_factory_t =
-    device_providers::procfs::provider_factory<drivers::procfs::driver_factory>;
+    device_providers::procfs::provider_factory<backends::procfs::backend_factory>;
 using cpu_provider_t  = cpu_provider_factory_t::provider_t;
 using cpu_collector_t = collectors::cpu::collector<cpu_provider_t, cpu_production_config>;
 

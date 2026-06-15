@@ -59,51 +59,46 @@ Panel Config:
             SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk * $cu_per_gpu * 0.128
-          pop: 100 * SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * TO_INT($lds_banks_per_cu))
-            / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk * $cu_per_gpu * 0.128)
+          pop: true
         vL1D Cache BW:
           value: SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 128 * $cu_per_gpu
-          pop: 100 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
-            / ($max_sclk / 1000 * 128 * $cu_per_gpu)
+          pop: true
         L2 Cache BW:
           value: SUM(TCC_REQ_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 128 * TO_INT($total_l2_chan)
-          pop: 100 * SUM(TCC_REQ_sum * 128) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk /
-            1000 * 128 * TO_INT($total_l2_chan))
+          pop: true
         L2-Fabric Read BW:
           value: SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum + 32 *
             TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $hbmBandwidth
-          pop: 100 * SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum + 32 *
-            TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp) / $hbmBandwidth
+          pop: true
         L2-Fabric Write BW:
           value: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)
             / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $hbmBandwidth
-          pop: 100 * SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) *
-            32) / SUM(End_Timestamp - Start_Timestamp) / $hbmBandwidth
+          pop: true
         Kernel Time:
           avg: AVG(End_Timestamp - Start_Timestamp)
           unit: ns
           peak: N/A
-          pop: N/A
+          pop: false
         Kernel Time (Cycles):
           avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Cycle
           peak: N/A
-          pop: N/A
+          pop: false
         SIMD Utilization:
           value: SUM(100 * SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           unit: Percent
           peak: 100
-          pop: SUM(100 * SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+          pop: false
         Clock Rate:
           value: GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu / (End_Timestamp - Start_Timestamp)
           unit: GHz
           peak: N/A
-          pop: N/A
+          pop: false
