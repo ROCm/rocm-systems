@@ -1838,6 +1838,7 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
   int teamSize = devr->ceSize;
   int teamSelf = devr->ceSelf;
   bool ipcBacked = teamSize > 1;
+  int winIdx = -1;
 
   // Decode win from winDev: IPC uses shadow pool, PROXY type-puns.
   if (ipcBacked) {
@@ -1847,6 +1848,22 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
     win = (struct ncclDevrWindow*)winDevHost->winHost;
   } else {
     win = reinterpret_cast<struct ncclDevrWindow*>(winDev);
+  }
+
+  // Locate this window's registration. A stale handle (e.g. a second
+  // deregister of an already-freed window) is no longer in winSorted
+  for (int i = 0; i < devr->winSortedCount; i++) {
+    if (devr->winSorted[i].win == win) {
+      winIdx = i;
+      break;
+    }
+  }
+  if (winIdx < 0) {
+    WARN("ncclCommWindowDeregister: window %p is not registered (already "
+         "deregistered?)",
+         (void*)winDev);
+    ret = ncclInvalidArgument;
+    goto fail;
   }
 
   // Undo stage 2: inter-node proxy MR. rmaHostWins[0] is a reliable witness
@@ -1883,13 +1900,7 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
   }
 
   NCCLCHECKGOTO(ncclCommDeregister(comm, win->localRegHandle), ret, fail);
-  {
-    int i = listFindSortedLub(&ncclDevrWindowSorted::userAddr, devr->winSorted,
-                              devr->winSortedCount,
-                              reinterpret_cast<uintptr_t>(win->userPtr));
-    i -= 1;
-    listRemove(devr->winSorted, &devr->winSortedCount, i);
-  }
+  listRemove(devr->winSorted, &devr->winSortedCount, winIdx);
   free(win);
   return ncclSuccess;
 
