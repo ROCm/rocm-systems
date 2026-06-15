@@ -21,7 +21,16 @@
 import importlib
 from pathlib import Path
 
-BENCHMARKING_SUPPORTED = ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950", "gfx1151"]
+BENCHMARKING_SUPPORTED = [
+    "gfx90a",
+    "gfx940",
+    "gfx941",
+    "gfx942",
+    "gfx950",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+]
 
 
 def run_roofline_benchmark(

@@ -516,7 +516,7 @@ Two-step workflow:
 Roofline visualization options (available only in analyze mode):
 
 * ``--sort``: Overlay top kernels or top dispatches (default: kernels)
-* ``--mem-level``: Filter by memory level -- HBM, L2, L1, L0, LDS (default: ALL)
+* ``--mem-level``: Filter by memory level -- HBM, L2, vL1D, L0, LDS (default: ALL)
 * ``--roofline-data-type``: Choose datatypes for roofline visualization (default: FP32)
    * Multiple data types can be provided with this option in order to isolate and visualize said types in a single plot.
    * Note: layering more than one data type could create a cluttered plot
