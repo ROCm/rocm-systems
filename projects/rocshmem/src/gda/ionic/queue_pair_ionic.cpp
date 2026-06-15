@@ -326,7 +326,7 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
   wqe->common.length = byteswap<uint32_t>(length);
 
   if (length) {
-    if (opcode == IONIC_V2_OP_RDMA_WRITE && length <= inline_threshold) {
+    if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold)) {
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
@@ -351,7 +351,8 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
 }
 
 __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode) {
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+    uint32_t rkey, uint8_t opcode, bool ring_db) {
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
@@ -392,13 +393,15 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(laddr ? get_lkey(laddr) : 0);
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
     }
   }
 
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 
-  commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
+  if (ring_db) {
+    commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
+  }
 }
 
 __device__ uint64_t QueuePair::ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
@@ -477,8 +480,8 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey
 }
 
 __device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-    bool fetching) {
+    uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, bool fence) {
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
@@ -500,6 +503,9 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
   }
 
   wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
+  if (fence) {
+    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_FENCE);
+  }
 
   wqe->base.wqe_idx = my_sq_pos;
   wqe->base.op = opcode;

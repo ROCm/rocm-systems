@@ -236,7 +236,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
   uint32_t hdr_flags;
   uint32_t inline_msg;
 
-  inline_msg = length <= inline_threshold &&
+  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
                opcode == gda_op_rdma_write;
 
   bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -311,13 +311,10 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
 }
 
 __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t size,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
-  uint32_t lkey = (static_cast<uint32_t>(size) <= inline_threshold && opcode == gda_op_rdma_write)
-      ? 0 : get_lkey(laddr);
-
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, bool ring_db) {
   lock(&bnxt_sq.lock);
 
-  /* Write WQE to SQ */
   bnxt_write_rma_wqe(size, raddr, rkey, laddr, lkey, opcode);
 
   if (ring_db) {
@@ -424,13 +421,13 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
 }
 
 __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
+    uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, bool fence) {
   uint32_t atomic_idx = 0;
 
   lock(&bnxt_sq.lock);
 
-  /* Write WQE to SQ */
-  atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, false);
+  atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 
   bnxt_ring_doorbell(bnxt_sq.tail);
 

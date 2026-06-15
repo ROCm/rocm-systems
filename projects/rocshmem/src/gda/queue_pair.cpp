@@ -169,45 +169,24 @@ __device__ void QueuePair::post_wqe_rma(
   }
 }
 
-__device__ void QueuePair::post_wqe_rma_single([[maybe_unused]] int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, [[maybe_unused]] bool ring_db) {
+__device__ void QueuePair::post_wqe_rma_single(int32_t size,
+    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, bool ring_db) {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma_single(size, laddr, raddr, opcode);
+    ionic_post_wqe_rma_single(size, laddr, lkey, raddr, rkey, opcode, ring_db);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    bnxt_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db);
+    bnxt_post_wqe_rma_single(size, laddr, lkey, raddr, rkey, opcode, ring_db);
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db);
+    mlx5_post_wqe_rma_single(size, laddr, lkey, raddr, rkey, opcode, ring_db);
     return;
-#endif
-  default:
-    assert(false /* invalid nic provider */);
-    __builtin_unreachable();
-  }
-}
-
-__device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
-  switch (constmem.gda_provider) {
-#if defined(GDA_IONIC)
-  case GDAProvider::IONIC:
-    return ionic_post_wqe_amo_single(raddr, opcode, atomic_data, atomic_cmp, fetching);
-#endif
-#if defined(GDA_BNXT)
-  case GDAProvider::BNXT:
-    return bnxt_post_wqe_amo_single(raddr, opcode, atomic_data, atomic_cmp,
-           fetching);
-#endif
-#if defined(GDA_MLX5)
-  case GDAProvider::MLX5:
-    return mlx5_post_wqe_amo_single(raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
   default:
     assert(false /* invalid nic provider */);
@@ -233,6 +212,29 @@ __device__ uint64_t QueuePair::post_wqe_amo(uintptr_t raddr, uint32_t rkey,
   case GDAProvider::MLX5:
     return mlx5_post_wqe_amo(raddr, rkey, opcode, atomic_data, atomic_cmp,
            wf_info, fetching, fence);
+#endif
+  default:
+    assert(false /* invalid nic provider */);
+    __builtin_unreachable();
+  }
+}
+
+__device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
+    uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, bool fence) {
+  switch (constmem.gda_provider) {
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+    return ionic_post_wqe_amo_single(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
+#endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    return bnxt_post_wqe_amo_single(raddr, rkey, opcode, atomic_data, atomic_cmp,
+           fetching, fence);
+#endif
+#if defined(GDA_MLX5)
+  case GDAProvider::MLX5:
+    return mlx5_post_wqe_amo_single(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 #endif
   default:
     assert(false /* invalid nic provider */);
@@ -313,14 +315,29 @@ __device__ void QueuePair::put_nbi_single(void *dest, const void *source,
     size_t length, bool ring_db) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma_single(length, src, dst, gda_op_rdma_write, ring_db);
+  uint32_t src_lkey = (length <= inline_threshold)
+      ? 0 : get_lkey(src);
+  post_wqe_rma_single(length, src, src_lkey, dst, rkey,
+                       gda_op_rdma_write, ring_db);
+}
+
+__device__ void QueuePair::put_nbi_single(void *raddr, uint32_t rkey,
+    const void *laddr, uint32_t lkey,
+    size_t length, bool ring_db) {
+  uintptr_t l = reinterpret_cast<uintptr_t>(laddr);
+  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
+  post_wqe_rma_single(length, l, lkey, r, rkey,
+                       gda_op_rdma_write, ring_db);
 }
 
 __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t length, bool ring_db) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma_single(length, dst, src, gda_op_rdma_read, ring_db);
+  uint32_t dst_lkey = get_lkey(dst);
+  post_wqe_rma_single(length, dst, dst_lkey, src, rkey,
+                       gda_op_rdma_read, ring_db);
 }
+
 
 __device__ void QueuePair::get_nbi(void *dest, const void *source,
     size_t length, ActiveWFInfo &wf_info) {
@@ -362,7 +379,13 @@ __device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data,
 
 __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_amo_single(dst, gda_op_atomic_fa, value, 0, false);
+  post_wqe_amo_single(dst, rkey, gda_op_atomic_fa, value, 0);
+}
+
+__device__ void QueuePair::atomic_add_single(void *raddr, uint32_t rkey,
+    int64_t value, bool fence) {
+  uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
+  post_wqe_amo_single(r, rkey, gda_op_atomic_fa, value, 0, false, fence);
 }
 
 __device__ void QueuePair::atomic_add(void *raddr, uint32_t rkey,
