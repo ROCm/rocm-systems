@@ -90,10 +90,16 @@ mod tests {
     }
 
     #[test]
-    fn every_profile_is_containerised_with_default_image() {
+    fn no_profile_is_containerised() {
+        // Builtin profiles are plain (non-containerised); container
+        // settings are layered on at session-create time via CLI flags,
+        // not baked into the builtin definitions.
         for (_, p) in profiles() {
-            let c = p.containerize.expect("builtin profiles are containerised");
-            assert_eq!(c.image, DEFAULT_IMAGE);
+            assert!(
+                p.containerize.is_none(),
+                "builtin profile {} must not be containerised",
+                p.name
+            );
         }
     }
 }

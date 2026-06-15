@@ -711,7 +711,7 @@ mod tests {
             name: name.to_string(),
             description: None,
             emulator: crate::emulator::EmulatorDef {
-                emulator: crate::emulator::EmulatorKind::Noop,
+                emulator: "noop".to_string(),
                 plugins: Default::default(),
                 exec_mode: Default::default(),
                 options: Default::default(),

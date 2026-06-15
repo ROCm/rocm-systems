@@ -306,7 +306,14 @@ fn json_output_is_parseable() {
         .output()
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v, serde_json::json!(["p"]));
+    // The CLI auto-seeds builtin profiles on first run, so the list also
+    // contains those; just assert it parses as an array that includes the
+    // profile we created.
+    let names = v.as_array().expect("profile list should be a JSON array");
+    assert!(
+        names.contains(&serde_json::json!("p")),
+        "expected created profile in list, got {v}"
+    );
 }
 
 #[test]

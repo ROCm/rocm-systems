@@ -5,7 +5,7 @@
 //! discoverable on this machine (rocjitsu not installed).
 
 use mirage_core::common::MaybeRef;
-use mirage_core::emulator::{EmulatorDef, EmulatorKind, ExecMode};
+use mirage_core::emulator::{EmulatorDef, ExecMode};
 use mirage_rocjitsu::{kmd_config, kmd_preload};
 
 #[test]
@@ -25,7 +25,7 @@ fn sim_config_round_trip() {
             .next()
             .expect("at least one builtin agent");
         let def = EmulatorDef {
-            emulator: EmulatorKind::Rocjitsu,
+            emulator: "rocjitsu".to_string(),
             plugins: Default::default(),
             exec_mode: ExecMode::Functional,
             options: Default::default(),
