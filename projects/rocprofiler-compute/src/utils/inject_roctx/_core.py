@@ -9,8 +9,10 @@ RecordFunction backend. Backends interact only through _push_scope,
 _pop_scope, and the helpers defined here.
 """
 
+import importlib
 import inspect
 import os
+import sys
 import threading
 from functools import wraps
 from pathlib import Path
@@ -40,6 +42,9 @@ _range_pop: Callable[[], None] = _missing_range_pop
 _native_tier_hook: Optional[NativeTierHook] = None
 _framework_roots: list[str] = []
 
+# ROCm site directories probed for the roctx module.
+_roctx_candidate_paths: list[str] = []
+
 # Frames under the package directory are skipped during caller-location
 # resolution.
 _PACKAGE_ROOT: str = str(Path(__file__).resolve().parent) + os.sep
@@ -52,6 +57,45 @@ def set_python_tier_io(
     global _range_push, _range_pop
     _range_push = push
     _range_pop = pop
+
+
+def python_tier_configured() -> bool:
+    """True once the Python-tier push/pop callbacks have been wired."""
+    return _range_push is not _missing_range_push
+
+
+def get_python_tier_io() -> tuple[Callable[[str], None], Callable[[], None]]:
+    """Return the currently wired (rangePush, rangePop) callbacks."""
+    return _range_push, _range_pop
+
+
+def roctx_candidate_paths() -> list[str]:
+    """Return the directories probed for the roctx module."""
+    return list(_roctx_candidate_paths)
+
+
+def ensure_python_tier() -> bool:
+    """Wire the Python-tier rangePush/rangePop callbacks from the ROCm roctx
+    module. Idempotent; returns True if the Python tier is configured.
+    """
+    if python_tier_configured():
+        return True
+    global _roctx_candidate_paths
+    rocm_root = os.environ.get("ROCM_PATH", "/opt/rocm")
+    py = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    _roctx_candidate_paths = [
+        f"{rocm_root}/lib/{py}/site-packages",
+        f"{rocm_root}/libexec/rocprofiler-sdk/python",
+    ]
+    for candidate in _roctx_candidate_paths:
+        if candidate not in sys.path:
+            sys.path.insert(0, candidate)
+    try:
+        roctx_mod = importlib.import_module("roctx")
+    except ImportError:
+        return False
+    set_python_tier_io(roctx_mod.rangePush, roctx_mod.rangePop)
+    return True
 
 
 def set_native_tier_hook(hook: Optional[NativeTierHook]) -> None:
