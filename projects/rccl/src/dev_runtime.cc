@@ -483,13 +483,6 @@ static ncclResult_t symMemoryObtain(
     NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
   }
 
-  // ginEnabled is set in ncclDevrCommCreateInternal, which might not be called for RMA proxy
-  // so we introduce rmaProxyEnabled to track if RMA proxy is enabled
-  devr->rmaProxyEnabled = comm->globalRmaProxySupport;
-  if (devr->rmaProxyEnabled) {
-    NCCLCHECKGOTO(symMemoryRegisterRma(comm, mem), ret, fail_mem_space_teams);
-  }
-
   // Add to list of mems.
   mem->next = devr->memHead;
   devr->memHead = mem;
