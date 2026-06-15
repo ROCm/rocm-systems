@@ -15,7 +15,7 @@ been replaced by an in-tree capture layer built directly into `amdhip64`. Key ch
 | **Handle IDs**                 | Sequential `uint32_t` per type            | Raw pointer cast to `uint64_t`                     |
 | **Stream capture**             | Not captured                              | Full stream create/destroy + event record           |
 | **Graph capture**              | Not captured                              | Full `hipStreamBeginCapture` → `hipGraphLaunch`    |
-| **Fat-binary launch path**     | Not captured                              | Compiler dispatch table slot + TLS                 |
+| **Fat-binary launch path**     | Not captured                              | Compiler dispatch table slot + TLS (args included) |
 | **Capture shim generation**    | Manual updates per new API                | `gen_hrr_api_args.py` auto-generates all shims     |
 | **D2H data validation**        | None                                      | Blob compare on every D2H memcpy                   |
 | **Pinned host mem (register)** | Not captured                              | `hipHostRegister` blob snapshot + playback restore |
@@ -227,6 +227,13 @@ grid/block/shared/stream into thread-local storage) then `hipLaunchByPtr`. Both 
 are hooked in `HipCompilerDispatchTable`; `hipLaunchByPtr` reads the TLS values and
 calls `serialize_kernel_launch()`.
 
+Kernel arguments are captured from the per-thread exec stack: `hipSetupArgument`
+accumulates the packed kernarg buffer into `hip::tls.exec_stack_.top().arguments_`
+(indexed by descriptor offset), which `capture_hipLaunchByPtr` snapshots *before*
+calling the real function — the real `hipLaunchByPtr` `PopExec`'s (moves out) that
+exec, so the copy must happen first. The snapshot feeds the same `kbuf` serialization
+path used by `hipModuleLaunchKernel`.
+
 ## Generator — `gen_hrr_api_args.py`
 
 A single Python script produces three files from `hip_api_trace.hpp`:
@@ -416,6 +423,12 @@ required ~360 lines for this). Hidden runtime-injected args are skipped via
 `extra[]` (pre-packed buffer pointed to by `HIP_LAUNCH_PARAM_BUFFER_POINTER`) and
 `kernelParams[]` (void** array reconstructed into a packed buffer using the signature).
 
+The `<<<>>>` path (`hipLaunchByPtr`) is also fully supported: `hipSetupArgument` packs
+the kernarg buffer into the per-thread exec stack (`hip::tls.exec_stack_.top().arguments_`)
+before the launch, and `capture_hipLaunchByPtr` snapshots it (a copy, since the real
+`hipLaunchByPtr` moves the exec out via `PopExec`) and feeds it through the same
+signature-driven serialization path.
+
 `co_hash` is always written as 0 in kernel launch events — no cheap mapping from
 kernel to code object at dispatch time. Playback resolves kernels by name, scanning
 all loaded modules.
@@ -590,22 +603,6 @@ pointer-based memcpy APIs are unaffected.
 **Workaround:** none currently. A fix would require recording the variable name and
 host pointer, then at playback calling `hipModuleGetGlobal` on the loaded module to
 resolve the device address and rebuilding the symbol table entry.
-
-### `hipLaunchByPtr` — Kernel Args Not Captured
-
-The `<<<>>>` launch path (`__hipPushCallConfiguration` + `hipLaunchByPtr`) does not
-support kernel argument capture. Grid/block/shared/stream are saved in thread-local
-storage and recorded correctly. However `hipLaunchByPtr` receives only a function
-pointer — the kernarg buffer is assembled by the compiler-generated wrapper _after_
-`hipLaunchByPtr` returns, and is never accessible to the capture shim.
-
-**Impact:** kernels launched via `<<<>>>` syntax are recorded with correct
-grid/block/stream but with zero arguments. At replay the kernel is launched with a
-zeroed kernarg buffer, which gives wrong results for any kernel that reads its
-arguments.
-
-**Workaround:** capture workloads that use `hipModuleLaunchKernel` /
-`hipExtModuleLaunchKernel` directly, or modify the workload to use the explicit API.
 
 ### `co_hash` Always Zero in Kernel Launch Events
 

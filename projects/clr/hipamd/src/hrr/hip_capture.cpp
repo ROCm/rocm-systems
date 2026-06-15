@@ -606,6 +606,15 @@ hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim,
 }
 
 hipError_t capture_hipLaunchByPtr(const void* func) {
+  // The kernarg buffer is accumulated by hipSetupArgument into the per-thread
+  // exec stack (hip::tls.exec_stack_.top().arguments_), laid out by descriptor
+  // offset. The real hipLaunchByPtr PopExec's (std::move) that exec, consuming
+  // the buffer, so we must snapshot it *before* calling through. Copy (not move)
+  // to leave arguments_ intact for the real launch.
+  std::vector<char> kargs;
+  if (hip_capture_enabled() && !hip::tls.exec_stack_.empty())
+    kargs = hip::tls.exec_stack_.top().arguments_;
+
   hipError_t r = g_real_table.hipLaunchByPtr_fn(func);
   if (r == hipSuccess && hip_capture_enabled()) {
     // func is a host stub pointer — resolve to real hipFunction_t first
@@ -615,12 +624,16 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
       amd::Kernel* kernel = hip::asKernel(f);
       if (kernel) {
         const amd::KernelSignature& sig = kernel->signature();
+        // Feed the snapshot through the existing kbuf path (indexed by
+        // desc.offset_). Empty buffer falls back to num_args=0.
+        const void* kbuf = kargs.empty() ? nullptr : kargs.data();
+        size_t      ksz  = kargs.size();
         serialize_kernel_launch(
             kernel->name().c_str(),
             g_pushed_grid.x, g_pushed_grid.y, g_pushed_grid.z,
             g_pushed_block.x, g_pushed_block.y, g_pushed_block.z,
             static_cast<uint32_t>(g_pushed_shared), g_pushed_stream,
-            sig, nullptr, nullptr, 0);
+            sig, nullptr, kbuf, ksz);
       }
     }
   }
