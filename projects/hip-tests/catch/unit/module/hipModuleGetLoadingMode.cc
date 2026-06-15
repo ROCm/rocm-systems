@@ -139,6 +139,9 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_DefaultModeCheck") {
     const char* val = getenv("HIP_MODULE_LOADING");
     INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
 
+    // Initialize HIP runtime with current env var settings
+    HIP_CHECK(hipInit(0));
+
     hipModuleLoadingMode_t mode;
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
 
@@ -174,6 +177,9 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_LazyModeCheck") {
     // Verify the env var is set
     const char* val = getenv("HIP_MODULE_LOADING");
     INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
+
+    // Initialize HIP runtime with current env var settings
+    HIP_CHECK(hipInit(0));
 
     hipModuleLoadingMode_t mode;
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
@@ -223,6 +229,9 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
     const char* val = getenv("HIP_MODULE_LOADING");
     INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
 
+    // Initialize HIP runtime with current env var settings
+    HIP_CHECK(hipInit(0));
+
     hipModuleLoadingMode_t mode;
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
 
@@ -263,6 +272,10 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_CaseInsensitive") {
 
     // Test lowercase "eager"
     REQUIRE(setenv("HIP_MODULE_LOADING", "eager", 1) == 0);
+
+    // Initialize HIP runtime with current env var settings
+    HIP_CHECK(hipInit(0));
+
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
     INFO("Mode with 'eager': " << mode);
     REQUIRE(mode == HIP_MODULE_EAGER_LOADING);
@@ -298,6 +311,9 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_MultiThread") {
     // Set env var to EAGER first
     setenv("HIP_MODULE_LOADING", "EAGER", 1);
 
+    // Initialize HIP runtime with current env var settings
+    HIP_CHECK(hipInit(0));
+
     // Create Thread one.
     std::thread t1(setMode);
     t1.join();
@@ -331,6 +347,9 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_Change") {
     // Verify the env var is set
     const char* val = getenv("HIP_MODULE_LOADING");
     INFO("Environment variable HIP_MODULE_LOADING = " << (val ? val : "(not set)"));
+
+    // Initialize HIP runtime with current env var settings
+    HIP_CHECK(hipInit(0));
 
     // Get the mode - this initializes HIP runtime and caches the mode
     HIP_CHECK(hipModuleGetLoadingMode(&mode));
