@@ -11,6 +11,7 @@
 #include "platform/ndrange.hpp"
 #include "devprogram.hpp"
 #include "devkernel.hpp"
+#include "hotswap.hpp"
 #include "utils/macros.hpp"
 #include "utils/options.hpp"
 #include "comgrctx.hpp"
@@ -1780,11 +1781,14 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     }
 
     if (!amd::Isa::isCompatible(*binaryIsa, device().isa())) {
-      // HotSwap: let a foreign AMDGPU code object past the compat gate so the HSA
-      // loader can transpile it to the device ISA. Only reached on a real ISA
-      // mismatch; if no transpiler is loaded the loader fails later as before.
-      bool hotswap_ok =
-          std::string(binaryIsaName.data()).find("amdgcn-amd-amdhsa--gfx") != std::string::npos;
+      // HotSwap: when the tool is loaded, allow a SUPPORTED foreign source ISA past
+      // the compat gate so the HSA loader transpiles it. The transpile happens
+      // downstream in the loader (no status to check here); gating on the
+      // (source -> device) allowlist means an unsupported pair still errors as before.
+      const bool hotswap_ok =
+          amd::hotswap::Enabled() &&
+          amd::hotswap::IsSupportedPair(binaryIsa->processorName(),
+                                        device().isa().processorName());
       if (!hotswap_ok) {
         buildLog_ += "Error: The program ISA " + std::string(binaryIsaName.data());
         buildLog_ += " is not compatible with the device ISA " + device().isa().isaName() + "\n";
