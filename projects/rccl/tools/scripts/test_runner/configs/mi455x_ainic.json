@@ -11,7 +11,7 @@
     "env_variables": {
       "NCCL_SOCKET_IFNAME": "ens1np0",
       "NCCL_DEBUG": "INFO",
-      "NCCL_MNNVL_ENABLE": "1",
+      "NCCL_MNNVL_ENABLE": "0",
       "RCCL_USE_AMD_SMI_LIB": "0",
       "NCCL_CUMEM_ENABLE": "1"
     },
@@ -153,6 +153,7 @@
         "num_nodes": 2,
         "num_gpus": 4,
         "env_variables": {
+          "NCCL_MNNVL_ENABLE": "1",
           "NCCL_NET_SHARED_COMMS": "1",
           "NCCL_NET_SHARED_BUFFERS": "1",
           "NCCL_IB_DISABLE": "0"
@@ -998,6 +999,7 @@
         "num_gpus": 4,
         "timeout": 300,
         "env_variables": {
+          "NCCL_MNNVL_ENABLE": "1",
           "NCCL_DEBUG": "INFO",
           "NCCL_DEBUG_SUBSYS": "REG",
           "NCCL_LOCAL_REGISTER": "1",
@@ -1090,6 +1092,7 @@
         "num_gpus": 4,
         "timeout": 60,
         "env_variables": {
+          "NCCL_MNNVL_ENABLE": "1",
           "NCCL_DEBUG": "INFO",
           "NCCL_DEBUG_SUBSYS": "REG",
           "NCCL_LOCAL_REGISTER": "1",
@@ -1145,6 +1148,7 @@
         "num_gpus": 4,
         "timeout": 300,
         "env_variables": {
+          "NCCL_MNNVL_ENABLE": "1",
           "NCCL_DEBUG": "INFO",
           "NCCL_DEBUG_SUBSYS": "REG",
           "NCCL_GRAPH_REGISTER": "1",
@@ -1286,6 +1290,7 @@
         "num_gpus": 4,
         "timeout": 300,
         "env_variables": {
+          "NCCL_MNNVL_ENABLE": "1",
           "NCCL_DEBUG": "INFO",
           "RCCL_MPI_LOG_ALL_RANKS": "1"
         },
@@ -1707,6 +1712,7 @@
         "num_gpus": 2,
         "timeout": 300,
         "env_variables": {
+          "NCCL_MNNVL_ENABLE": "1",
           "NCCL_DEBUG": "INFO",
           "RCCL_MPI_LOG_ALL_RANKS": "1"
         },
