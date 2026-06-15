@@ -49,7 +49,7 @@ The ``rocprofv3-avail list`` command displays the list of agents and hardware co
 
    rocprofv3-avail list
 
-The output contains the logical node id, name, and the list of Performace Monitoring Counters (PMC) supported on the agent.
+The output contains the logical node id, name, and the list of Performance Monitoring Counters (PMC) supported on the agent.
 
 Sample output (truncated):
 

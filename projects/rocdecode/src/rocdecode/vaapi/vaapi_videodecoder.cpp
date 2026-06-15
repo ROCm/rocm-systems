@@ -118,7 +118,7 @@ void VaapiVideoDecoder::CheckOutputFormat() {
 }
 
 rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
 
     // Check if the output surface format is set by the user or native.
@@ -167,7 +167,7 @@ rocDecStatus VaapiVideoDecoder::InitializeDecoder() {
 }
 
 rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(pPicParams));
     void *pic_params_ptr, *iq_matrix_ptr, *slice_params_ptr;
     uint32_t pic_params_size, iq_matrix_size, slice_params_size;
     bool scaling_list_enabled = false;
@@ -360,7 +360,7 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
 }
 
 rocDecStatus VaapiVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus *decode_status) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx) + ", " + RocDecFmtPtr(decode_status));
     VASurfaceStatus va_surface_status;
     if (pic_idx >= va_surface_ids_.size() || decode_status == nullptr) {
         FunctionExitLog(g_rocdec_logger);
@@ -382,7 +382,7 @@ rocDecStatus VaapiVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus 
 }
 
 rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDescriptor &va_drm_prime_surface_desc) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
     if (pic_idx >= va_surface_ids_.size()) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -398,7 +398,7 @@ rocDecStatus VaapiVideoDecoder::ExportSurface(int pic_idx, VADRMPRIMESurfaceDesc
 }
 
 rocDecStatus VaapiVideoDecoder::SyncSurface(int pic_idx) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(pic_idx));
     if (pic_idx >= va_surface_ids_.size()) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -409,7 +409,7 @@ rocDecStatus VaapiVideoDecoder::SyncSurface(int pic_idx) {
 }
 
 rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconfig_params) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(reconfig_params));
     if (reconfig_params == nullptr) {
         FunctionExitLog(g_rocdec_logger);
         return ROCDEC_INVALID_PARAMETER;
@@ -472,7 +472,8 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
 }
 
 bool VaapiVideoDecoder::IsCodecConfigSupported(int device_id, rocDecVideoCodec codec_type, rocDecVideoChromaFormat chroma_format, uint32_t bit_depth_minus8, rocDecVideoSurfaceFormat output_format) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id) + ", " + ROCDEC_TOSTR(codec_type) + ", " +
+                             ROCDEC_TOSTR(chroma_format) + ", " + ROCDEC_TOSTR(bit_depth_minus8) + ", " + ROCDEC_TOSTR(output_format));
     RocdecDecodeCaps decode_caps;
     decode_caps.device_id = device_id;
     decode_caps.codec_type = codec_type;
@@ -484,7 +485,7 @@ bool VaapiVideoDecoder::IsCodecConfigSupported(int device_id, rocDecVideoCodec c
 }
 
 rocDecStatus VaapiVideoDecoder::CreateDecoderConfig() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     switch (decoder_create_info_.codec_type) {
         case rocDecVideoCodec_HEVC:
             if (decoder_create_info_.bit_depth_minus_8 == 0) {
@@ -536,7 +537,7 @@ rocDecStatus VaapiVideoDecoder::CreateDecoderConfig() {
 }
 
 rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     if (decoder_create_info_.num_decode_surfaces < 1) {
         CriticalLog(g_rocdec_logger, "Invalid number of decode surfaces.");
         FunctionExitLog(g_rocdec_logger);
@@ -625,7 +626,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
 }
 
 rocDecStatus VaapiVideoDecoder::CreateContext() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     CHECK_VAAPI(vaCreateContext(va_display_, va_config_id_, decoder_create_info_.width, decoder_create_info_.height,
         VA_PROGRESSIVE, va_surface_ids_.data(), va_surface_ids_.size(), &va_context_id_));
     FunctionExitLog(g_rocdec_logger);
@@ -633,7 +634,7 @@ rocDecStatus VaapiVideoDecoder::CreateContext() {
 }
 
 rocDecStatus VaapiVideoDecoder::DestroyDataBuffers() {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     if (pic_params_buf_id_) {
         CHECK_VAAPI(vaDestroyBuffer(va_display_, pic_params_buf_id_));
         pic_params_buf_id_ = 0;
@@ -674,7 +675,7 @@ VaContext::~VaContext() {
 };
 
 rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id) + ", " + RocDecFmtPtr(va_ctx_id));
     std::lock_guard<std::mutex> lock(mutex);
     bool found_existing = false;
     uint32_t va_ctx_idx = 0;
@@ -769,7 +770,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
 }
 
 rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_id) + ", " + RocDecFmtPtr(va_display));
     if (va_ctx_id >= va_contexts_.size()) {
         CriticalLog(g_rocdec_logger, "Invalid VA context Id.");
         *va_display = 0;
@@ -810,7 +811,7 @@ rocDecStatus VaContext::GetVaDisplay(uint32_t va_ctx_id, VADisplay *va_display) 
 }
 
 rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, RocDecFmtPtr(dec_cap));
     if (dec_cap == nullptr) {
         CriticalLog(g_rocdec_logger, "Null decode capability struct pointer.");
         FunctionExitLog(g_rocdec_logger);
@@ -1016,7 +1017,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
 }
 
 rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(device_id));
     CHECK_HIP(hipGetDeviceCount(&num_devices_));
     if (num_devices_ < 1) {
         CriticalLog(g_rocdec_logger, "Didn't find any GPU.");
@@ -1035,7 +1036,7 @@ rocDecStatus VaContext::InitHIP(int device_id, hipDeviceProp_t& hip_dev_prop) {
 }
 
 rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, ROCDEC_TOSTR(va_ctx_idx) + ", " + drm_node);
     InfoLog(g_rocdec_logger, "Opening DRM node: " + drm_node);
     va_contexts_[va_ctx_idx].drm_fd = open(drm_node.c_str(), O_RDWR);
     if (va_contexts_[va_ctx_idx].drm_fd < 0) {
@@ -1075,7 +1076,7 @@ rocDecStatus VaContext::InitVAAPI(int va_ctx_idx, std::string drm_node) {
 }
 
 void VaContext::GetVisibleDevices(std::vector<int>& visible_devices_vetor) {
-    FunctionEntryLog(g_rocdec_logger);
+    FunctionEntryLogWithArgs(g_rocdec_logger, "");
     // First, check if the ROCR_VISIBLE_DEVICES environment variable is present
     char *visible_devices = std::getenv("ROCR_VISIBLE_DEVICES");
     // If ROCR_VISIBLE_DEVICES is not present, check if HIP_VISIBLE_DEVICES is present

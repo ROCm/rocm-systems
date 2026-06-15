@@ -42,6 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -168,7 +169,25 @@ inline namespace config
 namespace
 {
 auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
+
+bool
+json_has_project_name_root(const std::string& json_path)
+{
+    std::ifstream ifs{ json_path };
+    if(!ifs.is_open())
+    {
+        return false;
+    }
+    try
+    {
+        const auto json = nlohmann::json::parse(ifs);
+        return json.is_object() && json.contains(TIMEMORY_PROJECT_NAME);
+    } catch(const nlohmann::json::exception&)
+    {
+        return false;
+    }
 }
+}  // namespace
 
 void
 finalize()
@@ -263,12 +282,6 @@ configure_settings(bool _init)
                               "Enable some runtime validation checks (typically enabled "
                               "for continuous integration)",
                               false, "debugging", "advanced");
-
-    ROCPROFSYS_CONFIG_SETTING(
-        bool, "ROCPROFSYS_CI_SKIP_PUSH_POP_CHECK",
-        "Skip CI validation check for push/pop trace count mismatch "
-        "(used only for tests with known imbalances)",
-        false, "debugging", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_MONOCHROME", "Disable colorized logging",
                               false, "debugging", "advanced");
@@ -1087,18 +1100,32 @@ configure_settings(bool _init)
     auto _proc      = mproc::get_concurrent_processes(_ppid);
     bool _main_proc = (_proc.size() < 2 || *_proc.begin() == _pid);
 
-    for(auto&& itr :
+    for(auto&& filename :
         tim::delimit(_config->get<std::string>("ROCPROFSYS_CONFIG_FILE"), ";:"))
     {
         if(_config->get_suppress_config()) continue;
 
-        LOG_DEBUG("Reading config file {}", itr);
-        if(_config->read(itr) && _main_proc &&
+        const auto expanded_filename = settings::format(filename, _config->get_tag());
+
+        // Prevent Timemory's read() silently dropping JSON config files without proper
+        // root. Non-existing JSONs should not throw: default ROCPROFSYS_CONFIG_FILE
+        // includes '~/.rocprofiler-systems.json' that can be missing
+        if(expanded_filename.ends_with(".json") && filepath::exists(expanded_filename) &&
+           !json_has_project_name_root(expanded_filename))
+        {
+            throw std::runtime_error(
+                fmt::format("Config file '{}' is missing the expected '{}' root object "
+                            "and cannot be loaded. If this is a hierarchical preset "
+                            "configuration, pass it via --preset instead.",
+                            expanded_filename, TIMEMORY_PROJECT_NAME));
+        }
+
+        LOG_DEBUG("Reading config file {}", filename);
+        if(_config->read(filename) && _main_proc &&
            ((_config->get<bool>("ROCPROFSYS_CI") && settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
         {
-            auto              fitr = settings::format(itr, _config->get_tag());
-            std::ifstream     _in{ fitr };
+            std::ifstream     _in{ expanded_filename };
             std::stringstream _iss{};
             while(_in)
             {
@@ -1108,7 +1135,7 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                LOG_DEBUG("config file '{}': {}", fitr, _iss.str());
+                LOG_DEBUG("config file '{}': {}", expanded_filename, _iss.str());
             }
         }
     }
@@ -1277,7 +1304,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
 
     if(!_config->get_enabled())
     {
-        _set("ROCPROFSYS_USE_TRACE", false);
+        _set("ROCPROFSYS_TRACE", false);
         _set("ROCPROFSYS_PROFILE", false);
         _set("ROCPROFSYS_USE_CAUSAL", false);
         _set("ROCPROFSYS_USE_AMD_SMI", false);
@@ -1458,7 +1485,7 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("ROCPROFSYS_USE_PROCESS_SAMPLING", "process_sampling");
     _handle_use_option("ROCPROFSYS_USE_CAUSAL", "causal");
     _handle_use_option("ROCPROFSYS_USE_KOKKOSP", "kokkos");
-    _handle_use_option("ROCPROFSYS_USE_TRACE", "perfetto");
+    _handle_use_option("ROCPROFSYS_TRACE", "perfetto");
     _handle_use_option("ROCPROFSYS_PROFILE", "timemory");
     _handle_use_option("ROCPROFSYS_USE_OMPT", "ompt");
     _handle_use_option("ROCPROFSYS_USE_RCCLP", "rcclp");
@@ -2751,34 +2778,54 @@ get_rank_filter_logs()
 #endif
 
 #if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
+// Return the first env var in `env_var_options` that holds an unsigned integer.
+// `label` is used only for logging (e.g. "MPI rank", "MPI world size").
 std::optional<std::uint64_t>
-get_mpi_rank_from_env()
+get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
+                       const std::string&              label)
 {
-    const std::vector<std::string> rank_env_var_options = {
-        // rank env vars: user-provided then most generic to most runtime-specific
-        get_rank_filter_id(),  "MPI_RANK",
-        "MPI_LOCALRANKID",     "MPI_RANKID",
-        "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK"
-    };
-
-    for(const auto& env_var : rank_env_var_options)
+    for(const auto& env_var : env_var_options)
     {
-        const std::string rank_str = get_env(env_var, std::string{});
+        const std::string value_str = get_env(env_var, std::string{});
 
-        if(rank_str.empty()) continue;
-        try
+        if(value_str.empty()) continue;
+
+        std::uint64_t value  = 0;
+        const char*   first  = value_str.data();
+        const char*   last   = first + value_str.size();
+        const auto    result = std::from_chars(first, last, value);
+
+        if(result.ec != std::errc{} || result.ptr != last)
         {
-            const auto rank = std::stoul(rank_str);
-            LOG_DEBUG("MPI output filtering: using MPI rank = {} from {}", rank, env_var);
-            return rank;
-        } catch(const std::exception& e)
-        {
-            LOG_WARNING("MPI output filtering: failed to get MPI rank from {}='{}': {}",
-                        env_var, rank_str, e.what());
+            LOG_WARNING("MPI output filtering: failed to parse {} from {}='{}' as a "
+                        "non-negative integer",
+                        label, env_var, value_str);
+            continue;
         }
+
+        LOG_DEBUG("MPI output filtering: using {} = {} from {}", label, value, env_var);
+        return value;
     }
 
     return std::nullopt;
+}
+
+std::optional<std::uint64_t>
+get_mpi_rank_from_env()
+{
+    // global rank env-vars: user-provided, then runtime-specific
+    return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
+                                    "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
+                                    "SLURM_PROCID" },
+                                  "MPI rank");
+}
+
+std::optional<std::uint64_t>
+get_mpi_world_size_from_env()
+{
+    return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
+                                    "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
+                                  "MPI world size");
 }
 #endif
 }  // namespace
@@ -2805,8 +2852,49 @@ is_rank_in_filter(std::string enabled_ranks_str)
         return true;
     }
 
-    const auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
+    auto enabled_ranks = rocprofsys::utility::parse_numeric_range<
         std::int64_t, std::unordered_set<std::int64_t>>(enabled_ranks_str, "ranks", 1L);
+
+    // Check current_rank and enabled_ranks against total number of existing MPI ranks
+    const auto world_size = get_mpi_world_size_from_env();
+    if(world_size.has_value())
+    {
+        if(world_size.value() == 0)
+        {
+            LOG_WARNING("MPI output filtering DISABLED: total number of MPI ranks (world "
+                        "size) is 0");
+            return true;
+        }
+
+        for(auto it = enabled_ranks.begin(); it != enabled_ranks.end();)
+        {
+            if(*it < 0 || static_cast<std::uint64_t>(*it) >= world_size.value())
+            {
+                LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
+                            "existing ranks [0-{}]. Ignoring",
+                            *it, world_size.value() - 1);
+                it = enabled_ranks.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
+        if(current_rank.value() >= world_size.value())
+        {
+            LOG_WARNING("MPI output filtering DISABLED: MPI rank {} not in range of "
+                        "existing ranks [0-{}]",
+                        current_rank.value(), world_size.value() - 1);
+            return true;
+        }
+    }
+
+    if(enabled_ranks.empty())
+    {
+        LOG_WARNING("MPI output filtering DISABLED: no valid enabled ranks provided");
+        return true;
+    }
 
     const auto is_enabled = enabled_ranks.count(current_rank.value()) != 0;
     LOG_DEBUG("Output for MPI rank {} is {}", current_rank.value(),

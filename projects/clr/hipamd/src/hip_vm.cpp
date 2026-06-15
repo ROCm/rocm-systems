@@ -84,7 +84,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   if (prop->requestedHandleTypes != hipMemHandleTypeNone &&
-      prop->requestedHandleTypes != hipMemHandleTypePosixFileDescriptor) {
+      prop->requestedHandleTypes != hipMemHandleTypePosixFileDescriptor &&
+      prop->requestedHandleType  != hipMemHandleTypeFabric) {
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -95,7 +96,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   bool useHostDevice = (prop->location.type == hipMemLocationTypeHost);
-  amd::Context* curDevContext = hip::getCurrentDevice()->asContext();
+  hip::Device* dev = hip::getCurrentDevice();
+  amd::Context* curDevContext = dev->asContext();
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
   if (amdContext == nullptr) {
@@ -129,7 +131,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
 
   // Add this to amd::Memory object, so this ptr is accesible for other hipmemory operations.
   size_t offset = 0;  // this is ignored
-  amd::Memory* phys_mem_obj = getMemoryObject(ptr, offset);
+  amd::Memory* phys_mem_obj = getMemoryObject(dev, ptr, offset);
   // saves the current device id so that it can be accessed later
   phys_mem_obj->getUserData().deviceId = prop->location.id;
   phys_mem_obj->getUserData().locationType = prop->location.type;
@@ -165,8 +167,10 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  amd::Memory::HandleType htype = static_cast<amd::Memory::HandleType>(handleType);
+
   if (!ga->asAmdMemory().getContext().devices()[0]->ExportShareableVMMHandle(
-          ga->asAmdMemory(), flags, shareableHandle)) {
+          ga->asAmdMemory(), flags, shareableHandle, htype)) {
     LogPrintfError("Exporting Handle failed with flags: %d", flags);
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -246,7 +250,8 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  amd::Memory* phys_mem_obj = device->ImportShareableVMMHandle(osHandle);
+  amd::Memory::HandleType htype = static_cast<amd::Memory::HandleType>(shHandleType);
+  amd::Memory* phys_mem_obj = device->ImportShareableVMMHandle(osHandle, htype);
 
   if (phys_mem_obj == nullptr) {
     LogError("failed to new a va range curr_mem_obj object!");

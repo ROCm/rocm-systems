@@ -132,6 +132,8 @@ public:
   bool is_halted () const;
   void set_halted (bool halted);
 
+  size_t lds_size () const { return m_cwsr_record->lds_size (); }
+
   /* Return the last wave stop event, or nullptr if the event is already
      processed and destroyed.  */
   const event_t *last_stop_event () const;
