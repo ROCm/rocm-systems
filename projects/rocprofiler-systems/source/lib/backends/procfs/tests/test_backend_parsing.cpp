@@ -1,13 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "library/pmc/device_providers/procfs/drivers/driver.hpp"
+#include "backends/procfs/backend.hpp"
 
 #include <gtest/gtest.h>
 
 #include <string_view>
 
-using namespace rocprofsys::pmc::drivers::procfs;
+using namespace rocprofsys::backends::procfs;
 
 class parse_proc_stat_test : public ::testing::Test
 {};

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "library/pmc/device_providers/procfs/drivers/driver.hpp"
+#include "backends/procfs/backend.hpp"
 
 #include <gmock/gmock.h>
 
@@ -13,7 +13,7 @@
 #include <memory>
 #include <utility>
 
-namespace rocprofsys::pmc::drivers::procfs::testing
+namespace rocprofsys::backends::procfs::testing
 {
 
 static constexpr std::size_t DEFAULT_CPU_COUNT    = 4;
@@ -42,12 +42,12 @@ static constexpr rusage_snapshot DEFAULT_RUSAGE{
 };
 
 /**
- * @brief Mock implementation of procfs driver for unit testing.
+ * @brief Mock implementation of procfs backend for unit testing.
  *
  * Used by device and collector tests to inject synthetic CPU data
  * without touching the filesystem.
  */
-class mock_driver
+class mock_backend
 {
 public:
     MOCK_METHOD((std::map<size_t, cpu_jiffies>), read_proc_stat, ());
@@ -84,28 +84,29 @@ public:
     }
 };
 
-using strict_mock_driver = ::testing::StrictMock<mock_driver>;
+using strict_mock_backend = ::testing::StrictMock<mock_backend>;
 
 /**
- * @brief Factory for creating and injecting mock driver instances in tests.
+ * @brief Factory for creating and injecting mock backend instances in tests.
  */
-struct mock_driver_factory
+struct mock_backend_factory
 {
-    using driver_t = mock_driver;
+    using backend_t = mock_backend;
 
-    static std::shared_ptr<driver_t> s_mock_driver;
+    static std::shared_ptr<backend_t> s_mock_backend;
 
-    static std::shared_ptr<driver_t> create_driver([[maybe_unused]] size_t cpu_count = 0)
+    static std::shared_ptr<backend_t> create_backend(
+        [[maybe_unused]] size_t cpu_count = 0)
     {
-        return s_mock_driver;
+        return s_mock_backend;
     }
 
-    static void set_mock_driver(std::shared_ptr<driver_t> driver)
+    static void set_mock_backend(std::shared_ptr<backend_t> backend)
     {
-        s_mock_driver = std::move(driver);
+        s_mock_backend = std::move(backend);
     }
 };
 
-inline std::shared_ptr<mock_driver> mock_driver_factory::s_mock_driver = nullptr;
+inline std::shared_ptr<mock_backend> mock_backend_factory::s_mock_backend = nullptr;
 
-}  // namespace rocprofsys::pmc::drivers::procfs::testing
+}  // namespace rocprofsys::backends::procfs::testing

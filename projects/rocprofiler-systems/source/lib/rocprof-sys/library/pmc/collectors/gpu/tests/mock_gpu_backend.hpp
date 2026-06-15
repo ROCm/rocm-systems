@@ -3,16 +3,16 @@
 
 #pragma once
 
-#include "library/pmc/collectors/gpu/types.hpp"
+#include "backends/amd_smi/device_backend.hpp"
 
 #include <gmock/gmock.h>
 
 #include <cstdint>
 
-namespace rocprofsys::pmc::collectors::gpu::testing
+namespace rocprofsys::backends::amd_smi::testing
 {
 
-struct mock_gpu_driver
+struct mock_gpu_backend
 {
     MOCK_METHOD(asic_info, get_gpu_asic_info, (), (const));
     MOCK_METHOD(metrics, get_gpu_metrics, (), (const));
@@ -22,4 +22,4 @@ struct mock_gpu_driver
     MOCK_METHOD(bool, is_sdma_supported, (), (const, noexcept));
 };
 
-}  // namespace rocprofsys::pmc::collectors::gpu::testing
+}  // namespace rocprofsys::backends::amd_smi::testing

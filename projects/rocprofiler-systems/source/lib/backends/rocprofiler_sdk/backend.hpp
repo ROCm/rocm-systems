@@ -3,8 +3,7 @@
 
 #pragma once
 
-#include "common/defines.h"
-#include "library/pmc/collectors/gpu_perf_counter/types.hpp"
+#include "backends/rocprofiler_sdk/types.hpp"
 #include <cstdint>
 
 #include <cstddef>
@@ -29,13 +28,10 @@ using rocprofiler_device_counting_service_cb_t =
     rocprofiler_device_counting_service_callback_t;
 #endif
 
-namespace rocprofsys::pmc::drivers::rocprofiler_sdk
+namespace rocprofsys::backends::rocprofiler_sdk
 {
 
-using collectors::gpu_perf_counter::counter_metadata;
-using collectors::gpu_perf_counter::dimension_position;
-
-struct driver
+struct backend
 {
     using counter_config_id_t          = rocprofiler_counter_config_id_t;
     using counter_id_t                 = rocprofiler_counter_id_t;
@@ -180,14 +176,14 @@ struct driver
     }
 };
 
-struct driver_factory
+struct backend_factory
 {
-    using driver_t = driver;
+    using backend_t = backend;
 
-    static std::shared_ptr<driver_t> create_driver()
+    static std::shared_ptr<backend_t> create_backend()
     {
-        return std::make_shared<driver_t>();
+        return std::make_shared<backend_t>();
     }
 };
 
-}  // namespace rocprofsys::pmc::drivers::rocprofiler_sdk
+}  // namespace rocprofsys::backends::rocprofiler_sdk

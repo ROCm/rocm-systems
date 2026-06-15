@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-namespace rocprofsys::pmc::drivers::procfs
+namespace rocprofsys::backends::procfs
 {
 // /proc/stat: ~120 bytes per CPU line. Default 16 KB covers ~128 CPUs.
 static constexpr size_t DEFAULT_STAT_BUFFER_SIZE = 16384;
@@ -237,20 +237,20 @@ parse_statm(std::string_view content)
 }
 
 /**
- * @brief Driver wrapping Linux procfs/sysfs and getrusage for CPU metrics.
+ * @brief backend wrapping Linux procfs/sysfs and getrusage for CPU metrics.
  *
  * Persistent file handles via unique_file (std::unique_ptr<FILE, file_closer>),
  * rewind+fread, pre-allocated buffers, zero-copy string_view parsing.
  * CPU frequency read from sysfs scaling_cur_freq (per-CPU file handles).
  */
-class driver
+class backend
 {
 public:
     /**
      * @param cpu_count Number of online CPUs. Sizes buffers and opens
      *        per-CPU sysfs file handles for frequency reading.
      */
-    explicit driver(size_t cpu_count)
+    explicit backend(size_t cpu_count)
     : m_stat_buffer(
           std::max(DEFAULT_STAT_BUFFER_SIZE, (cpu_count * BYTES_PER_STAT_LINE) + 256))
     , m_statm_buffer(STATM_BUFFER_SIZE)
@@ -374,16 +374,16 @@ private:
 };
 
 /**
- * @brief Factory for creating procfs driver instances.
+ * @brief Factory for creating procfs backend instances.
  */
-struct driver_factory
+struct backend_factory
 {
-    using driver_t = driver;
+    using backend_t = backend;
 
-    static std::shared_ptr<driver_t> create_driver(size_t cpu_count)
+    static std::shared_ptr<backend_t> create_backend(size_t cpu_count)
     {
-        return std::make_shared<driver_t>(cpu_count);
+        return std::make_shared<backend_t>(cpu_count);
     }
 };
 
-}  // namespace rocprofsys::pmc::drivers::procfs
+}  // namespace rocprofsys::backends::procfs
