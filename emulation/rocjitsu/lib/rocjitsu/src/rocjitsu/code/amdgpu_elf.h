@@ -119,6 +119,8 @@ inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
   case EF_AMDGPU_MACH_AMDGCN_GFX1200:
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
     return ROCJITSU_CODE_ARCH_RDNA4;
+  case EF_AMDGPU_MACH_AMDGCN_GFX1250:
+    return ROCJITSU_CODE_ARCH_GFX1250;
   default:
     return ROCJITSU_CODE_ARCH_INVALID;
   }
@@ -151,6 +153,8 @@ inline constexpr const char *elf_mach_name(uint32_t mach) {
     return "gfx1200";
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
     return "gfx1201";
+  case EF_AMDGPU_MACH_AMDGCN_GFX1250:
+    return "gfx1250";
   default:
     return "unknown";
   }

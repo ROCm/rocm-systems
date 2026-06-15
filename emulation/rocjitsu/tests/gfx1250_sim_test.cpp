@@ -995,6 +995,8 @@ TEST(Gfx1250CodeObjectTest, MachineFlagMapsToTarget) {
   AmdGpuCodeObject co(image.data(), image.size());
   ASSERT_TRUE(co.is_valid());
   EXPECT_EQ(co.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
+  EXPECT_EQ(arch_for_elf_mach(EF_AMDGPU_MACH_AMDGCN_GFX1250), ROCJITSU_CODE_ARCH_GFX1250);
+  EXPECT_STREQ(elf_mach_name(EF_AMDGPU_MACH_AMDGCN_GFX1250), "gfx1250");
   ASSERT_EQ(co.text_sections().size(), 1u);
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_GFX1250);

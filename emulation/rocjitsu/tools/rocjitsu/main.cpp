@@ -21,6 +21,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <stop_token>
 #include <string_view>
 #include <sys/mman.h>
@@ -279,9 +280,10 @@ static std::string find_interposer_lib() {
     return {};
   self[n] = '\0';
   auto bin_dir = std::filesystem::path(self).parent_path();
-  // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu_kmd.so
+  // Installed layout: <prefix>/bin/rocjitsu -> <prefix>/lib{,64}/librocjitsu_kmd.so
   // Build layout: build/tools/rocjitsu/rocjitsu → build/lib/.../librocjitsu_kmd.so
   for (auto &candidate : {
+           bin_dir / ".." / "lib64" / "librocjitsu_kmd.so",
            bin_dir / ".." / "lib" / "librocjitsu_kmd.so",
            bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "linux" /
                "librocjitsu_kmd.so",
