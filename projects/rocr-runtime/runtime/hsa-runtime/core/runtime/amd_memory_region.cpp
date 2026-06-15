@@ -148,10 +148,13 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  // Alocation requests for system memory considers aggregate
-  // memory available on all CPU devices
-  if (size > ((IsSystem() ?
-                max_sysmem_alloc_size_ : max_single_alloc_size_))) {
+  // Skip the per-region cap on Windows/DXG so over-commit requests can
+  // reach WDDM; system memory still enforces the cap.
+  const bool is_dxg = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+  if (IsSystem() && (size > max_sysmem_alloc_size_)) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  if (!IsSystem() && !is_dxg && (size > max_single_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
