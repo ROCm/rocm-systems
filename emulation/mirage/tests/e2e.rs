@@ -203,6 +203,42 @@ fn session_start_detach_exec_then_stop() {
 }
 
 #[test]
+fn stopped_session_stays_gone_past_heartbeat() {
+    // Regression: `session stop` reported success but the orphaned host
+    // process kept re-stamping its heartbeat, which recreated the session
+    // directory (its parent is created on demand) and made the "stopped"
+    // session silently reappear in `session list`. The host must detect
+    // that its session directory was removed and exit instead.
+    let env = Env::new();
+    env.mirage()
+        .args(["profile", "create", "p"])
+        .assert()
+        .success();
+    env.mirage()
+        .args(["session", "start", "--profile", "p", "--id", "s9"])
+        .assert()
+        .success();
+    env.mirage()
+        .args(["session", "stop", "s9", "-f"])
+        .assert()
+        .success();
+    // Wait well past the host's heartbeat interval (2s): a live orphan
+    // would recreate the directory within one beat.
+    std::thread::sleep(std::time::Duration::from_millis(3000));
+    assert!(
+        !env.runtime.join("mirage/session/s9").exists(),
+        "session directory reappeared after stop"
+    );
+    let out = env.mirage().args(["session", "list"]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("(no sessions)"),
+        "stopped session reappeared in list: stderr={stderr:?} stdout={:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
 fn attach_to_long_running_exec_then_signal() {
     let env = Env::new();
     env.mirage()

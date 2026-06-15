@@ -282,9 +282,17 @@ impl MirageCtl for FileCtl {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            if let Ok(id) = SessionId::new(name) {
-                out.push(id);
+            let Ok(id) = SessionId::new(name) else {
+                continue;
+            };
+            // A real session always has a `def.json`. Skip directories
+            // missing it: these are ghosts left by a heartbeat write that
+            // raced a `session destroy`, and a destroyed session must not
+            // reappear in listings.
+            if !crate::paths::SessionLayout::for_id(&id).def().exists() {
+                continue;
             }
+            out.push(id);
         }
         out.sort();
         Ok(out)

@@ -184,6 +184,21 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     let mut last_heartbeat = tokio::time::Instant::now();
 
     loop {
+        // Detect external destruction. When `session destroy` removes our
+        // session directory out from under us, our `def.json` disappears.
+        // Exit immediately and *without* re-publishing health, because a
+        // heartbeat write would recreate the directory (its parent is
+        // created on demand) and the "stopped" session would silently
+        // reappear in `session list`. Only the session-owning orchestrator
+        // makes this decision; a per-node host follows the orchestrator.
+        if manages_session && !layout.def().exists() {
+            tracing::info!(
+                session = %config.session,
+                "session directory removed; host exiting"
+            );
+            return Ok(());
+        }
+
         // Discover new execs. The orchestrator host of a containerised
         // session does not run execs itself (the per-node hosts do), so
         // it skips discovery and merely waits for shutdown.
@@ -237,9 +252,12 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         }
     }
 
-    // Shutdown path: mark unhealthy and signal in-flight execs.
+    // Shutdown path: mark unhealthy and signal in-flight execs. Only
+    // re-publish health while the session directory still exists; if it
+    // was destroyed under us, writing health would recreate the directory
+    // and resurrect the session in listings.
     tracing::info!(session = %config.session, "host shutting down");
-    if manages_session {
+    if manages_session && layout.def().exists() {
         publish_health(&layout, false, "stopping", None).ok();
     }
     signal_all_execs(&layout, nix::sys::signal::Signal::SIGTERM);
@@ -258,7 +276,9 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     // host never leaks containers.
     if manages_session {
         mirage_core::container::teardown(&layout.container_json());
-        publish_health(&layout, false, "stopped", None).ok();
+        if layout.def().exists() {
+            publish_health(&layout, false, "stopped", None).ok();
+        }
     }
     Ok(())
 }
