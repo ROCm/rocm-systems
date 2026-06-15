@@ -57,6 +57,8 @@ add_executable(
     decode_execute_benchmark.cpp
     util_simd_test.cpp
     v_add_simd_benchmark.cpp
+    mfma_simd_benchmark.cpp
+    wmma_simd_benchmark.cpp
     simd_correctness/vop1_cvt_f64_scalar_correctness_test.cpp
     simd_correctness/vopc_cmp_class_scalar_correctness_test.cpp
     simd_correctness/vop2_simd_correctness_test.cpp
@@ -92,6 +94,7 @@ add_executable(
     simd_correctness/vop3_cndmask_pack_simd_correctness_test.cpp
     simd_correctness/vop3_div_helpers_simd_correctness_test.cpp
     simd_correctness/vop3_b16_rdna_simd_correctness_test.cpp
+    simd_correctness/vop3_cvt_pk_f32_rdna_correctness_test.cpp
     simd_correctness/vop3_ternary_fp_simd_correctness_test.cpp
     simd_correctness/vop3_fmac_simd_correctness_test.cpp
     simd_correctness/vop3_ldexp_simd_correctness_test.cpp
@@ -106,6 +109,14 @@ add_executable(
     data_types_test.cpp
     drm_info_layout_test.cpp
 )
+if(RJ_ENABLE_EXPENSIVE_CHECKS)
+    target_sources(
+        rocjitsu_tests
+        PRIVATE
+            simd_correctness/mfma_simd_exact_test.cpp
+            simd_correctness/wmma_simd_exact_test.cpp
+    )
+endif()
 target_link_libraries(
     rocjitsu_tests
     PRIVATE
@@ -119,7 +130,10 @@ target_link_libraries(
 rj_configure_target(rocjitsu_tests TEST)
 
 include(GoogleTest)
-gtest_discover_tests(rocjitsu_tests)
+# Benchmarks are timing tools, not correctness tests; keep them out of the
+# default ctest run (invoke them directly via
+# ./rocjitsu_tests --gtest_filter='*Benchmark*').
+gtest_discover_tests(rocjitsu_tests TEST_FILTER -*Benchmark*)
 
 add_executable(
     rj_dbt_translate_smoke_test
