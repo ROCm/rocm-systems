@@ -304,7 +304,7 @@ protected:
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
         // const bool is_vadd = inst.mnemonic().find("v_add_f32") != std::string_view::npos;
-        //if (is_vadd && is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
+        // if (is_vadd && is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
         if (is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
           anchor_offsets_.push_back(cur); // Instrumentor will need offset
           anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
@@ -612,7 +612,7 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
       ++matches_golden_1;
   }
   EXPECT_LT(matches_golden_1, N) << "Sabotaged dispatch matched the golden in " << matches_golden_1
-                               << "/" << N << " elements - trampoline appears bypassed";
+                                 << "/" << N << " elements - trampoline appears bypassed";
 
   // Revert first trampoline in sabotaged
   std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSNop0, sizeof(kSNop0));
@@ -620,14 +620,14 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   // Perform same change and test for second trampoline
   uint64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset() + offset_between_anchors,
-                                   sizeof(pre_overwrite));
+              sizeof(pre_overwrite));
   ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
                                    << ") at start of .rj_trampolines but found 0x" << pre_overwrite
                                    << " - trampoline body layout changed?";
 
   // s_endpgm 0 on CDNA: SOPP prefix (0x17F) << 23 | opcode 1 << 16 | simm16 0.
   std::memcpy(sabotaged.data() + tramp->sectionOffset() + offset_between_anchors, &kSEndpgm0,
-                                   sizeof(kSEndpgm0));
+              sizeof(kSEndpgm0));
 
   auto sabotaged_out_2 = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
   ASSERT_EQ(sabotaged_out_2.size(), N)
@@ -654,7 +654,7 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
       ++matches_golden_2;
   }
   EXPECT_LT(matches_golden_2, N) << "Sabotaged dispatch matched the golden in " << matches_golden_2
-                               << "/" << N << " elements - trampoline appears bypassed";
+                                 << "/" << N << " elements - trampoline appears bypassed";
 }
 
 #endif // HAS_HOST_AMDGPU
