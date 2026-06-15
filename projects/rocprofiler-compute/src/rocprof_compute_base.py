@@ -193,6 +193,7 @@ class RocProfCompute:
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
+            self._resolve_pc_sampling_interval()
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -626,6 +627,40 @@ class RocProfCompute:
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--bench-only cannot be used with --no-roof.")
+
+    def _resolve_pc_sampling_interval(self) -> None:
+        """Apply the method-aware default for --pc-sampling-interval and
+        validate a user-supplied value."""
+        args = self.__args
+        if not getattr(args, "pc_sampling", False):
+            return
+
+        stochastic_default_interval_in_cycles = 1048576
+        stochastic_min_interval_in_cycles = 65536
+        host_trap_default_interval_in_microseconds = 512
+
+        method = args.pc_sampling_method
+        if args.pc_sampling_interval is None:
+            if method == "stochastic":
+                args.pc_sampling_interval = stochastic_default_interval_in_cycles
+            else:
+                args.pc_sampling_interval = host_trap_default_interval_in_microseconds
+            return
+
+        interval = args.pc_sampling_interval
+        if method == "stochastic":
+            is_power_of_two = interval > 0 and interval & (interval - 1) == 0
+            if not is_power_of_two or interval < stochastic_min_interval_in_cycles:
+                console_error(
+                    "--pc-sampling-interval for stochastic sampling must be a "
+                    f"power of 2 and at least {stochastic_min_interval_in_cycles} "
+                    f"(got {interval})."
+                )
+        elif interval <= 0:
+            console_error(
+                "--pc-sampling-interval for host_trap sampling must be a "
+                f"positive integer (got {interval})."
+            )
 
     def _validate_list_option_exclusions(self) -> None:
         """Validate that list/discovery options aren't combined with --block.
