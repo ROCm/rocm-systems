@@ -45,6 +45,26 @@ static int IbCastCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
   return maxNqps;
 }
 
+// Export a cuMem/VMM GPU range as a DMA-BUF FD and register the gpu-flush buffer as dmabuf MR.
+static ncclResult_t regGpuFlushDmabufCuMem(struct ncclIbGpuFlush* gpuFlush,
+                                           struct ibv_pd* pd, size_t regLen) {
+  void* const gpuAddr = gpuFlush->gpuFlushGpuMem;
+  CUresult vmmStatus =
+    cuMemGetHandleForAddressRange((void*)&gpuFlush->dmabufFd,
+                                  (CUdeviceptr)gpuAddr, regLen,
+                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
+  if (vmmStatus != CUDA_SUCCESS || gpuFlush->dmabufFd < 0) {
+    WARN("Failed to export DMA BUF via cuMemGetHandleForAddressRange");
+    return ncclSystemError;
+  }
+
+  int access =
+    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
+  NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&gpuFlush->gpuMr, pd, 0, regLen,
+                                   (uint64_t)gpuAddr, gpuFlush->dmabufFd,
+                                   access));
+  return ncclSuccess;
+}
 
 #define NCCL_CTS_QP_SLOT_INVALID 0xFF
 enum ncclIbChannelType {

@@ -67,8 +67,7 @@ struct ncclDevrState {
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // RCCL: intra-node CE team for !symmetricSupport. Co-located peers route
-  // through CE/IPC instead of the NIC proxy.
-  // Symmetric path keeps using lsa* above.
+  // through CE/IPC. Symmetric path keeps using lsa* above.
   int ceSelf;
   int ceSize;
   int* ceRankList;
