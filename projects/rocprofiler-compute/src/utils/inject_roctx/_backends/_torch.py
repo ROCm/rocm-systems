@@ -174,7 +174,7 @@ def _initialize_c_tier() -> bool:
         _roctx_recordfn = _load_roctx_recordfn()
     except Exception as exc:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"loader raised; falling back to Python tier: {exc}",
         )
         _roctx_recordfn = None
@@ -183,7 +183,7 @@ def _initialize_c_tier() -> bool:
         try:
             _roctx_recordfn.install()
             console_log(
-                "api trace",
+                "ml api trace",
                 (
                     "Coverage tier: C++ RecordFunction "
                     "(global callback; covers every thread)."
@@ -194,7 +194,7 @@ def _initialize_c_tier() -> bool:
             return True
         except Exception as exc:
             console_warning(
-                "api trace",
+                "ml api trace",
                 f".so install() raised; falling back to Python tier: {exc}",
             )
             _roctx_recordfn = None
@@ -218,7 +218,7 @@ def _emit_python_tier_fallback_warning() -> None:
             loader_trail = ""
     trail_block = f"\nLoader trail:\n{loader_trail}" if loader_trail else ""
     console_warning(
-        "api trace",
+        "ml api trace",
         "Coverage tier: Python-only injector (the C++ RecordFunction tier is "
         "unavailable). Operator coverage on autograd backward threads is "
         "reduced; backward markers may lack their full context chain." + trail_block,
@@ -229,7 +229,7 @@ def patch_distributed_collectives() -> None:
     """Wrap DISTRIBUTED_COLLECTIVE_NAMES + every entry in _functional_collectives."""
     if dist is None:
         console_warning(
-            "api trace",
+            "ml api trace",
             "torch.distributed not importable; collectives will not be marked.",
         )
         return
@@ -252,7 +252,7 @@ def patch_distributed_collectives() -> None:
             wrapped.append(fn_name)
         except Exception as exc:
             console_warning(
-                "api trace",
+                "ml api trace",
                 f"Could not patch torch.distributed.{fn_name}: {exc}",
             )
 
@@ -281,13 +281,13 @@ def patch_distributed_collectives() -> None:
                 wrapped.append(f"_functional_collectives.{fn_name}")
             except Exception as exc:
                 console_warning(
-                    "api trace",
+                    "ml api trace",
                     f"Could not patch _functional_collectives.{fn_name}: {exc}",
                 )
 
     if wrapped:
         console_log(
-            "api trace",
+            "ml api trace",
             f"Wrapped {len(wrapped)} torch.distributed collectives with ROCTX markers",
         )
 
@@ -320,7 +320,7 @@ def patch_process_group_methods() -> None:
                 wrapped_method_count["count"] += 1
             except Exception as exc:
                 console_warning(
-                    "api trace",
+                    "ml api trace",
                     f"Could not patch ProcessGroup.{cls.__name__}.{method_name}: {exc}",
                 )
 
@@ -346,7 +346,7 @@ def patch_process_group_methods() -> None:
                 _wrap_one(cls)
             except Exception as exc:
                 console_warning(
-                    "api trace",
+                    "ml api trace",
                     f"_wrap_one({cls.__name__}) failed in "
                     f"ProcessGroup.__init_subclass__: {exc}",
                 )
@@ -360,7 +360,7 @@ def patch_process_group_methods() -> None:
 
     if wrapped_method_count["count"]:
         console_log(
-            "api trace",
+            "ml api trace",
             f"Wrapped {wrapped_method_count['count']} ProcessGroup methods across "
             f"{len(wrapped_classes)} subclasses with ROCTX markers",
         )
@@ -392,13 +392,13 @@ def patch_cuda_graph() -> None:
             wrapped_methods.append(method_name)
         except Exception as exc:
             console_warning(
-                "api trace",
+                "ml api trace",
                 f"Could not patch CUDAGraph.{method_name}: {exc}",
             )
 
     if wrapped_methods:
         console_log(
-            "api trace",
+            "ml api trace",
             "Wrapped CUDAGraph methods with ROCTX markers: "
             f"{', '.join(wrapped_methods)}",
         )
@@ -446,12 +446,12 @@ def patch_compile_callable() -> None:
     try:
         torch.compile = compile_with_roctx
         console_log(
-            "api trace",
+            "ml api trace",
             "Wrapped torch.compile + its returned callable with ROCTX markers",
         )
     except Exception as exc:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"Could not patch torch.compile invocation wrapper: {exc}",
         )
 
@@ -477,7 +477,7 @@ def warn_dispatcher_failure_once(phase: str, error: Exception) -> None:
     setattr(_thread_local, flag_attr, True)
     try:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"Dispatcher {phase} raised ({type(error).__name__}: {error}). "
             "Subsequent failures on this thread will be suppressed.",
         )
@@ -515,7 +515,7 @@ def install_dispatcher_hook() -> str:
     """C++ tier: no-op. Python tier: enter TorchDispatchMode on this thread."""
     if _USING_C_TIER:
         console_log(
-            "api trace",
+            "ml api trace",
             "Operator coverage: C++ RecordFunction callback "
             "(FUNCTION + BACKWARD_FUNCTION).",
         )
@@ -523,7 +523,7 @@ def install_dispatcher_hook() -> str:
 
     if TorchDispatchMode is None:
         console_warning(
-            "api trace",
+            "ml api trace",
             "TorchDispatchMode is not importable on this PyTorch build; "
             "per-op coverage will be missing.",
         )
@@ -587,12 +587,12 @@ def install_dispatcher_hook() -> str:
         mode = RoctxDispatchMode()
         mode.__enter__()
     except Exception as exc:
-        console_warning("api trace", f"TorchDispatchMode activation failed: {exc}")
+        console_warning("ml api trace", f"TorchDispatchMode activation failed: {exc}")
         return "none"
 
     _active_dispatch_mode = mode
     console_log(
-        "api trace",
+        "ml api trace",
         "Operator coverage: TorchDispatchMode (Python tier).",
     )
     return "torch_dispatch_mode"
@@ -625,7 +625,7 @@ def install_tensor_backward_wrapper() -> None:
 
     backward_with_roctx._roctx_wrapped = True
     torch.Tensor.backward = backward_with_roctx
-    console_log("api trace", "Wrapped torch.Tensor.backward with ROCTX markers")
+    console_log("ml api trace", "Wrapped torch.Tensor.backward with ROCTX markers")
 
 
 def wrap_method_on_subclasses(
@@ -656,7 +656,7 @@ def wrap_method_on_subclasses(
                     break
         except Exception as exc:
             console_warning(
-                "api trace",
+                "ml api trace",
                 f"Failed to wrap {cls.__name__}.{method_name}: {exc}",
             )
 
@@ -709,7 +709,7 @@ def inject_roctx_into_optimizer() -> None:
     wrapped_count = wrap_method_on_subclasses(Optimizer, "step", make_step_wrapper)
     if wrapped_count > 0:
         console_log(
-            "api trace",
+            "ml api trace",
             "Wrapped optimizer.step() across torch.optim subclasses "
             "with ROCTX markers\n",
         )
@@ -731,7 +731,7 @@ def wrap_module_function(
         setattr(module, attr_name, wrapped)
     except Exception as exc:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"Could not patch {marker_name}: {exc}",
         )
         return False
@@ -870,7 +870,7 @@ def install_function_apply_wrappers() -> bool:
             stamp_apply(cls)
         except Exception as exc:
             console_warning(
-                "api trace",
+                "ml api trace",
                 f"stamp_apply({cls.__name__}) failed in __init_subclass__: {exc}",
             )
 
@@ -889,7 +889,7 @@ def install_tensor_method_wrappers() -> None:
     selected_methods = _selected_tensor_method_wraps()
     if not _deep_tensor_method_wraps_enabled():
         console_log(
-            "api trace",
+            "ml api trace",
             "Deep tensor method wraps disabled by default; set "
             f"{DEEP_TENSOR_METHOD_WRAPS_ENV}=1 to enable "
             f"({', '.join(DEEP_TENSOR_METHOD_WRAPS)}).",
@@ -909,13 +909,13 @@ def install_tensor_method_wrappers() -> None:
         except (TypeError, AttributeError) as exc:
             # C-slot methods refuse Python reassignment.
             console_warning(
-                "api trace",
+                "ml api trace",
                 f"Could not patch torch.Tensor.{method_name}: {exc}",
             )
 
     if wrapped:
         console_log(
-            "api trace",
+            "ml api trace",
             f"Wrapped {len(wrapped)} torch.Tensor methods with ROCTX markers: "
             f"{', '.join(wrapped)}",
         )
@@ -957,7 +957,7 @@ def install_extra_structural_wrappers() -> None:
                 wrapped.append(f"torch.cuda.{cls_name}")
             except Exception as exc:
                 console_warning(
-                    "api trace",
+                    "ml api trace",
                     f"Could not patch torch.cuda.{cls_name}.__init__: {exc}",
                 )
 
@@ -966,13 +966,13 @@ def install_extra_structural_wrappers() -> None:
             wrapped.append("torch.autograd.Function.apply")
     except Exception as exc:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"Could not patch torch.autograd.Function.apply: {exc}",
         )
 
     if wrapped:
         console_log(
-            "api trace",
+            "ml api trace",
             f"Wrapped {len(wrapped)} additional structural entry points "
             "with ROCTX markers",
         )
@@ -1009,9 +1009,9 @@ def inject_roctx_into_model() -> None:
         nn.Module.__call__ = call_with_roctx
         did_wrap = nn.Module.__call__ is call_with_roctx
     except Exception as exc:
-        console_warning("api trace", f"Could not patch nn.Module.__call__: {exc}")
+        console_warning("ml api trace", f"Could not patch nn.Module.__call__: {exc}")
     if did_wrap:
-        console_log("api trace", "Wrapped nn.Module forward() with ROCTX markers\n")
+        console_log("ml api trace", "Wrapped nn.Module forward() with ROCTX markers\n")
 
 
 def using_c_tier() -> bool:
@@ -1037,7 +1037,7 @@ def _resolve_torch() -> bool:
 
     if importlib.util.find_spec("torch._C") is None:
         console_warning(
-            "api trace",
+            "ml api trace",
             "PyTorch is not installed or not properly configured; "
             "skipping torch instrumentation.",
         )
@@ -1046,14 +1046,14 @@ def _resolve_torch() -> bool:
         import torch as _torch_mod
     except ImportError:
         console_warning(
-            "api trace",
+            "ml api trace",
             "PyTorch is not installed or not properly configured; "
             "skipping torch instrumentation.",
         )
         return False
 
     torch = _torch_mod
-    console_log("api trace", f"PyTorch version: {torch.__version__}")
+    console_log("ml api trace", f"PyTorch version: {torch.__version__}")
     try:
         _TORCH_ROOT = str(Path(torch.__file__).resolve().parent) + os.sep
     except Exception:
@@ -1116,7 +1116,7 @@ def _resolve_torch() -> bool:
         _load_roctx_recordfn = _loader_fn
     except Exception as exc:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"_torch_cpp_loader unavailable; falling back to Python tier: {exc}",
         )
 
@@ -1128,11 +1128,11 @@ class TorchBackend:
 
     def install(self) -> None:
         py = f"python{sys.version_info.major}.{sys.version_info.minor}"
-        console_log("api trace", f"Workload Python Version: {py}")
+        console_log("ml api trace", f"Workload Python Version: {py}")
 
         if not _ROCTX_AVAILABLE:
             console_warning(
-                "api trace",
+                "ml api trace",
                 f"ROCTX bindings not found in {_ROCTX_CANDIDATE_PATHS}; "
                 "skipping torch instrumentation.",
             )
@@ -1142,7 +1142,7 @@ class TorchBackend:
             roctx_path = Path(rangePush.__code__.co_filename).parent
         else:
             roctx_path = "<unknown>"
-        console_log("api trace", f"ROCTX module loaded from: {roctx_path}")
+        console_log("ml api trace", f"ROCTX module loaded from: {roctx_path}")
 
         if not _resolve_torch():
             return

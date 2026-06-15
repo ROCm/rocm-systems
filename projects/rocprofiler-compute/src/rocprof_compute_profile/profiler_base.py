@@ -95,7 +95,7 @@ def _find_python_script_index(argv: list[str]) -> tuple[Optional[int], Optional[
 _INJECT_MODULE = "utils.inject_roctx"
 
 
-def _prepare_api_trace_injection(
+def _prepare_ml_api_trace_injection(
     remaining: list[str],
     resolved_exec_path: Path,
     is_python: bool,
@@ -123,7 +123,7 @@ def _prepare_api_trace_injection(
             console_warning(
                 f"Cannot inject ROCTX markers into 'python {skip_flag}' "
                 "invocations. Launching workload as-is; "
-                "API tracing may have no effect."
+                "ML API tracing may have no effect."
             )
         elif not Path(remaining[script_index]).is_file():
             raise PythonScriptNotFoundError(remaining[script_index])
@@ -136,14 +136,14 @@ def _prepare_api_trace_injection(
             "Command does not look like a Python entry point, "
             "skipping ROCTX auto-injection and launching workload as-is. "
             "Ensure the binary already initializes ROCTX markers, "
-            "otherwise API tracing will have no effect."
+            "otherwise ML API tracing will have no effect."
         )
 
     if (resolved_exec_path.parent / "_internal").is_dir():
         console_warning(
             "Workload appears to be a self-contained binary. "
             "Such bundles typically ship private ROCm/HSA libraries, which "
-            "prevents API tracing from collecting data. "
+            "prevents ML API tracing from collecting data. "
             "Rebuild without packaging libhsa/libhip or "
             "adjust LD_LIBRARY_PATH to /opt/rocm before profiling."
         )
@@ -205,7 +205,7 @@ class RocProfCompute_Base:
         if selected_frameworks:
             if args.attach_pid:
                 console_error(
-                    "API tracing cannot be used with --attach-pid. "
+                    "ML API tracing cannot be used with --attach-pid. "
                     "ROCTX injection requires launching the workload; "
                     "already-running processes cannot be instrumented. "
                     "Please remove one of these options."
@@ -213,15 +213,15 @@ class RocProfCompute_Base:
 
             if args.attach_duration_msec:
                 console_error(
-                    "API tracing cannot be used with --attach-duration-msec. "
+                    "ML API tracing cannot be used with --attach-duration-msec. "
                     "--attach-duration-msec only applies to --attach-pid, which "
-                    "is incompatible with API tracing. Please remove one of "
+                    "is incompatible with ML API tracing. Please remove one of "
                     "these options."
                 )
 
             if args.spatial_multiplexing is not None:
                 console_error(
-                    "API tracing does not yet support multi-node profiling "
+                    "ML API tracing does not yet support multi-node profiling "
                     "via --spatial-multiplexing. Please remove one of these "
                     "options."
                 )
@@ -261,7 +261,7 @@ class RocProfCompute_Base:
             resolved_exec_path = Path(exec_candidate).resolve()
 
             # Detect bare Python interpreter (no script, no -c/-m) regardless
-            # of API tracing — this always hangs the profiler.
+            # of ML API tracing — this always hangs the profiler.
             is_python = re.match(r"^python[0-9.]*$", resolved_exec_path.name)
             script_index: Optional[int] = None
             skip_flag: Optional[str] = None
@@ -271,7 +271,7 @@ class RocProfCompute_Base:
                     raise NoScriptInCommandError(args.remaining)
 
             if selected_frameworks:
-                inject_pkg_parent = _prepare_api_trace_injection(
+                inject_pkg_parent = _prepare_ml_api_trace_injection(
                     args.remaining,
                     resolved_exec_path,
                     bool(is_python),
@@ -373,7 +373,7 @@ class RocProfCompute_Base:
                 workload_dir=args.output_directory,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
-                api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
+                ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
                 retain_rocpd_output=args.retain_rocpd_output,
                 extra_env=getattr(self, "_inject_env", None),
             )

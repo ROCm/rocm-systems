@@ -15,8 +15,8 @@ from utils.rocpd_data import (
 )
 from utils.utils_analysis import (
     build_call_trees_with_kernel_ids,
-    process_api_trace_output,
-    write_api_trace_consolidated_csv,
+    process_ml_api_trace_output,
+    write_ml_api_trace_consolidated_csv,
 )
 from utils.utils_profile import _augment_marker_csv, _parse_function_backend
 
@@ -214,7 +214,7 @@ def test_marker_csv_has_correlation_id_from_stack_id():
     common.clean_output_dir(True, workload_dir)
 
 
-# ---- process_api_trace_output parity for rocpd vs csv layouts ----
+# ---- process_ml_api_trace_output parity for rocpd vs csv layouts ----
 
 
 MARKER_COLUMNS_ROCPD = [
@@ -320,8 +320,8 @@ def write_rocpd_layout(workload_dir, fbase="run0"):
     marker_df = build_marker_df(include_guid=True)
     counter_df = build_counter_df(include_guid=True)
 
-    marker_path = Path(workload_dir) / f"api_trace_{fbase}_marker_api_trace.csv"
-    counter_path = Path(workload_dir) / f"api_trace_{fbase}_counter_collection.csv"
+    marker_path = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
+    counter_path = Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
 
     marker_df.to_csv(marker_path, index=False)
     counter_df.to_csv(counter_path, index=False)
@@ -335,18 +335,18 @@ def write_csv_layout(workload_dir, fbase="run0", pid="12345"):
     marker_df = build_marker_df(include_guid=False)
     counter_df = build_counter_df(include_guid=False)
 
-    marker_path = subdir / f"api_trace_{pid}_marker_api_trace.csv"
-    counter_path = subdir / f"api_trace_{pid}_counter_collection.csv"
+    marker_path = subdir / f"ml_api_trace_{pid}_marker_api_trace.csv"
+    counter_path = subdir / f"ml_api_trace_{pid}_counter_collection.csv"
 
     marker_df.to_csv(marker_path, index=False)
     counter_df.to_csv(counter_path, index=False)
 
 
-def read_api_trace_csvs(api_trace_dir):
+def read_ml_api_trace_csvs(ml_api_trace_dir):
     """Return a dict mapping filename -> sorted DataFrame for comparison."""
     result = {}
 
-    for csv_file in sorted(Path(api_trace_dir).glob("*.csv")):
+    for csv_file in sorted(Path(ml_api_trace_dir).glob("*.csv")):
         df = pd.read_csv(csv_file)
         df = df.sort_values(by=list(df.columns)).reset_index(drop=True)
         result[csv_file.name] = df
@@ -361,8 +361,8 @@ def build_kernel_top_df():
     })
 
 
-def test_api_trace_output_same_for_rocpd_and_csv():
-    """Test that the API trace output is the same for rocpd and csv files."""
+def test_ml_api_trace_output_same_for_rocpd_and_csv():
+    """Test that the ML API trace output is the same for rocpd and csv files."""
     rocpd_dir = common.get_output_dir(suffix="_rocpd")
     csv_dir = common.get_output_dir(suffix="_csv")
 
@@ -373,15 +373,15 @@ def test_api_trace_output_same_for_rocpd_and_csv():
     write_csv_layout(csv_dir)
 
     kernel_top_df = build_kernel_top_df()
-    rocpd_output = process_api_trace_output(rocpd_dir)
-    csv_output = process_api_trace_output(csv_dir)
+    rocpd_output = process_ml_api_trace_output(rocpd_dir)
+    csv_output = process_ml_api_trace_output(csv_dir)
     assert rocpd_output is not None
     assert csv_output is not None
     rocpd_df, rocpd_trace_path = rocpd_output
     csv_df, csv_trace_path = csv_output
 
-    write_api_trace_consolidated_csv(rocpd_df, rocpd_trace_path)
-    write_api_trace_consolidated_csv(csv_df, csv_trace_path)
+    write_ml_api_trace_consolidated_csv(rocpd_df, rocpd_trace_path)
+    write_ml_api_trace_consolidated_csv(csv_df, csv_trace_path)
     rocpd_trees = build_call_trees_with_kernel_ids(rocpd_df, kernel_top_df)
     csv_trees = build_call_trees_with_kernel_ids(csv_df, kernel_top_df)
 
@@ -403,11 +403,11 @@ def test_api_trace_output_same_for_rocpd_and_csv():
         assert "kernel_mm" in mm_node.kernels
         assert mm_node.kernels["kernel_mm"].launches == 1
 
-    rocpd_results = read_api_trace_csvs(Path(rocpd_dir) / "api_trace")
-    csv_results = read_api_trace_csvs(Path(csv_dir) / "api_trace")
+    rocpd_results = read_ml_api_trace_csvs(Path(rocpd_dir) / "ml_api_trace")
+    csv_results = read_ml_api_trace_csvs(Path(csv_dir) / "ml_api_trace")
 
     assert rocpd_results.keys() == csv_results.keys(), (
-        f"API trace CSV files differ: rocpd={sorted(rocpd_results.keys())} "
+        f"ML API trace CSV files differ: rocpd={sorted(rocpd_results.keys())} "
         f"csv={sorted(csv_results.keys())}"
     )
 
@@ -423,7 +423,7 @@ def test_api_trace_output_same_for_rocpd_and_csv():
     common.clean_output_dir(True, csv_dir)
 
 
-# ---- Backend column unpacking in save_api_trace_inputs ----
+# ---- Backend column unpacking in save_ml_api_trace_inputs ----
 
 
 def test_parse_function_backend_untagged_is_unknown():
@@ -463,7 +463,7 @@ def test_parse_function_backend_aten_leaf_is_unknown():
 def test_augment_marker_csv_adds_backend_column(tmp_path):
     """End-to-end: tagged + untagged rows survive copy; Backend is populated."""
     src = tmp_path / "src_marker_api_trace.csv"
-    dst = tmp_path / "api_trace_dst_marker_api_trace.csv"
+    dst = tmp_path / "ml_api_trace_dst_marker_api_trace.csv"
 
     src_df = pd.DataFrame({
         "Domain": ["MARKER_CORE_RANGE_API"] * 3,
@@ -503,32 +503,32 @@ def test_augment_marker_csv_handles_unknown_schema(tmp_path):
     assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
 
 
-def test_process_api_trace_output_defaults_backend_for_untagged(tmp_path):
+def test_process_ml_api_trace_output_defaults_backend_for_untagged(tmp_path):
     """Untagged rows default to Backend='torch' in the consolidated df."""
     workload_dir = str(tmp_path)
     write_rocpd_layout(workload_dir)
 
-    consolidated_df, _ = process_api_trace_output(workload_dir)
+    consolidated_df, _ = process_ml_api_trace_output(workload_dir)
 
     assert "Backend" in consolidated_df.columns
     assert (consolidated_df["Backend"] == "torch").all()
 
 
-def test_process_api_trace_output_preserves_per_row_backend(tmp_path):
+def test_process_ml_api_trace_output_preserves_per_row_backend(tmp_path):
     """A pre-stripped + tagged CSV (as produced by _augment_marker_csv)
     surfaces the per-row Backend value into the consolidated dataframe.
     """
     workload_dir = str(tmp_path)
     write_rocpd_layout(workload_dir)
 
-    # Overwrite the fixture with what save_api_trace_inputs would produce:
+    # Overwrite the fixture with what save_ml_api_trace_inputs would produce:
     # Function has prefixes stripped, Backend carries per-row attribution.
-    marker_path = Path(workload_dir) / "api_trace_run0_marker_api_trace.csv"
+    marker_path = Path(workload_dir) / "ml_api_trace_run0_marker_api_trace.csv"
     df = pd.read_csv(marker_path)
     df["Backend"] = ["torch", "torch", "triton"]
     df.to_csv(marker_path, index=False)
 
-    consolidated_df, _ = process_api_trace_output(workload_dir)
+    consolidated_df, _ = process_ml_api_trace_output(workload_dir)
 
     assert "Backend" in consolidated_df.columns
     backend_by_operator = dict(

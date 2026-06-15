@@ -68,7 +68,7 @@ def run_prof(
     workload_dir: str,
     loglevel: int,
     format_rocprof_output: str,
-    api_trace_enabled: bool = False,
+    ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
     extra_env: Optional[dict[str, str]] = None,
 ) -> None:
@@ -296,9 +296,9 @@ def run_prof(
                 "deprecated and will be replaced with automatic .db file "
                 "retention in a future release."
             )
-        if api_trace_enabled:
+        if ml_api_trace_enabled:
             # move counter collection and marker trace to workload dir
-            save_api_trace_inputs(workload_dir, fbase, format_rocprof_output)
+            save_ml_api_trace_inputs(workload_dir, fbase, format_rocprof_output)
         if retain_rocpd_output:
             console_warning(
                 "--retain-rocpd-output is deprecated and will be removed in "
@@ -338,9 +338,9 @@ def run_prof(
                 # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
-        if api_trace_enabled:
+        if ml_api_trace_enabled:
             # move counter collection and marker trace to workload dir
-            save_api_trace_inputs(workload_dir, fbase, format_rocprof_output)
+            save_ml_api_trace_inputs(workload_dir, fbase, format_rocprof_output)
         # Combine results into single CSV file
         if results_files:
             combined_results = csv_ops.concat_csv_files(results_files)
@@ -794,7 +794,7 @@ def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
     csv_ops.write_csv_from_dicts(dst_marker, rows, fieldnames=augmented_fieldnames)
     if unknown_count:
         console_warning(
-            "api trace",
+            "ml api trace",
             f"{unknown_count} marker row(s) in {src_marker} have no recognized "
             f"|<backend> suffix and were tagged Backend='{_UNKNOWN_BACKEND}'. "
             f"Sample Function values: {unknown_samples}.",
@@ -802,14 +802,14 @@ def _augment_marker_csv(src_marker: str, dst_marker: str) -> None:
 
 
 @demarcate
-def save_api_trace_inputs(
+def save_ml_api_trace_inputs(
     workload_dir: str,
     fbase: str,
     output_format: str = "rocpd",
 ) -> None:
     """
     Move counter_collection and marker_api_trace data to workload_dir,
-    for creation of API trace in Analyze mode.
+    for creation of ML API trace in Analyze mode.
 
     Marker CSVs are augmented on copy: the trailing ``|<backend>`` suffix
     written by inject_roctx is split off Function and surfaced as a
@@ -820,15 +820,17 @@ def save_api_trace_inputs(
         # Only one pair expected
         src_counter = src_dir / f"{fbase}_counter_collection.csv"
         src_marker = src_dir / f"{fbase}_marker_api_trace.csv"
-        dst_counter = Path(workload_dir) / f"api_trace_{fbase}_counter_collection.csv"
-        dst_marker = Path(workload_dir) / f"api_trace_{fbase}_marker_api_trace.csv"
+        dst_counter = (
+            Path(workload_dir) / f"ml_api_trace_{fbase}_counter_collection.csv"
+        )
+        dst_marker = Path(workload_dir) / f"ml_api_trace_{fbase}_marker_api_trace.csv"
         # These files are expected to exist; let underlying IO raise on miss.
         shutil.copyfile(src_counter, dst_counter)
         _augment_marker_csv(str(src_marker), str(dst_marker))
         console_log(
-            "api trace",
+            "ml api trace",
             "Moved counter collection and marker trace files "
-            "to workload dir for API trace creation.",
+            "to workload dir for ML API trace creation.",
         )
         console_log("Counter Collection: ", str(dst_counter))
         console_log("Marker API Trace: ", str(dst_marker))
@@ -838,26 +840,28 @@ def save_api_trace_inputs(
         marker_files = list(src_dir.glob("*/*_marker_api_trace.csv"))
         (Path(workload_dir) / f"{fbase}").mkdir(parents=True, exist_ok=True)
         # Expecting the files to be present; let underlying IO raise on miss.
-        # Path: workload_dir/fbase/api_trace_<src_basename> (discovered by
-        # process_api_trace_output via glob **/api_trace*_marker_api_trace.csv)
+        # Path: workload_dir/fbase/ml_api_trace_<src_basename> (discovered by
+        # process_ml_api_trace_output via glob **/ml_api_trace*_marker_api_trace.csv)
         for src_counter in counter_files:
             dst_counter = str(
                 Path(workload_dir)
                 / f"{fbase}"
-                / ("api_trace_" + Path(src_counter).name)
+                / ("ml_api_trace_" + Path(src_counter).name)
             )
             shutil.copyfile(src_counter, dst_counter)
-            console_log("api trace", f"Copied Counter Collection: {dst_counter}")
+            console_log("ml api trace", f"Copied Counter Collection: {dst_counter}")
         for src_marker in marker_files:
             dst_marker = str(
-                Path(workload_dir) / f"{fbase}" / ("api_trace_" + Path(src_marker).name)
+                Path(workload_dir)
+                / f"{fbase}"
+                / ("ml_api_trace_" + Path(src_marker).name)
             )
             _augment_marker_csv(src_marker, dst_marker)
-            console_log("api trace", f"Copied Marker API Trace: {dst_marker}")
+            console_log("ml api trace", f"Copied Marker API Trace: {dst_marker}")
     else:
         console_warning(
-            "api trace",
-            f"Unknown output_format: {output_format} in save_api_trace_inputs",
+            "ml api trace",
+            f"Unknown output_format: {output_format} in save_ml_api_trace_inputs",
         )
 
 

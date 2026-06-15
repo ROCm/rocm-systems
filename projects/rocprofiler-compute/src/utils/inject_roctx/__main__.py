@@ -30,7 +30,7 @@ def _report_recordfn_callback_errors() -> None:
     from utils.logger import console_warning
 
     console_warning(
-        "api trace",
+        "ml api trace",
         f"roctx_recordfn observed {callback_errors} swallowed callback "
         "exception(s) during the workload; some ROCTX markers may be missing "
         f"or misattributed. Stats: {dict(stats)}",

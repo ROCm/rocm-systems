@@ -53,9 +53,9 @@ def _safe_log(level: str, msg: str) -> None:
         emit = {"log": console_log, "warning": console_warning, "error": console_error}[
             level
         ]
-        emit("api trace loader", msg)
+        emit("ml api trace loader", msg)
     except Exception:
-        sys.stderr.write(f"[api trace loader] {level.upper()}: {msg}\n")
+        sys.stderr.write(f"[ml api trace loader] {level.upper()}: {msg}\n")
 
 
 def loaded_tier() -> Optional[str]:
