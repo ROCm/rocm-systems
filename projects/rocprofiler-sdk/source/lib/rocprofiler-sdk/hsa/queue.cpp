@@ -413,7 +413,7 @@ WriteInterceptor(const void* packets,
         // handler to complete during finalization.
         queue.async_started();
 
-        // Searching accross all the packets given during this write
+        // Searching across all the packets given during this write
         for(size_t i = 0; i < _num_packets; ++i)
         {
             const auto& original_packet = _packets[i].kernel_dispatch;
@@ -887,11 +887,6 @@ Queue::Queue(
             });
     }
 
-    if(!queue_interposition::supports_queue_interposition())
-    {
-        set_write_interceptor(WriteInterceptor, this);
-    }
-
     create_signal(0, &ready_signal, false);
     create_signal(0, &block_signal, false);
     create_signal(0, &_active_kernels, false);
@@ -899,6 +894,12 @@ Queue::Queue(
     _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
 
     signal_pool_init();  // ensure the signal pool is constructed
+    // Since this is an active queue, the write interceptor may be called immediately, so this needs
+    // to appear after signal construction.
+    if(!queue_interposition::supports_queue_interposition())
+    {
+        set_write_interceptor(WriteInterceptor, this);
+    }
 }
 
 void

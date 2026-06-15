@@ -6,7 +6,9 @@ cmake_minimum_required(VERSION 3.22)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(rj_default_compiler)
 
-project(rocm_jit_suite)
+project(rocm_jit_suite VERSION 0.1.0)
+
+include(rj_version)
 
 # Generate compile_commands.json for clangd, clang-tidy, and other tooling that
 # needs the exact compiler invocations from the configured build tree.
@@ -49,6 +51,11 @@ include(rj_log)
 # Sanitizer and static analysis options.
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
+option(
+    RJ_ENABLE_EXPENSIVE_CHECKS
+    "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
+    OFF
+)
 option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
@@ -257,7 +264,10 @@ install(
 )
 
 # Libraries: lib/
-install(TARGETS rocjitsu_shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(
+    TARGETS rocjitsu_shared rocjitsu_hooks
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     install(
