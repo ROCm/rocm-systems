@@ -1190,6 +1190,9 @@ static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 520);
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 535);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 537);
+// Step 30 is enum-only (#6596); no new runtime API ID.
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 537);
 #else
 #    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
         (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
