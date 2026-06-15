@@ -1013,37 +1013,16 @@ static void record_fat_binary_blob(const void* blob_ptr) {
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
 }
 
-// ---------------------------------------------------------------------------
-// Early DLL-load install — runs at static-init time, before any extern "C"
-// hipFoo() can be dispatched through hip_table_interface.cpp.
-//
-// This guarantees the first API call is captured.  hip_capture_init() (called
-// later from hip_context.cpp after the runtime is up) only needs to do the
-// fat-binary sweep and register atexit — the shims and writer are already live.
-// ---------------------------------------------------------------------------
-namespace {
-struct HrrEarlyInstall {
-  HrrEarlyInstall() {
-    // hip_capture_enabled() uses the ROCclr flag system which requires
-    // Flag::init() — not called until amd::Runtime::init() inside hip::init().
-    // Use getenv() directly: it is always safe at static-init time.
-    const char* out = getenv("HIP_HRR_CAPTURE_OUTPUT");
-    if (!out || out[0] == '\0') return;
-    // Only install the RUNTIME dispatch table shims at DLL load time.
-    // The COMPILER table (__hipRegisterFatBinary / __hipRegisterFunction) is
-    // installed later in hip_capture_init(), after hip::init() has fully set up
-    // the compiler dispatch table.  Installing it here (during DLL static init)
-    // can race with compiler-table initialization and cause ModuleInfo()==nullptr
-    // leading to hipErrorInvalidDeviceFunction on first kernel launch.
-    //
-    // writer::open() is intentionally NOT called here — Flag::init() has not run
-    // yet so the flag value is unreliable.  The writer is opened in hip_capture_init()
-    // after the runtime is up, before any write_blob() call can occur.
-    hip_capture_build_table();
-    hip_capture_install();
-  }
-} g_hrr_early_install;
-}  // namespace
+// Runtime dispatch-table capture is installed only from hip_capture_init()
+// (after hip::init() has built the live HipDispatchTable).  We intentionally
+// do NOT hook at libamdhip64 static-init time when HIP_HRR_CAPTURE_OUTPUT is set:
+// early install ran before amd::Runtime::init() / Flag::init(), forced every
+// HIP API through capture shims from the moment the DSO loaded, and pulled host
+// stacks (e.g. Python import torch → multiprocessing spawn) into ordering where
+// the GPU runtime appeared "already initialized" before child processes start.
+// Events before writer::open() were dropped anyway (write_event_raw no-ops when
+// g_events_fd < 0), so deferring install loses no recorded events for that
+// window while restoring a normal pre-init load path.
 
 // ---------------------------------------------------------------------------
 // Crash-time finalize — chained fatal-signal handlers.
@@ -1138,7 +1117,13 @@ void hrr_install_signal_handlers() {
 
 void hip_capture_init() {
   if (!hip_capture_enabled()) return;
-  if (!g_installed) return;  // early install failed (table not installed)
+
+  // Snapshot the fully-initialized dispatch table and install runtime shims here
+  // only (see comment above — no static-init capture hook).
+  if (!g_installed) {
+    hip_capture_build_table();
+    hip_capture_install();
+  }
 
   // Open the events writer now — Flag::init() has run so output_dir is valid.
   if (!hrr_cap::writer::open(hip_capture_output_dir())) return;

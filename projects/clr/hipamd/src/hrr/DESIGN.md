@@ -464,10 +464,15 @@ with `hipEventRecord` to accumulate elapsed time into `total_graph_ms`.
 
 ## Init / Shutdown
 
-`hip_capture_init()` is called from `hip_context.cpp` at HIP init. It always snapshots
-the dispatch tables; if `HIP_HRR_CAPTURE_OUTPUT` is set it opens the writer, recovers
-pre-init fat binaries, installs the capture shims, and registers `hip_capture_shutdown`
-via `atexit`. Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
+`hip_capture_init()` is called from `hip_context.cpp` at HIP init (after `amd::Runtime`
+and the live `HipDispatchTable` are ready). If `HIP_HRR_CAPTURE_OUTPUT` is set it
+snapshots the runtime dispatch table, installs runtime capture shims, opens the writer,
+recovers pre-init fat binaries (compiler-table shims + retroactive sweep), and
+registers `hip_capture_shutdown` via `atexit`. Runtime shims are **not** installed at
+`libamdhip64` static-init time: that pulled every HIP call through capture from DSO
+load before `hip::init()` completed and disturbed host stacks that load HIP early
+(e.g. Python + `spawn`). Events before `writer::open()` were never persisted anyway.
+Shutdown uninstalls shims and flushes `events.bin` + `manifest.json`.
 
 ## Enable Flag
 
