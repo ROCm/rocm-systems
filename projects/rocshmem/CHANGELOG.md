@@ -1,5 +1,5 @@
 # Changelog for rocSHMEM
-## rocSHMEM 3.4.0 for ROCm 7.14
+## rocSHMEM 3.5.0 for ROCm 7.14
 
 ### Added
 * Added new APIs:
@@ -23,7 +23,7 @@
 * Adding ASAN build support
 * Change default ROCSHMEM_DEBUG_LEVEL from WARN to ERROR
 
-## rocSHMEM 3.3.0 for ROCm 7.13
+## rocSHMEM 3.4.0 for ROCm 7.13
 ### Added
 * Added new APIs:
    * `rocshmem_quiet_on_stream`
