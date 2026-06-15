@@ -456,15 +456,14 @@ rsmi_status_t rsmi_init(uint64_t flags) {
       smi.Initialize(flags);
     } catch (const amd::smi::rsmi_exception& e) {
       smi.Cleanup();
-      if (e.error_code() == RSMI_INITIALIZATION_ERROR &&
-          !strcmp(e.what(), "Failed to initialize rocm_smi library (KFD node discovery).")) {
+      if (e.error_code() == RSMI_STATUS_DRIVER_NOT_LOADED) {
         // This system does not actually have ROCM drivers set up
         // We were probably just called through dependency, just report the
         // error and log without complaining loudly.
         std::ostringstream ss;
         ss << "Exception caught: " << e.what() << ".";
         LOG_INFO(ss);
-        return RSMI_STATUS_NOT_SUPPORTED;
+        return RSMI_STATUS_DRIVER_NOT_LOADED;
       }
       throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
     } catch (...) {
