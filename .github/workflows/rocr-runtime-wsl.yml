@@ -9,6 +9,7 @@ on:
       - "projects/hip/**"
       - "projects/hip-tests/**"
       - ".github/workflows/rocr-runtime-wsl.yml"
+      - "shared/amdgpu-windows-interop/wkmi"
   push:
     branches:
       - develop
@@ -18,6 +19,7 @@ on:
       - "projects/hip/**"
       - "projects/hip-tests/**"
       - ".github/workflows/rocr-runtime-wsl.yml"
+      - "shared/amdgpu-windows-interop/wkmi"
 
 permissions:
   contents: read
