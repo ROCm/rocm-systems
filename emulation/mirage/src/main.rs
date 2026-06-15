@@ -22,6 +22,20 @@ use mirage_daemon::WebuiArgs;
 use mirage_host::{HostConfig, run as host_run};
 use tokio::sync::Notify;
 
+// Link-only dependencies on the emulator backend crates. The binary
+// never names them: each crate registers itself into the emulator
+// registry via `inventory` (an `inventory::submit!` in its `lib.rs`).
+// Referencing them with `extern crate` guarantees the linker keeps the
+// crate object - and therefore its registration - even though no symbol
+// is used directly. Each is gated on its feature so a backend can be
+// dropped from the build entirely.
+#[cfg(feature = "hotswap")]
+extern crate mirage_hotswap as _;
+#[cfg(feature = "noop")]
+extern crate mirage_noop as _;
+#[cfg(feature = "rocjitsu")]
+extern crate mirage_rocjitsu as _;
+
 /// `mirage` — a UX for the rocjitsu (and other) GPU emulators.
 ///
 /// Mirage stores all its state on disk under your XDG directories:

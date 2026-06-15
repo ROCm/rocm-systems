@@ -1,7 +1,3 @@
-use std::path::PathBuf;
-
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -42,7 +38,7 @@ pub struct EmulatorDef {
 }
 
 /// Whether the host's hardware/environment can actually run an
-/// emulator. This is distinct from [`EmulatorDescription::installed`]:
+/// emulator. This is distinct from [`EmulatorBackend::installed`]:
 /// an emulator can be installed yet unsupported (e.g. HotSwap installed
 /// on a machine with no compatible physical GPU), or supported yet not
 /// installed. Both signals are surfaced so the UX/CLI can explain
@@ -76,24 +72,38 @@ impl SupportStatus {
     }
 }
 
-/// A description of an emulator backend: its identity (name, version,
-/// blurb)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The static identity of an emulator backend: its name, version, a
+/// short human-readable blurb, and the schema of options it accepts.
+/// Live runtime status (installed / supported) is reported separately
+/// through the [`EmulatorBackend`] trait methods.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EmulatorDescription {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// Schema of the options this backend accepts (empty when none).
     pub options_schema: Vec<OptionDef>,
 }
 
-pub trait EmulatorBackend : Sync + Send {
+/// A backend integration mirage can drive to emulate a workload.
+///
+/// Every emulator (the pass-through `noop`, `rocjitsu`, `hotswap`, …)
+/// lives in its own crate and registers a single stateless
+/// implementation of this trait into the global registry via
+/// [`inventory`]. The core and control-plane crates never name a
+/// concrete backend: they look one up by its [`EmulatorKind`] with
+/// [`get_emulator_backend`] and dispatch through this trait, so all
+/// backend-specific behaviour stays inside the backend's own crate.
+///
+/// Implementations are stateless singletons (a unit struct is typical);
+/// any per-session state is resolved on demand from the on-disk session
+/// definition (see [`crate::session::resolve_profile`]).
+pub trait EmulatorBackend: Sync + Send {
     /// Returns a description of the emulator, including its name, version, and a brief description.
     fn description(&self) -> EmulatorDescription;
 
-    /// Creates a new instance of the emulator bound to the given
-    /// profile. The profile is retained so instance methods
-    /// ([`Emulator::def`], [`Emulator::injection_def`], …) can resolve
-    /// against it.
+    /// Bring the emulator up for the given profile. Returns a
+    /// human-readable reason on failure.
     fn boot(&self, def: &ProfileDef) -> std::result::Result<(), String>;
 
     /// Schema for the options that this emulator supports. Empty when
@@ -126,23 +136,32 @@ pub trait EmulatorBackend : Sync + Send {
     /// silently running unemulated.
     ///
     /// `session` is the id of the session the workload runs in, so
-    /// emulators can materialise per-session runtime assets under the
-    /// session directory.
+    /// emulators can resolve the session's profile and materialise
+    /// per-session runtime assets under the session directory.
     fn injection_def(&self, session: &SessionId) -> Result<InjectionDef>;
 }
 
+/// One registry entry: the canonical [`EmulatorKind`] name plus the
+/// backend that handles it. Each backend crate submits exactly one of
+/// these via [`inventory::submit!`]; the backend is a `'static`
+/// reference to a stateless singleton (typically a unit struct), so the
+/// entry is const-constructible and needs no allocation.
 pub struct EmulatorBackendDef {
-    pub kind: EmulatorKind,
-    pub backend : Box<dyn EmulatorBackend>,
+    /// Canonical lowercase name the backend registers under (the value
+    /// stored in [`EmulatorDef::emulator`]).
+    pub kind: &'static str,
+    /// The backend implementation.
+    pub backend: &'static dyn EmulatorBackend,
 }
 
 inventory::collect!(EmulatorBackendDef);
 
-pub fn get_emulator_backend(kind: &EmulatorKind) -> Option<&'static Box<dyn EmulatorBackend>> {
-    for def in inventory::iter::<EmulatorBackendDef> {
-        if &def.kind == kind {
-            return Some(&def.backend);
-        }
-    }
-    None
+/// Look up the [`EmulatorBackend`] registered for `kind`, or `None` if
+/// no backend with that name was compiled into this binary (e.g. its
+/// crate's feature is disabled).
+pub fn get_emulator_backend(kind: &str) -> Option<&'static dyn EmulatorBackend> {
+    inventory::iter::<EmulatorBackendDef>
+        .into_iter()
+        .find(|def| def.kind == kind)
+        .map(|def| def.backend)
 }

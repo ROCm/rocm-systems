@@ -27,7 +27,9 @@ use std::path::{Path, PathBuf};
 
 use mirage_core::config::OptionDef;
 use mirage_core::discovery::{self, LibSearch};
-use mirage_core::emulator::{EmulatorBackend, EmulatorDef, EmulatorDescription, SupportStatus};
+use mirage_core::emulator::{
+    EmulatorBackend, EmulatorBackendDef, EmulatorDescription, SupportStatus,
+};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
@@ -85,30 +87,30 @@ pub const ADAPTER_POLICIES: &[&str] = &["none", "env", "native_build", "triton",
 /// GPUs physically present there is nothing for HotSwap to run on.
 pub const SUPPORTED_GPUS: &[(u32, &str)] = &[(90402, "gfx942"), (90500, "gfx950")];
 
-/// HotSwap [`Emulator`] implementation. HotSwap is wired into a
+/// HotSwap [`EmulatorBackend`] implementation. HotSwap is wired into a
 /// workload via the env contract: the patched ROCR + COMGR shadow the
 /// system copies (`LD_LIBRARY_PATH`), the HIP intercept is `LD_PRELOAD`ed,
 /// and the `HSA_HOTSWAP_*` variables select the source target and policy.
-pub struct Hotswap {
-    profile: ProfileDef,
-}
+/// Stateless; a single shared instance is registered in the emulator
+/// registry.
+pub struct Hotswap;
 
 impl EmulatorBackend for Hotswap {
-    fn description() -> EmulatorDescription {
+    fn description(&self) -> EmulatorDescription {
         describe()
     }
 
-    fn new(def: ProfileDef) -> Self {
-        Self { profile: def }
+    fn boot(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+        Ok(())
     }
 
-    fn options() -> Vec<OptionDef> {
+    fn options(&self) -> Vec<OptionDef> {
         Vec::new()
     }
 
-    fn shutdown(self) {}
+    fn shutdown(&self, _session: &SessionId) {}
 
-    fn validate_profile(_def: &ProfileDef) -> std::result::Result<(), String> {
+    fn validate_profile(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
         // HotSwap is not bundled or built by mirage; it must be
         // installed separately. Surface actionable guidance now, at
         // profile-creation time, rather than only when a session is
@@ -120,19 +122,19 @@ impl EmulatorBackend for Hotswap {
         }
     }
 
-    fn def(&self) -> &EmulatorDef {
-        &self.profile.emulator
-    }
-
-    fn installed() -> bool {
+    fn installed(&self) -> bool {
         is_installed()
     }
 
-    fn discover_plugins() -> Vec<PluginsDef> {
+    fn supported(&self) -> SupportStatus {
+        support_status()
+    }
+
+    fn discover_plugins(&self) -> Vec<PluginsDef> {
         Vec::new()
     }
 
-    fn health(&self) -> SessionHealth {
+    fn health(&self, _session: &SessionId) -> SessionHealth {
         let support = support_status();
         let installed = is_installed();
         let healthy = installed && support.supported;
@@ -151,7 +153,10 @@ impl EmulatorBackend for Hotswap {
         }
     }
 
-    fn injection_def(&self, _session: &SessionId) -> Result<InjectionDef> {
+    fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
+        // The trait hands us only the session id, so recover the profile
+        // it was started with to learn whether it is containerised.
+        let profile = mirage_core::session::resolve_profile(session)?;
         // Refuse to run unemulated: without the HotSwap tree the
         // workload would silently run on real hardware, so fail loudly
         // with guidance instead.
@@ -162,7 +167,7 @@ impl EmulatorBackend for Hotswap {
             ))
         })?;
 
-        let containerized = self.profile.containerize.is_some();
+        let containerized = profile.containerize.is_some();
         let (ld_preload, env, mounts) = build_hotswap_env(&dir, containerized);
 
         // HotSwap retargets device code onto a *physical* GPU, so the
@@ -399,18 +404,20 @@ fn ensure_cache_dirs(root: &Path) -> std::io::Result<()> {
 
 /// Describe the hotswap emulator backend for the registry. Owned by
 /// this crate (rather than `mirage_core`) so that all hotswap-specific
-/// policy lives alongside the hotswap discovery integration. Reports
-/// whether hotswap is installed, the resolved path to its runtime
-/// library when available, and whether this host has a physical GPU
-/// HotSwap can actually run on.
+/// policy lives alongside the hotswap discovery integration.
 pub fn describe() -> EmulatorDescription {
     EmulatorDescription {
         name: "hotswap".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         description: "load-time ISA rewriter: run a GPU's code on a different GPU (e.g. gfx1250 on gfx942/gfx950)".to_string(),
-        installed: is_installed(),
-        path: lib_path(),
-        support: support_status(),
+        options_schema: Vec::new(),
+    }
+}
+
+inventory::submit! {
+    EmulatorBackendDef {
+        kind: "hotswap",
+        backend: &Hotswap,
     }
 }
 

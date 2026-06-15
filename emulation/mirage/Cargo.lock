@@ -1060,6 +1060,7 @@ dependencies = [
  "mirage_daemon",
  "mirage_host",
  "mirage_hotswap",
+ "mirage_noop",
  "mirage_rocjitsu",
  "nix",
  "predicates",
@@ -1122,8 +1123,6 @@ dependencies = [
  "libc",
  "mirage_builtin",
  "mirage_core",
- "mirage_hotswap",
- "mirage_rocjitsu",
  "serde",
  "serde_json",
  "tokio",
@@ -1172,8 +1171,6 @@ dependencies = [
  "libc",
  "mirage_container",
  "mirage_core",
- "mirage_hotswap",
- "mirage_rocjitsu",
  "nix",
  "serde",
  "serde_json",
@@ -1186,6 +1183,15 @@ dependencies = [
 name = "mirage_hotswap"
 version = "0.1.0"
 dependencies = [
+ "inventory",
+ "mirage_core",
+]
+
+[[package]]
+name = "mirage_noop"
+version = "0.1.0"
+dependencies = [
+ "inventory",
  "mirage_core",
 ]
 
@@ -1194,6 +1200,7 @@ name = "mirage_rocjitsu"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "inventory",
  "mirage_builtin",
  "mirage_core",
  "serde",

@@ -71,10 +71,7 @@ static TEST_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Current test override root, if any.
 fn test_root() -> Option<PathBuf> {
-    TEST_ROOT
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
+    TEST_ROOT.read().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Returns `$XDG_CONFIG_HOME` (or `$HOME/.config` if unset).

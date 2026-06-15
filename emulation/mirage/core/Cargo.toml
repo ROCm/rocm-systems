@@ -18,7 +18,7 @@ nix = { workspace = true }
 libc = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-inventory = "0.3.24"
+inventory = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

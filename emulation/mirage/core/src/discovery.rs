@@ -103,7 +103,9 @@ impl LibSearch<'_> {
             .and_then(|p| p.parent().map(Path::to_path_buf));
 
         // Generic, opt-in: every directory on $LD_LIBRARY_PATH.
-        if self.system_fallbacks && let Some(paths) = non_empty_var("LD_LIBRARY_PATH") {
+        if self.system_fallbacks
+            && let Some(paths) = non_empty_var("LD_LIBRARY_PATH")
+        {
             for entry in std::env::split_paths(&paths) {
                 if !entry.as_os_str().is_empty() {
                     dirs.push(entry);

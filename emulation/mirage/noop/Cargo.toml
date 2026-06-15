@@ -1,5 +1,5 @@
 [package]
-name = "mirage_hotswap"
+name = "mirage_noop"
 version = "0.1.0"
 edition = "2024"
 

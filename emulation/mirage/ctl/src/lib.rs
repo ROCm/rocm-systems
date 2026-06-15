@@ -20,9 +20,9 @@ use anyhow::Context as _;
 use clap::{Args, Subcommand};
 use mirage_core::common::MaybeRef;
 use mirage_core::ctl::{CreateSessionRequest, MirageCtl, StdStream, StreamPacket};
-use mirage_core::emulator::EmulatorDescription;
 use mirage_core::exec::{ExecArgs, ExecDef, ExecId, ExecRef};
 use mirage_core::profile::{ContainerizedDef, FileMount, ProfileDef};
+use mirage_core::registry::EmulatorInfo;
 use mirage_core::session::SessionId;
 use tokio_stream::StreamExt;
 
@@ -62,30 +62,24 @@ pub fn init_logging(verbose: u8) {
         .try_init();
 }
 
-/// The full emulator registry: the generic pass-through
-/// ([`mirage_core::registry::noop`]) plus the emulator-specific
-/// backends, each of which is owned by its own crate. Assembled here
-/// because `mirage_ctl` is the lowest crate that depends on every
-/// emulator integration. Each entry reports its current install state
-/// and resolved runtime path, so building the registry probes the
-/// machine.
-pub fn registry() -> Vec<EmulatorDescription> {
-    use mirage_core::emulator::EmulatorBackend;
-    vec![
-        mirage_core::emulator::Noop::description(),
-        mirage_rocjitsu::Rocjitsu::description(),
-        mirage_hotswap::Hotswap::description(),
-    ]
+/// The full emulator registry: every backend crate compiled into this
+/// binary registers itself via [`inventory`], and
+/// [`mirage_core::registry::registry`] probes each one for its identity
+/// and live install / support status. No backend is named here, so
+/// enabling or disabling a backend's feature simply adds or removes it
+/// from this list.
+pub fn registry() -> Vec<EmulatorInfo> {
+    mirage_core::registry::registry()
 }
 
 /// Lookup an emulator by its canonical name in the full [`registry`].
-pub fn find_emulator(name: &str) -> Option<EmulatorDescription> {
+pub fn find_emulator(name: &str) -> Option<EmulatorInfo> {
     registry().into_iter().find(|e| e.name == name)
 }
 
 /// The default emulator for new profiles: the first installed,
 /// non-noop entry, falling back to `noop`.
-pub fn default_emulator() -> EmulatorDescription {
+pub fn default_emulator() -> EmulatorInfo {
     let specs = registry();
     mirage_core::registry::default_emulator(&specs).clone()
 }
@@ -94,7 +88,7 @@ pub fn default_emulator() -> EmulatorDescription {
 /// each backend with whether its runtime is installed and whether this
 /// host's hardware supports it. With `json` the full descriptions are
 /// emitted as-is; otherwise a compact table (or, with `long`, a
-/// detailed block including the support reason and runtime path).
+/// detailed block including the support reason).
 fn emulators_cmd(long: bool, json: bool) {
     let specs = registry();
     if json {
@@ -122,9 +116,6 @@ fn emulators_cmd(long: bool, json: bool) {
                 if spec.support.supported { "yes" } else { "no" },
                 spec.support.reason
             );
-            if let Some(path) = &spec.path {
-                println!("  runtime:   {}", path.display());
-            }
             println!();
         }
         return;
@@ -181,11 +172,10 @@ pub fn ensure_builtins_present() {
 /// Shared by the CLI profile commands and the daemon's profile
 /// endpoint so both validate identically.
 pub fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
-    use mirage_core::emulator::{EmulatorBackend, EmulatorKind, Noop};
-    match def.emulator.emulator {
-        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::validate_profile(def),
-        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::validate_profile(def),
-        EmulatorKind::Noop => Noop::validate_profile(def),
+    let kind = &def.emulator.emulator;
+    match mirage_core::emulator::get_emulator_backend(kind) {
+        Some(backend) => backend.validate_profile(def),
+        None => Err(format!("unknown emulator `{kind}`")),
     }
 }
 
@@ -1241,10 +1231,7 @@ fn resolve_start_profile<C: MirageCtl>(
 
 /// Resolve the session id: the `--id` flag, an interactive prompt (blank
 /// for auto), or `None` (auto-generated).
-fn resolve_start_id(
-    id: Option<SessionId>,
-    interactive: bool,
-) -> anyhow::Result<Option<SessionId>> {
+fn resolve_start_id(id: Option<SessionId>, interactive: bool) -> anyhow::Result<Option<SessionId>> {
     if id.is_some() || !interactive {
         return Ok(id);
     }
@@ -1611,9 +1598,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
             })?;
             tracing::info!(session = %def.id, "session created; spawning host");
             spawn_host_for(&def.id)?;
-            if let Err(e) =
-                wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(10))
-            {
+            if let Err(e) = wait_ready_or_bail(ctl.as_ref(), &def.id, Duration::from_secs(10)) {
                 // The transient session we just created never came up
                 // (e.g. a container image that couldn't be pulled or a
                 // node that wouldn't start). Tear it down so we don't

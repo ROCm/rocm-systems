@@ -177,7 +177,6 @@ struct EmulatorEntry {
     supported: bool,
     /// Human-readable explanation of the support decision.
     support_reason: String,
-    path: Option<std::path::PathBuf>,
     available_plugins: Vec<&'static str>,
 }
 
@@ -194,7 +193,6 @@ async fn list_emulators() -> Json<Vec<EmulatorEntry>> {
                 is_default,
                 supported: spec.support.supported,
                 support_reason: spec.support.reason,
-                path: spec.path,
                 // Plugin discovery requires constructing a live backend
                 // instance; the registry doesn't expose a static plugin
                 // list yet, so we return an empty set here. Future work:

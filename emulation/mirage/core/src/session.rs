@@ -216,6 +216,28 @@ pub struct SessionDef {
     pub created_at: DateTime<Utc>,
 }
 
+/// Read a session's on-disk definition and resolve its profile (whether
+/// stored inline or referenced by name).
+///
+/// Shared by the host and every emulator backend so a backend's
+/// [`crate::emulator::EmulatorBackend::injection_def`] — which receives
+/// only a [`SessionId`] — can recover the profile it was started with
+/// without the caller threading it through.
+pub fn resolve_profile(session: &SessionId) -> crate::error::Result<ProfileDef> {
+    let layout = crate::paths::SessionLayout::for_id(session);
+    let def: SessionDef = crate::state::read_json(&layout.def())?;
+    match def.profile {
+        MaybeRef::Owned(p) => Ok(p),
+        MaybeRef::Ref(name) => {
+            let p = crate::paths::profile_path(&name);
+            if !p.exists() {
+                return Err(crate::error::MirageError::ProfileNotFound(name));
+            }
+            crate::state::read_json(&p)
+        }
+    }
+}
+
 /// Aggregate view returned by `MirageCtl::session_state`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionState {

@@ -20,7 +20,9 @@ use std::path::PathBuf;
 use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
 use mirage_core::config::OptionDef;
-use mirage_core::emulator::{EmulatorBackend, EmulatorDef, EmulatorDescription, ExecMode, SupportStatus};
+use mirage_core::emulator::{
+    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, ExecMode, SupportStatus,
+};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
 use mirage_core::plugin::PluginsDef;
@@ -28,31 +30,30 @@ use mirage_core::profile::{FileMount, ProfileDef};
 use mirage_core::session::{SessionHealth, SessionId};
 use mirage_core::topology::TopologyDef;
 
-/// rocjitsu [`Emulator`] implementation. Bundles the rocjitsu-specific
-/// injection (the KMD `LD_PRELOAD` plus the `ROCJITSU_RUNTIME_DIR` env
-/// var and the `config_path` discovery file it points at) and profile
-/// validation so callers dispatch generically on
-/// [`mirage_core::emulator::EmulatorKind`].
-pub struct Rocjitsu {
-    profile: ProfileDef,
-}
+/// rocjitsu [`EmulatorBackend`] implementation. Bundles the
+/// rocjitsu-specific injection (the KMD `LD_PRELOAD` plus the
+/// `ROCJITSU_RUNTIME_DIR` env var and the `config_path` discovery file
+/// it points at) and profile validation so callers dispatch generically
+/// through [`mirage_core::emulator::get_emulator_backend`]. Stateless; a
+/// single shared instance is registered in the emulator registry.
+pub struct Rocjitsu;
 
 impl EmulatorBackend for Rocjitsu {
-    fn description() -> EmulatorDescription {
+    fn description(&self) -> EmulatorDescription {
         describe()
     }
 
-    fn new(def: ProfileDef) -> Self {
-        Self { profile: def }
+    fn boot(&self, _def: &ProfileDef) -> std::result::Result<(), String> {
+        Ok(())
     }
 
-    fn options() -> Vec<OptionDef> {
+    fn options(&self) -> Vec<OptionDef> {
         Vec::new()
     }
 
-    fn shutdown(self) {}
+    fn shutdown(&self, _session: &SessionId) {}
 
-    fn validate_profile(def: &ProfileDef) -> std::result::Result<(), String> {
+    fn validate_profile(&self, def: &ProfileDef) -> std::result::Result<(), String> {
         // Building the kmd config resolves the topology + agent
         // references; any error here is precisely what would otherwise
         // surface at run time. No session exists at validation time, so
@@ -62,19 +63,21 @@ impl EmulatorBackend for Rocjitsu {
             .map_err(|e| format!("rocjitsu cannot use this profile: {e}"))
     }
 
-    fn def(&self) -> &EmulatorDef {
-        &self.profile.emulator
-    }
-
-    fn installed() -> bool {
+    fn installed(&self) -> bool {
         is_installed()
     }
 
-    fn discover_plugins() -> Vec<PluginsDef> {
+    fn supported(&self) -> SupportStatus {
+        // rocjitsu emulates the GPU in software, so it runs on any host
+        // regardless of the physical hardware present.
+        SupportStatus::supported("software emulator; no special hardware required")
+    }
+
+    fn discover_plugins(&self) -> Vec<PluginsDef> {
         Vec::new()
     }
 
-    fn health(&self) -> SessionHealth {
+    fn health(&self, _session: &SessionId) -> SessionHealth {
         let installed = is_installed();
         SessionHealth {
             healthy: installed,
@@ -90,7 +93,10 @@ impl EmulatorBackend for Rocjitsu {
     }
 
     fn injection_def(&self, session: &SessionId) -> Result<InjectionDef> {
-        let def = &self.profile.emulator;
+        // The trait hands us only the session id, so recover the profile
+        // (and thus the emulator def) it was started with.
+        let profile = mirage_core::session::resolve_profile(session)?;
+        let def = &profile.emulator;
         let config = kmd_config(def, Some(session))?;
         // Refuse to run unemulated: if the KMD interposer can't be
         // located there is nothing to emulate the workload, so fail
@@ -138,7 +144,7 @@ impl EmulatorBackend for Rocjitsu {
         // location so the in-container resolution finds them with no extra
         // configuration. Without these mounts the in-container host fails
         // to locate the KMD library and the exec can never start.
-        let mounts = if self.profile.containerize.is_some() {
+        let mounts = if profile.containerize.is_some() {
             // Mirrors `mirage_host`'s `CONTAINER_CACHE_DIR` +
             // `<emulator>/<ASSET_SUBDIR>`; kept as a literal here to avoid
             // a host→emulator crate dependency.
@@ -177,18 +183,19 @@ impl EmulatorBackend for Rocjitsu {
 /// Describe the rocjitsu emulator backend for the registry. Owned by
 /// this crate (rather than `mirage_core`) so that all rocjitsu-
 /// specific policy lives alongside the rocjitsu runtime integration.
-/// Reports whether rocjitsu is installed and the resolved path to its
-/// runtime KMD library when available.
 pub fn describe() -> EmulatorDescription {
     EmulatorDescription {
         name: "rocjitsu".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         description: "ROCm just-in-time GPU emulator (cycle-accurate or functional)".to_string(),
-        installed: is_installed(),
-        path: kmd_preload(),
-        // rocjitsu emulates the GPU in software, so it runs on any
-        // host regardless of the physical hardware present.
-        support: SupportStatus::supported("software emulator; no special hardware required"),
+        options_schema: Vec::new(),
+    }
+}
+
+inventory::submit! {
+    EmulatorBackendDef {
+        kind: "rocjitsu",
+        backend: &Rocjitsu,
     }
 }
 /// Subdirectory under `<MIRAGE_CACHE>/emulator/` where the extracted
@@ -308,10 +315,7 @@ fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
 ///    `<MIRAGE_CACHE>/emulator/rocjitsu/sim_<hash>.json` so identical
 ///    configs share a file and stale files are never overwritten
 ///    in-place.
-pub fn kmd_config(
-    def: &EmulatorDef,
-    session: Option<&SessionId>,
-) -> Result<PathBuf> {
+pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<PathBuf> {
     let topology: TopologyDef = match &def.topology {
         MaybeRef::Owned(t) => t.clone(),
         MaybeRef::Ref(name) => mirage_core::topology::store::get(name)?,
@@ -388,7 +392,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(tmp.path());
         let def = EmulatorDef {
-            emulator: mirage_core::emulator::EmulatorKind::Rocjitsu,
+            emulator: "rocjitsu".to_string(),
             plugins: Default::default(),
             exec_mode: ExecMode::Functional,
             options: Default::default(),

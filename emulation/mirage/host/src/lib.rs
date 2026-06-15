@@ -41,7 +41,6 @@ use mirage_core::common::MaybeRef;
 use mirage_core::container::{
     ContainerState, ENV_HEAD_ADDR, ENV_HEAD_PORT, ENV_RANK, container_name,
 };
-use mirage_core::emulator::{EmulatorBackend, EmulatorKind};
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::{ExecDef, ExecId, ExecStatus, InjectionDef, NodeStatus};
 use mirage_core::paths::{ExecLayout, SessionLayout};
@@ -563,20 +562,21 @@ fn node_mirage_env(rank: u32, head_addr: &str, head_port: u16) -> Vec<(String, S
 
 /// Resolve the emulator-level injection for a session by reading its
 /// on-disk definition, resolving its profile, and dispatching to the
-/// configured [`EmulatorKind`]'s [`EmulatorBackend`] implementation to
-/// compute the env vars / `LD_PRELOAD` it needs.
+/// configured emulator backend (looked up in the registry by its
+/// [`mirage_core::emulator::EmulatorKind`] name) to compute the env
+/// vars / `LD_PRELOAD` it needs.
 ///
 /// Returns an empty [`InjectionDef`] for emulators that need no
 /// injection (`noop`). Errors when a configured emulator cannot produce
-/// its required assets or its runtime library is missing, so a
-/// misconfigured session fails loudly instead of silently running
-/// unemulated.
+/// its required assets, its runtime library is missing, or no backend
+/// with that name was compiled in, so a misconfigured session fails
+/// loudly instead of silently running unemulated.
 fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
     let profile = resolve_profile(session)?;
-    match profile.emulator.emulator {
-        EmulatorKind::Rocjitsu => mirage_rocjitsu::Rocjitsu::new(profile).injection_def(session),
-        EmulatorKind::Hotswap => mirage_hotswap::Hotswap::new(profile).injection_def(session),
-        EmulatorKind::Noop => mirage_core::emulator::Noop::new(profile).injection_def(session),
+    let kind = &profile.emulator.emulator;
+    match mirage_core::emulator::get_emulator_backend(kind) {
+        Some(backend) => backend.injection_def(session),
+        None => Err(MirageError::Other(format!("unknown emulator `{kind}`"))),
     }
 }
 

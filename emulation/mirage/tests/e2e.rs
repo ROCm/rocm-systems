@@ -6,7 +6,7 @@
 //!   `XDG_RUNTIME_DIR`, and `XDG_STATE_HOME` at it.
 //! * Drives the unified `mirage` binary as a subprocess via
 //!   `assert_cmd`. The CLI re-execs itself with the `host` subcommand
-//!   to spawn per-session hosts \u2014 no separate host binary needed.
+//!   to spawn per-session hosts - no separate host binary needed.
 
 use std::path::PathBuf;
 use std::process::Command;

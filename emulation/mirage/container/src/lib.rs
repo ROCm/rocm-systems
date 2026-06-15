@@ -733,7 +733,16 @@ mod tests {
         // docker — which rejects `keep-groups` — keeps working.
         let groups = vec!["video".to_string()];
         let argv = Engine::run_argv(
-            "docker", "n", "img", None, false, &[], &[], &groups, &[], &[],
+            "docker",
+            "n",
+            "img",
+            None,
+            false,
+            &[],
+            &[],
+            &groups,
+            &[],
+            &[],
         );
         let joined = argv.join(" ");
         assert!(!joined.contains("--group-add"));
@@ -745,7 +754,16 @@ mod tests {
     fn run_argv_omits_network_when_none() {
         let command = vec!["sleep".to_string(), "infinity".to_string()];
         let argv = Engine::run_argv(
-            "podman", "n", "img", None, false, &[], &[], &[], &[], &command,
+            "podman",
+            "n",
+            "img",
+            None,
+            false,
+            &[],
+            &[],
+            &[],
+            &[],
+            &command,
         );
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
