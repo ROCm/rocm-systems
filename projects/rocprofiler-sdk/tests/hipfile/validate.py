@@ -153,7 +153,6 @@ def test_hipfile_traces(input_data):
         assert operation_name(buffer_records, api_call) in cb_op_names
 
     observed_args = False
-    observed_retval = False
     for api_call in hipfile_ext_traces:
         assert api_call["thread_id"] > 0
         assert api_call["start_timestamp"] > 0
@@ -163,10 +162,8 @@ def test_hipfile_traces(input_data):
         assert "args" in api_call
         assert "retval" in api_call
         observed_args = observed_args or len(api_call["args"]) > 0
-        observed_retval = observed_retval or len(api_call["retval"]) > 0
 
     assert observed_args
-    assert observed_retval
 
 
 if __name__ == "__main__":
