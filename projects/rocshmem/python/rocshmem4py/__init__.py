@@ -42,7 +42,9 @@ try:
         rocshmem_buffer_unregister_all,
         rocshmem_ptr,
         rocshmem_barrier_all,
+        rocshmem_barrier,
         rocshmem_barrier_all_on_stream,
+        rocshmem_barrier_on_stream,
         rocshmem_fence,
         rocshmem_quiet,
         rocshmem_get_uniqueid,
@@ -57,7 +59,9 @@ try:
         rocshmem_signal_wait_until_on_stream,
         TeamConfig,
         rocshmem_sync_all,
+        rocshmem_team_sync,
         rocshmem_sync_all_on_stream,
+        rocshmem_team_sync_on_stream,
         # TODO: rocshmem_ctx_{create,destroy,fence,quiet} to be added later
         # due to IPC no-MPI HostInterface aborting on non-MPI WindowInfo
         # rocshmem_ctx_create,

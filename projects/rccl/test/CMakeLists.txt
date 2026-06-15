@@ -222,6 +222,7 @@ if(BUILD_TESTS)
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
+      VersionInfoTests.cpp
       device/TestOp128.cpp
       device/GinDeviceTests.cpp
       common/main_fixtures.cpp
@@ -311,6 +312,7 @@ if(BUILD_TESTS)
       transport/GinMPI/GinMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
+      WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       RegistrationMPITests.cpp

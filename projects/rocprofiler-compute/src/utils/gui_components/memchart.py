@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from typing import Any
+from typing import Any, Optional, Union
 
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
@@ -17,10 +17,14 @@ DEFAULT_SCIENTIFIC_WIDTH = 8
 
 
 def insert_chart_data(mem_data: list[dict[str, Any]], base_data: schema.Workload) -> G:
+    if not mem_data:
+        return G()
     if len(mem_data) != 1:
         console_error("Memory Chart config doesn't follow expected formatting")
 
     table_config = mem_data[0]["metric_table"]
+    if table_config["id"] not in base_data.dfs:
+        return G()
     original_df = base_data.dfs[table_config["id"]]
     display_columns = original_df.columns.values.tolist().copy()
     display_df = original_df[display_columns]
@@ -2025,7 +2029,9 @@ def get_memchart(
     )
 
 
-def format_value_for_display(value: Any, max_length: int = DEFAULT_MAX_LENGTH) -> str:  # noqa: ANN401
+def format_value_for_display(
+    value: Optional[Union[int, float, str]], max_length: int = DEFAULT_MAX_LENGTH
+) -> str:
     """
     Format a value (int, float, or str) into a concise string suitable for display.
 
