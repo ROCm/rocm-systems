@@ -121,6 +121,11 @@ hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char
   // Do not include the default hiprtc header if the app passes --hiprtc-no-builtin-header option.
   // This is to avoid conflicts with std type traits defined in hiprtc header. Once the actual fix
   // to move type traits to __hip_internal namespace is made in 7.0, this option can be removed.
+
+  // Always block system C/C++ headers to match NVRTC behavior (AIRUNTIME-2028)
+  compile_options.push_back("-nostdinc");
+  compile_options.push_back("-nostdinc++");
+
   if (!no_builtin_header) {
     compile_options.push_back("-D__HIPCC_RTC__");
     compile_options.push_back("-nogpuinc");
