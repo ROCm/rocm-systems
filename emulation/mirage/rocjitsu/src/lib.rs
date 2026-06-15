@@ -21,7 +21,8 @@ use mirage_core::agent::AgentDef;
 use mirage_core::common::MaybeRef;
 use mirage_core::config::OptionDef;
 use mirage_core::emulator::{
-    EmulatorBackend, EmulatorBackendDef, EmulatorDef, EmulatorDescription, ExecMode, SupportStatus,
+    EmulatorBackend, EmulatorBackendDef, EmulatorDaemon, EmulatorDef, EmulatorDescription,
+    ExecMode, SupportStatus,
 };
 use mirage_core::error::{MirageError, Result};
 use mirage_core::exec::InjectionDef;
@@ -29,6 +30,8 @@ use mirage_core::plugin::PluginsDef;
 use mirage_core::profile::{FileMount, ProfileDef};
 use mirage_core::session::{SessionHealth, SessionId};
 use mirage_core::topology::TopologyDef;
+
+pub mod daemon;
 
 /// rocjitsu [`EmulatorBackend`] implementation. Bundles the
 /// rocjitsu-specific injection (the KMD `LD_PRELOAD` plus the
@@ -177,6 +180,32 @@ impl EmulatorBackend for Rocjitsu {
             mounts,
             host_gpus: false,
         })
+    }
+
+    fn start_daemon(&self, session: &SessionId) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        // The per-node host hosts one rocjitsu daemon per node. If the
+        // KMD library cannot be located there is nothing to host the
+        // emulated device with; return `None` rather than erroring, since
+        // the per-exec `injection_def` already fails loudly in that case
+        // (and a non-rocjitsu host must not be blocked by a missing
+        // rocjitsu library).
+        let Some(lib) = kmd_preload() else {
+            tracing::warn!(
+                "rocjitsu: KMD library ({KMD_LIB_NAME}) not found; \
+                 not starting daemon"
+            );
+            return Ok(None);
+        };
+        let profile = mirage_core::session::resolve_profile(session)?;
+        let config = kmd_config(&profile.emulator, Some(session))?;
+        // The daemon binds its socket under the same runtime directory the
+        // workload's interposer probes (`$ROCJITSU_RUNTIME_DIR`), which is
+        // exactly what `injection_def` exports — so the workload connects
+        // to *this* daemon with no extra wiring.
+        let runtime_dir = write_config_discovery(&config)?;
+        let daemon =
+            daemon::Daemon::start(&lib, &config, &runtime_dir).map_err(MirageError::Other)?;
+        Ok(Some(Box::new(daemon)))
     }
 }
 

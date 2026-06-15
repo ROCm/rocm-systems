@@ -139,6 +139,42 @@ pub trait EmulatorBackend: Sync + Send {
     /// emulators can resolve the session's profile and materialise
     /// per-session runtime assets under the session directory.
     fn injection_def(&self, session: &SessionId) -> Result<InjectionDef>;
+
+    /// Start a host-side emulator *daemon* for `session`, if this
+    /// backend hosts one.
+    ///
+    /// The per-node host process calls this once, on startup, before it
+    /// runs any exec. A backend that emulates the GPU out-of-process
+    /// (e.g. rocjitsu's daemon, which owns the simulated device and
+    /// serves the workload's KFD ioctls over a Unix socket) stands the
+    /// daemon up here and returns a handle the host keeps alive for the
+    /// whole session; the handle is stopped (dropped) when the host
+    /// shuts down. There is exactly one daemon per node host, matching
+    /// the "one emulated GPU per node" model.
+    ///
+    /// Returns `Ok(None)` — the default — for backends that need no
+    /// daemon (`noop`, `hotswap`, or rocjitsu when its runtime library
+    /// is not installed and the exec will fail loudly anyway). Returns
+    /// `Err` only when a daemon was expected but could not be started.
+    fn start_daemon(&self, session: &SessionId) -> Result<Option<Box<dyn EmulatorDaemon>>> {
+        let _ = session;
+        Ok(None)
+    }
+}
+
+/// A running, host-side emulator daemon owned by a per-node host.
+///
+/// The host holds the boxed handle for the lifetime of the session and
+/// drops it on shutdown. Implementations must tear the daemon down in
+/// their [`Drop`] so cleanup happens even if the host panics; [`stop`]
+/// is provided for an explicit, ordered shutdown and defaults to simply
+/// dropping the handle.
+///
+/// [`stop`]: EmulatorDaemon::stop
+pub trait EmulatorDaemon: Send {
+    /// Stop the daemon and release its resources. Blocking. The default
+    /// drops the handle, which must perform the teardown.
+    fn stop(self: Box<Self>) {}
 }
 
 /// One registry entry: the canonical [`EmulatorKind`] name plus the

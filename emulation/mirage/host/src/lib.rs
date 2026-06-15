@@ -159,6 +159,20 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
     let run_execs_here = is_node_host || !containerized;
     let host_rank = config.rank;
 
+    // Host the emulator daemon for the node this host serves. A backend
+    // that emulates the GPU out-of-process (rocjitsu) stands up its
+    // daemon here — one per node host — and we keep the handle alive for
+    // the host's lifetime; dropping it on shutdown tears the daemon down.
+    // Only a host that actually runs execs (a per-node in-container host,
+    // or the orchestrator of a non-containerised session) hosts a daemon,
+    // because that is where the workload — and thus the
+    // `ROCJITSU_RUNTIME_DIR` the daemon binds its socket under — lives.
+    let mut emulator_daemon = if run_execs_here {
+        start_emulator_daemon(&config.session)
+    } else {
+        None
+    };
+
     // Install signal handlers.
     let sig_shutdown = shutdown.clone();
     tokio::spawn(async move {
@@ -269,6 +283,11 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
         let _ = tokio::time::timeout(remaining.max(Duration::from_millis(10)), t).await;
     }
     signal_all_execs(&layout, nix::sys::signal::Signal::SIGKILL);
+    // Stop the emulator daemon after the workload children are gone, so
+    // the simulated device outlives every process that talks to it.
+    if let Some(daemon) = emulator_daemon.take() {
+        daemon.stop();
+    }
     // Tear down any per-node containers and the per-session network.
     // Only the orchestrator owns the containers, so only it tears them
     // down. Idempotent and a no-op for non-containerised sessions; the
@@ -597,6 +616,39 @@ fn resolve_injection(session: &SessionId) -> Result<InjectionDef> {
     match mirage_core::emulator::get_emulator_backend(kind) {
         Some(backend) => backend.injection_def(session),
         None => Err(MirageError::Other(format!("unknown emulator `{kind}`"))),
+    }
+}
+
+/// Start the emulator daemon for `session`, if its backend hosts one.
+///
+/// Dispatches to the configured emulator backend's
+/// [`mirage_core::emulator::EmulatorBackend::start_daemon`]. A failure
+/// to start the daemon is *not* fatal: the rocjitsu interposer falls
+/// back to in-process emulation when no daemon socket is present, so we
+/// log and continue rather than aborting the host. Returns `None` for
+/// emulators that host no daemon (`noop`, `hotswap`) or when the backend
+/// is unknown.
+fn start_emulator_daemon(
+    session: &SessionId,
+) -> Option<Box<dyn mirage_core::emulator::EmulatorDaemon>> {
+    let profile = resolve_profile(session).ok()?;
+    let kind = &profile.emulator.emulator;
+    let backend = mirage_core::emulator::get_emulator_backend(kind)?;
+    match backend.start_daemon(session) {
+        Ok(daemon) => {
+            if daemon.is_some() {
+                tracing::info!(session = %session, emulator = %kind, "emulator daemon hosted");
+            }
+            daemon
+        }
+        Err(e) => {
+            tracing::warn!(
+                session = %session,
+                "emulator daemon failed to start ({e}); \
+                 falling back to in-process emulation"
+            );
+            None
+        }
     }
 }
 

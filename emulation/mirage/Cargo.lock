@@ -980,6 +980,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1201,8 +1211,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "inventory",
+ "libc",
  "mirage_builtin",
  "mirage_core",
+ "rocjitsu_sys",
  "serde",
  "serde_json",
  "tempfile",
@@ -1598,6 +1610,13 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rocjitsu_sys"
+version = "0.1.0"
+dependencies = [
+ "libloading",
 ]
 
 [[package]]
