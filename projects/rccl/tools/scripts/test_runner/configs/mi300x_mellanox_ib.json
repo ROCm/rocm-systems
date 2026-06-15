@@ -2508,6 +2508,98 @@
         { "name": "DeviceAPI_GIN_D3_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 3 (-R 2 -D 3), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 3" },
         { "name": "DeviceAPI_GIN_D4_NoDmabuf", "description": "GIN device-API alltoall, symmetric window + multimem depth 4 (-R 2 -D 4), NCCL_DMABUF_ENABLE NOT set", "command_args": "-R 2 -D 4" }
       ]
+    },
+    "gin_device_mpi": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_NCONTEXTS": "4",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_DeviceMPI_AllTests",
+          "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes; LSA-only, multi-context, and negative opt-in tests self-skip in this layout",
+          "test_filter": "GinMPIDeviceTests.*",
+          "timeout": 600
+        }
+      ]
+    },
+    "gin_barrier_session": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_NCONTEXTS": "4",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_BarrierSession_LsaAndHybrid",
+          "description": "ncclBarrierSession LSA-only + hybrid (LSA+GIN) with 2 ranks/node so the inner LSA team is non-trivial and the outer rail-GIN arm crosses nodes",
+          "test_filter": "GinMPIDeviceTests.BarrierSession_*"
+        }
+      ]
+    },
+    "gin_negative": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_NCONTEXTS": "4",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_Disable_Error",
+          "description": "Negative path: ncclDevCommCreate must reject GIN bring-up when NCCL_GIN_ENABLE=0",
+          "test_filter": "GinMPIDeviceTests.Disable_Error",
+          "env_variables": {
+            "NCCL_GIN_ENABLE": "0"
+          }
+        },
+        {
+          "name": "GIN_Invalid_SignalPool",
+          "description": "Oversized GIN signal pool is silently clamped; basic put round-trip still works",
+          "test_filter": "GinMPIDeviceTests.Invalid_SignalPool",
+          "env_variables": {
+            "NCCL_GIN_SIGNAL_POOL_SIZE": "0x40000000"
+          }
+        },
+        {
+          "name": "GIN_Invalid_CounterPool",
+          "description": "Oversized GIN counter pool is silently clamped; basic put round-trip still works",
+          "test_filter": "GinMPIDeviceTests.Invalid_CounterPool",
+          "env_variables": {
+            "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
+          }
+        }
+      ]
     }
   },
   "test_suites": [
@@ -3043,6 +3135,24 @@
       "name": "rccl-tests - Device API - GIN",
       "description": "GIN device-API alltoall sweeping multimem depth (rccl-tests -R 2 -D 3 / -D 4) with GIN env (NCCL_DMABUF_ENABLE, NCCL_GIN_TYPE=2, HSA_NO_SCRATCH_RECLAIM, NCCL_ENV_PLUGIN=none, RCCL_ENABLE_INTRANET). Requires rccl-tests built with --enable-device-api.",
       "config": "device_api_gin",
+      "enabled": true
+    },
+    {
+      "name": "GIN Device MPI - Proxy Tests",
+      "description": "GIN proxy device-side MPI tests (put/signal/counter/barrier/alltoall) over IB across two nodes",
+      "config": "gin_device_mpi",
+      "enabled": true
+    },
+    {
+      "name": "GIN BarrierSession - LSA + Hybrid",
+      "description": "ncclBarrierSession LSA-only and hybrid LSA+GIN barrier with 2 ranks/node",
+      "config": "gin_barrier_session",
+      "enabled": true
+    },
+    {
+      "name": "GIN Negative / Pool Limits",
+      "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
+      "config": "gin_negative",
       "enabled": true
     }
   ]
