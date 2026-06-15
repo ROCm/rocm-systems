@@ -25,6 +25,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.aggregation import (
+    calc_pct_of_peak,
     to_avg,
     to_concat,
     to_int,
@@ -55,8 +56,9 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
+from utils.utils_analysis import PEAK_COL_PREFERENCE, VALUE_COL_PREFERENCE
 from utils.utils_common import get_uuid, get_version
-from utils.utils_counter_defs import get_build_in_vars
+from utils.utils_counter_defs import extract_counters_and_variables, get_build_in_vars
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -86,9 +88,10 @@ class db_analysis(OmniAnalyze_Base):
             self._kernel_values_data_per_workload,
             self._workload_values_data_per_workload,
         ) = self.calc_expressions()
-        self._roofline_data_per_kernel, self._roofline_data_per_workload = (
-            self.calc_roofline_data()
-        )
+        (
+            self._roofline_data_per_kernel,
+            self._roofline_data_per_workload,
+        ) = self.calc_roofline_data()
 
     @demarcate
     def run_analysis(self) -> None:
@@ -160,6 +163,7 @@ class db_analysis(OmniAnalyze_Base):
                         l1_cache_data=getattr(roofline_data, "l1_cache_data", None),
                         l2_cache_data=getattr(roofline_data, "l2_cache_data", None),
                         hbm_cache_data=getattr(roofline_data, "hbm_cache_data", None),
+                        lds_cache_data=getattr(roofline_data, "lds_cache_data", None),
                         kernel=kernel_objs[kernel_name],
                     )
                 )
@@ -173,6 +177,7 @@ class db_analysis(OmniAnalyze_Base):
                         l1_cache_data=workload_roofline.get("l1_cache_data"),
                         l2_cache_data=workload_roofline.get("l2_cache_data"),
                         hbm_cache_data=workload_roofline.get("hbm_cache_data"),
+                        lds_cache_data=workload_roofline.get("lds_cache_data"),
                         workload=workload_obj,
                     )
                 )
@@ -556,8 +561,8 @@ class db_analysis(OmniAnalyze_Base):
                     )
                 elif not caught:
                     console_warning(
-                        f"Could not evaluate expression for {name}: {value} - "
-                        "likely due to missing counter data."
+                        f"Expression for {name}: {value} evaluated to N/A "
+                        "(divide-by-zero or empty counter data)."
                     )
                 return None
 
@@ -572,10 +577,22 @@ class db_analysis(OmniAnalyze_Base):
             return None
 
     @staticmethod
-    def calc_builtin_vars(pmc_df: pd.DataFrame, sys_info: dict) -> pd.DataFrame:
-        """Calculate arch-specific built-in variables (numActiveCUs, etc.)"""
+    def calc_builtin_vars(
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        expressions: list[str],
+    ) -> None:
+        """Evaluate arch-specific built-in variables referenced by expressions
+        (numActiveCUs, etc.). Mutates ``sys_info`` in place."""
         gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
-        build_in_vars = get_build_in_vars(gpu_series)
+        _, expression_builtin_vars = extract_counters_and_variables(
+            "\n".join(expressions), gpu_series
+        )
+        build_in_vars = {
+            k: v
+            for k, v in get_build_in_vars(gpu_series).items()
+            if k in expression_builtin_vars
+        }
         # Calculate PER_XCD variables first
         for key, value in build_in_vars.items():
             if "PER_XCD" in key:
@@ -588,7 +605,6 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info[key] = db_analysis.evaluate(
                     key, value, pmc_df, sys_info, parse=True
                 )
-        return pmc_df
 
     @staticmethod
     def calc_dataframe_expressions(
@@ -597,9 +613,15 @@ class db_analysis(OmniAnalyze_Base):
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
     ) -> pd.Series:
-        # Calculate built-in variables
-        db_analysis.calc_builtin_vars(pmc_df, sys_info)
-        # Evaluate expressions while printing warnings
+        db_analysis.calc_builtin_vars(
+            pmc_df,
+            sys_info,
+            [
+                v
+                for v in expression_df["value"].tolist()
+                if isinstance(v, str) and v and v != "None"
+            ],
+        )
         return expression_df.apply(
             lambda row: db_analysis.evaluate(
                 f"{row['metric_id']} - {row['value_name']}",
@@ -662,7 +684,7 @@ class db_analysis(OmniAnalyze_Base):
     def calc_expressions(
         self,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame]]:
-        """Calculate both kernel-level and workload-level metrics"""
+        """Calculate kernel-level and workload-level metrics, including Pct of Peak."""
         kernel_values_data = {}
         workload_values_data = {}
 
@@ -677,8 +699,14 @@ class db_analysis(OmniAnalyze_Base):
             ).items():
                 sys_info[f"{key}_empirical_peak"] = value
 
+            metrics_info = self._metrics_info_data_per_workload.get(
+                workload_path, pd.DataFrame(columns=["pop", "metric_id"])
+            )
+            pop_metric_ids = set(metrics_info.loc[metrics_info["pop"], "metric_id"])
+
             # Calculate kernel-level metrics
             kernel_values_list = []
+            new_kernel_rows: list[dict] = []
 
             for kernel_name, kernel_pmc_df in pmc_df.groupby("Kernel_Name"):
                 kernel_expression_df = expression_template.assign(
@@ -689,38 +717,90 @@ class db_analysis(OmniAnalyze_Base):
                     sys_info.copy(),
                     kernel_expression_df,
                 )
+                new_kernel_rows.extend(
+                    db_analysis._derive_pop_values(pop_metric_ids, kernel_expression_df)
+                )
                 kernel_values_list.append(kernel_expression_df)
 
-            kernel_values_data[workload_path] = (
-                pd.concat(kernel_values_list, ignore_index=True)
-                if kernel_values_list
-                else pd.DataFrame()
-            )
+            if kernel_values_list and new_kernel_rows:
+                kernel_values_data[workload_path] = pd.concat(
+                    kernel_values_list + [pd.DataFrame(new_kernel_rows)],
+                    ignore_index=True,
+                )
+            elif kernel_values_list:
+                kernel_values_data[workload_path] = pd.concat(
+                    kernel_values_list, ignore_index=True
+                )
+            else:
+                kernel_values_data[workload_path] = pd.DataFrame()
 
             # Variance warnings are emitted at workload-level, not per kernel.
             console_debug(f"Processing workload: {workload_path}")
             clear_noise_clamp_warnings()
-            workload_values_data[workload_path] = expression_template.copy()
-            workload_values_data[workload_path]["value"] = (
-                db_analysis.calc_dataframe_expressions(
-                    pmc_df,
-                    sys_info.copy(),
-                    workload_values_data[workload_path],
-                    emit_variance_warnings=True,
-                )
+            workload_expression_df = expression_template.copy()
+            workload_expression_df["value"] = db_analysis.calc_dataframe_expressions(
+                pmc_df,
+                sys_info.copy(),
+                workload_expression_df,
+                emit_variance_warnings=True,
             )
             print_noise_clamp_summary()
             db_analysis.validate_dual_issue_metrics(
                 pmc_df,
                 sys_info,
-                workload_values_data[workload_path],
+                workload_expression_df,
                 self._arch_configs[sys_info["gpu_arch"]],
             )
+            new_workload_rows = db_analysis._derive_pop_values(
+                pop_metric_ids, workload_expression_df
+            )
+            if new_workload_rows:
+                workload_values_data[workload_path] = pd.concat(
+                    [workload_expression_df, pd.DataFrame(new_workload_rows)],
+                    ignore_index=True,
+                )
+            else:
+                workload_values_data[workload_path] = workload_expression_df
 
         if kernel_values_data or workload_values_data:
             console_debug("Calculated kernel-level and workload-level metric values")
 
         return kernel_values_data, workload_values_data
+
+    @staticmethod
+    def _derive_pop_values(
+        pop_metric_ids: set[str],
+        values_df: pd.DataFrame,
+    ) -> list[dict]:
+        """Return new Pct of Peak rows for pop-enabled metrics in values_df."""
+        candidates = values_df[
+            values_df["metric_id"].isin(pop_metric_ids)
+            & values_df["value_name"].isin([
+                "Avg",
+                "Value",
+                "Peak",
+                "Peak (Empirical)",
+            ])
+        ]
+        new_rows = []
+        for _metric_id, grp in candidates.groupby("metric_id"):
+            vals = grp.set_index("value_name")["value"]
+            val = next(
+                (vals.get(col) for col in VALUE_COL_PREFERENCE if col in vals.index),
+                None,
+            )
+            peak = next(
+                (vals.get(col) for col in PEAK_COL_PREFERENCE if col in vals.index),
+                None,
+            )
+            pct = calc_pct_of_peak(val, peak)
+            if pct is None:
+                continue
+            base = grp.iloc[0].to_dict()
+            base["value_name"] = "Pct of Peak"
+            base["value"] = pct
+            new_rows.append(base)
+        return new_rows
 
     def calc_metrics_data(
         self,
@@ -748,6 +828,7 @@ class db_analysis(OmniAnalyze_Base):
                 "Xfer",
                 "Coherency",
                 "Transaction",
+                "Pct of Peak",
             ]
             metrics_info_df = pd.DataFrame([
                 {
@@ -755,6 +836,7 @@ class db_analysis(OmniAnalyze_Base):
                     "metric_id": metric_id,
                     "description": row.get("Description"),
                     "unit": row.get("Unit"),
+                    "pop": row.get("Pct of Peak") is True,
                     "table_name": table_names_map[int(metric_id.split(".")[0]) * 100],
                     "sub_table_name": table_names_map[
                         int(metric_id.split(".")[0]) * 100
@@ -877,9 +959,9 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             gfx_arch = sys_info["gpu_arch"]
-            roofline_data_df = self._arch_configs[gfx_arch].dfs[402]
+            roofline_data_df = self._arch_configs[gfx_arch].dfs.get(402)
 
-            if roofline_data_df.empty:
+            if roofline_data_df is None or roofline_data_df.empty:
                 console_warning(
                     f"Roofline data is filtered out or not found for {workload_path}."
                 )
@@ -895,6 +977,7 @@ class db_analysis(OmniAnalyze_Base):
                 "l1_cache_data": roofline_data_expressions.get("AI L1", ""),
                 "l2_cache_data": roofline_data_expressions.get("AI L2", ""),
                 "hbm_cache_data": roofline_data_expressions.get("AI HBM", ""),
+                "lds_cache_data": roofline_data_expressions.get("AI LDS", ""),
             }
 
             # Calculate kernel-level roofline data

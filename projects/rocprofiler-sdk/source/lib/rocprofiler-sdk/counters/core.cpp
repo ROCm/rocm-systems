@@ -84,14 +84,14 @@ counter_callback_info::setup_counter_config(std::shared_ptr<counter_config>& pro
             rocprofiler::common::get_val(asts->arch_to_counter_asts, agent_name);
         if(!agent_map)
         {
-            ROCP_ERROR << fmt::format("Coult not build AST for {}", agent_name);
+            ROCP_ERROR << fmt::format("Could not build AST for {}", agent_name);
             return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
         }
 
         const auto* counter_ast = rocprofiler::common::get_val(*agent_map, metric.name());
         if(!counter_ast)
         {
-            ROCP_ERROR << fmt::format("Coult not find AST for {}", metric.name());
+            ROCP_ERROR << fmt::format("Could not find AST for {}", metric.name());
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }
         config.asts.push_back(*counter_ast);
