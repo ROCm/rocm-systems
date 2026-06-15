@@ -120,6 +120,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_vmem_get_access)* hsa_amd_vmem_get_access_;
   decltype(hsa_amd_vmem_export_shareable_handle)* hsa_amd_vmem_export_shareable_handle_;
   decltype(hsa_amd_vmem_import_shareable_handle)* hsa_amd_vmem_import_shareable_handle_;
+  decltype(hsa_amd_vmem_export_fabric_handle)* hsa_amd_vmem_export_fabric_handle_;
+  decltype(hsa_amd_vmem_import_fabric_handle)* hsa_amd_vmem_import_fabric_handle_;
   decltype(hsa_amd_vmem_retain_alloc_handle)* hsa_amd_vmem_retain_alloc_handle_;
   decltype(hsa_amd_agent_set_async_scratch_limit)* hsa_amd_agent_set_async_scratch_limit_;
   decltype(hsa_amd_vmem_address_reserve_align)* hsa_amd_vmem_address_reserve_align_;
@@ -495,6 +497,14 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t vmem_import_shareable_handle(int dmabuf_fd,
     hsa_amd_vmem_alloc_handle_t* handle) {
     return ROCR_DYN(hsa_amd_vmem_import_shareable_handle)(dmabuf_fd, handle);
+  }
+  static hsa_status_t vmem_export_fabric_handle(hsa_fabric_handle_t* fabric_handle,
+    hsa_amd_vmem_alloc_handle_t handle, uint64_t flags) {
+    return ROCR_DYN(hsa_amd_vmem_export_fabric_handle)(fabric_handle, handle, flags);
+  }
+  static hsa_status_t vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+    hsa_amd_vmem_alloc_handle_t* handle) {
+    return ROCR_DYN(hsa_amd_vmem_import_fabric_handle)(fabric_handle, handle);
   }
   static hsa_status_t vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* allocHandle,
     void* addr) {

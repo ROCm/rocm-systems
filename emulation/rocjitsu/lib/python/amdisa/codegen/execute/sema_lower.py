@@ -164,8 +164,12 @@ _STD_MATH: dict[SemaNodeKind, str] = {
     SemaNodeKind.SIN: 'std::sin',
     SemaNodeKind.COS: 'std::cos',
     SemaNodeKind.LOG2: 'std::log2',
-    SemaNodeKind.FLOOR: 'std::floor',
-    SemaNodeKind.TRUNC: 'std::trunc',
+    # floor/trunc go through util:: wrappers that quiet a signaling NaN so the
+    # generated scalar bodies agree with the SIMD fast paths (and the GPU) under
+    # gcc, whose glibc floorf/truncf pass sNaN through unquieted (clang's
+    # roundss/roundsd quiet it). See util::floor_scalar in util/simd.h.
+    SemaNodeKind.FLOOR: 'util::floor_scalar',
+    SemaNodeKind.TRUNC: 'util::trunc_scalar',
 }
 
 
@@ -1066,7 +1070,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
     ' : static_cast<uint32_t>(v)); }}()',
     'rndne': 'std::nearbyint({0})',
-    'ceil': 'std::ceil({0})',
+    'ceil': 'util::ceil_scalar({0})',
     'exp2': 'amdgpu::transcendental::exp_f32({0})',
     'bcnt': 'static_cast<uint32_t>(std::popcount({0}))',
     'bcnt1': 'static_cast<uint32_t>(std::popcount({0}))',
