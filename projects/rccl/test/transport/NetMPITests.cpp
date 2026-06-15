@@ -153,8 +153,8 @@ namespace
 inline constexpr size_t kTestBufferSize = 16384;
 
 // NET transport test requirements
-inline constexpr int kMinNodesForNET   = 2; // NET transport requires at least 2 nodes
-inline constexpr int kExactRanksForNET = 2; // NET transport tests use exactly 2 ranks (1 per node)
+inline constexpr int kMinNodesForNET = 2; // NET transport requires at least 2 nodes
+inline constexpr int kMinRanksForNET = 2; // NET transport needs at least 2 ranks (>=1 cross-node pair)
 
 // Test pattern generation constants
 inline constexpr int kDefaultPatternMultiplier = 100; // For NET transport patterns
@@ -348,8 +348,26 @@ public:
             4 * 1024 * 1024 + 1 // 4MB + 1 (unaligned)
         };
 
-        int         peer_rank = (config.world_rank == 0) ? 1 : 0;
-        hipStream_t stream    = getActiveStream();
+        // Pair each rank with the same local rank on a partner node so every transfer
+        // crosses the network (real NET path), regardless of how many ranks run per node.
+        // Nodes are paired (0,1), (2,3), ... via an XOR so the pairing is symmetric
+        // (if A's peer is B then B's peer is A), which is required for matched send/recv.
+        const int num_nodes      = detectNodeCount();
+        const int ranks_per_node = (num_nodes > 0) ? (config.world_size / num_nodes) : config.world_size;
+        const int node_id        = (ranks_per_node > 0) ? (config.world_rank / ranks_per_node) : 0;
+        const int local_rank     = (ranks_per_node > 0) ? (config.world_rank % ranks_per_node)
+                                                         : config.world_rank;
+        const int partner_node   = node_id ^ 1;
+        int       peer_rank      = partner_node * ranks_per_node + local_rank;
+
+        // Odd node count leaves the top node without an XOR partner; fall back to the
+        // first node so the rank still has a valid cross-node peer to talk to.
+        if(peer_rank >= config.world_size)
+        {
+            peer_rank = local_rank;
+        }
+
+        hipStream_t stream = getActiveStream();
         ASSERT_NE(stream, nullptr) << "Rank " << config.world_rank << ": Stream is null";
 
         for(size_t size : sizes)
@@ -435,15 +453,16 @@ public:
 // Test cases
 TEST_F(NetTransportMPITest, NetGraphRegisterBufferTest)
 {
-    // NET transport tests require exactly 2 ranks on 2 nodes (1 rank per node)
-    if(!validateTestPrerequisites(kExactRanksForNET,
-                                  kExactRanksForNET,
+    // NET transport tests require at least 2 ranks spread across at least 2 nodes so that
+    // communication crosses the network. Any ranks-per-node layout is supported.
+    if(!validateTestPrerequisites(kMinRanksForNET,
+                                  kNoProcessLimit,
                                   kNoPowerOfTwoRequired,
                                   kMinNodesForNET,
-                                  kMinNodesForNET))
+                                  kNoNodeLimit))
     {
-        GTEST_SKIP() << "NET transport test requires exactly " << kExactRanksForNET << " ranks on "
-                     << kMinNodesForNET << " nodes (1 rank per node)";
+        GTEST_SKIP() << "NET transport test requires at least " << kMinRanksForNET
+                     << " ranks across at least " << kMinNodesForNET << " nodes";
     }
 
     // Create test-specific communicator
@@ -464,15 +483,16 @@ TEST_F(NetTransportMPITest, NetGraphRegisterBufferTest)
 
 TEST_F(NetTransportMPITest, NetLocalRegisterBufferTest)
 {
-    // NET transport tests require exactly 2 ranks on 2 nodes (1 rank per node)
-    if(!validateTestPrerequisites(kExactRanksForNET,
-                                  kExactRanksForNET,
+    // NET transport tests require at least 2 ranks spread across at least 2 nodes so that
+    // communication crosses the network. Any ranks-per-node layout is supported.
+    if(!validateTestPrerequisites(kMinRanksForNET,
+                                  kNoProcessLimit,
                                   kNoPowerOfTwoRequired,
                                   kMinNodesForNET,
-                                  kMinNodesForNET))
+                                  kNoNodeLimit))
     {
-        GTEST_SKIP() << "NET transport test requires exactly " << kExactRanksForNET << " ranks on "
-                     << kMinNodesForNET << " nodes (1 rank per node)";
+        GTEST_SKIP() << "NET transport test requires at least " << kMinRanksForNET
+                     << " ranks across at least " << kMinNodesForNET << " nodes";
     }
 
     // Create test-specific communicator
@@ -493,15 +513,16 @@ TEST_F(NetTransportMPITest, NetLocalRegisterBufferTest)
 
 TEST_F(NetTransportMPITest, MultipleBufferSizesTest)
 {
-    // NET transport tests require exactly 2 ranks on 2 nodes (1 rank per node)
-    if(!validateTestPrerequisites(kExactRanksForNET,
-                                  kExactRanksForNET,
+    // NET transport tests require at least 2 ranks spread across at least 2 nodes so that
+    // communication crosses the network. Any ranks-per-node layout is supported.
+    if(!validateTestPrerequisites(kMinRanksForNET,
+                                  kNoProcessLimit,
                                   kNoPowerOfTwoRequired,
                                   kMinNodesForNET,
-                                  kMinNodesForNET))
+                                  kNoNodeLimit))
     {
-        GTEST_SKIP() << "NET transport test requires exactly " << kExactRanksForNET << " ranks on "
-                     << kMinNodesForNET << " nodes (1 rank per node)";
+        GTEST_SKIP() << "NET transport test requires at least " << kMinRanksForNET
+                     << " ranks across at least " << kMinNodesForNET << " nodes";
     }
 
     ASSERT_MPI_SUCCESS(createTestCommunicator());
