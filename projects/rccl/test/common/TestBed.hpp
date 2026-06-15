@@ -161,7 +161,8 @@ namespace RcclUnitTesting
                                        bool           const inPlace,
                                        bool           const managedMem,
                                        bool           const useHipGraph,
-                                       int            const ranksPerProc=1);
+                                       int            const ranksPerProc=1,
+                                       bool           const useBias=false);
 
     // Run a simple sweep
     void RunSimpleSweep(std::vector<ncclFunc_t>     const& funcTypes,
