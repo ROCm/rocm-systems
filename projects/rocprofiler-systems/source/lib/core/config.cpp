@@ -1218,7 +1218,7 @@ configure_settings(bool _init)
 
     auto _dl_verbose = _config->find(std::string{ env_vars::DL_VERBOSE });
     if(_dl_verbose->second->get_config_updated())
-        rocprofsys::set_env(std::string{ _dl_verbose->first },
+        rocprofsys::set_env(std::string{ _dl_verbose->first }.c_str(),
                             _dl_verbose->second->as_string(), 0);
 
     if(_config->get_papi_events().empty())
@@ -1265,7 +1265,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     };
 
     auto _use_causal = get_setting_value<bool>(std::string{ env_vars::USE_CAUSAL });
-    if(_use_causal && *_use_causal) set_env(std::string{ env_vars::MODE }, "causal", 1);
+    if(_use_causal && *_use_causal) set_env(env_vars::MODE, "causal", 1);
 
     if(get_mode() == Mode::Coverage)
     {
@@ -2813,7 +2813,7 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
 {
     for(const auto& env_var : env_var_options)
     {
-        const std::string value_str = get_env(env_var, std::string{});
+        const std::string value_str = get_env(env_var.c_str(), std::string{});
 
         if(value_str.empty()) continue;
 

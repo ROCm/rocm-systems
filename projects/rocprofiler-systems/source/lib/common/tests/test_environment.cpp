@@ -303,7 +303,7 @@ TEST(FreeFunctionEnvTest, GetEnvOneArgReturnsEmptyForUnsetVar)
 TEST(FreeFunctionEnvTest, SetEnvAndGetViaFreeFunction)
 {
     const char* name = "ROCPROFSYS_FREE_FUNC_SETENV_TEST_99887766";
-    set_env(std::string{ name }, std::string{ "free_val" }, 1);
+    set_env(name, std::string{ "free_val" }, 1);
     EXPECT_EQ(get_env(name, std::string{}), "free_val");
     ::unsetenv(name);
 }
@@ -335,21 +335,6 @@ TEST_F(FakeEnvGetEnvTest, StringReturnsValueWhenSet)
 {
     fake_env::setenv("FOO", "bar", 1);
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{ "default" }), "bar");
-}
-
-TEST_F(FakeEnvGetEnvTest, StringViewEnvIdResolvesViaShim)
-{
-    // A non-null-terminated string_view name must still resolve correctly.
-    fake_env::setenv("FOO", "bar", 1);
-    const std::string_view name = std::string_view{ "FOOBAR" }.substr(0, 3);
-    EXPECT_EQ(fake_environment::get_env(name, std::string{ "default" }), "bar");
-}
-
-TEST_F(FakeEnvGetEnvTest, StdStringEnvIdResolvesViaShim)
-{
-    fake_env::setenv("FOO", "7", 1);
-    const std::string name{ "FOO" };
-    EXPECT_EQ(fake_environment::get_env(name, 42), 7);
 }
 
 TEST_F(FakeEnvGetEnvTest, IntReturnsDefaultWhenUnset)
@@ -437,14 +422,6 @@ TEST_F(FakeEnvSetEnvTest, OverrideOneOverwrites)
     fake_env::setenv("FOO", "original", 1);
     fake_environment::set_env("FOO", std::string{ "new" }, 1);
     EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "new");
-}
-
-TEST_F(FakeEnvSetEnvTest, StringViewEnvVarResolvesViaShim)
-{
-    // A non-null-terminated string_view name must be materialised before setenv.
-    const std::string_view name = std::string_view{ "FOOBAR" }.substr(0, 3);
-    fake_environment::set_env(name, std::string{ "baz" }, 1);
-    EXPECT_EQ(fake_environment::get_env("FOO", std::string{}), "baz");
 }
 
 class FakeEnvGetEnvChoiceTest : public ::testing::Test

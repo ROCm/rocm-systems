@@ -41,9 +41,9 @@ namespace argparse = ::tim::argparse;
 namespace path     = rocprofsys::common::path;
 namespace env      = rocprofsys::env_vars;
 using namespace ::timemory::join;
+using rocprofsys::get_env;
 using rocprofsys::common::update_mode;
 using ::rocprofsys::utility::parse_numeric_range;
-using ::tim::get_env;
 using ::tim::log::monochrome;
 using ::tim::log::stream;
 
