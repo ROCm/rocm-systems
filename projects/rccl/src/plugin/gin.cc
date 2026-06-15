@@ -264,8 +264,8 @@ static void initPluginLibsOnceFunc() {
   }
   // Add internal rocshmem GDA plugin (device-initiated, no RMA proxy)
   {
-    extern ncclGin_t ncclGinRocshmemApiGdaPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemApiGdaPlugin;
+    extern ncclGin_t ncclGinRocshmemGdaPlugin;
+    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
     ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
     pluginCounter++;
   }
