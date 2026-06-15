@@ -149,6 +149,13 @@ class IPCContext : public Context {
                             int nelems, int pe_root);
 
   template <typename T>
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T *source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                void *dest, const void *source, int nelement, int PE_root);
+
+  template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
@@ -372,6 +379,29 @@ class IPCContext : public Context {
   template <typename T>
   __device__ void internal_get_broadcast(T *dst, const T *src, int nelems,
                                          int pe_root);  // NOLINT(runtime/int)
+
+  __device__ void internal_broadcastmem_wave(void *dst, const void *src, int nelems,
+                                      int pe_root, int pe_start,
+                                      int stride, int pe_size,
+                                      long *p_sync);
+
+  __device__ void internal_put_broadcastmem_wave(void *dst, const void *src, int nelems, 
+                                                 int pe_root, int pe_start, int stride, int pe_size);
+
+  __device__ void internal_get_broadcastmem_wave(void *dst, const void *src, int nelems, int pe_root);
+
+  template <typename T>
+  __device__ void internal_broadcast_wave(T *dst, const T *src, int nelems,
+                                      int pe_root, int pe_start,
+                                      int stride, int pe_size,
+                                      long *p_sync);
+  
+  template <typename T>
+  __device__ void internal_put_broadcast_wave(T *dst, const T *src, int nelems, 
+                                                 int pe_root, int pe_start, int stride, int pe_size);
+
+  template <typename T>
+  __device__ void internal_get_broadcast_wave(T *dst, const T *src, int nelems, int pe_root);
 
   template <typename T>
   __device__ void fcollect_linear(rocshmem_team_t team, T *dest,

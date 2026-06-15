@@ -159,6 +159,13 @@ class ROContext : public Context {
                             long *p_sync);  // NOLINT(runtime/int)
 
   template <typename T>
+  __device__ int broadcast_wave(rocshmem_team_t team,
+                                T *dest, const T* source, int nelement, int PE_root);
+
+  __device__ int broadcastmem_wave(rocshmem_team_t team,
+                                  void *dest, const void* source, int nelement, int PE_root);
+
+  template <typename T>
   __device__ void alltoall(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
 
@@ -361,7 +368,7 @@ class ROContext : public Context {
                                     const size_t* start_coord, const size_t* boundary,
                                     int ndim, size_t element_size, int root, uint64_t flags);
 
-  // Rooted SUM Reduction operations
+  // Rooted SUM Reduction operations  
   // Rooted MAX Reduction operations
   // Rooted MIN Reduction operations
  private:

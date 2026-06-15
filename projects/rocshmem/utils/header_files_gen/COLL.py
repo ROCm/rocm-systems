@@ -267,6 +267,49 @@ def generate_reduce_on_stream_api():
     return expanded_code
 
 
+def broadcast_wave_api(T, TNAME):
+    return (
+        f"__device__ int rocshmem_ctx_{TNAME}_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,\n"
+        f"              {T} *dest, const {T} *source, int nelement, int PE_root);\n\n"
+    )
+
+def generate_broadcast_wave_api():
+    expanded_code = """
+/**
+ * @name ROCSHMEM_CTX_TYPE_BROADCAST_WAVE
+ * @brief Perform a broadcast between PEs in the active set. The caller
+ * is blocked until the broadcast completes.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+                           heap.
+ * @param[in] nelement     Number of elements to participate in the broadcast.
+ * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
+ * 
+ *
+ * @return int; zero when sucessful, non-zero otherwise
+ */\n"""
+
+    all_types = [
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong"),
+        ("float", "float"),
+        ("double", "double")
+    ]
+
+
+    for type_, tname_ in all_types:
+        expanded_code += broadcast_wave_api(type_, tname_)
+
+    return expanded_code
+
 def write_to_file(filename, content):
     with open(filename, 'w') as file:
         file.write(content)
@@ -287,7 +330,8 @@ namespace rocshmem {
         generate_broadcast_api() +
         generate_fcollect_api() +
         generate_reduction_api() +
-        generate_reduce_on_stream_api()
+        generate_reduce_on_stream_api() +
+        generate_broadcast_wave_api()
     )
 
     expanded_code += """

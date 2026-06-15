@@ -701,6 +701,16 @@ __device__ void GDAContext::broadcast(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
+__device__ int GDAContext::broadcast_wave([[maybe_unused]] rocshmem_team_t team,
+                                          [[maybe_unused]] T *dest, 
+                                          [[maybe_unused]] const T* source, 
+                                          [[maybe_unused]] int nelement, 
+                                          [[maybe_unused]] int PE_root) {
+  LOGD_WARN("Broadcast Wave API not implemented for GDA backend");
+  return ROCSHMEM_ERROR;
+}
+
+template <typename T>
 __device__ void GDAContext::internal_broadcast(T *dst, const T *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     long *p_sync) {  // NOLINT(runtime/int)
@@ -1413,6 +1423,8 @@ __device__ inline int GDAContext::tile_min_reduce_wg([[maybe_unused]] rocshmem_t
   LOGD_WARN("Tile API not implemented for GDA backend");
   return ROCSHMEM_ERROR;
 }
+
+
 
 // Rooted SUM Reduction operations
 // Rooted MAX Reduction operations

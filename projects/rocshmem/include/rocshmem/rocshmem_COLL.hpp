@@ -397,6 +397,66 @@ __host__ void rocshmem_ctx_ulonglong_broadcast(
 
 
 /**
+ * @name ROCSHMEM_CTX_TYPE_BROADCAST_WAVE
+ * @brief Perform a broadcast between PEs in the active set. The caller
+ * is blocked until the broadcast completes.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+                           heap.
+ * @param[in] nelement     Number of elements to participate in the broadcast.
+ * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
+ * 
+ *
+ * @return int; zero when sucessful, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_short_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              short *dest, const short *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_int_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              int *dest, const int *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_long_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              long *dest, const long *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_longlong_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              long long *dest, const long long *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_float_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              float *dest, const float *source, int nelement, int PE_root);
+
+__device__ int rocshmem_ctx_double_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              double *dest, const double *source, int nelement, int PE_root);
+
+
+/**
+ * @name ROCSHMEM_CTX_BROADCASTMEM_WAVE
+ * @brief Perform a broadcast between PEs in the active set. The caller
+ * is blocked until the broadcast completes.
+ *
+ * This function must be called as a work-group collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+                           heap.
+ * @param[in] nelement     Size of buffer to participate in the broadcast.
+ * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
+ * 
+ *
+ * @return int; zero when sucessful, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
+              void *dest, const void *source, int nelement, int PE_root);
+
+/**
  * @name SHMEM_FCOLLECT
  * @brief Concatenates blocks of data from multiple PEs to an array in every
  * PE participating in the collective routine.
@@ -1391,6 +1451,7 @@ ATTR_NO_INLINE int rocshmem_ctx_double_max_reduce_on_stream(
 ATTR_NO_INLINE int rocshmem_ctx_double_prod_reduce_on_stream(
   rocshmem_ctx_t ctx, rocshmem_team_t team,
   double *dest, const double *source, int nreduce, hipStream_t stream);
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP

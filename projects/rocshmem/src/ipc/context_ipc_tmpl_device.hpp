@@ -519,6 +519,60 @@ __device__ void IPCContext::broadcast(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
+__device__ void IPCContext::internal_put_broadcast_wave(T *dst, const T *src, int nelems, int pe_root, int pe_start,
+    int stride, int pe_size) {  // NOLINT(runtime/int)
+  if (my_pe == pe_root) {
+    int finish = pe_start + stride * pe_size;
+    for (int i = pe_start; i < finish; i += stride) {
+      if (i != my_pe) {
+        put_nbi_wave(dst, src, nelems, i);
+      }
+    }
+  }
+}
+
+template <typename T>
+__device__ void IPCContext::internal_get_broadcast_wave(
+  T *dst, const T *src, int nelems, int pe_root) {
+    get_wave(dst, src, nelems, pe_root);
+}
+
+template <typename T>
+__device__ int IPCContext::broadcast_wave(rocshmem_team_t team,
+                              T *dest, const T *source, int nelement, int PE_root) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int stride = team_obj->tinfo_wrt_world->stride;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_size = team_obj->tinfo_wrt_world->size;
+  long *p_sync = team_obj->bcast_pSync;
+
+  // Passed pe_root is relative to team, convert to world root
+  int pe_root_world = team_obj->get_pe_in_world(PE_root);
+  // internal_broadcast_wave<T>(dest, source, nelement, pe_root_world, 
+  //                             pe_start, stride, pe_size, p_sync);
+
+  internal_broadcastmem_wave(dest, source, nelement * sizeof(T), pe_root_world, 
+                              pe_start, stride, pe_size, p_sync);
+  return 0;
+}
+
+template <typename T>
+__device__ void IPCContext::internal_broadcast_wave(T *dst, const T *src, int nelems,
+                                      int pe_root, int pe_start,
+                                      int stride, int pe_size,
+                                      [[maybe_unused]] long *p_sync) {  // NOLINT(runtime/int)
+  if (num_pes < 4) {
+    internal_put_broadcast_wave<T>(dst, src, nelems, pe_root, pe_start, stride, pe_size);
+  } else {
+    internal_get_broadcast_wave<T>(dst, src, nelems, pe_root);
+  }
+
+  // Synchronize on completion of broadcast
+  internal_sync_wave(my_pe, pe_start, stride, pe_size, p_sync);
+}
+
+template <typename T>
 __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
                                       int pe_root, int pe_start,
                                       int stride, int pe_size,

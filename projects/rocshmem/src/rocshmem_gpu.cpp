@@ -663,6 +663,15 @@ __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
   get_internal_ctx(ctx)->broadcast<T>(team, dest, source, nelem, pe_root);
 }
 
+#define BROADCAST_WAVE_IMP_GEN(T, TNAME) \
+  __device__ int rocshmem_ctx_##TNAME##_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, \
+    T *dest, const T *source, int nelement, int PE_root){                             \
+      return get_internal_ctx(ctx)->broadcast_wave<T>(ctx, team, dest, source, nelement, PE_root);}
+
+__device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team, \
+  void *dest, const void *source, int nelement, int PE_root){                             \
+    return get_internal_ctx(ctx)->broadcastmem_wave(ctx, team, dest, source, nelement, PE_root);}
+
 template <typename T>
 __device__ void rocshmem_ctx_alltoall_wg(rocshmem_ctx_t ctx,
                                          rocshmem_team_t team, T *dest,
@@ -2160,6 +2169,13 @@ INT_REDUCTION_ON_STREAM_KERNEL_GEN(short, short)
 
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(float, float)
 FLOAT_REDUCTION_ON_STREAM_KERNEL_GEN(double, double)
+
+BROADCAST_WAVE_IMP_GEN(int, int)
+BROADCAST_WAVE_IMP_GEN(short, short)
+BROADCAST_WAVE_IMP_GEN(long, long)
+BROADCAST_WAVE_IMP_GEN(long long, longlong)
+BROADCAST_WAVE_IMP_GEN(float, float)
+BROADCAST_WAVE_IMP_GEN(double, double)
 // clang-format on
 
 }  // namespace rocshmem
