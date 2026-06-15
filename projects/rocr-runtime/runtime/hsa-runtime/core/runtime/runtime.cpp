@@ -3111,8 +3111,9 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (clear_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
   if (set_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, set_flags));
 
-  uint8_t* base = AlignDown((uint8_t*)ptr, os::PageSize());
-  uint8_t* end = AlignUp((uint8_t*)ptr + size, os::PageSize());
+  const size_t pageSize = os::PageSize();
+  uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
+  uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
   HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
   if (error != HSAKMT_STATUS_SUCCESS)
@@ -3196,8 +3197,9 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
     attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, 0));
   }
 
-  uint8_t* base = AlignDown((uint8_t*)ptr, os::PageSize());
-  uint8_t* end = AlignUp((uint8_t*)ptr + size, os::PageSize());
+  const size_t pageSize = os::PageSize();
+  uint8_t* base = AlignDown((uint8_t*)ptr, pageSize);
+  uint8_t* end = AlignUp((uint8_t*)ptr + size, pageSize);
   size_t len = end - base;
   if (attribs.size() != 0) {
     HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, attribs.size(), &attribs[0]));
@@ -3280,8 +3282,9 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
 hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
                                   uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
                                   hsa_signal_t completion_signal) {
-  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, os::PageSize()));
-  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, os::PageSize());
+  const size_t pageSize = os::PageSize();
+  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, pageSize));
+  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, pageSize);
   size_t len = end - base;
 
   PrefetchOp* op = new PrefetchOp();
@@ -3417,8 +3420,9 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
 }
 
 Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
-  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, os::PageSize()));
-  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, os::PageSize());
+  const size_t pageSize = os::PageSize();
+  uintptr_t base = reinterpret_cast<uintptr_t>(AlignDown(ptr, pageSize));
+  uintptr_t end = AlignUp(reinterpret_cast<uintptr_t>(ptr) + size, pageSize);
 
   std::vector<std::pair<uintptr_t, uintptr_t>> holes;
 
