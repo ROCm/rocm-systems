@@ -900,17 +900,24 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
     return HSAKMT_STATUS_ERROR;
   }
 
+  // GPU VA for the user's pointer (may differ from addr if hostPtr is not page-aligned).
+  uint64_t alternate_va = addr + ((uintptr_t)MemoryAddress - (uintptr_t)aligned_ptr);
+
   {
     std::lock_guard<std::mutex> guard(*allocation_map_lock_);
-   (*allocation_map_)[MemoryAddress] =
+    // Host VA entry: keyed at MemoryAddress (original host ptr). gpu_addr = addr (page base).
+    (*allocation_map_)[MemoryAddress] =
         Allocation(handle, aligned_ptr, addr, aligned_size, true, MemoryAddress,
                    MemorySizeInBytes);
+    // GPU VA entry: keyed at addr (page-aligned GPU base) for range lookup.
+    // gpu_addr = alternate_va so agentBaseAddress = alternate_va → offset = 0 for dPtr queries.
+    // size_requested = aligned_size so interior GPU VAs are found by the range check.
     (*allocation_map_)[(void *)addr] =
-        Allocation(handle, aligned_ptr, addr, aligned_size, true, nullptr,
-                   MemorySizeInBytes);
+        Allocation(handle, aligned_ptr, alternate_va, aligned_size, true, nullptr,
+                   aligned_size);
   }
 
-  *AlternateVAGPU = addr + ((uintptr_t)MemoryAddress - (uintptr_t)aligned_ptr);
+  *AlternateVAGPU = alternate_va;
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -1031,7 +1038,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
 
   if (allocation_info.userptr) {
     PointerInfo->Type = HSA_POINTER_REGISTERED_USER;
-    PointerInfo->SizeInBytes = allocation_info.size;
+    PointerInfo->SizeInBytes = allocation_info.size_requested;
   } else if (gpu_mem->IsVirtual()) {
     PointerInfo->Type = HSA_POINTER_RESERVED_ADDR;
   } else {
@@ -1052,15 +1059,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryUserData(const void *Pointer,
                                                 void *UserData) {
   CHECK_DXG_OPEN();
 
-  uint64_t aligned_ptr = rocr::AlignDown((uint64_t)Pointer, 4096);
-
   std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-  auto it = allocation_map_->find((void *)aligned_ptr);
+  // Try exact match first (device VA or page-aligned host ptr).
+  auto it = allocation_map_->find(const_cast<void*>(Pointer));
   if (it != allocation_map_->end()) {
     it->second.rocr_userdata = UserData;
     return HSAKMT_STATUS_SUCCESS;
   }
-
+  // Range lookup for unaligned host ptrs registered via hsaKmtMapMemoryToGPUNodes
+  // (stored at original MemoryAddress, not aligned).
+  auto* alloc = FindAllocation(const_cast<void*>(Pointer), 0);
+  if (alloc != nullptr) {
+    alloc->rocr_userdata = UserData;
+    return HSAKMT_STATUS_SUCCESS;
+  }
   return HSAKMT_STATUS_ERROR;
 }
 
