@@ -169,11 +169,18 @@ class Event {
   amd::Event* event_;          //!< Underlying ROCclr event object for GPU synchronization
   int device_id_;              //!< Device ID where this event was created
   std::atomic<bool> synced_since_last_record_{false};  //!< Set by hipEventSynchronize, cleared by hipEventRecord
+  uint64_t coalesce_id_ = 0;  //!< 0 = unassigned; non-zero = unique coalesce identity
 
  public:
   void MarkSynced() { synced_since_last_record_.store(true, std::memory_order_release); }
   bool WasSyncedSinceLastRecord() {
     return synced_since_last_record_.exchange(false, std::memory_order_acq_rel);
+  }
+
+ private:
+  static uint64_t GenerateCoalesceId() {
+    static std::atomic<uint64_t> nextId{1};  // Start at 1 so 0 remains sentinel
+    return ++nextId;
   }
 };
 

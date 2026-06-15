@@ -1501,9 +1501,9 @@ class ExternalSemaphoreCmd : public Command {
 class Marker : public Command {
   device::Signal* ipc_completion_signal_ = nullptr;
   device::Signal* ipc_dep_signal_ = nullptr;
-  //! Opaque client (HIP) event identity for detecting consecutive records; a
-  //! non-null value also opts the record into coalescing. Compared, never deref'd.
-  void* coalesce_event_ = nullptr;
+  //! Monotonic client (HIP) coalesce identity for detecting consecutive records;
+  //! a non-zero value also opts the record into coalescing. 0 = not coalesceable.
+  uint64_t coalesce_event_ = 0;
   bool synced_since_record_ = false;  //!< Client synced the event since its last record
 
  public:
@@ -1522,10 +1522,10 @@ class Marker : public Command {
   void setIpcDepSignal(device::Signal* s) { ipc_dep_signal_ = s; }
   device::Signal* ipcDepSignal() const { return ipc_dep_signal_; }
 
-  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-null
+  //! Coalescing metadata set by the client layer (opaque to rocclr). A non-zero
   //! coalesceEvent() both identifies the event and marks the record eligible.
-  void setCoalesceEvent(void* e) { coalesce_event_ = e; }
-  void* coalesceEvent() const { return coalesce_event_; }
+  void setCoalesceEvent(uint64_t id) { coalesce_event_ = id; }
+  uint64_t coalesceEvent() const { return coalesce_event_; }
   void setSyncedSinceRecord(bool v) { synced_since_record_ = v; }
   bool syncedSinceRecord() const { return synced_since_record_; }
 

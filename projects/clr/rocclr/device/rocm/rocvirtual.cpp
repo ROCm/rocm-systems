@@ -676,14 +676,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   prof_signal->flags_.isPacketDispatch_ = false;
   prof_signal->ResetCachedTiming();
 
-  if (nullptr != cmd) {
-    // Release any existing HwEvent before setting new one for the same command
-    if (cmd->HwEvent() != nullptr) {
-      reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
-    }
-    cmd->SetHwEvent(prof_signal);
-    prof_signal->retain();
-  }
+  // Release any existing HwEvent before setting new one for the same command
+  AttachHwEvent(cmd, prof_signal);
 
   if (ts != nullptr) {
     // Save HSA signal earlier to make sure the possible callback will have a valid
@@ -1860,7 +1854,7 @@ bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
     retainExternalSignals_ = false;
   }
   // Any fence/flush ends the coalescing window for event records.
-  last_barrier_coalesce_event_ = nullptr;
+  SetCoalesceWindow(0, nullptr);
 
   // Check if runtime could skip CPU wait
   if (!skip_cpu_wait) {
@@ -1976,6 +1970,9 @@ VirtualGPU::~VirtualGPU() {
     // Release the resources of signal
     releaseGpuMemoryFence();
   }
+
+  // Release any retained coalescing-window signal not freed via releaseGpuMemoryFence.
+  SetCoalesceWindow(0, nullptr);
 
   if (timestamp_ != nullptr) {
     timestamp_->release();
@@ -2265,7 +2262,7 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
 
   // Any non-marker command is intervening work that ends the event coalescing window.
   if (!command.isMarkerCommand()) {
-    last_barrier_coalesce_event_ = nullptr;
+    SetCoalesceWindow(0, nullptr);
   }
 
   // Disable profiling when command is being captured to prevent memory leak from created timestamp_
@@ -2350,6 +2347,32 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
 
   // Clear the command tracking
   command_ = nullptr;
+}
+
+// ================================================================================================
+void VirtualGPU::SetCoalesceWindow(uint64_t event_id, void* hw_event) {
+  last_barrier_coalesce_event_ = event_id;
+  if (hw_event != last_barrier_hw_event_) {
+    if (hw_event != nullptr) {
+      reinterpret_cast<ProfilingSignal*>(hw_event)->retain();
+    }
+    if (last_barrier_hw_event_ != nullptr) {
+      reinterpret_cast<ProfilingSignal*>(last_barrier_hw_event_)->release();
+    }
+    last_barrier_hw_event_ = hw_event;
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::AttachHwEvent(amd::Command* cmd, void* hw_event) {
+  if (cmd == nullptr || hw_event == nullptr) {
+    return;
+  }
+  if (cmd->HwEvent() != nullptr) {
+    reinterpret_cast<ProfilingSignal*>(cmd->HwEvent())->release();
+  }
+  cmd->SetHwEvent(hw_event);
+  reinterpret_cast<ProfilingSignal*>(hw_event)->retain();
 }
 
 // ================================================================================================
@@ -4583,7 +4606,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       SetGpuQueue(roc_device_.AcquireActiveQueue(priority_, nullptr, nullptr, &md_rb), md_rb);
     }
     flush(vcmd.GetBatchHead());
-    last_barrier_coalesce_event_ = nullptr;
+    SetCoalesceWindow(0, nullptr);
   } else {
     profilingBegin(vcmd);
     const Settings& settings = dev().settings();
@@ -4602,6 +4625,9 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
       // Skip a redundant barrier when this marker records the same client event as
       // the previous barrier with no intervening work. IPC records always dispatch.
       if (ipc_s.handle == 0 && ShouldCoalesceMarker(vcmd)) {
+        // Reuse the prior barrier's completion signal so hipEventQuery/Synchronize
+        // observe correct readiness even though no new barrier was dispatched.
+        AttachHwEvent(command_, last_barrier_hw_event_);
         profilingEnd();
         force_irq_ = false;
         return;
@@ -4635,9 +4661,10 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         hasPendingDispatch_ = false;
       }
     }
-    // A record sets the window to its own event; a wait/other marker has a null
-    // coalesceEvent() and so clears it, which a cross-stream wait relies on.
-    last_barrier_coalesce_event_ = vcmd.coalesceEvent();
+    // A record sets the window to its own event and barrier signal; a wait/other
+    // marker has a zero coalesceEvent() and so clears it, which a wait relies on.
+    uint64_t ev = vcmd.coalesceEvent();
+    SetCoalesceWindow(ev, ev != 0 ? command_->HwEvent() : nullptr);
     profilingEnd();
   }
   force_irq_ = false;

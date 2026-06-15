@@ -217,7 +217,11 @@ hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, 
   // Only timing-disabled events opt into coalescing: a non-null coalesceEvent()
   // marks the record eligible and carries its identity for the device layer.
   if (flags & hipEventDisableTiming) {
-    marker->setCoalesceEvent(reinterpret_cast<void*>(this));
+    // Assign monotonic ID on first record to avoid address-reuse collision
+    if (coalesce_id_ == 0) {
+      coalesce_id_ = GenerateCoalesceId();
+    }
+    marker->setCoalesceEvent(coalesce_id_);
     marker->setSyncedSinceRecord(WasSyncedSinceLastRecord());
   }
 
