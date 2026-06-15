@@ -108,6 +108,42 @@ class SystemCapabilities:
             return None
 
     @cached_property
+    def ai_nic_devices(self) -> list[str]:
+        """Get the unique AI NIC device names reported by AMD SMI.
+
+        Runs ``amd-smi static`` and extracts every distinct NETDEV value.
+        Returns an empty list when AMD SMI is unavailable or reports no NICs.
+
+        Example output line from ``amd-smi static``:
+        ``NETDEV: enp137s0np0``
+        """
+        amd_smi = shutil.which("amd-smi")
+        if not amd_smi:
+            return []
+        try:
+            result = subprocess.run(
+                [amd_smi, "static"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode != 0:
+                return []
+            seen: set[str] = set()
+            devices: list[str] = []
+            for line in result.stdout.splitlines():
+                if "netdev" in line.lower():
+                    colon_idx = line.find(":")
+                    if colon_idx != -1:
+                        name = line[colon_idx + 1 :].strip()
+                        if name and name not in seen:
+                            seen.add(name)
+                            devices.append(name)
+            return devices
+        except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
+            return []
+
+    @cached_property
     def papi_nic_events(self) -> Optional[str]:
         """Get the list of all events that we want PAPI to record.
 

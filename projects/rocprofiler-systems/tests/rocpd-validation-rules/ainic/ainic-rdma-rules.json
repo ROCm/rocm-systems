@@ -1,0 +1,81 @@
+{
+    "required_tables": [
+        {
+            "name_prefix": "rocpd_string_",
+            "min_rows": 1,
+            "required_columns": ["string"],
+            "validation_queries": [
+                {
+                    "description": "Check for ainic_rx_rdma_ucast_bytes track name",
+                    "error_message": "Did not find ainic_rx_rdma_ucast_bytes in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_rx_rdma_ucast_bytes'"
+                },
+                {
+                    "description": "Check for ainic_tx_rdma_ucast_bytes track name",
+                    "error_message": "Did not find ainic_tx_rdma_ucast_bytes in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_tx_rdma_ucast_bytes'"
+                },
+                {
+                    "description": "Check for ainic_rx_rdma_ucast_pkts track name",
+                    "error_message": "Did not find ainic_rx_rdma_ucast_pkts in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_rx_rdma_ucast_pkts'"
+                },
+                {
+                    "description": "Check for ainic_tx_rdma_ucast_pkts track name",
+                    "error_message": "Did not find ainic_tx_rdma_ucast_pkts in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_tx_rdma_ucast_pkts'"
+                },
+                {
+                    "description": "Check for ainic_rx_rdma_cnp_pkts track name",
+                    "error_message": "Did not find ainic_rx_rdma_cnp_pkts in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_rx_rdma_cnp_pkts'"
+                },
+                {
+                    "description": "Check for ainic_tx_rdma_cnp_pkts track name",
+                    "error_message": "Did not find ainic_tx_rdma_cnp_pkts in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_tx_rdma_cnp_pkts'"
+                },
+                {
+                    "description": "Check for ainic_tx_rdma_ack_timeout track name",
+                    "error_message": "Did not find ainic_tx_rdma_ack_timeout in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_tx_rdma_ack_timeout'"
+                },
+                {
+                    "description": "Check for ainic_resp_tx_pkt_seq_err track name",
+                    "error_message": "Did not find ainic_resp_tx_pkt_seq_err in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_resp_tx_pkt_seq_err'"
+                },
+                {
+                    "description": "Check for ainic_req_rx_pkt_seq_err track name",
+                    "error_message": "Did not find ainic_req_rx_pkt_seq_err in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_req_rx_pkt_seq_err'"
+                },
+                {
+                    "description": "Check for ainic_req_rx_impl_nak_seq_err track name",
+                    "error_message": "Did not find ainic_req_rx_impl_nak_seq_err in ROCpd string table",
+                    "comparison": "greater_than",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE string = 'ainic_req_rx_impl_nak_seq_err'"
+                }
+            ]
+        }
+    ]
+}
