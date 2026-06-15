@@ -295,6 +295,15 @@ void CommandProcessor::startup() {
     completion_->set_interrupt_callback(interrupt_cb_);
 }
 
+void CommandProcessor::shutdown() {
+  stop_doorbell_monitor();
+  if (is_primary_ && engine()) {
+    engine()->primary_release();
+    is_primary_ = false;
+  }
+  completion_.reset();
+}
+
 void CommandProcessor::register_queue(HwQueue queue) {
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: REGISTER_QUEUE id={} pid={} ring={:#x} size={} rptr={:#x} wptr={:#x} "
