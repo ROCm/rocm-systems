@@ -105,7 +105,7 @@ static auto amdsmi_read_cper_file(const std::string& filepath) -> CperFileCtx {
 
   // Use POSIX open/read/close, not std::ifstream: its basic_filebuf is freed by
   // this library's libstdc++, an invalid free when libamd_smi.so is LD_PRELOAD-ed
-  // under a different host libstdc++ (ROCM-25398).
+  // under a different host libstdc++.
   int fd = open(filepath.c_str(), O_RDONLY);
   if (fd == -1) {
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] failed to open file: " << filepath
