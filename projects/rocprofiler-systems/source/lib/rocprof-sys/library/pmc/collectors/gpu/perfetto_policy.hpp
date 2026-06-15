@@ -424,8 +424,8 @@ private:
         }
 
         auto temp_it = tracks.find(detail::TEMPERATURE_VALUE);
-        if(has_gpu_temperature_output(effective_metrics) &&
-           temp_it != tracks.end() && !temp_it->second.track_indexes.empty())
+        if(has_gpu_temperature_output(effective_metrics) && temp_it != tracks.end() &&
+           !temp_it->second.track_indexes.empty())
         {
             const double temp = select_gpu_temperature(effective_metrics, metric_values);
             TRACE_COUNTER(

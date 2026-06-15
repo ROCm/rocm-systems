@@ -1,8 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-add_library(pmc-gpu-collector-tests OBJECT test_device.cpp test_power_metrics.cpp
-                                                    test_temperature_metrics.cpp)
+add_library(
+    pmc-gpu-collector-tests
+    OBJECT
+    test_device.cpp
+    test_power_metrics.cpp
+    test_temperature_metrics.cpp
+)
 
 target_link_libraries(
     pmc-gpu-collector-tests

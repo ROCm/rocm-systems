@@ -75,8 +75,8 @@ public:
         return usage;
     }
 
-    [[nodiscard]] std::uint32_t
-    get_temperature_value(amdsmi_temperature_type_t sensor_type) const
+    [[nodiscard]] std::uint32_t get_temperature_value(
+        amdsmi_temperature_type_t sensor_type) const
     {
         std::int64_t temperature = 0;
         if(amdsmi_get_temp_metric(m_handle, sensor_type, AMDSMI_TEMP_CURRENT,

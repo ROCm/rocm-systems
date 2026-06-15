@@ -3,8 +3,8 @@
 
 //
 // Unit tests for GPU die temperature selection / labeling helpers in
-// library/pmc/collectors/gpu/types.hpp (has_gpu_temperature_output, select_gpu_temperature,
-// gpu_temperature_track_label).
+// library/pmc/collectors/gpu/types.hpp (has_gpu_temperature_output,
+// select_gpu_temperature, gpu_temperature_track_label).
 //
 // Same helpers are used by perfetto_policy.hpp, perfetto_processor.cpp, and
 // rocpd_processor.cpp.
@@ -73,5 +73,6 @@ TEST(gpu_temperature, TrackLabelMatchesSelectedReading)
                  "Hotspot Temp");
     EXPECT_STREQ(gpu_temperature_track_label(make_temp_enabled(true, true)),
                  "Hotspot Temp");
-    EXPECT_STREQ(gpu_temperature_track_label(make_temp_enabled(false, true)), "Edge Temp");
+    EXPECT_STREQ(gpu_temperature_track_label(make_temp_enabled(false, true)),
+                 "Edge Temp");
 }
