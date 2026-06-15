@@ -309,8 +309,12 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
 
   // construct the WQE on the stack
+  // Inline sends carry the payload in the WQE itself, so no local lkey is needed.
+  // Computing get_lkey() unconditionally aborts when laddr is not in the symmetric
+  // heap or a registered buffer (e.g. alltoallv_get's stack-local control message).
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
-                   raddr, rkey, laddr, get_lkey(laddr), static_cast<uint32_t>(length), send_inline};
+                   raddr, rkey, laddr, send_inline ? 0 : get_lkey(laddr),
+                   static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
