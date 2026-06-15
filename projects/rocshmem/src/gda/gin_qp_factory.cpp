@@ -54,6 +54,8 @@
 #include <hsa/hsa_ext_amd.h>
 #include <cstring>
 #include <cstdlib>
+#include <map>
+#include <unistd.h>
 #include <vector>
 #include <string>
 #include <dlfcn.h>
@@ -1358,6 +1360,8 @@ int rocshmem_gin_reg_mr(rocshmem_gin_qp_set_t qp_set,
   return 0;
 }
 
+static std::map<uintptr_t, int> gin_dmabuf_fd_map;
+
 int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
                              void *addr, size_t size, int atomic,
                              void **out_mr, uint32_t *out_lkey, uint32_t *out_rkey) {
@@ -1367,7 +1371,48 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
              | IBV_ACCESS_REMOTE_READ;
   if (atomic) access |= IBV_ACCESS_REMOTE_ATOMIC;
 
-  struct ibv_mr *mr = ibv.reg_mr_vmm(qp_set->nic.pd_orig, addr, size, access);
+  struct ibv_pd *pd = qp_set->nic.pd_orig;
+  struct ibv_mr *mr = nullptr;
+
+#if HIP_VERSION >= 70000000
+  if (ibv.is_dmabuf_supported()) {
+    int fd = -1;
+    static size_t page_size = sysconf(_SC_PAGESIZE);
+    size_t aligned_size = (size + page_size - 1) & ~(page_size - 1);
+
+    hipError_t err = hipMemGetHandleForAddressRange(
+        (void *)&fd, (hipDeviceptr_t)addr, aligned_size,
+        hipMemRangeHandleTypeDmaBufFd, 0);
+    if (err == hipSuccess && fd >= 0) {
+#if 0
+      // iova=0: offset-based addressing, no baseAddr needed on device side.
+      // Requires NIC support (mlx5 yes, bnxt no as of 2026-06).
+      mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, 0, fd, access);
+#else
+      mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, (uint64_t)addr, fd, access);
+#endif
+      if (mr) {
+        gin_dmabuf_fd_map[(uintptr_t)mr] = fd;
+        LOG_TRACE("gin_reg_mr_vmm: dmabuf for %p size %zd lkey=0x%x rkey=0x%x",
+                  addr, size, mr->lkey, mr->rkey);
+      } else {
+        close(fd);
+      }
+    }
+    if (!mr) {
+      LOG_TRACE("gin_reg_mr_vmm: dmabuf failed, trying iova2 fallback");
+    }
+  }
+#endif
+
+  if (!mr) {
+#if 0
+    // iova=0 fallback for NICs that support offset-based addressing
+    mr = ibv.reg_mr_iova2(pd, addr, size, 0, access);
+#else
+    mr = ibv.reg_mr_iova2(pd, addr, size, (uintptr_t)addr, access);
+#endif
+  }
   if (!mr) return -1;
 
   *out_mr = mr;
@@ -1377,7 +1422,13 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
 }
 
 void rocshmem_gin_dereg_mr(void *mr) {
-  if (mr) ibv.dereg_mr((struct ibv_mr*)mr);
+  if (!mr) return;
+  auto it = gin_dmabuf_fd_map.find((uintptr_t)mr);
+  if (it != gin_dmabuf_fd_map.end()) {
+    close(it->second);
+    gin_dmabuf_fd_map.erase(it);
+  }
+  ibv.dereg_mr((struct ibv_mr*)mr);
 }
 
 int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set) {

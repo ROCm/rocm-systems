@@ -265,44 +265,12 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
   }
 }
 
-struct ibv_mr* IBVWrapper::reg_mr_vmm(struct ibv_pd* pd, void* addr, size_t length, int access) {
-#if HIP_VERSION >= 70000000
-  if (ibv.reg_dmabuf_mr != NULL) {
-    int fd = -1;
-    static size_t page_size = sysconf(_SC_PAGESIZE);
-    size_t aligned_size = (length + page_size - 1) & ~(page_size - 1);
+struct ibv_mr* IBVWrapper::reg_mr_iova2(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access) {
+  return ibv.reg_mr_iova2(pd, addr, length, iova, access);
+}
 
-    hipError_t err = hipMemGetHandleForAddressRange(
-        (void *)&fd, (hipDeviceptr_t)addr, aligned_size,
-        hipMemRangeHandleTypeDmaBufFd, 0);
-    if (err == hipSuccess && fd >= 0) {
-#if 0
-      // iova=0: offset-based addressing, no baseAddr needed on device side.
-      // Requires NIC support (mlx5 yes, bnxt no as of 2026-06).
-      struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, 0, fd, access);
-#else
-      struct ibv_mr *mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, (uint64_t)addr, fd, access);
-#endif
-      if (mr) {
-        dmabuf_fd_map[(uintptr_t) mr] = fd;
-        LOG_TRACE("reg_mr_vmm: dmabuf for %p size %zd lkey=0x%x rkey=0x%x",
-                  addr, length, mr->lkey, mr->rkey);
-        return mr;
-      }
-      close(fd);
-    }
-    LOG_TRACE("reg_mr_vmm: dmabuf failed, trying iova2 fallback");
-  }
-#endif
-
-#if 0
-  // iova=0 fallback for NICs that support offset-based addressing
-  LOG_TRACE("reg_mr_vmm: ibv_reg_mr_iova2(%p, %zd, iova=0)", addr, length);
-  return ibv.reg_mr_iova2(pd, addr, length, 0, access);
-#else
-  LOG_TRACE("reg_mr_vmm: ibv_reg_mr_iova2(%p, %zd)", addr, length);
-  return ibv.reg_mr_iova2(pd, addr, length, (uintptr_t)addr, access);
-#endif
+struct ibv_mr* IBVWrapper::reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access) {
+  return ibv.reg_dmabuf_mr(pd, offset, length, iova, fd, access);
 }
 
 int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
