@@ -27,8 +27,16 @@ constexpr unsigned long ioctl_with_size(unsigned long request, size_t size) {
          ((static_cast<unsigned long>(size) & _IOC_SIZEMASK) << _IOC_SIZESHIFT);
 }
 
+// SVM is the one KFD ioctl we see with a runtime-sized payload. The UAPI macro
+// encodes sizeof(kfd_ioctl_svm_args), while libhsakmt rebuilds the request with
+// enough _IOC_SIZE space for the trailing kfd_ioctl_svm_attribute array. Dispatch
+// and name lookup therefore need to compare the command bits without the size.
 constexpr bool is_svm_ioctl(unsigned long request) {
   return ioctl_without_size(request) == ioctl_without_size(AMDKFD_IOC_SVM);
+}
+
+constexpr unsigned long canonical_ioctl_request(unsigned long request) {
+  return is_svm_ioctl(request) ? AMDKFD_IOC_SVM : request;
 }
 
 inline bool svm_ioctl_required_size(uint32_t nattr, size_t &required_size) {
@@ -39,6 +47,18 @@ inline bool svm_ioctl_required_size(uint32_t nattr, size_t &required_size) {
     return false;
   required_size = base_size + static_cast<size_t>(nattr) * attr_size;
   return true;
+}
+
+inline bool validate_ioctl_arg_size(unsigned long request, const void *arg, size_t &arg_size) {
+  arg_size = ioctl_arg_size(request);
+  if (!is_svm_ioctl(request))
+    return true;
+
+  if (arg_size < sizeof(kfd_ioctl_svm_args))
+    return false;
+  const auto *svm_args = static_cast<const kfd_ioctl_svm_args *>(arg);
+  size_t required_size = 0;
+  return svm_ioctl_required_size(svm_args->nattr, required_size) && arg_size >= required_size;
 }
 
 } // namespace rocjitsu

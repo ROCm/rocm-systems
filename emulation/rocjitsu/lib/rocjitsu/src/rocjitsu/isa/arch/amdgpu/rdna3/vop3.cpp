@@ -10215,8 +10215,15 @@ void VCmpxLtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 < s1)
       result |= (1ULL << lane);
   }
@@ -10250,8 +10257,15 @@ void VCmpxEqI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 == s1)
       result |= (1ULL << lane);
   }
@@ -10285,8 +10299,15 @@ void VCmpxLeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
@@ -10320,8 +10341,15 @@ void VCmpxGtI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 > s1)
       result |= (1ULL << lane);
   }
@@ -10355,8 +10383,15 @@ void VCmpxNeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 != s1)
       result |= (1ULL << lane);
   }
@@ -10390,8 +10425,15 @@ void VCmpxGeI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    int16_t s0 = static_cast<int16_t>(src0.read_lane(wf, lane) & 0xFFFF);
-    int16_t s1 = static_cast<int16_t>(src1.read_lane(wf, lane) & 0xFFFF);
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    int16_t s0 = static_cast<int16_t>(static_cast<uint16_t>(s0_raw));
+    int16_t s1 = static_cast<int16_t>(static_cast<uint16_t>(s1_raw));
     if (s0 >= s1)
       result |= (1ULL << lane);
   }
@@ -10425,8 +10467,15 @@ void VCmpxLtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 < s1)
       result |= (1ULL << lane);
   }
@@ -10460,8 +10509,15 @@ void VCmpxEqU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 == s1)
       result |= (1ULL << lane);
   }
@@ -10495,8 +10551,15 @@ void VCmpxLeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 <= s1)
       result |= (1ULL << lane);
   }
@@ -10530,8 +10593,15 @@ void VCmpxGtU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 > s1)
       result |= (1ULL << lane);
   }
@@ -10565,8 +10635,15 @@ void VCmpxNeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 != s1)
       result |= (1ULL << lane);
   }
@@ -10600,8 +10677,15 @@ void VCmpxGeU16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint16_t s0 = static_cast<uint16_t>(src0.read_lane(wf, lane));
-    uint16_t s1 = static_cast<uint16_t>(src1.read_lane(wf, lane));
+    uint32_t opsel = amdgpu::vop3_opsel(inst_);
+    uint32_t s0_raw = src0.read_lane(wf, lane);
+    uint32_t s1_raw = src1.read_lane(wf, lane);
+    if (opsel & (1u << 0))
+      s0_raw >>= 16;
+    if (opsel & (1u << 1))
+      s1_raw >>= 16;
+    uint16_t s0 = static_cast<uint16_t>(s0_raw);
+    uint16_t s1 = static_cast<uint16_t>(s1_raw);
     if (s0 >= s1)
       result |= (1ULL << lane);
   }

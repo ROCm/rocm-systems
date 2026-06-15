@@ -94,6 +94,8 @@ def _register_handlers() -> None:
         gen_vector_permlane_swap,
         gen_vector_permlane,
         gen_vector_permlane64,
+        gen_vector_permlane_family,
+        gen_vector_permlane_idx_gen,
         gen_vector_cvt_pk,
         gen_vector_cvt_scale,
         gen_cvt_fp8,
@@ -169,7 +171,14 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops
     )
     DISPATCH['vector_bitop3'] = lambda c: gen_vector_bitop3(
-        c.dst_ops, c.src_ops, c.dtype
+        c.dst_ops,
+        c.src_ops,
+        c.dtype,
+        (
+            c.opsel_exprs[0]
+            if c.arch_name == 'gfx1250' and c.is_vop3 and c.dtype == 'b16'
+            else None
+        ),
     )
     DISPATCH['vector_permlane16'] = lambda c: gen_vector_permlane(
         c.dst_ops, c.src_ops, c.op, cross=False, op_sel_expr=c.opsel_exprs[0]
@@ -186,6 +195,12 @@ def _register_handlers() -> None:
     DISPATCH['vector_permlane64'] = lambda c: gen_vector_permlane64(
         c.dst_ops, c.src_ops
     )
+    DISPATCH['vector_permlane_family'] = lambda c: gen_vector_permlane_family(
+        c.dst_ops, c.src_ops, c.op
+    )
+    DISPATCH['vector_permlane_idx_gen'] = lambda c: gen_vector_permlane_idx_gen(
+        c.dst_ops, c.src_ops
+    )
     DISPATCH['vector_cvt_pk'] = lambda c: gen_vector_cvt_pk(
         c.dst_ops,
         c.src_ops,
@@ -195,6 +210,14 @@ def _register_handlers() -> None:
             'inst_.opsel'
             if c.is_vop3 and 'opsel' in c.enc_field_names
             else 'inst_.op_sel' if c.is_vop3 and 'op_sel' in c.enc_field_names else '0u'
+        ),
+        fp8_format_select=(
+            'inst_.clamp'
+            if c.cls == 'vector_cvt_pk'
+            and c.op in ('fp8_f32', 'fp8_f16')
+            and c.is_vop3
+            and c.arch_name == 'gfx1250'
+            else None
         ),
     )
     DISPATCH['vector_cvt_scale'] = lambda c: gen_vector_cvt_scale(

@@ -15,12 +15,18 @@
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 
 #include "rocjitsu/isa/operand.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/simd.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
+
+namespace rocjitsu::gfx1250 {
+struct Isa;
+} // namespace rocjitsu::gfx1250
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -35,14 +41,67 @@ using float32_t = float;
 /// flip at runtime.
 inline bool simd_force_scalar() { return util::force_scalar(); }
 
+/// Write an explicit SGPR lane-mask destination. Wave32 targets use the low
+/// dword only; writing a pair would clobber the next SGPR, which codegen may
+/// legally use for unrelated scalar state.
+template <typename Operand>
+inline void write_explicit_lane_mask(const Operand &dst, Wavefront &wf, uint64_t mask) {
+  if (wf.wf_size() <= 32)
+    dst.write_scalar(wf, static_cast<uint32_t>(mask));
+  else
+    dst.write_scalar64(wf, mask);
+}
+
 template <typename Op>
 inline void write_wave_mask_scalar(const Op &op, Wavefront &wf, uint64_t mask) {
-  // Keep this wave32/wave64 mask-width rule in sync with the Python emitters
-  // in sema_lower.py and vector_cmp.py.
-  if (wf.wf_size() <= 32)
-    op.write_scalar(wf, static_cast<uint32_t>(mask));
+  write_explicit_lane_mask(op, wf, mask);
+}
+
+template <typename MachineInst> inline uint32_t vop3_opsel(const MachineInst &inst) {
+  if constexpr (requires { inst.opsel; })
+    return inst.opsel;
+  else if constexpr (requires { inst.op_sel; })
+    return inst.op_sel;
   else
-    op.write_scalar64(wf, mask);
+    return 0;
+}
+
+template <typename Inst> inline bool vop3_fp8_decode_e5m3(const Inst &inst) {
+  if constexpr (requires { typename Inst::IsaType; }) {
+    if constexpr (std::is_same_v<typename Inst::IsaType, ::rocjitsu::gfx1250::Isa> &&
+                  requires { inst.inst_.clamp; })
+      return inst.inst_.clamp;
+  }
+  return false;
+}
+
+template <typename Operand>
+inline uint32_t read_vop3_true16_src(const Operand &src, Wavefront &wf, uint32_t lane,
+                                     uint32_t opsel, uint32_t src_idx) {
+  uint32_t value = src.read_lane(wf, lane);
+  if (opsel & (1u << src_idx))
+    value >>= 16;
+  return value & 0xffffu;
+}
+
+template <typename Operand>
+inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t lane, uint32_t opsel,
+                                  uint32_t value) {
+  uint32_t src_half = value & 0xffffu;
+  auto reg = dst.to_register_ref();
+  if (reg && reg->cls == RegClass::VGPR) {
+    // VOP3 true16 selects the destination half with op_sel[3], independent of
+    // any packed operand encoding convention.
+    uint32_t off = reg->index + (wf.vgpr_msb_for_role(dst.vgpr_msb_role()) << 8);
+    uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, true) : off;
+    uint32_t idx = wf.vgpr_alloc().base + voff;
+    uint32_t old_dst = wf.cu().read_vgpr(idx, lane);
+    uint32_t merged = (opsel & 0x8u) ? ((old_dst & 0x0000ffffu) | (src_half << 16))
+                                     : ((old_dst & 0xffff0000u) | src_half);
+    wf.cu().write_vgpr(idx, lane, merged);
+    return;
+  }
+  dst.write_lane(wf, lane, (opsel & 0x8u) ? (src_half << 16) : src_half);
 }
 
 /// In-vector VOP3 source modifier (f32), bit-exact with the scalar lambda the
@@ -1205,7 +1264,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, vcc);
+  write_explicit_lane_mask(inst.vdst, wf, vcc);
   return true;
 }
 
@@ -1259,7 +1318,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     vcc = (vcc & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, vcc);
+  write_explicit_lane_mask(inst.vdst, wf, vcc);
   return true;
 }
 
@@ -1403,7 +1462,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1449,7 +1508,7 @@ template <typename T, typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1498,7 +1557,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1549,7 +1608,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -1601,7 +1660,7 @@ template <typename Inst, typename CmpOp>
         cmp_bits |= (1ULL << i);
     dst = (dst & ~(chunk << base)) | ((cmp_bits & chunk) << base);
   }
-  write_wave_mask_scalar(inst.vdst, wf, dst);
+  write_explicit_lane_mask(inst.vdst, wf, dst);
   return true;
 }
 
@@ -2624,8 +2683,9 @@ template <FmaMixDst DstMode, typename Inst>
   if constexpr (DstMode == FmaMixDst::F32) {
     // Clang contracts native SIMD a*b+c on FMA hosts for this shape while the
     // generated scalar bodies remain bit-exact with separate multiply/add. The
-    // f16 destination modes stay enabled: they narrow to f16 and are covered by
-    // the fma_mix SIMD-vs-scalar tests rather than by this raw-f32 bit path.
+    // f16 destination modes round after the mixed-precision add, and the other
+    // FMA-family SIMD helpers intentionally model fused instructions with
+    // stdx::fma, so this guard is only needed for the F32 fma_mix/mad_mix path.
     return false;
   }
 #endif

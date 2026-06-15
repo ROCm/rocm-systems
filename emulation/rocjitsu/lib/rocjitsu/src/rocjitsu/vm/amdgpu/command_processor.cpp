@@ -562,6 +562,7 @@ uint32_t CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_lds_base(lds_base);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_process_id(entry.process_id);
+      wf->set_exec(initial_exec_mask_for_wave(entry, w, cu->wf_size()));
       init_wavefront_regs(cu, wf, entry, global_wg_id, w);
       wg_wavefronts.push_back(wf);
     }
@@ -1326,32 +1327,29 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
   };
   auto write_read_ptr = [&] {
     uint64_t rptr_val = rpos * sizeof(uint32_t);
+    assert((queue.read_ptr_va & (alignof(uint64_t) - 1)) == 0 &&
+           "SDMA queue read pointer must be 64-bit aligned");
     auto *read_ptr = static_cast<uint64_t *>(resolve(queue.read_ptr_va));
-    if (read_ptr) {
-      // Queue read pointers should be naturally aligned and contained in one
-      // page. Keep runtime guards before atomic_ref anyway so malformed tests
-      // or future queue types do not turn the fallback path into UB.
-      bool contained_in_page =
-          (queue.read_ptr_va & GpuMemory::PAGE_MASK) + sizeof(rptr_val) <= GpuMemory::PAGE_SIZE;
-      bool aligned = reinterpret_cast<uintptr_t>(read_ptr) % alignof(uint64_t) == 0;
-      assert(contained_in_page && "SDMA read pointer must not cross a page boundary");
-      assert(aligned && "SDMA read pointer must be naturally aligned");
-      if (contained_in_page && aligned) {
-        std::atomic_ref<uint64_t>(*read_ptr).store(rptr_val, std::memory_order_release);
-        return;
-      }
+    // The queue read pointer is ABI-aligned, so use an atomic store when the VA
+    // translates to one naturally aligned host pointer inside a single page. The
+    // byte-wise fallback preserves functional behavior for sparse-memory paths
+    // without forming an invalid atomic_ref.
+    if (read_ptr &&
+        (queue.read_ptr_va & GpuMemory::PAGE_MASK) + sizeof(rptr_val) <= GpuMemory::PAGE_SIZE &&
+        reinterpret_cast<uintptr_t>(read_ptr) % alignof(uint64_t) == 0) {
+      std::atomic_ref<uint64_t>(*read_ptr).store(rptr_val, std::memory_order_release);
+      return;
     }
     // Fallback for queues whose read pointer cannot be resolved to a directly
     // writable host pointer in this process.
     write_gpu_block(queue.read_ptr_va, &rptr_val, sizeof(rptr_val), queue.process_id);
   };
   // Publish the unchanged read pointer before retrying a wait/poll packet or an
-  // SDMA packet whose translated VA is not ready yet. The queue owner still sees
-  // the packet as pending, and the doorbell reschedule gives later mappings or
-  // signal writes a chance to make the same packet executable. Callers must
-  // return from process_sdma_ring() immediately after this helper so a later
-  // read-pointer update cannot accidentally advance past the deferred packet.
-  auto reschedule_current_packet = [&] {
+  // SDMA packet whose translated VA is not ready yet. This helper must be used
+  // as `return stop_and_retry_current_packet();`: the queue owner still sees the
+  // packet as pending, and continuing this scan would allow the final read-pointer
+  // write below to incorrectly advance past the pending packet.
+  auto stop_and_retry_current_packet = [&] {
     write_read_ptr();
     engine()->schedule_event_now(&doorbell_event_);
   };
@@ -1390,14 +1388,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           if (wait_addr > 0x1000) {
             auto *wait_ptr = static_cast<uint64_t *>(resolve(wait_addr));
             if (!wait_ptr) {
-              reschedule_current_packet();
-              return;
+              return stop_and_retry_current_packet();
             }
             uint64_t wait_value =
                 std::atomic_ref<uint64_t>(*wait_ptr).load(std::memory_order_acquire);
             if (!sdma_compare_u64(wait_func, wait_value & wait_mask, wait_ref)) {
-              reschedule_current_packet();
-              return;
+              return stop_and_retry_current_packet();
             }
           }
         }
@@ -1416,8 +1412,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
           if (signal_addr > 0x1000 && signal_op == 0x70) {
             signal_ptr = static_cast<int64_t *>(resolve(signal_addr));
             if (!signal_ptr) {
-              reschedule_current_packet();
-              return;
+              return stop_and_retry_current_packet();
             }
             signal_decrement = true;
           }
@@ -1431,8 +1426,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         auto *src_ptr = resolve(src_va);
         auto *dst_ptr = resolve(dst_va);
         if (!src_ptr || !dst_ptr) {
-          reschedule_current_packet();
-          return;
+          return stop_and_retry_current_packet();
         }
 
         std::memcpy(dst_ptr, src_ptr, count);
@@ -1465,8 +1459,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       auto *src_ptr = resolve(src_va);
       auto *dst_ptr = resolve(dst_va);
       if (!src_ptr || !dst_ptr) {
-        reschedule_current_packet();
-        return;
+        return stop_and_retry_current_packet();
       }
       // GFX12.5 COPY_LINEAR uses bit 28 for NPD metadata. The two-destination
       // broadcast form is marked by bit 27 and extends the packet with DW7/DW8.
@@ -1477,8 +1470,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
         auto *dst2_ptr = resolve(dst2_va);
         if (!dst2_ptr) {
-          reschedule_current_packet();
-          return;
+          return stop_and_retry_current_packet();
         }
         std::memcpy(dst_ptr, src_ptr, count);
         for (auto *l2 : l2_caches_)
@@ -1547,13 +1539,11 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         if (addr > 0x1000) {
           auto *ptr = static_cast<uint64_t *>(resolve(addr));
           if (!ptr) {
-            reschedule_current_packet();
-            return;
+            return stop_and_retry_current_packet();
           }
           uint64_t val = std::atomic_ref<uint64_t>(*ptr).load(std::memory_order_acquire);
           if (!sdma_compare_u64(func, val & mask, ref)) {
-            reschedule_current_packet();
-            return;
+            return stop_and_retry_current_packet();
           }
         }
         pkt_dwords = sdma::POLL_MEM_64B_GFX1250_SIZE;
@@ -1571,8 +1561,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
       } else if (addr_va > 0x1000) {
         auto *ptr = static_cast<uint32_t *>(resolve(addr_va));
         if (!ptr) {
-          reschedule_current_packet();
-          return;
+          return stop_and_retry_current_packet();
         }
         auto compare = [func](uint32_t val, uint32_t reference) -> bool {
           switch (func) {
@@ -1596,8 +1585,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         };
         uint32_t val = std::atomic_ref<uint32_t>(*ptr).load(std::memory_order_acquire);
         if (!compare(val & mask, ref)) {
-          reschedule_current_packet();
-          return;
+          return stop_and_retry_current_packet();
         }
       }
       (void)hdp_flush;

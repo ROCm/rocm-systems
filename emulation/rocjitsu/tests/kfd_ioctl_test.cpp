@@ -131,6 +131,8 @@ TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {
   attrs[1].value = KFD_IOCTL_SVM_FLAG_GPU_EXEC;
 
   unsigned long svm_request = rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size());
+  EXPECT_TRUE(rocjitsu::is_svm_ioctl(svm_request));
+  EXPECT_EQ(rocjitsu::canonical_ioctl_request(svm_request), AMDKFD_IOC_SVM);
   int rc = driver_->ioctl(svm_request, svm_args);
   EXPECT_EQ(rc, 0);
 

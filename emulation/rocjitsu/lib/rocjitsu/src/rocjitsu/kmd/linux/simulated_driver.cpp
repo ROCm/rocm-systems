@@ -534,10 +534,7 @@ int SimulatedDriver::ioctl(uint32_t process_id, unsigned long request, void *arg
 }
 
 static const char *ioctl_name(unsigned long req) {
-  // SVM requests carry a variable attrs[] tail, so the size bits may differ
-  // from the fixed UAPI macro while the ioctl number/type still match.
-  unsigned long dispatch_req = is_svm_ioctl(req) ? AMDKFD_IOC_SVM : req;
-  switch (dispatch_req) {
+  switch (canonical_ioctl_request(req)) {
   case AMDKFD_IOC_GET_VERSION:
     return "GET_VERSION";
   case AMDKFD_IOC_GET_CLOCK_COUNTERS:
@@ -592,10 +589,7 @@ static const char *ioctl_name(unsigned long req) {
 int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg) {
   util::Logger::cp("IOCTL pid=", proc.process_id(), " ", ioctl_name(request));
 
-  // Match SVM by ioctl number/type but keep dispatch in the normal switch. The
-  // caller-provided size is still available in request for RPC-side validation.
-  unsigned long dispatch_request = is_svm_ioctl(request) ? AMDKFD_IOC_SVM : request;
-  switch (dispatch_request) {
+  switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_GET_VERSION:
     return get_version_ioctl(arg);
   case AMDKFD_IOC_GET_CLOCK_COUNTERS:
@@ -674,6 +668,10 @@ int SimulatedDriver::dispatch_ioctl(KfdProcess &proc, unsigned long request, voi
   case AMDKFD_IOC_IPC_IMPORT_HANDLE:
     return ipc_import_handle_ioctl(proc, arg);
   case AMDKFD_IOC_SVM:
+    // SVM requests carry a trailing attribute array, so libhsakmt sets _IOC_SIZE
+    // to the actual buffer size. canonical_ioctl_request() lets this follow the
+    // normal switch-dispatch style while still accepting those runtime-sized
+    // request values.
     return svm_ioctl(proc, arg);
   default:
     util::Logger::debug_print("rocjitsu: unhandled ioctl 0x", std::hex, request);

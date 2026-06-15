@@ -284,6 +284,8 @@ protected:
 /// @tparam Isa ISA traits type providing a Context type alias.
 template <typename Isa> class IsaInstruction : public Instruction {
 public:
+  using IsaType = Isa;
+
   /// @brief Construct an ISA instruction with the given mnemonic.
   /// @param[in] mnemonic Human-readable mnemonic string.
   IsaInstruction(std::string_view mnemonic, ExecuteFn exec_fn) : Instruction(mnemonic, exec_fn) {}

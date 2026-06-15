@@ -120,6 +120,8 @@ class LoweringContext:
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_dst_reg: str | None = None
     true16_src_raw: str | None = None
+    fp8_byte_select: str | None = None
+    fp8_decode_e5m3_select: str | None = None
     vector_sgpr_once: bool = False
     clear_false_lane_mask_writes: bool = True
 
@@ -321,6 +323,8 @@ def _lower_stmt(node: SemaNode, ctx: LoweringContext) -> list[str]:
             true16_src_selects=ctx.true16_src_selects,
             true16_dst_reg=ctx.true16_dst_reg,
             true16_src_raw=ctx.true16_src_raw,
+            fp8_byte_select=ctx.fp8_byte_select,
+            fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
             vector_sgpr_once=ctx.vector_sgpr_once,
             clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
         )
@@ -453,6 +457,8 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
         true16_src_selects=ctx.true16_src_selects,
         true16_dst_reg=ctx.true16_dst_reg,
         true16_src_raw=ctx.true16_src_raw,
+        fp8_byte_select=ctx.fp8_byte_select,
+        fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
         vector_sgpr_once=ctx.vector_sgpr_once,
         clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
@@ -504,6 +510,8 @@ def _lower_for(node: SemaNode, ctx: LoweringContext) -> list[str]:
         true16_src_selects=ctx.true16_src_selects,
         true16_dst_reg=ctx.true16_dst_reg,
         true16_src_raw=ctx.true16_src_raw,
+        fp8_byte_select=ctx.fp8_byte_select,
+        fp8_decode_e5m3_select=ctx.fp8_decode_e5m3_select,
         vector_sgpr_once=ctx.vector_sgpr_once,
         clear_false_lane_mask_writes=ctx.clear_false_lane_mask_writes,
     )
@@ -1051,6 +1059,14 @@ def _lower_dst_write(
                 dst_ref = f'wf.vgpr_alloc().base + ({ctx.true16_dst_reg})'
                 read_dst = f'wf.cu().read_vgpr({dst_ref}, lane)'
                 write_dst = f'wf.cu().write_vgpr({dst_ref}, lane, merged);'
+            elif ctx.true16_dst_select == 'inst_.opsel & 0x8u':
+                return [
+                    f'{ind}{{',
+                    f'{ind}  uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>({selected_rhs}));',
+                    f'{ind}  ::rocjitsu::amdgpu::write_vop3_true16_dst('
+                    f'{name}, wf, lane, {ctx.true16_dst_select}, src_half);',
+                    f'{ind}}}',
+                ]
             else:
                 read_dst = f'{name}.read_lane(wf, lane)'
                 write_dst = f'{name}.write_lane(wf, lane, merged);'
@@ -1680,6 +1696,29 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
+
+    if len(args) == 1 and callee in (
+        'cvt_f32_fp8',
+        'cvt_f32_bf8',
+        'cvt_f16_fp8',
+        'cvt_f16_bf8',
+    ):
+        arg = args[0]
+        if ctx.fp8_byte_select is not None:
+            arg = f'(({arg} >> (({ctx.fp8_byte_select}) * 8u)) & 0xFFu)'
+        if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f32_fp8':
+            return (
+                f'std::bit_cast<uint32_t>(({ctx.fp8_decode_e5m3_select}) ? '
+                f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
+                f'util::fp8_e4m3_to_f32(static_cast<uint8_t>({arg})))'
+            )
+        if ctx.fp8_decode_e5m3_select is not None and callee == 'cvt_f16_fp8':
+            return (
+                f'static_cast<uint32_t>(util::f32_to_f16(({ctx.fp8_decode_e5m3_select}) ? '
+                f'util::fp8_e5m3_to_f32(static_cast<uint8_t>({arg})) : '
+                f'util::fp8_e4m3_to_f32(static_cast<uint8_t>({arg}))))'
+            )
+        return _INLINE_UNARY_OPS[callee].format(arg)
 
     if len(args) == 1 and callee in _INLINE_UNARY_OPS:
         return _INLINE_UNARY_OPS[callee].format(args[0])

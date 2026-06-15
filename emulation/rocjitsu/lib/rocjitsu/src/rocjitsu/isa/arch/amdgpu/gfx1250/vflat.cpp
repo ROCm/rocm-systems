@@ -826,7 +826,7 @@ void FlatAtomicSwapB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -871,9 +871,9 @@ void FlatAtomicCmpswapB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
-  d->elem_size = 8;
+  d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -922,7 +922,7 @@ void FlatAtomicAddU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -969,7 +969,7 @@ void FlatAtomicSubU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1016,7 +1016,7 @@ void FlatAtomicSubClampU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1063,7 +1063,7 @@ void FlatAtomicMinI32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1110,7 +1110,7 @@ void FlatAtomicMinU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1157,7 +1157,7 @@ void FlatAtomicMaxI32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1204,7 +1204,7 @@ void FlatAtomicMaxU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1251,7 +1251,7 @@ void FlatAtomicAndB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1298,7 +1298,7 @@ void FlatAtomicOrB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1345,7 +1345,7 @@ void FlatAtomicXorB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1392,7 +1392,7 @@ void FlatAtomicIncU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1439,7 +1439,7 @@ void FlatAtomicDecU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1486,7 +1486,7 @@ void FlatAtomicSwapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1497,12 +1497,14 @@ void FlatAtomicSwapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -1533,7 +1535,7 @@ void FlatAtomicCmpswapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1544,14 +1546,18 @@ void FlatAtomicCmpswapB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 8);
+  d->store_data.resize(wf.wf_size() * 16);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 16 + 0], &val0, 4);
     uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
-    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
+    std::memcpy(&d->store_data[lane * 16 + 4], &val1, 4);
+    uint32_t val2 = cu.read_vgpr(data_base + 2, lane);
+    std::memcpy(&d->store_data[lane * 16 + 8], &val2, 4);
+    uint32_t val3 = cu.read_vgpr(data_base + 3, lane);
+    std::memcpy(&d->store_data[lane * 16 + 12], &val3, 4);
   }
   set_data(std::move(d));
 }
@@ -1582,7 +1588,7 @@ void FlatAtomicAddU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1593,12 +1599,14 @@ void FlatAtomicAddU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -1629,7 +1637,7 @@ void FlatAtomicSubU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1640,12 +1648,14 @@ void FlatAtomicSubU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -1676,7 +1686,7 @@ void FlatAtomicMinI64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1725,7 +1735,7 @@ void FlatAtomicMinU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1774,7 +1784,7 @@ void FlatAtomicMaxI64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1823,7 +1833,7 @@ void FlatAtomicMaxU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1872,7 +1882,7 @@ void FlatAtomicAndB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1883,12 +1893,14 @@ void FlatAtomicAndB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -1919,7 +1931,7 @@ void FlatAtomicOrB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1930,12 +1942,14 @@ void FlatAtomicOrB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -1966,7 +1980,7 @@ void FlatAtomicXorB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -1977,12 +1991,14 @@ void FlatAtomicXorB64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2013,7 +2029,7 @@ void FlatAtomicIncU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2024,12 +2040,14 @@ void FlatAtomicIncU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2060,7 +2078,7 @@ void FlatAtomicDecU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2071,12 +2089,14 @@ void FlatAtomicDecU64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t data_base =
       wf.vgpr_alloc().base +
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
-  d->store_data.resize(wf.wf_size() * 4);
+  d->store_data.resize(wf.wf_size() * 8);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t val0 = cu.read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    std::memcpy(&d->store_data[lane * 8 + 0], &val0, 4);
+    uint32_t val1 = cu.read_vgpr(data_base + 1, lane);
+    std::memcpy(&d->store_data[lane * 8 + 4], &val1, 4);
   }
   set_data(std::move(d));
 }
@@ -2107,7 +2127,7 @@ void FlatAtomicCondSubU32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2154,7 +2174,7 @@ void FlatAtomicMinNumF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2201,7 +2221,7 @@ void FlatAtomicMaxNumF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2248,7 +2268,7 @@ void FlatAtomicAddF64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2297,7 +2317,7 @@ void FlatAtomicAddF32Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2344,7 +2364,7 @@ void FlatAtomicPkAddF16Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2391,7 +2411,7 @@ void FlatAtomicPkAddBf16Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 4;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FADD;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2438,7 +2458,7 @@ void FlatAtomicMinNumF64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMIN;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
@@ -2487,7 +2507,7 @@ void FlatAtomicMaxNumF64Vflat::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
   d->elem_size = 8;
   d->num_elems = 1;
-  d->is_load = (inst_.nv != 0);
+  d->is_load = amdgpu::gfx12_atomic_returns(inst_.th);
   d->atomic_op = amdgpu::AtomicOp::FMAX;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);

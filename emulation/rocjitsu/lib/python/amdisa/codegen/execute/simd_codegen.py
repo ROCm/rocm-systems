@@ -336,8 +336,10 @@ _VOP3_UNARY_FP_F32 = {
 # widens it to f32, applies omod/clamp, then narrows back to u16 (a 16-bit->f32->16-bit
 # modifier round trip). The plain `a & 0xFFFFu` VOP1 functor it would otherwise reuse
 # ignores those modifiers, so with clamp/omod set the SIMD path diverged from scalar
-# (clamp=1: scalar 0x1 vs simd 0xffff). Leaving the VOP3 twin scalar keeps it correct;
-# the modifier-free VOP1 form still takes the fast path.
+# (clamp=1: scalar 0x1 vs simd 0xffff). The f32 FP8/BF8 VOP3 decoders use op_sel[1:0]
+# as a bit-swapped byte selector, while the VOP1 SIMD functor always consumes byte 0. Leaving these
+# VOP3 twins scalar keeps both modifier and byte-select behavior correct; the
+# modifier-free / byte0 VOP1 forms still take the fast path.
 _VOP3_UNARY_SKIP = {
     'v_floor_f16',
     'v_ceil_f16',
@@ -354,6 +356,8 @@ _VOP3_UNARY_SKIP = {
     'v_frexp_exp_i32_f64',
     'v_frexp_mant_f16',
     'v_frexp_exp_i16_f16',
+    'v_cvt_f32_fp8',
+    'v_cvt_f32_bf8',
 }
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
@@ -1879,6 +1883,38 @@ SIMD_VOP3_BINARY_INT_EXTRA: dict[str, tuple[str, str]] = {
     'v_xor_b16_vop3': ('uint32_t', '[](auto a, auto b) { return (a ^ b) & 0xFFFFu; }'),
 }
 
+# True16 VOP3 scalar semantics select 16-bit source halves and merge a selected
+# destination half. The generic 32-bit VOP3 SIMD glue overwrites the whole dword.
+SIMD_VOP3_TRUE16_UNSAFE = frozenset(
+    {
+        'v_add_i16_vop3',
+        'v_add_nc_i16_vop3',
+        'v_add_nc_u16_vop3',
+        'v_add_u16_vop3',
+        'v_and_b16_vop3',
+        'v_cmp_eq_i16_vop3',
+        'v_cmp_eq_u16_vop3',
+        'v_cmp_ge_i16_vop3',
+        'v_cmp_ge_u16_vop3',
+        'v_cmp_gt_i16_vop3',
+        'v_cmp_gt_u16_vop3',
+        'v_cmp_le_i16_vop3',
+        'v_cmp_le_u16_vop3',
+        'v_cmp_lt_i16_vop3',
+        'v_cmp_lt_u16_vop3',
+        'v_cmp_ne_i16_vop3',
+        'v_cmp_ne_u16_vop3',
+        'v_mul_lo_u16_vop3',
+        'v_not_b16_vop3',
+        'v_or_b16_vop3',
+        'v_sub_i16_vop3',
+        'v_sub_nc_i16_vop3',
+        'v_sub_nc_u16_vop3',
+        'v_sub_u16_vop3',
+        'v_xor_b16_vop3',
+    }
+)
+
 # VOP3 unary integer ops without a VOP1 twin. Reuse the VOP1 unary glue
 # (operand shape is identical: src0 in, vdst out, 32-bit lanes) — only the
 # probe routing key differs. RDNA3+; CDNA4 does not decode.
@@ -2433,26 +2469,8 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b, auto c) { return (a & 0xFFFFu) * (b & 0xFFFFu) + c; }',
     ),
-    # v_mad_i16 / v_mad_u16 (and the _legacy twins): 16-bit multiply-add, result
-    # truncated to the low 16 bits and zero-extended. The low 16 bits of the
-    # product+add are independent of operand sign, so masking the operands and
-    # the result to 16 bits reproduces the int16 and uint16 scalar bodies alike.
-    'v_mad_i16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
-    'v_mad_u16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
-    'v_mad_legacy_i16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
-    'v_mad_legacy_u16_vop3': (
-        'uint32_t',
-        '[](auto a, auto b, auto c) { return ((a & 0xFFFFu) * (b & 0xFFFFu) + (c & 0xFFFFu)) & 0xFFFFu; }',
-    ),
+    # v_mad_i16 / v_mad_u16 need true16 VOP3 op_sel handling for each source
+    # and for the destination half, so their executors stay scalar.
     # v_bfe_u32: bitfield extract. off = src1 & 31, w = src2 & 31, result =
     # (src >> off) & ((1<<w)-1). The scalar `if (w==0) return 0` is redundant —
     # ((1u<<w)-1) is already 0 for w==0 — and `w>=32` is dead since w is masked
@@ -2561,6 +2579,8 @@ SIMD_VOP3_CARRY_CIN.update(
 
 def simd_probe_line(template_name: str) -> str | None:
     """Return the SIMD fast-path probe block for a kernel, or None."""
+    if template_name in SIMD_VOP3_TRUE16_UNSAFE:
+        return None
     if template_name in SIMD_VOP2_CNDMASK:
         return '  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();'
     if template_name in SIMD_VOP3_CNDMASK:
