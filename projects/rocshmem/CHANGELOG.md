@@ -10,17 +10,17 @@
    * `rocshmem_reduce_on_stream`
    * `rocshmem_team_split_2D`
    * Tile-granular RMA operations for the IPC backend
-   * Host-iniated RMA operations in the IPC backend for the non-MPI
+   * Host-initiated RMA operations in the IPC backend for the non-MPI
      bootstrapping path
    * Team creation using non-contiguous parent teams in the IPC backend
    * Python bindings of memory-management APIs
-   * Python binding coverage for teams APIs
+   * Python bindings coverage for team APIs
 * Performance optimizations:
    * Separate put/get memcpy primitives to apply correct cache coherence semantics and fences
    * O(1) IPC availability check using pattern detection
-   * Use constmem for backend variables and provider muxing 
-* Add support for GPU initiated operations using the SDMA engines
-* Adding ASAN build support
+   * Use constmem for backend variables and provider muxing
+* Added support for GPU initiated operations using the SDMA engines
+* Added ASAN build support
 * Change default ROCSHMEM_DEBUG_LEVEL from WARN to ERROR
 
 ## rocSHMEM 3.4.0 for ROCm 7.13
