@@ -179,7 +179,7 @@ class Event {
 
  private:
   static uint64_t GenerateCoalesceId() {
-    static std::atomic<uint64_t> nextId{1};  // Start at 1 so 0 remains sentinel
+    static std::atomic<uint64_t> nextId{0};  // First id is 1; 0 remains the sentinel
     return ++nextId;
   }
 };

@@ -51,6 +51,8 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_CrossStreamWait) {
   HIP_CHECK(hipMalloc(&D_d, Nbytes));
   D_h = reinterpret_cast<float*>(malloc(Nbytes));
 
+  REQUIRE(D_h != nullptr);
+
   hipStream_t stream1, stream2;
   hipEvent_t event;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -88,10 +90,7 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_CrossStreamWait) {
 
     // D_d should equal (A_d + B_d) + B_d
     HIP_CHECK(hipMemcpy(D_h, D_d, Nbytes, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < N; i++) {
-      float expected = (A_h[i] + B_h[i]) + B_h[i];
-      REQUIRE(D_h[i] == expected);
-    }
+    HipTest::checkVectors<float>(A_h, B_h, D_h, N, [](float a, float b) { return (a + b) + b; });
   }
 
   HIP_CHECK(hipEventDestroy(event));
