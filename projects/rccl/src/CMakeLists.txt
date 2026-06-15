@@ -504,14 +504,28 @@ add_custom_command(
 list(APPEND HIP_SOURCES ${HIP_COMPAT_DST})
 list(APPEND NCCL_DEVICE_HIP_FILES ${HIP_COMPAT_DST})
 
-add_custom_command(
-  OUTPUT ${NCCL_DEVICE_HEADER}
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
-  COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
-  COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
-  DEPENDS ${NCCL_DEVICE_HIP_FILES}
-  VERBATIM
-)
+# copy_directory_if_different was added in CMake 3.26.  On older toolchains
+# fall back to the unconditional copy_directory (same behaviour, just causes
+# unnecessary recompilation on no-op rebuilds).
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.26")
+  add_custom_command(
+    OUTPUT ${NCCL_DEVICE_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    VERBATIM
+  )
+else()
+  add_custom_command(
+    OUTPUT ${NCCL_DEVICE_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include"
+    COMMAND ${CMAKE_COMMAND} -E copy "${HIPIFY_DIR}/src/include/nccl_device.h" "${PROJECT_BINARY_DIR}/include/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${HIPIFY_DIR}/src/include/nccl_device" "${PROJECT_BINARY_DIR}/include/nccl_device"
+    DEPENDS ${NCCL_DEVICE_HIP_FILES}
+    VERBATIM
+  )
+endif()
 add_custom_target(copy_nccl_device_headers DEPENDS ${NCCL_DEVICE_HEADER})
 
 # Adding custom target to hipify all the source files
@@ -988,6 +1002,10 @@ else()
 endif()
 target_link_libraries(rccl PRIVATE   dl)
 target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
+# librocm-core provides getROCmVersion() for reporting the runtime ROCm version.
+if(ROCM_MAJOR_VERSION GREATER_EQUAL 6)
+  target_link_libraries(rccl PRIVATE -L${ROCM_PATH}/lib -lrocm-core)
+endif()
 # Wrap fmt in $<BUILD_INTERFACE:...> so it's only used while building rccl
 # and is omitted from the exported rccl-targets export set. Without this,
 # a FetchContent-built fmt-header-only target leaks into rccl's link

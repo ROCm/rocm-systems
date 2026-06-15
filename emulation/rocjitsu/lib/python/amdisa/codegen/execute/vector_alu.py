@@ -227,6 +227,7 @@ def gen_vector_unary(
         'ffbh_u32',
         'ffbl',
         'ffbh_i32',
+        'cls_i32',
         'bcnt',
         'mbcnt_lo',
         'mbcnt_hi',
@@ -249,6 +250,12 @@ def gen_vector_unary(
             L.append('    uint32_t abs_val = sv < 0 ? ~s : s;')
             L.append(
                 f'    {dst[0]}.write_lane(wf, lane, abs_val == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(abs_val)));'
+            )
+        elif op == 'cls_i32':
+            L.append('    int32_t sv = static_cast<int32_t>(s);')
+            L.append('    uint32_t abs_val = sv < 0 ? ~s : s;')
+            L.append(
+                f'    {dst[0]}.write_lane(wf, lane, abs_val == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(abs_val)) - 1);'
             )
         elif op in int_op_map:
             L.append(f'    {dst[0]}.write_lane(wf, lane, {int_op_map[op]});')

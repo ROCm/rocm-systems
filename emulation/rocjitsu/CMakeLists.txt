@@ -52,6 +52,11 @@ include(rj_log)
 option(RJ_SANITIZER "Enable sanitizer (asan, ubsan, tsan, or msan)" "")
 option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
+    RJ_ENABLE_EXPENSIVE_CHECKS
+    "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
+    OFF
+)
+option(
     LTO
     "Enable link-time optimization (IPO) for Release / RelWithDebInfo"
     OFF

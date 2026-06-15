@@ -112,12 +112,25 @@ __host__ void GDAHostContext::sync_all() {
   host_interface->sync_all(context_window_info);
 }
 
+__host__ void GDAHostContext::sync(rocshmem_team_t team) {
+  host_interface->sync(team, context_window_info);
+}
+
 __host__ void GDAHostContext::barrier_all() {
   host_interface->barrier_all(context_window_info);
 }
 
+__host__ void GDAHostContext::barrier(rocshmem_team_t team) {
+  host_interface->barrier(team, context_window_info);
+}
+
 __host__ void GDAHostContext::barrier_all_on_stream(hipStream_t stream) {
   host_interface->barrier_all_on_stream(stream);
+}
+
+__host__ void GDAHostContext::barrier_on_stream(rocshmem_team_t team,
+                                                hipStream_t stream) {
+  host_interface->barrier_on_stream(team, stream);
 }
 
 __host__ void GDAHostContext::quiet_on_stream(hipStream_t stream) {
@@ -127,6 +140,11 @@ __host__ void GDAHostContext::quiet_on_stream(hipStream_t stream) {
 
 __host__ void GDAHostContext::sync_all_on_stream(hipStream_t stream) {
   host_interface->sync_all_on_stream(stream);
+}
+
+__host__ void GDAHostContext::sync_on_stream(rocshmem_team_t team,
+                                             hipStream_t stream) {
+  host_interface->sync_on_stream(team, stream);
 }
 
 __host__ void GDAHostContext::alltoallmem_on_stream(rocshmem_team_t team,

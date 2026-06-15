@@ -179,7 +179,7 @@ ROCPROFILER_IMPL_SFINAE_CONCEPT(is_iterable,
                                 std::begin(std::declval<Tp>()),
                                 std::end(std::declval<Tp>()))
 
-// compatability
+// compatibility
 template <typename Tp>
 using supports_ostream = can_stringify<Tp>;
 
