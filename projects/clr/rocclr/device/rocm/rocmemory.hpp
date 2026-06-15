@@ -133,8 +133,7 @@ class Memory : public device::Memory {
 
   // Map interop buffer
   hsa_status_t interopMapBuffer(hsa_handle_t fdn,
-                                hsa_interop_map_flag_t flags = HSA_INTEROP_MAP_FLAG_NONE,
-                                size_t size_hint = 0);
+                                hsa_interop_map_flag_t flags = HSA_INTEROP_MAP_FLAG_NONE);
 
   // Place interop object into HSA's flat address space
   bool createInteropBuffer(GLenum targetType, int miplevel);

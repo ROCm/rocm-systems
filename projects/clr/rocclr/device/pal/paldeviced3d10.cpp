@@ -22,7 +22,7 @@ bool Device::associateD3D10Device(void* d3d10Device) { return false; }
  * without notification. So it is safe to use a local copy of the relevant DXX extension interface
  *classes.
  **************************************************************************************************************/
-#include "platform/DxxInteropExt.h"
+#include "DxxOpenCLInteropExt.h"
 
 namespace amd::pal {
 

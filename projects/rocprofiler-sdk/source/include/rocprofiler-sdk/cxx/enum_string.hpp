@@ -421,10 +421,6 @@ ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_external_semaphore
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_export_fabric_handle);
 ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_import_fabric_handle);
 #    endif
-#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
-ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_image_create_v2);
-ROCPROFILER_ENUM_LABEL(ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_interop_map_buffer_with_size);
-#    endif
 #endif
 
 #if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION == 0x01
@@ -462,8 +458,6 @@ static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 82);
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 84);
 #    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x0F
 static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 86);
-#    elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x10
-static_assert(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST == 88);
 #    else
 #        if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                       \
             (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
