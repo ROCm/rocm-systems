@@ -1926,7 +1926,9 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   CATCH;
 }
 hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode) {
+  TRY;
   return hip::GetHipDispatchTable()->hipModuleGetLoadingMode_fn(mode);
+  CATCH;
 }
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name) {

@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <vector>
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/wait.h>
@@ -49,7 +50,7 @@ void runTestInFork(std::function<void()> testFunc) {
   if (pid == 0) {
     // Child process: run the test
     testFunc();
-    exit(0);  // Test passed in child
+    _exit(0);  // Test passed in child
   } else {
     // Parent process: wait for child
     int status;
@@ -106,8 +107,7 @@ void kernelExecutionFunction(hipModule_t module) {
 
   void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
-                                  reinterpret_cast<void **>(&config)));
+  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, nullptr, config));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipMemcpy(B.data(), Bd, SIZE_BYTES, hipMemcpyDeviceToHost));
   for (uint32_t i = 0; i < LEN; i++) {
