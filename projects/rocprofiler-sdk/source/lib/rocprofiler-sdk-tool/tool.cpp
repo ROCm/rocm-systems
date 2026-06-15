@@ -2439,11 +2439,12 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     assign_attach_output_session_suffix();
 
-    pid_t instrumented_pid = getpid();   // The target process we're attaching to
-    pid_t parent_pid       = getppid();  // The rocprofv3 tool process
-    ROCP_INFO << "Attach mode: Setting process_id to target PID " << instrumented_pid
-              << " (tool PID: " << parent_pid << ")";
-    tool_metadata->set_process_id(instrumented_pid, parent_pid);  // Set target as main process
+    pid_t instrumented_pid = getpid();   // The process being profiled
+    pid_t parent_pid       = getppid();  // Its parent process
+    ROCP_INFO << "Attach mode: Setting process_id to instrumented PID " << instrumented_pid
+              << " (parent PID: " << parent_pid << ")";
+    // NOLINTNEXTLINE(readability-suspicious-call-argument): parent_pid is correctly the _ppid arg
+    tool_metadata->set_process_id(instrumented_pid, parent_pid);
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {

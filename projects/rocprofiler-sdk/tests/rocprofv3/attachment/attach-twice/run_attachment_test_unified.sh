@@ -198,9 +198,8 @@ else
 fi
 
 # Locate the process's output files. With default naming the files are under a
-# subdirectory named after the hostname. Reattach adds a session segment after the
-# PID in the basename, e.g. <pid>_results.json vs <pid>_1_results.json (not
-# <pid>_results_1.json).
+# subdirectory named after the hostname. Reattach adds a session ID after the
+# PID in the basename, e.g. <pid>_1_results.json
 APP_JSON=$(find ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/ \( -name "${APP_PID}_results.json" -o -name "${APP_PID}_*_results.json" \) | head -1)
 if [ -z "$APP_JSON" ]; then
     echo "Error: Could not find app (PID ${APP_PID}) JSON output after second attachment"
