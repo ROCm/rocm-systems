@@ -388,8 +388,11 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
     // `LD_PRELOAD`/env paths resolve and the workload can reach the GPU.
     let injection = resolve_injection(session)?;
     def.mounts.extend(injection.mounts.iter().cloned());
-    def.devices.extend(injection.devices.iter().cloned());
-    def.groups.extend(injection.groups.iter().cloned());
+
+    // The emulator decides whether its workload needs host GPU access
+    // (e.g. HotSwap runs the retargeted code on the real GPU). The
+    // provider-specific group handling lives in the container engine.
+    let host_gpus = injection.host_gpus;
 
     // Each container hosts itself: its entrypoint is `mirage host`, run
     // from the mirage binary bind-mounted in read-only, against the
@@ -487,6 +490,7 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         .bring_up(
             session,
             &def,
+            host_gpus,
             node_count,
             head_port,
             |rank| {
@@ -652,7 +656,7 @@ async fn run_exec(layout: ExecLayout, host_rank: Option<u32>) -> Result<()> {
 
     // Resolve the emulator-level injection (env vars, LD_PRELOAD, ...)
     // for this exec's session. For a rocjitsu session this is what wires
-    // `LD_PRELOAD=librocjitsu_kmd.so` plus `RJ_CONFIG`/`RJ_SCHEMA` into
+    // `LD_PRELOAD=librocjitsu_kmd.so` plus `ROCJITSU_RUNTIME_DIR` into
     // every spawned child so the workload actually runs under emulation.
     //
     // Crucially, this happens *after* the initial `status.json` and node
