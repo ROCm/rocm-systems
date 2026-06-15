@@ -23,97 +23,9 @@ import ctypes
 import pytest
 
 from conftest import requires_multi_pe  # noqa: E402
+from hip_test_utils import HipStream, d2h, h2d, hip_sync  # noqa: E402
 
 import rocshmem4py  # noqa: E402
-
-
-# ---------------------------------------------------------------------------
-# Minimal HIP ctypes shim (just enough to move bytes and drive a stream)
-# ---------------------------------------------------------------------------
-
-try:
-    _hip = ctypes.CDLL("libamdhip64.so")
-except OSError as e:
-    pytest.skip(f"libamdhip64.so not loadable: {e}", allow_module_level=True)
-
-HIP_MEMCPY_HOST_TO_DEVICE = 1
-HIP_MEMCPY_DEVICE_TO_HOST = 2
-
-_hip.hipDeviceSynchronize.restype = ctypes.c_int
-_hip.hipMemcpy.restype = ctypes.c_int
-_hip.hipMemcpy.argtypes = [
-    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
-]
-_hip.hipStreamCreate.restype = ctypes.c_int
-_hip.hipStreamCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
-_hip.hipStreamDestroy.restype = ctypes.c_int
-_hip.hipStreamDestroy.argtypes = [ctypes.c_void_p]
-_hip.hipStreamSynchronize.restype = ctypes.c_int
-_hip.hipStreamSynchronize.argtypes = [ctypes.c_void_p]
-
-
-def _hip_check(rc: int, fn: str) -> None:
-    if rc != 0:
-        raise RuntimeError(f"{fn} failed with HIP error {rc}")
-
-
-def h2d(device_ptr: int, host_buf) -> None:
-    _hip_check(
-        _hip.hipMemcpy(
-            ctypes.c_void_p(device_ptr),
-            ctypes.cast(host_buf, ctypes.c_void_p),
-            ctypes.sizeof(host_buf),
-            HIP_MEMCPY_HOST_TO_DEVICE,
-        ),
-        "hipMemcpy H2D",
-    )
-
-
-def d2h(host_buf, device_ptr: int) -> None:
-    _hip_check(
-        _hip.hipMemcpy(
-            ctypes.cast(host_buf, ctypes.c_void_p),
-            ctypes.c_void_p(device_ptr),
-            ctypes.sizeof(host_buf),
-            HIP_MEMCPY_DEVICE_TO_HOST,
-        ),
-        "hipMemcpy D2H",
-    )
-
-
-def hip_sync() -> None:
-    _hip_check(_hip.hipDeviceSynchronize(), "hipDeviceSynchronize")
-
-
-class HipStream:
-    """Context-manager wrapping a raw hipStream_t.
-
-    The integer handle matches the type expected by ``rocshmem_*_on_stream``
-    bindings.  In torch environments the equivalent is
-    ``torch.cuda.current_stream().cuda_stream``.
-    """
-
-    def __init__(self) -> None:
-        s = ctypes.c_void_p()
-        _hip_check(_hip.hipStreamCreate(ctypes.byref(s)), "hipStreamCreate")
-        self._handle = s
-
-    @property
-    def handle(self) -> int:
-        return self._handle.value or 0
-
-    def synchronize(self) -> None:
-        _hip_check(
-            _hip.hipStreamSynchronize(self._handle), "hipStreamSynchronize"
-        )
-
-    def __enter__(self) -> "HipStream":
-        return self
-
-    def __exit__(self, *exc) -> None:
-        if self._handle:
-            _hip.hipStreamDestroy(self._handle)
-            self._handle = ctypes.c_void_p()
 
 
 # ---------------------------------------------------------------------------

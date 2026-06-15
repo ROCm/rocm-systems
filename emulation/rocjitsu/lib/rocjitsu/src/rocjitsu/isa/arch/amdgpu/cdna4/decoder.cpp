@@ -13,7 +13,29 @@
 namespace rocjitsu {
 namespace cdna4 {
 
+namespace {
+
+bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {
+  constexpr uint32_t VOP3P_MFMA_ENC = 423;
+  constexpr uint32_t PREFIX_OP = 44;
+  auto enc0 = (opcode[0] >> 23) & 0x1FFu;
+  auto op0 = (opcode[0] >> 16) & 0x7Fu;
+  if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP)
+    return false;
+  auto enc2 = (opcode[2] >> 23) & 0x1FFu;
+  auto op2 = (opcode[2] >> 16) & 0x7Fu;
+  return enc2 == VOP3P_MFMA_ENC && (op2 == 45 || op2 == 46);
+}
+
+} // namespace
+
 std::unique_ptr<Instruction> Decoder::decode(const MachineInst *opcode) {
+  if (isMfmaScaleF8f6f4Vop3px2(opcode)) {
+    auto op2 = (opcode[2] >> 16) & 0x7Fu;
+    if (op2 == 45)
+      return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2);
+    return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2);
+  }
   Sop1MachineInst op = std::bit_cast<decltype(op)>(*opcode);
   return primary_decode_table[op.encoding](opcode);
 }
@@ -4692,16 +4714,6 @@ std::unique_ptr<Instruction> Decoder::decodeVop3pX2Prefix(const MachineInst *opc
   return sub_decode_vop3p[op.op](opcode + 2);
 }
 
-std::unique_ptr<Instruction>
-Decoder::decodeVMfmaF3216x16x128F8f6f4Vop3pMfma(const MachineInst *opcode) {
-  return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode);
-}
-
-std::unique_ptr<Instruction>
-Decoder::decodeVMfmaF3232x32x64F8f6f4Vop3pMfma(const MachineInst *opcode) {
-  return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode);
-}
-
 std::unique_ptr<Instruction> Decoder::decodeVPkFmaF32Vop3p(const MachineInst *opcode) {
   return std::make_unique<VPkFmaF32Vop3p>(opcode);
 }
@@ -8856,8 +8868,8 @@ const std::array<Decoder::DecodeFunc, 128> Decoder::sub_decode_vop3p = {
     &Decoder::decodeVDot8I32I4Vop3p,
     &Decoder::decodeVDot8U32U4Vop3p,
     &Decoder::decodeVop3pX2Prefix,
-    &Decoder::decodeVMfmaF3216x16x128F8f6f4Vop3pMfma,
-    &Decoder::decodeVMfmaF3232x32x64F8f6f4Vop3pMfma,
+    &Decoder::decodeInvalid,
+    &Decoder::decodeInvalid,
     &Decoder::decodeInvalid,
     &Decoder::decodeVPkFmaF32Vop3p,
     &Decoder::decodeVPkMulF32Vop3p,
