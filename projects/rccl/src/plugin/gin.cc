@@ -24,10 +24,6 @@ extern getNcclGin_t getNcclGin_v12;
 extern getNcclGin_t getNcclGin_v13;
 extern getNcclGin_t getNcclRma_v13;
 NCCL_PARAM(GinPluginRefCount, "GIN_PLUGIN_REF_COUNT", 0);
-// [RCCL] NCCL_GIN_TYPE selects the GIN backend (e.g. 2 = GIN_IB_PROXY); used by
-// net_ib/gin.cc and rma_proxy.cc. Restored during the develop merge (develop's
-// plugin/gin.cc dropped it but the IB GIN backend still relies on it).
-NCCL_PARAM(GinType, "GIN_TYPE", -1);
 #define NCCL_GIN_VERSION_COUNT 3
 int ncclGinVersion[NCCL_GIN_VERSION_COUNT] = {13, 12, 11};
 getNcclGin_t* getNcclGin[NCCL_GIN_VERSION_COUNT] = {getNcclGin_v13, getNcclGin_v12, getNcclGin_v11};

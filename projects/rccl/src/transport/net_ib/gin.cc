@@ -52,7 +52,7 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
 #endif
 }
 
-extern int64_t ncclParamGinType();
+NCCL_PARAM(GinType, "GIN_TYPE", -1);
 
 static std::mutex ncclGinIbGdakiLockMutex;
 static int ncclGinIbGdakiNDevs = -1;
