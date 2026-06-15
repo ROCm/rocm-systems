@@ -464,7 +464,8 @@ def process_ml_api_trace_output(
     if not existing_csv_files:
         console_warning(
             "No marker files with corresponding counter files found. "
-            "Ensure profiling was done with '--torch-trace'."
+            "Ensure profiling was done with ML API tracing enabled "
+            "(e.g., via '--torch-trace')."
         )
         return pd.DataFrame(), Path(f"{workload_dir}/ml_api_trace")
 
