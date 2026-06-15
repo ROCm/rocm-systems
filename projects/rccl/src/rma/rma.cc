@@ -295,7 +295,8 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm* comm, struct ncclKernelPlan
   }
 
   INFO(NCCL_COLL, "scheduleRmaTasksToPlan: rank=%d ctx=%d func=%d nRmaTasks=%d nRmaTasksProxy=%d nRmaTasksCe=%d",
-    comm->rank, ctx, plan->rmaArgs->func, plan->rmaArgs->nRmaTasks, plan->rmaArgs->nRmaTasksProxy, plan->rmaArgs->nRmaTasksCe);
+       comm->rank, ctx, plan->rmaArgs->func, plan->rmaArgs->nRmaTasks, plan->rmaArgs->nRmaTasksProxy,
+       plan->rmaArgs->nRmaTasksCe);
 
 exit:
   return ret;

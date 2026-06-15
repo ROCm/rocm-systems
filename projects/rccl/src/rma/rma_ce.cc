@@ -13,9 +13,9 @@
 #include "comm.h"
 #include "collectives.h"
 // [RCCL] cudawrap.h intentionally not included: its CUCHECKGOTO routes calls through
-// pfn_* CUDA driver pointers (cudawrap.cc is excluded from the RCCL build). Batch mem ops
-// go through ncclCuStreamBatchMemOp (rocmwrap.h decl, HIP impl in rma_proxy_launch.cc),
-// which calls hipStreamBatchMemOp with a per-op fallback on HIP < 71360850.
+// pfn_* CUDA driver pointers (cudawrap.cc is excluded from the RCCL build).
+// Batch mem ops go through ncclCuStreamBatchMemOp (rocmwrap.h decl, HIP impl
+// in rma_proxy_launch.cc)
 #include "rma/rma.h"
 #include "rma/rma_ce.h"
 
@@ -48,14 +48,17 @@ ncclResult_t ncclRmaCeInit(struct ncclComm* comm){
 
     NCCLCHECKGOTO(ncclMemAlloc((void**)&signalsDevBase, signalsBufSize), ret, fail);
     NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, signalsDevBase, signalsBufSize, NCCL_WIN_COLL_SYMMETRIC, &signalsWinDev), ret, fail);
+
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     // RCCL: decode win like rmaTaskAppend; shadow pool for sym/IPC, type-pun for proxy.
     bool useShadowPool = comm->symmetricSupport || comm->devrState.ceSize > 1;
     if (useShadowPool) {
-      NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, signalsWinDev, &signalsWinDevHost), ret, fail);
+      NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows,
+                                         signalsWinDev, &signalsWinDevHost),
+                    ret, fail);
       ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDevHost->winHost;
     } else {
-      ceCtx->signalsWin = reinterpret_cast<struct ncclDevrWindow*>(signalsWinDev);
+      ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDev;
     }
 #else
     NCCLCHECKGOTO(ncclShadowPoolToHost(&comm->devrState.shadows, signalsWinDev, &signalsWinDevHost), ret, fail);
@@ -63,6 +66,7 @@ ncclResult_t ncclRmaCeInit(struct ncclComm* comm){
     // Get the ncclDevrWindow from the winHost field
     ceCtx->signalsWin = (struct ncclDevrWindow*)signalsWinDevHost->winHost;
 #endif
+
     ceCtx->signalsDev = signalsDevBase;
     ceCtx->graphSignalsDev = signalsDevBase + nRanks + 1;
     ceCtx->graphAckDev = signalsDevBase + 2 * nRanks + 2;
@@ -301,11 +305,7 @@ ncclResult_t ncclRmaCeWaitLaunch(struct ncclComm* comm, struct ncclKernelPlan* p
         batchParams[opIdx].waitValue.flags = CU_STREAM_WAIT_VALUE_GEQ;
         opIdx++;
       }
-      // Execute all wait operations in a single batch.
-      // [RCCL] ncclCuStreamBatchMemOp wraps hipStreamBatchMemOp with a per-op
-      // fallback on HIP < 71360850 (bare-metal AllToAllPut).
-      NCCLCHECKGOTO(
-          ncclCuStreamBatchMemOp(stream, opIdx, batchParams), ret, fail);
+      NCCLCHECKGOTO(ncclCuStreamBatchMemOp(stream, opIdx, batchParams), ret, fail);
     }
     else {
       // Graph: wait-reset-ack cycle using separate graphSignalsDev (isolated from non-graph)

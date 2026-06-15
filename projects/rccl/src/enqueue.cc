@@ -3351,7 +3351,7 @@ static ncclResult_t rmaTaskAppend(
     }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    // RCCL: decode peerWin like register path; shadow pool for sym/IPC, type-pun for proxy.
+    // RCCL: decode peerWin like register path; shadow pool for sym/IPC.
     bool useShadowPool = comm->symmetricSupport || comm->devrState.ceSize > 1;
     if (useShadowPool) {
       struct ncclWindow_vidmem* peerWinDevHost = NULL;

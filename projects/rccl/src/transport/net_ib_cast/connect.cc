@@ -46,34 +46,26 @@ static int IbCastCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
   return maxNqps;
 }
 
-#if HIP_VERSION >= 71260540
 // Export a cuMem/VMM GPU range as a DMA-BUF FD and register the gpu-flush buffer as dmabuf MR.
-static ncclResult_t IbCastRegGpuFlushDmabufCuMemRange(
-    struct ncclIbGpuFlush* gpuFlush, struct ibv_pd* pd, size_t regLen) {
+static ncclResult_t regGpuFlushDmabufCuMem(struct ncclIbGpuFlush* gpuFlush,
+                                           struct ibv_pd* pd, size_t regLen) {
   void* const gpuAddr = gpuFlush->gpuFlushGpuMem;
   CUresult vmmStatus =
-      cuMemGetHandleForAddressRange((void*)&gpuFlush->dmabufFd,
-                                    (CUdeviceptr)gpuAddr,
-                                    regLen,
-                                    CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
-                                    0);
+    cuMemGetHandleForAddressRange((void*)&gpuFlush->dmabufFd,
+                                  (CUdeviceptr)gpuAddr, regLen,
+                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0);
   if (vmmStatus != CUDA_SUCCESS || gpuFlush->dmabufFd < 0) {
     WARN("Failed to export DMA BUF via cuMemGetHandleForAddressRange");
     return ncclSystemError;
   }
 
-  NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&gpuFlush->gpuMr,
-                                   pd,
-                                   0 /*offset*/,
-                                   regLen,
-                                   (uint64_t)gpuAddr /*iova*/,
-                                   gpuFlush->dmabufFd,
-                                   IBV_ACCESS_LOCAL_WRITE |
-                                       IBV_ACCESS_REMOTE_WRITE |
-                                       IBV_ACCESS_REMOTE_READ));
+  int access =
+    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
+  NCCLCHECK(wrap_ibv_reg_dmabuf_mr(&gpuFlush->gpuMr, pd, 0, regLen,
+                                   (uint64_t)gpuAddr, gpuFlush->dmabufFd,
+                                   access));
   return ncclSuccess;
 }
-#endif
 
 #define NCCL_CTS_QP_SLOT_INVALID 0xFF
 enum ncclIbChannelType {
@@ -1533,19 +1525,21 @@ ib_recv:
         NCCLCHECKGOTO(ncclCudaCalloc(&rCommDev->gpuFlush.gpuFlushGpuMem, sizeof(int), /*manager=*/nullptr, ncclMemPersist, hipDeviceMallocFinegrained), ret, fail);
 #endif
         if (useDmaBuf) {
-#if HIP_VERSION >= 71260540
           // Driver VMM range export for cuMem/VMM buffers (NCCL_CUMEM_ENABLE=1):
           // the HSA exporter below cannot export cuMem allocations on some ROCm/NIC
-          // stacks, but cuMemGetHandleForAddressRange can.
+          // stacks, but cuMemGetHandleForAddressRange can. Fall back to the HSA
+          // exporter if the VMM export path is disabled or fails.
+          ncclResult_t vmmExportRet = ncclInvalidUsage;
           if (rcclParamDmaBufUseVmmExport() && ncclCuMemEnable()) {
-            NCCLCHECKGOTO(IbCastRegGpuFlushDmabufCuMemRange(&rCommDev->gpuFlush,
-                                                            rCommDev->base.pd,
-                                                            sizeof(int)),
-                          ret,
-                          fail);
-          } else
-#endif
-          {
+            vmmExportRet =
+              regGpuFlushDmabufCuMem(&rCommDev->gpuFlush, rCommDev->base.pd,
+                                     sizeof(int));
+            if (vmmExportRet != ncclSuccess) {
+              WARN("NET/IB: VMM DMA-BUF export failed, falling back to HSA "
+                   "exporter");
+            }
+          }
+          if (vmmExportRet != ncclSuccess) {
             uint64_t exportOffset = 0;
             void *aligned_ptr = NULL;
             size_t alignedSize = 0;
