@@ -14,6 +14,7 @@
  *   - gfx1150 (Strix Point / RDNA 3.5)
  *   - gfx1151 (Strix Halo / RDNA 3.5)
  *   - gfx1152 (Krackan / RDNA 3.5)
+ *   - gfx1153 (Krackan2 / RDNA 3.5)
  *   - gfx1200 (RX 9060/RDNA4)
  *   - gfx1201 (RX 9070 XT/RDNA4)
  *
@@ -793,7 +794,7 @@ main(int argc, char** argv)
 
         case 6:  // Strix/Strix Halo (RDNA 3.5)
             printf("  - RDNA 3.5 APU iGPU: Strix Point (gfx1150) / Strix Halo (gfx1151) / "
-                   "Krackan (gfx1152)\n");
+                   "Krackan (gfx1152) / Krackan2 (gfx1153)\n");
             printf("  - Wave32 native, WMMA (FP16/BF16/INT8) 16x16x16\n");
             printf("  - VOPD same-wave dual-issue VALU\n");
             printf("  - No CDNA-style FP8/BF8 cvt builtins; scalar FP; s_singleuse_vdst\n");

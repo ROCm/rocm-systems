@@ -1,0 +1,7 @@
+jobs:
+- pmc:
+  - SQ_WAIT_INST_ANY
+  - SQ_WAIT_INST_LDS_sum
+  - SQ_WAVES
+  - SQ_WAVES_sum
+  - CPC_STAT_IDLE

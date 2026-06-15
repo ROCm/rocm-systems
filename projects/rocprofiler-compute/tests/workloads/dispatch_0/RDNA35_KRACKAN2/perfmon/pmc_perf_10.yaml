@@ -1,0 +1,7 @@
+jobs:
+- pmc:
+  - SQ_WAIT_ANY
+  - SQ_WAIT_BARRIER
+  - SQ_WAIT_CNT_ANY
+  - SQ_WAIT_IFETCH
+  - CPC_STAT_BUSY

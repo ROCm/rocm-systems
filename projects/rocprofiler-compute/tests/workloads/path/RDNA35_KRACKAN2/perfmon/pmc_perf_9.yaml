@@ -1,0 +1,9 @@
+jobs:
+- pmc:
+  - SQ_INSTS_WAVE32_LDS_PARAM_LOAD_sum
+  - SQ_INST_CYCLES_LDS_sum
+  - SQ_ITEMS_sum
+  - SQ_LDS_ATOMIC_RETURN_sum
+  - CPC_MEC_INSTR_CACHE_MISS_sum
+  - GCEA_WDRAM_SIZE_REQ_sum
+  - GCEA_WRET_VLD_sum

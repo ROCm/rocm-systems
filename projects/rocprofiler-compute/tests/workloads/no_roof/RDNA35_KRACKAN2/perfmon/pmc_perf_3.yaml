@@ -1,0 +1,18 @@
+jobs:
+- pmc:
+  - SQC_LDS_IDX_ACTIVE_sum
+  - SQC_TC_DATA_READ_REQ_sum
+  - SQC_TC_INST_REQ_sum
+  - SQ_BUSY_CYCLES_avr
+  - GRBM_GUI_ACTIVE
+  - CPC_GUS_WRITE_REQUEST_SENT_sum
+  - GCEA_RDRAM_SIZE_REQ_sum
+  - GCEA_RRET_VLD_sum
+  - GL1C_GL2_REQ_WRITE_sum
+  - GL1C_REQ_MISS_sum
+  - GL1C_REQ_READ_sum
+  - GL1C_REQ_WRITE_sum
+  - GL2C_HIT_sum
+  - GL2C_MC_WRREQ_sum
+  - GL2C_MISS_sum
+  - GL2C_READ_128_REQ_sum

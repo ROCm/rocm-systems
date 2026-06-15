@@ -1,0 +1,5 @@
+jobs:
+- pmc:
+  - SQ_WAVE_CYCLES
+  - SQ_WAVE_CYCLES_sum
+  - CPC_STAT_STALL

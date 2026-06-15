@@ -888,6 +888,7 @@ class OmniSoC_Base:
             self.get_args().no_roof
             or self.__arch == "gfx908"
             or self.__arch == "gfx1151"
+            or self.__arch == "gfx1153"
             or (
                 self.get_args().filter_blocks
                 and "4" not in self.get_args().filter_blocks

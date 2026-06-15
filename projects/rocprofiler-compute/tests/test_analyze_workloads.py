@@ -67,6 +67,14 @@ WORKLOADS_BY_ARCH = {
     "MI300X_A1": CDNA_WORKLOADS,
     "MI350": ["no_roof", "vcopy", "vcopy_iteration_multiplexing"],
     "RDNA35_HALO": ["dispatch_0", "ipblocks_CU", "kernel", "no_roof", "path", "vcopy"],
+    "RDNA35_KRACKAN2": [
+        "dispatch_0",
+        "ipblocks_CU",
+        "kernel",
+        "no_roof",
+        "path",
+        "vcopy",
+    ],
 }
 
 # All workloads exit 0 except these.

@@ -466,4 +466,23 @@ mi_gpu_spec:
               memory_die: 1
             chip_ids:
               physical: 4372
+      - gpu_arch: gfx1153
+        perfmon_config:
+            SQ: 4
+            TA: 4
+            GRBM: 1
+            CPC:  1
+            GCEA: 2
+            TCP:  4
+            SPI:  1
+            GL1A: 1
+            GL1C: 4
+            GL2A: 4
+            GL2C: 4
+        models:
+          - gpu_model: rdna35_krackan2
+            design:
+              memory_die: 1
+            chip_ids:
+              physical: 6402
   #########################################################

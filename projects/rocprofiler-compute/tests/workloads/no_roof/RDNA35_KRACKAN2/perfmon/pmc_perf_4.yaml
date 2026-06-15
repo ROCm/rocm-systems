@@ -1,0 +1,18 @@
+jobs:
+- pmc:
+  - SQ_BUSY_CYCLES_sum
+  - SQ_INSTS_ALL_sum
+  - SQ_INSTS_FLAT_LOAD_sum
+  - SQ_INSTS_FLAT_STORE_sum
+  - GRBM_SPI_BUSY
+  - CPC_ME1_STALL_ON_DATA_FROM_ROQ
+  - GCEA_SARB_BUSY
+  - GCEA_SARB_BUSY_sum
+  - GL1C_REQ_sum
+  - GL1C_STALL_GL2_GL1_sum
+  - GL1C_STALL_LFIFO_FULL_sum
+  - GL1C_STARVE
+  - GL2C_READ_32_REQ_sum
+  - GL2C_READ_64_REQ_sum
+  - GL2C_READ_sum
+  - GL2C_REQ_sum

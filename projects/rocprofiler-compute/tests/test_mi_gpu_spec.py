@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import common
+import pytest
 
 from utils.mi_gpu_spec import MIGPUSpecs
 
@@ -85,6 +86,7 @@ class TestMIGPUSpecs:
             "gfx1150",
             "gfx1151",
             "gfx1152",
+            "gfx1153",
             "gfx908",
             None,
             "",
@@ -174,18 +176,20 @@ class TestMIGPUSpecs:
         ):
             assert MIGPUSpecs.get_num_dies("gfx942", "testmodel") == 4
 
-    def test_get_num_dies_rdna_with_memory_die(self):
+    @pytest.mark.parametrize("arch", ["gfx1151", "gfx1153"])
+    def test_get_num_dies_rdna_with_memory_die(self, arch):
         design = {"rdna_model": {"memory_die": 3}}
         with (
             patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {arch: "navi3"}),
         ):
-            assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 3
+            assert MIGPUSpecs.get_num_dies(arch, "rdna_model") == 3
 
-    def test_get_num_dies_rdna_no_memory_die(self):
+    @pytest.mark.parametrize("arch", ["gfx1151", "gfx1153"])
+    def test_get_num_dies_rdna_no_memory_die(self, arch):
         design = {"rdna_model": {}}
         with (
             patch.object(MIGPUSpecs, "_gpu_design", design),
-            patch.object(MIGPUSpecs, "_gpu_series_dict", {"gfx1151": "navi3"}),
+            patch.object(MIGPUSpecs, "_gpu_series_dict", {arch: "navi3"}),
         ):
-            assert MIGPUSpecs.get_num_dies("gfx1151", "rdna_model") == 1
+            assert MIGPUSpecs.get_num_dies(arch, "rdna_model") == 1

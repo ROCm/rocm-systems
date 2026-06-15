@@ -1,0 +1,22 @@
+GPU_ID,GUID,Correlation_Id,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987738840249,10987739076513,0,CPC_ME1_STALL_WAIT_ON_RCIU_READY,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987738840249,10987739076513,0,GCEA_SARB_STARVING,1987019.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987738840249,10987739076513,0,GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum,99290.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987738840249,10987739076513,0,SQ_INSTS_TEX_LOAD_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987738840249,10987739076513,0,SQ_INSTS_TEX_STORE_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987738840249,10987739076513,0,SQ_INSTS_TEX_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,1,0,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987738840249,10987739076513,0,SQ_INSTS_VALU,262144.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739220274,10987739447761,0,CPC_ME1_STALL_WAIT_ON_RCIU_READY,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739220274,10987739447761,0,GCEA_SARB_STARVING,1449420.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739220274,10987739447761,0,GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum,129500.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739220274,10987739447761,0,SQ_INSTS_TEX_LOAD_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739220274,10987739447761,0,SQ_INSTS_TEX_STORE_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739220274,10987739447761,0,SQ_INSTS_TEX_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,2,1,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739220274,10987739447761,0,SQ_INSTS_VALU,262144.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739536856,10987739758170,0,CPC_ME1_STALL_WAIT_ON_RCIU_READY,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739536856,10987739758170,0,GCEA_SARB_STARVING,1319405.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739536856,10987739758170,0,GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum,124900.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739536856,10987739758170,0,SQ_INSTS_TEX_LOAD_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739536856,10987739758170,0,SQ_INSTS_TEX_STORE_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739536856,10987739758170,0,SQ_INSTS_TEX_sum,0.0
+1,000000a7-a7ef-77ef-8d66-b5b7cff8c0ba,3,2,1048576,256,0,0,8,0,128,"vecCopy(double*, double*, double*, int, int)",10987739536856,10987739758170,0,SQ_INSTS_VALU,262144.0

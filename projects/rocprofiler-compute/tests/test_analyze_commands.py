@@ -26,6 +26,7 @@ indirs = [
     "tests/workloads/vcopy/MI300X_A1",
     "tests/workloads/vcopy/MI350",
     "tests/workloads/vcopy/RDNA35_HALO",
+    "tests/workloads/vcopy/RDNA35_KRACKAN2",
 ]
 
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
@@ -724,10 +725,12 @@ def test_gpu_ids(binary_handler_analyze_rocprof_compute):
             or dir == "tests/workloads/vcopy/MI200"
             or dir == "tests/workloads/vcopy/MI350"
             or dir == "tests/workloads/vcopy/RDNA35_HALO"
+            or dir == "tests/workloads/vcopy/RDNA35_KRACKAN2"
         ):
             # MI100/MI200 workloads (rocpd format) have GPU IDs re-ranked to
             # 0-based consecutive integers by process_rocpd_csv(). MI350 and
             # RDNA35_HALO also use GPU ID 0.
+            # RDNA35_KRACKAN2 also use GPU ID 0.
             gpu_id = "0"
         else:
             gpu_id = "2"
