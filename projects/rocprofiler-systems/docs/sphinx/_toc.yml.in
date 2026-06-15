@@ -41,6 +41,8 @@ subtrees:
           title: Network performance profiling
         - file: how-to/communication-runtime-profiling.rst
           title: Communication runtime profiling
+        - file: how-to/unified-memory-profiling.rst
+          title: Unified memory profiling
         - file: how-to/openmp-profiling.rst
           title: OpenMP performance profiling
         - file: how-to/vcn-jpeg-sampling.rst

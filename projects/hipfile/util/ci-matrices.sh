@@ -3,13 +3,13 @@
 #
 # SPDX-License-Identifier: MIT
 #
-# Single source of truth for the ci_matrix + build_ci_image_matrix jq used by
+# Single source of truth for the ci_matrix + full_CI_images_matrix jq used by
 # the Precheck job in .github/workflows/hipfile-ci-toplevel.yml ("Compute
 # matrix configurations" step).
 #
 # Two ways to use it:
 #   Sourced (CI):  source ci-matrices.sh
-#                  -> sets shell vars ci_matrix and build_ci_image_matrix from
+#                  -> sets shell vars ci_matrix and full_CI_images_matrix from
 #                     the env vars SUPPORTED_PLATFORMS, ROCM_VERSIONS,
 #                     MATRIX_INCLUDE, MATRIX_EXCLUDE
 #   Tests:         bash ci-matrices.sh --test
@@ -37,15 +37,16 @@ compute_ci_matrix() {
     }'
 }
 
-# Derive the image-build matrix from ci_matrix. Simulates GHA's matrix
-# expansion (cross-product -> exclude -> include with merge semantics),
-# projects each resulting combo down to (supported_platforms, rocm_versions),
-# and dedupes. This way future test-only axes on ci_matrix (CXX, compiler,
-# ...) do not multiply images, and an exclude that removes all test legs for a
+# Calculate the catalog of every CI image this run references. It is
+# derived by simulating GHA's matrix expansion (cross-product -> exclude
+# -> include with merge semantics) on ci_matrix, projecting each resulting 
+# combo down to (supported_platforms, rocm_versions), and deduping.
+# This way future test-only axes on ci_matrix (CXX, compiler, ...)
+# do not multiply images, and an exclude that removes all test legs for a
 # given (platform, version) correctly removes that image. Emitted in
 # include-only form so GHA spawns exactly one image-build job per row.
 # Arg: ci_matrix (JSON)
-compute_build_ci_image_matrix() {
+compute_full_CI_images_matrix() {
   local ci_matrix="$1"
   printf '%s' "${ci_matrix}" | jq -c '
     . as $ci
@@ -118,14 +119,14 @@ _run_tests() {
 
   echo "Test 1: today's ci_matrix (no extra axes) -> all cross-product pairs"
   ci='{"supported_platforms":["rocky","ubuntu"],"rocm_versions":["7.2.2"],"include":[],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
   echo
   echo "Test 2: real-world today (rocky,rocky8,suse,ubuntu) x (7.2.2), include ubuntu/7.13.0"
   ci='{"supported_platforms":["rocky","rocky8","suse","ubuntu"],"rocm_versions":["7.2.2"],"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.13.0"}],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"},{"supported_platforms":"rocky8","rocm_versions":"7.2.2"},{"supported_platforms":"suse","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.13.0"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
@@ -134,7 +135,7 @@ _run_tests() {
   # rocky8 has only one test leg in ci_matrix and it's excluded. Therefore no
   # rocky8 image is needed.
   ci='{"supported_platforms":["rocky8","ubuntu"],"rocm_versions":["7.2.2"],"cxx_standard":[17],"exclude":[{"supported_platforms":"rocky8","cxx_standard":17}],"include":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
@@ -143,7 +144,7 @@ _run_tests() {
   # rocky8 has two test legs; only one is excluded. Image still required for
   # the cxx=20 leg.
   ci='{"supported_platforms":["rocky8","ubuntu"],"rocm_versions":["7.2.2"],"cxx_standard":[17,20],"exclude":[{"supported_platforms":"rocky8","cxx_standard":17}],"include":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"rocky8","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
@@ -152,7 +153,7 @@ _run_tests() {
   # include {ubuntu, 7.13.0, cxx:17} can't merge (rv=7.13.0 not in base), so
   # new combo; projection adds the pair.
   ci='{"supported_platforms":["ubuntu"],"rocm_versions":["7.2.2"],"cxx_standard":[17],"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.13.0","cxx_standard":17}],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.13.0"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
@@ -160,21 +161,21 @@ _run_tests() {
   echo "Test 6: augmenting include {cxx:20} -> no new (sp, rv) pairs"
   # {cxx:20} merges into every combo (no overwrite), creates no new combos.
   ci='{"supported_platforms":["ubuntu"],"rocm_versions":["7.2.2"],"cxx_standard":[17],"include":[{"cxx_standard":20}],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
   echo
   echo "Test 7: include duplicating an existing combo -> dedup, no spurious entry"
   ci='{"supported_platforms":["ubuntu"],"rocm_versions":["7.2.2"],"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
   echo
   echo "Test 8: partial-axis include {sp:rocky} when rocky in base -> merges, no new"
   ci='{"supported_platforms":["rocky","ubuntu"],"rocm_versions":["7.2.2"],"include":[{"supported_platforms":"rocky"}],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
@@ -182,28 +183,28 @@ _run_tests() {
   echo "Test 9: partial-axis include {sp:rocky} when rocky NOT in base -> creates partial entry"
   # The phantom case the maintainer accepted. We don't paper over it.
   ci='{"supported_platforms":["ubuntu"],"rocm_versions":["7.2.2"],"include":[{"supported_platforms":"rocky"}],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"rocky"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
   echo
   echo "Test 10: exclude (rocky, 7.2.2) -> removes that pair"
   ci='{"supported_platforms":["rocky","ubuntu"],"rocm_versions":["7.2.2","7.3.0"],"exclude":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"}],"include":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"rocky","rocm_versions":"7.3.0"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.3.0"}]}' || failures=$((failures+1))
 
   echo
   echo "Test 11: exclude then re-include same pair"
   ci='{"supported_platforms":["rocky","ubuntu"],"rocm_versions":["7.2.2"],"exclude":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"}],"include":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"}]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
   echo
   echo "Test 12: future axes, no excludes/includes -> dedup down to (sp,rv) projection"
   ci='{"supported_platforms":["ubuntu"],"rocm_versions":["7.2.2"],"cxx_standard":[17,20],"compiler":["clang","gcc"],"include":[],"exclude":[]}'
-  out=$(compute_build_ci_image_matrix "$ci")
+  out=$(compute_full_CI_images_matrix "$ci")
   _assert_eq "  output" "$out" \
     '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}' || failures=$((failures+1))
 
@@ -221,12 +222,12 @@ _run_tests() {
 # shell); when executed they are equal. So "!=" means "we are being sourced".
 # Do NOT set shell options here: sourcing must not mutate the caller's shell.
 if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
-  # SC2034: ci_matrix/build_ci_image_matrix are consumed by the sourcing CI step.
+  # SC2034: ci_matrix/full_CI_images_matrix are consumed by the sourcing CI step.
   # SC2153: the UPPER_CASE names are CI env vars, not typos of the lowercase args.
   # shellcheck disable=SC2034,SC2153
   ci_matrix=$(compute_ci_matrix "${SUPPORTED_PLATFORMS}" "${ROCM_VERSIONS}" "${MATRIX_INCLUDE}" "${MATRIX_EXCLUDE}")
   # shellcheck disable=SC2034
-  build_ci_image_matrix=$(compute_build_ci_image_matrix "${ci_matrix}")
+  full_CI_images_matrix=$(compute_full_CI_images_matrix "${ci_matrix}")
 else
   set -euo pipefail
   case "${1:-}" in

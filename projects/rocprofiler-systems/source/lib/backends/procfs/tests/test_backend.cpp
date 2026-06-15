@@ -1,23 +1,23 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "library/pmc/device_providers/procfs/drivers/driver.hpp"
+#include "backends/procfs/backend.hpp"
 
 #include <gtest/gtest.h>
 
 #include <unistd.h>
 
-using namespace rocprofsys::pmc::drivers::procfs;
+using namespace rocprofsys::backends::procfs;
 
-class procfs_driver_test : public ::testing::Test
+class procfs_backend_test : public ::testing::Test
 {
 protected:
     size_t cpu_count = static_cast<size_t>(std::max(0L, sysconf(_SC_NPROCESSORS_ONLN)));
 };
 
-TEST_F(procfs_driver_test, reads_proc_stat)
+TEST_F(procfs_backend_test, reads_proc_stat)
 {
-    driver drv(cpu_count);
+    backend drv(cpu_count);
 
     auto jiffies = drv.read_proc_stat();
 
@@ -28,9 +28,9 @@ TEST_F(procfs_driver_test, reads_proc_stat)
     }
 }
 
-TEST_F(procfs_driver_test, reads_rusage)
+TEST_F(procfs_backend_test, reads_rusage)
 {
-    driver drv(cpu_count);
+    backend drv(cpu_count);
 
     auto snap = drv.read_rusage();
 
@@ -38,9 +38,9 @@ TEST_F(procfs_driver_test, reads_rusage)
     EXPECT_GT(snap.virt_mem, 0);
 }
 
-TEST_F(procfs_driver_test, socket_topology_nonempty)
+TEST_F(procfs_backend_test, socket_topology_nonempty)
 {
-    driver drv(cpu_count);
+    backend drv(cpu_count);
 
     const auto& topology = drv.get_socket_topology();
 
@@ -55,9 +55,9 @@ TEST_F(procfs_driver_test, socket_topology_nonempty)
     EXPECT_EQ(total_cpus, cpu_count);
 }
 
-TEST_F(procfs_driver_test, repeated_reads_return_valid_data)
+TEST_F(procfs_backend_test, repeated_reads_return_valid_data)
 {
-    driver drv(cpu_count);
+    backend drv(cpu_count);
 
     auto first  = drv.read_proc_stat();
     auto second = drv.read_proc_stat();
@@ -72,7 +72,7 @@ TEST_F(procfs_driver_test, repeated_reads_return_valid_data)
     }
 }
 
-TEST_F(procfs_driver_test, large_cpu_count_does_not_crash)
+TEST_F(procfs_backend_test, large_cpu_count_does_not_crash)
 {
-    EXPECT_NO_THROW({ driver drv(1024); });
+    EXPECT_NO_THROW({ backend drv(1024); });
 }

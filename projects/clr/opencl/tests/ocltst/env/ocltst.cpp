@@ -258,8 +258,11 @@ class App {
   //! Function to scan for the different tests in the module
   void ScanForTests();
 
-  //! Function to run all the specified tests
-  void RunAllTests();
+  //! Function to run all the specified tests.
+  //! \return true if all requested tests are executed and pass successfully;
+  //!         false if any test fails, if no tests are executed, or when
+  //!         running in list-only mode.
+  bool RunAllTests();
 
   //! Free memory
   void CleanUp();
@@ -718,7 +721,8 @@ void App::PrintTestOrder(int mod_index) {
 }
 
 //! Function that runs all the tests specified in the command-line
-void App::RunAllTests() {
+bool App::RunAllTests() {
+  bool status = true;
 #ifdef _WIN32
 
   if (!m_console) m_window = new Window("Test", 100, 100, m_width, m_height, 0);
@@ -885,6 +889,9 @@ void App::RunAllTests() {
   oclTestLog(OCLTEST_LOG_ALWAYS, "Total Run Tests:     %8d (%6.2f%s)\n", (int)total_tests,
              percent_total, "%");
   oclTestLog(OCLTEST_LOG_ALWAYS, "\n\n");
+  // fail the ocltst process if there are any failed tests
+  status = (num_failures == 0);
+  return status;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1401,6 +1408,7 @@ int main(int argc, char** argv) {
   platform = parseCommandLineForPlatform(argc, argv);
   // reset optind as we really didn't parse the full command line
   optind = 1;
+  bool status = true;
   App app(platform);
 #ifdef _WIN32
   // this function is registers windows service routine when ocltst is launched
@@ -1418,7 +1426,9 @@ int main(int argc, char** argv) {
     app.printOCLinfo();
     app.ScanForTests();
     for (int i = 0; i < app.GetNumItr(); i++) {
-      app.RunAllTests();
+      if (!app.RunAllTests()) {
+        status = false;
+      }
     }
     app.CleanUp();
 #ifdef AUTO_REGRESS
@@ -1427,8 +1437,8 @@ int main(int argc, char** argv) {
     return (-1);
   }
 #endif /* AUTO_REGRESS */
-
-  return 0;
+  // return 0 if all tests passed, 1 otherwise
+  return status ? 0 : 1;
 }
 
 #ifdef _WIN32

@@ -3223,14 +3223,14 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         node_help = "Gets power and baseboard information for the node"
-        node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\
+        node_subcommand_help = f"{self.description}\n\nReturns information for node 0 (OAM_ID 0) on the system.\
                                 \nIf no node argument is provided, all node information will be displayed."
         node_optionals_title = "Node arguments"
 
         # Help text for Node arguments
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
-        gtt_help = "Display GTT (shared GPU memory) size"
+        gtt_help = "Displays GTT (shared GPU memory) size"
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
