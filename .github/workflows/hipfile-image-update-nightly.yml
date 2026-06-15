@@ -10,7 +10,7 @@ on:
     # buffer. This job is purely an optimization: if it is late/failed/builds
     # against an incomplete nightly, per-PR runs fall back to building the nightly
     # image on demand.
-    - cron: "0 10 * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch:
   # Refresh on merge of a Dockerfile/resolver change so the published nightly
   # image + floating cache track develop. Without this, the per-PR registry
