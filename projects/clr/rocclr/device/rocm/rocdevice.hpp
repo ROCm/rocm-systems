@@ -237,14 +237,14 @@ class NullDevice : public amd::Device {
     return true;
   }
 
-  bool virtualMap(void* va, size_t size, amd::Memory* phys) override {
+  cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
     ShouldNotReachHere();
-    return false;
+    return CL_INVALID_OPERATION;
   }
 
-  bool virtualUnmap(void* va, size_t size) override {
+  cl_int virtualUnmap(void* va, size_t size) override {
     ShouldNotReachHere();
-    return false;
+    return CL_INVALID_OPERATION;
   }
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
@@ -479,8 +479,8 @@ class Device : public NullDevice {
   virtual void* virtualAlloc(void* req_addr, size_t size, size_t alignment) override;
   virtual bool virtualFree(void* addr) override;
 
-  virtual bool virtualMap(void* va, size_t size, amd::Memory* phys) override;
-  virtual bool virtualUnmap(void* va, size_t size) override;
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
+  virtual cl_int virtualUnmap(void* va, size_t size) override;
 
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) override;

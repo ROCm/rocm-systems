@@ -287,41 +287,33 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
   // Re-interpret the ga handle.
   hip::GenericAllocation* ga = reinterpret_cast<hip::GenericAllocation*>(handle);
 
-  // Pre-validate predictable failure causes at the HIP layer so that a false
-  // return from virtualMap can be unambiguously attributed to OOM (matches the
-  // hipMalloc convention of pre-validating then treating backend failure as OOM).
+  // Pick the owning device. The backend self-classifies the remaining failure
+  // causes (missing/invalid VA reservation, out-of-bounds range) via cl_int
+  // return codes, so the HIP layer keeps only the checks the backend cannot
+  // perform: the device-id index guard and size-vs-granularity alignment.
 
-  // 1. Owner device id is in range.
+  // Owner device id must index g_devices[] safely before any backend call.
   size_t owner_dev_id = ga->GetProperties().location.id;
   if (owner_dev_id >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-
-  // 2. The VA reservation exists and was created by hipMemAddressReserve.
-  amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(ptr);
-  if (vaddr_base_obj == nullptr ||
-      !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
-  // 3. The requested [ptr, ptr+size) lies inside the reservation, and size is
-  //    a multiple of the device's VMM allocation granularity.
   amd::Device* dev = g_devices[owner_dev_id]->devices()[0];
+
+  // The backend does not validate size-vs-granularity alignment; a misaligned
+  // size would otherwise fail in the HW map and surface as OOM instead of the
+  // correct invalid-value.
   size_t granularity = dev->info().virtualMemAllocGranularityMinimum_;
-  address base = reinterpret_cast<address>(vaddr_base_obj->getSvmPtr());
-  address req_start = reinterpret_cast<address>(ptr);
-  if (req_start < base ||
-      (req_start + size) > (base + vaddr_base_obj->getSize()) ||
-      (granularity != 0 && (size % granularity) != 0)) {
+  if (granularity != 0 && (size % granularity) != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   ga->retain();
 
   // Direct synchronous path, do not wait on streams or other work
-  if (!dev->virtualMap(ptr, size, &ga->asAmdMemory())) {
+  cl_int cl_err = dev->virtualMap(ptr, size, &ga->asAmdMemory());
+  if (cl_err != CL_SUCCESS) {
     ga->release();
-    HIP_RETURN(hipErrorOutOfMemory);
+    HIP_RETURN(ConvertCLErrorIntoHIPError(cl_err));
   }
 
   HIP_RETURN(hipSuccess);
@@ -535,13 +527,14 @@ hipError_t hipMemUnmap(void* ptr, size_t size) {
 
     // Each sub-buffer is unmapped by the device that owns its physical backing.
     amd::Device* sub_dev = g_devices[ga->GetProperties().location.id]->devices()[0];
-    if (!sub_dev->virtualUnmap(sub_va, sub_size)) {
+    cl_int cl_err = sub_dev->virtualUnmap(sub_va, sub_size);
+    if (cl_err != CL_SUCCESS) {
       LogPrintfError("hipMemUnmap: virtualUnmap failed for va: %p", sub_va);
       // Backend keeps bookkeeping intact on failure, but the ga retain is a
       // HIP-layer ref owned by the caller-visible mapping; release it here so
       // it does not leak.
       ga->release();
-      HIP_RETURN(hipErrorInvalidValue);
+      HIP_RETURN(ConvertCLErrorIntoHIPError(cl_err));
     }
 
     // Release the ga ref only on successful HW unmap.

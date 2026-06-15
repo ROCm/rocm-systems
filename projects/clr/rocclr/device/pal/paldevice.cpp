@@ -2476,16 +2476,16 @@ static inline address NextSubBufferPtr(const amd::Memory* mem) {
 // then issues Pal::IQueue::RemapVirtualMemoryPages on MainEngine and waits
 // the fence. The HIP layer is responsible for draining peer-device queues
 // from the CPU side before calling virtualMap
-bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   if (phys == nullptr) {
     LogError("PAL virtualMap: phys is nullptr");
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   VirtualGPU* vgpu = xferQueue_;
   if (vgpu == nullptr) {
     LogError("PAL virtualMap: device has no VirtualGPU available");
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   // Serialize against this device's command submission.
@@ -2494,13 +2494,13 @@ bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
   amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
   if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
     LogPrintfError("PAL virtualMap: no virtual VA reservation for va: %p", va);
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
   if (vaddr_sub_obj == nullptr) {
     LogError("PAL virtualMap: MapMemObjBookkeeping failed");
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   pal::Memory* phys_pal_mem = getGpuMemory(phys);
@@ -2530,22 +2530,22 @@ bool Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
     // down the sub-buffer view directly.
     vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
     vaddr_sub_obj->release();
-    return false;
+    return CL_OUT_OF_HOST_MEMORY;
   }
 
   constexpr bool kImportVmmForInterprocess = false;
   FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
-  return true;
+  return CL_SUCCESS;
 }
 
 // ================================================================================================
 // Direct synchronous unmap path. Symmetric to virtualMap, but preceded by
 // WaitForIdleCompute/Sdma on this device only. HIP layer must handle device sync
-bool Device::virtualUnmap(void* va, size_t size) {
+cl_int Device::virtualUnmap(void* va, size_t size) {
   VirtualGPU* vgpu = xferQueue_;
   if (vgpu == nullptr) {
     LogError("PAL virtualUnmap: device has no VirtualGPU available");
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   // Serialize against this device's command submission.
@@ -2554,13 +2554,13 @@ bool Device::virtualUnmap(void* va, size_t size) {
   amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
   if (vaddr_sub_obj == nullptr) {
     LogPrintfError("PAL virtualUnmap: no sub_obj for va: %p", va);
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   amd::Memory* vaddr_base_obj = amd::MemObjMap::FindVirtualMemObj(va);
   if (vaddr_base_obj == nullptr || !(vaddr_base_obj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
     LogPrintfError("PAL virtualUnmap: no virtual VA reservation for va: %p", va);
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   size_t vaddr_offset = reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
@@ -2591,13 +2591,13 @@ bool Device::virtualUnmap(void* va, size_t size) {
                    static_cast<int>(result));
     // Keep HW state and bookkeeping consistent — bail out before tearing
     // down sub_obj/MemObjMap entries.
-    return false;
+    return CL_INVALID_VALUE;
   }
 
   constexpr bool kDestroyVirtualBuffer = true;
   constexpr bool kReleaseSubObj = true;
   UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
-  return true;
+  return CL_SUCCESS;
 }
 
 // ================================================================================================
