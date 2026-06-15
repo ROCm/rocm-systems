@@ -303,6 +303,15 @@ namespace RcclUnitTesting
                             bool&                 isMatch,
                             float          const  fp8Tolerance)
   {
+    // FP8 has very few mantissa bits, so 1 ULP is a large *relative* step:
+    //   e4m3 (3 mantissa bits): 1 ULP = 2^-3 = 12.5% of magnitude
+    //   e5m2 (2 mantissa bits): 1 ULP = 2^-2 = 25.0% of magnitude
+    // A relative tolerance of (fp8Tolerance * 2^-mantissa) covers fp8Tolerance ULP at any magnitude,
+    // unlike a fixed absolute tolerance which is too tight at high magnitudes and too loose near
+    // zero. kFp8MinMag floors the tolerance so exact-zero / tiny outputs aren't compared at zero tol.
+    float const kFp8E4M3Ulp = 0.125f; // 2^-3
+    float const kFp8E5M2Ulp = 0.25f;  // 2^-2
+    float const kFp8MinMag  = 0.0625f; // smallest input magnitude produced by FillPattern
     isMatch = true;
     size_t idx = 0;
     for (idx = 0; idx < numElements; ++idx)
@@ -315,11 +324,21 @@ namespace RcclUnitTesting
       case ncclUint32:  isMatch = (U4[idx] == expected.U4[idx]); break;
       case ncclInt64:   isMatch = (I8[idx] == expected.I8[idx]); break;
       case ncclUint64:  isMatch = (U8[idx] == expected.U8[idx]); break;
-      case ncclFloat8e4m3: isMatch = (fabs(float(F1[idx]) - float(expected.F1[idx])) < fp8Tolerance); break;
+      case ncclFloat8e4m3: {
+        float const a = float(F1[idx]), b = float(expected.F1[idx]);
+        float const tol = fp8Tolerance * kFp8E4M3Ulp * fmaxf(fmaxf(fabsf(a), fabsf(b)), kFp8MinMag);
+        isMatch = (fabsf(a - b) <= tol);
+        break;
+      }
       case ncclFloat16: isMatch = (fabs(__half2float(F2[idx]) - __half2float(expected.F2[idx])) < 9e-2); break;
       case ncclFloat32: isMatch = (fabs(F4[idx] - expected.F4[idx]) < 1e-5); break;
       case ncclFloat64: isMatch = (fabs(F8[idx] - expected.F8[idx]) < 1e-12); break;
-      case ncclFloat8e5m2: isMatch = (fabs(float(B1[idx]) - float(expected.B1[idx])) < fp8Tolerance); break;
+      case ncclFloat8e5m2: {
+        float const a = float(B1[idx]), b = float(expected.B1[idx]);
+        float const tol = fp8Tolerance * kFp8E5M2Ulp * fmaxf(fmaxf(fabsf(a), fabsf(b)), kFp8MinMag);
+        isMatch = (fabsf(a - b) <= tol);
+        break;
+      }
       case ncclBfloat16: isMatch = (fabs((float)B2[idx] - (float)expected.B2[idx]) < 9e-2); break;
       default:
         TEST_ERROR("Unsupported datatype");

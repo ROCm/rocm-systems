@@ -101,7 +101,7 @@ namespace RcclUnitTesting
                     PtrUnion       const& expected,
                     bool           const  verbose,
                     bool&                 isMatch,
-                    float          const  fp8Tolerance = 9e-2f);
+                    float          const  fp8Tolerance = 2.0f);
 
     // Output to string (for debug)
     std::string ToString(ncclDataType_t const  dataType,
