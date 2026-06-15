@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  *
  * Lightweight device-only header for QueuePair.
- * Provides only the declarations needed by GIN device kernels,
+ * Provides only the device-side declarations needed by external consumers,
  * without pulling in IB verbs types or host-only dependencies.
  * Link against rocshmem's device bitcode for the definitions.
  */
@@ -100,23 +100,23 @@ class ActiveWFInfo {
 
 class QueuePair {
  public:
-  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
-      int pe, ActiveWFInfo &wf_info);
+  __device__ void put_nbi(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
 
-  __device__ void put_nbi_with_keys(void *raddr, uint32_t rkey,
+  __device__ void put_nbi(void *raddr, uint32_t rkey,
       const void *laddr, uint32_t lkey,
-      size_t size, ActiveWFInfo &wf_info, bool ring_db = true);
+      size_t length, ActiveWFInfo &wf_info, bool ring_db = true);
 
-  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
+  __device__ void put_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);
 
-  __device__ void get_nbi(void *dest, const void *source, size_t nelems,
-      int pe, ActiveWFInfo &wf_info);
+  __device__ void get_nbi(void *dest, const void *source, size_t length,
+      ActiveWFInfo &wf_info);
 
-  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems,
+  __device__ void get_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);
 
-  __device__ void atomic_add_with_keys(void *raddr, uint32_t rkey,
+  __device__ void atomic_add(void *raddr, uint32_t rkey,
       int64_t value, ActiveWFInfo &wf_info, bool fence = false);
 
   __device__ void quiet(ActiveWFInfo &wf_info);

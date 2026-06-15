@@ -288,66 +288,7 @@ __device__ void QueuePair::ionic_quiet_single() {
   ionic_quiet_internal_ccqe_single(sq_prod);
 }
 
-__device__ void QueuePair::ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  uint32_t num_wqes = 1;
-  if (wf_info.scope == ThreadScope::thread) {
-    num_wqes = wf_info.num_pe_group_lanes;
-  }
-
-  uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
-
-  uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
-  struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
-  uint16_t wqe_flags = 0;
-
-  if (!(my_sq_pos & (sq_mask + 1))) {
-    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
-  }
-
-  if (wf_info.is_pe_group_last) {
-    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
-  }
-
-  // TODO why is this needed?
-  if (size && !laddr && opcode == IONIC_V2_OP_RDMA_WRITE) {
-    size = 1;
-  }
-
-  wqe->base.wqe_idx = my_sq_pos;
-  wqe->base.op = opcode;
-  wqe->base.num_sge_key = size ? 1 : 0;
-  wqe->base.imm_data_key = byteswap<uint32_t>(0);
-
-  wqe->common.rdma.remote_va_high = byteswap<uint32_t>(raddr >> 32);
-  wqe->common.rdma.remote_va_low = byteswap<uint32_t>(raddr);
-  wqe->common.rdma.remote_rkey = byteswap<uint32_t>(rkey);
-  wqe->common.length = byteswap<uint32_t>(size);
-
-  if (size) {
-    if (opcode == IONIC_V2_OP_RDMA_WRITE && static_cast<int32_t>(size) <= static_cast<int32_t>(inline_threshold)) {
-      wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
-      wqe->base.num_sge_key = 0;
-      if (!laddr) {
-        // TODO why is this needed?
-        wqe->common.pld.data[0] = 1;
-      } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
-      }
-    } else {
-      wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
-      wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(get_lkey(laddr));
-    }
-  }
-
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
-    __HIP_MEMORY_SCOPE_AGENT);
-
-  commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
-}
-
-__device__ void QueuePair::ionic_post_wqe_rma_with_keys(uint32_t size,
+__device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
     uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   uint32_t num_wqes = 1;
@@ -369,32 +310,32 @@ __device__ void QueuePair::ionic_post_wqe_rma_with_keys(uint32_t size,
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
   }
 
-  if (size && !laddr && opcode == IONIC_V2_OP_RDMA_WRITE) {
-    size = 1;
+  if (length && !laddr && opcode == IONIC_V2_OP_RDMA_WRITE) {
+    length = 1;
   }
 
   wqe->base.wqe_idx = my_sq_pos;
   wqe->base.op = opcode;
-  wqe->base.num_sge_key = size ? 1 : 0;
+  wqe->base.num_sge_key = length ? 1 : 0;
   wqe->base.imm_data_key = byteswap<uint32_t>(0);
 
   wqe->common.rdma.remote_va_high = byteswap<uint32_t>(raddr >> 32);
   wqe->common.rdma.remote_va_low = byteswap<uint32_t>(raddr);
   wqe->common.rdma.remote_rkey = byteswap<uint32_t>(rkey);
-  wqe->common.length = byteswap<uint32_t>(size);
+  wqe->common.length = byteswap<uint32_t>(length);
 
-  if (size) {
-    if (opcode == IONIC_V2_OP_RDMA_WRITE && size <= inline_threshold) {
+  if (length) {
+    if (opcode == IONIC_V2_OP_RDMA_WRITE && length <= inline_threshold) {
       wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_INL);
       wqe->base.num_sge_key = 0;
       if (!laddr) {
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), length);
       }
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
-      wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
+      wqe->common.pld.sgl[0].len = byteswap<uint32_t>(length);
       wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(lkey);
     }
   }
@@ -449,7 +390,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
     } else {
       wqe->common.pld.sgl[0].va = byteswap<uint64_t>(laddr);
       wqe->common.pld.sgl[0].len = byteswap<uint32_t>(size);
-      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(get_lkey(laddr));
+      wqe->common.pld.sgl[0].lkey = byteswap<uint32_t>(laddr ? get_lkey(laddr) : 0);
     }
   }
 
@@ -458,9 +399,9 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t size,
   commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
 }
 
-__device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size, uintptr_t raddr,
+__device__ uint64_t QueuePair::ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
-    bool fetching, ActiveWFInfo &wf_info) {
+    ActiveWFInfo &wf_info, bool fetching, bool fence) {
   uint32_t num_wqes = wf_info.num_pe_group_lanes;
   uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
   uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
@@ -487,6 +428,9 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size,
 
   if (wf_info.is_pe_group_last) {
     wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
+  }
+  if (fence) {
+    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_FENCE);
   }
 
   wqe->base.wqe_idx = my_sq_pos;
@@ -530,8 +474,8 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo([[maybe_unused]] int32_t size,
   return ret;
 }
 
-__device__ uint64_t QueuePair::ionic_post_wqe_amo_single([[maybe_unused]] int32_t size,
-    uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+__device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching) {
   uint32_t num_wqes = 1;
   uint32_t my_sq_prod = reserve_sq_single(num_wqes);
@@ -588,46 +532,6 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single([[maybe_unused]] int32_
     fetching_atomic_freelist->push_back(wave_fetch_atomic);
   }
   return ret;
-}
-
-__device__ void QueuePair::ionic_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence) {
-  uint32_t num_wqes = wf_info.num_pe_group_lanes;
-  uint32_t my_sq_prod = reserve_sq(wf_info, num_wqes);
-  uint32_t my_sq_pos = my_sq_prod + wf_info.pe_group_logical_lane_id;
-  struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
-  uint16_t wqe_flags = 0;
-
-  if (!(my_sq_pos & (sq_mask + 1))) {
-    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_COLOR);
-  }
-  if (wf_info.is_pe_group_last) {
-    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_SIG);
-  }
-  if (fence) {
-    wqe_flags |= byteswap<uint16_t>(IONIC_V1_FLAG_FENCE);
-  }
-
-  wqe->base.wqe_idx = my_sq_pos;
-  wqe->base.op = opcode;
-  wqe->base.num_sge_key = 1;
-  wqe->base.imm_data_key = byteswap<uint32_t>(0);
-
-  wqe->atomic_v2.remote_va_high = byteswap<uint32_t>(raddr >> 32);
-  wqe->atomic_v2.remote_va_low  = byteswap<uint32_t>(raddr);
-  wqe->atomic_v2.remote_rkey    = byteswap<uint32_t>(rkey);
-  wqe->atomic_v2.swap_add_high  = byteswap<uint32_t>(atomic_data >> 32);
-  wqe->atomic_v2.swap_add_low   = byteswap<uint32_t>(atomic_data);
-  wqe->atomic_v2.compare_high   = 0;
-  wqe->atomic_v2.compare_low    = 0;
-  wqe->atomic_v2.local_va =
-      byteswap<uint64_t>(reinterpret_cast<uint64_t>(nonfetching_atomic));
-  wqe->atomic_v2.lkey = byteswap<uint32_t>(nonfetching_atomic_lkey);
-
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
-    __HIP_MEMORY_SCOPE_AGENT);
-
-  commit_sq(wf_info, my_sq_prod, my_sq_pos, num_wqes);
 }
 
 }  // namespace rocshmem

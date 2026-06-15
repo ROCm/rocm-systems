@@ -223,7 +223,8 @@ __device__ void QueuePair::bnxt_quiet_single() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
-__device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, int32_t length, uint8_t opcode) {
+__device__ void QueuePair::bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
+    uint32_t rkey, uintptr_t laddr, uint32_t lkey, uint8_t opcode) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_rdma rdma;
   struct bnxt_re_sge sge;
@@ -235,7 +236,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   uint32_t hdr_flags;
   uint32_t inline_msg;
 
-  inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
+  inline_msg = length <= inline_threshold &&
                opcode == gda_op_rdma_write;
 
   bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
@@ -267,7 +268,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   if (!inline_msg) {
     /* Populate SG Segment */
     sge.pa     = laddr;
-    sge.lkey   = get_lkey(laddr);
+    sge.lkey   = lkey;
     sge.length = length;
   }
 
@@ -288,66 +289,7 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
   bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
 }
 
-__device__ void QueuePair::bnxt_write_rma_wqe_with_keys(uintptr_t raddr, uint32_t rkey,
-    uintptr_t laddr, uint32_t lkey, uint32_t size, uint8_t opcode) {
-  struct bnxt_re_bsqe hdr;
-  struct bnxt_re_rdma rdma;
-  struct bnxt_re_sge sge;
-  struct bnxt_re_bsqe *hdr_ptr;
-  struct bnxt_re_rdma *rdma_ptr;
-  struct bnxt_re_sge *sge_ptr;
-  uint32_t wqe_size;
-  uint32_t wqe_type;
-  uint32_t hdr_flags;
-  uint32_t inline_msg;
-
-  inline_msg = size <= inline_threshold &&
-               opcode == gda_op_rdma_write;
-
-  bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
-
-  hdr_ptr  = (struct bnxt_re_bsqe*) bnxt_re_get_hwqe(&bnxt_sq, 0);
-  rdma_ptr = (struct bnxt_re_rdma*) bnxt_re_get_hwqe(&bnxt_sq, 1);
-  sge_ptr  = (struct bnxt_re_sge*)  bnxt_re_get_hwqe(&bnxt_sq, 2);
-
-  wqe_type  = BNXT_RE_HDR_WT_MASK & opcode;
-  wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
-  hdr_flags = ((uint32_t) BNXT_RE_HDR_FLAGS_MASK)
-            & ((uint32_t) BNXT_RE_WR_FLAGS_SIGNALED);
-
-  if (inline_msg) {
-    hdr_flags |= ((uint32_t) BNXT_RE_WR_FLAGS_INLINE);
-  }
-
-  hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
-                    | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
-                    | wqe_type;
-  hdr.key_immd      = 0;
-  hdr.lhdr.qkey_len = size;
-
-  rdma.rva  = raddr;
-  rdma.rkey = rkey;
-
-  if (!inline_msg) {
-    sge.pa     = laddr;
-    sge.lkey   = lkey;
-    sge.length = size;
-  }
-
-  memcpy(hdr_ptr,  &hdr,  sizeof(struct bnxt_re_bsqe));
-  memcpy(rdma_ptr, &rdma, sizeof(struct bnxt_re_rdma));
-
-  if (inline_msg) {
-    memcpy(sge_ptr,  reinterpret_cast<const void*>(laddr),  size);
-  } else {
-    memcpy(sge_ptr,  &sge,  sizeof(struct bnxt_re_sge));
-  }
-
-  bnxt_re_fill_psns_for_msntbl(&bnxt_sq, size);
-  bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
-}
-
-__device__ void QueuePair::bnxt_post_wqe_rma_with_keys(uint32_t size,
+__device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
     uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   if (wf_info.is_pe_group_first) {
@@ -356,8 +298,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma_with_keys(uint32_t size,
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
-      bnxt_write_rma_wqe_with_keys(raddr, rkey, laddr, lkey,
-                                    size, opcode);
+      bnxt_write_rma_wqe(length, raddr, rkey, laddr, lkey, opcode);
       if (ring_db) {
         bnxt_ring_doorbell(bnxt_sq.tail);
       }
@@ -369,34 +310,15 @@ __device__ void QueuePair::bnxt_post_wqe_rma_with_keys(uint32_t size,
   }
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  if (wf_info.is_pe_group_first) {
-    lock(&bnxt_sq.lock);
-  }
-
-  for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
-    if (i == wf_info.pe_group_logical_lane_id) {
-      /* Write WQE to SQ */
-      bnxt_write_rma_wqe(raddr, laddr, length, opcode);
-
-      /* Ring Doorbell */
-      bnxt_ring_doorbell(bnxt_sq.tail);
-    }
-  }
-
-  if (wf_info.is_pe_group_first) {
-    unlock(&bnxt_sq.lock);
-  }
-}
-
-__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
+__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t size,
     uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
+  uint32_t lkey = (static_cast<uint32_t>(size) <= inline_threshold && opcode == gda_op_rdma_write)
+      ? 0 : get_lkey(laddr);
 
   lock(&bnxt_sq.lock);
 
   /* Write WQE to SQ */
-  bnxt_write_rma_wqe(raddr, laddr, length, opcode);
+  bnxt_write_rma_wqe(size, raddr, rkey, laddr, lkey, opcode);
 
   if (ring_db) {
     bnxt_ring_doorbell(bnxt_sq.tail);
@@ -405,8 +327,9 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
   unlock(&bnxt_sq.lock);
 }
 
-__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
+__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    bool fetching, bool fence) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_atomic amo;
   struct bnxt_re_sge sge;
@@ -430,6 +353,9 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
   wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
   hdr_flags = ((uint32_t) BNXT_RE_HDR_FLAGS_MASK)
             & ((uint32_t) BNXT_RE_WR_FLAGS_SIGNALED);
+  if (fence) {
+    hdr_flags |= ((uint32_t) BNXT_RE_WR_FLAGS_UC_FENCE);
+  }
   wqe_type  = BNXT_RE_HDR_WT_MASK & opcode;
 
   hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
@@ -467,18 +393,18 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
   return atomic_idx;
 }
 
-__device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
-    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching,
-    ActiveWFInfo &wf_info) {
+__device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+    ActiveWFInfo &wf_info, bool fetching, bool fence) {
   uint32_t atomic_idx = 0;
 
-    if (wf_info.is_pe_group_first) {
+  if (wf_info.is_pe_group_first) {
     lock(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
     if (i == wf_info.pe_group_logical_lane_id) {
-      atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
+      atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 
       /* Ring Doorbell */
       bnxt_ring_doorbell(bnxt_sq.tail);
@@ -504,7 +430,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
   lock(&bnxt_sq.lock);
 
   /* Write WQE to SQ */
-  atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
+  atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, false);
 
   bnxt_ring_doorbell(bnxt_sq.tail);
 
@@ -516,60 +442,6 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
   }
 
   return 0;
-}
-
-__device__ void QueuePair::bnxt_post_wqe_amo_with_keys(uintptr_t raddr, uint32_t rkey,
-    uint8_t opcode, int64_t atomic_data, ActiveWFInfo &wf_info, bool fence) {
-  if (wf_info.is_pe_group_first) {
-    lock(&bnxt_sq.lock);
-  }
-
-  for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
-    if (i == wf_info.pe_group_logical_lane_id) {
-      struct bnxt_re_bsqe hdr;
-      struct bnxt_re_atomic amo;
-      struct bnxt_re_sge sge;
-
-      uint32_t wqe_size  = BNXT_RE_HDR_WS_MASK & GDA_BNXT_WQE_SLOT_COUNT;
-      uint32_t hdr_flags = ((uint32_t)BNXT_RE_HDR_FLAGS_MASK)
-                         & ((uint32_t)BNXT_RE_WR_FLAGS_SIGNALED);
-      if (fence) {
-        hdr_flags |= ((uint32_t)BNXT_RE_WR_FLAGS_UC_FENCE);
-      }
-      uint32_t wqe_type  = BNXT_RE_HDR_WT_MASK & opcode;
-
-      bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
-
-      hdr.rsv_ws_fl_wt  = (wqe_size  << BNXT_RE_HDR_WS_SHIFT)
-                        | (hdr_flags << BNXT_RE_HDR_FLAGS_SHIFT)
-                        | wqe_type;
-      hdr.key_immd = rkey;
-      hdr.lhdr.rva = raddr;
-
-      amo.swp_dt = atomic_data;
-      amo.cmp_dt = 0;
-
-      sge.pa     = (uint64_t)nonfetching_atomic;
-      sge.lkey   = nonfetching_atomic_lkey;
-      sge.length = sizeof(uint64_t);
-
-      auto *hdr_ptr = (struct bnxt_re_bsqe*)  bnxt_re_get_hwqe(&bnxt_sq, 0);
-      auto *amo_ptr = (struct bnxt_re_atomic*) bnxt_re_get_hwqe(&bnxt_sq, 1);
-      auto *sge_ptr = (struct bnxt_re_sge*)    bnxt_re_get_hwqe(&bnxt_sq, 2);
-
-      memcpy(hdr_ptr, &hdr, sizeof(struct bnxt_re_bsqe));
-      memcpy(amo_ptr, &amo, sizeof(struct bnxt_re_atomic));
-      memcpy(sge_ptr, &sge, sizeof(struct bnxt_re_sge));
-
-      bnxt_re_fill_psns_for_msntbl(&bnxt_sq, sizeof(uint64_t));
-      bnxt_re_incr_tail(&bnxt_sq, GDA_BNXT_WQE_SLOT_COUNT);
-      bnxt_ring_doorbell(bnxt_sq.tail);
-    }
-  }
-
-  if (wf_info.is_pe_group_first) {
-    unlock(&bnxt_sq.lock);
-  }
 }
 
 }  // namespace rocshmem

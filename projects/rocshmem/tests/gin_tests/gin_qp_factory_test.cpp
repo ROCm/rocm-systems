@@ -54,22 +54,22 @@ __global__ void gin_put_kernel(rocshmem::QueuePair **qps,
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
     printf("gin_put_kernel: peer=%d dst=%p src=%p bytes=%zu rkey=0x%x lkey=0x%x\n",
            peer, dst, src, nbytes, dst_rkey, src_lkey);
-    qps[peer]->put_nbi_with_keys(dst, dst_rkey, src, src_lkey, nbytes, wf_info);
+    qps[peer]->put_nbi(dst, dst_rkey, src, src_lkey, nbytes, wf_info);
     printf("gin_put_kernel: put posted, calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_put_kernel: quiet done\n");
   }
 }
 
-// Atomic add kernel using explicit rkey (_with_keys)
-__global__ void gin_atomic_with_keys_kernel(rocshmem::QueuePair **qps,
+// Atomic add kernel using explicit rkey
+__global__ void gin_atomic_kernel(rocshmem::QueuePair **qps,
                                              void *remote_addr, uint32_t rkey,
                                              int64_t value, int peer) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
     printf("gin_atomic_kernel: peer=%d addr=%p rkey=0x%x val=%lld\n",
            peer, remote_addr, rkey, (long long)value);
-    qps[peer]->atomic_add_with_keys(remote_addr, rkey, value, wf_info, /*fence=*/false);
+    qps[peer]->atomic_add(remote_addr, rkey, value, wf_info, /*fence=*/false);
     printf("gin_atomic_kernel: atomic posted, calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_atomic_kernel: quiet done\n");
@@ -87,9 +87,9 @@ __global__ void gin_put_signal_kernel(rocshmem::QueuePair **qps,
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
     printf("gin_put_signal: peer=%d put dst=%p rkey=0x%x src=%p lkey=0x%x bytes=%zu\n",
            peer, dst, dst_rkey, src, src_lkey, nbytes);
-    qps[peer]->put_nbi_with_keys(dst, dst_rkey, src, src_lkey, nbytes, wf_info, /*ring_db=*/false);
+    qps[peer]->put_nbi(dst, dst_rkey, src, src_lkey, nbytes, wf_info, /*ring_db=*/false);
     printf("gin_put_signal: atomic signal=%p rkey=0x%x fence=1\n", signal_addr, signal_rkey);
-    qps[peer]->atomic_add_with_keys(signal_addr, signal_rkey, 1, wf_info, /*fence=*/true);
+    qps[peer]->atomic_add(signal_addr, signal_rkey, 1, wf_info, /*fence=*/true);
     printf("gin_put_signal: calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_put_signal: done\n");
@@ -212,8 +212,8 @@ static int test_put(int rank, int nranks, MPI_Comm comm) {
   return errors ? -1 : 0;
 }
 
-static int test_atomic_signal_with_keys(int rank, int nranks, MPI_Comm comm) {
-  printf("[rank %d] Test: RDMA atomic_add_with_keys\n", rank);
+static int test_atomic_signal(int rank, int nranks, MPI_Comm comm) {
+  printf("[rank %d] Test: RDMA atomic_add\n", rank);
 
   rocshmem_gin_qp_set_t qp_set = nullptr;
   void **gpu_qps = nullptr;
@@ -247,7 +247,7 @@ static int test_atomic_signal_with_keys(int rank, int nranks, MPI_Comm comm) {
 
   int peer = (rank + 1) % nranks;
 
-  gin_atomic_with_keys_kernel<<<1, 64>>>(
+  gin_atomic_kernel<<<1, 64>>>(
     (rocshmem::QueuePair**)gpu_qps,
     (void*)all_info[peer].addr, all_info[peer].rkey, 1,
     peer);
@@ -263,7 +263,7 @@ static int test_atomic_signal_with_keys(int rank, int nranks, MPI_Comm comm) {
     fprintf(stderr, "[rank %d] FAIL: signal = %lu, expected 1\n", rank, host_signal);
     errors = 1;
   } else {
-    printf("[rank %d] PASS: atomic_add_with_keys (value=%lu)\n", rank, host_signal);
+    printf("[rank %d] PASS: atomic_add (value=%lu)\n", rank, host_signal);
   }
 
   free(all_info);
@@ -274,7 +274,7 @@ static int test_atomic_signal_with_keys(int rank, int nranks, MPI_Comm comm) {
 }
 
 static int test_put_signal(int rank, int nranks, MPI_Comm comm) {
-  printf("[rank %d] Test: put_nbi_with_keys + fenced atomic_add_with_keys (GIN pattern)\n", rank);
+  printf("[rank %d] Test: put_nbi + fenced atomic_add (GIN pattern)\n", rank);
 
   rocshmem_gin_qp_set_t qp_set = nullptr;
   void **gpu_qps = nullptr;
@@ -419,11 +419,11 @@ int main(int argc, char **argv) {
   total_failures += (test_put(rank, nranks, MPI_COMM_WORLD) != 0);
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Test 3: RDMA atomic_add_with_keys (explicit rkey)
-  total_failures += (test_atomic_signal_with_keys(rank, nranks, MPI_COMM_WORLD) != 0);
+  // Test 3: RDMA atomic_add (explicit rkey)
+  total_failures += (test_atomic_signal(rank, nranks, MPI_COMM_WORLD) != 0);
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Test 4: put_nbi_with_keys + fenced atomic_add_with_keys (GIN pattern)
+  // Test 4: put_nbi + fenced atomic_add (GIN pattern)
   total_failures += (test_put_signal(rank, nranks, MPI_COMM_WORLD) != 0);
   MPI_Barrier(MPI_COMM_WORLD);
 

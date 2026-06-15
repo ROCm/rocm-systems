@@ -930,7 +930,7 @@ static int gin_modify_qps_rtr_to_rts(rocshmem_gin_qp_set *set,
 ///////////////////////////////////////////////////////////////////////////////
 // GPU QP initialization (adapted from GDABackend::*_initialize_gpu_qp)
 // Sets up doorbell pointers, CQ/SQ buffers on the GPU-side QueuePair.
-// Does NOT set lkey/rkey (GIN uses put_nbi_with_keys for per-buffer keys).
+// Does NOT set lkey/rkey (GIN uses put_nbi for per-buffer keys).
 ///////////////////////////////////////////////////////////////////////////////
 
 int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
@@ -971,7 +971,7 @@ int rocshmem_gin_qp_set::initialize_gpu_qp(QueuePair *gpu_qp, int idx) {
 
     gpu_qp->qp_num = ibv_qps[idx]->qp_num;
     gpu_qp->inline_threshold = 32;
-    // lkey/rkey left at 0 — GIN uses put_nbi_with_keys
+    // lkey/rkey left at 0 — GIN uses put_nbi
     return 0;
   }
 #endif

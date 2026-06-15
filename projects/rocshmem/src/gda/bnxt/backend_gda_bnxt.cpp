@@ -92,7 +92,6 @@ void GDABackend::bnxt_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   /* Base Heap information */
   gpu_qp->base_heap = (uintptr_t) heap.get_local_heap_base();
   gpu_qp->base_heap_size = heap.get_size();
-
 }
 
 void GDABackend::bnxt_create_cqs(int cqe) {

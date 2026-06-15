@@ -45,14 +45,14 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
         uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-        qp->put_nbi_with_keys((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
+        qp->put_nbi((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, wf_info, !hasSignal);
       }
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
       } else if (hasCounter) {
         qp->quiet(wf_info);
       }
@@ -92,15 +92,15 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         __threadfence_system();
       }
 
-      // lkey=0: put_nbi_with_keys copies srcVal inline into the WQE
+      // lkey=0: put_nbi copies srcVal inline into the WQE
       // (inline_threshold >= sizeof(T)), so no registered MR is needed.
-      qp->put_nbi_with_keys((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info, !hasSignal);
+      qp->put_nbi((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), wf_info, !hasSignal);
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add_with_keys((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
+        qp->atomic_add((void*)sigAddr, sigRkey, (int64_t)signalOpArg, wf_info, /*fence=*/false);
       }
     }
     coop.sync();
