@@ -74,6 +74,7 @@
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
+#include "host_team_sync_barrier_tester.hpp"
 
 #include "backend_bc.hpp"
 extern Backend* backend;
@@ -178,7 +179,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
   std::vector<Tester*> testers;
   std::string test_name;
 
-  BackendType backend_type = get_backend_type();
+  BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
 
   switch (type) {
@@ -706,6 +707,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TileGetArbitraryTestType:
       test_name = "Tile Get Arbitrary Strides";
       testers.push_back(new TileRMATester(args));
+      break;
+    case HostTeamSyncBarrierTestType:
+      test_name = "Host Team Sync/Barrier";
+      testers.push_back(new HostTeamSyncBarrierTester(args));
       break;
     case ReduceOnStreamTestType:
       test_name = "Reduce On Stream";

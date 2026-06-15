@@ -61,6 +61,38 @@ pub enum ContainerError {
 /// Result alias for container operations.
 pub type Result<T> = std::result::Result<T, ContainerError>;
 
+/// Whether `provider` resolves to podman (by binary name or path
+/// basename). podman supports `--group-add keep-groups`, which docker
+/// does not, so callers branch their GPU group passthrough on this.
+fn provider_is_podman(provider: &str) -> bool {
+    std::path::Path::new(provider)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(provider)
+        .contains("podman")
+}
+
+/// Host AMD GPU device nodes to expose to a node container (`--device`)
+/// when host GPU access is requested: the KFD compute device
+/// (`/dev/kfd`) and the DRM render nodes (`/dev/dri`). Only paths that
+/// actually exist on the host are returned, so a host missing one simply
+/// omits it.
+fn host_gpu_devices() -> Vec<String> {
+    ["/dev/kfd", "/dev/dri"]
+        .iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .map(|p| (*p).to_string())
+        .collect()
+}
+
+/// Supplementary groups that own the host GPU device nodes
+/// (`--group-add`). `video` and `render` are the conventional owners of
+/// `/dev/kfd` and the `/dev/dri/render*` nodes on ROCm hosts; docker is
+/// given these explicitly (podman inherits them via `keep-groups`).
+fn host_gpu_groups() -> Vec<String> {
+    vec!["video".to_string(), "render".to_string()]
+}
+
 /// A phase of container bring-up, reported to the `progress` callback of
 /// [`Engine::bring_up`] so the host can surface detailed, live status to
 /// clients as a session starts.
@@ -169,12 +201,6 @@ impl Engine {
     // ---- argv builders (pure) -------------------------------------
 
     /// Build the argv (after the provider binary) for launching a
-    /// detached node container that idles on `sleep infinity` so execs
-    /// can be injected into it later.
-    ///
-    /// The container is named and given a matching hostname so peers can
-    /// resolve it by name on the shared network.
-    /// Build the argv (after the provider binary) for launching a
     /// detached node container.
     ///
     /// `command` is the container's foreground process (PID 1). Mirage
@@ -182,12 +208,23 @@ impl Engine {
     /// so the container hosts its node directly; an empty `command`
     /// leaves the image's default entrypoint in place.
     ///
+    /// When `host_gpus` is set, the container is launched with the
+    /// supplementary groups needed to open the passed-through GPU device
+    /// nodes. The mechanism depends on `provider`: podman inherits the
+    /// launching user's groups via `--group-add keep-groups`, while
+    /// docker (which has no `keep-groups`) is given the named `groups`
+    /// explicitly. When `host_gpus` is unset no group passthrough is
+    /// emitted, which keeps plain (non-GPU) containers working on docker
+    /// — `keep-groups` is a podman-only feature and docker rejects it.
+    ///
     /// The container is named and given a matching hostname so peers can
     /// resolve it by name on the shared network.
     pub fn run_argv(
+        provider: &str,
         name: &str,
         image: &str,
         network: Option<&str>,
+        host_gpus: bool,
         mounts: &[FileMount],
         devices: &[String],
         groups: &[String],
@@ -201,15 +238,29 @@ impl Engine {
             name.to_string(),
             "--hostname".to_string(),
             name.to_string(),
-            // Run the GPU device nodes unconfined and keep the launching
-            // user's supplementary groups inside the container so the
-            // workload can open `/dev/kfd` and `/dev/dri/*` (podman drops
-            // them by default, which breaks ROCm device access).
-            "--security-opt".to_string(),
-            "seccomp=unconfined".to_string(),
-            "--group-add".to_string(),
-            "keep-groups".to_string(),
         ];
+        if host_gpus {
+            // Run the GPU device nodes unconfined and grant the container
+            // the supplementary groups that own `/dev/kfd` and
+            // `/dev/dri/*`, so the workload can open them.
+            argv.push("--security-opt".to_string());
+            argv.push("seccomp=unconfined".to_string());
+            if provider_is_podman(provider) {
+                // podman inherits the launching user's supplementary
+                // groups (including `video`/`render`) rather than naming
+                // them. It also rejects combining `keep-groups` with any
+                // other `--group-add`, so the named groups are dropped.
+                argv.push("--group-add".to_string());
+                argv.push("keep-groups".to_string());
+            } else {
+                // docker has no `keep-groups`; add the named GPU groups
+                // explicitly so the workload can open the device nodes.
+                for g in groups {
+                    argv.push("--group-add".to_string());
+                    argv.push(g.clone());
+                }
+            }
+        }
         if let Some(net) = network {
             argv.push("--network".to_string());
             argv.push(net.to_string());
@@ -226,13 +277,6 @@ impl Engine {
             argv.push("--device".to_string());
             argv.push(d.clone());
         }
-        // We always pass `--group-add keep-groups` above, which inherits
-        // the launching user's supplementary groups (including `video`/
-        // `render`) into the container. podman rejects combining
-        // `keep-groups` with any other `--group-add`, so the named groups
-        // are intentionally dropped here: keep-groups already covers them,
-        // and adding them would fail with exit 125.
-        let _ = groups;
         argv.push(image.to_string());
         // The container's foreground process. Mirage hosts the node from
         // inside the container, so this is normally `mirage host ...`.
@@ -325,18 +369,35 @@ impl Engine {
 
     /// Launch a detached node container and return its id (the trimmed
     /// stdout of `run -d`).
+    ///
+    /// `host_gpus` requests host GPU access for the container; the
+    /// group passthrough it implies is provider-specific (see
+    /// [`Self::run_argv`]).
+    #[allow(clippy::too_many_arguments)]
     pub fn launch_node(
         &self,
         name: &str,
         image: &str,
         network: Option<&str>,
+        host_gpus: bool,
         mounts: &[FileMount],
         devices: &[String],
         groups: &[String],
         env: &[(String, String)],
         command: &[String],
     ) -> Result<String> {
-        let argv = Self::run_argv(name, image, network, mounts, devices, groups, env, command);
+        let argv = Self::run_argv(
+            &self.provider,
+            name,
+            image,
+            network,
+            host_gpus,
+            mounts,
+            devices,
+            groups,
+            env,
+            command,
+        );
         let out = self.output(&argv)?;
         Ok(String::from_utf8_lossy(&out).trim().to_string())
     }
@@ -368,6 +429,11 @@ impl Engine {
     /// rank, returning the [`ContainerState`] the host should persist
     /// plus the per-rank container ids (the trimmed stdout of `run -d`).
     ///
+    /// `host_gpus` requests host GPU access for every node container
+    /// (the provider-specific group passthrough described on
+    /// [`Self::run_argv`]); the emulator decides whether its workload
+    /// needs it.
+    ///
     /// `node_env(rank)` yields the environment for the node of that rank
     /// (mirage injects `MIRAGE_RANK`/`MIRAGE_HEAD_ADDR`/`MIRAGE_HEAD_PORT`
     /// there). `node_command(rank)` yields the container's foreground
@@ -377,10 +443,12 @@ impl Engine {
     /// On any failure the partially-created containers and network are
     /// torn down before returning the error, so a failed bring-up never
     /// leaks resources.
+    #[allow(clippy::too_many_arguments)]
     pub fn bring_up<F, G, P>(
         &self,
         session: &mirage_core::session::SessionId,
         def: &ContainerizedDef,
+        host_gpus: bool,
         node_count: u32,
         head_port: u16,
         mut node_env: F,
@@ -438,6 +506,21 @@ impl Engine {
             self.ensure_network(&network)?;
         }
 
+        // When the emulator requested host GPU access, expose the host's
+        // GPU device nodes and the groups that own them on top of any
+        // devices/groups the profile already configured. The group
+        // passthrough mechanism itself is provider-specific and handled
+        // in `run_argv`.
+        let (devices, groups) = if host_gpus {
+            let mut devices = def.devices.clone();
+            devices.extend(host_gpu_devices());
+            let mut groups = def.groups.clone();
+            groups.extend(host_gpu_groups());
+            (devices, groups)
+        } else {
+            (def.devices.clone(), def.groups.clone())
+        };
+
         for rank in 0..node_count {
             let name = mirage_core::container::container_name(session, rank);
             progress(BringUpPhase::LaunchingNode {
@@ -451,9 +534,10 @@ impl Engine {
                 &name,
                 &def.image,
                 Some(&network),
+                host_gpus,
                 &def.mounts,
-                &def.devices,
-                &def.groups,
+                &devices,
+                &groups,
                 &env,
                 &command,
             ) {
@@ -588,9 +672,11 @@ mod tests {
             "0".to_string(),
         ];
         let argv = Engine::run_argv(
+            "podman",
             "mirage-s-node-0",
             "img:latest",
             Some("mirage-s"),
+            true,
             &mounts,
             &devices,
             &groups,
@@ -609,18 +695,58 @@ mod tests {
         assert!(joined.contains("-v /h:/c"));
         assert!(joined.contains("--device /dev/kfd"));
         assert!(joined.contains("--device /dev/dri"));
-        // Named groups are intentionally dropped: `--group-add
-        // keep-groups` (always emitted) cannot be combined with other
-        // `--group-add` options, and already inherits them from the host.
+        // On podman the named groups are dropped: `--group-add
+        // keep-groups` cannot be combined with other `--group-add`
+        // options, and already inherits them from the host.
         assert!(!joined.contains("--group-add video"));
         assert!(!joined.contains("--group-add render"));
         assert!(joined.ends_with("img:latest /mnt/mirage/bin/mirage host --session s --rank 0"));
     }
 
     #[test]
+    fn run_argv_docker_host_gpus_adds_named_groups() {
+        // docker has no `keep-groups`; the named GPU groups are added
+        // explicitly so the workload can open the device nodes.
+        let groups = vec!["video".to_string(), "render".to_string()];
+        let argv = Engine::run_argv(
+            "docker",
+            "n",
+            "img",
+            None,
+            true,
+            &[],
+            &[],
+            &groups,
+            &[],
+            &[],
+        );
+        let joined = argv.join(" ");
+        assert!(joined.contains("--security-opt seccomp=unconfined"));
+        assert!(!joined.contains("keep-groups"));
+        assert!(joined.contains("--group-add video"));
+        assert!(joined.contains("--group-add render"));
+    }
+
+    #[test]
+    fn run_argv_without_host_gpus_omits_group_passthrough() {
+        // Plain (non-GPU) containers emit no group passthrough at all, so
+        // docker — which rejects `keep-groups` — keeps working.
+        let groups = vec!["video".to_string()];
+        let argv = Engine::run_argv(
+            "docker", "n", "img", None, false, &[], &[], &groups, &[], &[],
+        );
+        let joined = argv.join(" ");
+        assert!(!joined.contains("--group-add"));
+        assert!(!joined.contains("keep-groups"));
+        assert!(!joined.contains("seccomp=unconfined"));
+    }
+
+    #[test]
     fn run_argv_omits_network_when_none() {
         let command = vec!["sleep".to_string(), "infinity".to_string()];
-        let argv = Engine::run_argv("n", "img", None, &[], &[], &[], &[], &command);
+        let argv = Engine::run_argv(
+            "podman", "n", "img", None, false, &[], &[], &[], &[], &command,
+        );
         assert!(!argv.iter().any(|a| a == "--network"));
         assert_eq!(argv.last().map(String::as_str), Some("infinity"));
     }
@@ -721,6 +847,7 @@ mod tests {
                 "mirage-s-node-0",
                 "img",
                 Some("mirage-s"),
+                false,
                 &[],
                 &[],
                 &[],
@@ -757,6 +884,7 @@ mod tests {
             .bring_up(
                 &session,
                 &def,
+                false,
                 2,
                 6000,
                 |rank| vec![("MIRAGE_RANK".to_string(), rank.to_string())],

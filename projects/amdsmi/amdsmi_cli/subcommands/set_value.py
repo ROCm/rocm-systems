@@ -366,13 +366,13 @@ class SetValueCommands:
         if args.cpu_pwr_limit:
             static_dict["set_pwr_limit"] = {}
             try:
-                soc_max_pwr_limit = amdsmi_interface.amdsmi_get_cpu_socket_power_cap_max(args.cpu)
-                soc_max_pwr_limit = self.helpers.convert_SI_unit(
-                    float(soc_max_pwr_limit), self.helpers.SI_Unit.MILLI
-                )
-                max_power = int(soc_max_pwr_limit)
+                # max is returned in mW, the same unit as the requested limit
+                max_power = amdsmi_interface.amdsmi_get_cpu_socket_power_cap_max(args.cpu)
                 if args.cpu_pwr_limit[0][0] > max_power:
                     args.cpu_pwr_limit[0][0] = max_power
+                    static_dict["set_pwr_limit"]["Warning"] = (
+                        f"requested power limit exceeds maximum of {max_power} mW; setting to {max_power} mW instead"
+                    )
 
                 amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.cpu_pwr_limit[0][0])
                 static_dict["set_pwr_limit"]["Response"] = (

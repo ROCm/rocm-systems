@@ -26,19 +26,10 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.mi_gpu_spec import mi_gpu_specs
+from utils.mi_gpu_spec import MIGPUSpecs, mi_gpu_specs
 from utils.utils_common import format_table_ascii, get_version
 
 T = TypeVar("T")
-
-
-def canonical_gpu_arch(gpu_arch: Optional[str]) -> Optional[str]:
-    """Map LLVM GPU targets that share one SoC and analysis config tree."""
-    if gpu_arch is None:
-        return None
-    if gpu_arch == "gfx1152":
-        return "gfx1151"
-    return gpu_arch
 
 
 VERSION_LOC: list[str] = [
@@ -53,6 +44,40 @@ VERSION_LOC: list[str] = [
 ]
 
 
+def run(cmd: list[str]) -> Optional[str]:
+    """Run a command and return stdout, aborting on execution failures."""
+    cmd_str = " ".join(cmd)
+    try:
+        completed = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError as exc:
+        console_error(f"Required command not found: {cmd_str} ({exc})")
+        return None
+    except OSError as exc:
+        console_error(f"Failed to execute command: {cmd_str} ({exc})")
+        return None
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        message = f"Command failed with exit code {completed.returncode}: {cmd_str}"
+        if stderr:
+            message += f". stderr: {stderr}"
+        console_error(message)
+        return None
+    return completed.stdout
+
+
+def search(pattern: str, string: str) -> Optional[str]:
+    """Return the first multiline regex capture group, if present."""
+    match = re.search(pattern, string, re.MULTILINE)
+    if match is not None:
+        return match.group(1)
+    return None
+
+
 def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
     supported_gpu_arch = mi_gpu_specs.get_gpu_series_dict()
     unsupported_gpu_arch: set[str] = set()
@@ -64,9 +89,8 @@ def detect_arch(rocminfo_lines: list[str]) -> Optional[tuple[str, int]]:
         if not gpu_arch:
             continue
 
-        arch_for_support = canonical_gpu_arch(gpu_arch)
-        if arch_for_support in supported_gpu_arch:
-            return (arch_for_support, idx1)
+        if gpu_arch in supported_gpu_arch:
+            return (gpu_arch, idx1)
 
         if gpu_arch not in unsupported_gpu_arch:
             unsupported_gpu_arch.add(gpu_arch)
@@ -264,14 +288,9 @@ def extract_machine_info() -> dict[str, Any]:
 
 @demarcate
 def extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
-    # Partition is only supported on >= MI 300 series
-    # (gpu_arch should be gfx940 or higher for MI300+)
-    is_partition_supported = False
-    if gpu_arch and gpu_arch.startswith("gfx") and len(gpu_arch) >= 6:
-        try:
-            is_partition_supported = int(gpu_arch[3:6], 16) >= 0x940
-        except ValueError:
-            pass  # Invalid hex string, keep is_partition_supported as False
+    is_partition_supported = gpu_arch and MIGPUSpecs.is_partition_supported(
+        gpu_arch=gpu_arch, gpu_model=None
+    )
 
     result: dict[str, Optional[str]] = {
         "vbios": None,
@@ -901,27 +920,6 @@ def get_rocm_ver() -> str:
     return ""
 
 
-def run(cmd: list[str], exit_on_error: bool = False) -> str:
-    try:
-        p = subprocess.run(cmd, capture_output=True)
-    except FileNotFoundError as e:
-        console_error(
-            f"Unable to parse specs. Can't find ROCm asset: {e.filename}\n"
-            'Try passing a path to an existing workload results in "analyze" mode.'
-        )
-
-    if exit_on_error and p.returncode != 0:  # type: ignore
-        console_error(f"Command {cmd} failed with non-zero exit code")
-    return p.stdout.decode("utf-8")  # type: ignore
-
-
-def search(pattern: str, string: str) -> Optional[str]:
-    m = re.search(pattern, string, re.MULTILINE)
-    if m is not None:
-        return m.group(1)
-    return None
-
-
 def total_sqc(archname: str, num_compute_units: str, num_shader_engines: str) -> int:
     cu_per_se = float(num_compute_units) / float(num_shader_engines)
     sq_per_se = cu_per_se / 2.0
@@ -955,17 +953,22 @@ def set_cache_sizes(num_cu: int, cache_info: dict, num_dies: int) -> dict[str, i
         console_error("Failed to retrieve GPU cache information from AMD-SMI.")
 
     cache_sizes = {}
+
+    # vL1D is the level-1 data cache with the most instances (one per CU).
+    # Match by instance count, not num_cu, to stay correct on harvested parts.
+    l1_data_caches = [
+        cache_values
+        for cache_values in cache_info["cache"]
+        if cache_values["cache_level"] == 1
+        and "DATA_CACHE" in cache_values["cache_properties"]
+    ]
+    if l1_data_caches:
+        vl1d = max(l1_data_caches, key=lambda cache: cache["num_cache_instance"])
+        cache_sizes["L1"] = vl1d["cache_size"] * 1024
+
+    # L2 and L3/MALL cache sizes
     for cache_values in cache_info["cache"]:
-        # Cache level is L1 and we are looking for vL1d which means
-        # there should be a cache instance per CU available on the GPU
-        if (
-            cache_values["cache_level"] == 1
-            and cache_values["num_cache_instance"] == num_cu
-        ):
-            cache_sizes["L1"] = cache_values["cache_size"] * 1024
-        # Cache levels L2 and L3/MALL are shared across all CUs
-        # therefore only have one cache instance
-        elif cache_values["cache_level"] == 2:
+        if cache_values["cache_level"] == 2:
             cache_sizes["L2"] = cache_values["cache_size"] * 1024
         elif cache_values["cache_level"] == 3 and num_dies > 0:
             cache_sizes["MALL"] = int(cache_values["cache_size"] * 1024 / num_dies)

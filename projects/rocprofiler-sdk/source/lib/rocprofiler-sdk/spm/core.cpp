@@ -145,7 +145,7 @@ destroy_spm_counter_profile(rocprofiler_counter_config_id_t id)
 }
 
 /**
- * @brief looks into the config's packet cache to re-use the packet
+ * @brief looks into the config's packet cache to reuse the packet
  * If not, constructs the packet using packet generator
  * updates packet_return map
  */

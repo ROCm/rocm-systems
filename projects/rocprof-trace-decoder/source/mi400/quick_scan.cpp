@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "quick_scan.h"
+#include "../quick_scan_export.hpp"
 
 #include <cstring>
 
@@ -45,6 +45,7 @@ namespace mi400::quick_scan
 {
 namespace
 {
+using ::quick_scan::QuickToken;
 
 // Single combined byte per first-byte slot, derived once from the canonical
 // mi400::TokenLookupTable at TU init. Any future AddEncoding edit in
@@ -110,7 +111,7 @@ const Tables& tables()
 // in-progress flag). Same semantics as the scalar.
 
 __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_mi400_avx512(
-    const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap
+    const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap
 )
 {
     if (!buf || !out || out_cap == 0 || size == 0) return 0;
@@ -225,7 +226,7 @@ __attribute__((target("avx512vbmi,avx512bw,avx512f,bmi2"))) size_t scan_mi400_av
                 {
                     uint64_t contents;
                     std::memcpy(&contents, buf + bp + pos, 8);
-                    out[n_out++] = TokenGenerator::QuickToken{contents, T.rare_type[b]};
+                    out[n_out++] = QuickToken{contents, T.rare_type[b], bp + pos};
                     if (n_out >= out_cap) goto done;
                 }
 
@@ -261,7 +262,7 @@ done:
             const size_t avail = size - bp;
             const size_t to_copy = avail < 8 ? avail : 8;
             std::memcpy(&contents, buf + bp, to_copy);
-            out[n_out++] = TokenGenerator::QuickToken{contents, T.rare_type[b]};
+            out[n_out++] = QuickToken{contents, T.rare_type[b], bp};
             if (n_out >= out_cap) break;
         }
 
@@ -272,7 +273,7 @@ done:
     return n_out;
 }
 
-using ScanFn = size_t (*)(const uint8_t*, size_t, TokenGenerator::QuickToken*, size_t);
+using ScanFn = size_t (*)(const uint8_t*, size_t, QuickToken*, size_t);
 
 // Returns nullptr if the x86 CPU lacks AVX-512.
 ScanFn select_scanner()
@@ -284,15 +285,17 @@ ScanFn select_scanner()
 }
 
 } // namespace
+} // namespace mi400::quick_scan
 
-size_t scan_mi400(const uint8_t* buf, size_t size, TokenGenerator::QuickToken* __restrict__ out, size_t out_cap)
+namespace quick_scan
 {
-    static const ScanFn fn = select_scanner();
+size_t scan_mi400(const uint8_t* buf, size_t size, QuickToken* __restrict__ out, size_t out_cap)
+{
+    static const mi400::quick_scan::ScanFn fn = mi400::quick_scan::select_scanner();
     if (!fn) throw std::exception();
 
     return fn(buf, size, out, out_cap);
 }
-
-} // namespace mi400::quick_scan
+} // namespace quick_scan
 
 #endif // MI400_RARE_SCAN_HAS_X86

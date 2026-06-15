@@ -43,7 +43,6 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/mpl/type_traits.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
