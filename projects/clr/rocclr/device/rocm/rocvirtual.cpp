@@ -23,6 +23,13 @@
 
 #include <fstream>
 #include <limits>
+
+#ifdef _WIN32
+#include "device/rocm/rocd3d10interop.hpp"
+#include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d10.hpp"
+#include "platform/interop_d3d11.hpp"
+#endif
 #include <memory>
 #include <string>
 #include <thread>
@@ -5012,6 +5019,15 @@ void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
 
   profilingBegin(vcmd);
   addSystemScope();
+
+  for (auto& mem : vcmd.getMemList()) {
+    amd::InteropObject* interop = mem->getInteropObj();
+    if (!interop) continue;
+    // Copy data from the original D3D resource to the shared intermediate resource
+    // (no-op for GL and for resources that are already directly shared)
+    interop->copyOrigToShared();
+  }
+
   profilingEnd();
 }
 
@@ -5020,6 +5036,14 @@ void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   profilingBegin(vcmd);
+
+  for (auto& mem : vcmd.getMemList()) {
+    amd::InteropObject* interop = mem->getInteropObj();
+    if (!interop) continue;
+    // Copy data from the shared intermediate resource back to the original D3D resource
+    interop->copySharedToOrig();
+  }
+
   profilingEnd();
 }
 

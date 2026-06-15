@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-#ifndef __DXXOPENCLINTEROPEXT_H__
-#define __DXXOPENCLINTEROPEXT_H__
+#ifndef __DXXINTEROPEXT_H__
+#define __DXXINTEROPEXT_H__
 
 // Abstract extension interface class
 // Each extension interface (e.g. OpenCL Interop extension) will derive from this class
@@ -67,9 +67,11 @@ class IAmdDxExtCLInterop : public IAmdDxExtInterface {
 
   virtual HRESULT CLAcquireResource(ID3D10Resource* pResource, UINT* gpuIdBitmask) = 0;
   virtual HRESULT CLReleaseResource(ID3D10Resource* pResource, UINT* gpuIdBitmask) = 0;
+  virtual HRESULT CLQueryResource(ID3D10Resource* pResource, VOID* pSrd, UINT* pSrdSize) = 0;
 
   virtual HRESULT CLAcquireResource11(ID3D11Resource* pResource, UINT* gpuIdBitmask) = 0;
   virtual HRESULT CLReleaseResource11(ID3D11Resource* pResource, UINT* gpuIdBitmask) = 0;
+  virtual HRESULT CLQueryResource11(ID3D11Resource* pResource, VOID* pSrd, UINT* pSrdSize) = 0;
 
   virtual HRESULT CLAcquireResource9(IDirect3DSurface9* pResource, UINT* gpuIdBitmask) = 0;
   virtual HRESULT CLReleaseResource9(IDirect3DSurface9* pResource, UINT* gpuIdBitmask) = 0;
@@ -85,5 +87,10 @@ typedef HRESULT(__cdecl* PFNAmdDxExtCreate11)(ID3D11Device* pDevice, IAmdDxExt**
 
 HRESULT __cdecl AmdDxExtCreate9(IDirect3DDevice9Ex* pDevice, IAmdDxExt** ppExt);
 typedef HRESULT(__cdecl* PFNAmdDxExtCreate9)(IDirect3DDevice9Ex* pDevice, IAmdDxExt** ppExt);
+
+struct CachedExt {
+  IAmdDxExt* pExt = nullptr;
+  IAmdDxExtCLInterop* pCLExt = nullptr;
+};
 
 #endif
