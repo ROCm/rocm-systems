@@ -198,11 +198,11 @@ class TestMIGPUSpecs:
         """
         # rdna35_halo (dGPU) includes MALL in its memory levels
         result = MIGPUSpecs.get_memory_levels("rdna35_halo")
-        assert result == ["L0", "L1", "L2", "MALL", "LDS"]
+        assert result == ["LDS", "L0", "L1", "L2", "MALL"]
 
         # rdna35_point_1 (APU) does not include MALL
         result = MIGPUSpecs.get_memory_levels("rdna35_point_1")
-        assert result == ["L0", "L1", "L2", "LDS"]
+        assert result == ["LDS", "L0", "L1", "L2"]
 
     def test_get_memory_levels_missing_returns_empty(self):
         design = {"testmodel": {"physical_aid": 4}}
