@@ -34,7 +34,6 @@ env:
   ENABLE_HIP_CLR_BUILD: "true"
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
   ENABLE_AQLPROFILE_BUILD: "false"
-  INSTALL_NIGHTLY_ROCM: "true"
   SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/rocr-runtime projects/clr projects/hip"
 
 jobs:
@@ -82,6 +81,7 @@ jobs:
           ../scripts/update-docs.sh
 
   build-docs-from-source:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on: linux-gfx942-1gpu-core42-ossci-rocm
     container:
       image: docker.io/rocm/rocprofiler-private:ubuntu-22.04-gfx94X-latest
@@ -162,7 +162,6 @@ jobs:
           enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
           enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
           enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
-          install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
           ccache-key: ccache-docs-ubuntu-22.04-gfx94X
           ccache-variant: ccache
 

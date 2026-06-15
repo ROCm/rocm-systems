@@ -6,6 +6,14 @@
 Using PC sampling in ROCm Compute Profiler
 ********************************************
 
+.. warning::
+
+   PC sampling is an experimental feature. Enable it in ``profile``
+   mode by passing ``--experimental --pc-sampling``. The ``analyze``
+   command detects PC sampling automatically from the profiling
+   configuration and needs no extra pc-sampling flag. Behavior and
+   command-line surface may change in future releases.
+
 Program Counter (PC) sampling service for GPU profiling is a profiling technique that periodically samples the program counter during the GPU kernel execution to understand code execution patterns and hotspots.
 
 ROCm Compute Profiler supports Host Trap PC sampling and Stochastic (Hardware-Based) PC sampling.
@@ -26,7 +34,7 @@ For using profiling options for PC sampling the configuration needed are:
 
 .. code-block:: shell
 
-   $ rocprof-compute profile -n pc_test -b 21 --no-roof --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
+   $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
 
 Analysis options
 ================
@@ -38,7 +46,7 @@ For using analysis options for PC sampling the configuration needed are:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -b 21 -k 0 --pc-sampling-sorting-type offset
+   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -k 0 --pc-sampling-sorting-type offset
 
 **Sample output:**
 
@@ -68,6 +76,5 @@ Selecting single kernel sorting by PC count:
 
 .. note::
 
-  * PC sampling feature is currently in BETA version. To enable PC sampling, you have to explicitly enable it with block index 21.
   * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
   * To associate PC sampling info back to HIP source code, you need to build the profiling target app with ``-g`` to keep the symbols. Otherwise, PC sampling info will be only associated with assembly lines.

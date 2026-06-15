@@ -348,6 +348,8 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy_MultiThread_AllAPIs:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: []
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_2
@@ -388,7 +390,10 @@ memory:
     tags: [alloc]
   Unit_hipHostRegister_Memcpy: *level_2
   Unit_hipHostRegister_Flags: *level_2
-  Unit_hipHostRegister_Negative: *level_2
+  Unit_hipHostRegister_Negative:
+    <<: *level_2
+    # Tests behaviour after free which throws off the sanitizer
+    disabled: [asan]
   Unit_hipHostRegister_Capture:
     <<: *level_2
     tags: [alloc]
@@ -475,6 +480,8 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMallocManaged_OverSubscription:
     <<: *level_2
+    # Huge memory usage, no point enabling it with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMallocManaged_Negative:
     <<: *level_2
@@ -495,6 +502,8 @@ memory:
     tags: [memset]
   Unit_hipMemset_Negative_OutOfBoundsPtr:
     <<: *level_2
+    # Out of bounds access is caught by the sanitizer
+    disabled: [asan]
     tags: [memset]
   Unit_hipMemset2D_Negative_InvalidPtr:
     <<: *level_2
@@ -653,6 +662,8 @@ memory:
     tags: [alloc]
   Unit_hipMallocManaged_Large:
     <<: *level_2
+    # Huge memory usage, no point enabling it with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic:
     <<: *level_2
@@ -696,6 +707,8 @@ memory:
     tags: [query]
   Unit_hipMemRangeGetAttribute_TstCountParam:
     <<: *level_2
+    # Huge memory usage, no point enabling it with ASAN
+    disabled: [asan]
     tags: [query]
   Unit_hipMemRangeGetAttribute_AccessedBy1:
     <<: *level_2
@@ -948,6 +961,8 @@ memory:
     tags: [alloc]
   Unit_hipMallocManaged_MultiThread:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMallocManaged_MGpuMThread:
     <<: *level_2
@@ -1265,20 +1280,28 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMallocFromPoolAsync_Multidevice_MultiStream:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc, multigpu]
   Unit_hipMallocFromPoolAsync_MThread_DefaultThresh:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_MThread_MaxThresh:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_windows, amd_wsl, asan]
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool:
     <<: *level_2
-    disabled: [amd_windows, amd_wsl]
+    # Does not play well with ASAN
+    disabled: [amd_windows, amd_wsl, asan]
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMallocFromPoolAsync_MultStream_Sync:
     <<: *level_2
@@ -1372,6 +1395,8 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyWithStream_MultiThread:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [transfer]
   Unit_hipMemsetAsync_VerifyExecutionWithKernel:
     <<: *level_2
@@ -1597,7 +1622,8 @@ memory:
   Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
-    disabled: [amd_windows, amd_wsl]
+    # Huge memory usage, no point enabling it with ASAN
+    disabled: [amd_windows, amd_wsl, asan]
     tags: [alloc]
   Unit_hipMalloc_Positive_APU_LargeAllocSpill:
     <<: *level_2
@@ -1654,7 +1680,8 @@ memory:
     disabled: [amd_wsl]
   Unit_hipMalloc3D_Basic:
     <<: *level_2
-    disabled: [amd_wsl]
+    # hipMemGetInfo doesnt report updated memory immediately after hipFree in ASAN
+    disabled: [amd_wsl, asan]
     tags: [alloc]
   Unit_hipMalloc3D_SmallandBigChunks:
     <<: *level_2
@@ -1941,9 +1968,13 @@ memory:
     tags: [alloc]
   Unit_hipFreeDoubleDevice:
     <<: *level_2
+    # Tests double free which throws off the sanitizer
+    disabled: [asan]
     tags: [alloc]
   Unit_hipFreeDoubleHost:
     <<: *level_2
+    # Tests double free which throws off the sanitizer
+    disabled: [asan]
     tags: [alloc]
   Unit_hipFreeDoubleArrayFree:
     <<: *level_2
@@ -1974,6 +2005,8 @@ memory:
     tags: [alloc]
   Unit_hipHostFree_DoubleFree:
     <<: *level_2
+    # Tests double free which throws off the sanitizer
+    disabled: [asan]
     tags: [alloc]
   Unit_hipHostFree_Multithreading:
     <<: *level_2
@@ -2098,6 +2131,8 @@ memory:
     tags: [alloc]
   Unit_hipFreeHost_DoubleFree:
     <<: *level_2
+    # Tests double free which throws off the sanitizer
+    disabled: [asan]
     tags: [alloc]
   Unit_hipFreeHost_Multithreading:
     <<: *level_2
@@ -2122,6 +2157,8 @@ memory:
     tags: [alloc]
   Unit_hipMallocAsync_StreamEvent_CrissCross:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMallocAsync_Multidevice:
     <<: *level_2
@@ -2131,6 +2168,8 @@ memory:
     tags: [alloc, multigpu]
   Unit_hipMallocAsync_Multidevice_MultiStream:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc, multigpu]
   Unit_hipMallocAsync_ByUsinghipMalloc:
     <<: *level_2
@@ -2140,9 +2179,13 @@ memory:
     tags: [alloc]
   Unit_hipMallocAsync_MThread_ThreadLocalStream:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMallocAsync_MThread_ThreadSharedStream:
     <<: *level_2
+    # Does not play well with ASAN
+    disabled: [asan]
     tags: [alloc]
   Unit_hipMallocAsync_DefaultStreams_Concurrent:
     <<: *level_2
@@ -2436,8 +2479,14 @@ memory:
   Unit_hipMemSetMemPool_Basic: *level_2
   Unit_hipFreeHost_Capture_negative:
     <<: *level_2
-  Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory: *level_2
-  Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory: *level_2
+  Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory:
+    <<: *level_2
+    # Huge memory usage, no point enabling it with ASAN
+    disabled: [asan]
+  Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory:
+    <<: *level_2
+    # Huge memory usage, no point enabling it with ASAN
+    disabled: [asan]
   Unit_hipMemPoolExportToShareableHandle_multiproc: *level_2
   Unit_hipMemPoolExportToShareableHandle_multiproc_child:
     <<: *level_2

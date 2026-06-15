@@ -1347,6 +1347,29 @@ class CodeGenerator:
             and self.isa_spec.profile.generate_scaled_wmma_vop3px2
         )
 
+    def _supports_cdna_mfma_f8f6f4_vop3px2(self) -> bool:
+        return self.isa_spec.arch_name.lower() == 'cdna4'
+
+    @staticmethod
+    def _emit_cdna_mfma_f8f6f4_vop3px2_decoder_helpers() -> str:
+        return textwrap.dedent('''\
+            namespace {
+
+            bool isMfmaScaleF8f6f4Vop3px2(const MachineInst *opcode) {
+              constexpr uint32_t VOP3P_MFMA_ENC = 423;
+              constexpr uint32_t PREFIX_OP = 44;
+              auto enc0 = (opcode[0] >> 23) & 0x1FFu;
+              auto op0 = (opcode[0] >> 16) & 0x7Fu;
+              if (enc0 != VOP3P_MFMA_ENC || op0 != PREFIX_OP)
+                return false;
+              auto enc2 = (opcode[2] >> 23) & 0x1FFu;
+              auto op2 = (opcode[2] >> 16) & 0x7Fu;
+              return enc2 == VOP3P_MFMA_ENC && (op2 == 45 || op2 == 46);
+            }
+
+            } // namespace
+            ''')
+
     def _gfx1250_f8f6f4_wmma_shape(
         self, inst: Instruction
     ) -> tuple[int, int, int] | None:
@@ -7151,6 +7174,20 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     'if (isWmmaScaleF32F8f6f4Vop3px2(opcode)) return std::make_unique<VWmmaScaleF3216x16x128F8f6f4Vop3px2>(opcode)'
                 )
             )
+        if self._supports_cdna_mfma_f8f6f4_vop3px2():
+            class_impl.append(
+                cgen.Line(self._emit_cdna_mfma_f8f6f4_vop3px2_decoder_helpers())
+            )
+            decode_body.append(
+                cgen.Line(
+                    '  if (isMfmaScaleF8f6f4Vop3px2(opcode)) {\n'
+                    '    auto op2 = (opcode[2] >> 16) & 0x7Fu;\n'
+                    '    if (op2 == 45)\n'
+                    '      return std::make_unique<VMfmaF3216x16x128F8f6f4Vop3pMfma>(opcode + 2);\n'
+                    '    return std::make_unique<VMfmaF3232x32x64F8f6f4Vop3pMfma>(opcode + 2);\n'
+                    '  }\n'
+                )
+            )
         if self._supports_generated_vopd():
             decode_body.append(
                 cgen.Statement(
@@ -7219,6 +7256,13 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                     ):
                         _pfx = 'decodeVop3pX2Prefix'
                         _dte.sub_decode_funcs[_vop3px2_opcode] = _pfx
+                        for ie in self.isa_spec.inst_encodings:
+                            for inst in ie.insts:
+                                if (
+                                    inst.name
+                                    in self.isa_spec.profile.inst_size_overrides
+                                ):
+                                    _dte.sub_decode_funcs[inst.opcode] = 'decodeInvalid'
                         _custom_decode_bodies[_pfx] = cgen.Block(
                             [
                                 cgen.Statement(
