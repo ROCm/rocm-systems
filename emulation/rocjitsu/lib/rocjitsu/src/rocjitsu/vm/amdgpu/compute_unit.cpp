@@ -50,7 +50,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   // Completer port: CP sends dispatch activation messages here.
   cpl_ = add_port(std::make_unique<simdojo::Port>("cpl", 0, this, simdojo::PortDirection::IN,
                                                   simdojo::PortProtocol::DISPATCH));
-  cpl_->set_handler([this](simdojo::Tick, simdojo::Message *) { activate(); });
+  cpl_->set_handler([this](simdojo::Tick, simdojo::Message *) { schedule_work(); });
 
   // Requester port: structural connection to shared L2 cache.
   req_ = add_port(std::make_unique<simdojo::Port>("req", 1, this, simdojo::PortDirection::OUT,
@@ -92,8 +92,8 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
   throw std::runtime_error("Unsupported architecture for ComputeUnit");
 }
 
-Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs,
-                                        uint32_t vgprs) {
+Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
+                                        uint32_t num_vgprs) {
   assert(wfs_.size() == config_.num_wf_slots && "wavefront slots not properly initialized");
   // Free register allocations from previously halted wavefronts before claiming
   // a new slot. This is needed so SGPR/VGPR blocks can be reused. However, we
@@ -109,14 +109,14 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
       break;
     }
   }
-  if (slot >= config_.num_wf_slots)
-    return nullptr;
 
-  int32_t sgpr_base = sgpr_file_.allocate(sgprs);
+  assert(slot < config_.num_wf_slots && "tried to dispatch to an invalid wavefront slot");
+
+  int32_t sgpr_base = sgpr_file_.allocate(num_sgprs);
   if (sgpr_base < 0)
     return nullptr;
 
-  int32_t vgpr_base = allocate_vgprs(vgprs);
+  int32_t vgpr_base = allocate_vgprs(num_vgprs);
   if (vgpr_base < 0) {
     sgpr_file_.free(static_cast<uint32_t>(sgpr_base));
     return nullptr;
@@ -136,10 +136,10 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   auto *wf = wfs_[slot].get();
   wf->wg_id_ = wg_id;
   wf->pc = pc;
-  wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), sgprs};
-  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), vgprs};
-  wf->num_sgprs_ = sgprs;
-  wf->num_vgprs_ = vgprs;
+  wf->sgpr_alloc_ = {static_cast<uint32_t>(sgpr_base), num_sgprs};
+  wf->vgpr_alloc_ = {static_cast<uint32_t>(vgpr_base), num_vgprs};
+  wf->num_sgprs_ = num_sgprs;
+  wf->num_vgprs_ = num_vgprs;
   wf->exec_ = wf_size_ == 64 ? ~0ULL : (1ULL << wf_size_) - 1;
   wf->vcc_ = 0;
   wf->m0_ = 0;
@@ -149,11 +149,13 @@ Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sg
   wf->set_ready_cycle(cycle_counter_);
   wf->trace_inst_count_ = 0;
 
-  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + sgprs, wf);
+  std::fill(sgpr_to_wave_.begin() + sgpr_base, sgpr_to_wave_.begin() + sgpr_base + num_sgprs, wf);
   fill_vgpr_to_wave(static_cast<uint32_t>(vgpr_base), vgpr_allocation_block_size(), wf);
 
   util::Logger::cp("DISPATCH_WF cu=", this->full_path(), " wf=", wf->wf_id(), " slot=", slot,
                    " pc=0x", std::hex, pc, std::dec, " wg=", wg_id, " pid=", wf->process_id());
+
+  schedule_work();
   return wf;
 }
 

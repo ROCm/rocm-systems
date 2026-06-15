@@ -127,18 +127,6 @@ public:
     return false;
   }
 
-  /// @brief Step each CU once (one round-robin pass within this SE).
-  bool step() {
-    bool any_active = false;
-    for (auto *cu : cus_) {
-      if (cu->has_active_wfs()) {
-        cu->step();
-        any_active = true;
-      }
-    }
-    return any_active;
-  }
-
   /// @brief Check if any WGs are queued or any CU is active.
   bool has_pending() const {
     for (auto &q : pipe_queues_)
@@ -148,20 +136,6 @@ public:
       if (cu->has_active_wfs())
         return true;
     return false;
-  }
-
-  /// @brief Run all CUs to idle (functional mode, for test harness use).
-  void run_to_idle() {
-    bool progress = true;
-    while (progress) {
-      progress = false;
-      for (auto *cu : cus_) {
-        if (cu->has_active_wfs()) {
-          cu->step();
-          progress = true;
-        }
-      }
-    }
   }
 
   /// @brief Legacy: select a CU with capacity for direct dispatch.

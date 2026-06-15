@@ -82,13 +82,16 @@ on the next CU in round-robin order, then calls `activate()` on that CU.
 - `activate()` - registers the CP as a primary component and begins
   processing doorbell events
 
-Each CU runs its dispatched wavefronts independently. In functional mode,
-a work event calls `advance()`, which executes up to `functional_quantum`
-instructions (or all remaining if quantum is 0) before yielding back to
-the event loop. A non-zero quantum allows CU events to interleave,
-guaranteeing forward progress for inter-CU synchronization patterns such
-as spin-locks or semaphore acquire/release on global memory. When a CU
-becomes idle, it fires its `on_idle` callback. When all CUs are idle
+Each CU runs its dispatched wavefronts independently. The CU is
+self-driving: `dispatch_wf()` schedules a tick event that calls
+`execute_quantum()`, which executes up to `functional_quantum`
+instructions before yielding back to the event loop. The tick event
+reschedules itself at `now + quantum` if work remains. Since functional
+mode is 1 CPI, ticks advance proportionally to instruction count. The
+quantum allows CU events to interleave, guaranteeing forward progress
+for inter-CU synchronization patterns such as spin-locks or semaphore
+acquire/release on global memory. When a CU becomes idle, it stops
+scheduling and fires its `on_idle` callback. When all CUs are idle
 and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
 
@@ -105,8 +108,7 @@ Config loader / Driver::submit()
                 cu->dispatch_wf(wg_id, pc, sgprs, vgprs)
                   └── find idle slot, allocate SGPR/VGPR blocks
                       initialize wavefront state (pc, wg_id)
-                cu->activate()
-                  └── schedule work event (functional) or resume clock (clocked)
+                      schedule tick event if CU was idle (self-driving)
 ```
 
 A `DispatchPacket` specifies:
@@ -208,7 +210,7 @@ The SoC plugs into simdojo's `SimulationEngine` directly. The C API layer
    config and creates a `SoC` with engine configuration. The C API sets the
    SoC as the topology root via `engine.topology().set_root(std::move(soc))`.
 
-2. **`build()`** - Partitions topology, initializes all components, and
+2. **`create()`** - Partitions topology, initializes all components, and
    sets up the engine.
 
 3. **`run()`** - Starts all components and drains events continuously.

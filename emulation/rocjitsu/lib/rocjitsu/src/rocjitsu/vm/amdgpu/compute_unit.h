@@ -99,11 +99,11 @@ public:
   /// and initializes the slot's dynamic state (wg_id, pc, allocations).
   /// @param wg_id Workgroup ID for this wavefront.
   /// @param pc Kernel entry point (byte address).
-  /// @param sgprs Number of scalar registers to allocate.
-  /// @param vgprs Number of vector registers to allocate.
+  /// @param num_sgprs Number of scalar registers to allocate.
+  /// @param num_vgprs Number of vector registers to allocate.
   /// @returns Pointer to the activated wavefront, or nullptr if no free slot
   ///          or insufficient register space.
-  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t sgprs, uint32_t vgprs);
+  Wavefront *dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs, uint32_t num_vgprs);
 
   /// @brief Execute one instruction on the next active wavefront.
   /// @retval true An instruction was executed.
@@ -127,7 +127,7 @@ public:
   bool can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes = 0) const;
 
   /// @brief Execute up to kFunctionalQuantum instructions, then yield.
-  virtual bool advance() = 0;
+  virtual bool execute_quantum() = 0;
 
   /// @brief End the current functional-mode quantum after this instruction.
   ///
@@ -135,12 +135,9 @@ public:
   /// components can publish the state on which the wavefront is polling.
   void request_functional_yield() { functional_yield_requested_ = true; }
 
-  /// @brief Signal that work has been dispatched; begin processing.
-  ///
-  /// @details Schedules an engine event that calls advance() repeatedly
-  /// until all wavefronts are exhausted. Called by the command processor
-  /// after dispatch_wf().
-  virtual void activate() = 0;
+  /// @brief Schedule the tick event if the CU is not already executing.
+  /// Called from dispatch_wf() and the cpl_ port handler.
+  virtual void schedule_work() = 0;
 
   /// @brief Check whether this CU has no active wavefronts.
   /// @retval true No wavefronts are actively executing.
@@ -619,7 +616,7 @@ inline void InstructionComputeUnitView::write_sgpr(uint32_t reg_idx, uint32_t va
 ///
 /// @details Adds event-driven activation on top of ComputeUnitCore.
 ///
-/// In FUNCTIONAL mode, advance() executes up to kFunctionalQuantum
+/// In FUNCTIONAL mode, execute_quantum() runs up to kFunctionalQuantum
 /// instructions, then yields to the simulation event loop. This
 /// interleaving ensures forward progress when wavefronts on different
 /// CUs synchronize via global memory (e.g., spin-locks, semaphores).
@@ -630,7 +627,7 @@ public:
   using ComputeUnitCore::ComputeUnitCore;
 
   /// @brief Execute work up to the quantum limit, then yield.
-  bool advance() override {
+  bool execute_quantum() override {
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
       // A request left by direct step() execution must not shorten this quantum.
       functional_yield_requested_ = false;
@@ -643,23 +640,29 @@ public:
     }
     if (is_idle()) {
       notify_idle();
-      return !is_idle();
+      if (is_idle()) {
+        executing_ = false;
+        return false;
+      }
     }
     return true;
   }
 
-  /// @brief Schedule CU execution via the event loop.
-  void activate() override {
+  void schedule_work() override {
+    if (executing_ || !this->engine())
+      return;
+    executing_ = true;
     auto now = this->engine()->context(this->partition_id()).current_tick();
-    this->schedule_event(&work_event_, now + 1);
+    this->schedule_event(&tick_event_, now + 1);
   }
 
 private:
-  simdojo::Event work_event_{this, simdojo::EventType::TIMER_CALLBACK,
+  simdojo::Event tick_event_{this, simdojo::EventType::TIMER_CALLBACK,
                              [this](simdojo::Tick now, simdojo::Message *) {
-                               if (advance())
-                                 this->schedule_event(&work_event_, now + 1);
+                               if (execute_quantum())
+                                 this->schedule_event(&tick_event_, now + kFunctionalQuantum);
                              }};
+  bool executing_ = false;
 };
 
 /// @brief ISA-parameterized compute unit owning the typed VGPR register file.

@@ -81,7 +81,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     loaded.wire_links(s->engine->topology());
     s->soc->wire_backing(s->engine->topology());
   }
-  s->engine->build();
+  s->engine->create();
 
   if (serve) {
     s->engine->register_as_primary();

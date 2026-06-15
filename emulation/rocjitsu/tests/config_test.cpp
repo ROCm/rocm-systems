@@ -709,7 +709,7 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
   loaded.wire_links(engine.topology());
-  engine.build();
+  engine.create();
 
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
   using namespace rocr::llvm::amdhsa;

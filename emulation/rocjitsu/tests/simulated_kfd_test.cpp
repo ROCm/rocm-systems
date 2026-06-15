@@ -67,7 +67,7 @@ TestVM create_test_vm() {
   t.engine->topology().set_root(std::move(vm));
   t.loaded.wire_links(t.engine->topology());
   soc->wire_backing(t.engine->topology());
-  t.engine->build();
+  t.engine->create();
   t.engine->register_as_primary();
 
   return t;
