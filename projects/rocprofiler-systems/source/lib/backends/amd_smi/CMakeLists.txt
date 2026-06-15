@@ -13,7 +13,6 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-rocm
-        rocprofiler-systems-core-library
 )
 
 if(ROCPROFSYS_BUILD_AINIC)
