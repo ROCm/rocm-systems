@@ -56,17 +56,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The CLI now displays the canonical vendor name `Advanced Micro Devices, Inc. [AMD/ATI]` when the board manufacturer name is reported as the raw AMD PCI vendor ID (`0x1002`) because the host `pci.ids` lookup is unavailable. The C and Python APIs continue to return the raw value unchanged.
   - Standardized the hardcoded AMD vendor string on the canonical `pci.ids` spelling (with the comma) so `VENDOR_NAME` and `MANUFACTURER_NAME` are consistent with `lspci`.
 
-- **Fixed `amdsmi_get_gpu_cper_entries()` crash (`free(): invalid pointer` / `SIGABRT`) when the CPER node reports zero bytes**.  
-  - debugfs CPER nodes (`/sys/kernel/debug/dri/<N>/amdgpu_ring_cper`) report `st_size == 0` because their content is generated on read. The previous `std::ifstream`-based read allocated a zero-byte buffer and left an STL `basic_filebuf` whose destructor could perform an invalid free across the library boundary when `libamd_smi.so` is `LD_PRELOAD`-ed alongside a different host libstdc++ (the device-metrics-exporter / `gpuagent` scenario), aborting the process and zeroing all GPU metrics.
-  - Reverted the CPER file read to POSIX `open`/`read`/`close`:
-    - No STL allocation occurs across the library boundary.
-    - The file descriptor is closed on every exit path, fixing a latent fd leak on the short-read branch.
-    - Only a negative `read()` result is treated as `AMDSMI_STATUS_FILE_ERROR`; a zero-byte read is handled by the empty-ring fix below.
+- **Fixed `amd-smi ras --cper` / `amdsmi_get_gpu_cper_entries()` crash (`free(): invalid pointer` / `SIGABRT`)** when `libamd_smi.so` is `LD_PRELOAD`-ed under a host with a different libstdc++ (for example, device-metrics-exporter / `gpuagent`).
 
-- **Fixed `amd-smi ras --cper` failing with `AMDSMI_STATUS_FILE_ERROR` on an empty CPER ring**.  
-  - An empty `amdgpu_ring_cper` debugfs node (no RAS records recorded) returns 0 bytes on read, which was previously reported as a file error on otherwise healthy GPUs.
-  - A zero-byte read is now treated as a valid "no records" state: `amdsmi_get_gpu_cper_entries()` returns `AMDSMI_STATUS_SUCCESS` with `entry_count == 0`.
-  - `amd-smi ras --cper` now reports no CPER records instead of failing.
+- **Fixed `amd-smi ras --cper` failing with `AMDSMI_STATUS_FILE_ERROR` on an empty CPER ring**. An empty ring (no RAS records) now reports no CPER records; `amdsmi_get_gpu_cper_entries()` returns `AMDSMI_STATUS_SUCCESS` with `entry_count == 0`.
 
 - **Fixed `amdsmi_init()` aborting entirely when CPU/ESMI initialization fails**.  
   - `populate_amd_cpus()` treated an `esmi_init()` failure (non-AMD CPU, missing/unsupported energy or HSMP driver, or a CPU/SMU in a bad state) as fatal, causing all of `amdsmi_init()` to fail so GPU and NIC functionality became unusable. ESMI/CPU discovery is now non-fatal and is skipped on failure, mirroring the NIC discovery paths.
