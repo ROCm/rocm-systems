@@ -25,14 +25,14 @@ ExecutionCtx::ExecutionCtx(int deviceId, DevResourceDesc* desc, uint32_t flags)
       ctxId_(nextCtxId_.fetch_add(1)) {}
 
 hipError_t ExecutionCtx::Create() {
-  hipDeviceProp_t prop{};
-  hipError_t status = ihipGetDeviceProperties(&prop, deviceId_);
-  if (status != hipSuccess) return status;
-
-  uint32_t totalCUs = static_cast<uint32_t>(prop.multiProcessorCount);
-  uint32_t maskWords = (totalCUs + 31) / 32;
-
+  uint32_t totalCUs = getTotalCuCount(deviceId_);
+  if (totalCUs == 0) return hipErrorInvalidConfiguration;
+  uint32_t alignment = getSmAlignment(deviceId_);
+  uint32_t totalWGPs = (alignment > 1) ? (totalCUs / alignment) : totalCUs;
+  uint32_t maskWords = (totalWGPs + 31) / 32;
   cuMask_.resize(maskWords, 0);
+  LogPrintfInfo("[ExecCtx] Create: deviceId=%d totalCUs=%u alignment=%u totalWGPs=%u maskWords=%u",
+                deviceId_, totalCUs, alignment, totalWGPs, maskWords);
   for (const auto& res : resourceDesc_->resources) {
     if (res.type == hipDevResourceTypeSm) {
       cuCount_ += res.sm.smCount;
@@ -42,11 +42,15 @@ hipError_t ExecutionCtx::Create() {
         const auto* meta = lookupResourceMeta(deviceId_, resId);
         if (meta != nullptr) startCU = meta->startCU;
       }
-      auto partial = buildCuMask(startCU, res.sm.smCount, totalCUs);
+      LogPrintfInfo("[ExecCtx] Create: resId=%u smCount=%u startCU=%u cuCount_=%u",
+                    resId, res.sm.smCount, startCU, cuCount_);
+      auto partial = buildCuMask(startCU, res.sm.smCount, totalCUs, alignment);
       for (uint32_t w = 0; w < maskWords && w < partial.size(); w++)
         cuMask_[w] |= partial[w];
     }
   }
+  LogPrintfInfo("[ExecCtx] Create done: ctxId=%llu cuCount_=%u mask[0]=0x%08x",
+                ctxId_, cuCount_, maskWords > 0 ? cuMask_[0] : 0u);
   return hipSuccess;
 }
 
@@ -94,12 +98,21 @@ void ExecutionCtx::fillRemainder(hipDevResource* remainder, uint32_t remainingCU
 }
 
 std::vector<uint32_t> ExecutionCtx::buildCuMask(uint32_t startCU, uint32_t count,
-                                             uint32_t totalCUs) {
-  uint32_t maskWords = (totalCUs + 31) / 32;
+                                             uint32_t totalCUs, uint32_t alignment) {
+  // Each mask bit represents one WGP (alignment CUs). Convert CU units to WGP units.
+  uint32_t totalWGPs = (alignment > 1) ? (totalCUs / alignment) : totalCUs;
+  uint32_t maskWords = (totalWGPs + 31) / 32;
   std::vector<uint32_t> mask(maskWords, 0);
-  for (uint32_t i = startCU; i < startCU + count && i < totalCUs; i++) {
+  uint32_t startWGP = startCU / alignment;
+  uint32_t wgpCount = count / alignment;
+  for (uint32_t i = startWGP; i < startWGP + wgpCount && i < totalWGPs; i++) {
     mask[i / 32] |= (1u << (i % 32));
   }
+  LogPrintfInfo("[ExecCtx] buildCuMask: startCU=%u count=%u totalCUs=%u alignment=%u "
+                "-> startWGP=%u wgpCount=%u totalWGPs=%u maskWords=%u mask[0]=0x%08x",
+                startCU, count, totalCUs, alignment,
+                startWGP, wgpCount, totalWGPs, maskWords,
+                maskWords > 0 ? mask[0] : 0u);
   return mask;
 }
 
@@ -107,10 +120,23 @@ uint32_t ExecutionCtx::getSmAlignment(int deviceId) {
   return g_devices[deviceId]->devices()[0]->settings().enableWgpMode_ ? 2 : 1;
 }
 
+uint32_t ExecutionCtx::getTotalCuCount(int deviceId) {
+  hipDeviceProp_t prop{};
+  hipError_t status = ihipGetDeviceProperties(&prop, deviceId);
+  if (status != hipSuccess) {
+    LogPrintfError("Can't read device props for device id : %d", deviceId);
+    return 0;
+  }
+  uint32_t alignment = getSmAlignment(deviceId);
+  return static_cast<uint32_t>(prop.multiProcessorCount) * alignment;
+}
+
 void ExecutionCtx::tagResource(hipDevResource* res, uint32_t resourceId, int deviceId) {
   std::memcpy(&res->_internal_padding[0], &resourceId, sizeof(uint32_t));
   int32_t devId = static_cast<int32_t>(deviceId);
   std::memcpy(&res->_internal_padding[4], &devId, sizeof(int32_t));
+  LogPrintfInfo("[ExecCtx] tagResource: resourceId=%u deviceId=%d smCount=%u alignment=%u",
+                resourceId, deviceId, res->sm.smCount, res->sm.smCoscheduledAlignment);
 }
 
 uint32_t ExecutionCtx::readResourceId(const hipDevResource* res) {
@@ -127,6 +153,8 @@ int ExecutionCtx::readDeviceId(const hipDevResource* res) {
 
 void ExecutionCtx::registerResourceMeta(int deviceId, uint32_t resourceId,
                                     uint32_t familyId, uint32_t startCU) {
+  LogPrintfInfo("[ExecCtx] registerResourceMeta: deviceId=%d resourceId=%u familyId=%u startCU=%u",
+                deviceId, resourceId, familyId, startCU);
   g_devices[deviceId]->registerResource(resourceId, familyId, startCU);
 }
 
@@ -196,7 +224,6 @@ hipError_t ExecutionCtx::recordEvent(hipEvent_t event) {
     snapshot[0]->release();
     return err;
   }
-  
   std::scoped_lock lock(e->lock());
 
   amd::Command::EventWaitList waitList;
@@ -220,7 +247,6 @@ hipError_t ExecutionCtx::recordEvent(hipEvent_t event) {
     cmd->enqueue();
     waitList.push_back(&cmd->event());
   }
-  
   // Create a single Marker to wait on all events in waitlist
   // Cache Flush not required for this fan-in marker
   amd::Command* fanIn = new amd::Marker(*snapshot[0], kMarkerDisableFlush, waitList);
@@ -256,7 +282,6 @@ hipError_t ExecutionCtx::waitEvent(hipEvent_t event) {
 hipError_t ExecutionCtx::deviceGetDevResource(int device, hipDevResource* resource,
                                            hipDevResourceType type) {
   if (resource == nullptr) return hipErrorInvalidValue;
-  
   if (type != hipDevResourceTypeSm) {
     return hipErrorInvalidResourceType;
   }
@@ -266,11 +291,8 @@ hipError_t ExecutionCtx::deviceGetDevResource(int device, hipDevResource* resour
 
   std::memset(resource, 0, sizeof(hipDevResource));
   resource->type = type;
-
-  hipDeviceProp_t prop{};
-  HIP_RETURN_ONFAIL(ihipGetDeviceProperties(&prop, device));
+  uint32_t cuCount = getTotalCuCount(device);
   uint32_t alignment = getSmAlignment(device);
-  uint32_t cuCount = static_cast<uint32_t>(prop.multiProcessorCount) * alignment;
 
   resource->sm.smCount = cuCount;
   resource->sm.minSmPartitionSize = alignment;
@@ -299,6 +321,8 @@ hipError_t ExecutionCtx::devSmResourceSplitByCount(
   if (alignedMin == 0) alignedMin = alignment;
 
   uint32_t possibleGroups = totalCUs / alignedMin;
+  LogPrintfInfo("[ExecCtx] SplitByCount: totalCUs=%u alignment=%u minCount=%u alignedMin=%u possibleGroups=%u",
+                totalCUs, alignment, minCount, alignedMin, possibleGroups);
 
   if (result == nullptr) {
     *nbGroups = possibleGroups;
@@ -315,6 +339,8 @@ hipError_t ExecutionCtx::devSmResourceSplitByCount(
 
   uint32_t actualGroups = std::min(*nbGroups, possibleGroups);
   *nbGroups = actualGroups;
+  LogPrintfInfo("[ExecCtx] SplitByCount: inputDevId=%d inputStartCU=%u familyId=%u actualGroups=%u",
+                inputDevId, inputStartCU, familyId, actualGroups);
 
   uint32_t assignedCUs = 0;
   for (uint32_t i = 0; i < actualGroups; i++) {
@@ -326,6 +352,8 @@ hipError_t ExecutionCtx::devSmResourceSplitByCount(
   }
 
   fillRemainder(remainder, totalCUs - assignedCUs, alignment);
+  LogPrintfInfo("[ExecCtx] SplitByCount done: assignedCUs=%u remainderCUs=%u",
+                assignedCUs, totalCUs - assignedCUs);
   if (remainder != nullptr && remainder->type != hipDevResourceTypeInvalid) {
     uint32_t remId = nextResourceId_.fetch_add(1);
     tagResource(remainder, remId, inputDevId);
@@ -345,6 +373,8 @@ hipError_t ExecutionCtx::devSmResourceSplit(
 
   uint32_t totalCUs = input->sm.smCount;
   uint32_t defaultAlignment = input->sm.smCoscheduledAlignment;
+  LogPrintfInfo("[ExecCtx] Split: totalCUs=%u defaultAlignment=%u nbGroups=%u",
+                totalCUs, defaultAlignment, nbGroups);
 
   for (uint32_t i = 0; i < nbGroups; i++) {
     if (groupParams[i].coscheduledSmCount == 0)
@@ -377,11 +407,13 @@ hipError_t ExecutionCtx::devSmResourceSplit(
 
   int inputDevId = readDeviceId(input);
   if (inputDevId < 0) return hipErrorInvalidDevice;
-  
   uint32_t inputStartCU = 0;
   const ResourceMeta* inputMeta = lookupResourceMeta(inputDevId, readResourceId(input));
   if (inputMeta != nullptr) inputStartCU = inputMeta->startCU;
   uint32_t familyId = nextFamilyId_.fetch_add(1);
+
+  LogPrintfInfo("[ExecCtx] Split: inputDevId=%d inputStartCU=%u familyId=%u assignedCUs=%u",
+                inputDevId, inputStartCU, familyId, assignedCUs);
 
   if (result != nullptr) {
     uint32_t cuOffset = 0;
@@ -395,6 +427,8 @@ hipError_t ExecutionCtx::devSmResourceSplit(
           !(groupParams[i].flags & hipDevSmResourceGroupBackfill))
         return hipErrorInvalidResourceConfiguration;
 
+      LogPrintfInfo("[ExecCtx] Split group[%u]: smCount=%u cosched=%u cuOffset=%u flags=0x%x",
+                    i, count, cosched, cuOffset, groupParams[i].flags);
       fillSmResult(&result[i], count, cosched, groupParams[i].flags);
       uint32_t resId = nextResourceId_.fetch_add(1);
       tagResource(&result[i], resId, inputDevId);
@@ -404,6 +438,8 @@ hipError_t ExecutionCtx::devSmResourceSplit(
   }
 
   fillRemainder(remainder, totalCUs - assignedCUs, defaultAlignment);
+  LogPrintfInfo("[ExecCtx] Split done: assignedCUs=%u remainderCUs=%u",
+                assignedCUs, totalCUs - assignedCUs);
   if (remainder != nullptr && remainder->type != hipDevResourceTypeInvalid) {
     uint32_t remId = nextResourceId_.fetch_add(1);
     tagResource(remainder, remId, inputDevId);
@@ -547,7 +583,7 @@ hipError_t hipGreenCtxCreate(hipExecutionCtx_t* phCtx, hipDevResourceDesc_t desc
   if (resourceDesc->deviceId < 0) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
-  
+
   if (resourceDesc->deviceId != device) {
     HIP_RETURN(hipErrorInvalidDevice);
   }

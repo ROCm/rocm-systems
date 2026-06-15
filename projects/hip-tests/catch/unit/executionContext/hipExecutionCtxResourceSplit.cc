@@ -362,7 +362,8 @@ HIP_TEST_CASE(Unit_hipExecutionCtxResourceSplit_Disjoint_Sets) {
     REQUIRE(result[i].sm.smCount == groupSize);
   }
 
-  unsigned int maskWords = (totalSMs + 31) / 32;
+  unsigned int totalWGPs = (alignment > 1) ? totalSMs / alignment : totalSMs;
+  unsigned int maskWords = (totalWGPs + 31) / 32;
   std::vector<std::vector<uint32_t>> masks(3);
   hipExecutionCtx_t ctx[3] = {};
   hipStream_t stream[3] = {};
