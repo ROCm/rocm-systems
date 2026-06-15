@@ -677,7 +677,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   prof_signal->ResetCachedTiming();
 
   // Release any existing HwEvent before setting new one for the same command
-  AttachHwEvent(cmd, prof_signal);
+  VirtualGPU::AttachHwEvent(cmd, prof_signal);
 
   if (ts != nullptr) {
     // Save HSA signal earlier to make sure the possible callback will have a valid

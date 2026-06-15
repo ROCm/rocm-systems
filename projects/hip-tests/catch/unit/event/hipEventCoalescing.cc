@@ -138,7 +138,7 @@ HIP_TEST_CASE(Unit_hipEventCoalescing_AsyncOpsBreakCoalescing) {
   SECTION("Memcpy breaks coalescing") {
     for (int iter = 0; iter < kNumIterations; iter++) {
       // Fill host source buffer with iter-specific value
-      const int sentinel = 0xDEAD0000 + iter;
+      const int sentinel = 0x12340000 + iter;
       std::fill(h_buf.begin(), h_buf.end(), sentinel);
 
       // First record - submits barrier

@@ -564,7 +564,9 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
   auto* e = reinterpret_cast<hip::Event*>(event);
   const auto status = e->synchronize();
   // Mark event as synced to prevent coalescing until next record
-  e->MarkSynced();
+  if (status == hipSuccess) {
+    e->MarkSynced();
+  }
   // Release freed memory for all memory pools on the device
   g_devices[e->deviceId()]->ReleaseFreedMemory();
   HIP_RETURN(status);
