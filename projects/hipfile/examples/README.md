@@ -24,7 +24,7 @@ query the library and need neither.
 
 ## Building
 
-Most examples are built in-tree by the parent hipFile project when
+All examples are built in-tree by the parent hipFile project when
 `AIS_INSTALL_EXAMPLES=ON` (default):
 
 ```bash
