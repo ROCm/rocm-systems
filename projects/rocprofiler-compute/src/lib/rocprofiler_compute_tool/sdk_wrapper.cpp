@@ -93,3 +93,10 @@ void SdkWrapperImpl::query_record_counter_id(rocprofiler_counter_instance_id_t i
 {
     ROCPROFILER_CALL(rocprofiler_query_record_counter_id(id, counter_id), "query record counter id");
 }
+
+void SdkWrapperImpl::at_intercept_table_registration_hsa(rocprofiler_intercept_library_cb_t callback,
+                                                         void* user_data)
+{
+    ROCPROFILER_CALL(rocprofiler_at_intercept_table_registration(callback, ROCPROFILER_HSA_TABLE, user_data),
+                     "register HSA intercept table callback");
+}

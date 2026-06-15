@@ -147,6 +147,17 @@ add_torch_library_path(parser_data& _data)
     return _data;
 }
 
+output_format_selection
+resolve_output_format(const strset_t& tokens)
+{
+    output_format_selection _sel;
+    _sel.perfetto = tokens.contains("proto");
+    _sel.rocpd    = tokens.contains("rocpd");
+    _sel.json     = tokens.contains("json");
+    _sel.text     = tokens.contains("text") || tokens.contains("txt");
+    return _sel;
+}
+
 parser_data&
 add_core_arguments(parser_t& _parser, parser_data& _data)
 {
@@ -308,7 +319,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     {
         _parser
             .add_argument({ "-T", "--trace" },
-                          "Generate a detailed trace (perfetto output)")
+                          "Generate a detailed trace (perfetto output). See also "
+                          "--output-format.")
             .max_count(1)
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
@@ -332,7 +344,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _parser
             .add_argument(
                 { "-P", "--profile" },
-                "Generate a call-stack-based profile (conflicts with --flat-profile)")
+                "Generate a call-stack-based profile (conflicts with --flat-profile). "
+                "See also --output-format.")
             .max_count(1)
             .conflicts({ "flat-profile" })
             .action([&](parser_t& p) {
@@ -799,13 +812,48 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("trace_period_clock_id");
     }
 
+    _parser.start_group("OUTPUT FORMAT OPTIONS",
+                        "Unified selection of which output format(s) to produce");
+
+    if(_data.reg.environ_filter("output_format", _data))
+    {
+        _parser
+            .add_argument(
+                { "--output-format" },
+                "Select output format(s); only the listed formats are produced: "
+                "proto (Perfetto trace), rocpd (RocPD database), json/text (Timemory "
+                "profile; txt aliases text). Space- or comma-separated, e.g. "
+                "--output-format proto rocpd. Cannot be combined with --trace, "
+                "--profile, --flat-profile, or --profile-format.")
+            .min_count(1)
+            .max_count(5)
+            .dtype("[format...]")
+            .choices({ "proto", "rocpd", "json", "text", "txt" })
+            .conflicts(
+                { "trace", "profile", "flat-profile", "profile-format", "use-rocpd" })
+            .action([&](parser_t& p) {
+                const auto _sel = resolve_output_format(p.get<strset_t>("output-format"));
+                update_env(_data, "ROCPROFSYS_TRACE", _sel.perfetto);
+                update_env(_data, "ROCPROFSYS_USE_ROCPD", _sel.rocpd);
+                update_env(_data, "ROCPROFSYS_PROFILE", _sel.profile());
+                update_env(_data, "ROCPROFSYS_JSON_OUTPUT", _sel.json);
+                update_env(_data, "ROCPROFSYS_TEXT_OUTPUT", _sel.text);
+                update_env(_data, "ROCPROFSYS_COUT_OUTPUT", false);
+            });
+
+        _data.reg.processed_environs.emplace("output_format");
+    }
+
     _parser.start_group("PROFILE OPTIONS",
                         "Specific options controlling profiling (i.e. deterministic "
                         "measurements which are aggregated into a summary)");
 
     if(_data.reg.environ_filter("profile_format", _data))
     {
-        _parser.add_argument({ "--profile-format" }, "Data formats for profiling results")
+        _parser
+            .add_argument({ "--profile-format" },
+                          "Data formats for profiling results. See also "
+                          "--output-format.")
             .min_count(1)
             .max_count(3)
             .dtype("string")
