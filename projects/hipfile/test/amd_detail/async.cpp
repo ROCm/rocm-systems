@@ -26,7 +26,9 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -36,9 +38,12 @@
 #include <string>
 #include <system_error>
 #include <sys/types.h>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <variant>
+
+using namespace std::chrono_literals;
 
 // Put tests inside the macros to suppress the global constructor
 // warnings
@@ -488,12 +493,6 @@ TEST_P(FallbackAsyncIO, mismatchingGpuIdsThrows)
 
 TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
 {
-    /* This test will log some errors about async operations being outstanding and being unable to free
-     * memory. The outstanding operations occur because async_io_cleanup is not run. Some memory is unable to
-     * be freed, due to being alloced with malloc, and attempted to be freed with hipHostFree.  This happens
-     * because we mock the allocation of the pinned memory, but the mocks are destructed before the
-     * AsyncOpFallback destructor runs, so we can't mock the deallocation of the pinned memory.
-     */
     EXPECT_CALL(*mbuffer, getLength).WillOnce(Return(1024 * 1024));
     EXPECT_CALL(*mbuffer, getGpuId).Times(AnyNumber()).WillRepeatedly(Return(0));
     EXPECT_CALL(*mbuffer, getBuffer).WillOnce(Return(reinterpret_cast<hipStream_t>(0xBADBADBB)));
@@ -511,8 +510,8 @@ TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
         .WillOnce(Return(reinterpret_cast<void *>(0xDEBBBBBB)));
     EXPECT_CALL(mhip, hipHostGetDevicePointer(Eq(op_data), _))
         .WillOnce(Return(reinterpret_cast<void *>(0xDE000000)));
-    // EXPECT_CALL(mhip, hipHostFree(Eq(bounce_buffer.get())));
-    // EXPECT_CALL(mhip, hipHostFree(Eq(op_data.get())));
+    EXPECT_CALL(mhip, hipHostFree(Eq(bounce_buffer))).WillOnce([](void *ptr) { free(ptr); });
+    EXPECT_CALL(mhip, hipHostFree(Eq(op_data))).WillOnce([](void *ptr) { free(ptr); });
     EXPECT_CALL(mhip, hipDeviceGetAttribute).WillOnce(Return(1024));
     EXPECT_CALL(*mstream, getLock);
     EXPECT_CALL(*mstream, getHipStream).Times(AnyNumber());
@@ -522,6 +521,10 @@ TEST_P(FallbackAsyncIO, attemptToQueueCleanupOnStreamSubmissionFailure)
     EXPECT_THROW(Fallback().async_io(io_type, mfile, mbuffer, &size, &file_offset, &buffer_offset,
                                      &bytes_written, mstream),
                  Hip::RuntimeError);
+    // Call to allow destruction of the op and bounce buffer
+    async_io_cleanup(op_data);
+    // Sleep to allow cleanup thread to destruct op
+    std::this_thread::sleep_for(500ms);
 }
 
 INSTANTIATE_TEST_SUITE_P(FallbackAsyncIOSuite, FallbackAsyncIO,
