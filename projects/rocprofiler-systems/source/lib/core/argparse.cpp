@@ -831,12 +831,12 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 { "trace", "profile", "flat-profile", "profile-format", "use-rocpd" })
             .action([&](parser_t& p) {
                 const auto _sel = resolve_output_format(p.get<strset_t>("output-format"));
-                update_env(_data, "ROCPROFSYS_TRACE", _sel.perfetto);
-                update_env(_data, "ROCPROFSYS_USE_ROCPD", _sel.rocpd);
-                update_env(_data, "ROCPROFSYS_PROFILE", _sel.profile());
-                update_env(_data, "ROCPROFSYS_JSON_OUTPUT", _sel.json);
-                update_env(_data, "ROCPROFSYS_TEXT_OUTPUT", _sel.text);
-                update_env(_data, "ROCPROFSYS_COUT_OUTPUT", false);
+                update_env(_data, env_vars::TRACE, _sel.perfetto);
+                update_env(_data, env_vars::USE_ROCPD, _sel.rocpd);
+                update_env(_data, env_vars::PROFILE, _sel.profile());
+                update_env(_data, env_vars::JSON_OUTPUT, _sel.json);
+                update_env(_data, env_vars::TEXT_OUTPUT, _sel.text);
+                update_env(_data, env_vars::COUT_OUTPUT, false);
             });
 
         _data.reg.processed_environs.emplace("output_format");
