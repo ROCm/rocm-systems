@@ -414,22 +414,32 @@ def has_gpu_od_interface(bdf):
     Returns:
         bool: True if gpu_od directory exists for this GPU
     """
-    # Add amdsmi_cli to path for import.
-    # Installed location: {rocm_prefix}/libexec/amdsmi_cli/
-    # Source/dev location: {project_root}/amdsmi_cli/ (3 dirs up from common/)
-    _rocm_prefix = os.path.dirname(os.path.dirname(amdsmi_path))
-    cli_path = os.path.join(_rocm_prefix, "libexec", "amdsmi_cli")
-    if not os.path.isdir(cli_path):
-        # Fall back to source tree layout
-        cli_path = os.path.normpath(
-            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "amdsmi_cli")
+    # TODO(amdsmi_team): Refactor to create an amdsmi_get_gpu_fan_speed_range() API
+    #                    amdsmi_get_gpu_fan_speed_range(
+    #                                           amdsmi_processor_handle processor_handle,
+    #                                           uint32_t sensor_ind,
+    #                                           amdsmi_range_t* fan_speed_range)
+    # and begin deprecation of amdsmi_get_gpu_fan_speed_max(). This will allow us
+    # to remove the dependency on amdsmi_helpers from this common module.
+    # Exposing non-public SYSFS API interfaces in the CLI (and in general)
+    # is a bad design pattern and needs to be addressed in the future.
+    amdsmi_cli_path = os.path.normpath(
+        os.path.join(amdsmi_path, "..", "..", "libexec", "amdsmi_cli")
+    )
+    if not os.path.exists(amdsmi_cli_path):
+        raise FileNotFoundError(
+            f'amdsmi_cli path "{amdsmi_cli_path}" does not exist. '
+            f"Ensure the AMD-SMI CLI is installed, or set AMDSMI_PATH correctly."
         )
-    if cli_path not in sys.path:
-        sys.path.insert(0, cli_path)
-
-    from amdsmi_helpers import AMDSMIHelpers
-
-    has_gpu_od, _ = AMDSMIHelpers.detect_gpu_od(bdf)
+    if amdsmi_cli_path not in sys.path:
+        sys.path.append(amdsmi_cli_path)
+    try:
+        import amdsmi_helpers  # type: ignore
+    except ImportError as e:
+        raise ImportError(
+            f'Could not import the "amdsmi_helpers" module from "{amdsmi_cli_path}"'
+        ) from e
+    has_gpu_od, _ = amdsmi_helpers.AMDSMIHelpers.detect_gpu_od(bdf)
     return has_gpu_od
 
 

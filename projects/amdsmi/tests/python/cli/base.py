@@ -108,6 +108,8 @@ class TestCliBase(unittest.TestCase):
             "--iterations",
         ]
 
+        return
+
     def setUp(self):
         # Called before each test by unittest framework
         return
@@ -213,6 +215,9 @@ class TestCliBase(unittest.TestCase):
                             elif sub_arg == "PARTITION":  # arg --memory-partition
                                 for memory_partition_mode in self.memory_partition_modes:
                                     options.append(f"{items[item_index]} {memory_partition_mode}")
+                            elif sub_arg == "MODE":  # arg --compute-partition-mem-alloc-mode
+                                for mem_alloc_mode in ["CAPPING", "ALL"]:
+                                    options.append(f"{items[item_index]} {mem_alloc_mode}")
                             elif sub_arg == "WATTS":  # arg --power-cap
                                 for power_type in self.power_types:
                                     options.append(f"--power-cap {{min_power}} {power_type}")
@@ -239,6 +244,7 @@ class TestCliBase(unittest.TestCase):
                             ):  # arg --ptl-status
                                 options.append(f"{items[item_index]} 0")
                                 options.append(f"{items[item_index]} 1")
+                                pass
                             elif sub_arg == "FRMT1,FRMT2":  # arg --ptl-format
                                 for fmt1 in self.ptl_formats:
                                     for fmt2 in self.ptl_formats:
@@ -330,16 +336,23 @@ class TestCliBase(unittest.TestCase):
                                 )
                             )
 
-        # Calculate and substitute in dependent values; remove invalid cmds
+        # Calculate and substitute in dependent values
+        # Removes cmds that are invalid
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
                 # Find gpu index and mark when gpu=0
+                gpu_0 = False
                 try:
                     i = items.index("--gpu")
                     gpu = items[i + 1]
-                    gpu_index = int(gpu) if gpu.isdigit() else 0
+                    if gpu.isdigit():
+                        gpu_index = int(gpu)
+                        if gpu_index == 0:
+                            gpu_0 = True
+                    else:
+                        gpu_index = 0
                 except ValueError:
                     gpu_index = 0
 
@@ -358,6 +371,7 @@ class TestCliBase(unittest.TestCase):
                     or nameStr == "{csv}"
                     or "csv_file" in nameStr
                 ):
+                    # For adding file options
                     if nameStr == "{json}":
                         cmd = cmd.replace(nameStr, "--json", 1)
                     elif nameStr == "{json_file}":
@@ -382,6 +396,7 @@ class TestCliBase(unittest.TestCase):
                         print(f"Error: could not replace json/csv options, {nameStr}  cmd={cmd}")
                         cmd = ""
                 elif nameStr == "{watch_time}" or nameStr == "{watch_iterations}":
+                    # For adding watch options
                     if nameStr == "{watch_time}":
                         cmd = cmd.replace(nameStr, "--watch 1 --watch_time 2", 1)
                     else:
@@ -389,6 +404,8 @@ class TestCliBase(unittest.TestCase):
                 elif (
                     nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}"
                 ):
+                    # For setting --power-cap
+                    # Find power_type
                     for power_type in self.power_types:
                         if power_type in cmd:
                             power_type = self.static_data["gpu_data"][gpu_index]["limit"][
@@ -426,33 +443,25 @@ class TestCliBase(unittest.TestCase):
                 elif "clk_limit" in nameStr:
                     clock = self.metric_data["gpu_data"][gpu_index]["clock"]
                     if nameStr == "{clk_limit_sclk_min}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = (
-                            "SCLK",
-                            "socclk_0",
-                            "MIN",
-                            "min_clk",
-                        )
+                        clk_type = "SCLK"
+                        clk_type_name = "socclk_0"
+                        limit_type = "MIN"
+                        clk_limit_name = "min_clk"
                     elif nameStr == "{clk_limit_sclk_max}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = (
-                            "SCLK",
-                            "socclk_0",
-                            "MAX",
-                            "max_clk",
-                        )
+                        clk_type = "SCLK"
+                        clk_type_name = "socclk_0"
+                        limit_type = "MAX"
+                        clk_limit_name = "max_clk"
                     elif nameStr == "{clk_limit_mclk_min}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = (
-                            "MCLK",
-                            "mem_0",
-                            "MAX",
-                            "min_clk",
-                        )
+                        clk_type = "MCLK"
+                        clk_type_name = "mem_0"
+                        limit_type = "MAX"
+                        clk_limit_name = "min_clk"
                     elif nameStr == "{clk_limit_mclk_max}":
-                        clk_type, clk_type_name, limit_type, clk_limit_name = (
-                            "MCLK",
-                            "mem_0",
-                            "MIN",
-                            "max_clk",
-                        )
+                        clk_type = "MCLK"
+                        clk_type_name = "mem_0"
+                        limit_type = "MIN"
+                        clk_limit_name = "max_clk"
                     clk_type_limit_name = clock[clk_type_name][clk_limit_name]
                     if type(clk_type_limit_name) is dict:
                         value = clk_type_limit_name["value"]
@@ -462,16 +471,18 @@ class TestCliBase(unittest.TestCase):
                 elif "clk_level" in nameStr:
                     clock = self.static_data["gpu_data"][gpu_index]["clock"]
                     value = -1
-                    clk_type = ""
-                    clk_type_name = ""
                     if nameStr == "{clk_level_sclk}":
-                        clk_type, clk_type_name = "SCLK", "sys"
+                        clk_type = "SCLK"
+                        clk_type_name = "sys"
                     elif nameStr == "{clk_level_mclk}":
-                        clk_type, clk_type_name = "MCLK", "mem"
+                        clk_type = "MCLK"
+                        clk_type_name = "mem"
                     elif nameStr == "{clk_level_fclk}":
-                        clk_type, clk_type_name = "FCLK", "df"
+                        clk_type = "FCLK"
+                        clk_type_name = "df"
                     elif nameStr == "{clk_level_socclk}":
-                        clk_type, clk_type_name = "SOCCLK", "soc"
+                        clk_type = "SOCCLK"
+                        clk_type_name = "soc"
                     elif nameStr == "{clk_level_pcie}":
                         bus = self.static_data["gpu_data"][gpu_index]["bus"]
                         clk_type = "PCIE"
@@ -481,11 +492,14 @@ class TestCliBase(unittest.TestCase):
                             if value > 0:
                                 value = 0
                     if clk_type != "PCIE" and value < 0:
-                        clk_entry = clock[clk_type_name]
-                        if type(clk_entry) is dict:
-                            current_level = clk_entry["current_level"]
-                            freq_levels = clk_entry["frequency_levels"]
-                            value = len(freq_levels) - 1 if current_level == 0 else 0
+                        clk_type_name = clock[clk_type_name]
+                        if type(clk_type_name) is dict:
+                            current_level = clk_type_name["current_level"]
+                            freq_levels = clk_type_name["frequency_levels"]
+                            if current_level == 0:
+                                value = len(freq_levels) - 1
+                            else:
+                                value = 0
                     if value >= 0:
                         cmd = cmd.replace(nameStr, f"{clk_type} {value}", 1)
                     else:
@@ -496,7 +510,10 @@ class TestCliBase(unittest.TestCase):
                         num_supported = int(soc_pstate["num_supported"])
                         if num_supported > 0:
                             current = int(soc_pstate["current_id"])
-                            num = num_supported - 1 if current == 0 else 0
+                            if current == 0:
+                                num = num_supported - 1
+                            else:
+                                num = 0
                             cmd = cmd.replace(nameStr, f"{num}", 1)
                         else:
                             cmd = ""
@@ -508,7 +525,10 @@ class TestCliBase(unittest.TestCase):
                         num_supported = int(xgmi_plpd["num_supported"])
                         if num_supported > 0:
                             current = int(xgmi_plpd["current_id"])
-                            num = num_supported - 1 if current == 0 else 0
+                            if current == 0:
+                                num = num_supported - 1
+                            else:
+                                num = 0
                             cmd = cmd.replace(nameStr, f"{num}", 1)
                         else:
                             cmd = ""
@@ -526,6 +546,7 @@ class TestCliBase(unittest.TestCase):
                 cmd, cond = cmd_cond
                 items = cmd.split()
 
+                # Find the first sub_arg
                 if not found_sub_arg and len(items) >= 3:
                     sub_arg = items[2]
                     for mod in file_mods + ["--gpu", "--loglevel"]:
@@ -534,35 +555,43 @@ class TestCliBase(unittest.TestCase):
                             break
                     found_sub_arg = sub_arg
 
+                # No explicit gpu infers a gpu=0
                 gpu_index = "0"
                 if "--gpu" in cmd:
                     try:
                         i = items.index("--gpu")
                         gpu_index = items[i + 1]
-                    except ValueError:
+                    except ValueError as e:
+                        # condition where --gpu is not in the cmd
+                        # will get default gpu_index=0
                         pass
 
+                # Remove all --gpu for all sub_args except for the first sub_arg
                 if cmd and found_sub_arg:
                     sub_arg = items[2]
                     if sub_arg != found_sub_arg:
                         if "--gpu" in cmd:
                             cmd = ""
 
+                # Remove all file and watch modifiers except for gpu 0
                 if cmd and gpu_index != "0":
                     for mod in file_mods + watch_mods:
                         if mod in cmd:
                             cmd = ""
                             break
 
+                # Remove all --file and --watch combinations
                 if cmd and "--file" in cmd and "--watch" in cmd:
                     cmd = ""
 
+                # Remove all --watch mod for all sub_args except for the first sub_arg
                 if cmd and found_sub_arg and len(items) >= 3:
                     sub_arg = items[2]
                     if sub_arg != found_sub_arg:
                         if "--watch" in cmd:
                             cmd = ""
 
+                # Remove all file mod for all sub_args except for the first sub_arg
                 if cmd and found_sub_arg and len(items) >= 3:
                     sub_arg = items[2]
                     if sub_arg != found_sub_arg:
@@ -573,13 +602,15 @@ class TestCliBase(unittest.TestCase):
 
                 cmds[index] = (cmd, cond)
 
-        # Remove empty entries and normalise whitespace
+        # Remove empty (cmd,cond) arguments
         cmds = [cmd_cond for cmd_cond in cmds if cmd_cond[0] != ""]
+
+        # Remove extra spaces between arguments
         for index, cmd_cond in enumerate(cmds):
             cmd, cond = cmd_cond
-            cmd = " ".join(cmd.split()).strip()
+            cmd = cmd.split()
+            cmd = " ".join(cmd).strip()
             cmds[index] = (cmd, cond)
-
         if self.Debug:
             print(f"cmds: {'*' * 80}")
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
@@ -587,7 +618,12 @@ class TestCliBase(unittest.TestCase):
 
     def RunCmds(self, cmds):
         errors = []
-        msg_len = max((len(cmd) for cmd, _ in cmds), default=0) + 2
+        msg_len = 0
+        for cmd, cond in cmds:
+            num = len(cmd)
+            if num > msg_len:
+                msg_len = num
+        msg_len += 2
         for cmd, cond in cmds:
             if self.Debug or self.PrintCmdsOnly:
                 print(f"cmd={cmd}")
@@ -598,23 +634,30 @@ class TestCliBase(unittest.TestCase):
             if rc and std_err:
                 items = std_err.split()
                 if "amdsmi_exception" in std_err:
+                    # error code from amdsmi library exception
                     for index, item in enumerate(items):
                         if item == "Error":
-                            error_code = items[index + 4]
+                            error_code_str = items[index + 4]
+                            error_code = error_code_str
+                            # break
                 else:
+                    # error code from amd-smi CLI
                     error_code = items[-1]
+                    # Check for parse error 'choice'
                     if "CRITICAL" in error_code:
                         error_code = "Bad loglevel"
 
             msg = f"{cmd:{msg_len}s}:"
             if "--file" in cmd:
                 if not os.path.exists(self.tmp_filename):
-                    errors.append(f"{msg} Failure: File {self.tmp_filename} does not exist")
+                    _msg = f"{msg} Failure: File {self.tmp_filename} does not exist"
+                    errors.append(_msg)
                 else:
                     with open(self.tmp_filename, "r") as fin:
                         std_out = fin.read()
                     if not len(std_out):
-                        errors.append(f"{msg} Failure: File {self.tmp_filename} was empty")
+                        _msg = f"{msg} Failure: File {self.tmp_filename} was empty"
+                        errors.append(_msg)
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
@@ -625,7 +668,10 @@ class TestCliBase(unittest.TestCase):
                 msg += f" Failure: Received PASS (0), expected FAIL (!0)"
                 errors.append(msg)
             else:
-                expected = "PASS" if not rc else "FAIL"
+                if not rc:
+                    expected = "PASS"
+                else:
+                    expected = "FAIL"
                 msg += f" Success: Received and Expected {expected} ({error_code})"
 
             self.common.print(f"{self.tab}{msg}")
@@ -634,7 +680,7 @@ class TestCliBase(unittest.TestCase):
                 print(f"{self.tab}error_code={error_code}")
                 print(f"{self.tab}std_out={std_out}")
                 print(f"{self.tab}std_err={std_err}")
-
-        if errors:
+        if len(errors):
             msg = f"\n{self.tab}".join(errors)
             self.fail(f"Fail:\n{self.tab}{msg}")
+        return

@@ -234,6 +234,9 @@ class TestCliCommon(TestCliBase):
             ("amd-smi set --memory-partition", self.FAIL),
             ("amd-smi set --memory-partition NPS3", self.FAIL),
             ("amd-smi set --memory-partition INVALID", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode HALF", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode INVALID", self.FAIL),
             ("amd-smi set --process-isolation", self.FAIL),
             ("amd-smi set --process-isolation 2", self.FAIL),
             ("amd-smi set --clk-limit", self.FAIL),
@@ -262,6 +265,10 @@ class TestCliCommon(TestCliBase):
             ("amd-smi ras --cper --severity INVALID", self.FAIL),
             ("amd-smi ras --afid", self.FAIL),
             ("amd-smi ras --afid INVALID", self.FAIL),
+            # --afid --folder requires an existing directory of CPER records
+            ("amd-smi ras --afid --folder /nonexistent_amdsmi_pr4812_dir", self.FAIL),
+            # --decode is not a valid flag
+            ("amd-smi ras --decode", self.FAIL),
             # Test invalid watch order
             ("amd-smi monitor --interval 2 --watch 1", self.FAIL),
             ("amd-smi monitor --watch_time 2 --watch 1", self.FAIL),

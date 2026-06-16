@@ -306,6 +306,21 @@ class TestCliGpu(TestCliBase):
                     (f"amd-smi set --memory-partition {memory_partition} --gpu {index}", self.PASS)
                 )
 
+            # set --compute-partition-mem-alloc-mode defaults
+            try:
+                mem_alloc_mode = self.static_data["gpu_data"][index]["partition"][
+                    "compute_partition_mem_alloc_mode"
+                ]
+            except (KeyError, TypeError):
+                mem_alloc_mode = "N/A"
+            if mem_alloc_mode not in ("N/A", "INVALID"):
+                cmds.append(
+                    (
+                        f"amd-smi set --compute-partition-mem-alloc-mode {mem_alloc_mode} --gpu {index}",
+                        self.PASS,
+                    )
+                )
+
             # set --power-cap defaults
             for power_type in self.power_types:
                 socket_power_limit = self.static_data["gpu_data"][index]["limit"][power_type][
