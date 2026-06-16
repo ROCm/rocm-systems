@@ -5,6 +5,7 @@
 
 #include "library/pmc/common/types.hpp"
 
+#include <concepts>
 #include <cstddef>
 #include <memory>
 #include <utility>
@@ -12,6 +13,42 @@
 
 namespace rocprofsys::pmc::device_providers::amd_smi
 {
+
+/**
+ * @brief Concept that a BackendFactory template argument must satisfy.
+ *
+ * Enumerates every expression @c provider<F> evaluates on the factory and on
+ * the session it produces, so a mismatch is caught at the template boundary
+ * rather than deep inside the provider body.
+ *
+ * Checked expressions:
+ *  - @c F::backend_t          — the session type
+ *  - @c F::create_backend()   — returns @c shared_ptr<backend_t>
+ *  - @c sess.initialize()     — lifecycle init (may throw)
+ *  - @c sess.shutdown()       — lifecycle teardown
+ *  - @c sess.get_lib_version() — version query used in constructor
+ *  - @c sess.enumerate_gpu_handles() — GPU handle enumeration
+ *  - @c sess.enumerate_nic_handles() — NIC handle enumeration (AINIC builds only)
+ */
+template <typename F>
+concept backend_factory_contract =
+    requires { typename F::backend_t; } &&
+    requires {
+        { F::create_backend() } -> std::same_as<std::shared_ptr<typename F::backend_t>>;
+    } &&
+    requires(typename F::backend_t sess) {
+        { sess.initialize() };
+        { sess.shutdown() };
+        { sess.get_lib_version() };
+        { sess.enumerate_gpu_handles() };
+    }
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    &&
+    requires(typename F::backend_t sess) {
+        { sess.enumerate_nic_handles() };
+    }
+#endif
+;
 
 /**
  * @brief AMD SMI device provider for initialization and device enumeration.
@@ -26,7 +63,7 @@ namespace rocprofsys::pmc::device_providers::amd_smi
  *
  * @tparam BackendFactory  Provides @c backend_t and @c create_backend().
  */
-template <typename BackendFactory>
+template <backend_factory_contract BackendFactory>
 class provider
 {
     std::shared_ptr<typename BackendFactory::backend_t> m_backend_api;
@@ -153,7 +190,7 @@ public:
 /**
  * @brief Factory for creating AMD SMI provider instances.
  */
-template <typename BackendFactory>
+template <backend_factory_contract BackendFactory>
 struct provider_factory
 {
     using provider_t = provider<BackendFactory>;
