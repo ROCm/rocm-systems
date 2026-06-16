@@ -172,6 +172,15 @@ The following table lists the supported options:
       is saved in a file with the name
       ``1_file____rocm-debug-agent_rocm-debug-agent-test_offset_14309_size_31336``.
 
+  * - ``-c``, ``--load-all-code-objects``
+    - Loads all code objects as soon as they're loaded by the runtime.
+
+  * - ``-z``, ``--lazy``
+    - Delays inspecting the content of all loaded code objects until after an
+      exception is reported. Note that the application mustn't free the code
+      objects' memory while they're loaded on the device. This option isn't
+      compatible with ``-c``.
+
   * - ``-o <file-path>``, ``--output=<file-path>``
     - Saves the output produced by the ROCdebug-agent in the specified file. By
       default, the output is redirected to ``stderr``.
@@ -187,7 +196,7 @@ The following table lists the supported options:
       none, info, warning, or error. The default log level is none.
 
   * - ``-h``, ``--help``
-    - Displays the usage and aborts the process.
+    - Displays a usage message and aborts the process.
 
 Known limitations
 ------------------
