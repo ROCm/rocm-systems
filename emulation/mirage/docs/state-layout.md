@@ -14,7 +14,6 @@ files directly.
 | Config            | `MIRAGE_CONFIG`  | `$XDG_CONFIG_HOME`  | `mirage/` (profiles, agents, topologies) |
 | Sessions (runtime)| `MIRAGE_RUNTIME` | `$XDG_RUNTIME_DIR`  | `mirage/session/<id>/...`    |
 | Persistent state  | `MIRAGE_STATE`   | `$XDG_STATE_HOME`   | `mirage/`                    |
-| Cache             | `MIRAGE_CACHE`   | `$XDG_CACHE_HOME`   | `mirage/` (emulator runtime assets) |
 
 Each `MIRAGE_*` variable, when set, fully overrides the corresponding
 directory; otherwise the XDG variable (or its standard default) is used.
@@ -214,7 +213,7 @@ entries for full detail.
   therefore racy; use `--keep` if you need its logs afterward.
 * `mirage session stop` removes the entire `<session>/` directory after the
   host exits.
-* `mirage state purge` removes the runtime, state, and cache directories (and,
+* `mirage state purge` removes the runtime and state directories (and,
   with `--all`, the config directory too).
 * `$XDG_RUNTIME_DIR` is cleared on logout, so leaked sessions do not survive
   across reboots.

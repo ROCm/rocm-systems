@@ -13,7 +13,6 @@
 //! |-----------------------|-------------------------|-------------------------------|
 //! | Profiles              | `$XDG_CONFIG_HOME`      | `mirage/profile/<name>.json`  |
 //! | Sessions (runtime)    | `$XDG_RUNTIME_DIR`      | `mirage/session/<id>/...`     |
-//! | Cache                 | `$XDG_CACHE_HOME`       | `mirage/`                     |
 //! | Persistent state      | `$XDG_STATE_HOME`       | `mirage/`                     |
 //!
 //! Two environment variables provide direct overrides for the
@@ -23,8 +22,6 @@
 //!   be `$XDG_CONFIG_HOME/mirage`).
 //! * `$MIRAGE_STATE` — overrides the mirage state dir (would otherwise
 //!   be `$XDG_STATE_HOME/mirage`).
-//! * `$MIRAGE_CACHE` — overrides the mirage cache dir (would otherwise
-//!   be `$XDG_CACHE_HOME/mirage`).
 //! * `$MIRAGE_RUNTIME` — overrides the mirage runtime dir (would
 //!   otherwise be `$XDG_RUNTIME_DIR/mirage`); session files live under
 //!   `<mirage_runtime_dir>/session/<id>/...`.
@@ -117,19 +114,6 @@ pub fn xdg_state_home() -> PathBuf {
     home_dir().join(".local").join("state")
 }
 
-/// Returns `$XDG_CACHE_HOME` (or `$HOME/.cache` if unset).
-pub fn xdg_cache_home() -> PathBuf {
-    if let Some(root) = test_root() {
-        return root.join("cache");
-    }
-    if let Ok(p) = std::env::var("XDG_CACHE_HOME")
-        && !p.is_empty()
-    {
-        return PathBuf::from(p);
-    }
-    home_dir().join(".cache")
-}
-
 fn home_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
@@ -162,20 +146,6 @@ pub fn mirage_state_dir() -> PathBuf {
         return PathBuf::from(p);
     }
     xdg_state_home().join(APP_NAMESPACE)
-}
-
-/// Returns the mirage cache directory.
-///
-/// Honors `$MIRAGE_CACHE` as a direct override; otherwise returns
-/// `$XDG_CACHE_HOME/mirage`.
-pub fn mirage_cache_dir() -> PathBuf {
-    if test_root().is_none()
-        && let Ok(p) = std::env::var("MIRAGE_CACHE")
-        && !p.is_empty()
-    {
-        return PathBuf::from(p);
-    }
-    xdg_cache_home().join(APP_NAMESPACE)
 }
 
 /// Returns the mirage runtime directory.
@@ -373,7 +343,6 @@ impl NodeLayout {
 /// <override>/config/
 /// <override>/runtime/
 /// <override>/state/
-/// <override>/cache/
 /// ```
 ///
 /// This mutates a process-wide override rather than environment

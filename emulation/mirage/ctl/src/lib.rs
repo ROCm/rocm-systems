@@ -488,7 +488,7 @@ pub enum StateCmd {
     /// Completely stop and purge all mirage processes and state.
     ///
     /// Stops every running session and then removes the mirage
-    /// runtime, state, and cache directories. The config directory
+    /// runtime and state directories. The config directory
     /// (profiles, topologies) is left alone unless `--all` is passed.
     Purge {
         /// Don't prompt for confirmation.
@@ -593,10 +593,10 @@ pub async fn dispatch<C: MirageCtl + 'static>(
     ctl: C,
     json: bool,
 ) -> anyhow::Result<ExitCode> {
-    // Best-effort: write any missing builtin agents/topologies and
-    // extract the rocjitsu runtime assets on startup so they're always
-    // available under <MIRAGE_CONFIG>/ and <MIRAGE_CACHE>/. Errors here
-    // are non-fatal; the user can recover via `mirage state builtins`.
+    // Best-effort: write any missing builtin agents/topologies on
+    // startup so they're always available under <MIRAGE_CONFIG>/. Errors
+    // here are non-fatal; the user can recover via `mirage state
+    // builtins`.
     ensure_builtins_present();
     let ctl = Arc::new(ctl);
     match cmd {
@@ -1969,7 +1969,7 @@ async fn state_cmd<C: MirageCtl + 'static>(
             let prompt = if all {
                 "purge ALL mirage state, including profiles and topologies?"
             } else {
-                "purge all mirage runtime/state/cache and stop all sessions?"
+                "purge all mirage runtime/state and stop all sessions?"
             };
             if !force && !confirm(prompt)? {
                 return Ok(ExitCode::from(0));
@@ -1996,7 +1996,6 @@ fn purge<C: MirageCtl + ?Sized>(ctl: &C, all: bool) -> anyhow::Result<()> {
     let mut targets = vec![
         mirage_core::paths::mirage_runtime_dir(),
         mirage_core::paths::mirage_state_dir(),
-        mirage_core::paths::mirage_cache_dir(),
     ];
     if all {
         targets.push(mirage_core::paths::mirage_config_dir());
@@ -2031,7 +2030,6 @@ fn print_paths(json: bool) {
         "config": mirage_core::paths::mirage_config_dir(),
         "runtime": mirage_core::paths::mirage_runtime_dir(),
         "state": mirage_core::paths::mirage_state_dir(),
-        "cache": mirage_core::paths::mirage_cache_dir(),
         "profiles": mirage_core::paths::profile_root(),
         "sessions": mirage_core::paths::session_root(),
     });
@@ -2049,10 +2047,6 @@ fn print_paths(json: bool) {
         println!(
             "state:    {}",
             mirage_core::paths::mirage_state_dir().display()
-        );
-        println!(
-            "cache:    {}",
-            mirage_core::paths::mirage_cache_dir().display()
         );
         println!("profiles: {}", mirage_core::paths::profile_root().display());
         println!("sessions: {}", mirage_core::paths::session_root().display());

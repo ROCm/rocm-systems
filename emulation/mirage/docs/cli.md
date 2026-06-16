@@ -217,8 +217,8 @@ mirage state purge [-f|--force] [--all]
 
 * mirage writes any *missing* builtins on every run. `state builtins`
   additionally **overwrites** existing builtins (useful after upgrading).
-* `state purge` stops every running session and removes the runtime, state,
-  and cache directories. The config directory (profiles, topologies, agents)
+* `state purge` stops every running session and removes the runtime and state
+  directories. The config directory (profiles, topologies, agents)
   is left alone unless `--all` is given.
 
 ## `mirage paths`
@@ -231,7 +231,6 @@ $ mirage paths
 config:   /home/me/.config/mirage
 runtime:  /run/user/1000/mirage
 state:    /home/me/.local/state/mirage
-cache:    /home/me/.cache/mirage
 profiles: /home/me/.config/mirage/profile
 sessions: /run/user/1000/mirage/session
 ```
@@ -278,9 +277,8 @@ Invocations that name a subcommand, or that have no `--` separator (so
 | `MIRAGE_CONFIG`              | Override the config dir (else `$XDG_CONFIG_HOME/mirage`).         |
 | `MIRAGE_RUNTIME`             | Override the runtime/session dir (else `$XDG_RUNTIME_DIR/mirage`). |
 | `MIRAGE_STATE`               | Override the state dir (else `$XDG_STATE_HOME/mirage`).           |
-| `MIRAGE_CACHE`               | Override the cache dir (else `$XDG_CACHE_HOME/mirage`).           |
 | `MIRAGE_WEBUI_ADDR`          | Default bind address for `mirage webui`.                         |
-| `XDG_CONFIG_HOME` / `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` / `XDG_CACHE_HOME` | Standard XDG base directories used when the `MIRAGE_*` overrides are unset. |
+| `XDG_CONFIG_HOME` / `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` | Standard XDG base directories used when the `MIRAGE_*` overrides are unset. |
 
 rocjitsu discovery additionally honours `ROCM_HOME` and the ROCm SDK
 install root reported by `rocm-sdk path --root` (see

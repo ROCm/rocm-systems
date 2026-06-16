@@ -47,8 +47,8 @@ pub const ROCR_LIB: &str = "libhsa-runtime64.so";
 /// The COMGR transpiler, expected alongside [`LIB_NAME`].
 pub const COMGR_LIB: &str = "libamd_comgr.so";
 
-/// Subdirectory under the mirage cache / `./emulator/` where a
-/// HotSwap install may be dropped.
+/// Subdirectory name used to namespace a HotSwap install (e.g. under an
+/// `./emulator/` tree).
 pub const ASSET_SUBDIR: &str = "hotswap";
 
 /// In-container mount point for the HotSwap runtime tree (lib,
@@ -57,11 +57,6 @@ pub const ASSET_SUBDIR: &str = "hotswap";
 /// the injected `LD_PRELOAD`/`HOTSWAP_HOME`/`PYTHONPATH` paths resolve
 /// inside each node's container.
 pub const CONTAINER_HOTSWAP_DIR: &str = "/mnt/mirage/emulator/hotswap";
-
-/// In-container mount point for HotSwap's read-write cache tree
-/// (translation + per-framework caches), bind-mounted from the host
-/// cache dir so artifacts persist across runs.
-pub const CONTAINER_HOTSWAP_CACHE: &str = "/mnt/mirage/cache/hotswap";
 
 /// Human-facing name used in guidance messages.
 pub const DISPLAY_NAME: &str = "HotSwap";
@@ -221,29 +216,12 @@ fn physical_target_gfx() -> String {
         .unwrap_or_default()
 }
 
-/// Scratch root for HotSwap's translation/framework caches, under the
-/// mirage cache dir. Mirrors env_contract.py's `branch_root`.
-fn hotswap_branch_root() -> PathBuf {
-    mirage_core::paths::mirage_cache_dir().join("hotswap")
-}
-
-/// Cache subdirectories created under [`hotswap_branch_root`].
-const HOTSWAP_CACHE_SUBDIRS: &[&str] = &[
-    "hotswap_translation_cache",
-    "triton_cache",
-    "torchinductor_cache",
-    "torch_extensions",
-    "pytorch_kernel_cache",
-    "miopen_user_db",
-    "miopen_cache",
-];
-
 /// Build the HotSwap env contract for a workload, mirroring
 /// env_contract.py's `build_hotswap_env`: the `HSA_HOTSWAP_*` variables,
-/// the per-framework cache redirects, the python `sitecustomize` on
-/// `PYTHONPATH`, and the source-arch overrides selected by the adapter
-/// policy. Returns the `LD_PRELOAD` value (patched ROCR + intercept)
-/// separately so the host can merge it with any user-supplied preload.
+/// the python `sitecustomize` on `PYTHONPATH`, and the source-arch
+/// overrides selected by the adapter policy. Returns the `LD_PRELOAD`
+/// value (patched ROCR + intercept) separately so the host can merge it
+/// with any user-supplied preload.
 fn build_hotswap_env(
     dir: &Path,
     containerized: bool,
@@ -265,36 +243,22 @@ fn build_hotswap_env(
     let source_arch = source_arch_of(&source_target).to_string();
     let target_gfx = physical_target_gfx();
 
-    let root = hotswap_branch_root();
-    let _ = ensure_cache_dirs(&root);
-    let host_cache_root = std::fs::canonicalize(&root).unwrap_or(root);
-
     // Establish host→workload path mappings. For a containerised session
     // every host tree HotSwap relies on is bind-mounted under
     // `/mnt/mirage` and the workload must reference the in-container path;
     // otherwise it sees the host paths directly. The install root is
-    // mounted read-only (immutable runtime libs/tools), the cache root
-    // read-write so framework caches persist.
+    // mounted read-only (immutable runtime libs/tools).
     let mut mounts: Vec<FileMount> = Vec::new();
     let mut mappings: Vec<(PathBuf, PathBuf)> = Vec::new();
-    if containerized {
-        if let Some(home) = host_dir.parent() {
-            mounts.push(FileMount {
-                host_path: home.display().to_string(),
-                container_path: CONTAINER_HOTSWAP_DIR.to_string(),
-                read_only: true,
-            });
-            mappings.push((home.to_path_buf(), PathBuf::from(CONTAINER_HOTSWAP_DIR)));
-        }
+    if containerized
+        && let Some(home) = host_dir.parent()
+    {
         mounts.push(FileMount {
-            host_path: host_cache_root.display().to_string(),
-            container_path: CONTAINER_HOTSWAP_CACHE.to_string(),
-            read_only: false,
+            host_path: home.display().to_string(),
+            container_path: CONTAINER_HOTSWAP_DIR.to_string(),
+            read_only: true,
         });
-        mappings.push((
-            host_cache_root.clone(),
-            PathBuf::from(CONTAINER_HOTSWAP_CACHE),
-        ));
+        mappings.push((home.to_path_buf(), PathBuf::from(CONTAINER_HOTSWAP_DIR)));
     }
     // Rewrite a host path to the path the workload sees: any path under a
     // mounted host root maps to its container target; everything else is
@@ -316,13 +280,7 @@ fn build_hotswap_env(
     let intercept = dir.join(LIB_NAME);
     let ld_preload = format!("{}:{}", libhsa.display(), intercept.display());
 
-    let cache = |name: &str| remap(&host_cache_root.join(name)).display().to_string();
-
     let mut env: BTreeMap<String, String> = BTreeMap::new();
-    env.insert(
-        "HSA_HOTSWAP_CACHE_DIR".into(),
-        cache("hotswap_translation_cache"),
-    );
     env.insert("HSA_HOTSWAP_CACHE_DEBUG".into(), "1".into());
     env.insert("HSA_HOTSWAP_ISA_OVERRIDE".into(), target_gfx);
     env.insert("HSA_HOTSWAP_IR_RAISER".into(), "1".into());
@@ -334,18 +292,6 @@ fn build_hotswap_env(
     // Force-compile framework caches so a swapped target never reuses a
     // host-targeted artifact.
     env.insert("TRITON_ALWAYS_COMPILE".into(), "1".into());
-    env.insert("TRITON_CACHE_DIR".into(), cache("triton_cache"));
-    env.insert(
-        "TORCHINDUCTOR_CACHE_DIR".into(),
-        cache("torchinductor_cache"),
-    );
-    env.insert("TORCH_EXTENSIONS_DIR".into(), cache("torch_extensions"));
-    env.insert(
-        "PYTORCH_KERNEL_CACHE_PATH".into(),
-        cache("pytorch_kernel_cache"),
-    );
-    env.insert("MIOPEN_USER_DB_PATH".into(), cache("miopen_user_db"));
-    env.insert("MIOPEN_CUSTOM_CACHE_DIR".into(), cache("miopen_cache"));
 
     // The patched ROCR + COMGR shadow the system copies via the loader
     // search path. The host launcher inherits a minimal env (no
@@ -392,14 +338,6 @@ fn build_hotswap_env(
     }
 
     (ld_preload, env, mounts)
-}
-
-/// Best-effort creation of the HotSwap cache subdirectories.
-fn ensure_cache_dirs(root: &Path) -> std::io::Result<()> {
-    for name in HOTSWAP_CACHE_SUBDIRS {
-        std::fs::create_dir_all(root.join(name))?;
-    }
-    Ok(())
 }
 
 /// Describe the hotswap emulator backend for the registry. Owned by

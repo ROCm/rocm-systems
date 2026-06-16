@@ -49,7 +49,7 @@ adds or removes it from `mirage emulators`.
                 │ trait MirageCtl  (read/write on-disk state)
                 ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ Filesystem under the mirage config / runtime / cache directories │
+│ Filesystem under the mirage config / runtime / state directories │
 │  profiles, agents, topologies (config)                           │
 │  session/<id>/...           (runtime)                            │
 └───────────────▲──────────────────────────────────────────────────┘

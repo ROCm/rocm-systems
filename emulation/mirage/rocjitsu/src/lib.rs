@@ -172,32 +172,34 @@ impl EmulatorBackend for Rocjitsu {
 
         // For a containerised session the workload runs inside a node
         // container that does *not* share the host filesystem, so the
-        // rocjitsu runtime assets (the KMD interposer and the host-side
-        // library it may dlopen) must be bind-mounted in. The per-node
-        // host *inside* the container re-resolves this injection against
-        // its own environment, where `MIRAGE_CACHE=/mnt/mirage/cache`, so
-        // it looks for the assets under `<cache>/emulator/rocjitsu/` (see
-        // [`asset_dir`]). We mount each host asset to exactly that
-        // location so the in-container resolution finds them with no extra
-        // configuration. Without these mounts the in-container host fails
-        // to locate the KMD library and the exec can never start.
+        // rocjitsu libraries (the KMD interposer and the host-side library
+        // it may dlopen) must be bind-mounted in. The per-node host
+        // *inside* the container re-resolves this injection against its own
+        // environment, where its discovery searches `CONTAINER_LIB_DIR`
+        // (`/mnt/mirage/lib`). We bind-mount each host library there,
+        // preserving its file name, so the in-container resolution finds it
+        // with no extra configuration. Without these mounts the
+        // in-container host fails to locate the KMD library and the exec
+        // can never start.
         let mounts = if profile.containerize.is_some() {
-            // Mirrors `mirage_host`'s `CONTAINER_CACHE_DIR` +
-            // `<emulator>/<ASSET_SUBDIR>`; kept as a literal here to avoid
-            // a host→emulator crate dependency.
-            let container_asset_dir = format!("/mnt/mirage/cache/emulator/{ASSET_SUBDIR}");
+            let kmd_name = ld_preload
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| KMD_LIB_NAME.to_string());
             let mut mounts = vec![FileMount {
                 host_path: ld_preload.display().to_string(),
-                container_path: format!("{container_asset_dir}/{KMD_LIB_NAME}"),
+                container_path: format!("{CONTAINER_LIB_DIR}/{kmd_name}"),
                 read_only: true,
             }];
-            // The host-side rocjitsu library, if present on disk: the KMD
-            // interposer may dlopen it at runtime.
-            let host_lib = lib_path();
-            if host_lib.exists() {
+            // A sibling host-side `librocjitsu.so`, if present next to the
+            // KMD interposer: the interposer may dlopen it at runtime.
+            if let Some(host_lib) = ld_preload.parent().map(|d| d.join(LIB_NAME))
+                && host_lib != ld_preload
+                && host_lib.exists()
+            {
                 mounts.push(FileMount {
                     host_path: host_lib.display().to_string(),
-                    container_path: format!("{container_asset_dir}/{LIB_NAME}"),
+                    container_path: format!("{CONTAINER_LIB_DIR}/{LIB_NAME}"),
                     read_only: true,
                 });
             }
@@ -261,14 +263,21 @@ inventory::submit! {
         backend: &Rocjitsu,
     }
 }
-/// Subdirectory under `<MIRAGE_CACHE>/emulator/` where the extracted
-/// runtime assets (`librocjitsu_kmd.so`, `librocjitsu.so`) live.
-pub const ASSET_SUBDIR: &str = "rocjitsu";
+/// Subdirectory name used to namespace rocjitsu's per-session runtime
+/// directory (the daemon socket + `config_path` discovery file) under
+/// the session dir.
+pub const RUNTIME_SUBDIR: &str = "rocjitsu";
 
-/// Name used for the extracted KMD library on disk.
+/// In-container directory where the host-side rocjitsu libraries are
+/// bind-mounted for a containerised session. All mirage system mounts
+/// live under `/mnt/mirage`; the in-container KMD discovery searches
+/// this directory (see [`kmd_search_dirs`]).
+pub const CONTAINER_LIB_DIR: &str = "/mnt/mirage/lib";
+
+/// Name used for the KMD interposer library on disk.
 pub const KMD_LIB_NAME: &str = "librocjitsu_kmd.so";
 
-/// Name used for the extracted host-side library on disk.
+/// Name used for the host-side rocjitsu library on disk.
 pub const LIB_NAME: &str = "librocjitsu.so";
 
 /// Library file names accepted for the KMD interposer, in priority
@@ -280,24 +289,6 @@ pub const KMD_LIB_NAMES: &[&str] = &[KMD_LIB_NAME, LIB_NAME];
 /// Name of the synthesised rocjitsu `SimulationConfig` written into the
 /// per-session directory (`<session>/rj_config.json`).
 pub const RJ_CONFIG_NAME: &str = "rj_config.json";
-
-/// Directory where extracted runtime assets are stored
-/// (`<MIRAGE_CACHE>/emulator/rocjitsu/`).
-pub fn asset_dir() -> PathBuf {
-    mirage_core::paths::mirage_cache_dir()
-        .join("emulator")
-        .join(ASSET_SUBDIR)
-}
-
-/// On-disk path of the extracted KMD interposer library.
-pub fn kmd_lib_path() -> PathBuf {
-    asset_dir().join(KMD_LIB_NAME)
-}
-
-/// On-disk path of the extracted host-side rocjitsu library.
-pub fn lib_path() -> PathBuf {
-    asset_dir().join(LIB_NAME)
-}
 
 /// On-disk path of the synthesised `SimulationConfig` for `session`
 /// (`<MIRAGE_RUNTIME>/session/<id>/rj_config.json`).
@@ -318,7 +309,7 @@ pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
     let runtime_dir = config
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
-        .join(ASSET_SUBDIR);
+        .join(RUNTIME_SUBDIR);
     let config_path_file = runtime_dir.join("config_path");
     mirage_core::state::write_bytes(
         &config_path_file,
@@ -330,12 +321,12 @@ pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
 /// rocjitsu-emulated workload.
 ///
-/// Searches, in priority order, the extracted on-disk copy under
-/// `<MIRAGE_CACHE>/emulator/rocjitsu/`, the in-tree monorepo build
-/// output (relative to the mirage binary), `$ROCM_HOME/lib`, and
-/// `$(rocm-sdk path --root)/lib`. In each location the dedicated KMD
-/// interposer (`librocjitsu_kmd.so`) is preferred, falling back to
-/// `librocjitsu.so` (see [`KMD_LIB_NAMES`]).
+/// Searches, in priority order, the in-tree monorepo build output
+/// (relative to the mirage binary), `$ROCM_HOME/lib`, the ROCm SDK
+/// install root reported by `rocm-sdk path --root`, and the in-container
+/// mount directory ([`CONTAINER_LIB_DIR`]). In each location the
+/// dedicated KMD interposer (`librocjitsu_kmd.so`) is preferred, falling
+/// back to `librocjitsu.so` (see [`KMD_LIB_NAMES`]).
 pub fn kmd_preload() -> Option<PathBuf> {
     kmd_search_dirs()
         .iter()
@@ -343,11 +334,11 @@ pub fn kmd_preload() -> Option<PathBuf> {
 }
 
 /// Directories searched for the KMD interposer, in priority order:
-/// the extracted asset dir, the in-tree monorepo build output (relative
-/// to the mirage binary), `$ROCM_HOME/lib`, and the ROCm SDK install
-/// root reported by `rocm-sdk path --root` (`<root>/lib`).
+/// the in-tree monorepo build output (relative to the mirage binary),
+/// `$ROCM_HOME/lib`, the ROCm SDK install root reported by `rocm-sdk
+/// path --root` (`<root>/lib`), and the in-container mount directory.
 fn kmd_search_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![asset_dir()];
+    let mut dirs = Vec::new();
     // rocjitsu's in-tree KMD build output, relative to the mirage
     // binary, so a monorepo `cargo build` finds a fresh build without
     // extra configuration.
@@ -365,6 +356,10 @@ fn kmd_search_dirs() -> Vec<PathBuf> {
     if let Some(root) = mirage_core::discovery::rocm_sdk_root() {
         dirs.push(root.join("lib"));
     }
+    // In-container mount: for a containerised session the host libraries
+    // are bind-mounted here (see `injection_def`), and the in-container
+    // host re-resolves discovery against this directory.
+    dirs.push(PathBuf::from(CONTAINER_LIB_DIR));
     dirs
 }
 
@@ -396,10 +391,9 @@ fn find_lib_in(dir: &std::path::Path, names: &[&str]) -> Option<PathBuf> {
 ///    is supplied (the per-session runtime location, alongside
 ///    `def.json`/`health.json`). When `session` is `None` — e.g. at
 ///    profile-validation time, before any session exists — it falls
-///    back to a content-addressed
-///    `<MIRAGE_CACHE>/emulator/rocjitsu/sim_<hash>.json` so identical
-///    configs share a file and stale files are never overwritten
-///    in-place.
+///    back to a content-addressed `sim_<hash>.json` in the system temp
+///    directory so identical configs share a file and stale files are
+///    never overwritten in-place.
 pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<PathBuf> {
     // Drop-in `--config <path>`: when an explicit rocjitsu simulation
     // config is supplied (mirage being used as a `rocjitsu` replacement)
@@ -457,13 +451,15 @@ pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<Path
             cfg
         }
         // Validation (no session yet): fall back to a content-addressed
-        // cache file so identical configs share a file and stale files
-        // are never overwritten in-place.
+        // file in the system temp directory so identical configs share a
+        // file and stale files are never overwritten in-place.
         None => {
             let mut hasher = DefaultHasher::new();
             bytes.hash(&mut hasher);
             let key = format!("{:016x}", hasher.finish());
-            let cfg = asset_dir().join(format!("sim_{key}.json"));
+            let cfg = std::env::temp_dir()
+                .join(RUNTIME_SUBDIR)
+                .join(format!("sim_{key}.json"));
             if !cfg.exists() {
                 mirage_core::state::write_bytes(&cfg, &bytes)?;
             }

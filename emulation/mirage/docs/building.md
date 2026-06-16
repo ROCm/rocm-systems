@@ -118,11 +118,10 @@ directly). To get real GPU emulation you need the rocjitsu libraries.
 mirage discovers the rocjitsu KMD library (`librocjitsu_kmd.so`, or
 `librocjitsu.so` as a fallback) in this order:
 
-1. the extracted asset under `<MIRAGE_CACHE>/emulator/rocjitsu/`;
-2. a sibling monorepo build, relative to the `mirage` binary
+1. a sibling monorepo build, relative to the `mirage` binary
    (`../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux`);
-3. `$ROCM_HOME/lib`;
-4. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
+2. `$ROCM_HOME/lib`;
+3. `$(rocm-sdk path --root)/lib` (present when a ROCm Python wheel venv
    is active).
 
 If nothing is found, empty placeholders are staged and mirage still
@@ -142,7 +141,7 @@ cmake --build build
 ### Verifying rocjitsu is wired up
 
 ```sh
-./target/debug/mirage state builtins        # extract agents/topologies/assets
+./target/debug/mirage state builtins        # extract agents/topologies
 ./target/debug/mirage profile create gpu --emulator rocjitsu
 ./target/debug/mirage run --profile gpu -- \
   sh -c 'echo LD=$LD_PRELOAD ROCJITSU_RUNTIME_DIR=$ROCJITSU_RUNTIME_DIR'

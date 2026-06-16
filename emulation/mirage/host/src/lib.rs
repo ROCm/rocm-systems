@@ -77,11 +77,6 @@ const CONTAINER_CONFIG_DIR: &str = "/mnt/mirage/config";
 /// instead of falling back to a non-existent in-container XDG path.
 const CONTAINER_STATE_DIR: &str = "/mnt/mirage/state";
 
-/// Mirage cache root inside every node container. Set via `MIRAGE_CACHE`
-/// so the in-container host resolves its cache at a deterministic
-/// location instead of a non-existent in-container XDG path.
-const CONTAINER_CACHE_DIR: &str = "/mnt/mirage/cache";
-
 /// Configuration for running a host.
 #[derive(Debug, Clone)]
 pub struct HostConfig {
@@ -508,7 +503,6 @@ fn maybe_bring_up_containers(session: &SessionId, layout: &SessionLayout) -> Res
         CONTAINER_CONFIG_DIR.to_string(),
     ));
     injected_env.push(("MIRAGE_STATE".to_string(), CONTAINER_STATE_DIR.to_string()));
-    injected_env.push(("MIRAGE_CACHE".to_string(), CONTAINER_CACHE_DIR.to_string()));
 
     // Propagate the orchestrator's log level into each node container so
     // the per-node `mirage host` (and thus its exec/node events) logs at

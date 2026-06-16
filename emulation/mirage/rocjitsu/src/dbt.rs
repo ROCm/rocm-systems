@@ -175,14 +175,11 @@ impl EmulatorBackend for RocjitsuDbt {
         let containerized = profile.containerize.is_some();
         // For a containerised session the workload runs inside a node
         // container that does not share the host filesystem, so the hook
-        // library is bind-mounted in under the rocjitsu asset dir (the
-        // same convention the `rocjitsu` backend uses for its KMD lib)
-        // and `HSA_TOOLS_LIB` must point at the in-container path.
+        // library is bind-mounted in under the in-container lib dir (the
+        // same convention the `rocjitsu` backend uses for its KMD lib) and
+        // `HSA_TOOLS_LIB` must point at the in-container path.
         let hooks_in_workload = if containerized {
-            format!(
-                "/mnt/mirage/cache/emulator/{}/{HOOKS_LIB_NAME}",
-                crate::ASSET_SUBDIR
-            )
+            format!("{}/{HOOKS_LIB_NAME}", crate::CONTAINER_LIB_DIR)
         } else {
             hooks.display().to_string()
         };
@@ -377,22 +374,16 @@ fn hooks_lib_search() -> LibSearch<'static> {
     }
 }
 
-/// Returns the path mirage should pass as `HSA_TOOLS_LIB`. Prefers an
-/// extracted on-disk copy under `<MIRAGE_CACHE>/emulator/rocjitsu/`;
-/// falls back to the shared discovery search.
+/// Returns the path mirage should pass as `HSA_TOOLS_LIB`, located via
+/// the shared discovery search.
 pub fn hooks_preload() -> Option<PathBuf> {
-    let extracted = crate::asset_dir().join(HOOKS_LIB_NAME);
-    if extracted.exists() {
-        return Some(extracted);
-    }
     discovery::find_emulator_lib(&hooks_lib_search())
 }
 
 /// Returns true if the rocjitsu HSA tools hook library is reachable on
 /// this machine.
 pub fn is_installed() -> bool {
-    crate::asset_dir().join(HOOKS_LIB_NAME).exists()
-        || discovery::is_lib_installed(&hooks_lib_search())
+    discovery::is_lib_installed(&hooks_lib_search())
 }
 
 /// Whether this host has a physical GPU the DBT translator can target.
