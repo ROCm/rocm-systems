@@ -141,8 +141,7 @@ __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
 
   hdr.typ_qid_indx = (key_lo | (key_hi << 32));
 
-  __threadfence_system();
-  __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __HIP_MEMORY_SCOPE_SYSTEM);
+  __hip_atomic_store(bnxt_dbr, hdr.typ_qid_indx, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 [[maybe_unused]] __attribute__((noinline))
