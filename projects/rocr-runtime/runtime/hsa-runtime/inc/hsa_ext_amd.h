@@ -77,11 +77,10 @@
  * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
  * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
  * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
- * - 1.26 - hsa_amd_queue_signal_external_semaphore
- * - 1.27 - hsa_amd_queue_wait_external_semaphore
+ * - 1.26 - hsa_amd_queue_signal_external_semaphore, hsa_amd_queue_wait_external_semaphore
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 27
+#define HSA_AMD_INTERFACE_VERSION_MINOR 26
 
 #ifdef __cplusplus
 extern "C" {
