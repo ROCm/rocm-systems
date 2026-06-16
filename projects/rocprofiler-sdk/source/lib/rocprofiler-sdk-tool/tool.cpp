@@ -2722,7 +2722,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ROCP_ERROR << "Invalid GPU Device Index: " << entry;
     }
 
-    const auto defer_counter_start {tool::get_config().selected_regions};
+    const auto defer_counter_start{tool::get_config().selected_regions};
 
     if(tool::get_config().counter_collection)
     {
