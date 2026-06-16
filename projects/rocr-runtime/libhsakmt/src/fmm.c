@@ -372,7 +372,8 @@ static inline HsaSharedMemoryHandle *to_hsa_shared_memory_handle(
 
 static int __fmm_release(HsaKFDContext *ctx, vm_object_t *object, manageable_aperture_t *aperture);
 static int _fmm_unmap_from_gpu_scratch(HsaKFDContext *ctx, uint32_t gpu_id,
-				       manageable_aperture_t *aperture, void *address);
+				       manageable_aperture_t *aperture, void *address,
+				       bool preserve_cpu_va);
 static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_array_size);
 
 static vm_area_t *vm_create_and_init_area(void *start, void *end)
@@ -1493,7 +1494,8 @@ static void fmm_release_scratch(HsaKFDContext *ctx, uint32_t gpu_id)
 
 			pthread_mutex_unlock(&aperture->fmm_mutex);
 
-			_fmm_unmap_from_gpu_scratch(ctx, gpu_id, aperture, obj_addr);
+			_fmm_unmap_from_gpu_scratch(ctx, gpu_id, aperture,
+						    obj_addr, false);
 
 			pthread_mutex_lock(&aperture->fmm_mutex);
 		}
@@ -3684,14 +3686,15 @@ out:
 }
 
 static int _fmm_unmap_from_gpu_scratch(HsaKFDContext *ctx,
-				       uint32_t gpu_id,
-				       manageable_aperture_t *aperture,
-				       void *address)
+					       uint32_t gpu_id,
+					       manageable_aperture_t *aperture,
+					       void *address, bool preserve_cpu_va)
 {
 	int32_t gpu_mem_id;
 	vm_object_t *object;
 	struct kfd_ioctl_unmap_memory_from_gpu_args args = {0};
-	int ret;
+	int ret = 0;
+	bool has_mapped_devices;
 	struct hsa_kfd_fmm_context *fmm_ctx = ctx->fmm_context;
 
 	/* Retrieve gpu_mem id according to gpu_id */
@@ -3711,27 +3714,29 @@ static int _fmm_unmap_from_gpu_scratch(HsaKFDContext *ctx,
 		goto err;
 	}
 
-	if (!object->mapped_device_id_array ||
-			object->mapped_device_id_array_size == 0) {
-		pthread_mutex_unlock(&aperture->fmm_mutex);
-		return 0;
+	has_mapped_devices = object->mapped_device_id_array &&
+			object->mapped_device_id_array_size > 0;
+
+	if (has_mapped_devices) {
+		/* unmap from GPU */
+		args.handle = object->handles[0];
+		args.device_ids_array_ptr = (uint64_t)object->mapped_device_id_array;
+		args.n_devices = object->mapped_device_id_array_size / sizeof(uint32_t);
+		args.n_success = 0;
+		ret = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &args);
+
+		if (preserve_cpu_va) {
+			/* unmap from CPU while keeping the address space reserved */
+			mmap(address, object->size, PROT_NONE,
+			     MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
+			     -1, 0);
+		}
 	}
 
-	/* unmap from GPU */
-	args.handle = object->handles[0];
-	args.device_ids_array_ptr = (uint64_t)object->mapped_device_id_array;
-	args.n_devices = object->mapped_device_id_array_size / sizeof(uint32_t);
-	args.n_success = 0;
-	ret = hsakmt_ioctl(ctx->fd, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &args);
-
-	/* unmap from CPU while keeping the address space reserved */
-	mmap(address, object->size, PROT_NONE,
-	     MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE | MAP_FIXED,
-	     -1, 0);
-
-	remove_device_ids_from_mapped_array(object,
-			(uint32_t *)args.device_ids_array_ptr,
-			args.n_success * sizeof(uint32_t));
+	if (args.n_success)
+		remove_device_ids_from_mapped_array(object,
+				(uint32_t *)args.device_ids_array_ptr,
+				args.n_success * sizeof(uint32_t));
 
 	if (object->mapped_node_id_array)
 		free(object->mapped_node_id_array);
@@ -3764,7 +3769,7 @@ int hsakmt_fmm_unmap_from_gpu(HsaKFDContext *ctx, void *address)
 		return _fmm_unmap_from_gpu_scratch(ctx,
 					    gpu_mem_ptr->gpu_id,
 					    &gpu_mem_ptr->scratch_physical,
-					    address);
+					    address, true);
 	}
 
 	object = vm_find_object(fmm_ctx, address, 0, &aperture);

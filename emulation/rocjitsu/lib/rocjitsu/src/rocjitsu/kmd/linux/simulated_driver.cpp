@@ -1197,8 +1197,15 @@ int SimulatedDriver::map_memory_ioctl(KfdProcess &proc, void *arg) {
   return 0;
 }
 
-int SimulatedDriver::unmap_memory_ioctl([[maybe_unused]] KfdProcess &proc, void *arg) {
+int SimulatedDriver::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg);
+
+  std::lock_guard<std::mutex> lock(proc.alloc_mutex_);
+  auto it = proc.allocations_.find(args->handle);
+  if (it == proc.allocations_.end())
+    return -EINVAL;
+  const auto &alloc = it->second;
+  unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
   args->n_success = args->n_devices;
   return 0;
 }

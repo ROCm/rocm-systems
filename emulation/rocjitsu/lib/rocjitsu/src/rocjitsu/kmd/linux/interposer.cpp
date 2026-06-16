@@ -19,6 +19,11 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 
+RJ_DIAGNOSTIC_PUSH
+RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include "linux/uapi/kfd_ioctl.h"
+RJ_DIAGNOSTIC_POP
+
 #include "util/dynamic_loader.h"
 #include "util/log.h"
 
@@ -208,6 +213,16 @@ public:
       int close_rc = static_cast<int>(InterposerContext::real.close(remote_kfd_fd_));
       if (rc == 0)
         rc = close_rc;
+      remote_kfd_fd_ = -1;
+    }
+    clear_dups();
+    return rc;
+  }
+
+  int close_remote_fd_only() {
+    int rc = 0;
+    if (remote_kfd_fd_ >= 0) {
+      rc = static_cast<int>(InterposerContext::real.close(remote_kfd_fd_));
       remote_kfd_fd_ = -1;
     }
     clear_dups();
@@ -651,7 +666,7 @@ int openat64(int dirfd, const char *path, int flags, ...) {
 int close(int fd) {
   assert(InterposerContext::real.ready());
   if (InterposerContext::ctx.remote_lookup(fd))
-    return InterposerContext::ctx.close_remote();
+    return InterposerContext::ctx.close_remote_fd_only();
   InterposerContext::ctx.untrack_sysfs(fd);
   if (InterposerContext::ctx.untrack_drm(fd)) {
     InterposerContext::real.close(fd);
@@ -669,6 +684,11 @@ int close(int fd) {
   if (InterposerContext::ctx.owns_fd(fd))
     return 0;
   return static_cast<int>(InterposerContext::real.close(fd));
+}
+
+__attribute__((destructor)) void rj_interposer_shutdown() {
+  if (InterposerContext::real.ready())
+    InterposerContext::ctx.close_remote();
 }
 
 int ioctl(int fd, unsigned long request, ...) {
@@ -803,6 +823,10 @@ int ioctl(int fd, unsigned long request, ...) {
     return remote->ioctl(request, arg);
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
     if (auto *remote = InterposerContext::ctx.remote_lookup(InterposerContext::ctx.remote_kfd_fd()))
+      return remote->ioctl(request, arg);
+  }
+  if (_IOC_TYPE(request) == AMDKFD_IOCTL_BASE) {
+    if (auto *remote = InterposerContext::ctx.remote())
       return remote->ioctl(request, arg);
   }
 
