@@ -10,38 +10,35 @@
 #include <cstdint>
 #include <cstdio>
 #include <mutex>
-#include <new>
 #include <unordered_map>
 
 namespace rocr::hotswap {
 
 std::string get_agent_isa_name(hsa_agent_t agent) {
-  auto cb = [](hsa_isa_t isa, void *data) -> hsa_status_t {
-    try {
-      auto *name = static_cast<std::string *>(data);
-      uint32_t len = 0;
-      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
-          HSA_STATUS_SUCCESS) {
-        return HSA_STATUS_ERROR;
-      }
-      name->resize(len);
-      if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name->data()) !=
-          HSA_STATUS_SUCCESS) {
-        name->clear();
-        return HSA_STATUS_ERROR;
-      }
-      if (!name->empty() && name->back() == '\0') {
-        name->pop_back();
-      }
-      return HSA_STATUS_INFO_BREAK;
-    } catch (const std::bad_alloc &) {
-      auto *name = static_cast<std::string *>(data);
-      name->clear();
+  std::string name;
+
+  hsa_agent_iterate_isas(agent, [](hsa_isa_t isa, void *data) -> hsa_status_t {
+    uint32_t len = 0;
+    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) !=
+        HSA_STATUS_SUCCESS)
+      return HSA_STATUS_ERROR;
+
+    auto &out = *static_cast<std::string *>(data);
+    out.resize(len);
+
+    if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, out.data()) !=
+        HSA_STATUS_SUCCESS) {
+      out.clear();
       return HSA_STATUS_ERROR;
     }
-  };
-  std::string name;
-  hsa_agent_iterate_isas(agent, cb, &name);
+
+    // HSA returns null-terminated length; trim it.
+    if (!out.empty() && out.back() == '\0')
+      out.pop_back();
+
+    return HSA_STATUS_INFO_BREAK; // only need the first ISA
+  }, &name);
+
   return name;
 }
 
