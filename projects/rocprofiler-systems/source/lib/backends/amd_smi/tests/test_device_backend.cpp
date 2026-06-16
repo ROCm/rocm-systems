@@ -404,6 +404,162 @@ TEST_F(DeviceBackendTest, get_memory_usage_error_message_contains_function_name)
         std::runtime_error);
 }
 
+// ── NIC methods ──────────────────────────────────────────────────────────────
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+
+TEST_F(DeviceBackendTest, get_nic_asic_info_maps_product_and_vendor_names)
+{
+    const testing::mock_nic_asic_info_t raw{ .product_name = "CX7",
+                                             .vendor_name  = "Mellanox" };
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_asic_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto info = sut.get_nic_asic_info();
+    EXPECT_EQ(info.product_name, "CX7");
+    EXPECT_EQ(info.vendor_name, "Mellanox");
+}
+
+TEST_F(DeviceBackendTest, get_nic_asic_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_asic_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_nic_asic_info()), std::runtime_error);
+}
+
+TEST_F(DeviceBackendTest, get_nic_port_info_returns_empty_when_no_ports)
+{
+    testing::mock_nic_port_info_t raw{};
+    raw.num_ports = 0;
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto info = sut.get_nic_port_info();
+    EXPECT_TRUE(info.netdev.empty());
+}
+
+TEST_F(DeviceBackendTest, get_nic_port_info_returns_netdev_for_first_port)
+{
+    testing::mock_nic_port_info_t raw{};
+    raw.num_ports       = 1;
+    raw.ports[0].netdev = "mlx5_0";
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto info = sut.get_nic_port_info();
+    EXPECT_EQ(info.netdev, "mlx5_0");
+}
+
+TEST_F(DeviceBackendTest, get_nic_port_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_nic_port_info()), std::runtime_error);
+}
+
+TEST_F(DeviceBackendTest, get_nic_rdma_info_returns_zero_when_no_rdma_devices)
+{
+    testing::mock_nic_rdma_devices_info_t raw{};
+    raw.num_rdma_dev = 0;
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto info = sut.get_nic_rdma_info();
+    EXPECT_EQ(info.num_rdma_ports, 0U);
+}
+
+TEST_F(DeviceBackendTest, get_nic_rdma_info_returns_port_count)
+{
+    testing::mock_nic_rdma_devices_info_t raw{};
+    raw.num_rdma_dev                    = 1;
+    raw.rdma_dev_info[0].num_rdma_ports = 4;
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto info = sut.get_nic_rdma_info();
+    EXPECT_EQ(info.num_rdma_ports, 4U);
+}
+
+TEST_F(DeviceBackendTest, get_nic_rdma_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_nic_rdma_info()), std::runtime_error);
+}
+
+TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_returns_empty_when_count_zero)
+{
+    InSequence seq;
+    EXPECT_CALL(
+        *testing::g_mock_backend,
+        get_nic_rdma_port_statistics(k_handle, std::uint8_t{ 0 }, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<2>(0U), Return(k_ok)));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_TRUE(sut.get_nic_rdma_port_statistics(0).empty());
+}
+
+TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_maps_name_and_value)
+{
+    const testing::mock_nic_stat_t stat{ .name = "rx_bytes", .value = 99999 };
+
+    InSequence seq;
+    EXPECT_CALL(
+        *testing::g_mock_backend,
+        get_nic_rdma_port_statistics(k_handle, std::uint8_t{ 0 }, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<2>(1U), Return(k_ok)));
+    EXPECT_CALL(
+        *testing::g_mock_backend,
+        get_nic_rdma_port_statistics(k_handle, std::uint8_t{ 0 }, NotNull(), NotNull()))
+        .WillOnce(DoAll(SetArgPointee<2>(1U), SetArrayArgument<3>(&stat, &stat + 1),
+                        Return(k_ok)));
+
+    DeviceSut  sut{ m_session, k_handle };
+    const auto stats = sut.get_nic_rdma_port_statistics(0);
+    ASSERT_EQ(stats.size(), 1U);
+    EXPECT_EQ(stats[0].name, "rx_bytes");
+    EXPECT_EQ(stats[0].value, 99999U);
+}
+
+TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_count_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_nic_rdma_port_statistics(k_handle, _, NotNull(), IsNull()))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_nic_rdma_port_statistics(0)),
+                 std::runtime_error);
+}
+
+TEST_F(DeviceBackendTest, get_nic_rdma_port_statistics_throws_on_data_error)
+{
+    InSequence seq;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_nic_rdma_port_statistics(k_handle, _, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<2>(1U), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_nic_rdma_port_statistics(k_handle, _, NotNull(), NotNull()))
+        .WillOnce(Return(k_err));
+
+    DeviceSut sut{ m_session, k_handle };
+    EXPECT_THROW(static_cast<void>(sut.get_nic_rdma_port_statistics(0)),
+                 std::runtime_error);
+}
+
+#endif  // ROCPROFSYS_BUILD_AINIC
+
 // ── SDMA (disabled path) ──────────────────────────────────────────────────────
 
 #if !defined(AMD_SMI_SDMA_SUPPORTED) || AMD_SMI_SDMA_SUPPORTED != 1

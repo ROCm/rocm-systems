@@ -28,8 +28,9 @@ using MockApi   = StrictMock<testing::gmock_backend_api>;
 using factory_t = backend_factory<testing::mock_backend>;
 using sut_t     = factory_t::backend_t;
 
-constexpr testing::mock_status_t k_ok  = testing::mock_backend::STATUS_SUCCESS;
-constexpr testing::mock_status_t k_err = 1;
+constexpr testing::mock_status_t k_ok     = testing::mock_backend::STATUS_SUCCESS;
+constexpr testing::mock_status_t k_err    = 1;
+constexpr std::uint64_t          k_handle = 0xABCDABCDULL;
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
 //
@@ -236,5 +237,428 @@ TEST_F(BackendTest, enumerate_gpu_handles_throws_on_processor_data_error)
     EXPECT_THROW(static_cast<void>(m_session.enumerate_gpu_handles()),
                  std::runtime_error);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-device GPU forwarding
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_F(BackendTest, get_gpu_asic_info_calls_backend_method)
+{
+    const testing::mock_asic_info_t raw{ .market_name = "Instinct MI300X",
+                                         .vendor_name = "AMD" };
+    EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    testing::mock_asic_info_t out{};
+    m_session.get_gpu_asic_info(k_handle, &out);
+    EXPECT_STREQ(out.market_name, "Instinct MI300X");
+}
+
+TEST_F(BackendTest, get_gpu_asic_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_asic_info_t out{};
+    EXPECT_THROW(m_session.get_gpu_asic_info(k_handle, &out), std::runtime_error);
+}
+
+TEST_F(BackendTest, get_gpu_asic_info_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_gpu_asic_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_asic_info_t out{};
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_gpu_asic_info(k_handle, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_asic_info"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+TEST_F(BackendTest, get_metrics_info_calls_backend_method)
+{
+    testing::mock_gpu_metrics_t raw{};
+    raw.current_socket_power = 200;
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    testing::mock_gpu_metrics_t out{};
+    m_session.get_metrics_info(k_handle, &out);
+    EXPECT_EQ(out.current_socket_power, 200U);
+}
+
+TEST_F(BackendTest, get_metrics_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_gpu_metrics_t out{};
+    EXPECT_THROW(m_session.get_metrics_info(k_handle, &out), std::runtime_error);
+}
+
+TEST_F(BackendTest, get_metrics_info_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_metrics_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_gpu_metrics_t out{};
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_metrics_info(k_handle, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_metrics_info"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+TEST_F(BackendTest, get_memory_usage_calls_backend_method)
+{
+    constexpr std::uint64_t k_bytes = 4ULL * 1024 * 1024 * 1024;
+    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<2>(k_bytes), Return(k_ok)));
+
+    std::uint64_t out = 0;
+    m_session.get_memory_usage(k_handle, 0, &out);
+    EXPECT_EQ(out, k_bytes);
+}
+
+TEST_F(BackendTest, get_memory_usage_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
+        .WillOnce(Return(k_err));
+
+    std::uint64_t out = 0;
+    EXPECT_THROW(m_session.get_memory_usage(k_handle, 0, &out), std::runtime_error);
+}
+
+TEST_F(BackendTest, get_memory_usage_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_memory_usage(k_handle, _, _))
+        .WillOnce(Return(k_err));
+
+    std::uint64_t out = 0;
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_memory_usage(k_handle, 0, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_memory_usage"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SDMA forwarding (enabled path)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+
+TEST_F(BackendTest, try_get_gpu_process_list_returns_true_on_success)
+{
+    std::uint32_t count = 0;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
+    EXPECT_TRUE(m_session.try_get_gpu_process_list(k_handle, &count, nullptr));
+}
+
+TEST_F(BackendTest, try_get_gpu_process_list_returns_false_on_failure)
+{
+    std::uint32_t count = 0;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), IsNull()))
+        .WillOnce(Return(k_err));
+    EXPECT_FALSE(m_session.try_get_gpu_process_list(k_handle, &count, nullptr));
+}
+
+TEST_F(BackendTest, get_gpu_process_list_calls_backend_method)
+{
+    testing::mock_proc_info_t procs[1] = { { .sdma_usage = 500 } };
+    std::uint32_t             count    = 1;
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_gpu_process_list(k_handle, NotNull(), NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(1U), SetArrayArgument<2>(procs, procs + 1),
+                        Return(k_ok)));
+
+    testing::mock_proc_info_t out{};
+    m_session.get_gpu_process_list(k_handle, &count, &out);
+    EXPECT_EQ(out.sdma_usage, 500U);
+}
+
+TEST_F(BackendTest, get_gpu_process_list_throws_on_backend_error)
+{
+    std::uint32_t             count = 0;
+    testing::mock_proc_info_t out{};
+    EXPECT_CALL(*testing::g_mock_backend, get_gpu_process_list(k_handle, _, _))
+        .WillOnce(Return(k_err));
+    EXPECT_THROW(m_session.get_gpu_process_list(k_handle, &count, &out),
+                 std::runtime_error);
+}
+
+TEST_F(BackendTest, get_gpu_process_list_error_message_contains_function_name)
+{
+    std::uint32_t             count = 0;
+    testing::mock_proc_info_t out{};
+    EXPECT_CALL(*testing::g_mock_backend, get_gpu_process_list(k_handle, _, _))
+        .WillOnce(Return(k_err));
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_gpu_process_list(k_handle, &count, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_gpu_process_list"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+#endif  // AMD_SMI_SDMA_SUPPORTED
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NIC handle enumeration + per-device NIC forwarding
+// ─────────────────────────────────────────────────────────────────────────────
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+
+TEST_F(BackendTest, enumerate_nic_handles_returns_empty_when_no_sockets)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<0>(0U), Return(k_ok)));
+    EXPECT_TRUE(m_session.enumerate_nic_handles().empty());
+}
+
+TEST_F(BackendTest, enumerate_nic_handles_returns_handles_from_single_socket)
+{
+    constexpr std::uint64_t k_socket = 10;
+    constexpr std::uint64_t k_nics[] = { 300, 301 };
+
+    InSequence seq;
+    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
+        .WillOnce(DoAll(SetArgPointee<0>(1U),
+                        SetArrayArgument<1>(&k_socket, &k_socket + 1), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_processor_handles_by_type(k_socket, _, _, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(2U), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_processor_handles_by_type(k_socket, _, NotNull(), NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(2U), SetArrayArgument<2>(k_nics, k_nics + 2),
+                        Return(k_ok)));
+
+    auto handles = m_session.enumerate_nic_handles();
+    ASSERT_EQ(handles.size(), 2U);
+    EXPECT_EQ(handles[0], k_nics[0]);
+    EXPECT_EQ(handles[1], k_nics[1]);
+}
+
+TEST_F(BackendTest, enumerate_nic_handles_skips_socket_with_no_nics)
+{
+    constexpr std::uint64_t k_socket = 10;
+
+    InSequence seq;
+    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
+        .WillOnce(DoAll(SetArgPointee<0>(1U), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
+        .WillOnce(DoAll(SetArgPointee<0>(1U),
+                        SetArrayArgument<1>(&k_socket, &k_socket + 1), Return(k_ok)));
+    EXPECT_CALL(*testing::g_mock_backend,
+                get_processor_handles_by_type(k_socket, _, _, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<3>(0U), Return(k_ok)));
+    EXPECT_TRUE(m_session.enumerate_nic_handles().empty());
+}
+
+TEST_F(BackendTest, get_nic_asic_info_calls_backend_method)
+{
+    const testing::mock_nic_asic_info_t raw{ .product_name = "CX7",
+                                             .vendor_name  = "Mellanox" };
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_asic_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    testing::mock_nic_asic_info_t out{};
+    m_session.get_nic_asic_info(k_handle, &out);
+    EXPECT_STREQ(out.product_name, "CX7");
+}
+
+TEST_F(BackendTest, get_nic_asic_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_asic_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_nic_asic_info_t out{};
+    EXPECT_THROW(m_session.get_nic_asic_info(k_handle, &out), std::runtime_error);
+}
+
+TEST_F(BackendTest, get_nic_asic_info_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_asic_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_nic_asic_info_t out{};
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_nic_asic_info(k_handle, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_nic_asic_info"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+TEST_F(BackendTest, get_nic_port_info_calls_backend_method)
+{
+    testing::mock_nic_port_info_t raw{};
+    raw.num_ports       = 1;
+    raw.ports[0].netdev = "mlx5_0";
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    testing::mock_nic_port_info_t out{};
+    m_session.get_nic_port_info(k_handle, &out);
+    EXPECT_EQ(out.num_ports, 1U);
+}
+
+TEST_F(BackendTest, get_nic_port_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_nic_port_info_t out{};
+    EXPECT_THROW(m_session.get_nic_port_info(k_handle, &out), std::runtime_error);
+}
+
+TEST_F(BackendTest, get_nic_port_info_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_port_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_nic_port_info_t out{};
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_nic_port_info(k_handle, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_nic_port_info"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+TEST_F(BackendTest, get_nic_rdma_dev_info_calls_backend_method)
+{
+    testing::mock_nic_rdma_devices_info_t raw{};
+    raw.num_rdma_dev                    = 1;
+    raw.rdma_dev_info[0].num_rdma_ports = 4;
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, NotNull()))
+        .WillOnce(DoAll(SetArgPointee<1>(raw), Return(k_ok)));
+
+    testing::mock_nic_rdma_devices_info_t out{};
+    m_session.get_nic_rdma_dev_info(k_handle, &out);
+    EXPECT_EQ(out.num_rdma_dev, 1U);
+}
+
+TEST_F(BackendTest, get_nic_rdma_dev_info_throws_on_backend_error)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_nic_rdma_devices_info_t out{};
+    EXPECT_THROW(m_session.get_nic_rdma_dev_info(k_handle, &out), std::runtime_error);
+}
+
+TEST_F(BackendTest, get_nic_rdma_dev_info_error_message_contains_function_name)
+{
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_dev_info(k_handle, _))
+        .WillOnce(Return(k_err));
+
+    testing::mock_nic_rdma_devices_info_t out{};
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_nic_rdma_dev_info(k_handle, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_nic_rdma_dev_info"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+TEST_F(BackendTest, get_nic_rdma_port_statistics_calls_backend_method)
+{
+    testing::mock_nic_stat_t stat{ .name = "rx_bytes", .value = 12345 };
+    std::uint32_t            count = 1;
+    EXPECT_CALL(
+        *testing::g_mock_backend,
+        get_nic_rdma_port_statistics(k_handle, std::uint8_t{ 0 }, NotNull(), NotNull()))
+        .WillOnce(DoAll(SetArgPointee<2>(1U), SetArrayArgument<3>(&stat, &stat + 1),
+                        Return(k_ok)));
+
+    testing::mock_nic_stat_t out{};
+    m_session.get_nic_rdma_port_statistics(k_handle, 0, &count, &out);
+    EXPECT_STREQ(out.name, "rx_bytes");
+    EXPECT_EQ(out.value, 12345U);
+}
+
+TEST_F(BackendTest, get_nic_rdma_port_statistics_throws_on_backend_error)
+{
+    std::uint32_t            count = 0;
+    testing::mock_nic_stat_t out{};
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_port_statistics(k_handle, _, _, _))
+        .WillOnce(Return(k_err));
+    EXPECT_THROW(m_session.get_nic_rdma_port_statistics(k_handle, 0, &count, &out),
+                 std::runtime_error);
+}
+
+TEST_F(BackendTest, get_nic_rdma_port_statistics_error_message_contains_function_name)
+{
+    std::uint32_t            count = 0;
+    testing::mock_nic_stat_t out{};
+    EXPECT_CALL(*testing::g_mock_backend, get_nic_rdma_port_statistics(k_handle, _, _, _))
+        .WillOnce(Return(k_err));
+    EXPECT_THROW(
+        {
+            try
+            {
+                m_session.get_nic_rdma_port_statistics(k_handle, 0, &count, &out);
+            } catch(const std::runtime_error& ex)
+            {
+                EXPECT_THAT(ex.what(), HasSubstr("amdsmi_get_nic_rdma_port_statistics"));
+                throw;
+            }
+        },
+        std::runtime_error);
+}
+
+#endif  // ROCPROFSYS_BUILD_AINIC
 
 }  // namespace rocprofsys::backends::amd_smi

@@ -97,6 +97,48 @@ struct mock_proc_info_t
 // NOLINTEND(readability-identifier-naming)
 #endif
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+// ── Mock NIC raw types ──────────────────────────────────────────────────────
+// NOLINTBEGIN(readability-identifier-naming)
+
+struct mock_nic_asic_info_t
+{
+    const char* product_name = "";
+    const char* vendor_name  = "";
+};
+
+struct mock_nic_port_t
+{
+    const char* netdev = "";
+};
+
+struct mock_nic_port_info_t
+{
+    std::uint32_t   num_ports = 0;
+    mock_nic_port_t ports[1]  = {};  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+};
+
+struct mock_rdma_dev_info_t
+{
+    std::uint32_t num_rdma_ports = 0;
+};
+
+struct mock_nic_rdma_devices_info_t
+{
+    std::uint32_t num_rdma_dev = 0;
+    mock_rdma_dev_info_t
+        rdma_dev_info[1] = {};  // NOLINT(cppcoreguidelines-avoid-c-arrays)
+};
+
+struct mock_nic_stat_t
+{
+    const char*   name  = "";
+    std::uint64_t value = 0;
+};
+
+// NOLINTEND(readability-identifier-naming)
+#endif
+
 using mock_status_t = std::uint32_t;
 
 // ── GMock class ─────────────────────────────────────────────────────────────
@@ -116,6 +158,11 @@ struct gmock_backend_api
                 (std::uint32_t * count, std::uint64_t* handles));
     MOCK_METHOD(mock_status_t, get_processor_handles,
                 (std::uint64_t socket, std::uint32_t* count, std::uint64_t* handles));
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    MOCK_METHOD(mock_status_t, get_processor_handles_by_type,
+                (std::uint64_t socket, std::uint32_t type, std::uint64_t* handles,
+                 std::uint32_t* count));
+#endif
 
     // Per-device forwarding (explicit handle)
     MOCK_METHOD(mock_status_t, get_metrics_info,
@@ -127,6 +174,17 @@ struct gmock_backend_api
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     MOCK_METHOD(mock_status_t, get_gpu_process_list,
                 (std::uint64_t handle, std::uint32_t* count, mock_proc_info_t* list));
+#endif
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    MOCK_METHOD(mock_status_t, get_nic_asic_info,
+                (std::uint64_t handle, mock_nic_asic_info_t* out));
+    MOCK_METHOD(mock_status_t, get_nic_port_info,
+                (std::uint64_t handle, mock_nic_port_info_t* out));
+    MOCK_METHOD(mock_status_t, get_nic_rdma_dev_info,
+                (std::uint64_t handle, mock_nic_rdma_devices_info_t* out));
+    MOCK_METHOD(mock_status_t, get_nic_rdma_port_statistics,
+                (std::uint64_t handle, std::uint8_t port_idx, std::uint32_t* count,
+                 mock_nic_stat_t* stats));
 #endif
 };
 
@@ -148,6 +206,13 @@ struct mock_backend
     using memory_type_t    = std::uint32_t;
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
     using proc_info_t = mock_proc_info_t;
+#endif
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    using processor_type_t        = std::uint32_t;
+    using nic_asic_info_t         = mock_nic_asic_info_t;
+    using nic_port_info_t         = mock_nic_port_info_t;
+    using nic_rdma_devices_info_t = mock_nic_rdma_devices_info_t;
+    using nic_stat_t              = mock_nic_stat_t;
 #endif
 
     static constexpr status_t      STATUS_SUCCESS = 0;
@@ -178,6 +243,17 @@ struct mock_backend
         return g_mock_backend->get_processor_handles(socket, count, handles);
     }
 
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    static status_t get_processor_handles_by_type(socket_handle     socket,
+                                                  processor_type_t  type,
+                                                  processor_handle* handles,
+                                                  std::uint32_t*    count)
+    {
+        return g_mock_backend->get_processor_handles_by_type(socket, type, handles,
+                                                             count);
+    }
+#endif
+
     // Per-device forwarding (instance — explicit handle, matches backend<> API)
     status_t get_metrics_info(processor_handle handle, gpu_metrics_t* out) const
     {
@@ -200,6 +276,31 @@ struct mock_backend
                                   proc_info_t* list) const
     {
         return g_mock_backend->get_gpu_process_list(handle, count, list);
+    }
+#endif
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    status_t get_nic_asic_info(processor_handle handle, nic_asic_info_t* out) const
+    {
+        return g_mock_backend->get_nic_asic_info(handle, out);
+    }
+
+    status_t get_nic_port_info(processor_handle handle, nic_port_info_t* out) const
+    {
+        return g_mock_backend->get_nic_port_info(handle, out);
+    }
+
+    status_t get_nic_rdma_dev_info(processor_handle         handle,
+                                   nic_rdma_devices_info_t* out) const
+    {
+        return g_mock_backend->get_nic_rdma_dev_info(handle, out);
+    }
+
+    status_t get_nic_rdma_port_statistics(processor_handle handle, std::uint8_t port_idx,
+                                          std::uint32_t* count, nic_stat_t* stats) const
+    {
+        return g_mock_backend->get_nic_rdma_port_statistics(handle, port_idx, count,
+                                                            stats);
     }
 #endif
 };
