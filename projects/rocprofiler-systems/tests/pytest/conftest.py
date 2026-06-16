@@ -25,6 +25,8 @@ from pytest import StashKey
 
 from rocprofsys import (
     RocprofsysConfig,
+    TestEnvironment,
+    fundamental_system_environment,
     discover_build_config,
     GPUInfo,
     get_rocminfo,
@@ -694,10 +696,11 @@ def pytest_runtest_makereport(item, call):
             output_parts.append(f"{'='*70}")
             output_parts.append(f"Command: {cmd}")
         result_env = getattr(result, "environment", None)
-        if isinstance(result_env, dict) and result_env:
-            env_lines = [f"  {k}={v}" for k, v in sorted(result_env.items())]
-            output_parts.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
-            output_parts.append(f"{'='*70}")
+        if isinstance(result_env, TestEnvironment):
+            env_lines = result_env.format_layers()
+            if env_lines:
+                output_parts.append("Environment:\n\n" + "\n".join(env_lines) + "\n")
+                output_parts.append(f"{'='*70}")
         output_parts.append("Test Output:\n")
         test_out = getattr(result, "test_output", "")
         if test_out:
@@ -1398,8 +1401,9 @@ def _generate_rocprofsys_config_header() -> list[str]:
                 "libpyrocprofsys.<IMPL>-<VERSION>-<ARCH>-<OS>-<ABI>.so in site-packages/rocprofsys)",
             )
         )
+    # Use fundamental system env to avoid verbose output
     header.extend(["-" * 70, "System Environment:"])
-    for key, value in sorted(rocprof_config.get_fundamental_environment().items()):
+    for key, value in fundamental_system_environment().items():
         header.append(_row(f"{key}:", value))
     header.extend(["=" * 70, ""])
     return header
@@ -1594,13 +1598,13 @@ def _cleanup_temp_patterns() -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def base_env(rocprof_config) -> dict[str, str]:
-    """Get base environment variables for test execution."""
-    return rocprof_config.get_base_environment()
+def get_library_path(rocprof_config) -> str:
+    """Computed LD_LIBRARY_PATH (rocprofsys libs + user override + ROCm LLVM libs)."""
+    return rocprof_config.library_path
 
 
 @pytest.fixture
-def flat_env(base_env: dict[str, str]) -> dict[str, str]:
+def flat_env() -> dict[str, str]:
     """Environment variables for flat profile tests."""
     return {
         "ROCPROFSYS_TRACE": "ON",
@@ -1616,12 +1620,11 @@ def flat_env(base_env: dict[str, str]) -> dict[str, str]:
         "OMP_PROC_BIND": "spread",
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
 
 @pytest.fixture
-def lock_env(base_env: dict[str, str]) -> dict[str, str]:
+def lock_env() -> dict[str, str]:
     """Environment variables for thread lock tracing tests."""
     return {
         "ROCPROFSYS_USE_SAMPLING": "ON",
@@ -1635,12 +1638,11 @@ def lock_env(base_env: dict[str, str]) -> dict[str, str]:
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TIMELINE_PROFILE": "OFF",
         "ROCPROFSYS_LOG_LEVEL": "info",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
 
 @pytest.fixture
-def perfetto_env(base_env: dict[str, str]) -> dict[str, str]:
+def perfetto_env() -> dict[str, str]:
     """Environment variables for perfetto-only tests."""
     return {
         "ROCPROFSYS_TRACE": "ON",
@@ -1653,12 +1655,11 @@ def perfetto_env(base_env: dict[str, str]) -> dict[str, str]:
         "OMP_PROC_BIND": "spread",
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
 
 @pytest.fixture
-def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
+def timemory_env() -> dict[str, str]:
     """Environment variables for timemory-only tests."""
     return {
         "ROCPROFSYS_TRACE": "OFF",
@@ -1670,7 +1671,6 @@ def timemory_env(base_env: dict[str, str]) -> dict[str, str]:
         "OMP_PROC_BIND": "spread",
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
-        "LD_LIBRARY_PATH": base_env.get("LD_LIBRARY_PATH", ""),
     }
 
 
@@ -2032,6 +2032,7 @@ class RocprofsysTest:
         assert_file_regex,
         get_test_num_threads,
         test_output_dir,
+        get_library_path,
     ):
 
         self.run_test = run_test
@@ -2045,6 +2046,7 @@ class RocprofsysTest:
         self.assert_file_regex = assert_file_regex
         self.num_threads = get_test_num_threads
         self.test_output_dir = test_output_dir
+        self.get_library_path = get_library_path
 
 
 # ============================================================================
@@ -2143,13 +2145,16 @@ def run_test(
         # Timeout: ROCPROFSYS_CI_TIMEOUT env, else @pytest.mark.timeout, else default
         ci_timeout_env = os.environ.get("ROCPROFSYS_CI_TIMEOUT")
         if ci_timeout_env is not None:
+            # Shell-exported value: drives the subprocess timeout below and is
+            # already carried by the user env layer. Do NOT echo it into the
+            # test layer, or it would mask the real base default in dumps.
             timeout = int(ci_timeout_env)
         elif request.node.get_closest_marker("timeout"):
             timeout = request.node.get_closest_marker("timeout").args[0]
+            env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
         else:
             timeout = 300
-
-        env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
+            env["ROCPROFSYS_CI_TIMEOUT"] = str(timeout)
 
         # Verify that MPI is available for "mpi_optional" tests
         if request.node.get_closest_marker("mpi_optional") and num_procs > 0:
@@ -2190,12 +2195,7 @@ def run_test(
             ctest_mode = request.config.getoption("--ctest-mode", default="off")
 
             cmd_str = " ".join(str(c) for c in getattr(result, "command", []))
-            env_dict = getattr(result, "environment", {})
-            env_str = (
-                "\n".join(f"  {k}={v}" for k, v in sorted(env_dict.items()))
-                if env_dict
-                else ""
-            )
+            env_str = "\n".join(runner.environment.format_layers())
 
             details = []
             if cmd_str:

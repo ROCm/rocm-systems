@@ -17,6 +17,15 @@ from .config import (
     discover_build_config,
 )
 
+from .environment import (
+    TestEnvironment,
+    base_environment,
+    base_binary_environment,
+    base_python_environment,
+    base_causal_environment,
+    fundamental_system_environment,
+)
+
 from .runners import (
     TestResult,
     BaselineRunner,
@@ -55,6 +64,13 @@ __all__ = [
     "RocprofsysConfig",
     "discover_build_config",
     "discover_install_config",
+    # Environment
+    "TestEnvironment",
+    "base_environment",
+    "base_binary_environment",
+    "base_python_environment",
+    "base_causal_environment",
+    "fundamental_system_environment",
     # Runners
     "TestResult",
     "BaselineRunner",

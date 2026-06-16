@@ -25,7 +25,6 @@ def attach_env(rocprof_config) -> dict[str, str]:
         "ROCPROFSYS_TIME_OUTPUT": "OFF",
         "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count",
         "OMP_NUM_THREADS": str(rocprof_config.capabilities.num_procs),
-        "ROCPROFSYS_OUTPUT_PATH": "rocprof-sys-tests-output",
         "ROCPROFSYS_OUTPUT_PREFIX": "attach/",
     }
 
