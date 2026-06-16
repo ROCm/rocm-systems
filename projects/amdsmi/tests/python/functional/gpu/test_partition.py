@@ -351,4 +351,13 @@ class TestGpuPartition(unittest.TestCase):
         )
         return
 
+    def test_set_gpu_compute_partition_mem_alloc_mode(self):
+        self.common.print_func_name("")
+
+        self.common.Test_Per_GPU_With_One_Enum(
+            amdsmi_set_gpu_compute_partition_mem_alloc_mode=amdsmi.amdsmi_set_gpu_compute_partition_mem_alloc_mode,
+            compute_partition_mem_alloc_mode=self.common.compute_partition_mem_alloc_mode_types,
+        )
+        return
+
     # out of order freq_ind then value then clk_type
