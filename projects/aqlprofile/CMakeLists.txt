@@ -18,6 +18,13 @@ include (utils)
 ## Set build environment
 include (env)
 
+# Root of the rocm-systems monorepo, for shared/ctest test-filter infrastructure.
+# Guarded everywhere it is used so standalone / sparse checkouts (no shared/ctest)
+# keep building.
+if(NOT DEFINED ROCM_SYSTEMS_ROOT)
+  set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 ## Setup the package version.

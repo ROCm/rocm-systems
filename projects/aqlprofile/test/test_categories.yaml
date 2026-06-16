@@ -1,0 +1,58 @@
+# aqlprofile CTest Test Categories
+#
+# Test-filter standardization (RFC0010). Defines tiered categories consumed by
+# TheRock's test_runner.py via `ctest -L <category>` from the installed
+# share/hsa-amd-aqlprofile/ directory.
+#
+# Tier inheritance (applied by shared/ctest/parse_ctest_categories.py):
+#   quick         -> quick, standard, comprehensive, full
+#   standard      -> standard, comprehensive, full
+#   comprehensive -> comprehensive, full
+#   full          -> full
+#
+# Scope (initial): only the legacy `ctrl` harness is installed as a CTest entry
+# (`legacy-tests`, which runs share/hsa-amd-aqlprofile/run_tests.sh -- the
+# simple-convolution dry-run plus the PMC/SQTT/PCSMP scenarios). The GoogleTest
+# unit tests and the `testv2` integration test are not installed yet, so they
+# are intentionally not categorized here. New entries can be appended to the
+# install-time CTestTestfile.cmake (see test/CMakeLists.txt) and slotted into a
+# tier below without any TheRock-side change.
+
+test_categories:
+  quick:
+    description: "Fast sanity check via run_tests.sh (ctrl: dry-run/PMC/SQTT/PCSMP)"
+    test_patterns:
+      - "legacy-tests"
+    labels:
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation (same legacy ctrl scenarios for now)"
+    test_patterns:
+      - "legacy-tests"
+    labels:
+      - "pr"
+
+  comprehensive:
+    description: "Nightly run (same legacy ctrl scenarios for now)"
+    test_patterns:
+      - "legacy-tests"
+    labels:
+      - "nightly"
+
+  full:
+    description: "Complete installed test suite"
+    test_patterns:
+      - "legacy-tests"
+    labels:
+      - "all"
+
+execution_settings:
+  default_timeout: 600
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600
