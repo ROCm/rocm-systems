@@ -199,10 +199,12 @@ static const char *LOADER_DUMP_PREFIX = "amdcode";
 // jumps to E+256. The descriptor is rewritten to land on stub[0].
 //
 // gfx1250 encodings verified with: llvm-mc --arch=amdgcn --mcpu=gfx1250 --show-encoding
-//   s_mov_b32    s32, <lit> + literal  ->  0xBEA000FF
-//   s_mov_b32    s33, <lit> + literal  ->  0xBEA100FF
-//   s_set_pc_i64 s[32:33]              ->  0xBE804820
-//   s_code_end   (padding)             ->  0xBF9F0000
+//   global_wb   <scope:SCOPE_CU>       ->   0xEE0B007C, 0x00000000, 0x00000000
+//   v_nop        (padding)              ->  0x7E000000
+//   s_mov_b32    s100, <lit> + literal  ->  0xBEE400FF
+//   s_mov_b32    s101, <lit> + literal  ->  0xBEE500FF
+//   s_set_pc_i64 s[100:101]             ->  0xBE804864
+//   s_code_end   (padding)              ->  0xBF9F0000
 static constexpr size_t kTrampolineStubStride = AMD_ISA_ALIGN_BYTES;        // 256: one stub, entry-aligned
 static constexpr size_t kTrampolineEntriesPerKernel = 2;                    // entries at E and E+256
 static constexpr size_t kTrampolineEntrySpacing = AMD_ISA_ALIGN_BYTES;      // 256: matches kernel's E..E+256
@@ -211,12 +213,17 @@ static constexpr size_t kTrampolineSlotStride =
 
 static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
-  w[0] = 0xBEA000FF;                          // s_mov_b32 s32, target_lo
-  w[1] = static_cast<uint32_t>(target);
-  w[2] = 0xBEA100FF;                          // s_mov_b32 s33, target_hi
-  w[3] = static_cast<uint32_t>(target >> 32);
-  w[4] = 0xBE804820;                          // s_set_pc_i64 s[32:33]
-  for (size_t i = 5; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
+
+  w[0] = 0xEE0B007C;                          // global_wb <scope:SCOPE_CU>
+  w[1] = 0x00000000;                          // padding
+  w[2] = 0x00000000;                          // padding
+  w[3] = 0x7E000000;                          // v_nop (padding)
+  w[4] = 0xBEE400FF;                          // s_mov_b32 s100, target_lo
+  w[5] = static_cast<uint32_t>(target);
+  w[6] = 0xBEE500FF;                          // s_mov_b32 s101, target_hi
+  w[7] = static_cast<uint32_t>(target >> 32);
+  w[8] = 0xBE804864;                          // s_set_pc_i64 s[100:101]
+  for (size_t i = 9; i < kTrampolineStubStride / sizeof(uint32_t); ++i)
     w[i] = 0xBF9F0000;                        // s_code_end (prefetch-safe padding)
 }
 
