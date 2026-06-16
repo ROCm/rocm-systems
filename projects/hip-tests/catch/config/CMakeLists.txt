@@ -83,6 +83,7 @@ add_custom_command(
     COMMAND "${Python3_EXECUTABLE}" "${CONFIG_INJECT_SCRIPT}"
             "${HIP_TEST_CONFIG_HEADER}"
             "${HIP_TEST_CATEGORIES_YAML}"
+            "${CONFIG_OS}"
     DEPENDS
         ${CONFIG_COMMON_MODULE}
         ${CONFIG_PARSER_SCRIPT}

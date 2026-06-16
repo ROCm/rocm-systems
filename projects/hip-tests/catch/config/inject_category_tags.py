@@ -25,7 +25,6 @@ are always in sync with test_categories.yaml without touching parse_config.py.
 """
 
 import argparse
-import platform
 import re
 import sys
 
@@ -78,8 +77,11 @@ def exclude_gpu_key_applies(os_suffix, is_windows, is_linux):
 # ---------------------------------------------------------------------------
 
 
-def load_test_categories(yaml_path):
+def load_test_categories(yaml_path, os_name):
     """Parse test_categories.yaml and return (tier_patterns, gpu_exclusion_tags).
+
+    ``os_name`` is the target OS (``"windows"`` / ``"linux"``) passed in by the
+    build (``${CONFIG_OS}``), used to honour OS-specific exclude_arch keys.
 
     tier_patterns:     {tier_name: [compiled_regex, ...]}
     gpu_exclusion_tags:{test_name: set_of_ex_gpu_labels}
@@ -110,8 +112,9 @@ def load_test_categories(yaml_path):
             tier_patterns[tier] = compiled
 
     # --- GPU exclusions -------------------------------------------------------
-    is_windows = platform.system() == "Windows"
-    is_linux = platform.system() == "Linux"
+    os_name = (os_name or "").lower()
+    is_windows = os_name == "windows"
+    is_linux = os_name == "linux"
 
     gpu_exclusion_tags: dict = {}
     for key, section in (data.get("exclude_arch") or {}).items():
@@ -127,6 +130,15 @@ def load_test_categories(yaml_path):
             if isinstance(section, dict)
             else []
         ):
+            # Granularity caveat: tags are injected into the generated
+            # #define macros, which are keyed by the base HIP_TEST_CASE name
+            # only (the Catch2 template-instance suffix " - <type>" is not part
+            # of the macro). We therefore strip that suffix and key the
+            # exclusion by the base case name, so the label attaches to the
+            # whole case rather than a single instantiation. Listing any one
+            # variant (e.g. "Unit_hipMemsetDSync - uint32_t") excludes ALL
+            # instantiations of that case. Per-variant exclusion is not
+            # achievable with this macro-level tagging approach.
             base_test_name = test_name.split(" - ", 1)[0].strip()
             if base_test_name:
                 gpu_exclusion_tags.setdefault(base_test_name, set()).update(ex_tags)
@@ -249,9 +261,16 @@ def main():
         "test_categories_yaml",
         help="Path to test_categories.yaml.",
     )
+    parser.add_argument(
+        "os_name",
+        help="Target OS (e.g. 'linux' / 'windows'), passed as ${CONFIG_OS} by "
+        "the build. Used to honour OS-specific exclude_arch keys.",
+    )
     args = parser.parse_args()
 
-    tier_patterns, gpu_exclusion_tags = load_test_categories(args.test_categories_yaml)
+    tier_patterns, gpu_exclusion_tags = load_test_categories(
+        args.test_categories_yaml, args.os_name
+    )
 
     print(
         f"[inject_category_tags] Loaded {len(tier_patterns)} tier(s), "
