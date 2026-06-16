@@ -209,7 +209,7 @@ static constexpr size_t kTrampolineEntrySpacing = AMD_ISA_ALIGN_BYTES;      // 2
 static constexpr size_t kTrampolineSlotStride =
     kTrampolineStubStride * kTrampolineEntriesPerKernel;                    // 512 per kernel
 
-static void BuildTrampoline(uint8_t* buf, uint64_t target) {
+static void BuildTrampolineGfx1250(uint8_t* buf, uint64_t target) {
   auto* w = reinterpret_cast<uint32_t*>(buf);
   w[0] = 0xBEA000FF;                          // s_mov_b32 s32, target_lo
   w[1] = static_cast<uint32_t>(target);
@@ -1302,7 +1302,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
 
   // Kernel-entry trampolines (gfx1250). Gate on this code object's ISA and reset
   // the per-object fixup list collected by LoadDefinitionSymbol.
-  tramp_enabled_ = codeIsa.find("gfx1250") != std::string::npos;
+  trampoline_enabled_gfx1250_ = codeIsa.find("gfx1250") != std::string::npos;
   kd_fixups_.clear();
 
   uint32_t majorVersion, minorVersion;
@@ -1368,8 +1368,8 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   // Emit kernel-entry trampolines into the host shadow now that the image is
   // final (post-relocation) and still unfrozen. The single Freeze DMA carries
   // them to device along with the rewritten descriptors.
-  if (tramp_enabled_ && !kd_fixups_.empty()) {
-    status = InstallTrampolines(agent);
+  if (trampoline_enabled_gfx1250_ && !kd_fixups_.empty()) {
+    status = InstallTrampolinesGfx1250(agent);
     if (status != HSA_STATUS_SUCCESS) { return status; }
   }
 
@@ -1477,7 +1477,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ExecutableImpl::InstallTrampolines(hsa_agent_t agent) {
+hsa_status_t ExecutableImpl::InstallTrampolinesGfx1250(hsa_agent_t agent) {
   const size_t n = kd_fixups_.size();
   const size_t pool = n * kTrampolineSlotStride;
 
@@ -1506,7 +1506,7 @@ hsa_status_t ExecutableImpl::InstallTrampolines(hsa_agent_t agent) {
     for (size_t e = 0; e < kTrampolineEntriesPerKernel; ++e) {
       const uint64_t stub_off = slot_off + e * kTrampolineEntrySpacing;
       uint8_t blob[kTrampolineStubStride];
-      BuildTrampoline(blob, entry_dev + e * kTrampolineEntrySpacing);
+      BuildTrampolineGfx1250(blob, entry_dev + e * kTrampolineEntrySpacing);
       tramp->Copy(stub_off, blob, sizeof(blob));  // -> trampoline host shadow
     }
 
@@ -1568,7 +1568,7 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
     llvm::amdhsa::kernel_descriptor_t kd;
     sym->GetSection()->getData(sym->SectionOffset(), &kd, sizeof(kd));
 
-    if (tramp_enabled_) {
+    if (trampoline_enabled_gfx1250_) {
       // Record this descriptor; the trampoline is installed after relocations.
       // sym->VAddr() is the descriptor's ELF vaddr (matches SymbolAddress below).
       kd_fixups_.push_back({ SymbolSegment(agent, sym), sym->VAddr(),

@@ -625,7 +625,7 @@ private:
 
   // gfx1250: allocate a separate executable region and emit, per kernel, a stub
   // that jumps to the real entry, then redirect the kernel descriptor to it.
-  hsa_status_t InstallTrampolines(hsa_agent_t agent);
+  hsa_status_t InstallTrampolinesGfx1250(hsa_agent_t agent);
 
   amd::hsa::common::ReaderWriterLock rw_lock_;
   hsa_profile_t profile_;
@@ -646,7 +646,7 @@ private:
   // kd_fixups_ is collected per-LoadCodeObject; trampoline_segments_ persists for
   // the lifetime of the executable so it can be frozen and destroyed normally.
   struct KdFixup { Segment* code_seg; uint64_t kd_vaddr; int64_t entry_off; };
-  bool tramp_enabled_ = false;
+  bool trampoline_enabled_gfx1250_ = false;
   std::vector<KdFixup> kd_fixups_;
   std::vector<std::shared_ptr<Segment>> trampoline_segments_;
 };
