@@ -126,6 +126,9 @@ test_categories:
 #     labels:
 #       - "gfx950_linux_exclude"
 
+# Reserved for test_categories.yaml parity with other components.
+# rocprofiler-systems currently relies on existing per-test timeout markers
+# (and env/default fallbacks), so these settings are not consumed yet.
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
