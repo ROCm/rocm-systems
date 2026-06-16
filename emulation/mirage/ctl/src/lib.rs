@@ -537,7 +537,7 @@ pub struct RunArgs {
     /// Container provider (`podman`, `docker`, or a path). Autodetected
     /// when omitted.
     #[arg(long)]
-    provider: Option<String>,
+    container_provider: Option<String>,
     /// Override the emulator execution mode (`functional` or `clocked`).
     #[arg(long)]
     exec_mode: Option<ExecModeArg>,
@@ -1816,7 +1816,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 &mut profile,
                 a.image.clone(),
                 &a.mounts,
-                a.provider.clone(),
+                a.container_provider.clone(),
                 a.emulator.clone(),
                 a.exec_mode,
                 &a.options,
