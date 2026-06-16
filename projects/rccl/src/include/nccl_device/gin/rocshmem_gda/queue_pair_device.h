@@ -51,6 +51,16 @@ enum class ThreadScope : int {
   exclusive
 };
 
+enum class QpScope : int {
+  Exclusive,   // Exactly one thread accesses this QP for its entire lifetime. No handoff.
+  Workgroup,   // Contention only within the same CTA (workgroup-scope lock).
+  Agent        // Contention across CTAs (agent-scope lock, default).
+};
+
+inline constexpr auto Exclusive = QpScope::Exclusive;
+inline constexpr auto Workgroup = QpScope::Workgroup;
+inline constexpr auto Agent     = QpScope::Agent;
+
 class ActiveWFInfo {
  public:
   uint64_t    activemask{0};
@@ -104,6 +114,7 @@ class QueuePair {
       const void *laddr, uint32_t lkey,
       size_t length, ActiveWFInfo &wf_info, bool ring_db = true);
 
+  template<QpScope Scope = Agent>
   __device__ void put_nbi_single(void *raddr, uint32_t rkey,
       const void *laddr, uint32_t lkey,
       size_t length, bool ring_db = true);
@@ -111,11 +122,13 @@ class QueuePair {
   __device__ void atomic_add(void *raddr, uint32_t rkey,
       int64_t value, ActiveWFInfo &wf_info, bool fence = false);
 
+  template<QpScope Scope = Agent>
   __device__ void atomic_add_single(void *raddr, uint32_t rkey,
       int64_t value, bool fence = false);
 
   __device__ void quiet(ActiveWFInfo &wf_info);
 
+  template<QpScope Scope = Agent>
   __device__ void quiet_single();
 };
 

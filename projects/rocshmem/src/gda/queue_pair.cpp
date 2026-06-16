@@ -167,23 +167,24 @@ __device__ void QueuePair::post_wqe_rma(
   }
 }
 
+template<QpScope Scope>
 __device__ void QueuePair::post_wqe_rma_single(int32_t length,
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
     uint8_t opcode, bool ring_db) {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma_single(length, laddr, lkey, raddr, rkey, opcode, ring_db);
+    ionic_post_wqe_rma_single<Scope>(length, laddr, lkey, raddr, rkey, opcode, ring_db);
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    bnxt_post_wqe_rma_single(length, laddr, lkey, raddr, rkey, opcode, ring_db);
+    bnxt_post_wqe_rma_single<Scope>(length, laddr, lkey, raddr, rkey, opcode, ring_db);
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma_single(length, laddr, lkey, raddr, rkey, opcode, ring_db);
+    mlx5_post_wqe_rma_single<Scope>(length, laddr, lkey, raddr, rkey, opcode, ring_db);
     return;
 #endif
   default:
@@ -217,22 +218,23 @@ __device__ uint64_t QueuePair::post_wqe_amo(uintptr_t raddr, uint32_t rkey,
   }
 }
 
+template<QpScope Scope>
 __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr,
     uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, bool fence) {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return ionic_post_wqe_amo_single(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
+    return ionic_post_wqe_amo_single<Scope>(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return bnxt_post_wqe_amo_single(raddr, rkey, opcode, atomic_data, atomic_cmp,
+    return bnxt_post_wqe_amo_single<Scope>(raddr, rkey, opcode, atomic_data, atomic_cmp,
            fetching, fence);
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return mlx5_post_wqe_amo_single(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
+    return mlx5_post_wqe_amo_single<Scope>(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 #endif
   default:
     assert(false /* invalid nic provider */);
@@ -265,21 +267,22 @@ __device__ void QueuePair::quiet(ActiveWFInfo &wf_info) {
   }
 }
 
+template<QpScope Scope>
 __device__ void QueuePair::quiet_single() {
   switch (constmem.gda_provider) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_quiet_single();
+    ionic_quiet_single<Scope>();
     return;
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    bnxt_quiet_single();
+    bnxt_quiet_single<Scope>();
     return;
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_quiet_single();
+    mlx5_quiet_single<Scope>();
     return;
 #endif
   default:
@@ -319,12 +322,13 @@ __device__ void QueuePair::put_nbi_single(void *dest, const void *source,
                        gda_op_rdma_write, ring_db);
 }
 
+template<QpScope Scope>
 __device__ void QueuePair::put_nbi_single(void *raddr, uint32_t rkey,
     const void *laddr, uint32_t lkey,
     size_t length, bool ring_db) {
   uintptr_t l = reinterpret_cast<uintptr_t>(laddr);
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_rma_single(length, l, lkey, r, rkey,
+  post_wqe_rma_single<Scope>(length, l, lkey, r, rkey,
                        gda_op_rdma_write, ring_db);
 }
 
@@ -380,10 +384,11 @@ __device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
   post_wqe_amo_single(dst, rkey, gda_op_atomic_fa, value, 0);
 }
 
+template<QpScope Scope>
 __device__ void QueuePair::atomic_add_single(void *raddr, uint32_t rkey,
     int64_t value, bool fence) {
   uintptr_t r = reinterpret_cast<uintptr_t>(raddr);
-  post_wqe_amo_single(r, rkey, gda_op_atomic_fa, value, 0, false, fence);
+  post_wqe_amo_single<Scope>(r, rkey, gda_op_atomic_fa, value, 0, false, fence);
 }
 
 __device__ void QueuePair::atomic_add(void *raddr, uint32_t rkey,
@@ -483,6 +488,18 @@ __device__ uint32_t QueuePair::get_lkey(uintptr_t addr) {
   LOGD_ERROR_ABORT("Valid lkey buffer not found");
   return 0;
 }
+
+// Explicit template instantiations for QpScope variants
+template __device__ void QueuePair::put_nbi_single<Exclusive>(void*, uint32_t, const void*, uint32_t, size_t, bool);
+template __device__ void QueuePair::put_nbi_single<Agent>(void*, uint32_t, const void*, uint32_t, size_t, bool);
+template __device__ void QueuePair::atomic_add_single<Exclusive>(void*, uint32_t, int64_t, bool);
+template __device__ void QueuePair::atomic_add_single<Agent>(void*, uint32_t, int64_t, bool);
+template __device__ void QueuePair::quiet_single<Exclusive>();
+template __device__ void QueuePair::quiet_single<Agent>();
+template __device__ void QueuePair::post_wqe_rma_single<Exclusive>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ void QueuePair::post_wqe_rma_single<Agent>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ uint64_t QueuePair::post_wqe_amo_single<Exclusive>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
+template __device__ uint64_t QueuePair::post_wqe_amo_single<Agent>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
 
 }  // namespace rocshmem
 

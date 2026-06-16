@@ -253,6 +253,7 @@ __device__ void QueuePair::mlx5_quiet() {
  * TODO: This function is redundant but kept because ionic has a different
  * quiet_single implementation. Remove once ionic's quiet is unified.
  */
+template<QpScope Scope>
 __device__ void QueuePair::mlx5_quiet_single() {
   mlx5_poll_cq_until(mlx5_sq.depth);
 }
@@ -296,16 +297,19 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
 }
 
 // precondition: called with all active lanes using different QPs
+template<QpScope Scope>
 __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
                                                     uint32_t lkey, uintptr_t raddr,
                                                     uint32_t rkey, uint8_t opcode,
                                                     bool ring_db) {
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
 
-  // get SQ lock
-  acquire_lock(&mlx5_sq.lock);
-  // poll until we have enough space for at least one WQE
-  mlx5_poll_cq_until(1);
+  if constexpr (Scope != QpScope::Exclusive) {
+    // get SQ lock
+    acquire_lock(&mlx5_sq.lock);
+    // poll until we have enough space for at least one WQE
+    mlx5_poll_cq_until(1);
+  }
 
   // wqe_idx is the logical WQE id that wraps at 0xFFFF, sq_idx is the index into the actual SQ
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, 0);
@@ -327,8 +331,10 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int32_t length, uintptr_t la
     mlx5_ring_doorbell(mlx5_sq.post, wqe);
   }
 
-  // release SQ lock
-  release_lock(&mlx5_sq.lock);
+  if constexpr (Scope != QpScope::Exclusive) {
+    // release SQ lock
+    release_lock(&mlx5_sq.lock);
+  }
 }
 
 /* can be called with all active lanes using any number of different QPs, don't assume anything
@@ -388,14 +394,17 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
 }
 
 // precondition: called with all active lanes using different QPs
+template<QpScope Scope>
 __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr,
                                                         uint32_t rkey, uint8_t opcode,
                                                         int64_t atomic_data, int64_t atomic_cmp,
                                                         bool fetching, bool fence) {
-  // get SQ lock
-  acquire_lock(&mlx5_sq.lock);
-  // poll until we have enough space for at least one WQE
-  mlx5_poll_cq_until(1);
+  if constexpr (Scope != QpScope::Exclusive) {
+    // get SQ lock
+    acquire_lock(&mlx5_sq.lock);
+    // poll until we have enough space for at least one WQE
+    mlx5_poll_cq_until(1);
+  }
 
   uint64_t* atomic_laddr = nonfetching_atomic;
   uint32_t atomic_lkey = nonfetching_atomic_lkey;
@@ -428,14 +437,26 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr,
   }
   // ring doorbell for this WQE
   mlx5_ring_doorbell(mlx5_sq.post, wqe);
-  // release SQ lock
-  release_lock(&mlx5_sq.lock);
+
+  if constexpr (Scope != QpScope::Exclusive) {
+    // release SQ lock
+    release_lock(&mlx5_sq.lock);
+  }
+
   // wait until fetch completes
   if (fetching) {
-    mlx5_quiet_single();
+    mlx5_quiet_single<Scope>();
   }
 
   return fetching ? *atomic_laddr : 0;
 }
+
+// Explicit template instantiations for QpScope variants
+template __device__ void QueuePair::mlx5_post_wqe_rma_single<Exclusive>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ void QueuePair::mlx5_post_wqe_rma_single<Agent>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single<Exclusive>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
+template __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single<Agent>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
+template __device__ void QueuePair::mlx5_quiet_single<Exclusive>();
+template __device__ void QueuePair::mlx5_quiet_single<Agent>();
 
 }  // namespace rocshmem

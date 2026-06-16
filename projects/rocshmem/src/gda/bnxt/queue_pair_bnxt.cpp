@@ -96,19 +96,26 @@ __device__ static inline void* bnxt_re_get_hwqe(struct bnxt_device_sq *sq, uint3
   return (void *)((char*)sq->buf + (idx << 4));
 }
 
+template<QpScope Scope>
 __device__ static inline void lock(uint32_t *lock) {
+  constexpr auto mem_scope = (Scope == QpScope::Workgroup)
+      ? __HIP_MEMORY_SCOPE_WORKGROUP
+      : __HIP_MEMORY_SCOPE_AGENT;
   uint32_t expected;
-
   do {
     expected = 0;
   } while (0 == __hip_atomic_compare_exchange_strong(lock, &expected, 1,
                                                      __ATOMIC_ACQUIRE,
                                                      __ATOMIC_ACQUIRE,
-                                                     __HIP_MEMORY_SCOPE_SYSTEM));
+                                                     mem_scope));
 }
 
+template<QpScope Scope>
 __device__ static inline void unlock(uint32_t *lock) {
-  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  constexpr auto mem_scope = (Scope == QpScope::Workgroup)
+      ? __HIP_MEMORY_SCOPE_WORKGROUP
+      : __HIP_MEMORY_SCOPE_AGENT;
+  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, mem_scope);
 }
 
 __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
@@ -219,6 +226,7 @@ __device__ void QueuePair::bnxt_quiet() {
  * TODO: This function is redundant but kept because ionic has a different
  * quiet_single implementation. Remove once ionic's quiet is unified.
  */
+template<QpScope Scope>
 __device__ void QueuePair::bnxt_quiet_single() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
@@ -293,7 +301,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
     uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
   if (wf_info.is_pe_group_first) {
-    lock(&bnxt_sq.lock);
+    lock<Agent>(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
@@ -306,14 +314,17 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
   }
 
   if (wf_info.is_pe_group_first) {
-    unlock(&bnxt_sq.lock);
+    unlock<Agent>(&bnxt_sq.lock);
   }
 }
 
+template<QpScope Scope>
 __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
     uint8_t opcode, bool ring_db) {
-  lock(&bnxt_sq.lock);
+  if constexpr (Scope != QpScope::Exclusive) {
+    lock<Scope>(&bnxt_sq.lock);
+  }
 
   bnxt_write_rma_wqe(length, raddr, rkey, laddr, lkey, opcode);
 
@@ -321,7 +332,9 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
     bnxt_ring_doorbell(bnxt_sq.tail);
   }
 
-  unlock(&bnxt_sq.lock);
+  if constexpr (Scope != QpScope::Exclusive) {
+    unlock<Scope>(&bnxt_sq.lock);
+  }
 }
 
 __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
@@ -396,7 +409,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
   uint32_t atomic_idx = 0;
 
   if (wf_info.is_pe_group_first) {
-    lock(&bnxt_sq.lock);
+    lock<Agent>(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
@@ -409,7 +422,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
   }
 
   if (wf_info.is_pe_group_first) {
-    unlock(&bnxt_sq.lock);
+    unlock<Agent>(&bnxt_sq.lock);
   }
 
   if (fetching) {
@@ -420,25 +433,38 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
   return 0;
 }
 
+template<QpScope Scope>
 __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
     uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, bool fence) {
   uint32_t atomic_idx = 0;
 
-  lock(&bnxt_sq.lock);
+  if constexpr (Scope != QpScope::Exclusive) {
+    lock<Scope>(&bnxt_sq.lock);
+  }
 
   atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 
   bnxt_ring_doorbell(bnxt_sq.tail);
 
-  unlock(&bnxt_sq.lock);
+  if constexpr (Scope != QpScope::Exclusive) {
+    unlock<Scope>(&bnxt_sq.lock);
+  }
 
   if (fetching) {
-    bnxt_quiet_single();
+    bnxt_quiet_single<Scope>();
     return fetching_atomic[atomic_idx];
   }
 
   return 0;
 }
+
+// Explicit template instantiations for QpScope variants
+template __device__ void QueuePair::bnxt_post_wqe_rma_single<Exclusive>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ void QueuePair::bnxt_post_wqe_rma_single<Agent>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single<Exclusive>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
+template __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single<Agent>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
+template __device__ void QueuePair::bnxt_quiet_single<Exclusive>();
+template __device__ void QueuePair::bnxt_quiet_single<Agent>();
 
 }  // namespace rocshmem

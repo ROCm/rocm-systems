@@ -44,16 +44,16 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
         uint32_t dstRkey = loadConst(loadConst(&dstMh->rkeys) + peer);
         uint32_t srcLkey = loadConst(&srcMh->lkey);
 
-        qp->put_nbi_single((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, !hasSignal);
+        qp->put_nbi_single<rocshmem::Exclusive>((void*)dstAddr, dstRkey, (void*)srcAddr, srcLkey, bytes, !hasSignal);
       }
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add_single((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*fence=*/false);
+        qp->atomic_add_single<rocshmem::Exclusive>((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*fence=*/false);
       } else if (hasCounter) {
-        qp->quiet_single();
+        qp->quiet_single<rocshmem::Exclusive>();
       }
 
       if (hasCounter) {
@@ -92,13 +92,13 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
 
       // lkey=0: put_nbi_single copies srcVal inline into the WQE
       // (inline_threshold >= sizeof(T)), so no registered MR is needed.
-      qp->put_nbi_single((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), !hasSignal);
+      qp->put_nbi_single<rocshmem::Exclusive>((void*)dstAddr, dstRkey, &srcVal, 0, sizeof(T), !hasSignal);
 
       if (hasSignal) {
         if (signalOp == ncclGinSignalInc) signalOpArg = 1;
         uintptr_t sigAddr = loadConst(loadConst(&rsCtx->signal_raddrs) + peer) + sizeof(uint64_t) * signal.indexedSignal.signalId;
         uint32_t sigRkey = loadConst(loadConst(&rsCtx->signal_rkeys) + peer);
-        qp->atomic_add_single((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*fence=*/false);
+        qp->atomic_add_single<rocshmem::Exclusive>((void*)sigAddr, sigRkey, (int64_t)signalOpArg, /*fence=*/false);
       }
     }
     coop.sync();
@@ -147,7 +147,7 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
     rocshmem::QueuePair** qps = loadConst(&rsCtx->qps);
 #pragma unroll 1
     for (int peer = coop.thread_rank(); peer < ctx.nRanks; peer += coop.size()) {
-      loadConst(qps + peer)->quiet_single();
+      loadConst(qps + peer)->template quiet_single<rocshmem::Exclusive>();
     }
   }
 };

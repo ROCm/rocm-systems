@@ -75,6 +75,16 @@ enum class ThreadScope: int {
   wg
 };
 
+enum class QpScope : int {
+  Exclusive,   // Exactly one thread accesses this QP for its entire lifetime. No handoff.
+  Workgroup,   // Contention only within the same CTA (workgroup-scope lock).
+  Agent        // Contention across CTAs (agent-scope lock, default).
+};
+
+inline constexpr auto Exclusive = QpScope::Exclusive;
+inline constexpr auto Workgroup = QpScope::Workgroup;
+inline constexpr auto Agent     = QpScope::Agent;
+
 class ActiveWFInfo {
  public:
   uint64_t    activemask{0};                  // Mask of active threads in the wavefront
@@ -174,6 +184,7 @@ class QueuePair {
   __device__ void put_nbi_single(void *dest, const void *source, size_t length,
       bool ring_db);
 
+  template<QpScope Scope = Agent>
   __device__ void put_nbi_single(void *raddr, uint32_t rkey,
       const void *laddr, uint32_t lkey,
       size_t length, bool ring_db = true);
@@ -216,6 +227,7 @@ class QueuePair {
    */
   __device__ void quiet(ActiveWFInfo &wf_info);
 
+  template<QpScope Scope = Agent>
   __device__ void quiet_single();
 
   /**
@@ -250,6 +262,7 @@ class QueuePair {
 
   __device__ void atomic_nofetch_single(void *dest, int64_t value);
 
+  template<QpScope Scope = Agent>
   __device__ void atomic_add_single(void *raddr, uint32_t rkey,
       int64_t value, bool fence = false);
 
@@ -328,6 +341,7 @@ class QueuePair {
       ActiveWFInfo &wf_info, bool fetching = false, bool fence = false);
 #endif
 
+  template<QpScope Scope = Agent>
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
       uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetching = false, bool fence = false);
@@ -349,14 +363,17 @@ class QueuePair {
       uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 
+  template<QpScope Scope = Agent>
   __device__ __attribute__((noinline)) void
   post_wqe_rma_single(int32_t length, uintptr_t laddr, uint32_t lkey,
       uintptr_t raddr, uint32_t rkey, uint8_t opcode, bool ring_db);
 
 #if defined(GDA_MLX5)
+  template<QpScope Scope = Agent>
   __device__ uint64_t mlx5_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch = false, bool fence = false);
+  template<QpScope Scope = Agent>
   __device__ void mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
       uint32_t lkey, uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, bool ring_db);
@@ -364,6 +381,7 @@ class QueuePair {
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void mlx5_quiet();
+  template<QpScope Scope = Agent>
   __device__ void mlx5_quiet_single();
 #endif
 #if defined(GDA_BNXT)
@@ -374,9 +392,11 @@ class QueuePair {
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetching, bool fence);
 
+  template<QpScope Scope = Agent>
   __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetching = false, bool fence = false);
+  template<QpScope Scope = Agent>
   __device__ void bnxt_post_wqe_rma_single(int32_t length, uintptr_t laddr,
       uint32_t lkey, uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, bool ring_db);
@@ -384,12 +404,15 @@ class QueuePair {
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void bnxt_quiet();
+  template<QpScope Scope = Agent>
   __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
+  template<QpScope Scope = Agent>
   __device__ uint64_t ionic_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch = false, bool fence = false);
+  template<QpScope Scope = Agent>
   __device__ void ionic_post_wqe_rma_single(int32_t length,
       uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
       uint32_t rkey, uint8_t opcode, bool ring_db);
@@ -397,6 +420,7 @@ class QueuePair {
       uint32_t rkey, uintptr_t laddr, uint32_t lkey,
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
   __device__ void ionic_quiet(ActiveWFInfo &wf_info);
+  template<QpScope Scope = Agent>
   __device__ void ionic_quiet_single();
 #endif
 
@@ -466,6 +490,7 @@ class QueuePair {
    * @return position of my_tid=0's wqe.
    */
   __device__ uint32_t reserve_sq(ActiveWFInfo &wf_info, uint32_t num_wqes);
+  template<QpScope Scope = Agent>
   __device__ uint32_t reserve_sq_single(uint32_t num_wqes);
 
   /**
@@ -478,6 +503,7 @@ class QueuePair {
    */
   __device__ uint32_t commit_sq(ActiveWFInfo &wf_info, uint32_t my_sq_prod,
       uint32_t my_sq_pos, uint32_t num_wqes);
+  template<QpScope Scope = Agent>
   __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos,
       uint32_t num_wqes);
 

@@ -47,30 +47,39 @@ __device__ uint32_t QueuePair::reserve_sq(ActiveWFInfo &wf_info,
   return my_sq_prod;
 }
 
+template<QpScope Scope>
 __device__ uint32_t QueuePair::reserve_sq_single(uint32_t num_wqes) {
   uint32_t my_sq_prod = 0;
 
-  // reserve space for wqes in sq
-  my_sq_prod = __hip_atomic_fetch_add(&sq_prod, num_wqes, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-
-  // wait for that space to be available
-  ionic_quiet_internal_ccqe_single(my_sq_prod + num_wqes - sq_mask);
+  if constexpr (Scope == QpScope::Exclusive) {
+    my_sq_prod = sq_prod;
+    sq_prod += num_wqes;
+  } else {
+    my_sq_prod = __hip_atomic_fetch_add(&sq_prod, num_wqes, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    ionic_quiet_internal_ccqe_single(my_sq_prod + num_wqes - sq_mask);
+  }
 
   return my_sq_prod;
 }
 
+template<QpScope Scope>
 __device__ uint32_t QueuePair::commit_sq_single(uint32_t my_sq_prod, [[maybe_unused]] uint32_t my_sq_pos, uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
-  spin_lock_acquire_unique(&sq_lock);
-
-  if ((sq_dbprod - dbprod) & (1u << 31)) {
-    sq_dbprod = dbprod;
-
-    ionic_ring_doorbell_single(dbprod);
+  if constexpr (Scope != QpScope::Exclusive) {
+    spin_lock_acquire_unique(&sq_lock);
   }
 
-  spin_lock_release_unique(&sq_lock);
+  if constexpr (Scope == QpScope::Exclusive) {
+    sq_dbprod = dbprod;
+    ionic_ring_doorbell_single(dbprod);
+  } else {
+    if ((sq_dbprod - dbprod) & (1u << 31)) {
+      sq_dbprod = dbprod;
+      ionic_ring_doorbell_single(dbprod);
+    }
+    spin_lock_release_unique(&sq_lock);
+  }
 
   return dbprod;
 }
@@ -284,10 +293,6 @@ __device__ void QueuePair::ionic_quiet(ActiveWFInfo &wf_info) {
   ionic_quiet_internal(wf_info, sq_prod);
 }
 
-__device__ void QueuePair::ionic_quiet_single() {
-  ionic_quiet_internal_ccqe_single(sq_prod);
-}
-
 __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
     uintptr_t raddr, uint32_t rkey, uintptr_t laddr, uint32_t lkey,
     uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db) {
@@ -350,11 +355,12 @@ __device__ void QueuePair::ionic_post_wqe_rma(int32_t length,
   }
 }
 
+template<QpScope Scope>
 __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t length,
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
     uint32_t rkey, uint8_t opcode, bool ring_db) {
   uint32_t num_wqes = 1;
-  uint32_t my_sq_prod = reserve_sq_single(num_wqes);
+  uint32_t my_sq_prod = reserve_sq_single<Scope>(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
   struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
   uint16_t wqe_flags = 0;
@@ -400,7 +406,7 @@ __device__ void QueuePair::ionic_post_wqe_rma_single(int32_t length,
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 
   if (ring_db) {
-    commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
+    commit_sq_single<Scope>(my_sq_prod, my_sq_pos, num_wqes);
   }
 }
 
@@ -479,11 +485,12 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo(uintptr_t raddr, uint32_t rkey
   return ret;
 }
 
+template<QpScope Scope>
 __device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
     uint32_t rkey, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, bool fence) {
   uint32_t num_wqes = 1;
-  uint32_t my_sq_prod = reserve_sq_single(num_wqes);
+  uint32_t my_sq_prod = reserve_sq_single<Scope>(num_wqes);
   uint32_t my_sq_pos = my_sq_prod;
   struct ionic_v1_wqe *wqe = &ionic_sq_buf[my_sq_pos & sq_mask];
   uint16_t wqe_flags = 0;
@@ -530,7 +537,7 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
 
   __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
 
-  cons = commit_sq_single(my_sq_prod, my_sq_pos, num_wqes);
+  cons = commit_sq_single<Scope>(my_sq_prod, my_sq_pos, num_wqes);
 
   uint64_t ret{0};
   if (fetching) {
@@ -541,5 +548,22 @@ __device__ uint64_t QueuePair::ionic_post_wqe_amo_single(uintptr_t raddr,
   }
   return ret;
 }
+
+template<QpScope Scope>
+__device__ void QueuePair::ionic_quiet_single() {
+  ionic_quiet_internal_ccqe_single(sq_prod);
+}
+
+// Explicit template instantiations for QpScope variants
+template __device__ void QueuePair::ionic_post_wqe_rma_single<Exclusive>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ void QueuePair::ionic_post_wqe_rma_single<Agent>(int32_t, uintptr_t, uint32_t, uintptr_t, uint32_t, uint8_t, bool);
+template __device__ uint64_t QueuePair::ionic_post_wqe_amo_single<Exclusive>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
+template __device__ uint64_t QueuePair::ionic_post_wqe_amo_single<Agent>(uintptr_t, uint32_t, uint8_t, int64_t, int64_t, bool, bool);
+template __device__ void QueuePair::ionic_quiet_single<Exclusive>();
+template __device__ void QueuePair::ionic_quiet_single<Agent>();
+template __device__ uint32_t QueuePair::reserve_sq_single<Exclusive>(uint32_t);
+template __device__ uint32_t QueuePair::reserve_sq_single<Agent>(uint32_t);
+template __device__ uint32_t QueuePair::commit_sq_single<Exclusive>(uint32_t, uint32_t, uint32_t);
+template __device__ uint32_t QueuePair::commit_sq_single<Agent>(uint32_t, uint32_t, uint32_t);
 
 }  // namespace rocshmem
