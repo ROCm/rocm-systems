@@ -70,6 +70,11 @@ public:
         return hasPattern("IPC reuse buffer");
     }
 
+    bool hasNETReuse() const
+    {
+        return hasPattern("NET reuse buffer");
+    }
+
     bool hasNumSegments(int n) const
     {
         return hasPattern("numSegments " + std::to_string(n));
@@ -77,13 +82,12 @@ public:
 
     bool hasNETRegistration() const
     {
-        return hasPattern("NET register userbuff") ||
-               hasPattern("NET reuse buffer");
+        return hasPattern("NET register userbuff");
     }
 
     bool hasAnyRegistrationSuccess() const
     {
-        return hasIPCRegistration() || hasIPCReuse() || hasNETRegistration();
+        return hasIPCRegistration() || hasIPCReuse() || hasNETRegistration() || hasNETReuse();
     }
 
     bool hasIPCFailure() const
@@ -92,15 +96,22 @@ public:
                hasPattern("legacy IPC blocked");
     }
 
+    bool hasNETFailure() const
+    {
+        return hasPattern("failed to NET register");
+    }
+
     std::string getSummary() const
     {
         std::ostringstream ss;
         ss << "REG Log: ";
         if (hasIPCReuse()) ss << "[IPC-REUSE] ";
+        if (hasNETReuse()) ss << "[NET-REUSE] ";
         if (hasIPCRegistration()) ss << "[IPC-REG] ";
         if (hasNETRegistration()) ss << "[NET-REG] ";
         if (hasIPCFailure()) ss << "[IPC-FAIL] ";
-        if (!hasAnyRegistrationSuccess() && !hasIPCFailure()) ss << "[NO-REG]";
+        if (hasNETFailure()) ss << "[NET-FAIL] ";
+        if (!hasAnyRegistrationSuccess() && !hasIPCFailure() && !hasNETFailure()) ss << "[NO-REG]";
         return ss.str();
     }
 
@@ -199,6 +210,17 @@ protected:
     {
         const char* win = getenv("NCCL_WIN_ENABLE");
         return (!win || std::string(win) != "0");
+    }
+
+    // GIN backend is usable when not explicitly disabled and the GIN proxy
+    // type (NCCL_GIN_TYPE=2) is selected -- the inter-node leg of the
+    // LSA+GIN symmetric collectives rides on it.
+    bool isGinEnabled()
+    {
+        const char* en = getenv("NCCL_GIN_ENABLE");
+        if (en && std::string(en) == "0") return false;
+        const char* type = getenv("NCCL_GIN_TYPE");
+        return (type && std::string(type) == "2");
     }
 
     bool isPerRankLoggingEnabled() { return MPIHelpers::isPerRankLoggingEnabled(); }
@@ -693,6 +715,88 @@ TEST_F(UBR_MultiSegment, AllReduce)
 }
 
 /**
+ * @brief Register once, AllReduce twice - exercises the registration reuse fast path.
+ *
+ * After the first collective on a registered multi-segment buffer, a subsequent
+ * collective on the same buffer must hit the cache entry and skip re-registration.
+ *
+ * The fast path is transport-dependent: intra-node ranks reuse via the P2P/IPC
+ * cache (p2p.cc, "IPC reuse buffer"), while the inter-node leg reuses the NIC
+ * MR via the NET cache (net.cc, "NET reuse buffer"). The topology decides which
+ * one fires, so this test asserts on "either IPC or NET" rather than assuming a
+ * transport:
+ *   - the first call performs an initial registration (IPC or NET)
+ *   - a subsequent call hits the cached entry          (IPC or NET reuse)
+ */
+ TEST_F(UBR_MultiSegment, AllReduce_RegisterOnceUseTwice)
+ {
+     if (!validateTestPrerequisites(/*min_processes=*/2)) {
+         GTEST_SKIP() << "Requires 2+ ranks";
+     }
+     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+ 
+     ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
+     ASSERT_TRUE(isCuMemEnabled())
+         << "NCCL_CUMEM_ENABLE must be set to 1 (gates the multi-segment IPC branch in p2p.cc:1071)";
+     ASSERT_TRUE(isMultiSegmentRegisterEnabled())
+         << "NCCL_MULTI_SEGMENT_REGISTER must not be 0 (gates the multi-segment IPC branch in p2p.cc:1071)";
+     ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
+ 
+     int dev = 0;
+     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
+ 
+     constexpr size_t kRequestedSegmentSize = 128 * 1024 * 1024;
+     constexpr int    kNumSegments          = 4;
+ 
+     MultiSegmentBuffer buf;
+     ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
+     if (buf.totalSize == 0) {
+         GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+     }
+     auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
+ 
+     const size_t halfSize = buf.totalSize / 2;
+     ASSERT_EQ(halfSize % sizeof(T), 0u);
+     char*  base    = reinterpret_cast<char*>(buf.vaBase);
+     void*  sendBuf = base;
+     void*  recvBuf = base + halfSize;
+     size_t count   = halfSize / sizeof(T);
+ 
+     void* regHandle = nullptr;
+     ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
+     auto regCleanup = makeScopeGuard([&]() {
+         if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
+     });
+     ASSERT_MPI_NE(regHandle, nullptr);
+ 
+     int rank   = 0;
+     int nRanks = 0;
+     ncclCommUserRank(getActiveCommunicator(), &rank);
+     ncclCommCount(getActiveCommunicator(), &nRanks);
+ 
+     initSendBuffer<T>(sendBuf, count, rank);
+ 
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count,getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+ 
+     ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, halfSize));
+ 
+     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,getActiveCommunicator(), getActiveStream()));
+     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+     ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+ 
+     REGLogChecker checker = getLogChecker();
+     TEST_INFO("RegisterOnceUseTwice: %s (log size: %zu bytes)",
+               checker.getSummary().c_str(), checker.getContentLength());
+    ASSERT_TRUE(checker.hasIPCRegistration() || checker.hasNETRegistration())
+        << "Expected an initial registration log entry (IPC or NET) from the first AllReduce";
+    ASSERT_TRUE(checker.hasIPCReuse() || checker.hasNETReuse())
+        << "Expected a reuse log entry (IPC or NET) from the second AllReduce - "
+           "the registration cache (p2p.cc / net.cc) was not hit";
+ }
+
+/**
  * @brief Multi-segment registration on the symmetric-window path.
  *
  * Validates GPU-only multi-segment registration for symmetric windows
@@ -766,84 +870,106 @@ TEST_F(UBR_MultiSegment, AllReduce)
  }
 
 /**
- * @brief Register once, AllReduce twice - exercises the IPC reuse fast path.
+ * @brief Multi-segment registration on the combined LSA + GIN symmetric path.
  *
- * After the first collective on a registered multi-segment buffer,
- * a subsequent collective on the same buffer must hit that cache entry and skip IPC registration.
- * entirely - logging "IPC reuse buffer" instead of "IPC registering buffer".
+ * Cross-node ReduceScatter over symmetric windows (NCCL_WIN_COLL_SYMMETRIC)
+ * whose VA spans several physical cuMem segments.
+ *   - LSA: symMemoryMapLsaTeam maps each segment per peer and logs
+ *     "... numSegments <N>" (dev_runtime.cc).
+ *   - GIN: symMemoryRegisterGin registers the (all-device, contiguous)
+ *     multi-segment buffer for the inter-node proxy.
  *
- * The AllReduce_SpansMultipleSegments_SingleNode sweep issues a single
- * collective per iteration on a fresh buffer, so it never reaches the reuse
- * branch. This test asserts both:
- *   - the first call performs initial IPC registration  (hasIPCRegistration)
- *   - a subsequent call hits the cached entry           (hasIPCReuse)
+ * Requires >=2 nodes (a GIN inter-node leg) and >=2 ranks per node (an LSA
+ * intra-node leg); otherwise the path under test is not exercised and the
+ * test SKIPs.
+ *
  */
-TEST_F(UBR_MultiSegment, AllReduce_RegisterOnceUseTwice)
+TEST_F(UBR_MultiSegment, ReduceScatter_Symmetric_LsaGin)
 {
+    const int nodeCount = MPITestConstants::detectNodeCount();
     if (!validateTestPrerequisites(/*min_processes=*/2)) {
         GTEST_SKIP() << "Requires 2+ ranks";
     }
+    if (nodeCount < 2) {
+        GTEST_SKIP() << "LSA+GIN ReduceScatter requires >=2 nodes";
+    }
+    if (!isGinEnabled()) {
+        GTEST_SKIP() << "Requires GIN (NCCL_GIN_ENABLE!=0 and NCCL_GIN_TYPE=2)";
+    }
+
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-    ASSERT_TRUE(isUBREnabled()) << "NCCL_LOCAL_REGISTER must be set to 1";
-    ASSERT_TRUE(isCuMemEnabled())
-        << "NCCL_CUMEM_ENABLE must be set to 1 (gates the multi-segment IPC branch in p2p.cc:1071)";
-    ASSERT_TRUE(isMultiSegmentRegisterEnabled())
-        << "NCCL_MULTI_SEGMENT_REGISTER must not be 0 (gates the multi-segment IPC branch in p2p.cc:1071)";
+    ASSERT_TRUE(isCuMemEnabled()) << "NCCL_CUMEM_ENABLE must be set to 1";
+    ASSERT_TRUE(isWinEnabled()) << "NCCL_WIN_ENABLE must not be set to 0";
     ASSERT_TRUE(isPerRankLoggingEnabled()) << "RCCL_MPI_LOG_ALL_RANKS must be set to 1";
 
     int dev = 0;
     ASSERT_MPI_EQ(hipSuccess, hipGetDevice(&dev));
-
-    constexpr size_t kRequestedSegmentSize = 128 * 1024 * 1024;
-    constexpr int    kNumSegments          = 4;
-
-    MultiSegmentBuffer buf;
-    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kRequestedSegmentSize, kNumSegments, buf));
-    if (buf.totalSize == 0) {
-        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
-    }
-    auto vmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(buf); });
-
-    const size_t halfSize = buf.totalSize / 2;
-    ASSERT_EQ(halfSize % sizeof(T), 0u);
-    char*  base    = reinterpret_cast<char*>(buf.vaBase);
-    void*  sendBuf = base;
-    void*  recvBuf = base + halfSize;
-    size_t count   = halfSize / sizeof(T);
-
-    void* regHandle = nullptr;
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommRegister(getActiveCommunicator(), buf.vaBase, buf.totalSize, &regHandle));
-    auto regCleanup = makeScopeGuard([&]() {
-        if (regHandle) HIP_EXPECT(ncclCommDeregister(getActiveCommunicator(), regHandle));
-    });
-    ASSERT_MPI_NE(regHandle, nullptr);
 
     int rank   = 0;
     int nRanks = 0;
     ncclCommUserRank(getActiveCommunicator(), &rank);
     ncclCommCount(getActiveCommunicator(), &nRanks);
 
-    initSendBuffer<T>(sendBuf, count, rank);
+    // Homogeneous run, so ranks/node is uniform; <2 means no LSA intra-node leg.
+    if (nRanks / nodeCount < 2) {
+        GTEST_SKIP() << "LSA+GIN ReduceScatter requires >=2 ranks per node (LSA intra-node leg)";
+    }
 
-    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count,getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
+    constexpr size_t kSegmentSize = 4 * 1024 * 1024;
+    constexpr int    kNumSegments = 4;
+
+    SCOPED_TRACE("kNumSegments=" + std::to_string(kNumSegments) +
+                 " nodeCount=" + std::to_string(nodeCount) +
+                 " nRanks=" + std::to_string(nRanks));
+
+    // recv window: kNumSegments physical segments holding this rank's block.
+    MultiSegmentBuffer recvSeg;
+    ASSERT_NO_FATAL_FAILURE(createMultiSegmentBuffer(dev, kSegmentSize, kNumSegments, recvSeg));
+    if (recvSeg.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    }
+    auto recvVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(recvSeg); });
+
+    ASSERT_EQ(recvSeg.totalSize % sizeof(T), 0u);
+    const size_t recvCount = recvSeg.totalSize / sizeof(T);
+
+    MultiSegmentBuffer sendSeg;
+    ASSERT_NO_FATAL_FAILURE(
+        createMultiSegmentBuffer(dev, recvSeg.segmentSize * static_cast<size_t>(nRanks),
+                                 kNumSegments, sendSeg));
+    if (sendSeg.totalSize == 0) {
+        GTEST_SKIP() << "Raw VMM (hipMemCreate / Reserve / Map) not supported on this runtime";
+    }
+    auto sendVmmCleanup = makeScopeGuard([&]() { releaseMultiSegmentBuffer(sendSeg); });
+
+    const size_t sendCount = recvCount * static_cast<size_t>(nRanks);
+    ASSERT_GE(sendSeg.totalSize, sendCount * sizeof(T));
+
+    ncclWindow_t sendWin = nullptr;
+    ncclWindow_t recvWin = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), sendSeg.vaBase, sendSeg.totalSize, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(getActiveCommunicator(), recvSeg.vaBase, recvSeg.totalSize, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+    auto winCleanup = makeScopeGuard([&]() {
+        if (sendWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), sendWin));
+        if (recvWin) HIP_EXPECT(ncclCommWindowDeregister(getActiveCommunicator(), recvWin));
+    });
+    ASSERT_MPI_NE(sendWin, nullptr);
+    ASSERT_MPI_NE(recvWin, nullptr);
+
+    initSendBuffer<T>(sendSeg.vaBase, sendCount, rank);
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclReduceScatter(sendSeg.vaBase, recvSeg.vaBase, recvCount, getNcclDataType<T>(), ncclSum, getActiveCommunicator(), getActiveStream()));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
-
-    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0, halfSize));
-
-    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, getNcclDataType<T>(), ncclSum,getActiveCommunicator(), getActiveStream()));
-    ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-    ASSERT_TRUE(verifyAllReduceResult<T>(recvBuf, count, nRanks));
+    ASSERT_TRUE(verifyReduceScatterResult<T>(recvSeg.vaBase, recvCount, nRanks));
 
     REGLogChecker checker = getLogChecker();
-    TEST_INFO("RegisterOnceUseTwice: %s (log size: %zu bytes)",
+    TEST_INFO("LsaGin_MultiSegment_ReduceScatter: %s (log size: %zu bytes)",
               checker.getSummary().c_str(), checker.getContentLength());
-    ASSERT_TRUE(checker.hasIPCRegistration())
-        << "Expected initial 'IPC registering buffer' log entry from the first AllReduce";
-    ASSERT_TRUE(checker.hasIPCReuse())
-        << "Expected 'IPC reuse buffer' log entry from the second AllReduce - "
-           "the cache lookup at p2p.cc:1047 was not hit";
+    ASSERT_TRUE(checker.hasNumSegments(kNumSegments))
+        << "Expected 'numSegments " << kNumSegments
+        << "' in log - the symmetric-window multi-segment registration "
+           "(symMemoryMapLsaTeam) did not fire for the LSA+GIN ReduceScatter path";
 }
 
 // ============================================================================
