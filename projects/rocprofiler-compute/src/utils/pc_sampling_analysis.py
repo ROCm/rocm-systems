@@ -42,8 +42,7 @@ NORMALIZED_RECORD_COLUMNS = [
 SOURCE_LINE_MISSING = "N/A"
 
 # Maps a sampled PC's (code_object_id, code_obj_offset) to its native-collector
-# instruction record ({"name", "comment"}). Built by
-# ``file_io.load_native_code_object_map`` and threaded into ``enrich_with_metadata``.
+# instruction record ({"name", "comment"}).
 NativeCodeObjectMap = dict[tuple[int, int], dict[str, Optional[str]]]
 
 
