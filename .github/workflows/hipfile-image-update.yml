@@ -41,6 +41,12 @@ jobs:
     if: ${{ github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch' }}
     runs-on: [ubuntu-24.04]
     container: docker:28.5
+    # NOTE: nightly is intentionally absent here. This job refreshes the static
+    # latest-rocm<ver> images post-merge, but the nightly target moves daily, so
+    # nightly images are refreshed by hipfile-image-update-nightly.yml (daily and
+    # on Dockerfile-change merge) instead. Keep this matrix in sync with
+    # hipfile-ci-toplevel.yml's SUPPORTED_PLATFORMS/ROCM_VERSIONS/MATRIX_EXCLUDE
+    # (and MATRIX_INCLUDE if used) for the non-nightly rows.
     strategy:
       matrix:
         supported_platforms:

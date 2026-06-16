@@ -2028,12 +2028,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
-  int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
-#ifdef RCCL_DEVICE_LINKER
-  // In device-linker builds the per-warp scratch is static, so rcclShmemDynamicSize() is 0 above.
-  // Symmetric kernels still use dynamic shared memory (ncclSymkSmem[]) sized by kernelDynSmem.
-  if (plan->isSymColl) smem = plan->kernelDynSmem;
-#endif
+  int smem = plan->isSymColl ? plan->kernelDynSmem : rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));

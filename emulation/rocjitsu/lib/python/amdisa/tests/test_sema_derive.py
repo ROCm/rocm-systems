@@ -760,8 +760,10 @@ class TestDeriveVectorUnary:
 
         cpp = gen_vector_cvt_pk(['vdst'], ['src0'], sem.semantic_class, sem.operation)
         assert helper in cpp
-        assert 'raw & 0xFFu' in cpp
-        assert '(raw >> 8) & 0xFFu' in cpp
+        assert 'src_hi' in cpp
+        assert 'packed & 0xFFFFu' in cpp
+        assert 'half & 0xFFu' in cpp
+        assert '(half >> 8) & 0xFFu' in cpp
         assert write_fn in cpp
         assert ('util::f32_to_f16' in cpp) == needs_f16
         assert 'src1' not in cpp
@@ -786,7 +788,11 @@ class TestDeriveVectorUnary:
         src = ['src0', 'src1'] if needs_src1 else ['src0']
         cpp = gen_vector_cvt_pk(['vdst'], src, sem.semantic_class, sem.operation)
         assert helper in cpp
-        assert 'lo | (hi << 8)' in cpp
+        assert 'static_cast<uint32_t>(lo)' in cpp
+        assert 'static_cast<uint32_t>(hi) << 8' in cpp
+        assert 'word_hi' in cpp
+        assert 'packed << 16' in cpp
+        assert 'packed & 0xFFFFu' in cpp
         assert 'write_lane' in cpp
         assert ('src1' in cpp) == needs_src1
         assert ('util::f16_to_f32' in cpp) == needs_f16
@@ -868,7 +874,7 @@ class TestDeriveVectorUnary:
         assert read_helper in cpp
         assert encode_helper in cpp
         assert 'pack_scaled_dst(index' in cpp
-        assert 'read_scaled_input(index) * scale' in cpp
+        assert 'read_scaled_input(index) / scale' in cpp
         assert 'Isa::resolved_vgpr_offset' in cpp
 
 
