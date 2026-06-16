@@ -212,7 +212,7 @@ inline bool isPerRankLoggingEnabled()
  *
  * Matches the filename created by setupRankLogging(). The name embeds the
  * --gtest_filter test label when it identifies a single test
- * (rccl_test_<Label>_rank<R>_pid<P>.log) so every rank's file can be matched
+ * (rccl_test_<Label>_rank_<R>_pid<P>.log) so every rank's file can be matched
  * to the test that produced it; otherwise it falls back to
  * rccl_test_rank_<R>_pid<P>.log. The file is shared by all tests in the process
  * unless callers use TestLogAssertionContext::isolate_new_output.

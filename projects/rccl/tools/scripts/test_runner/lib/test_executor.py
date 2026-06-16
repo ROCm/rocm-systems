@@ -427,17 +427,20 @@ class TestExecutor:
         """
         Number of GPUs available on a node (lazy, detected once).
 
-        Returns 0 when the count cannot be determined, in which case callers
-        should fall back to defaults and skip GPU-count-based skipping.
+        Returns 0 when the count cannot be determined, in which case "auto"
+        sizing falls back to 8 GPUs/node and GPU-count-based skipping is disabled.
         """
         if not self._gpus_per_node_detected:
             self._gpus_per_node = self._detect_gpus_per_node()
             self._gpus_per_node_detected = True
-            if self.args.verbose:
-                if self._gpus_per_node:
+            if self._gpus_per_node:
+                if self.args.verbose:
                     print(f"Detected GPUs per node: {self._gpus_per_node}")
-                else:
-                    print("Could not detect GPU count; using defaults (no GPU-count skipping)")
+            else:
+                # Unconditional: silent fallback to 8 ranks on a smaller node is
+                # very hard to debug, so always surface the detection failure.
+                print("WARNING: could not detect GPU count; 'auto' sizing falls "
+                      "back to 8 GPUs/node and GPU-count skipping is disabled")
         return self._gpus_per_node
 
     def _detect_gpus_per_node(self):
@@ -800,8 +803,8 @@ class TestExecutor:
             # rccl-tests/install.sh parses args with getopt (short opts: hmt) and
             # parallelizes internally with -j$(nproc); it does NOT accept a -j flag.
             # It also ignores NCCL_HOME/RCCL_HOME/MPI_HOME from the environment, so
-            # the RCCL and MPI locations must be passed as explicit flags (only
-            # ROCM_PATH is read from the env).
+            # the RCCL and MPI locations must be passed as explicit flags (it does
+            # read ROCM_PATH and HIP_COMPILER from the env, but not those homes).
             if rccl_home and "--rccl_home" not in install_flags:
                 install_flags += ["--rccl_home", rccl_home]
             if rocm_path and "--rocm_home" not in install_flags:
@@ -994,18 +997,30 @@ class TestExecutor:
         # Use test_filter for all test types
         test_filter = test_config.get("test_filter", "*")
 
-        num_nodes = int(test_config.get("num_nodes", 1))
         # num_gpus / num_ranks support the literal "auto" (and num_gpus defaults to
         # "auto" when omitted): "auto" resolves to the detected GPUs per node so
-        # tests adapt to whatever hardware they run on.
+        # tests adapt to whatever hardware they run on. Bad/overridden values that
+        # bypass schema validation fail this single test rather than aborting the
+        # whole run.
         detected_gpus = self.gpus_per_node
-        num_gpus = self._resolve_gpu_count(test_config.get("num_gpus", "auto"), detected_gpus)
-        raw_ranks = test_config.get("num_ranks", 1)
-        if isinstance(raw_ranks, str) and raw_ranks.strip().lower() == "auto":
-            # All GPUs across all nodes
-            num_ranks = num_gpus * num_nodes
-        else:
-            num_ranks = int(raw_ranks)
+        try:
+            num_nodes = int(test_config.get("num_nodes", 1))
+            num_gpus = self._resolve_gpu_count(test_config.get("num_gpus", "auto"), detected_gpus)
+            raw_ranks = test_config.get("num_ranks", 1)
+            if isinstance(raw_ranks, str) and raw_ranks.strip().lower() == "auto":
+                # All GPUs across all nodes
+                num_ranks = num_gpus * num_nodes
+            else:
+                num_ranks = int(raw_ranks)
+        except (ValueError, TypeError) as e:
+            msg = f"Invalid num_nodes/num_gpus/num_ranks for test '{test_name}': {e}"
+            print(f"ERROR: {msg}")
+            return {
+                "name": test_name,
+                "result": TestResult.RESULT_FAILED.value,
+                "duration": 0,
+                "error": msg,
+            }
         timeout = test_config.get("timeout", 0)
         env_vars = test_config.get("env_variables", {})
 
@@ -1087,6 +1102,27 @@ class TestExecutor:
                     "result": TestResult.RESULT_SKIPPED.value,
                     "duration": 0,
                     "error": "mpirun not available"
+                }
+
+        # GPU-count skip: when the per-node GPU count is known, a test that needs
+        # more GPUs than the node provides is SKIPPED (not failed) so fixed-size
+        # tests can live in a shared config and self-skip on smaller nodes. For
+        # single-node tests the requirement is num_ranks; for multi-node it is the
+        # per-node rank count (num_gpus). Detection failure (detected_gpus == 0)
+        # disables this check. See README "Automatic skipping on insufficient GPUs".
+        if detected_gpus > 0:
+            gpus_needed = num_ranks if num_nodes <= 1 else num_gpus
+            if gpus_needed > detected_gpus:
+                msg = (
+                    f"SKIP: test needs {gpus_needed} GPU(s)/node, "
+                    f"node has {detected_gpus}"
+                )
+                print(msg)
+                return {
+                    "name": test_name,
+                    "result": TestResult.RESULT_SKIPPED.value,
+                    "duration": 0,
+                    "error": msg,
                 }
 
         # Multi-node tests: skip if hostfile / SLURM provides fewer hosts than required

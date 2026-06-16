@@ -438,7 +438,7 @@ class TestConfigProcessor:
                 "description": suite.get("description", ""),
                 "num_nodes": suite.get("num_nodes", 1),
                 "num_ranks": suite.get("num_ranks", 1),
-                "num_gpus": suite.get("num_gpus", 8),
+                "num_gpus": suite.get("num_gpus", "auto"),
                 "enabled": suite.get("enabled", True)
             }
 
