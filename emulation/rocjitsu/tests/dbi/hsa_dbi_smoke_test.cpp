@@ -561,8 +561,6 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   // s_nop 0. If this assertion fails, the orchestrator's trampoline layout
   // no longer starts with the placeholder we think it does, and the
   // sabotage premise ("we replaced the no-op with s_endpgm") would be a lie.
-  // TODO: With multiple instrumentation points, this will no longer be a good
-  // assumption. Will likely need to sabotage the whole section.
   constexpr uint32_t kSNop0 = 0xBF800000u;
   uint32_t pre_overwrite = 0;
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset(), sizeof(pre_overwrite));
@@ -590,7 +588,7 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
       << "Sabotaged dispatch failed (HSA error before s_endpgm could run)";
 
   // Trampoline-executed path: every thread that enters the trampoline hits
-  // s_endpgm and terminates before reaching the relocated v_add_f32 or its
+  // s_endpgm and terminates before reaching the relocated instruction or its
   // store-to-C. So C stays at the pre-dispatch zero pattern.
   bool any_nonzero_1 = false;
   for (float v : sabotaged_out_1) {

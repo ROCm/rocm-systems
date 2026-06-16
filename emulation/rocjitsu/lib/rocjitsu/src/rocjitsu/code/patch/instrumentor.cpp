@@ -249,8 +249,7 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 
   // All-or-nothing: per-point errors accumulate in `result.errors`; per-point
   // successes accumulate in `sites` but are only published to `result.sites`
-  // if `errors` ends up empty. Multi-site callers therefore can't tell
-  // *which* points succeeded when any fail — only the failures are itemized.
+  // if `errors` ends up empty.
   std::vector<ResolvedInstrumentationSite> sites;
   std::unordered_set<uint64_t> site_offsets;
   sites.reserve(points_.size());
