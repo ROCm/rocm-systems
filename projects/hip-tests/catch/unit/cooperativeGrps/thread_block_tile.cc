@@ -1043,9 +1043,7 @@ struct Max {
     ArrayContainer<NumElems> result;
 
     for (int i = 0; i < NumElems; i++) {
-      for (int i = 0; i < NumElems; i++) {
         result[i] = std::max(lhs[i], rhs[i]);
-      }
     }
 
     return result;
