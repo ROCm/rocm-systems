@@ -11,8 +11,8 @@ import pandas as pd
 import yaml
 
 import config
-from interface.factory import create_profile_data_reader
 from interface.profile_data import ProfileDataReaderOptions
+from orchestrator import create_profile_analysis_orchestrator
 from utils.logger import (
     console_error,
     console_log,
@@ -462,14 +462,15 @@ def _read_single_df_pmc(
     verbose: int,
     node_name: Optional[str] = None,
 ) -> pd.DataFrame:
-    reader = create_profile_data_reader(
+    orchestrator = create_profile_analysis_orchestrator(config_dict)
+    df = orchestrator.read_pmc_frame(
+        raw_data_dir,
         config_dict,
         ProfileDataReaderOptions(
             kernel_verbose=kernel_verbose,
             verbose=verbose,
         ),
     )
-    df = reader.read_pmc_frame(raw_data_dir)
     if not df.empty and node_name is not None:
         df.insert(0, "Node", node_name)
     return df

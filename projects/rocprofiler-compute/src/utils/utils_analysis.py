@@ -10,7 +10,6 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 
-from interface.pmc_frame import process_rocpd_csv as process_rocpd_csv
 from utils.logger import (
     console_debug,
     console_error,

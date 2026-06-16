@@ -974,10 +974,10 @@ def test_run_prof_success_v3(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     # Stub the conversion so the test doesn't depend on csv_ops pivot logic,
     # but process_rocprofv3_output itself runs and exercises Path.glob.
@@ -1013,10 +1013,10 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr(
         "interface.csv_data.process_rocprofv3_output", lambda *a, **k: csv_files
@@ -1053,8 +1053,8 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
         "utils.utils_profile.csv_ops.rename_columns", lambda *a, **k: None
     )
     # Mock shutil operations since we're not actually writing files
-    monkeypatch.setattr("utils.utils_profile.shutil.copyfile", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.shutil.rmtree", lambda *a, **k: None)
+    monkeypatch.setattr("interface.csv_data.shutil.copyfile", lambda *a, **k: None)
+    monkeypatch.setattr("interface.csv_data.shutil.rmtree", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
@@ -1084,14 +1084,14 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofiler_sdk.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr("orchestrator.common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr(
         "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
@@ -1107,15 +1107,15 @@ def test_rocprofiler_sdk_env_log_excludes_user_env(tmp_path, monkeypatch):
 
     logs = []
     monkeypatch.setattr(
-        "utils.utils_profile.console_debug",
+        "orchestrator.rocprofiler_sdk.console_debug",
         lambda msg, *a, **k: logs.append(str(msg)),
     )
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofiler_sdk.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
+    monkeypatch.setattr("orchestrator.common.parse_pmc_perf", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr(
         "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
@@ -1168,7 +1168,7 @@ def test_run_prof_rocpd_skips_pid_without_native_csv(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofiler_sdk.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
@@ -1213,13 +1213,13 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
         "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
@@ -1243,17 +1243,17 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (False, "error output"),
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     def mock_console_error(msg, exit=True):
         if exit:
             raise RuntimeError("console_error called")
 
-    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_error", mock_console_error)
 
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
@@ -1283,12 +1283,13 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output", mock_capture_subprocess_output
+        "orchestrator.rocprofv3.capture_subprocess_output",
+        mock_capture_subprocess_output,
     )
     monkeypatch.setattr(
         "interface.csv_data.process_rocprofv3_output", lambda *a, **k: []
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
@@ -1326,13 +1327,13 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
         "interface.csv_data.process_rocprofv3_output", lambda *a, **k: csv_files
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
 
@@ -1368,10 +1369,10 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv2")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
@@ -1398,13 +1399,13 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
 
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr(
         "interface.csv_data.process_rocprofv3_output", lambda *a, **k: [results_csv]
     )
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     # Mock csv_ops to track rename_columns calls and avoid disk I/O
@@ -1451,8 +1452,8 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
         "utils.utils_profile.csv_ops.rename_columns", mock_rename_columns
     )
     # Mock shutil operations since we're not actually writing files
-    monkeypatch.setattr("utils.utils_profile.shutil.copyfile", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.shutil.rmtree", lambda *a, **k: None)
+    monkeypatch.setattr("interface.csv_data.shutil.copyfile", lambda *a, **k: None)
+    monkeypatch.setattr("interface.csv_data.shutil.rmtree", lambda *a, **k: None)
 
     utils_profile.run_prof(str(fname), ["--arg"], workload_dir, logging.INFO, "csv")
 
@@ -1484,11 +1485,11 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     # Mock functions
     monkeypatch.setattr("utils.utils_common._rocprof_cmd", "rocprofv3")
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "success"),
     )
     monkeypatch.setattr("utils.mi_gpu_spec.mi_gpu_specs.get_num_xcds", lambda *a: 2)
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_log", lambda *a, **k: None)
 
     # Mock pandas
@@ -1524,16 +1525,23 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         return (True, "Success")
 
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output", mock_capture_subprocess
+        "orchestrator.rocprofiler_sdk.capture_subprocess_output",
+        mock_capture_subprocess,
     )
 
     def mock_console_error_no_exit(msg, exit=True):
         print(f"Mocked console_error: {msg}, exit={exit}")
 
-    monkeypatch.setattr("utils.utils_profile.console_error", mock_console_error_no_exit)
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
     monkeypatch.setattr(
-        "utils.utils_profile.parse_pmc_perf", lambda *a, **k: ["COUNTER1", "COUNTER2"]
+        "orchestrator.rocprofiler_sdk.console_error",
+        mock_console_error_no_exit,
+    )
+    monkeypatch.setattr(
+        "orchestrator.rocprofiler_sdk.console_debug",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "orchestrator.common.parse_pmc_perf", lambda *a, **k: ["COUNTER1", "COUNTER2"]
     )
 
     mock_fname_path_obj = mock.MagicMock(spec=Path)
@@ -1573,7 +1581,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils_profile.Path", path_side_effect)
 
     loglevel = logging.DEBUG
-    format_rocprof_output = True
+    format_rocprof_output = "csv"
 
     dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
@@ -1581,7 +1589,7 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
     monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
     monkeypatch.setattr(
-        "utils.utils_profile.create_temp_rocprofiler_metrics_path",
+        "orchestrator.common.create_temp_rocprofiler_metrics_path",
         lambda *a, **k: "dummy_path",
     )
     monkeypatch.setattr("yaml.dump", lambda *a, **k: None)
@@ -1711,7 +1719,7 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
     results_csv = str(tmp_path) + "/out/pmc_1/results1.csv"
 
     monkeypatch.setattr(
-        "utils.utils_profile.capture_subprocess_output",
+        "orchestrator.rocprofv3.capture_subprocess_output",
         lambda *a, **k: (True, "Success"),
     )
     monkeypatch.setattr(
@@ -1729,7 +1737,7 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
         "interface.csv_data.process_kokkos_trace_output", mock_kokkos_trace
     )
 
-    monkeypatch.setattr("utils.utils_profile.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("orchestrator.rocprofv3.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_profile.console_warning", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils_common.parse_pmc_perf", lambda *a, **k: ["C1"])
 
@@ -1763,8 +1771,8 @@ def test_run_prof_v3_cli_calls_kokkos_trace_processing(tmp_path, monkeypatch):
         "utils.utils_profile.csv_ops.rename_columns", lambda *a, **k: None
     )
     # Mock shutil operations since we're not actually writing files
-    monkeypatch.setattr("utils.utils_profile.shutil.copyfile", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils_profile.shutil.rmtree", lambda *a, **k: None)
+    monkeypatch.setattr("interface.csv_data.shutil.copyfile", lambda *a, **k: None)
+    monkeypatch.setattr("interface.csv_data.shutil.rmtree", lambda *a, **k: None)
 
     loglevel = logging.INFO
     format_rocprof_output = "csv"
@@ -3936,8 +3944,8 @@ def create_csv_string(data_dict):
     return pd.DataFrame(data_dict).to_csv(index=False)
 
 
-@mock.patch("utils.utils_profile.console_error")
-@mock.patch("utils.utils_profile.console_debug")
+@mock.patch("orchestrator.rocprofv3.console_error")
+@mock.patch("orchestrator.rocprofv3.console_debug")
 def test_v3_to_v2_agent_id_parsing_success_and_error(
     mock_console_debug, mock_console_error, tmp_path
 ):
@@ -4045,7 +4053,7 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     assert "GPU_ID" in rows[0]
 
 
-@mock.patch("utils.utils_profile.console_debug")  # To suppress debug output
+@mock.patch("orchestrator.rocprofv3.console_debug")  # To suppress debug output
 def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     """
     Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
@@ -4097,7 +4105,7 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     assert result_df["CYCLES"].iloc[0] == 5000
 
 
-@mock.patch("utils.utils_profile.console_debug")
+@mock.patch("orchestrator.rocprofv3.console_debug")
 def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.

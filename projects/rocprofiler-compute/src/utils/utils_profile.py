@@ -2,19 +2,13 @@
 # SPDX-License-Identifier:  MIT
 
 import importlib
-import os
 import pkgutil
-import re
-import shlex
-import shutil
-import time
 from pathlib import Path
-from typing import Any, Union, cast
+from typing import Any, Union
 
-import config
 import utils.utils_profile_csv as csv_ops
-from interface.factory import create_profile_data_writer
-from interface.profile_data import ProfilePassContext
+from orchestrator.common import ProfilerOptions
+from orchestrator.common import is_live_attach as _is_live_attach
 from utils.logger import (
     console_debug,
     console_error,
@@ -22,43 +16,14 @@ from utils.logger import (
     console_warning,  # noqa: F401
     demarcate,
 )
-from utils.utils_common import (
-    capture_subprocess_output,
-    create_temp_rocprofiler_metrics_path,
-    get_rocprof_cmd,
-    parse_pmc_perf,
-    perform_attach_detach,
-)
-from vendored import yaml
-
-_PROFILER_INTERNAL_RE = re.compile(
-    r"^\[rocprofiler"  # rocprofiler-sdk and rocprofiler-compute tool messages
-    r"|^[WI]\d{8}\s"  # glog-style timestamps (W/I followed by YYYYMMDD)
-)
-
-ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
+from utils.utils_common import get_rocprof_cmd
 
 
 def is_live_attach(
     profiler_options: ProfilerOptions,
 ) -> bool:
     """Return True if the profiler options indicate a live-attach (pid) mode."""
-    return (isinstance(profiler_options, list) and "--pid" in profiler_options) or (
-        isinstance(profiler_options, dict)
-        and profiler_options.get("ROCPROF_ATTACH_PID") is not None
-    )
-
-
-def _classify_output_line(line: str) -> None:
-    """Log a subprocess output line at the appropriate level.
-
-    Profiler-internal messages go to DEBUG (visible with -v).
-    Everything else goes to ERROR (always visible on failure).
-    """
-    if _PROFILER_INTERNAL_RE.match(line):
-        console_debug(line)
-    else:
-        console_error(line, exit=False)
+    return _is_live_attach(profiler_options)
 
 
 def run_prof(
@@ -87,170 +52,28 @@ def run_prof(
         return
 
     fpath = Path(fnames[0]) if multiple_files else Path(fnames)
-    fbase = fpath.stem
     if multiple_files:
         console_debug(f"pmc files: {', '.join([Path(fname).name for fname in fnames])}")
     else:
         console_debug(f"pmc file: {fpath.name}")
 
-    # standard rocprof options
     if get_rocprof_cmd() == "rocprofiler-sdk":
-        options = cast(dict[str, Union[str, list[str]]], profiler_options).copy()
-        if multiple_files:
-            options["ROCPROF_COUNTERS"] = ", ".join([
-                f"pmc: {' '.join(parse_pmc_perf(fname))}" for fname in fnames
-            ])
-        else:
-            options["ROCPROF_COUNTERS"] = f"pmc: {' '.join(parse_pmc_perf(fnames))}"
-        options["ROCPROF_AGENT_INDEX"] = "absolute"
+        from orchestrator.rocprofiler_sdk import RocprofilerSdkProfileOrchestrator
+
+        orchestrator = RocprofilerSdkProfileOrchestrator()
     else:
-        if multiple_files:
-            console_error(
-                "Multiple pmc files detected but rocprofv3 does not "
-                "support multiple input files."
-            )
-            return
-        default_options = ["-i", fnames]
-        options = default_options + cast(list[str], profiler_options)
-        options = ["-A", "absolute"] + options
+        from orchestrator.rocprofv3 import Rocprofv3ProfileOrchestrator
 
-    new_env = os.environ.copy()
+        orchestrator = Rocprofv3ProfileOrchestrator()
 
-    # Counter definitions
-    with open(
-        config.rocprof_compute_home
-        / "rocprof_compute_soc"
-        / "profile_configs"
-        / "sdk_config.yaml",
-        encoding="utf-8",
-    ) as filename:
-        sdk_config = yaml.safe_load(filename)
-    # Extra counter definitions
-    for fname in fnames if multiple_files else [fnames]:
-        fname_path = Path(fname)
-        counter_def_fname = fname_path.parent / (
-            "counter_def_" + fname_path.name[len("pmc_perf_") :]
-        )
-        if counter_def_fname.exists():
-            with open(Path(counter_def_fname), encoding="utf-8") as file:
-                sdk_config["rocprofiler-sdk"]["counters"].extend(
-                    yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
-                )
-    # Set counter definitions
-    new_env["ROCPROFILER_METRICS_PATH"] = create_temp_rocprofiler_metrics_path(
-        sdk_config
-    )
-    console_debug(
-        "Adding env var for counter definitions: "
-        f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
-    )
-
-    time_1 = time.time()
-
-    output_path = Path(workload_dir + "/out/pmc_1")
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    if get_rocprof_cmd() == "rocprofiler-sdk":
-        app_cmd = options.pop("APP_CMD") if "APP_CMD" in options else None
-        for key, value in options.items():
-            new_env[key] = value
-        # Log only the os.environ delta to avoid leaking secrets in shared logs.
-        env_delta = {k: v for k, v in new_env.items() if os.environ.get(k) != v}
-        console_debug(f"rocprof sdk env vars: {env_delta}")
-
-        if is_live_attach(profiler_options):
-            perform_attach_detach(new_env, options)
-        else:
-            if app_cmd is None:
-                console_error(
-                    "APP_CMD, the workload's executable must be provided "
-                    "when not in live attach mode"
-                )
-
-            console_debug(f"rocprof sdk user provided command: {app_cmd}")
-            success, output = capture_subprocess_output(
-                app_cmd, new_env=new_env, profileMode=True
-            )
-    else:
-        # print in readable format using shlex
-        console_debug(f"rocprof command: {shlex.join([get_rocprof_cmd()] + options)}")
-        # profile the app
-        success, output = capture_subprocess_output(
-            [get_rocprof_cmd()] + options, new_env=new_env, profileMode=True
-        )
-
-    time_2 = time.time()
-    console_debug(
-        f"Finishing subprocess of pmc file(s), the time taken is "
-        f"{int((time_2 - time_1) / 60)} m {str((time_2 - time_1) % 60)} sec "
-    )
-
-    if get_rocprof_cmd() != "rocprofiler-sdk":
-        # rocprofv3 with yaml input file can write out/pass_1 instead of out/pmc_1
-        # Move files from out/pass_1 to out/pmc_1 if pass_1 exists
-        pass_1 = Path(workload_dir) / "out" / "pass_1"
-        if pass_1.exists():
-            shutil.copytree(
-                pass_1, Path(workload_dir) / "out" / "pmc_1", dirs_exist_ok=True
-            )
-
-    # Delete counter definition temporary directory
-    if new_env.get("ROCPROFILER_METRICS_PATH"):
-        shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
-
-    if (not is_live_attach(profiler_options)) and (not success):
-        for line in output.splitlines():
-            stripped = line.strip()
-            if stripped:
-                _classify_output_line(stripped)
-        console_error("Profiling execution failed.")
-
-    pass_context = _build_profile_pass_context(
+    orchestrator.run_pass(
+        fnames=fnames,
+        profiler_options=profiler_options,
         workload_dir=workload_dir,
-        fbase=fbase,
-        options=options,
+        format_rocprof_output=format_rocprof_output,
         torch_trace_enabled=torch_trace_enabled,
         retain_rocpd_output=retain_rocpd_output,
     )
-    if format_rocprof_output not in ("rocpd", "csv"):
-        console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
-        return
-
-    create_profile_data_writer(format_rocprof_output).finalize_pass(pass_context)
-
-
-def _build_profile_pass_context(
-    workload_dir: str,
-    fbase: str,
-    options: Union[list[str], dict[str, Any]],
-    torch_trace_enabled: bool,
-    retain_rocpd_output: bool,
-) -> ProfilePassContext:
-    profiler_command = get_rocprof_cmd()
-    return ProfilePassContext(
-        workload_dir=Path(workload_dir),
-        fbase=fbase,
-        profiler_command=profiler_command,
-        using_native_tool=_uses_native_counter_collection(profiler_command, options),
-        torch_trace_enabled=torch_trace_enabled,
-        retain_rocpd_output=retain_rocpd_output,
-        kokkos_trace_enabled=_has_kokkos_trace(options),
-    )
-
-
-def _uses_native_counter_collection(
-    profiler_command: str,
-    options: Union[list[str], dict[str, Any]],
-) -> bool:
-    return (
-        profiler_command == "rocprofiler-sdk"
-        and isinstance(options, dict)
-        and options.get("ROCPROF_COUNTER_COLLECTION") == "0"
-    )
-
-
-def _has_kokkos_trace(options: Union[list[str], dict[str, Any]]) -> bool:
-    return isinstance(options, list) and "--kokkos-trace" in options
 
 
 @demarcate

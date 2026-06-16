@@ -13,6 +13,8 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from interface.profile_data import ProfileDataReaderOptions
+from orchestrator import create_profile_analysis_orchestrator
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import schema, utils_analysis
@@ -318,13 +320,29 @@ class db_analysis(OmniAnalyze_Base):
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
         args = self.get_args()
+        orchestrator = create_profile_analysis_orchestrator(self._profiling_config)
+        reader_options = ProfileDataReaderOptions()
 
         for workload_path in self._runs.keys():
-            if not (Path(workload_path) / "pmc_perf.csv").exists():
+            workload_dir = Path(workload_path)
+            pmc_perf = workload_dir / "pmc_perf.csv"
+            if not orchestrator.has_profile_data(
+                workload_dir,
+                self._profiling_config,
+                reader_options,
+            ):
                 continue
 
-            pmc_df = utils_analysis.process_rocpd_csv(
-                pd.read_csv(Path(workload_path) / "pmc_perf.csv")
+            orchestrator.materialize_pmc_perf(
+                workload_dir,
+                pmc_perf,
+                self._profiling_config,
+                reader_options,
+            )
+            pmc_df = orchestrator.read_pmc_frame(
+                workload_dir,
+                self._profiling_config,
+                reader_options,
             )
 
             if args.spatial_multiplexing:

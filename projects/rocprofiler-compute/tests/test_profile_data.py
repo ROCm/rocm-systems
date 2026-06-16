@@ -11,8 +11,16 @@ from interface.factory import (
     create_profile_data_writer,
 )
 from interface.pmc_frame import to_canonical_pmc_frame
-from interface.profile_data import ProfileDataReaderOptions
+from interface.profile_data import ProfileDataReaderOptions, ProfilePassContext
 from interface.rocpd_data import RocpdAnalysisData, RocpdProfileDataWriter
+from orchestrator.rocprofiler_sdk import (
+    RocprofilerSdkAnalysisOrchestrator,
+    RocprofilerSdkProfileOrchestrator,
+)
+from orchestrator.rocprofv3 import (
+    Rocprofv3AnalysisOrchestrator,
+    Rocprofv3ProfileOrchestrator,
+)
 
 
 def test_factory_selects_csv_and_rocpd_implementations():
@@ -106,6 +114,137 @@ def test_rocpd_long_counter_rows_convert_to_canonical_frame():
     assert canonical_frame["GPU_ID"].tolist() == [0]
     assert canonical_frame["SQ_WAVES"].tolist() == [11]
     assert canonical_frame["GRBM_COUNT"].tolist() == [22]
+
+
+def test_rocprofv3_profile_orchestrator_runs_and_finalizes(monkeypatch, tmp_path):
+    calls = []
+    pmc_file = tmp_path / "pmc_perf_SQ.yaml"
+    pmc_file.write_text("pmc: []\n", encoding="utf-8")
+
+    class FakeWriter:
+        def finalize_pass(self, context: ProfilePassContext) -> None:
+            calls.append(context)
+
+    monkeypatch.setattr(
+        "orchestrator.rocprofv3.build_counter_collection_environment",
+        lambda fnames: {},
+    )
+    monkeypatch.setattr(
+        "orchestrator.rocprofv3.cleanup_counter_collection_environment",
+        lambda new_env: None,
+    )
+    monkeypatch.setattr(
+        "orchestrator.rocprofv3.capture_subprocess_output",
+        lambda command, new_env, profileMode: (True, ""),
+    )
+    monkeypatch.setattr(
+        "orchestrator.rocprofv3.create_profile_data_writer",
+        lambda data_format: FakeWriter(),
+    )
+
+    Rocprofv3ProfileOrchestrator().run_pass(
+        str(pmc_file),
+        ["--arg"],
+        str(tmp_path),
+        "csv",
+    )
+
+    assert len(calls) == 1
+    assert calls[0].profiler_command == "rocprofv3"
+    assert calls[0].fbase == "pmc_perf_SQ"
+
+
+def test_rocprofiler_sdk_profile_orchestrator_runs_and_finalizes(
+    monkeypatch,
+    tmp_path,
+):
+    calls = []
+    pmc_file = tmp_path / "pmc_perf_SQ.yaml"
+    pmc_file.write_text("pmc: SQ_WAVES\n", encoding="utf-8")
+
+    class FakeWriter:
+        def finalize_pass(self, context: ProfilePassContext) -> None:
+            calls.append(context)
+
+    monkeypatch.setattr(
+        "orchestrator.rocprofiler_sdk.build_counter_collection_environment",
+        lambda fnames: {},
+    )
+    monkeypatch.setattr(
+        "orchestrator.rocprofiler_sdk.cleanup_counter_collection_environment",
+        lambda new_env: None,
+    )
+    monkeypatch.setattr(
+        "orchestrator.rocprofiler_sdk.capture_subprocess_output",
+        lambda command, new_env, profileMode: (True, ""),
+    )
+    monkeypatch.setattr(
+        "orchestrator.rocprofiler_sdk.create_profile_data_writer",
+        lambda data_format: FakeWriter(),
+    )
+
+    RocprofilerSdkProfileOrchestrator().run_pass(
+        str(pmc_file),
+        {"APP_CMD": ["app"]},
+        str(tmp_path),
+        "rocpd",
+    )
+
+    assert len(calls) == 1
+    assert calls[0].profiler_command == "rocprofiler-sdk"
+    assert calls[0].fbase == "pmc_perf_SQ"
+
+
+def test_analysis_orchestrators_delegate_to_reader(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeReader:
+        def has_profile_data(self, workload_dir: Path) -> bool:
+            calls.append(("has", workload_dir))
+            return True
+
+        def materialize_pmc_perf(self, workload_dir: Path, output_path: Path) -> Path:
+            calls.append(("materialize", workload_dir, output_path))
+            return output_path
+
+        def read_pmc_frame(self, workload_dir: Path) -> pd.DataFrame:
+            calls.append(("read", workload_dir))
+            return pd.DataFrame({"SQ_WAVES": [1]})
+
+    monkeypatch.setattr(
+        "orchestrator.common.create_profile_data_reader",
+        lambda profiling_config, options: FakeReader(),
+    )
+
+    for orchestrator in [
+        Rocprofv3AnalysisOrchestrator(),
+        RocprofilerSdkAnalysisOrchestrator(),
+    ]:
+        profiling_config = {"format_rocprof_output": "csv"}
+        options = ProfileDataReaderOptions()
+        output_path = tmp_path / "pmc_perf.csv"
+
+        assert orchestrator.has_profile_data(tmp_path, profiling_config, options)
+        assert (
+            orchestrator.materialize_pmc_perf(
+                tmp_path,
+                output_path,
+                profiling_config,
+                options,
+            )
+            == output_path
+        )
+        frame = orchestrator.read_pmc_frame(tmp_path, profiling_config, options)
+        assert frame["SQ_WAVES"].tolist() == [1]
+
+    assert [call[0] for call in calls] == [
+        "has",
+        "materialize",
+        "read",
+        "has",
+        "materialize",
+        "read",
+    ]
 
 
 def write_counter_result(csv_path: Path, counter_name: str, value: str) -> None:
