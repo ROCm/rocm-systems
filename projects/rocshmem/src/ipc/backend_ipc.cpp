@@ -30,7 +30,6 @@
 #include <cassert>
 
 #include "backend_ipc.hpp"
-#include "ipc_user_buf.hpp"
 #include "envvar.hpp"
 #include "ipc_team.hpp"
 #include "mpi_instance.hpp"
@@ -116,7 +115,6 @@ void IPCBackend::init() {
   ROCSHMEM_HOST_CTX_DEFAULT.ctx_opaque = default_host_ctx.get();
 
   setup_symm_registration();
-  ipc_user_buf_set_symm_table(ipcImpl.symm_table, num_pes);
 
   setup_wrk_sync_buffers();
 

@@ -36,7 +36,7 @@ getNcclGin_t* getNcclRma[NCCL_GIN_VERSION_COUNT] = {getNcclRma_v13, getNcclGin_v
 extern ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12);
 
 #ifdef ENABLE_ROCSHMEM_GIN
-#define NCCL_GIN_NUM_INTERNAL_PLUGINS 3
+#define NCCL_GIN_NUM_INTERNAL_PLUGINS 2
 #else
 #define NCCL_GIN_NUM_INTERNAL_PLUGINS 1
 #endif
@@ -267,14 +267,7 @@ static void initPluginLibsOnceFunc() {
   pluginCounter++;
 
 #ifdef ENABLE_ROCSHMEM_GIN
-  // Add internal rocshmem API plugin (device-initiated, GIN_TYPE=4)
-  {
-    extern ncclGin_t ncclGinRocshmemApiPlugin;
-    ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemApiPlugin;
-    ginPluginLibs[pluginCounter].ncclGinPluginState = ncclGinPluginStateInitReady;
-    pluginCounter++;
-  }
-  // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=5)
+  // Add internal rocshmem GDA plugin (device-initiated, GIN_TYPE=4)
   {
     extern ncclGin_t ncclGinRocshmemGdaPlugin;
     ginPluginLibs[pluginCounter].ncclGin = &ncclGinRocshmemGdaPlugin;
