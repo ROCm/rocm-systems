@@ -133,7 +133,8 @@ WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
       break;
   }
 
-  CHECK_HIP(hipMemset(source, 'a', buff_size));
+  CHECK_HIP(hipMemsetAsync(source, 'a', buff_size, stream));
+  CHECK_HIP(hipStreamSynchronize(stream));
 }
 
 WorkGroupPrimitiveTester::~WorkGroupPrimitiveTester() {
@@ -163,6 +164,7 @@ void WorkGroupPrimitiveTester::resetBuffers(size_t size) {
   size_t buff_size = size * batch_size * args.num_wgs;
   CHECK_HIP(hipMemsetAsync(dest, '1', buff_size, stream));
   CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
+  CHECK_HIP(hipStreamSynchronize(stream));
 }
 
 void WorkGroupPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
