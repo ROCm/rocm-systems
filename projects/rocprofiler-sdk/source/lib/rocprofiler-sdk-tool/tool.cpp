@@ -4555,7 +4555,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
 
             // technically unsafe, but otherwise the process looks hung to users
             ROCP_WARNING << fmt::format(
-                "signalhangler: waiting for worker thread to flush profiling data: ~{}s elapsed...",
+                "signalhandler: waiting for worker thread to flush profiling data: ~{}s elapsed...",
                 elapsed);
             attempt++;
         }
