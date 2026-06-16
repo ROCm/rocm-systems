@@ -201,6 +201,58 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_BetaDisabled_ConfiguresNothing)
     EXPECT_TRUE(m_sdk_wrapper->get_configure_pc_sampling_info().empty());
 }
 
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_StochasticMethod_ConfiguresStochastic)
+{
+    constexpr rocprofiler_agent_id_t agent{55};
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("stochastic");
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    m_sdk_wrapper->set_pc_sampling_config(1,
+                                          1000,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->set_configure_pc_sampling_status(ROCPROFILER_STATUS_SUCCESS);
+
+    drive_hsa_runtime_loaded();
+
+    ASSERT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 1u);
+    EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info()[0].method,
+              ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_MultipleConfigs_RequestedMethodOverridesFirstSeen)
+{
+    constexpr rocprofiler_agent_id_t agent{66};
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_input_parameters->set_pc_sampling_interval("");  // unset -> use the chosen config's min
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    // First-seen config is STOCHASTIC (non-requested) with a distinct interval range;
+    // the requested HOST_TRAP config appears second and must win.
+    m_sdk_wrapper->set_pc_sampling_config(1000,
+                                          2000,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->add_pc_sampling_config(64,
+                                          4096,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->set_configure_pc_sampling_status(ROCPROFILER_STATUS_SUCCESS);
+
+    drive_hsa_runtime_loaded();
+
+    ASSERT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 1u);
+    const auto& info = m_sdk_wrapper->get_configure_pc_sampling_info()[0];
+    EXPECT_EQ(info.method, ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP);
+    // Interval derives from the requested (HOST_TRAP) config's min, not the first-seen one.
+    EXPECT_EQ(info.interval, 64u);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_MaxIntervalZero_NoUpperClamp)
+{
+    EXPECT_EQ(configured_interval_for("100000", 64, 0), 100000u);
+}
+
 void TestPcSamplingInput::SetUp()
 {
     m_input_parameters = std::make_shared<MockInputParameters>();

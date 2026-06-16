@@ -271,14 +271,23 @@ void MockSdkWrapper::query_pc_sampling_configs(rocprofiler_agent_id_t /*agent_id
     if (!m_pc_sampling_config_set)
         return;
 
-    rocprofiler_pc_sampling_configuration_t config{};
-    config.size         = sizeof(rocprofiler_pc_sampling_configuration_t);
-    config.method       = m_pc_sampling_config.method;
-    config.unit         = m_pc_sampling_config.unit;
-    config.min_interval = m_pc_sampling_config.min_interval;
-    config.max_interval = m_pc_sampling_config.max_interval;
-    config.flags        = 0;
-    cb(&config, 1, user_data);
+    std::vector<pc_sampling_config_t> all{m_pc_sampling_config};
+    all.insert(all.end(), m_extra_pc_sampling_configs.begin(), m_extra_pc_sampling_configs.end());
+
+    std::vector<rocprofiler_pc_sampling_configuration_t> configs;
+    configs.reserve(all.size());
+    for (const auto& c : all)
+    {
+        rocprofiler_pc_sampling_configuration_t config{};
+        config.size         = sizeof(rocprofiler_pc_sampling_configuration_t);
+        config.method       = c.method;
+        config.unit         = c.unit;
+        config.min_interval = c.min_interval;
+        config.max_interval = c.max_interval;
+        config.flags        = 0;
+        configs.push_back(config);
+    }
+    cb(configs.data(), configs.size(), user_data);
 }
 
 void MockSdkWrapper::create_buffer(rocprofiler_context_id_t context_id,
@@ -348,6 +357,14 @@ void MockSdkWrapper::set_pc_sampling_config(size_t                           min
 {
     m_pc_sampling_config     = pc_sampling_config_t{min_interval, max_interval, method, unit};
     m_pc_sampling_config_set = true;
+}
+
+void MockSdkWrapper::add_pc_sampling_config(size_t                           min_interval,
+                                            size_t                           max_interval,
+                                            rocprofiler_pc_sampling_method_t method,
+                                            rocprofiler_pc_sampling_unit_t   unit)
+{
+    m_extra_pc_sampling_configs.push_back(pc_sampling_config_t{min_interval, max_interval, method, unit});
 }
 
 void MockSdkWrapper::set_configure_pc_sampling_status(rocprofiler_status_t status)

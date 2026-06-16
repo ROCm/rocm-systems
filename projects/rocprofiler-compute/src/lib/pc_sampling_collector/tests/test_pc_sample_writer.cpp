@@ -24,7 +24,7 @@ TEST_F(test_pc_sample_writer_t, ProvidedStochasticRecord_SerializesUnderStochast
     const auto record = make_stochastic_record();
 
     m_writer.begin();
-    m_writer.append_stochastic(record, record.inst_index);
+    m_writer.append_stochastic(record, 5);
 
     const auto  json       = nlohmann::json::parse(m_writer.get_result());
     const auto& root       = json["rocprofiler-sdk-tool"][0];
@@ -115,7 +115,7 @@ TEST_F(test_pc_sample_writer_t, ProvidedHostTrapRecord_SerializesWithoutStochast
     const auto record = make_host_trap_record();
 
     m_writer.begin();
-    m_writer.append_host_trap(record, record.inst_index);
+    m_writer.append_host_trap(record, 8);
 
     const auto  json      = nlohmann::json::parse(m_writer.get_result());
     const auto& root      = json["rocprofiler-sdk-tool"][0];

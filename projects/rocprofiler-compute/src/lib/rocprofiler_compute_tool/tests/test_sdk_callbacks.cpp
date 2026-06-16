@@ -3,14 +3,50 @@
 #include "test_sdk_callbacks.h"
 
 #include "fmt/format.h"
+#include "pc_sample_writer.h"
 #include "rocprofiler_compute_tool.h"
 
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 #include <unistd.h>
 
 #include <filesystem>
+#include <fstream>
+#include <memory>
 #include <string>
+#include <vector>
 
 using namespace rocprofiler_compute_tool;
+
+namespace rocprofiler_compute_tool
+{
+// Namespace-scope tool functions exercised directly by the tests below.
+void pc_sampling_buffer_callback(rocprofiler_context_id_t,
+                                 rocprofiler_buffer_id_t,
+                                 rocprofiler_record_header_t**,
+                                 size_t,
+                                 void*,
+                                 uint64_t);
+void kernel_dispatch_buffer_callback(rocprofiler_context_id_t,
+                                     rocprofiler_buffer_id_t,
+                                     rocprofiler_record_header_t**,
+                                     size_t,
+                                     void*,
+                                     uint64_t);
+void generate_output(tool_data_t* tool_data);
+}  // namespace rocprofiler_compute_tool
+
+namespace
+{
+rocprofiler_record_header_t make_pc_header(uint32_t category, uint32_t kind, void* payload)
+{
+    rocprofiler_record_header_t header{};
+    header.category = category;
+    header.kind     = kind;
+    header.payload  = payload;
+    return header;
+}
+}  // namespace
 
 TEST_F(TestSdkCallbacks, ProvidedSameKernelWithMultiplexingDisabled_DispatchCbReturnsFirstPmc)
 {
@@ -218,6 +254,112 @@ TEST_F(TestSdkCallbacks, FeatureDelegatesSampleIngestionAndFinalizeToCollector)
     EXPECT_EQ(collector->added_kernel_ids[0], 7u);
     EXPECT_EQ(collector->write_samples_count, 1);
     EXPECT_EQ(collector->snapshot_sources_count, 1);
+
+    std::error_code ec;
+    fs::remove_all(out_root, ec);
+}
+
+TEST_F(TestSdkCallbacks, PcSamplingBufferCallback_NullHeaders_DoesNothing)
+{
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
+
+    EXPECT_NO_THROW(pc_sampling_buffer_callback({}, {}, nullptr, 0, &m_tool_data, 0));
+    EXPECT_EQ(collector->append_sample_count, 0);
+}
+
+TEST_F(TestSdkCallbacks, PcSamplingBufferCallback_NullEntryAndForeignRecords_AreSkipped)
+{
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
+
+    rocprofiler_pc_sampling_record_host_trap_v0_t rec{};
+    rec.size = sizeof(rec);
+    auto foreign = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                                  ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE,
+                                  &rec);
+
+    rocprofiler_record_header_t* headers[] = {nullptr, &foreign};
+    EXPECT_NO_THROW(pc_sampling_buffer_callback({}, {}, headers, 2, &m_tool_data, 0));
+    EXPECT_EQ(collector->append_sample_count, 0);
+}
+
+TEST_F(TestSdkCallbacks, PcSamplingBufferCallback_MixedBatch_AppendsOnlyValidRecords)
+{
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
+
+    rocprofiler_pc_sampling_record_host_trap_v0_t valid{};
+    valid.size = sizeof(valid);
+    auto good  = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+                               ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE,
+                               &valid);
+    auto garbage = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, 0xFFFFFFFFu, &valid);
+
+    rocprofiler_record_header_t* headers[] = {&good, nullptr, &garbage, &good};
+    EXPECT_NO_THROW(pc_sampling_buffer_callback({}, {}, headers, 4, &m_tool_data, 0));
+    EXPECT_EQ(collector->append_sample_count, 2);
+}
+
+TEST_F(TestSdkCallbacks, KernelDispatchBufferCallback_MixedBatch_AppendsOnlyValidRecords)
+{
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
+
+    rocprofiler_buffer_tracing_kernel_dispatch_record_t kd{};
+    kd.size = sizeof(kd);
+    auto good = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                              &kd);
+    auto foreign = make_pc_header(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+                                  ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                  &kd);
+
+    rocprofiler_record_header_t* headers[] = {&good, nullptr, &foreign};
+    EXPECT_NO_THROW(kernel_dispatch_buffer_callback({}, {}, headers, 3, &m_tool_data, 0));
+    EXPECT_EQ(collector->append_kernel_dispatch_count, 1);
+}
+
+TEST_F(TestSdkCallbacks, GenerateOutput_FinalizeThrows_DoesNotEscape)
+{
+    namespace fs            = std::filesystem;
+    const fs::path out_root = fs::temp_directory_path() /
+                              ("rpc_gen_output_throw_" + std::to_string(::getpid()));
+    fs::create_directories(out_root);
+
+    // A pc-samples path whose parent is a regular file makes the real writer's
+    // flush throw std::runtime_error during finalize(); generate_output must
+    // swallow it so shutdown is not aborted.
+    const fs::path file_parent = out_root / "afile";
+    {
+        std::ofstream ofs(file_parent);
+        ofs << "x";
+    }
+    const fs::path bad_pc_path = file_parent / "ps_file_results.json";
+
+    // A real collector + feature so finalize() actually runs the writer.
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     out_root,
+                                                     out_root / "code_obj.json",
+                                                     bad_pc_path};
+
+    EXPECT_NO_THROW(generate_output(m_tool_data.get()));
 
     std::error_code ec;
     fs::remove_all(out_root, ec);

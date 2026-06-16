@@ -5,7 +5,7 @@
 #define ROCPROFILER_SDK_EXPERIMENTAL
 
 #include "gtest/gtest.h"
-#include "pc_sample_writer.h"
+#include "pc_sample_decode.h"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/pc_sampling.h>

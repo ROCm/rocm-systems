@@ -79,6 +79,16 @@ TEST_F(TestEnvironCache, MultipleRocprofKeys_AllCaptured)
               std::optional<std::string_view>{std::string_view{"1-5"}});
 }
 
+TEST_F(TestEnvironCache, RocprofilerSdkKeyInEnviron_ReturnsValue)
+{
+    // The ROCPROFILER_ family (rocprofiler-sdk vars) must be captured too; this
+    // would NOT match a bare "ROCPROF_" prefix.
+    Envp         envp{{"ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1"}};
+    EnvironCache cache{envp.data()};
+    EXPECT_EQ(cache.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED"),
+              std::optional<std::string_view>{std::string_view{"1"}});
+}
+
 TEST_F(TestEnvironCache, DuplicateEnvironEntries_FirstWins)
 {
     Envp         envp{{"ROCPROF_OUTPUT_PATH=/tmp/first", "ROCPROF_OUTPUT_PATH=/tmp/second"}};

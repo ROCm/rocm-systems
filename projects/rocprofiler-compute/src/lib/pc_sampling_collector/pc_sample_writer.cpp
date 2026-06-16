@@ -7,17 +7,12 @@
 #include "pc_sample_writer.h"
 
 #include "file_writer.h"
-#include "gsl_assert.h"
 #include "nlohmann/json.hpp"
 
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/pc_sampling.h>
 
-#include <fstream>
 #include <iostream>
 #include <memory>
-#include <stdexcept>
 
 using namespace rocprofiler_compute_tool;
 
@@ -35,40 +30,6 @@ std::string not_issued_reason_name(uint32_t reason)
     const char* name = rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
         static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(reason));
     return name != nullptr ? std::string{name} : std::string{};
-}
-
-pc_sample_hw_id_t map_hw_id(const rocprofiler_pc_sampling_hw_id_v0_t& hw)
-{
-    pc_sample_hw_id_t out{};
-    out.chiplet          = hw.chiplet;
-    out.wave_id          = hw.wave_id;
-    out.simd_id          = hw.simd_id;
-    out.pipe_id          = hw.pipe_id;
-    out.cu_or_wgp_id     = hw.cu_or_wgp_id;
-    out.shader_array_id  = hw.shader_array_id;
-    out.shader_engine_id = hw.shader_engine_id;
-    out.workgroup_id     = hw.workgroup_id;
-    out.vm_id            = hw.vm_id;
-    out.queue_id         = hw.queue_id;
-    out.microengine_id   = hw.microengine_id;
-    return out;
-}
-
-pc_sample_pc_t map_pc(const rocprofiler_pc_t& pc)
-{
-    pc_sample_pc_t out{};
-    out.code_object_id     = pc.code_object_id;
-    out.code_object_offset = pc.code_object_offset;
-    return out;
-}
-
-pc_sample_dim3_t map_dim3(const rocprofiler_dim3_t& d)
-{
-    pc_sample_dim3_t out{};
-    out.x = d.x;
-    out.y = d.y;
-    out.z = d.z;
-    return out;
 }
 
 nlohmann::json hw_id_to_json(const pc_sample_hw_id_t& hw)
@@ -115,30 +76,13 @@ nlohmann::json dim3_to_json(const pc_sample_dim3_t& d)
 
 nlohmann::json snapshot_to_json(const pc_sample_snapshot_t& s)
 {
-    return nlohmann::json::object({
-        {"stall_reason", not_issued_reason_name(s.stall_reason)},
-        {"dual_issue_valu", s.dual_issue_valu},
-        {"arb_state_issue_valu", s.arb_state_issue_valu},
-        {"arb_state_issue_matrix", s.arb_state_issue_matrix},
-        {"arb_state_issue_lds", s.arb_state_issue_lds},
-        {"arb_state_issue_lds_direct", s.arb_state_issue_lds_direct},
-        {"arb_state_issue_scalar", s.arb_state_issue_scalar},
-        {"arb_state_issue_vmem_tex", s.arb_state_issue_vmem_tex},
-        {"arb_state_issue_flat", s.arb_state_issue_flat},
-        {"arb_state_issue_exp", s.arb_state_issue_exp},
-        {"arb_state_issue_misc", s.arb_state_issue_misc},
-        {"arb_state_issue_brmsg", s.arb_state_issue_brmsg},
-        {"arb_state_stall_valu", s.arb_state_stall_valu},
-        {"arb_state_stall_matrix", s.arb_state_stall_matrix},
-        {"arb_state_stall_lds", s.arb_state_stall_lds},
-        {"arb_state_stall_lds_direct", s.arb_state_stall_lds_direct},
-        {"arb_state_stall_scalar", s.arb_state_stall_scalar},
-        {"arb_state_stall_vmem_tex", s.arb_state_stall_vmem_tex},
-        {"arb_state_stall_flat", s.arb_state_stall_flat},
-        {"arb_state_stall_exp", s.arb_state_stall_exp},
-        {"arb_state_stall_misc", s.arb_state_stall_misc},
-        {"arb_state_stall_brmsg", s.arb_state_stall_brmsg},
-    });
+    auto out = nlohmann::json::object();
+    out["stall_reason"] = not_issued_reason_name(s.stall_reason);
+    // Emit the plain uint32 fields from the single-sourced field list.
+#define PC_SAMPLE_SNAPSHOT_EMIT(field) out[#field] = s.field;
+    PC_SAMPLE_SNAPSHOT_PLAIN_FIELDS(PC_SAMPLE_SNAPSHOT_EMIT)
+#undef PC_SAMPLE_SNAPSHOT_EMIT
+    return out;
 }
 
 // Host-trap samples emit exactly these fields; stochastic adds more on top.
@@ -168,144 +112,6 @@ nlohmann::json stochastic_record_to_json(const pc_sample_record_t& r)
 }
 }  // namespace
 
-size_t pc_string_table_t::insert(const std::string& instruction_text, const std::string& comment)
-{
-    // Look up via views over the caller's strings so a cache hit copies nothing.
-    if (const auto it = m_index.find(
-            std::make_pair(std::string_view{instruction_text}, std::string_view{comment}));
-        it != m_index.end())
-        return it->second;
-
-    const size_t idx = m_instructions.size();
-    // deque element addresses are stable, so the views stored below stay valid.
-    const std::string& stored_text    = m_instructions.emplace_back(instruction_text);
-    const std::string& stored_comment = m_comments.emplace_back(comment);
-    m_index.emplace(std::make_pair(std::string_view{stored_text}, std::string_view{stored_comment}), idx);
-    return idx;
-}
-
-const std::deque<std::string>& pc_string_table_t::instructions() const
-{
-    return m_instructions;
-}
-
-const std::deque<std::string>& pc_string_table_t::comments() const
-{
-    return m_comments;
-}
-
-namespace
-{
-// Templated because both SDK record structs expose these members by the same names.
-template<typename RecT>
-void map_common_fields(pc_sample_record_t& out, const RecT& rec)
-{
-    out.hw_id            = map_hw_id(rec.hw_id);
-    out.pc               = map_pc(rec.pc);
-    out.exec_mask        = rec.exec_mask;
-    out.timestamp        = rec.timestamp;
-    out.dispatch_id      = rec.dispatch_id;
-    out.corr_id.internal = rec.correlation_id.internal;
-    out.corr_id.external = rec.correlation_id.external.value;
-    out.wrkgrp_id        = map_dim3(rec.workgroup_id);
-    out.wave_in_grp      = rec.wave_in_group;
-}
-}  // namespace
-
-std::optional<pc_sample_record_t> rocprofiler_compute_tool::decode_pc_sample_record(
-    const rocprofiler_record_header_t& header)
-{
-    if (header.category != ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING)
-        return std::nullopt;
-
-    if (header.kind == ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE)
-    {
-        const auto& rec = *reinterpret_cast<const rocprofiler_pc_sampling_record_stochastic_v0_t*>(
-            header.payload);
-
-        pc_sample_record_t out{};
-        out.kind = pc_sample_kind_t::Stochastic;
-        map_common_fields(out, rec);
-        out.flags.has_mem_cnt = rec.flags.has_memory_counter;
-        out.wave_issued       = rec.wave_issued;
-        out.inst_type         = rec.inst_type;
-        out.wave_cnt          = rec.wave_count;
-
-        out.snapshot.stall_reason               = rec.snapshot.reason_not_issued;
-        out.snapshot.dual_issue_valu            = rec.snapshot.dual_issue_valu;
-        out.snapshot.arb_state_issue_valu       = rec.snapshot.arb_state_issue_valu;
-        out.snapshot.arb_state_issue_matrix     = rec.snapshot.arb_state_issue_matrix;
-        out.snapshot.arb_state_issue_lds        = rec.snapshot.arb_state_issue_lds;
-        out.snapshot.arb_state_issue_lds_direct = rec.snapshot.arb_state_issue_lds_direct;
-        out.snapshot.arb_state_issue_scalar     = rec.snapshot.arb_state_issue_scalar;
-        out.snapshot.arb_state_issue_vmem_tex   = rec.snapshot.arb_state_issue_vmem_tex;
-        out.snapshot.arb_state_issue_flat       = rec.snapshot.arb_state_issue_flat;
-        out.snapshot.arb_state_issue_exp        = rec.snapshot.arb_state_issue_exp;
-        out.snapshot.arb_state_issue_misc       = rec.snapshot.arb_state_issue_misc;
-        out.snapshot.arb_state_issue_brmsg      = rec.snapshot.arb_state_issue_brmsg;
-        out.snapshot.arb_state_stall_valu       = rec.snapshot.arb_state_stall_valu;
-        out.snapshot.arb_state_stall_matrix     = rec.snapshot.arb_state_stall_matrix;
-        out.snapshot.arb_state_stall_lds        = rec.snapshot.arb_state_stall_lds;
-        out.snapshot.arb_state_stall_lds_direct = rec.snapshot.arb_state_stall_lds_direct;
-        out.snapshot.arb_state_stall_scalar     = rec.snapshot.arb_state_stall_scalar;
-        out.snapshot.arb_state_stall_vmem_tex   = rec.snapshot.arb_state_stall_vmem_tex;
-        out.snapshot.arb_state_stall_flat       = rec.snapshot.arb_state_stall_flat;
-        out.snapshot.arb_state_stall_exp        = rec.snapshot.arb_state_stall_exp;
-        out.snapshot.arb_state_stall_misc       = rec.snapshot.arb_state_stall_misc;
-        out.snapshot.arb_state_stall_brmsg      = rec.snapshot.arb_state_stall_brmsg;
-
-        return out;
-    }
-
-    if (header.kind == ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE)
-    {
-        const auto& rec = *reinterpret_cast<const rocprofiler_pc_sampling_record_host_trap_v0_t*>(
-            header.payload);
-
-        pc_sample_record_t out{};
-        out.kind = pc_sample_kind_t::HostTrap;
-        map_common_fields(out, rec);
-
-        return out;
-    }
-
-    return std::nullopt;
-}
-
-std::optional<kernel_dispatch_record_t> rocprofiler_compute_tool::decode_kernel_dispatch_record(
-    const rocprofiler_record_header_t& header)
-{
-    if (header.category != ROCPROFILER_BUFFER_CATEGORY_TRACING ||
-        header.kind != ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
-        return std::nullopt;
-
-    const auto& rec = *reinterpret_cast<const rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(
-        header.payload);
-    const auto& di = rec.dispatch_info;
-
-    kernel_dispatch_record_t out{};
-    out.size            = rec.size;
-    out.kind            = rec.kind;
-    out.operation       = rec.operation;
-    out.thread_id       = rec.thread_id;
-    out.corr_internal   = rec.correlation_id.internal;
-    out.corr_external   = rec.correlation_id.external.value;
-    out.start_timestamp = rec.start_timestamp;
-    out.end_timestamp   = rec.end_timestamp;
-
-    out.dispatch_info_size   = di.size;
-    out.agent_id_handle      = di.agent_id.handle;
-    out.queue_id_handle      = di.queue_id.handle;
-    out.kernel_id            = di.kernel_id;
-    out.dispatch_id          = di.dispatch_id;
-    out.private_segment_size = di.private_segment_size;
-    out.group_segment_size   = di.group_segment_size;
-    out.workgroup_size       = map_dim3(di.workgroup_size);
-    out.grid_size            = map_dim3(di.grid_size);
-
-    return out;
-}
-
 std::shared_ptr<pc_sample_writer_t> pc_sample_writer_t::create()
 {
     return std::make_shared<pc_sample_writer_json_t>();
@@ -325,14 +131,12 @@ void pc_sample_writer_json_t::begin()
 
 void pc_sample_writer_json_t::append_stochastic(const pc_sample_record_t& r, size_t inst_index)
 {
-    m_stochastic.push_back(r);
-    m_stochastic.back().inst_index = inst_index;
+    m_stochastic.push_back(sample_entry_t{r, inst_index});
 }
 
 void pc_sample_writer_json_t::append_host_trap(const pc_sample_record_t& r, size_t inst_index)
 {
-    m_host_trap.push_back(r);
-    m_host_trap.back().inst_index = inst_index;
+    m_host_trap.push_back(sample_entry_t{r, inst_index});
 }
 
 void pc_sample_writer_json_t::set_strings(const pc_string_table_t& table)
@@ -366,20 +170,20 @@ void pc_sample_writer_json_t::set_metadata(int pid)
 std::string pc_sample_writer_json_t::get_result()
 {
     auto stochastic_records = nlohmann::json::array();
-    for (const auto& r : m_stochastic)
+    for (const auto& e : m_stochastic)
     {
         stochastic_records.push_back(nlohmann::json::object({
-            {"record", stochastic_record_to_json(r)},
-            {"inst_index", r.inst_index},
+            {"record", stochastic_record_to_json(e.record)},
+            {"inst_index", e.inst_index},
         }));
     }
 
     auto host_trap_records = nlohmann::json::array();
-    for (const auto& r : m_host_trap)
+    for (const auto& e : m_host_trap)
     {
         host_trap_records.push_back(nlohmann::json::object({
-            {"record", common_record_to_json(r)},
-            {"inst_index", r.inst_index},
+            {"record", common_record_to_json(e.record)},
+            {"inst_index", e.inst_index},
         }));
     }
 

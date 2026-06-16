@@ -6,7 +6,7 @@
 #    define ROCPROFILER_SDK_EXPERIMENTAL
 #endif
 
-#include "pc_sample_writer.h"
+#include "pc_sample_types.h"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer.h>

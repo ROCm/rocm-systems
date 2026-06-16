@@ -3,6 +3,7 @@
 #include "pc_sampling_collector.h"
 
 #include "gsl_assert.h"
+#include "pair_hash.h"
 #include "source_snapshot.h"
 
 #include <unistd.h>
@@ -11,6 +12,7 @@
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -18,19 +20,6 @@
 #include <vector>
 
 using namespace rocprofiler_compute_tool;
-
-namespace
-{
-struct pc_location_hash_t
-{
-    size_t operator()(const std::pair<uint64_t, uint64_t>& p) const
-    {
-        const size_t h1 = std::hash<uint64_t>{}(p.first);
-        const size_t h2 = std::hash<uint64_t>{}(p.second);
-        return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
-    }
-};
-}  // namespace
 
 pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
 {
@@ -134,7 +123,7 @@ void pc_sampling_collector_impl_t::write_samples(pc_sample_writer_t& writer)
     writer.begin();
     // Many samples hit the same PC, so cache the string-table index per location
     // to avoid re-disassembling and re-inserting each one.
-    std::unordered_map<std::pair<uint64_t, uint64_t>, size_t, pc_location_hash_t> idx_by_location;
+    std::unordered_map<std::pair<uint64_t, uint64_t>, size_t, pair_hash_t> idx_by_location;
     for (const auto& sample : m_samples)
     {
         const auto location = std::make_pair(sample.pc.code_object_id, sample.pc.code_object_offset);
@@ -173,15 +162,19 @@ size_t pc_sampling_collector_impl_t::snapshot_sources(const std::filesystem::pat
 {
     const std::shared_ptr<source_snapshot_t> snapshotter = source_snapshot_t::create();
 
-    std::vector<std::string> refs;
+    // A large kernel can annotate hundreds of thousands of instructions with the
+    // same handful of source files, so dedup at collection time rather than
+    // accumulating one string per instruction.
+    std::set<std::string> unique_refs;
     for_each_instruction(
-        [&refs, &snapshotter](uint64_t /*id*/, const symbol_t& /*sym*/, const instruction_t& inst)
+        [&unique_refs, &snapshotter](uint64_t /*id*/, const symbol_t& /*sym*/, const instruction_t& inst)
         {
             if (const auto ref = snapshotter->parse_ref(inst.comment))
             {
-                refs.push_back(*ref);
+                unique_refs.insert(*ref);
             }
         });
 
+    const std::vector<std::string> refs(unique_refs.begin(), unique_refs.end());
     return snapshotter->snapshot(refs, output_root);
 }

@@ -3,7 +3,7 @@
 #pragma once
 
 #include "gtest/gtest.h"
-#include "pc_sample_writer.h"
+#include "pc_sample_types.h"
 
 class test_pc_string_table_t : public ::testing::Test
 {

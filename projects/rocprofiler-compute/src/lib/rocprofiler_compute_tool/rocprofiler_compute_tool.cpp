@@ -9,6 +9,7 @@
 
 #include "counters_writer.h"
 #include "input_parameters.h"
+#include "pc_sample_decode.h"
 #include "pc_sample_writer.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"

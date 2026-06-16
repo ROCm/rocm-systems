@@ -8,11 +8,20 @@ extern "C" char** environ;
 
 namespace
 {
-constexpr std::string_view kRocprofPrefix{"ROCPROF"};
+// Capture the project's own ROCPROF_* variables and the rocprofiler-sdk's
+// ROCPROFILER_* family (e.g. ROCPROFILER_PC_SAMPLING_BETA_ENABLED). Matched
+// explicitly rather than via a bare "ROCPROF" substring so the namespace
+// boundary stays intentional and self-documenting.
+constexpr std::string_view kRocprofPrefixes[]{"ROCPROF_", "ROCPROFILER_"};
 
 bool has_rocprof_prefix(std::string_view name)
 {
-    return name.size() >= kRocprofPrefix.size() && name.substr(0, kRocprofPrefix.size()) == kRocprofPrefix;
+    for (const auto prefix : kRocprofPrefixes)
+    {
+        if (name.size() >= prefix.size() && name.substr(0, prefix.size()) == prefix)
+            return true;
+    }
+    return false;
 }
 
 }  // namespace

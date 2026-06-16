@@ -197,6 +197,13 @@ public:
                                 size_t                           max_interval,
                                 rocprofiler_pc_sampling_method_t method,
                                 rocprofiler_pc_sampling_unit_t   unit);
+    // Append an additional config; query_pc_sampling_configs delivers every
+    // configured entry in one callback so the multi-config selection path can be
+    // exercised.
+    void add_pc_sampling_config(size_t                           min_interval,
+                                size_t                           max_interval,
+                                rocprofiler_pc_sampling_method_t method,
+                                rocprofiler_pc_sampling_unit_t   unit);
     void set_configure_pc_sampling_status(rocprofiler_status_t status);
 
     const std::vector<create_buffer_info>&         get_create_buffer_info() const;
@@ -219,6 +226,7 @@ private:
     std::vector<buffer_tracing_service_info>              m_buffer_tracing_service_info;
     pc_sampling_config_t                                  m_pc_sampling_config{};
     bool                                                  m_pc_sampling_config_set = false;
+    std::vector<pc_sampling_config_t>                     m_extra_pc_sampling_configs;
     rocprofiler_status_t            m_configure_pc_sampling_status = ROCPROFILER_STATUS_SUCCESS;
     uint64_t                        m_next_buffer_id               = 1;
     std::vector<create_buffer_info> m_create_buffer_info;

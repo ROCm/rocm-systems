@@ -75,7 +75,6 @@ protected:
         r.snapshot.arb_state_stall_misc       = 19;
         r.snapshot.arb_state_stall_brmsg      = 20;
 
-        r.inst_index = 5;
         return r;
     }
 
@@ -112,7 +111,6 @@ protected:
 
         r.wave_in_grp = 2;
 
-        r.inst_index = 8;
         return r;
     }
 

@@ -60,6 +60,15 @@ size_t rocprofiler_compute_tool::source_snapshot_impl_t::snapshot(
         std::error_code             ec;
         const std::filesystem::path src{ref};
 
+        // Reject a symlinked source outright (lstat, no follow): copy_file follows
+        // symlinks at the source, so a symlink could redirect the read outside
+        // allowed_root after the containment check (TOCTOU). Refusing symlinks
+        // closes that window at the cost of not snapshotting symlinked sources.
+        if (std::filesystem::is_symlink(std::filesystem::symlink_status(src, ec)) || ec)
+        {
+            continue;
+        }
+
         // Resolve symlinks and require the source inside allowed_root.
         const auto canon_src = std::filesystem::weakly_canonical(src, ec);
         if (ec || canon_allowed_root.empty() || !is_inside(canon_allowed_root, canon_src))

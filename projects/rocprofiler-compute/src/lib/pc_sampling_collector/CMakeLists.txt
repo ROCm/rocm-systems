@@ -12,6 +12,11 @@ add_library(
     code_object_writer.cpp
     file_writer.h
     file_writer.cpp
+    pair_hash.h
+    pc_sample_types.h
+    pc_sample_types.cpp
+    pc_sample_decode.h
+    pc_sample_decode.cpp
     pc_sample_writer.h
     pc_sample_writer.cpp
     source_snapshot.h
