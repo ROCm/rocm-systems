@@ -14,6 +14,15 @@ from amdisa.codegen.execute.vop3_modifiers import (
 )
 
 
+def _write_mask_to_explicit_dst(lines: list[str], dst: str, value: str) -> None:
+    # Keep this wave32/wave64 mask-width rule in sync with simd_glue.h and
+    # sema_lower.py.
+    lines.append('  if (wf.wf_size() <= 32)')
+    lines.append(f'    {dst}.write_scalar(wf, static_cast<uint32_t>({value}));')
+    lines.append('  else')
+    lines.append(f'    {dst}.write_scalar64(wf, {value});')
+
+
 def gen_vector_cmp_class(
     dst: list[str],
     src: list[str],
@@ -135,14 +144,13 @@ def gen_vector_cmp_class(
         L.append('    if (match) result |= (1ULL << lane);')
     else:
         L.append('    if (match) vcc |= (1ULL << lane);')
-        L.append('    else vcc &= ~(1ULL << lane);')
     L.append('  }')
     if is_cmpx:
         if cmpx_writes_vcc:
             L.append('  wf.set_vcc(result);')
         L.append('  wf.set_exec(result);')
     elif dst:
-        L.append(f'  {dst[0]}.write_scalar64(wf, vcc);')
+        _write_mask_to_explicit_dst(L, dst[0], 'vcc')
     else:
         L.append('  wf.set_vcc(vcc);')
     return '\n'.join(L)
@@ -284,20 +292,16 @@ def gen_vector_cmp(
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 
-    if op == 'f':
-        L.append('    vcc &= ~(1ULL << lane);')
-    elif op == 't':
+    if op == 't':
         L.append('    vcc |= (1ULL << lane);')
-    else:
+    elif op != 'f':
         cond = _cmp_condition(src, op, dtype, is_vop3, L, has_abs)
         L.append(f'    if ({cond})')
         L.append('      vcc |= (1ULL << lane);')
-        L.append('    else')
-        L.append('      vcc &= ~(1ULL << lane);')
     L.append('  }')
     if dst:
         # VOP3: write to explicit destination (sdst/vdst SGPR pair).
-        L.append(f'  {dst[0]}.write_scalar64(wf, vcc);')
+        _write_mask_to_explicit_dst(L, dst[0], 'vcc')
     else:
         # VOPC: write to VCC.
         L.append('  wf.set_vcc(vcc);')

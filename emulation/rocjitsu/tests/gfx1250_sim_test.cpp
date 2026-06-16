@@ -10,6 +10,8 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vimage.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop1.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/vop2.h"
 #include "rocjitsu/isa/arch/amdgpu/gfx1250/vop3.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -77,8 +79,10 @@ constexpr uint32_t kGfx1250SimdsPerCu = 4;
 constexpr uint32_t kGfx1250MaxWavesPerSimd = 20;
 constexpr uint32_t kGfx1250WaveSlotsPerCu = kGfx1250SimdsPerCu * kGfx1250MaxWavesPerSimd;
 constexpr uint32_t kGfx1250LdsSizeKb = 160;
+constexpr uint32_t kSdmaOpCopy = 1;
 constexpr uint32_t kSdmaOpFence = 5;
 constexpr uint32_t kSdmaOpPollRegmem = 8;
+constexpr uint32_t kSdmaSubopCopyLinear = 0;
 constexpr uint32_t kSdmaSubopFence64 = 2;
 constexpr uint32_t kSdmaSubopPollMem64 = 5;
 
@@ -182,10 +186,87 @@ private:
   std::array<uint64_t, 1> doorbells_{};
 };
 
+class TranslatedSdmaQueueForTest {
+public:
+  explicit TranslatedSdmaQueueForTest(Gfx1250Sim &sim) : sim_(sim), process_(kProcessId) {
+    sim_.memory->register_process(kProcessId, &process_.page_table_, &process_.page_table_mutex_);
+    process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
+    process_.map_pages(kQueueStateVa, queue_state_.data(),
+                       queue_state_.size() * sizeof(queue_state_[0]));
+    process_.map_pages(kSrcVa, src_.data(), src_.size());
+    process_.map_pages(kDstVa, dst_.data(), dst_.size());
+    process_.map_pages(kSignalVa, signal_.data(), signal_.size() * sizeof(signal_[0]));
+    process_.map_pages(kPollVa, poll_.data(), poll_.size() * sizeof(poll_[0]));
+
+    amdgpu::HwQueue queue{};
+    queue.process_id = kProcessId;
+    queue.queue_id = kQueueId;
+    queue.ring_base_va = kRingVa;
+    queue.ring_size = static_cast<uint32_t>(ring_.size() * sizeof(ring_[0]));
+    queue.read_ptr_va = kQueueStateVa;
+    queue.write_ptr_va = kQueueStateVa + sizeof(queue_state_[0]);
+    queue.doorbell_base = doorbells_.data();
+    queue.doorbell_offset = 0;
+    queue.host_accessible = true;
+    queue.is_sdma = true;
+    sim_.cp()->register_queue(std::move(queue));
+  }
+
+  ~TranslatedSdmaQueueForTest() {
+    sim_.cp()->unregister_queue(kQueueId, kProcessId);
+    sim_.memory->unregister_process(kProcessId);
+  }
+
+  uint32_t *ring() { return ring_.data(); }
+  uint8_t *src() { return src_.data(); }
+  uint8_t *dst() { return dst_.data(); }
+  int64_t &signal_value() { return signal_[0]; }
+  uint64_t &poll_value() { return poll_[0]; }
+
+  uint64_t src_va() const { return kSrcVa; }
+  uint64_t dst_va() const { return kDstVa; }
+  uint64_t signal_va() const { return kSignalVa; }
+  uint64_t poll_va() const { return kPollVa; }
+
+  void submit(uint32_t dwords) {
+    uint64_t write_idx = static_cast<uint64_t>(dwords) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(queue_state_[1]).store(write_idx, std::memory_order_release);
+    std::atomic_ref<uint64_t>(doorbells_[0]).store(write_idx, std::memory_order_release);
+    sim_.engine->schedule_event_now(sim_.cp()->doorbell_event());
+  }
+
+  uint64_t read_idx() const {
+    return std::atomic_ref<const uint64_t>(queue_state_[0]).load(std::memory_order_acquire);
+  }
+
+private:
+  static constexpr uint32_t kProcessId = 1251;
+  static constexpr uint32_t kQueueId = 1251;
+  static constexpr uint64_t kRingVa = 0x1000'0000'0000ULL;
+  static constexpr uint64_t kQueueStateVa = 0x1000'0000'1000ULL;
+  static constexpr uint64_t kSrcVa = 0x1000'0000'2000ULL;
+  static constexpr uint64_t kDstVa = 0x1000'0000'3000ULL;
+  static constexpr uint64_t kSignalVa = 0x1000'0000'4000ULL;
+  static constexpr uint64_t kPollVa = 0x1000'0000'5000ULL;
+
+  Gfx1250Sim &sim_;
+  KfdProcess process_;
+  alignas(4096) std::array<uint32_t, 1024> ring_{};
+  alignas(4096) std::array<uint64_t, 512> queue_state_{};
+  alignas(4096) std::array<uint8_t, 4096> src_{};
+  alignas(4096) std::array<uint8_t, 4096> dst_{};
+  alignas(4096) std::array<int64_t, 512> signal_{};
+  alignas(4096) std::array<uint64_t, 512> poll_{};
+  std::array<uint64_t, 1> doorbells_{};
+};
+
+void write_sdma_qword_va(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, uint64_t va) {
+  packet[lo_dw] = static_cast<uint32_t>(va) & ~0x7u;
+  packet[hi_dw] = static_cast<uint32_t>(va >> 32);
+}
+
 void write_sdma_qword_address(uint32_t *packet, uint32_t lo_dw, uint32_t hi_dw, const void *addr) {
-  auto value = reinterpret_cast<uintptr_t>(addr);
-  packet[lo_dw] = static_cast<uint32_t>(value) & ~0x7u;
-  packet[hi_dw] = static_cast<uint32_t>(value >> 32);
+  write_sdma_qword_va(packet, lo_dw, hi_dw, reinterpret_cast<uintptr_t>(addr));
 }
 
 void step_until_halted(simdojo::SimulationEngine &engine, amdgpu::ComputeUnitCore &cu,
@@ -517,6 +598,203 @@ TEST(Gfx1250SdmaTest, Fence64WritesFull64BitValue) {
   EXPECT_EQ(std::atomic_ref<uint64_t>(value).load(std::memory_order_acquire), kFenceValue);
 }
 
+TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  queue.signal_value() = 5;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0x5a);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
+  packet[8] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 10, 11, queue.src_va());
+  write_sdma_qword_va(packet, 12, 13, queue.dst_va());
+  packet[14] = 0x70;
+  write_sdma_qword_va(packet, 15, 16, queue.signal_va());
+  packet[17] = 1;
+  packet[18] = 0;
+
+  queue.submit(19);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 19u * sizeof(uint32_t));
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+  EXPECT_EQ(queue.signal_value(), 4);
+}
+
+TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedWaitAddressDoesNotAdvance) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  constexpr uint64_t kUnmappedWaitVa = 0x2000'0000'0000ULL;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0xa5);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 30);
+  packet[1] = 3;
+  write_sdma_qword_va(packet, 2, 3, kUnmappedWaitVa);
+  packet[4] = 0;
+  packet[5] = 0;
+  packet[6] = 0xFFFFFFFFu;
+  packet[7] = 0xFFFFFFFFu;
+  packet[8] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 10, 11, queue.src_va());
+  write_sdma_qword_va(packet, 12, 13, queue.dst_va());
+
+  queue.submit(19);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+  EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+}
+
+TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedDstDoesNotAdvanceOrSignal) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  constexpr uint64_t kUnmappedDstVa = 0x2000'0000'2000ULL;
+  queue.signal_value() = 5;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0x3c);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
+  packet[8] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 10, 11, queue.src_va());
+  write_sdma_qword_va(packet, 12, 13, kUnmappedDstVa);
+  packet[14] = 0x70;
+  write_sdma_qword_va(packet, 15, 16, queue.signal_va());
+  packet[17] = 1;
+  packet[18] = 0;
+
+  queue.submit(19);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+  EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+  EXPECT_EQ(queue.signal_value(), 5);
+}
+
+TEST(Gfx1250SdmaTest, CopyWaitSignalUnresolvedSignalDoesNotAdvanceOrCopy) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  constexpr uint64_t kUnmappedSignalVa = 0x2000'0000'4000ULL;
+  queue.signal_value() = 5;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0x69);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 31);
+  packet[8] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 10, 11, queue.src_va());
+  write_sdma_qword_va(packet, 12, 13, queue.dst_va());
+  packet[14] = 0x70;
+  write_sdma_qword_va(packet, 15, 16, kUnmappedSignalVa);
+  packet[17] = 1;
+  packet[18] = 0;
+
+  queue.submit(19);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+  EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+  EXPECT_EQ(queue.signal_value(), 5);
+}
+
+TEST(Gfx1250SdmaTest, CopyLinearUnresolvedDstDoesNotAdvance) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  constexpr uint64_t kUnmappedDstVa = 0x2000'0000'3000ULL;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0xc3);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, kUnmappedDstVa);
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+  EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+}
+
+TEST(Gfx1250SdmaTest, CopyLinearNpdBitDoesNotDecodeAsBroadcast) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0x4d);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 28);
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t));
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+}
+
+TEST(Gfx1250SdmaTest, PollMem64ResolvesTranslatedAddress) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  queue.poll_value() = 1;
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpPollRegmem | (kSdmaSubopPollMem64 << 8) | (3u << 28);
+  write_sdma_qword_va(packet, 1, 2, queue.poll_va());
+  packet[3] = 0;
+  packet[4] = 0;
+  packet[5] = 0xFFFFFFFFu;
+  packet[6] = 0xFFFFFFFFu;
+  packet[7] = 0;
+
+  queue.submit(8);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+
+  std::atomic_ref<uint64_t>(queue.poll_value()).store(0, std::memory_order_release);
+  sim.engine->schedule_event_now(sim.cp()->doorbell_event());
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 8u * sizeof(uint32_t));
+}
+
+TEST(Gfx1250SdmaTest, PollMem64UnresolvedAddressDoesNotAdvance) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint64_t kUnmappedPollVa = 0x2000'0000'1000ULL;
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpPollRegmem | (kSdmaSubopPollMem64 << 8) | (3u << 28);
+  write_sdma_qword_va(packet, 1, 2, kUnmappedPollVa);
+  packet[3] = 0;
+  packet[4] = 0;
+  packet[5] = 0xFFFFFFFFu;
+  packet[6] = 0xFFFFFFFFu;
+  packet[7] = 0;
+
+  queue.submit(8);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 0u);
+}
+
 TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   Gfx1250Sim sim;
   auto *cu = sim.cu();
@@ -579,6 +857,163 @@ TEST(Gfx1250ExecutionTest, DivScaleWritesExplicitSdstMask) {
   EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2), 0x12345679u);
   EXPECT_EQ(read_wave_sgpr(*cu, *wf, 3), 0xfefefefeu);
   EXPECT_EQ(read_vgpr(6), 0x5f800000u);
+}
+
+TEST(Gfx1250ExecutionTest, VMovB16HighVdstMergesIntoLowPhysicalVgpr) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 1, kLane, 0xAAAA5555u);
+  cu->write_vgpr(vgpr_base + 129, kLane, 0xDEADBEEFu);
+
+  const std::array<uint32_t, 1> words = {0x7F023880u}; // v_mov_b16_e32 v1.h, 0
+  gfx1250::VMovB16Vop1 high_half_mov(words.data());
+  high_half_mov.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x00005555u);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0xDEADBEEFu);
+}
+
+TEST(Gfx1250ExecutionTest, VNotB16HighVdstMergesIntoLowPhysicalVgpr) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 0, kLane, 0x000000FFu);
+  cu->write_vgpr(vgpr_base + 1, kLane, 0xAAAA5555u);
+  cu->write_vgpr(vgpr_base + 129, kLane, 0xDEADBEEFu);
+
+  const std::array<uint32_t, 1> words = {0x7F02D300u}; // v_not_b16_e32 v1.h, v0.l
+  gfx1250::VNotB16Vop1 high_half_not(words.data());
+  high_half_not.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0xFF005555u);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0xDEADBEEFu);
+}
+
+TEST(Gfx1250ExecutionTest, VAddF16HighVdstMergesIntoLowPhysicalVgpr) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 0, kLane, 0x00003C00u);
+  cu->write_vgpr(vgpr_base + 1, kLane, 0xAAAA5555u);
+  cu->write_vgpr(vgpr_base + 2, kLane, 0x00003C00u);
+  cu->write_vgpr(vgpr_base + 129, kLane, 0xDEADBEEFu);
+
+  const std::array<uint32_t, 1> words = {0x65020500u}; // v_add_f16_e32 v1.h, v0.l, v2.l
+  gfx1250::VAddF16Vop2 high_half_add(words.data());
+  high_half_add.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x40005555u);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0xDEADBEEFu);
+}
+
+TEST(Gfx1250ExecutionTest, VFmacF16Vop3HighVdstUsesHighHalfAddend) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 0, kLane, 0x00003C00u);
+  cu->write_vgpr(vgpr_base + 1, kLane, 0x40003C00u);
+  cu->write_vgpr(vgpr_base + 2, kLane, 0x00003C00u);
+
+  const std::array<uint32_t, 2> words = {
+      0xD5364001u, // v_fmac_f16 v1.h, v0.l, v2.l
+      0x02020500u,
+  };
+  gfx1250::VFmacF16Vop3 high_half_fmac(words.data());
+  high_half_fmac.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x42003C00u);
+}
+
+TEST(Gfx1250ExecutionTest, VFmacF16Vop2HighVdstUsesHighHalfAddend) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, kGfx1250Wave32VgprAllocation);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 0, kLane, 0x00003C00u);
+  cu->write_vgpr(vgpr_base + 1, kLane, 0x40003C00u);
+  cu->write_vgpr(vgpr_base + 2, kLane, 0x00003C00u);
+  cu->write_vgpr(vgpr_base + 129, kLane, 0x3C003C00u);
+
+  const std::array<uint32_t, 1> words = {0x6D020500u}; // v_fmac_f16_e32 v1.h, v0.l, v2.l
+  gfx1250::VFmacF16Vop2 high_half_fmac(words.data());
+  high_half_fmac.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 1, kLane), 0x42003C00u);
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 129, kLane), 0x3C003C00u);
+}
+
+TEST(Gfx1250ExecutionTest, VMadU32LiteralTimesScalarAddsVector) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1u);
+
+  constexpr uint32_t kLane = 0;
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  write_wave_sgpr(*cu, *wf, 3, 1);
+  cu->write_vgpr(vgpr_base + 4, kLane, 0x24u);
+
+  const std::array<uint32_t, 3> words = {
+      0xD6350004u, // v_mad_u32 v4, 0x48, s3, v4
+      0x041006FFu,
+      0x00000048u,
+  };
+  gfx1250::VMadU32Vop3 mad(words.data());
+  mad.execute_impl(*wf);
+
+  EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, kLane), 0x6Cu);
+}
+
+TEST(Gfx1250ExecutionTest, VCmpGtU32Wave32ExplicitSdstPreservesHighSgpr) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x3u);
+
+  const uint32_t vgpr_base = wf->vgpr_alloc().base;
+  cu->write_vgpr(vgpr_base + 4, 0, 3u);
+  cu->write_vgpr(vgpr_base + 4, 1, 5u);
+  write_wave_sgpr(*cu, *wf, 2, 0xaaaaaaaau);
+  write_wave_sgpr(*cu, *wf, 3, 0xfefefefeu);
+  wf->set_vcc(0x12345678u);
+
+  const std::array<uint32_t, 2> words = {
+      0xD44C0002u, // v_cmp_gt_u32_e64 s2, 4, v4
+      0x02020884u,
+  };
+  gfx1250::VCmpGtU32Vop3 cmp(words.data());
+  cmp.execute_impl(*wf);
+
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 2), 0x1u);
+  EXPECT_EQ(read_wave_sgpr(*cu, *wf, 3), 0xfefefefeu);
+  EXPECT_EQ(wf->vcc(), 0x12345678u);
 }
 
 TEST(Gfx1250ExecutionTest, TensorDmaD2CopiesGlobalAndLds) {
