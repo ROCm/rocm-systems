@@ -44,7 +44,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
+          ref: users/dravindr/tr_aqlprofile # WIP: paired TheRock branch for tf_aqlprofile; revert to a pinned ROCm/TheRock SHA before merge
 
       - name: Install python deps
         run: |
