@@ -123,7 +123,7 @@ typedef struct ncclConfig_v22800
     int         cgaClusterSize;      /*!< Cooperative group array cluster size */
     int         minCTAs;             /*!< Minimum number of cooperative thread arrays (blocks) */
     int         maxCTAs;             /*!< Maximum number of cooperative thread arrays (blocks) */
-    const char* netName;             /*!< Force NCCL to use a specfic network */
+    const char* netName;             /*!< Force NCCL to use a specific network */
     int         splitShare;          /*!< Allow communicators to share resources */
     int         trafficClass;        /*!< Traffic class*/
     const char* commName;            /*!< Name of the communicator*/
@@ -263,7 +263,7 @@ pncclCommInitRankConfig(ncclComm_t*   comm,
 /*! @brief      Creates a new communicator (multi thread/process version).
     @details    Rank must be between 0 and nranks-1 and unique within a communicator clique.
                 Each rank is associated to a CUDA device, which has to be set before calling
-                ncclCommInitRank.  ncclCommInitRank implicitly syncronizes with other ranks,
+                ncclCommInitRank.  ncclCommInitRank implicitly synchronizes with other ranks,
                 so it must be called by different threads/processes or use
    ncclGroupStart/ncclGroupEnd.
     @return     Result code. See @ref rccl_result_code for more details.
@@ -370,7 +370,7 @@ pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclCon
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm                  Original communicator object for this rank
-    @param[in]  excludeRanksList      List of ranks to be exluded
+    @param[in]  excludeRanksList      List of ranks to be excluded
     @param[in]  excludeRanksCount     Number of ranks to be excluded
     @param[out] newcomm               Pointer to new communicator
     @param[in]  config                Config file for new communicator. May be NULL to inherit from

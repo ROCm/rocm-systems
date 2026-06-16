@@ -32,6 +32,7 @@ from utils.specs import (
 )
 from utils.utils_common import (
     build_metric_list,
+    canonical_config_arch,
     detect_rocprof,
     get_arch_panel_id_to_alias,
     get_job_rank_and_size,
@@ -153,7 +154,7 @@ class RocProfCompute:
 
         self._validate_list_option_exclusions()
 
-        # Validate block 30 requires --membw-analysis and --experimental
+        # Validate block 30 / block 21 require their respective experimental flags
         filter_list: list[str] = []
         if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
             filter_list = self.__args.filter_blocks
@@ -167,14 +168,32 @@ class RocProfCompute:
             ):
                 if not self.__args.membw_analysis or not self.__args.experimental:
                     console_error(
-                        "Block 30 (Memory Bandwidth Analysis) is an experimental :"
-                        f"feature.\n"
+                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
+                        "feature.\n"
                         f'To use "-b {block_input}", you must also specify: '
-                        f"--membw-analysis --experimental"
+                        "--membw-analysis --experimental"
                     )
+            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
+            # from the profiling config yaml.
+            if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
+                if not self.__args.pc_sampling or not self.__args.experimental:
+                    console_error(
+                        "Block 21 (PC Sampling) is an experimental feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        "--pc-sampling --experimental"
+                    )
+
+        # When --pc-sampling is set, inject "21" into filter_blocks so the
+        # profiling config yaml records it and downstream code is unchanged.
+        if self.__mode == "profile" and self.__args.pc_sampling:
+            current = list(self.__args.filter_blocks or [])
+            if "21" not in current:
+                current.append("21")
+            self.__args.filter_blocks = current
 
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
+            self._resolve_pc_sampling_interval()
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -415,8 +434,10 @@ class RocProfCompute:
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
         arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
+        config_arch = canonical_config_arch(arch) or arch
+        config_root = Path(self.__args.config_dir) / config_arch
 
-        if arch in self.__supported_archs.keys():
+        if arch in self.__supported_archs.keys() or config_root.is_dir():
             sys_info = self.__mspec.get_class_members() if for_current_arch else None
             metric_list = self._build_arch_metric_list(arch, sys_info)
             for key, value in metric_list.items():
@@ -429,8 +450,10 @@ class RocProfCompute:
     @demarcate
     def list_blocks(self) -> None:
         arch = self.__args.list_blocks
+        config_arch = canonical_config_arch(arch) or arch
+        config_root = Path(self.__args.config_dir) / config_arch
 
-        if arch in self.__supported_archs.keys():
+        if arch in self.__supported_archs.keys() or config_root.is_dir():
             metric_list = self._build_arch_metric_list(arch, sys_info=None)
             top_panels = {k: v for k, v in metric_list.items() if "." not in k}
             panel_alias_dict = get_arch_panel_id_to_alias(arch)
@@ -449,7 +472,10 @@ class RocProfCompute:
     ) -> dict[str, str]:
         """Load panel configs for arch and build metric_list.
         Returns the metric_list dictionary."""
-        panel_configs = load_panel_configs([str(Path(self.__args.config_dir) / arch)])
+        config_arch = canonical_config_arch(arch) or arch
+        panel_configs = load_panel_configs([
+            str(Path(self.__args.config_dir) / config_arch)
+        ])
         return build_metric_list(panel_configs, sys_info)
 
     @demarcate
@@ -602,6 +628,40 @@ class RocProfCompute:
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--bench-only cannot be used with --no-roof.")
 
+    def _resolve_pc_sampling_interval(self) -> None:
+        """Apply the method-aware default for --pc-sampling-interval and
+        validate a user-supplied value."""
+        args = self.__args
+        if not getattr(args, "pc_sampling", False):
+            return
+
+        stochastic_default_interval_in_cycles = 1048576
+        stochastic_min_interval_in_cycles = 65536
+        host_trap_default_interval_in_microseconds = 512
+
+        method = args.pc_sampling_method
+        if args.pc_sampling_interval is None:
+            if method == "stochastic":
+                args.pc_sampling_interval = stochastic_default_interval_in_cycles
+            else:
+                args.pc_sampling_interval = host_trap_default_interval_in_microseconds
+            return
+
+        interval = args.pc_sampling_interval
+        if method == "stochastic":
+            is_power_of_two = interval > 0 and interval & (interval - 1) == 0
+            if not is_power_of_two or interval < stochastic_min_interval_in_cycles:
+                console_error(
+                    "--pc-sampling-interval for stochastic sampling must be a "
+                    f"power of 2 and at least {stochastic_min_interval_in_cycles} "
+                    f"(got {interval})."
+                )
+        elif interval <= 0:
+            console_error(
+                "--pc-sampling-interval for host_trap sampling must be a "
+                f"positive integer (got {interval})."
+            )
+
     def _validate_list_option_exclusions(self) -> None:
         """Validate that list/discovery options aren't combined with --block.
         Applies to both profile and analyze mode.
@@ -670,9 +730,10 @@ class RocProfCompute:
 
     @demarcate
     def run_analysis(self) -> None:
-        # Lazy import file_io since its only used in analysis mode
-        # This will prevent analysis dependencies
-        # leakage into profile mode path
+        # Lazy import pandas and file_io since they are only used in analysis
+        # mode. This keeps analysis deps out of the profile path.
+        import pandas as pd
+
         from utils import file_io
 
         self.print_graphic()
@@ -716,7 +777,7 @@ class RocProfCompute:
             else:
                 sysinfo_path = file_io.find_1st_sub_dir(base_path)
 
-            sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+            sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
             sys_info_dict = {
                 key: value[0] for key, value in sys_info.to_dict("list").items()
             }

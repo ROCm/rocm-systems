@@ -69,8 +69,10 @@ class cli_analysis(OmniAnalyze_Base):
                     " skipped",
                 )
 
+                pc_sampling_data = file_io.load_pc_sampling_results(path_info[0])
+
                 workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                    path_info[0]
+                    pc_sampling_data
                 )
                 workload.raw_pmc = workload.raw_pmc.rename(
                     columns={"Dispatch_Id": "Dispatch_ID"}
@@ -88,7 +90,9 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
                 workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
-                parser.load_non_mertrics_table(workload, path_info[0], args)
+                parser.load_non_mertrics_table(
+                    workload, path_info[0], args, pc_sampling_tool_data=pc_sampling_data
+                )
                 parser.nullify_unevaluated_metric_values(workload)
                 continue
 
@@ -146,11 +150,13 @@ class cli_analysis(OmniAnalyze_Base):
                 self.apply_torch_operator_filter(args, workload, path_info[0])
 
             # create the loaded table
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
             parser.load_table_data(
                 workload=workload,
                 dir_path=path_info[0],
                 is_gui=False,
                 args=args,
+                dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
             )
 
     @demarcate
@@ -234,9 +240,12 @@ class cli_analysis(OmniAnalyze_Base):
                             ai_data=ai_data,
                         )
 
-                        ops_fig, flops_fig, ops_dt, flops_dt = (
-                            roof_obj.construct_plotly_figures(ai_data=ai_data)
-                        )
+                        (
+                            ops_fig,
+                            flops_fig,
+                            ops_dt,
+                            flops_dt,
+                        ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
                         roof_obj.save_html_files(ops_fig, flops_fig, ops_dt, flops_dt)
                     else:
                         console_warning(
@@ -302,7 +311,7 @@ class cli_analysis(OmniAnalyze_Base):
                 "torch trace",
                 f"No operators matched the pattern(s): {pattern_list}",
             )
-            return
+            sys.exit(0)
 
         matched_df = consolidated_df[
             consolidated_df["Operator_Name"].isin(matched_names)

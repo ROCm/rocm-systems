@@ -51,6 +51,7 @@
 namespace rocr {
 namespace AMD {
 
+/// @brief Class to represent an AIE device.
 class AieAgent : public core::Agent {
 public:
  /// @brief AIE agent constructor.
@@ -62,7 +63,7 @@ public:
 
  hsa_status_t VisitRegion(bool include_peer,
                           hsa_status_t (*callback)(hsa_region_t region, void* data),
-                          void* data) const;
+                          void* data) const override;
  hsa_status_t IterateRegion(hsa_status_t (*callback)(hsa_region_t region, void* data),
                             void* data) const override;
 
@@ -74,7 +75,6 @@ public:
 
  hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
- // @brief Override from core::Agent.
  void InitDerivedCuid() override;
 
  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
@@ -83,7 +83,6 @@ public:
                           bool metadata_queue,
                           core::Queue** queue) override;
 
- /// @brief Override from core::Agent.
  const std::vector<const core::Isa*>& supported_isas() const override { return supported_isas_; }
 
  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override { return regions_; }

@@ -1767,6 +1767,15 @@ bool Device::populateOCLDeviceConstants() {
         std::numeric_limits<uint32_t>::max();  // gfx10+ does not share SGPRs between waves
   }
 
+  // Flag for fabric handle support
+  info_.fabric_handle_ = false;
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::system_get_info(
+          static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED),
+          &info_.fabric_handle_)) {
+    LogError("HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED query failed ");
+  }
+
   return true;
 }
 
@@ -2452,6 +2461,65 @@ bool Device::virtualFree(void* addr) {
   return true;
 }
 
+// ================================================================================================
+// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
+// non-async hipMemMap/hipMemUnmap entry points (wired up in subsequent
+// commits). No execution() lock and no barrier packet: the HIP layer is
+// responsible for draining access-device queues from the CPU side before
+// calling, and hsa_amd_vmem_{map,unmap} are synchronous w.r.t. the CPU.
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+  if (vaddr_sub_obj == nullptr) {
+    LogError("virtualMap: MapMemObjBookkeeping failed");
+    return CL_INVALID_VALUE;
+  }
+
+  hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
+  opaque_hsa_handle.handle = phys->getUserData().hsa_handle;
+  hsa_status_t hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), size,
+                                          vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("virtualMap: hsa_amd_vmem_map failed with status: %d", hsa_status);
+    // Roll back the bookkeeping so the sub_obj/MemObjMap doesn't leak.
+    // FinalizeMapMemObjBookkeeping was never called, so MemObjMap doesn't
+    // contain va and the cross-links are not wired. Just tear down the
+    // sub-buffer view directly.
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+    vaddr_sub_obj->release();
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+
+  constexpr bool kImportVmmForInterprocess = true;
+  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  if (vaddr_sub_obj == nullptr) {
+    LogPrintfError("virtualUnmap: no sub_obj for va: %p", va);
+    return CL_INVALID_VALUE;
+  }
+
+  hsa_status_t hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), size);
+  if (hsa_status != HSA_STATUS_SUCCESS) {
+    LogPrintfError("virtualUnmap: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kDestroyVirtualBuffer = true;
+  constexpr bool kReleaseSubObj = true;
+  UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
+  return CL_SUCCESS;
+}
+
+// ================================================================================================
 bool Device::SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                           VmmLocationType access_location) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
@@ -2491,30 +2559,41 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
 }
 
 // ================================================================================================
-bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) {
+bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
+                                      amd::Memory::HandleType handle_type) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
   hsa_vmem_handle.handle = amd_mem_obj.getUserData().hsa_handle;
-  int dmabuf_fd = 0;
 
   if (hsa_vmem_handle.handle == 0) {
     LogError("HSA Handle is not valid");
     return false;
   }
 
-  if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd, hsa_vmem_handle, flags)) !=
-      HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d", hsa_status);
-    return false;
+  if (handle_type == amd::Memory::HandleType::kHandleFabric) { //handle type fabric
+    hsa_fabric_handle_t fabric_handle;
+    if ((hsa_status = Hsa::vmem_export_fabric_handle(&fabric_handle,
+                        hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_vmem_export_fabric_handle with status: %d \n", hsa_status);
+      return false;
+    }
+    *(reinterpret_cast<hsa_fabric_handle_t*>(shareableHandle)) = fabric_handle;
+  } else {
+    int dmabuf_fd = 0;
+    if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd,
+                        hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d \n", hsa_status);
+      return false;
+    }
+    *(reinterpret_cast<int*>(shareableHandle)) = dmabuf_fd;
   }
-
-  *(reinterpret_cast<int*>(shareableHandle)) = dmabuf_fd;
 
   return true;
 }
 
 // ================================================================================================
-bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const {
+bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
+                                      amd::Memory::HandleType handle_type) const {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
 
@@ -2523,11 +2602,20 @@ bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) 
     return false;
   }
 
-  int dmabuf_fd = static_cast<int>(reinterpret_cast<uintptr_t>(osHandle));
-  if ((hsa_status = Hsa::vmem_import_shareable_handle(dmabuf_fd, &hsa_vmem_handle)) !=
-      HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_import_shareable_handle with status: %d", hsa_status);
-    return false;
+  if (handle_type == amd::Memory::HandleType::kHandleFabric) {
+    hsa_fabric_handle_t fabric_handle = *(reinterpret_cast<hsa_fabric_handle_t*>(osHandle));
+    if ((hsa_status = Hsa::vmem_import_fabric_handle(fabric_handle, &hsa_vmem_handle))
+                        != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_amd_vmem_import_fabric_handle with status: %d \n", hsa_status);
+      return false;
+    }
+  } else {
+    int dmabuf_fd = static_cast<int>(reinterpret_cast<uintptr_t>(osHandle));
+    if ((hsa_status = Hsa::vmem_import_shareable_handle(dmabuf_fd, &hsa_vmem_handle))
+                        != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_amd_vmem_import_shareable_handle with status: %d \n", hsa_status);
+      return false;
+    }
   }
 
   *hsa_handle_ptr = hsa_vmem_handle.handle;
@@ -2535,7 +2623,7 @@ bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) 
 }
 
 // ================================================================================================
-amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
+amd::Memory* Device::ImportShareableVMMHandle(void* osHandle, amd::Memory::HandleType handle_type) {
   amd::Memory* amd_mem_obj = new (context())
       amd::Buffer(context(), ROCCLR_MEM_PHYMEM | ROCCLR_MEM_INTERPROCESS, 0, osHandle);
   if (amd_mem_obj == nullptr) {
@@ -2543,6 +2631,7 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
     return nullptr;
   }
 
+  amd_mem_obj->getUserData().hsa_handle_type = handle_type;
   if (!amd_mem_obj->create(nullptr, false)) {
     LogError("Failed to create mem_obj from imported fd");
     amd_mem_obj->release();
