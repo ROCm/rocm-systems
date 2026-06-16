@@ -164,39 +164,84 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // KernelSignature marks an argument as a plain scalar (desc.type_ != T_POINTER)
 // whenever the pointer is a *member* of a struct passed by value — e.g. the
 // std::array<char*,N> that ATen's vectorized_elementwise_kernel takes through
-// the <<<>>> path. The type metadata cannot say "bytes 0..7 are an address",
-// so the only robust way to find such pointers is to ask the runtime whether
-// a candidate word is a live device allocation. Probing perturbs the calling
-// thread's HIP last-error state, so we save and restore it.
+// the <<<>>> path, or the ~720-byte ReduceOp config struct that mixes scalar
+// shapes/strides with device pointers (input, output, and the global
+// scratch/semaphore buffers used by multi-block reductions). The type metadata
+// cannot say "bytes o..o+7 of this argument are an address", so the only robust
+// way to find such pointers is to ask the runtime whether a candidate word is a
+// live device allocation.
 //
-// Scanning is byte-by-byte (not 8-byte-strided) so a device pointer embedded at
-// an unaligned offset inside a packed by-value struct (e.g. a `#pragma pack`'d
-// {char; void*}) is still found; on a hit we skip a full pointer width since
-// pointers do not overlap, otherwise we advance one byte. This is a heuristic:
-// any 8-byte window whose bit pattern happens to land in a live device VA is
-// flagged, so a large scalar/double can be a false positive — replay guards
-// against that by only overwriting a flagged word when the recorded value
-// actually resolves to a known allocation (see hip_playback.cpp).
+// `scan_embedded_ptr_offsets` produces the offset list for one launch, caching a
+// per-word verdict (POINTER / SCALAR) keyed by (kernel, arg-index, size, offset)
+// to avoid re-probing the runtime on every launch — that probe is a locked
+// allocation-tree walk, and issuing one per candidate word of every by-value arg
+// of every launch (millions on an LLM workload) both slows capture and perturbs
+// the very timing/ordering HRR records.
 //
-// Scope: only hipMemoryTypeDevice/Unified are flagged. A pinned/host
-// (hipMemoryTypeHost) pointer embedded by value would keep its capture-time
-// host VA at replay, which is invalid in the replay process; translating such
-// pointers is intentionally out of scope.
-static void find_embedded_ptr_offsets(const uint8_t* data, size_t size,
+// CRITICAL: a verdict is cached only from an *actual probe* (value >= 0x10000).
+// A null/small word (a pointer field that is null on this launch, or a small
+// scalar) is skipped WITHOUT caching, so a conditionally-populated pointer field
+// — e.g. the multi-block reduction scratch/semaphore pointers, which are null on
+// single-block launches — is still detected on the first launch where it is
+// actually non-null, instead of being frozen as a scalar from an early launch.
+// Device VAs are always huge, so a non-null embedded pointer never looks "small"
+// and is therefore never skipped.
+//
+// Notes:
+// - Scanning is byte-by-byte (skipping a full pointer width on a hit, since
+//   pointers do not overlap) so a pointer at an unaligned offset inside a packed
+//   struct is still found.
+// - This is a heuristic: a large scalar/double whose bit pattern lands in a live
+//   device VA is a false positive. Replay guards against corrupting such a
+//   scalar by only overwriting a flagged word when the recorded value actually
+//   resolves to a known allocation (see hip_playback.cpp).
+// - Scope: only hipMemoryTypeDevice/Unified words are flagged. A pinned/host
+//   (hipMemoryTypeHost) pointer embedded by value keeps its capture-time host VA
+//   at replay (invalid in the replay process); translating such pointers is
+//   intentionally out of scope.
+enum class PtrVerdict : uint8_t { Pointer, Scalar };
+
+static void scan_embedded_ptr_offsets(const void* func_key, uint32_t arg_idx,
+                                      const uint8_t* data, uint16_t size,
                                       std::vector<uint16_t>& offsets) {
   if (!data || !g_real_table.hipPointerGetAttributes_fn) return;
+  // Per-word verdict cache. thread_local keeps the hot launch path lock-free;
+  // verdicts are identical across threads so per-thread duplication is harmless.
+  thread_local std::map<std::tuple<const void*, uint32_t, uint16_t, uint16_t>,
+                        PtrVerdict> verdicts;
+  const bool cacheable = (func_key != nullptr);
   const hipError_t saved_cmd = hip::tls.last_command_error_;
   const hipError_t saved_err = hip::tls.last_error_;
   size_t j = 0;
   while (j + sizeof(void*) <= size) {
+    const uint16_t off = static_cast<uint16_t>(j);
+    if (cacheable) {
+      auto it = verdicts.find(std::make_tuple(func_key, arg_idx, size, off));
+      if (it != verdicts.end()) {
+        if (it->second == PtrVerdict::Pointer) {
+          offsets.push_back(off);
+          j += sizeof(void*);
+        } else {
+          j += 1;
+        }
+        continue;
+      }
+    }
     uint64_t cand;
     std::memcpy(&cand, data + j, sizeof(cand));
-    if (cand < 0x10000ULL) { j += 1; continue; }  // small scalars are not VAs
+    // Null/small word: never a device VA. Skip without caching a verdict — a
+    // pointer field that is merely null on this launch must stay re-checkable.
+    if (cand < 0x10000ULL) { j += 1; continue; }
     hipPointerAttribute_t attr{};
-    if (g_real_table.hipPointerGetAttributes_fn(
+    const bool is_ptr =
+        g_real_table.hipPointerGetAttributes_fn(
             &attr, reinterpret_cast<const void*>(cand)) == hipSuccess &&
-        (attr.type == hipMemoryTypeDevice || attr.type == hipMemoryTypeUnified)) {
-      offsets.push_back(static_cast<uint16_t>(j));
+        (attr.type == hipMemoryTypeDevice || attr.type == hipMemoryTypeUnified);
+    if (cacheable)
+      verdicts[std::make_tuple(func_key, arg_idx, size, off)] =
+          is_ptr ? PtrVerdict::Pointer : PtrVerdict::Scalar;
+    if (is_ptr) {
+      offsets.push_back(off);
       j += sizeof(void*);
     } else {
       j += 1;
@@ -204,36 +249,6 @@ static void find_embedded_ptr_offsets(const uint8_t* data, size_t size,
   }
   hip::tls.last_command_error_ = saved_cmd;
   hip::tls.last_error_         = saved_err;
-}
-
-// Memoized wrapper around find_embedded_ptr_offsets. The embedded-pointer
-// *layout* of an argument is structural — fixed by the kernel's by-value struct
-// type — so we probe the runtime once per (kernel, arg-index, size) and reuse
-// the offset list on every subsequent launch. Without this, capture issues one
-// hipPointerGetAttributes (a locked allocation-tree walk) per candidate window
-// of every by-value arg of every launch — millions of probes on an LLM
-// workload — which both slows capture and perturbs the very timing/ordering
-// HRR records.
-//
-// The cache is thread_local to keep the hot launch path lock-free; the layout
-// is identical across threads so per-thread duplication is harmless. Caveat:
-// the probe is value-based, so if a kernel's pointer slot is null/zero on its
-// first recorded launch the cached layout misses it. In practice the first
-// launch already carries live pointers; the assumption is documented here.
-static const std::vector<uint16_t>& memo_embedded_ptr_offsets(
-    const void* func_key, uint32_t arg_idx, uint16_t sz, const uint8_t* bytes) {
-  static const std::vector<uint16_t> kEmpty;
-  // Nothing to probe (and nothing worth caching) without the arg bytes — a
-  // later launch of the same arg may have them available.
-  if (!bytes || !func_key) return kEmpty;
-  thread_local std::map<std::tuple<const void*, uint32_t, uint16_t>,
-                        std::vector<uint16_t>> cache;
-  const auto key = std::make_tuple(func_key, arg_idx, sz);
-  auto it = cache.find(key);
-  if (it != cache.end()) return it->second;
-  std::vector<uint16_t> offs;
-  find_embedded_ptr_offsets(bytes, sz, offs);
-  return cache.emplace(key, std::move(offs)).first->second;
 }
 
 static void serialize_kernel_launch(
@@ -315,8 +330,8 @@ static void serialize_kernel_launch(
       }
       return;
     }
-    const std::vector<uint16_t>& offs =
-        memo_embedded_ptr_offsets(func_key, idx, sz, bytes);
+    std::vector<uint16_t> offs;
+    scan_embedded_ptr_offsets(func_key, idx, bytes, sz, offs);
     uint8_t kind = offs.empty() ? 0 : 3;
     push_u8(kind); push_u16(sz);
     if (bytes) push_bytes(bytes, sz);

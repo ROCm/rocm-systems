@@ -455,16 +455,22 @@ top-level pointer args. Old archives (no `value_kind == 3`) parse unchanged.
 
 This detector is a value-based heuristic with three deliberate properties:
 
-- **Memoized layout (perf + low perturbation).** The offset layout of a given
-  argument is structural — fixed by the kernel's by-value struct type — so
-  `memo_embedded_ptr_offsets` probes once per `(kernel, arg-index, size)` and
-  caches the result (thread-local, lock-free). Without this, capture would issue
-  one `hipPointerGetAttributes` (a locked allocation-tree walk) per candidate
-  window of every by-value arg of every launch — millions of probes on an LLM
-  workload — slowing capture and distorting the timing/ordering HRR records.
-  Caveat: if a kernel's pointer slot is null on its *first* recorded launch, the
-  cached layout misses it; in practice the first launch already carries live
-  pointers.
+- **Memoized per-word verdict (perf + low perturbation).** `hipPointerGetAttributes`
+  is a locked allocation-tree walk; issuing one per candidate word of every
+  by-value arg of every launch (millions on an LLM workload) slows capture and
+  distorts the timing/ordering HRR records. `scan_embedded_ptr_offsets` therefore
+  caches a per-word verdict (POINTER/SCALAR) keyed by `(kernel, arg-index, size,
+  offset)` (thread-local, lock-free). A verdict is cached **only from an actual
+  probe** (word value ≥ `0x10000`); a null/small word is skipped *without*
+  caching. This is essential: a conditionally-populated pointer field — e.g. the
+  multi-block reduction scratch/semaphore pointers in ATen's `ReduceOp` struct,
+  which are null on single-block launches — must stay re-checkable, so it is
+  detected on the first launch where it is actually non-null rather than frozen
+  as a scalar from an earlier launch. (Caching the whole offset *list* per
+  `(kernel, arg)` instead would drop such fields and replay the kernel with an
+  untranslated capture-time VA — a memory fault, e.g. the ArgMax sampler.)
+  Because device VAs are always huge, a non-null embedded pointer never looks
+  "small" and is never skipped.
 - **Unaligned scan.** The scan steps byte-by-byte (skipping a full pointer width
   on a hit, since pointers do not overlap) so a pointer at an unaligned offset
   inside a packed struct (`#pragma pack` `{char; void*}`) is still found. Most
