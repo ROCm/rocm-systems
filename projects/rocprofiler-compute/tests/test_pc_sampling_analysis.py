@@ -1027,6 +1027,36 @@ def test_load_pc_sampling_results_parses_tool_record(tmp_path: Path) -> None:
     assert tool_data["kernel_symbols"][0]["formatted_kernel_name"] == "vecCopy"
 
 
+def test_load_pc_sampling_results_resolves_native_pid_filename(
+    tmp_path: Path,
+) -> None:
+    """Resolve the native collector's ``<pid>_ps_file_results.json`` by glob."""
+    write_results_json(
+        tmp_path / "4242_ps_file_results.json",
+        kernel_symbols=[make_kernel_symbol(12, 2, "matMulKernel")],
+    )
+    tool_data = load_pc_sampling_results(str(tmp_path))
+    assert tool_data is not None
+    assert tool_data["kernel_symbols"][0]["formatted_kernel_name"] == "matMulKernel"
+
+
+def test_load_pc_sampling_results_multiple_files_loads_first_sorted(
+    tmp_path: Path,
+) -> None:
+    """With several results files, load the first sorted one without raising."""
+    write_results_json(
+        tmp_path / "2222_ps_file_results.json",
+        kernel_symbols=[make_kernel_symbol(12, 2, "second")],
+    )
+    write_results_json(
+        tmp_path / "1111_ps_file_results.json",
+        kernel_symbols=[make_kernel_symbol(12, 2, "first")],
+    )
+    tool_data = load_pc_sampling_results(str(tmp_path))
+    assert tool_data is not None
+    assert tool_data["kernel_symbols"][0]["formatted_kernel_name"] == "first"
+
+
 def test_process_pc_sampling_none_returns_empty() -> None:
     """Return empty DataFrame with expected columns when tool_data is None."""
     df = process_pc_sampling_kernel_trace(None)

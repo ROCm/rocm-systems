@@ -226,15 +226,28 @@ def build_agent_to_gpu_map_from_json(
 @demarcate
 def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
     """
-    Parse ``ps_file_results.json`` and return its ``rocprofiler-sdk-tool[0]``
-    record, or ``None`` if the file is absent.
+    Parse the PC sampling results json and return its ``rocprofiler-sdk-tool[0]``
+    record, or ``None`` if no file is present.
+
+    Resolves the file by glob so both the SDK plain name ``ps_file_results.json``
+    and the native collector's ``<pid>_ps_file_results.json`` are found. When
+    several match (e.g. a multi-pid native run) the first sorted file is loaded
+    and the rest are noted via ``console_debug``; merging multiple files is not
+    supported.
 
     The json can be multiple GB: parse once here and pass the dict to every
     PC sampling consumer instead of re-reading the file.
     """
-    json_path = Path(workload_path) / "ps_file_results.json"
-    if not json_path.exists():
+    matches = sorted(Path(workload_path).glob("*ps_file_results.json"))
+    if not matches:
         return None
+    json_path = matches[0]
+    if len(matches) > 1:
+        ignored = ", ".join(p.name for p in matches[1:])
+        console_debug(
+            f"PC sampling: multiple results files in {workload_path}; "
+            f"loading {json_path.name}, ignoring {ignored}"
+        )
     try:
         with json_path.open(encoding="utf-8") as json_file:
             return json.load(json_file)["rocprofiler-sdk-tool"][0]
