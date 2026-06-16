@@ -25,28 +25,28 @@
 #include "alt_rsmi.h"
 #include "debug.h"
 
-static int ARSMI_readDeviceProperties(uint32_t node_id, std::map<std::string, uint64_t> &retVec);
-static int ARSMI_readLinkProperties(uint32_t node_id, uint32_t target_id, std::map<std::string, uint64_t> &retVec);
-static int read_node_properties(uint32_t node, std::string property_name, uint64_t *val,
-                                std::map<std::string, uint64_t> &properties);
-static int read_link_properties(uint32_t node, uint32_t target, std::string property_name, uint64_t *val,
-                                std::map<std::string, uint64_t> &properties);
+static int ARSMI_readDeviceProperties(uint32_t node_id, std::map<std::string, uint64_t>& retVec);
+static int ARSMI_readLinkProperties(uint32_t node_id, uint32_t target_id, std::map<std::string, uint64_t>& retVec);
+static int read_node_properties(uint32_t node, std::string property_name, uint64_t* val,
+                                std::map<std::string, uint64_t>& properties);
+static int read_link_properties(uint32_t node, uint32_t target, std::string property_name, uint64_t* val,
+                                std::map<std::string, uint64_t>& properties);
 static int getNodeIndex(uint32_t node_id);
-static int getGpuId(uint32_t node, uint64_t *gpu_id);
+static int getGpuId(uint32_t node, uint64_t* gpu_id);
 static int countIoLinks(uint32_t dev_id);
 
 struct ARSMI_systemNode {
-    uint32_t s_node_id = 0;
-    uint64_t s_gpu_id = 0;
-    uint64_t s_unique_id = 0;
-    uint64_t s_location_id = 0;
-    uint64_t s_bdf = 0;
-    uint64_t s_domain = 0;
-    uint8_t  s_bus = 0;
-    uint8_t  s_device = 0;
-    uint8_t  s_function = 0;
-    uint8_t  s_partition_id = 0;
-    std::string s_card;
+  uint32_t s_node_id = 0;
+  uint64_t s_gpu_id = 0;
+  uint64_t s_unique_id = 0;
+  uint64_t s_location_id = 0;
+  uint64_t s_bdf = 0;
+  uint64_t s_domain = 0;
+  uint8_t s_bus = 0;
+  uint8_t s_device = 0;
+  uint8_t s_function = 0;
+  uint8_t s_partition_id = 0;
+  std::string s_card;
 };
 
 // Internal implementation details
@@ -55,14 +55,14 @@ struct ARSMI_systemNode {
 // When compiled into the production library (ARSMI_TEST_BUILD not defined), these are static.
 #ifdef ARSMI_TEST_BUILD
   // Test build: external linkage for cross-TU access
-  #define ARSMI_LOCAL thread_local
+#define ARSMI_LOCAL thread_local
 #else
   // Production build: static/internal linkage
-  #define ARSMI_LOCAL static thread_local
+#define ARSMI_LOCAL static thread_local
 #endif
 
-ARSMI_LOCAL const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
-ARSMI_LOCAL const char *kDrmClassRoot = "/sys/class/drm";
+ARSMI_LOCAL const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
+ARSMI_LOCAL const char* kDrmClassRoot = "/sys/class/drm";
 static const uint32_t kAmdGpuId = 0x1002;
 
 // Vector containing data about each node, ordered by bdf ID
@@ -72,329 +72,308 @@ ARSMI_LOCAL std::vector<ARSMI_systemNode> ARSMI_orderedNodes;
 ARSMI_LOCAL std::vector<std::vector<ARSMI_linkInfo>> ARSMI_orderedLinks;
 
 // Number of devices recognized
-ARSMI_LOCAL int ARSMI_num_devices=-1;
+ARSMI_LOCAL int ARSMI_num_devices = -1;
 
 // Public API functions
-int ARSMI_init(void)
-{
-    std::string err_msg;
-    std::multimap<uint64_t, ARSMI_systemNode> ARSMI_allSystemNodes;
+int ARSMI_init(void) {
+  std::string err_msg;
+  std::multimap<uint64_t, ARSMI_systemNode> ARSMI_allSystemNodes;
 
-    if (ARSMI_num_devices > 0) {
+  if (ARSMI_num_devices > 0) {
         // has already been initialized
-        return 0;
+    return 0;
+  }
+
+  auto node_dir = opendir(kKFDNodesPathRoot);
+  if (node_dir == nullptr) {
+    WARN("Failed to open topo/nodes directory ");
+    return 1;
+  }
+  auto dentry = readdir(node_dir);
+
+  while (dentry != nullptr) {
+    uint64_t gpu_id = 0, unique_id = 0, location_id = 0, domain = 0;
+    uint64_t vendor_id = 0;
+    if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) {
+      dentry = readdir(node_dir);
+      continue;
     }
 
-    auto node_dir = opendir(kKFDNodesPathRoot);
-    if (node_dir == nullptr) {
-        WARN("Failed to open topo/nodes directory ");
-        return 1;
-    }
-    auto dentry = readdir(node_dir);
+    uint32_t node_id = std::stoi(dentry->d_name);
 
-    while (dentry != nullptr) {
-        uint64_t gpu_id = 0, unique_id = 0, location_id = 0, domain = 0;
-        uint64_t vendor_id = 0;
-        if ((strcmp(dentry->d_name, ".") == 0) ||
-            (strcmp(dentry->d_name, "..") == 0)) {
-            dentry = readdir(node_dir);
-            continue;
-        }
+    std::map<std::string, uint64_t> properties;
+    ARSMI_readDeviceProperties(node_id, properties);
 
-        uint32_t node_id = std::stoi(dentry->d_name);
+    int ret_gpu_id = getGpuId(node_id, &gpu_id);
 
-        std::map<std::string, uint64_t> properties;
-        ARSMI_readDeviceProperties(node_id, properties);
-
-        int ret_gpu_id = getGpuId(node_id, &gpu_id);
-
-        int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id, properties);
-        int ret_loc_id = read_node_properties(node_id, "location_id", &location_id, properties);
-        int ret_domain = read_node_properties(node_id, "domain", &domain, properties);
-        int ret_vendor = read_node_properties(node_id, "vendor_id", &vendor_id, properties);
-        if (ret_gpu_id == 0 &&  !(ret_unique_id != 0 || ret_loc_id != 0 || ret_domain != 0 || ret_vendor != 0) &&
-            (gpu_id != 0) && (vendor_id == kAmdGpuId)) {
+    int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id, properties);
+    int ret_loc_id = read_node_properties(node_id, "location_id", &location_id, properties);
+    int ret_domain = read_node_properties(node_id, "domain", &domain, properties);
+    int ret_vendor = read_node_properties(node_id, "vendor_id", &vendor_id, properties);
+    if (ret_gpu_id == 0 && !(ret_unique_id != 0 || ret_loc_id != 0 || ret_domain != 0 || ret_vendor != 0) &&
+        (gpu_id != 0) && (vendor_id == kAmdGpuId)) {
             // Do not try to build a node if one of these fields
             // do not exist in KFD (0 as values okay)
-            ARSMI_systemNode myNode;
-            myNode.s_node_id = node_id;
-            myNode.s_gpu_id = gpu_id;
-            myNode.s_unique_id = unique_id;
-            myNode.s_location_id = location_id;
-            myNode.s_domain = domain & 0xFFFFFFFF;
-            myNode.s_bdf = (myNode.s_domain << 32) | (myNode.s_location_id);
-            myNode.s_location_id = myNode.s_bdf;
-            myNode.s_bdf |= ((domain & 0xFFFFFFFF) << 32);
-            myNode.s_location_id = myNode.s_bdf;
-            myNode.s_domain = myNode.s_location_id >> 32;
-            myNode.s_bus = ((myNode.s_location_id >> 8) & 0xFF);
-            myNode.s_device = ((myNode.s_location_id >> 3) & 0x1F);
-            myNode.s_function = myNode.s_location_id & 0x7;
-            myNode.s_partition_id = ((myNode.s_location_id >> 28) & 0xF);
+      ARSMI_systemNode myNode;
+      myNode.s_node_id = node_id;
+      myNode.s_gpu_id = gpu_id;
+      myNode.s_unique_id = unique_id;
+      myNode.s_location_id = location_id;
+      myNode.s_domain = domain & 0xFFFFFFFF;
+      myNode.s_bdf = (myNode.s_domain << 32) | (myNode.s_location_id);
+      myNode.s_location_id = myNode.s_bdf;
+      myNode.s_bdf |= ((domain & 0xFFFFFFFF) << 32);
+      myNode.s_location_id = myNode.s_bdf;
+      myNode.s_domain = myNode.s_location_id >> 32;
+      myNode.s_bus = ((myNode.s_location_id >> 8) & 0xFF);
+      myNode.s_device = ((myNode.s_location_id >> 3) & 0x1F);
+      myNode.s_function = myNode.s_location_id & 0x7;
+      myNode.s_partition_id = ((myNode.s_location_id >> 28) & 0xF);
 
-            ARSMI_allSystemNodes.emplace(unique_id, myNode);
-        }
-
-        dentry = readdir(node_dir);
+      ARSMI_allSystemNodes.emplace(unique_id, myNode);
     }
 
-    ARSMI_num_devices = ARSMI_allSystemNodes.size();
+    dentry = readdir(node_dir);
+  }
 
-    for (auto i : ARSMI_allSystemNodes) {
-        std::ostringstream ss;
-        ss << "[node_id = " << std::to_string(i.second.s_node_id)
-           << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
-           << "; unique_id = " << std::to_string(i.second.s_unique_id)
-           << "; location_id = " << std::to_string(i.second.s_location_id)
-           << "; bdf = " << std::to_string(i.second.s_bdf)
-           << "; domain = " << std::to_string(i.second.s_domain)
-           << "; partition = " << std::to_string(i.second.s_partition_id)
-           << "], ";
-        std::string tempstr = ss.str();
-        INFO(NCCL_INIT, "%s", tempstr.c_str());
-    }
+  ARSMI_num_devices = ARSMI_allSystemNodes.size();
 
-    if (closedir(node_dir)) {
-        WARN("Failed to close topology/node root directory");
-        return 1;
-    }
+  for (auto i : ARSMI_allSystemNodes) {
+    std::ostringstream ss;
+    ss << "[node_id = " << std::to_string(i.second.s_node_id) << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
+       << "; unique_id = " << std::to_string(i.second.s_unique_id)
+       << "; location_id = " << std::to_string(i.second.s_location_id) << "; bdf = " << std::to_string(i.second.s_bdf)
+       << "; domain = " << std::to_string(i.second.s_domain)
+       << "; partition = " << std::to_string(i.second.s_partition_id) << "], ";
+    std::string tempstr = ss.str();
+    INFO(NCCL_INIT, "%s", tempstr.c_str());
+  }
+
+  if (closedir(node_dir)) {
+    WARN("Failed to close topology/node root directory");
+    return 1;
+  }
 
     // Sort devices found. For this we need to group all devices
     // having the same unique_id, sort all devices with the same
     // unique_id by there bdf value. In addition, the groups
     // of devices with the same unique_id are sorted by
     // lowest bdf value among each others.
-    std::vector<uint64_t> already_seen;
-    std::vector<std::vector<ARSMI_systemNode>> sort_vecs;
-    int elem=0;
-    for (auto i : ARSMI_allSystemNodes) {
-        auto device_uuid = i.second.s_unique_id;
+  std::vector<uint64_t> already_seen;
+  std::vector<std::vector<ARSMI_systemNode>> sort_vecs;
+  int elem = 0;
+  for (auto i : ARSMI_allSystemNodes) {
+    auto device_uuid = i.second.s_unique_id;
 
-        if ( std::find(already_seen.begin(), already_seen.end(), device_uuid) == already_seen.end()) {
-            auto range = ARSMI_allSystemNodes.equal_range(device_uuid);
+    if (std::find(already_seen.begin(), already_seen.end(), device_uuid) == already_seen.end()) {
+      auto range = ARSMI_allSystemNodes.equal_range(device_uuid);
 
-            sort_vecs.resize(sort_vecs.size()+1);
-            for (auto j = range.first; j != range.second ; j++) {
-                sort_vecs[elem].push_back(j->second);
-            }
-            already_seen.push_back(device_uuid);
-            elem++;
-        }
+      sort_vecs.resize(sort_vecs.size() + 1);
+      for (auto j = range.first; j != range.second; j++) {
+        sort_vecs[elem].push_back(j->second);
+      }
+      already_seen.push_back(device_uuid);
+      elem++;
     }
+  }
 
-    //Sort each subvector
-    for (auto i = 0; i < sort_vecs.size(); i++) {
-        std::sort(sort_vecs[i].begin(), sort_vecs[i].end(), []
-                  (const ARSMI_systemNode &p1, const ARSMI_systemNode &p2) {
-                      return p1.s_bdf < p2.s_bdf;
-                  });
-    }
+    // Sort each subvector
+  for (auto i = 0; i < sort_vecs.size(); i++) {
+    std::sort(sort_vecs[i].begin(), sort_vecs[i].end(),
+              [](const ARSMI_systemNode& p1, const ARSMI_systemNode& p2) { return p1.s_bdf < p2.s_bdf; });
+  }
 
     // Copy the first element for every uuid into the first_elem vector
-    std::vector<uint64_t> first_elem;
-    for (auto i=0; i < sort_vecs.size(); i++) {
-        first_elem.push_back(sort_vecs[i][0].s_bdf);
-    }
-    std::sort (first_elem.begin(), first_elem.end(), []
-               (const uint64_t &p1, const uint64_t &p2) {
-                   return p1 < p2;
-               });
+  std::vector<uint64_t> first_elem;
+  for (auto i = 0; i < sort_vecs.size(); i++) {
+    first_elem.push_back(sort_vecs[i][0].s_bdf);
+  }
+  std::sort(first_elem.begin(), first_elem.end(), [](const uint64_t& p1, const uint64_t& p2) { return p1 < p2; });
 
     // Copy all elements of the sort_vecs subarrays into
     // ordered_nodes, with the sorted first_elem vector indicating
     // the order of each block.
-    for (auto i=0; i < first_elem.size(); i++) {
+  for (auto i = 0; i < first_elem.size(); i++) {
         // Find the first_elem[i] in sort_vecs in
-        for (auto j = 0; j < sort_vecs.size(); j++ ) {
-            if (first_elem[i] == sort_vecs[j][0].s_bdf) {
-                for (auto k=0; k<sort_vecs[j].size(); k++) {
-                    ARSMI_orderedNodes.push_back(sort_vecs[j][k]);
-                }
-                break;
-            }
+    for (auto j = 0; j < sort_vecs.size(); j++) {
+      if (first_elem[i] == sort_vecs[j][0].s_bdf) {
+        for (auto k = 0; k < sort_vecs[j].size(); k++) {
+          ARSMI_orderedNodes.push_back(sort_vecs[j][k]);
         }
+        break;
+      }
     }
+  }
 
     // Part 2: generate Link Matrix
-    ARSMI_orderedLinks.resize(ARSMI_num_devices);
-    for (int i=0; i<ARSMI_num_devices; i++) {
-        ARSMI_orderedLinks[i].resize(ARSMI_num_devices);
-        for (int j = 0; j < ARSMI_num_devices; j++) {
-            ARSMI_orderedLinks[i][j].src_node = std::numeric_limits<unsigned>::max();
-            ARSMI_orderedLinks[i][j].dst_node = std::numeric_limits<unsigned>::max();
-        }
+  ARSMI_orderedLinks.resize(ARSMI_num_devices);
+  for (int i = 0; i < ARSMI_num_devices; i++) {
+    ARSMI_orderedLinks[i].resize(ARSMI_num_devices);
+    for (int j = 0; j < ARSMI_num_devices; j++) {
+      ARSMI_orderedLinks[i][j].src_node = std::numeric_limits<unsigned>::max();
+      ARSMI_orderedLinks[i][j].dst_node = std::numeric_limits<unsigned>::max();
     }
+  }
 
-    for (int src_idx = 0; src_idx < ARSMI_num_devices; src_idx++) {
-        struct ARSMI_systemNode node = ARSMI_orderedNodes[src_idx];
-        uint32_t src_id = node.s_node_id, nlinks = countIoLinks(src_id);
-        for (int i = 0; i < nlinks; i++) {
-            ARSMI_linkInfo info;
-            std::map<std::string, uint64_t> properties;
-            int ret = ARSMI_readLinkProperties(src_id, i, properties);
-            if (ret != 0){
-                continue;
-            }
+  for (int src_idx = 0; src_idx < ARSMI_num_devices; src_idx++) {
+    struct ARSMI_systemNode node = ARSMI_orderedNodes[src_idx];
+    uint32_t src_id = node.s_node_id, nlinks = countIoLinks(src_id);
+    for (int i = 0; i < nlinks; i++) {
+      ARSMI_linkInfo info;
+      std::map<std::string, uint64_t> properties;
+      int ret = ARSMI_readLinkProperties(src_id, i, properties);
+      if (ret != 0) {
+        continue;
+      }
 
-            uint64_t type;
-            uint64_t weight;
-            uint64_t min_bandwidth;
-            uint64_t max_bandwidth;
-            uint64_t dst_id;
+      uint64_t type;
+      uint64_t weight;
+      uint64_t min_bandwidth;
+      uint64_t max_bandwidth;
+      uint64_t dst_id;
 
-            int ret_target = read_link_properties(src_id, i, "node_to", &dst_id, properties);
-            if (ret_target != 0) {
-                continue;
-            }
-            int dst_idx = getNodeIndex(dst_id);
-            if (dst_idx == -1) {
+      int ret_target = read_link_properties(src_id, i, "node_to", &dst_id, properties);
+      if (ret_target != 0) {
+        continue;
+      }
+      int dst_idx = getNodeIndex(dst_id);
+      if (dst_idx == -1) {
                 // Not all GPUs might be directly connected to all other GPUs.
                 // Will set default values in the topo_get_link_info function.
-                continue;
-            }
-            info.src_node = src_id;
-            info.dst_node = dst_id;
+        continue;
+      }
+      info.src_node = src_id;
+      info.dst_node = dst_id;
 
-            int ret_weight = read_link_properties(src_id, i, "weight", &weight, properties);
-            if (ret_weight != 0) {
-                WARN("Error reading link properties files");
-                return 1;
-            }
-            info.weight = weight;
+      int ret_weight = read_link_properties(src_id, i, "weight", &weight, properties);
+      if (ret_weight != 0) {
+        WARN("Error reading link properties files");
+        return 1;
+      }
+      info.weight = weight;
 
-            int ret_type = read_link_properties(src_id, i, "type", &type, properties);
-            if (ret_type != 0) {
-                WARN("Error reading link properties files");
-                return 1;
-            }
-            if (type == 11){
-                info.type = ARSMI_IOLINK_TYPE_XGMI;
-                info.hops = 1;
-            }
-            else if (type == 2) {
-                info.type = ARSMI_IOLINK_TYPE_PCIEXPRESS;
+      int ret_type = read_link_properties(src_id, i, "type", &type, properties);
+      if (ret_type != 0) {
+        WARN("Error reading link properties files");
+        return 1;
+      }
+      if (type == 11) {
+        info.type = ARSMI_IOLINK_TYPE_XGMI;
+        info.hops = 1;
+      } else if (type == 2) {
+        info.type = ARSMI_IOLINK_TYPE_PCIEXPRESS;
                 // hard coding for now to 2
-                info.hops = 2;
-            }
-            else {
-                info.type = ARSMI_IOLINK_TYPE_UNDEFINED;
-                info.hops = 0;
-            }
+        info.hops = 2;
+      } else {
+        info.type = ARSMI_IOLINK_TYPE_UNDEFINED;
+        info.hops = 0;
+      }
 
-            int ret_min_bw = read_link_properties(src_id, i, "min_bandwidth", &min_bandwidth, properties);
-            if (ret_min_bw != 0) {
-                WARN("Error reading link properties files");
-                return 1;
-            }
-            info.min_bandwidth = min_bandwidth;
+      int ret_min_bw = read_link_properties(src_id, i, "min_bandwidth", &min_bandwidth, properties);
+      if (ret_min_bw != 0) {
+        WARN("Error reading link properties files");
+        return 1;
+      }
+      info.min_bandwidth = min_bandwidth;
 
-            int ret_max_bw = read_link_properties(src_id, i, "max_bandwidth", &max_bandwidth, properties);
-            if (ret_max_bw != 0) {
-                return 1;
-            }
-            info.max_bandwidth = max_bandwidth;
+      int ret_max_bw = read_link_properties(src_id, i, "max_bandwidth", &max_bandwidth, properties);
+      if (ret_max_bw != 0) {
+        return 1;
+      }
+      info.max_bandwidth = max_bandwidth;
 
-            ARSMI_orderedLinks[src_idx][dst_idx] = info;
-        }
+      ARSMI_orderedLinks[src_idx][dst_idx] = info;
     }
+  }
 
-    return 0;
+  return 0;
 }
 
+int ARSMI_get_num_devices(uint32_t* num_devices) {
+  int res = 0;
 
-int ARSMI_get_num_devices (uint32_t *num_devices)
-{
-    int res = 0;
+  if (ARSMI_num_devices < 0) {
+    res = ARSMI_init();
+  }
 
-    if (ARSMI_num_devices < 0) {
-        res = ARSMI_init();
-    }
-
-    *num_devices = ARSMI_num_devices;
-    return res;
+  *num_devices = ARSMI_num_devices;
+  return res;
 }
 
-int ARSMI_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid)
-{
-    if (bdfid == nullptr) {
-        return EINVAL;
+int ARSMI_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
+  if (bdfid == nullptr) {
+    return EINVAL;
+  }
+
+  if (ARSMI_num_devices < 0) {
+    int res = ARSMI_init();
+    if (res != 0) {
+      return res;
     }
+  }
 
-    if (ARSMI_num_devices < 0) {
-        int res = ARSMI_init();
-        if (res != 0) {
-            return res;
-        }
-    }
+  *bdfid = ARSMI_orderedNodes[dv_ind].s_bdf;
 
-    *bdfid = ARSMI_orderedNodes[dv_ind].s_bdf;
-
-    return 0;
+  return 0;
 }
 
+int ARSMI_topo_get_link_info(uint32_t dv_ind_src, uint32_t dv_ind_dst, ARSMI_linkInfo* info) {
+  if (info == nullptr) {
+    return EINVAL;
+  }
 
-int ARSMI_topo_get_link_info(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                             ARSMI_linkInfo *info)
-{
-    if (info == nullptr) {
-        return EINVAL;
+  if (ARSMI_num_devices < 0) {
+    int res = ARSMI_init();
+    if (res != 0) {
+      return res;
     }
+  }
 
-    if (ARSMI_num_devices < 0) {
-        int res = ARSMI_init();
-        if (res != 0) {
-            return res;
-        }
-    }
+  if (dv_ind_src < 0 || dv_ind_src > ARSMI_num_devices) {
+    return EINVAL;
+  }
+  if (dv_ind_dst < 0 || dv_ind_dst > ARSMI_num_devices) {
+    return EINVAL;
+  }
 
-    if (dv_ind_src < 0 || dv_ind_src > ARSMI_num_devices) {
-        return EINVAL;
-    }
-    if (dv_ind_dst < 0 || dv_ind_dst > ARSMI_num_devices) {
-        return EINVAL;
-    }
+  uint32_t src_id = ARSMI_orderedNodes[dv_ind_src].s_node_id;
+  uint32_t dst_id = ARSMI_orderedNodes[dv_ind_dst].s_node_id;
 
-    uint32_t src_id = ARSMI_orderedNodes[dv_ind_src].s_node_id;
-    uint32_t dst_id = ARSMI_orderedNodes[dv_ind_dst].s_node_id;
-
-    ARSMI_linkInfo tinfo = ARSMI_orderedLinks[dv_ind_src][dv_ind_dst];
-    if (tinfo.src_node != src_id || tinfo.dst_node != dst_id) {
+  ARSMI_linkInfo tinfo = ARSMI_orderedLinks[dv_ind_src][dv_ind_dst];
+  if (tinfo.src_node != src_id || tinfo.dst_node != dst_id) {
         // Setting  default values.
-        tinfo.hops = 2;
-        tinfo.type = ARSMI_IOLINK_TYPE_PCIEXPRESS;
-        tinfo.weight = 40;
-        tinfo.min_bandwidth = 0;
-        tinfo.max_bandwidth = 0;
-    }
-    *info = tinfo;
+    tinfo.hops = 2;
+    tinfo.type = ARSMI_IOLINK_TYPE_PCIEXPRESS;
+    tinfo.weight = 40;
+    tinfo.min_bandwidth = 0;
+    tinfo.max_bandwidth = 0;
+  }
+  *info = tinfo;
 
-    return 0;
+  return 0;
 }
 
-int ARSMI_get_fw_version(uint32_t /*dv_ind*/, uint64_t *fw_version)
-{
-    if (fw_version == nullptr) return EINVAL;
+int ARSMI_get_fw_version(uint32_t /*dv_ind*/, uint64_t* fw_version) {
+  if (fw_version == nullptr) return EINVAL;
     // We assume that all GPUs on the system run the same firmware image.
     // dv_ind is accepted for API consistency with the amdsmi path but is not
     // used: MEC firmware is a system-wide property loaded once by the driver.
     // Search all DRM cards for a readable sysfs entry rather than mapping
     // dv_ind to a specific card — card0 is not guaranteed to expose it.
-    constexpr uint32_t maxCards = 128;
-    *fw_version = 0;
-    for (uint32_t card = 0; card < maxCards; card++) {
-        char path[256];
-        snprintf(path, sizeof(path),
-                 "%s/card%u/device/fw_version/mec_fw_version", kDrmClassRoot, card);
-        FILE *fp = fopen(path, "r");
-        if (fp != nullptr) {
-            char line[64];
-            if (fgets(line, sizeof(line), fp) != nullptr)
-                *fw_version = strtoull(line, nullptr, 16);
-            fclose(fp);
-            return 0;
-        }
+  constexpr uint32_t maxCards = 128;
+  *fw_version = 0;
+  for (uint32_t card = 0; card < maxCards; card++) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/card%u/device/fw_version/mec_fw_version", kDrmClassRoot, card);
+    FILE* fp = fopen(path, "r");
+    if (fp != nullptr) {
+      char line[64];
+      if (fgets(line, sizeof(line), fp) != nullptr) *fw_version = strtoull(line, nullptr, 16);
+      fclose(fp);
+      return 0;
     }
-    return 0;  // not found is not an error; caller receives 0
+  }
+  return 0;  // not found is not an error; caller receives 0
 }
 
 // ---------------------------------------------------------------------------
@@ -403,494 +382,461 @@ int ARSMI_get_fw_version(uint32_t /*dv_ind*/, uint64_t *fw_version)
 
 // Find the DRM card number whose PCI slot name matches the given BDF.
 // Returns the card number on success, -1 if not found.
-static int findCardForBdf(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function)
-{
-    for (uint32_t card = 0; card < 128; card++) {
-        char path[256];
-        snprintf(path, sizeof(path), "%s/card%u/device/uevent", kDrmClassRoot, card);
-        FILE *fp = fopen(path, "r");
-        if (fp == nullptr) continue;
+static int findCardForBdf(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
+  for (uint32_t card = 0; card < 128; card++) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/card%u/device/uevent", kDrmClassRoot, card);
+    FILE* fp = fopen(path, "r");
+    if (fp == nullptr) continue;
 
-        char line[256];
-        bool found = false;
-        while (fgets(line, sizeof(line), fp)) {
-            unsigned d, b, dev, fn;
-            if (sscanf(line, "PCI_SLOT_NAME=%x:%x:%x.%x", &d, &b, &dev, &fn) == 4) {
-                found = (d == domain && (uint8_t)b == bus &&
-                         (uint8_t)dev == device && (uint8_t)fn == function);
-                break;
-            }
-        }
-        fclose(fp);
-        if (found) return (int)card;
+    char line[256];
+    bool found = false;
+    while (fgets(line, sizeof(line), fp)) {
+      unsigned d, b, dev, fn;
+      if (sscanf(line, "PCI_SLOT_NAME=%x:%x:%x.%x", &d, &b, &dev, &fn) == 4) {
+        found = (d == domain && (uint8_t)b == bus && (uint8_t)dev == device && (uint8_t)fn == function);
+        break;
+      }
     }
-    return -1;
+    fclose(fp);
+    if (found) return (int)card;
+  }
+  return -1;
 }
 
 // Read a sysfs attribute as a NUL-terminated, newline-stripped string.
 // Returns 0 on success, -1 if the file cannot be opened or is empty.
-static int readUalinkStr(const char *dir, const char *attr, char *buf, size_t len)
-{
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%s", dir, attr);
-    FILE *fp = fopen(path, "r");
-    if (fp == nullptr) return -1;
-    size_t n = fread(buf, 1, len - 1, fp);
-    fclose(fp);
-    if (n == 0) return -1;
-    buf[n] = '\0';
-    while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r' || buf[n-1] == ' '))
-        buf[--n] = '\0';
-    return 0;
+static int readUalinkStr(const char* dir, const char* attr, char* buf, size_t len) {
+  char path[512];
+  snprintf(path, sizeof(path), "%s/%s", dir, attr);
+  FILE* fp = fopen(path, "r");
+  if (fp == nullptr) return -1;
+  size_t n = fread(buf, 1, len - 1, fp);
+  fclose(fp);
+  if (n == 0) return -1;
+  buf[n] = '\0';
+  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) buf[--n] = '\0';
+  return 0;
 }
 
 // Read a sysfs attribute as a uint32_t (decimal). Returns def on failure.
-static uint32_t readUalinkU32(const char *dir, const char *attr, uint32_t def)
-{
-    char buf[64];
-    if (readUalinkStr(dir, attr, buf, sizeof(buf)) != 0) return def;
-    return (uint32_t)strtoul(buf, nullptr, 10);
+static uint32_t readUalinkU32(const char* dir, const char* attr, uint32_t def) {
+  char buf[64];
+  if (readUalinkStr(dir, attr, buf, sizeof(buf)) != 0) return def;
+  return (uint32_t)strtoul(buf, nullptr, 10);
 }
 
-int ARSMI_get_fabric_info(uint32_t dv_ind, struct ARSMI_fabricInfo *info)
-{
-    if (info == nullptr) return EINVAL;
-    memset(info, 0, sizeof(*info));
-    info->fabric_type = ARSMI_FABRIC_TYPE_UNKNOWN;
-    info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
-    info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
+int ARSMI_get_fabric_info(uint32_t dv_ind, struct ARSMI_fabricInfo* info) {
+  if (info == nullptr) return EINVAL;
+  memset(info, 0, sizeof(*info));
+  info->fabric_type = ARSMI_FABRIC_TYPE_UNKNOWN;
+  info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
+  info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
 
-    if (ARSMI_num_devices < 0) {
-        int res = ARSMI_init();
-        if (res != 0) return res;
-    }
-    if ((int)dv_ind >= ARSMI_num_devices) return EINVAL;
+  if (ARSMI_num_devices < 0) {
+    int res = ARSMI_init();
+    if (res != 0) return res;
+  }
+  if ((int)dv_ind >= ARSMI_num_devices) return EINVAL;
 
-    const ARSMI_systemNode &node = ARSMI_orderedNodes[dv_ind];
-    int card = findCardForBdf((uint32_t)node.s_domain, node.s_bus,
-                               node.s_device, node.s_function);
-    if (card < 0) return ENODEV;
+  const ARSMI_systemNode& node = ARSMI_orderedNodes[dv_ind];
+  int card = findCardForBdf((uint32_t)node.s_domain, node.s_bus, node.s_device, node.s_function);
+  if (card < 0) return ENODEV;
 
-    char dir[256];
-    snprintf(dir, sizeof(dir), "%s/card%d/device/ualink", kDrmClassRoot, card);
+  char dir[256];
+  snprintf(dir, sizeof(dir), "%s/card%d/device/ualink", kDrmClassRoot, card);
 
-    struct stat st;
-    if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) return ENODEV;
+  struct stat st;
+  if (stat(dir, &st) != 0 || !S_ISDIR(st.st_mode)) return ENODEV;
 
-    char buf[256];
+  char buf[256];
 
     // link_type: "UALoE" | "UALLink"
-    if (readUalinkStr(dir, "link_type", buf, sizeof(buf)) == 0) {
-        if      (strcmp(buf, "UALoE")   == 0) info->fabric_type = ARSMI_FABRIC_TYPE_UALOE;
-        else if (strcmp(buf, "UALLink") == 0) info->fabric_type = ARSMI_FABRIC_TYPE_UALLINK;
-        else                                  info->fabric_type = ARSMI_FABRIC_TYPE_UNKNOWN;
-    }
+  if (readUalinkStr(dir, "link_type", buf, sizeof(buf)) == 0) {
+    if (strcmp(buf, "UALoE") == 0) info->fabric_type = ARSMI_FABRIC_TYPE_UALOE;
+    else if (strcmp(buf, "UALLink") == 0) info->fabric_type = ARSMI_FABRIC_TYPE_UALLINK;
+    else info->fabric_type = ARSMI_FABRIC_TYPE_UNKNOWN;
+  }
 
     // accel_state: "unconfigured" | "configured" | "ready" | "active" | "error"
-    if (readUalinkStr(dir, "accel_state", buf, sizeof(buf)) == 0) {
-        if      (strcmp(buf, "active")       == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE;
-        else if (strcmp(buf, "ready")        == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY;
-        else if (strcmp(buf, "configured")   == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED;
-        else if (strcmp(buf, "unconfigured") == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED;
-        else if (strcmp(buf, "error")        == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR;
-        else                                       info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
-    }
+  if (readUalinkStr(dir, "accel_state", buf, sizeof(buf)) == 0) {
+    if (strcmp(buf, "active") == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE;
+    else if (strcmp(buf, "ready") == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY;
+    else if (strcmp(buf, "configured") == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_CONFIGURED;
+    else if (strcmp(buf, "unconfigured") == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNCONFIGURED;
+    else if (strcmp(buf, "error") == 0) info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ERROR;
+    else info->accel_state = ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_UNKNOWN;
+  }
 
-    info->supported = (info->fabric_type == ARSMI_FABRIC_TYPE_UALOE ||
-                       info->fabric_type == ARSMI_FABRIC_TYPE_UALLINK) &&
-                      (info->accel_state == ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
-                       info->accel_state == ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
+  info->supported = (info->fabric_type == ARSMI_FABRIC_TYPE_UALOE || info->fabric_type == ARSMI_FABRIC_TYPE_UALLINK) &&
+                    (info->accel_state == ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_ACTIVE ||
+                     info->accel_state == ARSMI_FABRIC_ACCELERATOR_VPOD_STATE_READY);
 
-    info->accel_id  = readUalinkU32(dir, "accel_id",  0);
-    info->ppod_size = readUalinkU32(dir, "ppod_size", 0);
-    info->bandwidth = readUalinkU32(dir, "bandwidth", 0);
-    info->latency   = readUalinkU32(dir, "latency",   0);
-    info->vpod_id   = readUalinkU32(dir, "vpod_id",   0);
-    info->vpod_size = readUalinkU32(dir, "vpod_size", 0);
+  info->accel_id = readUalinkU32(dir, "accel_id", 0);
+  info->ppod_size = readUalinkU32(dir, "ppod_size", 0);
+  info->bandwidth = readUalinkU32(dir, "bandwidth", 0);
+  info->latency = readUalinkU32(dir, "latency", 0);
+  info->vpod_id = readUalinkU32(dir, "vpod_id", 0);
+  info->vpod_size = readUalinkU32(dir, "vpod_size", 0);
 
     // addr_mode: "source-aliasing" | "source-identification"
-    info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
-    if (readUalinkStr(dir, "addr_mode", buf, sizeof(buf)) == 0) {
-        if (strcmp(buf, "source-identification") == 0) {
-            info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION;
-        } else if (strcmp(buf, "source-aliasing") == 0) {
-            info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING;
-        }
+  info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
+  if (readUalinkStr(dir, "addr_mode", buf, sizeof(buf)) == 0) {
+    if (strcmp(buf, "source-identification") == 0) {
+      info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_IDENTIFICATION;
+    } else if (strcmp(buf, "source-aliasing") == 0) {
+      info->addr_mode = ARSMI_FABRIC_NPA_ADDRESS_MODE_SOURCE_ALIASING;
     }
+  }
 
     // ppod_id: UUID string "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" → 16 bytes
-    memset(info->ppod_id, 0, sizeof(info->ppod_id));
-    if (readUalinkStr(dir, "ppod_id", buf, sizeof(buf)) == 0) {
-        int parsed = sscanf(buf,
-                            "%02hhx%02hhx%02hhx%02hhx-"
-                            "%02hhx%02hhx-"
-                            "%02hhx%02hhx-"
-                            "%02hhx%02hhx-"
-                            "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
-                            &info->ppod_id[0],  &info->ppod_id[1],
-                            &info->ppod_id[2],  &info->ppod_id[3],
-                            &info->ppod_id[4],  &info->ppod_id[5],
-                            &info->ppod_id[6],  &info->ppod_id[7],
-                            &info->ppod_id[8],  &info->ppod_id[9],
-                            &info->ppod_id[10], &info->ppod_id[11],
-                            &info->ppod_id[12], &info->ppod_id[13],
-                            &info->ppod_id[14], &info->ppod_id[15]);
-        if (parsed != 16) {
-            memset(info->ppod_id, 0, sizeof(info->ppod_id));
-        }
+  memset(info->ppod_id, 0, sizeof(info->ppod_id));
+  if (readUalinkStr(dir, "ppod_id", buf, sizeof(buf)) == 0) {
+    int parsed = sscanf(buf,
+                        "%02hhx%02hhx%02hhx%02hhx-"
+                        "%02hhx%02hhx-"
+                        "%02hhx%02hhx-"
+                        "%02hhx%02hhx-"
+                        "%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx",
+                        &info->ppod_id[0], &info->ppod_id[1], &info->ppod_id[2], &info->ppod_id[3], &info->ppod_id[4],
+                        &info->ppod_id[5], &info->ppod_id[6], &info->ppod_id[7], &info->ppod_id[8], &info->ppod_id[9],
+                        &info->ppod_id[10], &info->ppod_id[11], &info->ppod_id[12], &info->ppod_id[13],
+                        &info->ppod_id[14], &info->ppod_id[15]);
+    if (parsed != 16) {
+      memset(info->ppod_id, 0, sizeof(info->ppod_id));
     }
+  }
 
-    return 0;
+  return 0;
 }
 
-const char* ARSMI_fabric_telem_id_to_string(uint64_t /*telem_id*/)
-{
-    return "UNKNOWN";
+const char* ARSMI_fabric_telem_id_to_string(uint64_t /*telem_id*/) {
+  return "UNKNOWN";
 }
 
 // Internal functions
-static int getNodeIndex(uint32_t node_id)
-{
-    int res = -1;
-    assert (ARSMI_num_devices > 0);
+static int getNodeIndex(uint32_t node_id) {
+  int res = -1;
+  assert(ARSMI_num_devices > 0);
 
-    for (int i = 0; i < ARSMI_num_devices; i++) {
-        if (ARSMI_orderedNodes[i].s_node_id == node_id) {
-            res = i;
-            break;
-        }
+  for (int i = 0; i < ARSMI_num_devices; i++) {
+    if (ARSMI_orderedNodes[i].s_node_id == node_id) {
+      res = i;
+      break;
     }
+  }
 
-    return res;
+  return res;
 }
 
-static std::string DevicePath(uint32_t dev_id)
-{
-    std::string node_path = kKFDNodesPathRoot;
-    node_path += '/';
-    node_path += std::to_string(dev_id);
+static std::string DevicePath(uint32_t dev_id) {
+  std::string node_path = kKFDNodesPathRoot;
+  node_path += '/';
+  node_path += std::to_string(dev_id);
 
-    return node_path;
+  return node_path;
 }
 
-static int isRegularFile(std::string fname, bool *is_reg)
-{
-    struct stat file_stat;
-    int ret;
+static int isRegularFile(std::string fname, bool* is_reg) {
+  struct stat file_stat;
+  int ret;
 
-    ret = stat(fname.c_str(), &file_stat);
-    if (ret) {
-        return errno;
-    }
+  ret = stat(fname.c_str(), &file_stat);
+  if (ret) {
+    return errno;
+  }
 
-    if (is_reg != nullptr) {
-        *is_reg = S_ISREG(file_stat.st_mode);
-    }
+  if (is_reg != nullptr) {
+    *is_reg = S_ISREG(file_stat.st_mode);
+  }
 
-    return 0;
+  return 0;
 }
 
-static bool isNumber(const std::string &s)
-{
-    return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+static bool isNumber(const std::string& s) {
+  return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
-static int openNodeFile(uint32_t dev_id, std::string node_file,
-                        std::ifstream *fs)
-{
-    std::string line;
-    std::string f_path;
-    bool reg_file;
+static int openNodeFile(uint32_t dev_id, std::string node_file, std::ifstream* fs) {
+  std::string line;
+  std::string f_path;
+  bool reg_file;
 
-    assert(fs != nullptr);
+  assert(fs != nullptr);
 
-    f_path = DevicePath(dev_id);
-    f_path += "/";
-    f_path += node_file;
+  f_path = DevicePath(dev_id);
+  f_path += "/";
+  f_path += node_file;
 
-    int ret = isRegularFile(f_path, &reg_file);
-    if (ret != 0) {
-        return ret;
-    }
-    if (!reg_file) {
-        return ENOENT;
-    }
+  int ret = isRegularFile(f_path, &reg_file);
+  if (ret != 0) {
+    return ret;
+  }
+  if (!reg_file) {
+    return ENOENT;
+  }
 
-    fs->open(f_path);
-    if (!fs->is_open()) {
-        return errno;
-    }
+  fs->open(f_path);
+  if (!fs->is_open()) {
+    return errno;
+  }
 
-    return 0;
+  return 0;
 }
 
-static int countIoLinks(uint32_t dev_id)
-{
-    std::string f_path;
-    int file_count = 0;
+static int countIoLinks(uint32_t dev_id) {
+  std::string f_path;
+  int file_count = 0;
 
-    f_path = DevicePath(dev_id);
-    f_path += "/io_links/";
+  f_path = DevicePath(dev_id);
+  f_path += "/io_links/";
 
-    auto node_dir = opendir(f_path.c_str());
-    auto dentry = readdir(node_dir);
-    while (dentry != NULL) {
-        if (dentry->d_type == DT_DIR && strcmp(dentry->d_name, ".") != 0
-            && strcmp(dentry->d_name, "..") != 0) {
-            file_count++;
-        }
-        dentry = readdir(node_dir);
+  auto node_dir = opendir(f_path.c_str());
+  auto dentry = readdir(node_dir);
+  while (dentry != NULL) {
+    if (dentry->d_type == DT_DIR && strcmp(dentry->d_name, ".") != 0 && strcmp(dentry->d_name, "..") != 0) {
+      file_count++;
     }
-    closedir(node_dir);
-    return file_count;
+    dentry = readdir(node_dir);
+  }
+  closedir(node_dir);
+  return file_count;
 }
 
-static int openLinkFile(uint32_t dev_id, uint32_t target_id,
-                        std::string node_file, std::ifstream *fs)
-{
-    std::string line;
-    std::string f_path;
-    bool reg_file;
+static int openLinkFile(uint32_t dev_id, uint32_t target_id, std::string node_file, std::ifstream* fs) {
+  std::string line;
+  std::string f_path;
+  bool reg_file;
 
-    assert(fs != nullptr);
+  assert(fs != nullptr);
 
-    f_path = DevicePath(dev_id);
-    f_path += "/io_links/";
-    f_path +=std::to_string(target_id);
-    f_path += "/";
-    f_path += node_file;
+  f_path = DevicePath(dev_id);
+  f_path += "/io_links/";
+  f_path += std::to_string(target_id);
+  f_path += "/";
+  f_path += node_file;
 
-    int ret = isRegularFile(f_path, &reg_file);
-    if (ret != 0) {
-        return ret;
-    }
-    if (!reg_file) {
-        return ENOENT;
-    }
+  int ret = isRegularFile(f_path, &reg_file);
+  if (ret != 0) {
+    return ret;
+  }
+  if (!reg_file) {
+    return ENOENT;
+  }
 
-    fs->open(f_path);
-    if (!fs->is_open()) {
-        return errno;
-    }
+  fs->open(f_path);
+  if (!fs->is_open()) {
+    return errno;
+  }
 
-    return 0;
+  return 0;
 }
 
+static int readGpuId(uint32_t node_id, uint64_t* gpu_id) {
+  std::string line;
+  std::ifstream fs;
 
-static int readGpuId(uint32_t node_id, uint64_t *gpu_id)
-{
-    std::string line;
-    std::ifstream fs;
-
-    assert(gpu_id != nullptr);
-    int ret = openNodeFile(node_id, "gpu_id", &fs);
-    if (ret) {
-        fs.close();
-        return ret;
-    }
-
-    std::stringstream ss;
-    ss << fs.rdbuf();
-    fs.close();
-
-    std::string gpu_id_str = ss.str();
-    gpu_id_str.erase(std::remove(gpu_id_str.begin(), gpu_id_str.end(), '\n'),
-                     gpu_id_str.end());
-    if (!isNumber(gpu_id_str)) {
-        return ENXIO;
-    }
-
-    *gpu_id = static_cast<uint64_t>(std::stoi(gpu_id_str));
-    return 0;
-}
-
-static bool isNodeSupported(uint32_t node_indx)
-{
-    std::ifstream fs;
-    bool ret = true;
-
-    int err = openNodeFile(node_indx, "properties", &fs);
-    if (err == ENOENT) {
-        return false;
-    }
-    if (fs.peek() == std::ifstream::traits_type::eof()) {
-        ret = false;
-    }
-
+  assert(gpu_id != nullptr);
+  int ret = openNodeFile(node_id, "gpu_id", &fs);
+  if (ret) {
     fs.close();
     return ret;
+  }
+
+  std::stringstream ss;
+  ss << fs.rdbuf();
+  fs.close();
+
+  std::string gpu_id_str = ss.str();
+  gpu_id_str.erase(std::remove(gpu_id_str.begin(), gpu_id_str.end(), '\n'), gpu_id_str.end());
+  if (!isNumber(gpu_id_str)) {
+    return ENXIO;
+  }
+
+  *gpu_id = static_cast<uint64_t>(std::stoi(gpu_id_str));
+  return 0;
 }
 
-static int getPropertyValue(std::string property, uint64_t *value, std::map<std::string, uint64_t> &properties)
-{
-    if (value == nullptr) {
-        return EINVAL;
-    }
-    if (properties.empty()) {
-        return EINVAL;
-    }
+static bool isNodeSupported(uint32_t node_indx) {
+  std::ifstream fs;
+  bool ret = true;
 
-    if (properties.find(property) == properties.end()) {
-        return EINVAL;
-    }
+  int err = openNodeFile(node_indx, "properties", &fs);
+  if (err == ENOENT) {
+    return false;
+  }
+  if (fs.peek() == std::ifstream::traits_type::eof()) {
+    ret = false;
+  }
 
-    *value = properties[property];
-    return 0;
+  fs.close();
+  return ret;
 }
 
-static int ARSMI_readDeviceProperties(uint32_t node_id, std::map<std::string, uint64_t> &properties)
-{
-    std::string line;
-    std::ifstream fs;
-    std::vector<std::string> tVec;
+static int getPropertyValue(std::string property, uint64_t* value, std::map<std::string, uint64_t>& properties) {
+  if (value == nullptr) {
+    return EINVAL;
+  }
+  if (properties.empty()) {
+    return EINVAL;
+  }
 
-    int ret = openNodeFile(node_id, "properties", &fs);
-    if (ret) {
-        return ret;
-    }
+  if (properties.find(property) == properties.end()) {
+    return EINVAL;
+  }
 
-    while (std::getline(fs, line)) {
-        tVec.push_back(line);
-    }
+  *value = properties[property];
+  return 0;
+}
 
-    if (tVec.empty()) {
-        fs.close();
-        return ENOENT;
-    }
+static int ARSMI_readDeviceProperties(uint32_t node_id, std::map<std::string, uint64_t>& properties) {
+  std::string line;
+  std::ifstream fs;
+  std::vector<std::string> tVec;
+
+  int ret = openNodeFile(node_id, "properties", &fs);
+  if (ret) {
+    return ret;
+  }
+
+  while (std::getline(fs, line)) {
+    tVec.push_back(line);
+  }
+
+  if (tVec.empty()) {
+    fs.close();
+    return ENOENT;
+  }
 
     // Remove any *trailing* empty (whitespace) lines
-    while (tVec.back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
-        tVec.pop_back();
-    }
+  while (tVec.back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+    tVec.pop_back();
+  }
 
-    fs.close();
+  fs.close();
 
-    std::string key_str;
-    std::string val_str;
-    uint64_t val_int;  // Assume all properties are unsigned integers for now
-    std::istringstream fs2;
+  std::string key_str;
+  std::string val_str;
+  uint64_t val_int;  // Assume all properties are unsigned integers for now
+  std::istringstream fs2;
 
-    for (const auto & i : tVec) {
-        fs2.str(i);
-        fs2 >> key_str;
-        fs2 >> val_str;
+  for (const auto& i : tVec) {
+    fs2.str(i);
+    fs2 >> key_str;
+    fs2 >> val_str;
 
-        val_int = std::stoull(val_str);
-        properties[key_str] = val_int;
+    val_int = std::stoull(val_str);
+    properties[key_str] = val_int;
 
-        fs2.str("");
-        fs2.clear();
-    }
+    fs2.str("");
+    fs2.clear();
+  }
 
-    return 0;
+  return 0;
 }
 
 static int ARSMI_readLinkProperties(uint32_t node_id, uint32_t target_node_id,
-                                    std::map<std::string, uint64_t> &properties)
-{
-    std::string line;
-    std::ifstream fs;
-    std::vector<std::string> tVec;
+                                    std::map<std::string, uint64_t>& properties) {
+  std::string line;
+  std::ifstream fs;
+  std::vector<std::string> tVec;
 
-    int ret = openLinkFile(node_id, target_node_id, "properties", &fs);
-    if (ret) {
-        return ret;
-    }
+  int ret = openLinkFile(node_id, target_node_id, "properties", &fs);
+  if (ret) {
+    return ret;
+  }
 
-    while (std::getline(fs, line)) {
-        tVec.push_back(line);
-    }
+  while (std::getline(fs, line)) {
+    tVec.push_back(line);
+  }
 
-    if (tVec.empty()) {
-        fs.close();
-        return ENOENT;
-    }
+  if (tVec.empty()) {
+    fs.close();
+    return ENOENT;
+  }
 
     // Remove any *trailing* empty (whitespace) lines
-    while (tVec.back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
-        tVec.pop_back();
-    }
+  while (tVec.back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
+    tVec.pop_back();
+  }
 
-    fs.close();
+  fs.close();
 
-    std::string key_str;
-    std::string val_str;
-    uint64_t val_int;  // Assume all properties are unsigned integers for now
-    std::istringstream fs2;
+  std::string key_str;
+  std::string val_str;
+  uint64_t val_int;  // Assume all properties are unsigned integers for now
+  std::istringstream fs2;
 
-    for (const auto & i : tVec) {
-        fs2.str(i);
-        fs2 >> key_str;
-        fs2 >> val_str;
+  for (const auto& i : tVec) {
+    fs2.str(i);
+    fs2 >> key_str;
+    fs2 >> val_str;
 
-        val_int = std::stoull(val_str);
-        properties[key_str] = val_int;
+    val_int = std::stoull(val_str);
+    properties[key_str] = val_int;
 
-        fs2.str("");
-        fs2.clear();
-    }
+    fs2.str("");
+    fs2.clear();
+  }
 
-    return 0;
+  return 0;
 }
 
 // /sys/class/kfd/kfd/topology/nodes/*/properties
-static int read_node_properties(uint32_t node, std::string property_name,
-                                uint64_t *val, std::map<std::string, uint64_t> &properties)
-{
-    int retVal = EINVAL;
+static int read_node_properties(uint32_t node, std::string property_name, uint64_t* val,
+                                std::map<std::string, uint64_t>& properties) {
+  int retVal = EINVAL;
 
-    if (property_name.empty() || val == nullptr) {
-        WARN("Could not read node # %u property %s", node, property_name.c_str());
-        return retVal;
-    }
-
-    if (isNodeSupported(node)) {
-        retVal = getPropertyValue(property_name, val, properties);
-    } else {
-        retVal = 1;
-        WARN("Could not read node # %u",node);
-    }
-
+  if (property_name.empty() || val == nullptr) {
+    WARN("Could not read node # %u property %s", node, property_name.c_str());
     return retVal;
+  }
+
+  if (isNodeSupported(node)) {
+    retVal = getPropertyValue(property_name, val, properties);
+  } else {
+    retVal = 1;
+    WARN("Could not read node # %u", node);
+  }
+
+  return retVal;
 }
 
 // /sys/class/kfd/kfd/topology/nodes/*/io_links/*/properties
-static int read_link_properties(uint32_t node, uint32_t target, std::string property_name,
-                                uint64_t *val, std::map<std::string, uint64_t> &properties)
-{
-    int retVal = EINVAL;
+static int read_link_properties(uint32_t node, uint32_t target, std::string property_name, uint64_t* val,
+                                std::map<std::string, uint64_t>& properties) {
+  int retVal = EINVAL;
 
-    if (property_name.empty() || val == nullptr) {
-        WARN("Could not read node # %u", node);
-        return retVal;
-    }
-
-    if (isNodeSupported(node)) {
-        retVal = getPropertyValue(property_name, val, properties);
-    } else {
-        retVal = 1;
-        WARN("Could not read node # %u", node);
-    }
-
+  if (property_name.empty() || val == nullptr) {
+    WARN("Could not read node # %u", node);
     return retVal;
+  }
+
+  if (isNodeSupported(node)) {
+    retVal = getPropertyValue(property_name, val, properties);
+  } else {
+    retVal = 1;
+    WARN("Could not read node # %u", node);
+  }
+
+  return retVal;
 }
 
 // /sys/class/kfd/kfd/topology/nodes/*/gpu_id
-int getGpuId(uint32_t node, uint64_t *gpu_id)
-{
-    int retVal = EINVAL;
+int getGpuId(uint32_t node, uint64_t* gpu_id) {
+  int retVal = EINVAL;
 
-    if (gpu_id == nullptr) {
-        WARN("Could not determine GPU id of node # %u", node);
-        return retVal;
-    }
+  if (gpu_id == nullptr) {
+    WARN("Could not determine GPU id of node # %u", node);
+    return retVal;
+  }
 
-    if (isNodeSupported(node)) {
-        retVal = readGpuId(node, gpu_id);
-    } else {
-        retVal = 1;
-        WARN("Could not read node # %u", node);
-    }
+  if (isNodeSupported(node)) {
+    retVal = readGpuId(node, gpu_id);
+  } else {
+    retVal = 1;
+    WARN("Could not read node # %u", node);
+  }
 
   return retVal;
 }

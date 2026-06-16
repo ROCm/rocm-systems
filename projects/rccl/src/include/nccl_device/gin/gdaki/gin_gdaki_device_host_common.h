@@ -15,15 +15,15 @@
 
 template <typename T>
 struct ncclGinGdakiGlobalGPUBufferTable {
-  T *buffer;
-  __be32 *rkeys;
+  T* buffer;
+  __be32* rkeys;
   __be32 lkey;
   unsigned int offset;
 };
 
 struct ncclGinGdakiGPUContext {
-  struct doca_gpu_dev_verbs_qp *gdqp;
-  struct doca_gpu_dev_verbs_qp *companion_gdqp;
+  struct doca_gpu_dev_verbs_qp* gdqp;
+  struct doca_gpu_dev_verbs_qp* companion_gdqp;
   struct ncclGinGdakiGlobalGPUBufferTable<uint64_t> counters_table;
   struct ncclGinGdakiGlobalGPUBufferTable<uint64_t> signals_table;
 
@@ -32,7 +32,7 @@ struct ncclGinGdakiGPUContext {
 };
 
 struct ncclGinGdakiMemHandle {
-  __be32 *rkeys;
+  __be32* rkeys;
   __be32 lkey;
 };
 

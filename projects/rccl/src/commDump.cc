@@ -7,10 +7,8 @@
 #include "device.h"
 #include "archinfo.h"
 
-__attribute__ ((visibility("default")))
-ncclResult_t ncclCommDump(
-    const ncclComm_t comm,
-    std::unordered_map<std::string, std::string>& map) {
+__attribute__((visibility("default"))) ncclResult_t ncclCommDump(const ncclComm_t comm,
+                                                                 std::unordered_map<std::string, std::string>& map) {
   if (comm == nullptr) {
     WARN("ncclCommDump comm is null");
     return ncclSuccess;

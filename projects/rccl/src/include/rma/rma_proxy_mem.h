@@ -21,14 +21,13 @@
 // argument for now. Defined here (file-local via static, matching gdrwrap.h's
 // convention) so both translation units can instantiate them.
 template <typename T>
-static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int /*host_flags*/,
-                                          void **gdrHandle, struct ncclMemManager* manager,
-                                          bool forceHost = false) {
+static ncclResult_t allocMemCPUAccessible(T** ptr, T** devPtr, size_t nelem, int /*host_flags*/, void** gdrHandle,
+                                          struct ncclMemManager* manager, bool forceHost = false) {
   if (ncclGdrCopy && !forceHost) {
     NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, manager));
   } else {
-    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
-    memset((void *)*ptr, 0, nelem * sizeof(T));
+    NCCLCHECK(ncclCuMemHostAlloc((void**)ptr, NULL, nelem * sizeof(T)));
+    memset((void*)*ptr, 0, nelem * sizeof(T));
     *devPtr = *ptr;
     if (gdrHandle) *gdrHandle = NULL;
   }
@@ -36,7 +35,7 @@ static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int
 }
 
 template <typename T>
-static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
+static ncclResult_t freeMemCPUAccessible(T* ptr, void* gdrHandle, struct ncclMemManager* manager) {
   if (gdrHandle != NULL) {
     NCCLCHECK(ncclGdrCudaFree(gdrHandle, manager));
   } else {

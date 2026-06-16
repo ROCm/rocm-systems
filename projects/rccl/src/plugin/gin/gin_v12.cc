@@ -12,13 +12,13 @@
 static ncclGin_v12_t* ncclGin_v12;
 static ncclGin_t ncclGin;
 
-static ncclResult_t ncclGin_connect(void* ctx, void* handles[], int nranks, int rank,
-  void* listenComm, void** collComm) {
+static ncclResult_t ncclGin_connect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
+                                    void** collComm) {
   return ncclGin_v12->connect(ctx, handles, nranks, rank, 1, 0, listenComm, collComm);
 }
 
-static ncclResult_t ncclGin_createContext(void* collComm, ncclGinConfig_t* config,
-    void** ginCtx, ncclNetDeviceHandle_t** devHandle) {
+static ncclResult_t ncclGin_createContext(void* collComm, ncclGinConfig_t* config, void** ginCtx,
+                                          ncclNetDeviceHandle_t** devHandle) {
   if (ncclGin_v12->createContext == NULL) {
     if (config->nContexts > 1) {
       WARN("GIN plugin v12 does not support multiple contexts");
@@ -27,7 +27,8 @@ static ncclResult_t ncclGin_createContext(void* collComm, ncclGinConfig_t* confi
     *ginCtx = collComm;
     return ncclSuccess;
   } else {
-    NCCLCHECK(ncclGin_v12->createContext(collComm, config->nSignals, config->nCounters, config->nContexts, ginCtx, devHandle));
+    NCCLCHECK(ncclGin_v12->createContext(collComm, config->nSignals, config->nCounters, config->nContexts, ginCtx,
+                                         devHandle));
   }
   return ncclSuccess;
 }
@@ -47,7 +48,7 @@ static ncclResult_t ncclGin_iflush(void* ginCtx, int context, void* mhandle, uin
 }
 
 static ncclResult_t ncclGin_iput(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
-    uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request) {
+                                 uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request) {
   if (context != 0) {
     WARN("GIN plugin v12 does not support multiple contexts");
     return ncclInvalidUsage;
@@ -55,14 +56,15 @@ static ncclResult_t ncclGin_iput(void* ginCtx, int context, uint64_t srcOff, voi
   return ncclGin_v12->iput(ginCtx, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, 0, request);
 }
 
-static ncclResult_t ncclGin_iputSignal(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle,
-    size_t size, uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff, void *signalMhandle,
-    uint64_t signalValue, uint32_t signalOp, void** request) {
+static ncclResult_t ncclGin_iputSignal(void* ginCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
+                                       uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
+                                       void* signalMhandle, uint64_t signalValue, uint32_t signalOp, void** request) {
   if (context != 0) {
     WARN("GIN plugin v12 does not support multiple connections");
     return ncclInvalidUsage;
   }
-  return ncclGin_v12->iputSignal(ginCtx, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, signalOff, signalMhandle, signalValue, signalOp, 0, request);
+  return ncclGin_v12->iputSignal(ginCtx, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, signalOff, signalMhandle,
+                                 signalValue, signalOp, 0, request);
 }
 
 static ncclResult_t ncclGin_getProperties(int dev, ncclNetProperties_t* props) {
@@ -82,8 +84,7 @@ static ncclResult_t ncclGin_getProperties(int dev, ncclNetProperties_t* props) {
   props->netDeviceType = props_v11.netDeviceType;
   props->netDeviceVersion = props_v11.netDeviceVersion;
   props->vProps.ndevs = props_v11.vProps.ndevs;
-  for (int i = 0; i < props_v11.vProps.ndevs; i++)
-    props->vProps.devs[i] = props_v11.vProps.devs[i];
+  for (int i = 0; i < props_v11.vProps.ndevs; i++) props->vProps.devs[i] = props_v11.vProps.devs[i];
   props->maxP2pBytes = props_v11.maxP2pBytes;
   props->maxCollBytes = props_v11.maxCollBytes;
   props->maxMultiRequestSize = props_v11.maxMultiRequestSize;
@@ -98,7 +99,7 @@ static ncclResult_t ncclGin_getProperties(int dev, ncclNetProperties_t* props) {
 ncclGin_t* getNcclGin_v12(void* lib) {
   ncclGin_v12 = (ncclGin_v12_t*)ncclOsDlsym(lib, "ncclGinPlugin_v12");
   if (ncclGin_v12) {
-    INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded gin plugin %s (v12)", ncclGin_v12->name);
+    INFO(NCCL_INIT | NCCL_NET, "NET/Plugin: Loaded gin plugin %s (v12)", ncclGin_v12->name);
     ncclGin.name = ncclGin_v12->name;
     ncclGin.init = ncclGin_v12->init;
     ncclGin.devices = ncclGin_v12->devices;
@@ -125,15 +126,15 @@ ncclGin_t* getNcclGin_v12(void* lib) {
   return nullptr;
 }
 
-
 ncclGin_t* getNcclGin_v12_internal(ncclGin_v12_t* ncclGin_v12_ext) {
   if (ncclGin_v12 != NULL) {
-    INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: cannot load built-in v12 gin iface. preoccupied with %s (v12)", ncclGin_v12->name); 
+    INFO(NCCL_INIT | NCCL_NET, "NET/Plugin: cannot load built-in v12 gin iface. preoccupied with %s (v12)",
+         ncclGin_v12->name);
     return nullptr;
   }
   ncclGin_v12 = ncclGin_v12_ext;
 
-  INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded gin plugin %s (v12)", ncclGin_v12->name);
+  INFO(NCCL_INIT | NCCL_NET, "NET/Plugin: Loaded gin plugin %s (v12)", ncclGin_v12->name);
   ncclGin.name = ncclGin_v12->name;
   ncclGin.init = ncclGin_v12->init;
   ncclGin.devices = ncclGin_v12->devices;

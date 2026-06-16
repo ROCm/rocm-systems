@@ -26,10 +26,13 @@ typedef struct {
   ncclResult_t (*connect)(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm);
   // Create device-side GIN context. devHandle will be passed to device code.
   // This function is not used in GIN_PROXY mode.
-  ncclResult_t (*createContext)(void* collComm, int nSignals, int nCounters, void** ginCtx, ncclNetDeviceHandle_v11_t** devHandle);
+  ncclResult_t (*createContext)(void* collComm, int nSignals, int nCounters, void** ginCtx,
+                                ncclNetDeviceHandle_v11_t** devHandle);
   // Collective memory registration
-  ncclResult_t (*regMrSym)(void* collComm, void* data, size_t size, int type, uint64_t mrFlags, void** mhandle, void **ginHandle);
-  ncclResult_t (*regMrSymDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mrFlags, void** mhandle, void **ginHandle);
+  ncclResult_t (*regMrSym)(void* collComm, void* data, size_t size, int type, uint64_t mrFlags, void** mhandle,
+                           void** ginHandle);
+  ncclResult_t (*regMrSymDmaBuf)(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                 uint64_t mrFlags, void** mhandle, void** ginHandle);
   ncclResult_t (*deregMrSym)(void* collComm, void* mhandle);
   // Close and free collective comm objects
   ncclResult_t (*destroyContext)(void* ginCtx);
@@ -37,12 +40,11 @@ typedef struct {
   ncclResult_t (*closeListen)(void* listenComm);
 
   // Put operations
-  ncclResult_t (*iput)(void* collComm, uint64_t srcOff, void* srcMhandle, size_t size,
-      uint64_t dstOff, void* dstMhandle, uint32_t rank, void** request);
-  ncclResult_t (*iputSignal)(void* collComm, uint64_t srcOff, void* srcMhandle,
-      size_t size, uint64_t dstOff, void* dstMhandle,
-      uint32_t rank, uint64_t signalOff, void *signalMhandle,
-      uint64_t signalValue, uint32_t signalOp, void** request);
+  ncclResult_t (*iput)(void* collComm, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff,
+                       void* dstMhandle, uint32_t rank, void** request);
+  ncclResult_t (*iputSignal)(void* collComm, uint64_t srcOff, void* srcMhandle, size_t size, uint64_t dstOff,
+                             void* dstMhandle, uint32_t rank, uint64_t signalOff, void* signalMhandle,
+                             uint64_t signalValue, uint32_t signalOp, void** request);
 
   // Test whether a request is complete.
   ncclResult_t (*test)(void* collComm, void* request, int* done);
@@ -51,7 +53,7 @@ typedef struct {
   ncclResult_t (*ginProgress)(void* collComm);
 
   // Query the last error for the GIN support. Particularly important when ginProgress is not used, to report errors.
-  ncclResult_t (*queryLastError)(void* ginCtx, bool *hasError);
+  ncclResult_t (*queryLastError)(void* ginCtx, bool* hasError);
 
   // Finalize the GIN support
   ncclResult_t (*finalize)(void* ctx);

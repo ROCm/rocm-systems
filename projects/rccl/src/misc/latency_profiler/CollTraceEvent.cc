@@ -20,18 +20,15 @@ ncclResult_t CudaWaitEvent::waitEventFinish() {
     if (res != cudaErrorNotReady) {
       CUDACHECK(res);
     }
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(ncclParamColltraceCheckIntervalMs()));
+    std::this_thread::sleep_for(std::chrono::milliseconds(ncclParamColltraceCheckIntervalMs()));
     res = cudaEventQuery(event_.get());
   }
   return ncclSuccess;
 }
 
-std::shared_ptr<float> CudaWaitEvent::getElapsedTimeSinceEvent(
-    CudaWaitEvent* start) {
+std::shared_ptr<float> CudaWaitEvent::getElapsedTimeSinceEvent(CudaWaitEvent* start) {
   float elapsedTime;
-  auto res =
-      cudaEventElapsedTime(&elapsedTime, start->event_.get(), event_.get());
+  auto res = cudaEventElapsedTime(&elapsedTime, start->event_.get(), event_.get());
   if (res != cudaSuccess) {
     WARN("get elapsed time failed error: %s", cudaGetErrorString(res));
     return nullptr;

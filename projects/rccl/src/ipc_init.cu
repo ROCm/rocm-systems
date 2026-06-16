@@ -18,16 +18,14 @@ using nccl_dda_ipc_detail::DdaIpcBarrierState;
 using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_ipc_detail::kDdaNranks;
 
-
-#define HIP_CALL(cmd)                                                                   \
-    do {                                                                                \
-        hipError_t error = (cmd);                                                       \
-        if (error != hipSuccess)                                                        \
-        {                                                                               \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error)          \
-                      << ") at line " << __LINE__ << " in file " << __FILE__ << "\n";   \
-        }                                                                               \
-    } while (0)
+#define HIP_CALL(cmd) \
+  do { \
+    hipError_t error = (cmd); \
+    if (error != hipSuccess) { \
+      std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " << __LINE__ << " in file " \
+                << __FILE__ << "\n"; \
+    } \
+  } while (0)
 
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (comm == nullptr) {
@@ -38,8 +36,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   // - multi-node runs
   // - not using 1 process per GPU
   // - MNNVL (fabric-based P2P)
-  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 ||
-      comm->bootstrap == nullptr || comm->directMode || comm->MNNVL) {
+  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
+      comm->MNNVL) {
     return ncclSuccess;
   }
 
@@ -55,8 +53,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   HIP_CALL(hipExtMallocWithFlags((void**)&scratch, bytes, hipDeviceMallocFinegrained));
 #endif
 
-  auto* handler = new (std::nothrow) ncclIpcMemHandler(
-      comm->bootstrap, comm->rank, comm->nRanks);
+  auto* handler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
   if (handler == nullptr) {
     CUDACHECKIGNORE(cudaFree(scratch));
     WARN("ncclDdaIpcCommInit: OOM allocating ncclIpcMemHandler");
@@ -83,9 +80,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   if (ce != cudaSuccess) {
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    WARN(
-        "ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)",
-        cudaGetErrorString(ce));
+    WARN("ncclDdaIpcCommInit: cudaMalloc(peer table) failed (%s)", cudaGetErrorString(ce));
     return ncclSuccess;
   }
 
@@ -103,24 +98,17 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     h_ptrs[i] = p;
   }
 
-  ce = cudaMemcpy(
-      peerDev,
-      h_ptrs,
-      kDdaNranks * sizeof(void*),
-      cudaMemcpyHostToDevice);
+  ce = cudaMemcpy(peerDev, h_ptrs, kDdaNranks * sizeof(void*), cudaMemcpyHostToDevice);
   if (ce != cudaSuccess) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
     CUDACHECKIGNORE(cudaFree(scratch));
-    WARN(
-        "ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)",
-        cudaGetErrorString(ce));
+    WARN("ncclDdaIpcCommInit: cudaMemcpy(peer table) failed (%s)", cudaGetErrorString(ce));
     return ncclSuccess;
   }
 
   const int nBlocksMax = ddaMaxNBlocksForScratch();
-  auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(
-      kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
+  auto barrierPair = meta::comms::IpcGpuBarrier::mallocAndInit(kDdaNranks, nBlocksMax, comm->rank, comm->bootstrap);
   if (!barrierPair.first) {
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
@@ -146,11 +134,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaIpcScratchBytes = bytes;
   comm->ddaIpcPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
-  INFO(
-      NCCL_INIT,
-      "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device",
-      bytes,
-      nBlocksMax);
+  INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
+       nBlocksMax);
   return ncclSuccess;
 }
 

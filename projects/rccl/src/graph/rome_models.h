@@ -23,13 +23,14 @@ THE SOFTWARE.
 #ifndef RCCL_ROME_MODELS_H_
 #define RCCL_ROME_MODELS_H_
 
-ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct ncclTopoGraph* graph, int* gpu_map, int* net_map, int reverse);
+ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct ncclTopoGraph* graph, int* gpu_map,
+                        int* net_map, int reverse);
 ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, struct ncclTopoGraph* graph, int* gpu_map);
-ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* graph2, const char *ringBase);
+ncclResult_t parseRome4P2H(struct ncclTopoSystem* system, struct ncclTopoGraph* graph2, const char* ringBase);
 ncclResult_t parseChordalRing(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
 ncclResult_t parse1H16P(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
 ncclResult_t parse4H4P(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
-ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, const char *ringBase);
+ncclResult_t parseA2a8P(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, const char* ringBase);
 ncclResult_t parseGIOTopos(struct ncclTopoSystem* system, struct ncclTopoGraph* graph);
 
 #endif

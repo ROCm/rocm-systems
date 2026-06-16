@@ -28,24 +28,17 @@ using nccl_dda_ipc_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_ipc_detail::kDdaNranks;
 
 template <typename T>
-static ncclResult_t ncclAllToAllDdaIpcTyped(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclComm* comm,
-    cudaStream_t stream) {
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr ||
-      comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
+static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                            cudaStream_t stream) {
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr || comm->ddaIpcPeerPtrsDev == nullptr ||
+      comm->ddaIpcBarrierState == nullptr) {
     return ncclInvalidUsage;
   }
 
   const size_t totalCount = count * comm->nRanks;
   if (totalCount * sizeof(T) > comm->ddaIpcScratchBytes) {
-    WARN(
-        "DDA IPC alltoall: total element count %zu needs %zu bytes; comm scratch is %zu bytes",
-        totalCount,
-        totalCount * sizeof(T),
-        comm->ddaIpcScratchBytes);
+    WARN("DDA IPC alltoall: total element count %zu needs %zu bytes; comm scratch is %zu bytes", totalCount,
+         totalCount * sizeof(T), comm->ddaIpcScratchBytes);
     return ncclInvalidArgument;
   }
 
@@ -55,21 +48,14 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
 
-  auto* barrierState =
-      static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
+  auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
   meta::comms::IpcGpuBarrier barrierHost = barrierState->barrierHost;
 
   void* peerPtrsDev = comm->ddaIpcPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  meta::comms::ddaAllToAllIpc<T, kDdaNranks, false>
-      <<<grid, block, 0, stream>>>(
-          d_ipcbuffs,
-          static_cast<T*>(recvbuff),
-          count,
-          static_cast<const T*>(sendbuff),
-          comm->rank,
-          barrierHost);
+  meta::comms::ddaAllToAllIpc<T, kDdaNranks, false><<<grid, block, 0, stream>>>(
+    d_ipcbuffs, static_cast<T*>(recvbuff), count, static_cast<const T*>(sendbuff), comm->rank, barrierHost);
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
@@ -77,17 +63,13 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(
 
 } // namespace
 
-bool ncclAllToAllDdaIpcEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype) {
+bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype) {
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
-  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr ||
-      comm->ddaIpcPeerPtrsDev == nullptr || comm->ddaIpcBarrierState == nullptr) {
+  if (comm->ddaIpcMemHandler == nullptr || comm->ddaIpcScratch == nullptr || comm->ddaIpcPeerPtrsDev == nullptr ||
+      comm->ddaIpcBarrierState == nullptr) {
     return false;
   }
   if (count == 0) {
@@ -99,8 +81,7 @@ bool ncclAllToAllDdaIpcEligible(
   if (comm->nRanks != nccl_dda_ipc_detail::kDdaNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 &&
-      datatype != ncclBfloat16) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
 
@@ -118,15 +99,8 @@ bool ncclAllToAllDdaIpcEligible(
   return true;
 }
 
-ncclResult_t ncclAllToAllDdaIpc(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclComm* comm,
-    cudaStream_t stream) {
-  
+ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                ncclComm* comm, cudaStream_t stream) {
   int typeSize = ncclTypeSize(datatype);
-  return ncclAllToAllDdaIpcTyped<int8_t>(
-        sendbuff, recvbuff, count * typeSize, comm, stream);
+  return ncclAllToAllDdaIpcTyped<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
 }

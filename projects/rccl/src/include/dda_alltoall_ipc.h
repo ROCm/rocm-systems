@@ -15,23 +15,13 @@ struct ncclComm;
 /**
  * Check if DDA alltoall is eligible for the given parameters
  */
-bool ncclAllToAllDdaIpcEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype);
+bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype);
 
 /**
  * Execute DDA alltoall operation using IPC
  */
-ncclResult_t ncclAllToAllDdaIpc(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclComm* comm,
-    cudaStream_t stream);
+ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                ncclComm* comm, cudaStream_t stream);
 
 #endif
-

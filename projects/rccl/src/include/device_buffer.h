@@ -13,7 +13,7 @@
 namespace meta::comms {
 
 class DeviceBuffer {
- public:
+public:
   explicit DeviceBuffer(std::size_t size);
   ~DeviceBuffer();
 
@@ -22,9 +22,11 @@ class DeviceBuffer {
   DeviceBuffer(DeviceBuffer&& other) noexcept;
   DeviceBuffer& operator=(DeviceBuffer&& other) noexcept;
 
-  void* get() const { return ptr_; }
+  void* get() const {
+    return ptr_;
+  }
 
- private:
+private:
   void* ptr_{nullptr};
   std::size_t size_{0};
 };

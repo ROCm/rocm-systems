@@ -18,19 +18,17 @@
 namespace meta::comms {
 
 // Helper macro for catching HIP errors
-#define HIP_CALL(cmd)                                                                   \
-    do {                                                                                \
-        hipError_t error = (cmd);                                                       \
-        if (error != hipSuccess)                                                        \
-        {                                                                               \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error)          \
-                      << ") at line " << __LINE__ << " in file " << __FILE__ << "\n";   \
-        }                                                                               \
-    } while (0)
+#define HIP_CALL(cmd) \
+  do { \
+    hipError_t error = (cmd); \
+    if (error != hipSuccess) { \
+      std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " << __LINE__ << " in file " \
+                << __FILE__ << "\n"; \
+    } \
+  } while (0)
 
 DeviceBuffer::DeviceBuffer(std::size_t size) : size_(size) {
-  
-#if defined(HIP_UNCACHED_MEMORY)  
+#if defined(HIP_UNCACHED_MEMORY)
   HIP_CALL(hipExtMallocWithFlags((void**)&ptr_, size, hipDeviceMallocUncached));
 #else
   HIP_CALL(hipExtMallocWithFlags((void**)&ptr_, size, hipDeviceMallocFinegrained));
@@ -43,8 +41,7 @@ DeviceBuffer::~DeviceBuffer() {
   }
 }
 
-DeviceBuffer::DeviceBuffer(DeviceBuffer&& other) noexcept
-    : ptr_(other.ptr_), size_(other.size_) {
+DeviceBuffer::DeviceBuffer(DeviceBuffer&& other) noexcept : ptr_(other.ptr_), size_(other.size_) {
   other.ptr_ = nullptr;
   other.size_ = 0;
 }

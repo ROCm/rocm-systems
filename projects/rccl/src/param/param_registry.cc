@@ -13,8 +13,7 @@ extern "C" NCCL_PARAM_COMPILER_EXPORT_SYMBOL void* ncclParamRegistryInstance() {
   return &state;
 }
 
-ncclResult_t ncclParamRegistry::add(std::string key, ncclParamInfo_t info,
-                                    ncclParamInterface* param) {
+ncclResult_t ncclParamRegistry::add(std::string key, ncclParamInfo_t info, ncclParamInterface* param) {
   auto& reg = state();
   std::lock_guard<std::mutex> lock(reg.mtx);
   if (reg.map.find(key) != reg.map.end()) {

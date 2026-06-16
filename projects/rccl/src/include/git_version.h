@@ -7,6 +7,6 @@
 #ifndef RCCL_GIT_VERSION_H_
 #define RCCL_GIT_VERSION_H_
 
-extern const char *rcclGitHash;
+extern const char* rcclGitHash;
 
 #endif

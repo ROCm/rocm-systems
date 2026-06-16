@@ -25,17 +25,17 @@ extern "C" {
  */
 
 struct ncclIbCastSchedState {
-  int      nqps;
-  int      qpIndex;          /* current WRR cursor */
-  int      initTotTokens;
-  int      initQpTokens[NCCL_IB_MAX_QPS];
-  int      activeTotTokens;
-  int      activeQpTokens[NCCL_IB_MAX_QPS];
+  int nqps;
+  int qpIndex;          /* current WRR cursor */
+  int initTotTokens;
+  int initQpTokens[NCCL_IB_MAX_QPS];
+  int activeTotTokens;
+  int activeQpTokens[NCCL_IB_MAX_QPS];
   uint32_t splitDataMin;
-  bool     schedInit;        /* true once IbCastQpSchedUpdateTx has fired */
-  bool     schedEnable;
-  bool     doWrr;
-  bool     splitData;
+  bool schedInit;        /* true once IbCastQpSchedUpdateTx has fired */
+  bool schedEnable;
+  bool doWrr;
+  bool splitData;
 };
 
 /* Copy scheduler state out of a connected sendComm.
@@ -47,11 +47,8 @@ ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState
 ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 
 /* Override schedParms; takes effect on the next isend, no reconnect needed. */
-ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
-                                      bool schedEnable,
-                                      bool doWrr,
-                                      bool splitData,
-                                      uint32_t splitDataMin);
+ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
+                                     uint32_t splitDataMin);
 
 /* ── Resiliency state introspection (requires ENABLE_FAULT_INJECTION) ── */
 #ifdef ENABLE_FAULT_INJECTION
@@ -59,11 +56,11 @@ ncclResult_t ncclIbCastSetSchedParms(void* sendComm,
 struct ncclIbCastResiliencyState {
   bool recoveryEnabled;
   bool inProgress;
-  int  outstandingRequests;
-  int  outstandingRecovery;
-  int  ndevs;
-  int  devState[NCCL_NET_MAX_DEVS_PER_NIC];
-  int  recoveryCount[NCCL_NET_MAX_DEVS_PER_NIC];
+  int outstandingRequests;
+  int outstandingRecovery;
+  int ndevs;
+  int devState[NCCL_NET_MAX_DEVS_PER_NIC];
+  int recoveryCount[NCCL_NET_MAX_DEVS_PER_NIC];
 };
 
 /* Fills out with the current resiliency state of the communicator.

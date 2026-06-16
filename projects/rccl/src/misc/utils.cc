@@ -22,12 +22,11 @@ int ncclCudaCompCap() {
   int ccMajor, ccMinor;
   if (!CUDASUCCESS(cudaDeviceGetAttribute(&ccMajor, cudaDevAttrComputeCapabilityMajor, cudaDev))) return 0;
   if (!CUDASUCCESS(cudaDeviceGetAttribute(&ccMinor, cudaDevAttrComputeCapabilityMinor, cudaDev))) return 0;
-  return ccMajor*10+ccMinor;
+  return ccMajor * 10 + ccMinor;
 }
 
 ncclResult_t int64ToBusId(int64_t id, char* busId) {
-  sprintf(busId, "%04lx:%02lx:%02lx.%01lx",
-          (unsigned long)((id) >> 20), (unsigned long)((id & 0xff000) >> 12),
+  sprintf(busId, "%04lx:%02lx:%02lx.%01lx", (unsigned long)((id) >> 20), (unsigned long)((id & 0xff000) >> 12),
           (unsigned long)((id & 0xff0) >> 4), (unsigned long)(id & 0xf));
   return ncclSuccess;
 }
@@ -38,9 +37,7 @@ ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
   for (int i = 0; hexOffset < sizeof(hexStr) - 1; i++) {
     char c = busId[i];
     if (c == '.' || c == ':') continue;
-    if ((c >= '0' && c <= '9') ||
-        (c >= 'A' && c <= 'F') ||
-        (c >= 'a' && c <= 'f')) {
+    if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
       hexStr[hexOffset++] = busId[i];
     } else break;
   }
@@ -51,7 +48,7 @@ ncclResult_t busIdToInt64(const char* busId, int64_t* id) {
 
 // Get an int64 from a PCI path. For example, sys/class/pci0000:00/0000:00:02.0/0000:02:00.0/ will return 0x000002000.
 ncclResult_t pciPathToInt64(char* path, int64_t* id) {
-  char* str = path+strlen(path)-1;
+  char* str = path + strlen(path) - 1;
   // Remove trailing "/"
   if (*str == '/') str--;
   // Find next /
@@ -62,7 +59,7 @@ ncclResult_t pciPathToInt64(char* path, int64_t* id) {
 }
 
 // Convert a logical cudaDev index to the NVML device minor number
-ncclResult_t getBusId(int cudaDev, int64_t *busId) {
+ncclResult_t getBusId(int cudaDev, int64_t* busId) {
   // On most systems, the PCI bus ID comes back as in the 0000:00:00.0
   // format. Still need to allocate proper space in case PCI domain goes
   // higher.
@@ -78,7 +75,7 @@ ncclResult_t getHostName(char* hostname, int maxlen, const char delim) {
     return ncclSystemError;
   }
   int i = 0;
-  while ((hostname[i] != delim) && (hostname[i] != '\0') && (i < maxlen-1)) i++;
+  while ((hostname[i] != delim) && (hostname[i] != '\0') && (i < maxlen - 1)) i++;
   hostname[i] = '\0';
   return ncclSuccess;
 }
@@ -101,22 +98,13 @@ static uint64_t hostHashValue = 0;
 /* Get Windows MachineGuid - similar to boot_id on Linux */
 static bool getWindowsMachineGuid(char* guid, size_t len) {
   HKEY hKey;
-  LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-                               "SOFTWARE\\Microsoft\\Cryptography",
-                               0,
-                               KEY_READ,
-                               &hKey);
+  LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ, &hKey);
   if (result != ERROR_SUCCESS) {
     return false;
   }
   DWORD dataSize = (DWORD)len;
   DWORD dataType;
-  result = RegQueryValueExA(hKey,
-                            "MachineGuid",
-                            NULL,
-                            &dataType,
-                            (LPBYTE)guid,
-                            &dataSize);
+  result = RegQueryValueExA(hKey, "MachineGuid", NULL, &dataType, (LPBYTE)guid, &dataSize);
   RegCloseKey(hKey);
   if (result != ERROR_SUCCESS || dataType != REG_SZ) {
     return false;
@@ -127,23 +115,23 @@ static bool getWindowsMachineGuid(char* guid, size_t len) {
 
 static void getHostHashOnce() {
   char hostHash[1024];
-  const char *hostId;
+  const char* hostId;
 
   // Fall back is the full hostname if something fails
-  (void) getHostName(hostHash, sizeof(hostHash), '\0');
+  (void)getHostName(hostHash, sizeof(hostHash), '\0');
   int offset = strlen(hostHash);
 
   if ((hostId = ncclGetEnv("NCCL_HOSTID")) != NULL) {
     INFO(NCCL_ENV, "NCCL_HOSTID set by environment to %s", hostId);
-    strncpy(hostHash, hostId, sizeof(hostHash)-1);
-    hostHash[sizeof(hostHash)-1] = '\0';
+    strncpy(hostHash, hostId, sizeof(hostHash) - 1);
+    hostHash[sizeof(hostHash) - 1] = '\0';
   } else {
 #if defined(NCCL_OS_LINUX)
-    FILE *file = fopen(HOSTID_FILE, "r");
+    FILE* file = fopen(HOSTID_FILE, "r");
     if (file != NULL) {
-      char *p;
+      char* p;
       if (fscanf(file, "%ms", &p) == 1) {
-        strncpy(hostHash+offset, p, sizeof(hostHash)-offset-1);
+        strncpy(hostHash + offset, p, sizeof(hostHash) - offset - 1);
         free(p);
       }
       fclose(file);
@@ -151,15 +139,15 @@ static void getHostHashOnce() {
 #elif defined(NCCL_OS_WINDOWS)
     char machineGuid[256];
     if (getWindowsMachineGuid(machineGuid, sizeof(machineGuid))) {
-      strncpy(hostHash+offset, machineGuid, sizeof(hostHash)-offset-1);
+      strncpy(hostHash + offset, machineGuid, sizeof(hostHash) - offset - 1);
     }
 #endif
   }
 
   // Make sure the string is terminated
-  hostHash[sizeof(hostHash)-1]='\0';
+  hostHash[sizeof(hostHash) - 1] = '\0';
 
-  TRACE(NCCL_INIT,"unique hostname '%s'", hostHash);
+  TRACE(NCCL_INIT, "unique hostname '%s'", hostHash);
 
   hostHashValue = getHash(hostHash, strlen(hostHash));
 }
@@ -184,15 +172,15 @@ uint64_t hashCombine(uint64_t baseHash, uint64_t value) {
 uint64_t getPidHash(void) {
   char pname[1024];
   // Start off with our pid ($$)
-  sprintf(pname, "%ld", (long) ncclOsGetPid());
+  sprintf(pname, "%ld", (long)ncclOsGetPid());
   int plen = strlen(pname);
 #if defined(NCCL_OS_LINUX)
-  int len = readlink("/proc/self/ns/pid", pname+plen, sizeof(pname)-1-plen);
+  int len = readlink("/proc/self/ns/pid", pname + plen, sizeof(pname) - 1 - plen);
   if (len < 0) len = 0;
   plen += len;
 #endif
-  pname[plen]='\0';
-  TRACE(NCCL_INIT,"unique PID '%s'", pname);
+  pname[plen] = '\0';
+  TRACE(NCCL_INIT, "unique PID '%s'", pname);
 
   return getHash(pname, strlen(pname));
 }
@@ -210,15 +198,17 @@ int parseStringList(const char* string, struct netIf* ifList, int maxList) {
     if (c == ':') {
       if (ifC > 0) {
         ifList[ifNum].prefix[ifC] = '\0';
-        ifList[ifNum].port = atoi(ptr+1);
-        ifNum++; ifC = 0;
+        ifList[ifNum].port = atoi(ptr + 1);
+        ifNum++;
+        ifC = 0;
       }
       while (c != ',' && c != '\0') c = *(++ptr);
     } else if (c == ',' || c == '\0') {
       if (ifC > 0) {
         ifList[ifNum].prefix[ifC] = '\0';
         ifList[ifNum].port = -1;
-        ifNum++; ifC = 0;
+        ifNum++;
+        ifC = 0;
       }
     } else {
       ifList[ifNum].prefix[ifC] = c;
@@ -242,14 +232,12 @@ static bool matchPort(const int port1, const int port2) {
   return false;
 }
 
-
 bool matchIfList(const char* string, int port, struct netIf* ifList, int listSize, bool matchExact) {
   // Make an exception for the case where no user list is defined
   if (listSize == 0) return true;
 
-  for (int i=0; i<listSize; i++) {
-    if (matchIf(string, ifList[i].prefix, matchExact)
-        && matchPort(port, ifList[i].port)) {
+  for (int i = 0; i < listSize; i++) {
+    if (matchIf(string, ifList[i].prefix, matchExact) && matchPort(port, ifList[i].port)) {
       return true;
     }
   }
@@ -266,14 +254,13 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, 
 
   // If we have lots of space left in hunk but that wasn't enough then we'll
   // allocate the object unhunked.
-  if (me->topFrame.end - me->topFrame.bumper >= 8<<10)
-    goto unhunked;
+  if (me->topFrame.end - me->topFrame.bumper >= 8 << 10) goto unhunked;
 
   // If we have another hunk (which must be empty) waiting above this one and
   // the object fits then use that.
   if (top && top->above) {
     struct Hunk* top1 = top->above;
-    uintptr_t uobj = (reinterpret_cast<uintptr_t>(top1) + sizeof(struct Hunk) + align-1) & -uintptr_t(align);
+    uintptr_t uobj = (reinterpret_cast<uintptr_t>(top1) + sizeof(struct Hunk) + align - 1) & -uintptr_t(align);
     if (uobj + size <= reinterpret_cast<uintptr_t>(top1) + top1->size) {
       me->topFrame.hunk = top1;
       me->topFrame.bumper = uobj + size;
@@ -284,19 +271,18 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, 
 
   { // If the next hunk we're going to allocate wouldn't be big enough but the
     // Unhunk proxy fits in the current hunk then go allocate as unhunked.
-    size_t nextSize = (top ? top->size : 0) + (64<<10);
+    size_t nextSize = (top ? top->size : 0) + (64 << 10);
     constexpr size_t maxAlign = 64;
     if (nextSize < sizeof(struct Hunk) + maxAlign + size) {
-      uintptr_t uproxy = (me->topFrame.bumper + alignof(Unhunk)-1) & -uintptr_t(alignof(Unhunk));
-      if (uproxy + sizeof(struct Unhunk) <= me->topFrame.end)
-        goto unhunked;
+      uintptr_t uproxy = (me->topFrame.bumper + alignof(Unhunk) - 1) & -uintptr_t(alignof(Unhunk));
+      if (uproxy + sizeof(struct Unhunk) <= me->topFrame.end) goto unhunked;
     }
 
     // At this point we must need another hunk, either to fit the object
     // itself or its Unhunk proxy.
     mallocSize = nextSize;
     INFO(NCCL_ALLOC, "%s:%d memory stack hunk malloc(%llu)", __FILE__, __LINE__, (unsigned long long)mallocSize);
-    struct Hunk *top1 = (struct Hunk*)malloc(mallocSize);
+    struct Hunk* top1 = (struct Hunk*)malloc(mallocSize);
     if (top1 == nullptr) goto malloc_exhausted;
     top1->size = nextSize;
     top1->above = nullptr;
@@ -308,7 +294,7 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, 
   }
 
   { // Try to fit object in the new top hunk.
-    uintptr_t uobj = (me->topFrame.bumper + align-1) & -uintptr_t(align);
+    uintptr_t uobj = (me->topFrame.bumper + align - 1) & -uintptr_t(align);
     if (uobj + size <= me->topFrame.end) {
       me->topFrame.bumper = uobj + size;
       return reinterpret_cast<void*>(uobj);
@@ -318,7 +304,7 @@ void* ncclMemoryStack::allocateSpilled(struct ncclMemoryStack* me, size_t size, 
 unhunked:
   { // We need to allocate the object out-of-band and put an Unhunk proxy in-band
     // to keep track of it.
-    uintptr_t uproxy = (me->topFrame.bumper + alignof(Unhunk)-1) & -uintptr_t(alignof(Unhunk));
+    uintptr_t uproxy = (me->topFrame.bumper + alignof(Unhunk) - 1) & -uintptr_t(alignof(Unhunk));
     Unhunk* proxy = reinterpret_cast<Unhunk*>(uproxy);
     me->topFrame.bumper = uproxy + sizeof(Unhunk);
     proxy->next = me->topFrame.unhunks;
@@ -331,7 +317,8 @@ unhunked:
   }
 
 malloc_exhausted:
-  WARN("%s:%d Unrecoverable error detected: malloc(size=%llu) returned null.", __FILE__, __LINE__, (unsigned long long)mallocSize);
+  WARN("%s:%d Unrecoverable error detected: malloc(size=%llu) returned null.", __FILE__, __LINE__,
+       (unsigned long long)mallocSize);
   abort();
 }
 
@@ -349,16 +336,16 @@ void ncclMemoryStackDestruct(struct ncclMemoryStack* me) {
   // Free hunks
   struct ncclMemoryStack::Hunk* h = me->stub.above;
   while (h != nullptr) {
-    struct ncclMemoryStack::Hunk *h1 = h->above;
+    struct ncclMemoryStack::Hunk* h1 = h->above;
     free(h);
     h = h1;
   }
 }
 
 /* return concatenated string representing each set bit */
-ncclResult_t ncclBitsToString(uint32_t bits, uint32_t mask, const char* (*toStr)(int), char *buf, size_t bufLen, const char *wildcard) {
-  if (!buf || !bufLen)
-    return ncclInvalidArgument;
+ncclResult_t ncclBitsToString(uint32_t bits, uint32_t mask, const char* (*toStr)(int), char* buf, size_t bufLen,
+                              const char* wildcard) {
+  if (!buf || !bufLen) return ncclInvalidArgument;
 
   bits &= mask;
 
@@ -382,21 +369,21 @@ ncclResult_t ncclBitsToString(uint32_t bits, uint32_t mask, const char* (*toStr)
 
 size_t get_sc_page_size() {
   static size_t cached_page_size = 0;
-  size_t ps = __atomic_load_n(&cached_page_size,__ATOMIC_RELAXED);
+  size_t ps = __atomic_load_n(&cached_page_size, __ATOMIC_RELAXED);
   if (ps == 0) {
-      ps = (size_t)sysconf(_SC_PAGESIZE);
-      __atomic_store_n(&cached_page_size, ps,__ATOMIC_RELAXED);
+    ps = (size_t)sysconf(_SC_PAGESIZE);
+    __atomic_store_n(&cached_page_size, ps, __ATOMIC_RELAXED);
   }
   return ps;
 }
 
-void get_aligned_ptr_and_size(const void *ptr, const size_t bufsize, void **aligned_ptr, size_t *aligned_size) {
+void get_aligned_ptr_and_size(const void* ptr, const size_t bufsize, void** aligned_ptr, size_t* aligned_size) {
   if (!aligned_ptr || !aligned_size) return;
   const size_t page_size = get_sc_page_size();
   uintptr_t aligned_ptr_local = (uintptr_t)ptr & ~(page_size - 1);
   size_t local_offset = (size_t)((uintptr_t)ptr - aligned_ptr_local);
   *aligned_size = (bufsize + local_offset + page_size - 1) & ~(page_size - 1);
-  *aligned_ptr = (void *)aligned_ptr_local;
+  *aligned_ptr = (void*)aligned_ptr_local;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -404,9 +391,9 @@ void get_aligned_ptr_and_size(const void *ptr, const size_t bufsize, void **alig
 // Uses shadowpool's algorithm
 uint64_t ncclHashPointer(int hbits, void* key) {
   uintptr_t h = reinterpret_cast<uintptr_t>(key);
-  h ^= h>>32;
+  h ^= h >> 32;
   h *= 0x9e3779b97f4a7c13;
-  return (uint64_t)h >> (64-hbits);
+  return (uint64_t)h >> (64 - hbits);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -431,10 +418,8 @@ static inline void writeNextPtr(void* object, int nextFieldOffset, void* value) 
   memcpy(nextPtr, &value, sizeof(void*));
 }
 
-ncclResult_t ncclIntruAddressMapInsert_untyped(
-    struct ncclIntruAddressMap_untyped* map,
-    int keySize, int keyFieldOffset, int nextFieldOffset,
-    uintptr_t key, void* object) {
+ncclResult_t ncclIntruAddressMapInsert_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
+                                               int nextFieldOffset, uintptr_t key, void* object) {
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;
@@ -450,21 +435,21 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(
 
   if (map->hbits == 0) {
     map->hbits = 4;
-    map->table = (void**)calloc((size_t)1<<map->hbits, sizeof(void*));
+    map->table = (void**)calloc((size_t)1 << map->hbits, sizeof(void*));
     if (map->table == nullptr) {
       map->hbits = 0; // Reset on failure
-      WARN("Intrusive address map initialization failed: calloc(%zu entries) returned null", (size_t)1<<map->hbits);
+      WARN("Intrusive address map initialization failed: calloc(%zu entries) returned null", (size_t)1 << map->hbits);
       return ncclSystemError;
     }
   }
 
   int hbits = map->hbits;
 
-  if (map->count+1 > 2<<hbits) {
+  if (map->count + 1 > 2 << hbits) {
     int oldHbits = hbits;
-    int oldSize = 1<<oldHbits;
+    int oldSize = 1 << oldHbits;
     int newHbits = hbits + 1;
-    int newSize = 1<<newHbits;
+    int newSize = 1 << newHbits;
 
     void** newTable = (void**)malloc(newSize * sizeof(void*));
     if (newTable == nullptr) {
@@ -498,7 +483,8 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(
   void* currentNext = readNextPtr(object, nextFieldOffset);
 
   if (currentNext != nullptr) {
-    INFO(NCCL_INIT, "Intrusive map: inserting object %p with non-NULL next pointer %p (key=0x%lx). "
+    INFO(NCCL_INIT,
+         "Intrusive map: inserting object %p with non-NULL next pointer %p (key=0x%lx). "
          "Object may already be in another list or this is intentional reuse.",
          object, currentNext, (unsigned long)key);
   }
@@ -510,10 +496,8 @@ ncclResult_t ncclIntruAddressMapInsert_untyped(
   return ncclSuccess;
 }
 
-ncclResult_t ncclIntruAddressMapFind_untyped(
-    struct ncclIntruAddressMap_untyped* map,
-    int keySize, int keyFieldOffset, int nextFieldOffset,
-    uintptr_t key, void** object) {
+ncclResult_t ncclIntruAddressMapFind_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
+                                             int nextFieldOffset, uintptr_t key, void** object) {
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;
@@ -548,10 +532,8 @@ ncclResult_t ncclIntruAddressMapFind_untyped(
   return ncclSuccess;
 }
 
-ncclResult_t ncclIntruAddressMapRemove_untyped(
-    struct ncclIntruAddressMap_untyped* map,
-    int keySize, int keyFieldOffset, int nextFieldOffset,
-    uintptr_t key) {
+ncclResult_t ncclIntruAddressMapRemove_untyped(struct ncclIntruAddressMap_untyped* map, int keySize, int keyFieldOffset,
+                                               int nextFieldOffset, uintptr_t key) {
   if (map == nullptr) {
     WARN("Intrusive address map pointer is NULL");
     return ncclInvalidUsage;

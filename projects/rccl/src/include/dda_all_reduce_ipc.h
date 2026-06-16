@@ -12,21 +12,10 @@
 
 struct ncclComm;
 
-bool ncclAllReduceDdaIpcEligible(
-    ncclComm* comm,
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op);
+bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                 ncclDataType_t datatype, ncclRedOp_t op);
 
-ncclResult_t ncclAllReduceDdaIpc(
-    const void* sendbuff,
-    void* recvbuff,
-    size_t count,
-    ncclDataType_t datatype,
-    ncclRedOp_t op,
-    ncclComm* comm,
-    cudaStream_t stream);
+ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                 ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 
 #endif

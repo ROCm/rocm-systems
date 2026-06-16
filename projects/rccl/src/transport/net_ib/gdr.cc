@@ -39,15 +39,14 @@ static void ibGdrSupportInitOnce() {
     // this `memory_peers` directory is either not created (go to else-if condition)
     // or created under a different path like `/sys/kernel/` or `/sys/` (depending on your ib_peer_mem module)
     const char* memory_peers_paths[] = {"/sys/kernel/mm/memory_peers/amdkfd/version",
-                                  "/sys/kernel/memory_peers/amdkfd/version",
-                                  "/sys/memory_peers/amdkfd/version",
-                                  NULL};
+                                        "/sys/kernel/memory_peers/amdkfd/version", "/sys/memory_peers/amdkfd/version",
+                                        NULL};
     int i = 0;
 
     while (memory_peers_paths[i]) {
       if (access(memory_peers_paths[i], F_OK) == 0) {
         ncclIbGdrModuleLoaded = 1;
-        INFO(NCCL_INIT,"Found %s", memory_peers_paths[i]);
+        INFO(NCCL_INIT, "Found %s", memory_peers_paths[i]);
         break;
       } else {
         ncclIbGdrModuleLoaded = 0;
@@ -60,25 +59,24 @@ static void ibGdrSupportInitOnce() {
     if (strncmp("Hyper-V UEFI Release", strValue, 20) == 0) {
       int roMode = ncclParamIbPciRelaxedOrdering();
       (void)ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue);
-      if (strcmp(strValue, "1") == 0 && roMode == 0)
-        ncclIbGdrModuleLoaded = 0;
+      if (strcmp(strValue, "1") == 0 && roMode == 0) ncclIbGdrModuleLoaded = 0;
     }
 
     if (ncclIbGdrModuleLoaded == 0) {
       // Check for `ib_register_peer_memory_client` symbol in `/proc/kallsyms`
       // if your system uses native OS ib_peer module
       char buf[256];
-      FILE *fp = NULL;
+      FILE* fp = NULL;
       fp = fopen("/proc/kallsyms", "r");
 
       if (fp == NULL) {
-        INFO(NCCL_INIT,"Could not open /proc/kallsyms");
+        INFO(NCCL_INIT, "Could not open /proc/kallsyms");
       } else {
         while (fgets(buf, sizeof(buf), fp) != NULL) {
           if (strstr(buf, "t ib_register_peer_memory_client") != NULL ||
               strstr(buf, "T ib_register_peer_memory_client") != NULL) {
             ncclIbGdrModuleLoaded = 1;
-            INFO(NCCL_INIT,"Found ib_register_peer_memory_client in /proc/kallsyms");
+            INFO(NCCL_INIT, "Found ib_register_peer_memory_client in /proc/kallsyms");
             break;
           }
         }
@@ -97,8 +95,7 @@ static void ibGdrSupportInitOnce() {
 ncclResult_t ncclIbGdrSupport() {
   static std::once_flag once;
   std::call_once(once, ibGdrSupportInitOnce);
-  if (!ncclIbGdrModuleLoaded)
-    return ncclSystemError;
+  if (!ncclIbGdrModuleLoaded) return ncclSystemError;
   return ncclSuccess;
 }
 
@@ -111,8 +108,7 @@ static void ibPeerMemSupportInitOnce() {
 ncclResult_t ncclIbPeerMemSupport() {
   static std::once_flag once;
   std::call_once(once, ibPeerMemSupportInitOnce);
-  if (!ncclIbPeerMemModuleLoaded)
-    return ncclSystemError;
+  if (!ncclIbPeerMemModuleLoaded) return ncclSystemError;
   return ncclSuccess;
 }
 
