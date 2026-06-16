@@ -687,8 +687,14 @@ void Buffer::destroy() {
         if (memFlags & (CL_MEM_ALLOC_HOST_PTR)) {
           if (dev().info().hmmSupported_) {
             // AMD HMM path. Release reserved system memory
+            ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                    "[HMM-PATH] release ALLOC_HOST_PTR: HMM path (releaseMemory) ptr=%p size=%zu",
+                    deviceMemory_, size());
             dev().releaseMemory(deviceMemory_, size());
           } else {
+            ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                    "[HMM-PATH] release ALLOC_HOST_PTR: FALLBACK path (memFree) ptr=%p size=%zu",
+                    deviceMemory_, size());
             dev().memFree(deviceMemory_, size());
           }
         } else if (memFlags & ROCCLR_MEM_HSA_SIGNAL_MEMORY) {
@@ -706,7 +712,14 @@ void Buffer::destroy() {
       if (memFlags & CL_MEM_USE_HOST_PTR) {
         // unlock svm host pointer from memory pool
         if (!dev().info().hmmSupported_) {
+          ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                  "[HMM-PATH] release USE_HOST_PTR: FALLBACK path (memory_unlock) ptr=%p",
+                  owner()->getSvmPtr());
           Hsa::memory_unlock(owner()->getSvmPtr());
+        } else {
+          ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                  "[HMM-PATH] release USE_HOST_PTR: HMM path (no unlock) ptr=%p",
+                  owner()->getSvmPtr());
         }
         // destroy system memory
         if (!(amd::Os::releaseMemory(deviceMemory_, size()))) {
@@ -845,6 +858,9 @@ bool Buffer::create(bool alloc_local) {
         if (memFlags & CL_MEM_ALLOC_HOST_PTR) {
           if (dev().info().hmmSupported_) {
             // AMD HMM path. ROCr allocates system memory and KFD will manage it
+            ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                    "[HMM-PATH] alloc ALLOC_HOST_PTR: HMM path (reserveMemory+SvmAllocInit) "
+                    "size=%zu", size());
             deviceMemory_ = dev().reserveMemory(size(), amd::Os::pageSize());
             if (deviceMemory_ == NULL) {
               return false;
@@ -856,6 +872,8 @@ bool Buffer::create(bool alloc_local) {
               return false;
             }
           } else {
+            ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                    "[HMM-PATH] alloc ALLOC_HOST_PTR: FALLBACK path (hostAlloc) size=%zu", size());
             deviceMemory_ = dev().hostAlloc(size(), 1, Device::MemorySegment::kNoAtomics);
           }
         } else if (memFlags & CL_MEM_FOLLOW_USER_NUMA_POLICY) {
@@ -906,11 +924,17 @@ bool Buffer::create(bool alloc_local) {
         if (dev().info().hmmSupported_) {
           // Currently HMM requires certain initial calls to mark sysmem allocation as
           // GPU accessible or prefetch memory into GPU
+          ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                  "[HMM-PATH] alloc USE_HOST_PTR: HMM path (SvmAllocInit) ptr=%p size=%zu",
+                  deviceMemory_, size());
           if (!dev().SvmAllocInit(deviceMemory_, size())) {
             ClPrint(amd::LOG_ERROR, amd::LOG_MEM, "SVM init in ROCr failed!");
             return false;
           }
         } else {
+          ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+                  "[HMM-PATH] alloc USE_HOST_PTR: FALLBACK path (hostLock) ptr=%p size=%zu",
+                  owner()->getSvmPtr(), size());
           deviceMemory_ =
               dev().hostLock(owner()->getSvmPtr(), size(), getHostMemorySegment(memFlags));
         }

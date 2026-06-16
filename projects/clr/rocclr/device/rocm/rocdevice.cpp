@@ -1721,6 +1721,9 @@ bool Device::populateOCLDeviceConstants() {
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", settings().kernel_arg_impl_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HMM support: %d, XNACK: %d, Direct host access: %d",
           info_.hmmSupported_, info_.hmmCpuMemoryAccessible_, info_.hmmDirectHostAccess_);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT,
+          "[HMM-PATH] device hmmSupported_=%d -> runtime will use %s for managed/SVM memory",
+          info_.hmmSupported_, info_.hmmSupported_ ? "HMM path" : "FALLBACK path");
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Max SDMA Read Mask: 0x%x, Max SDMA Write Mask: 0x%x",
           maxSdmaReadMask_, maxSdmaWriteMask_);
 
@@ -2596,6 +2599,9 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
     }
   }
   if (info().hmmSupported_) {
+    ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+            "[HMM-PATH] SetSvmAttributes: HMM path (svm_attributes_set) advice=%d ptr=%p count=%zu "
+            "use_cpu=%d numa_id=%d", advice, dev_ptr, count, use_cpu, numa_id);
     std::vector<hsa_amd_svm_attribute_pair_t> attr;
 
     switch (advice) {
@@ -2660,6 +2666,9 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryA
       return false;
     }
   } else {
+    ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+            "[HMM-PATH] SetSvmAttributes: FALLBACK path (no-op) advice=%d ptr=%p count=%zu",
+            advice, dev_ptr, count);
     LogWarning("hsa_amd_svm_attributes_set() is ignored, because no HMM support");
   }
   return true;
@@ -2721,6 +2730,9 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
   }
 
   if (info().hmmSupported_) {
+    ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+            "[HMM-PATH] GetSvmAttributes: HMM path (svm_attributes_get) ptr=%p count=%zu",
+            dev_ptr, count);
     uint32_t accessed_by = 0;
     std::vector<hsa_amd_svm_attribute_pair_t> attr;
 
@@ -2910,6 +2922,9 @@ bool Device::SvmAllocInit(void* memory, size_t size) const {
   }
 
   if (info().hmmSupported_) {
+    ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+            "[HMM-PATH] EarlyMallocPrefetch: HMM path (svm_prefetch_async) ptr=%p size=%zu",
+            memory, size);
     // Initialize signal for the barrier
     Hsa::signal_store_relaxed(prefetch_signal_, kInitSignalValueOne);
 
@@ -2927,6 +2942,8 @@ bool Device::SvmAllocInit(void* memory, size_t size) const {
       return false;
     }
   } else {
+    ClPrint(amd::LOG_INFO, amd::LOG_MEM,
+            "[HMM-PATH] EarlyMallocPrefetch: FALLBACK path (no-op) ptr=%p size=%zu", memory, size);
     LogWarning("Early prefetch failed, because no HMM support");
   }
 

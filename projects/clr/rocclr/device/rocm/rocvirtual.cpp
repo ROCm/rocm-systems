@@ -2652,6 +2652,10 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
   profilingBegin(cmd);
 
   if (dev().info().hmmSupported_) {
+    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+            "[HMM-PATH] submitSvmPrefetchAsync: HMM path (svm_prefetch_async) ptr=%p count=%zu "
+            "cpu_access=%d numa_id=%d",
+            const_cast<void*>(cmd.dev_ptr()), cmd.count(), cmd.cpu_access(), cmd.numa_id());
     // Initialize signal for the barrier
     auto wait_events = Barriers().WaitingSignal(HwQueueEngine::Unknown);
     hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
@@ -2681,6 +2685,9 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
     // Add system scope, since the prefetch scope is unclear
     addSystemScope();
   } else {
+    ClPrint(amd::LOG_INFO, amd::LOG_COPY,
+            "[HMM-PATH] submitSvmPrefetchAsync: FALLBACK path (no-op) ptr=%p count=%zu",
+            const_cast<void*>(cmd.dev_ptr()), cmd.count());
     LogWarning("hsa_amd_svm_prefetch_async is ignored, because no HMM support");
   }
   profilingEnd();
