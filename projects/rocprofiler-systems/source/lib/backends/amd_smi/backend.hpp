@@ -31,12 +31,12 @@ concept amdsmi_backend_policy = requires {
     typename T::gpu_metrics_t;
     typename T::asic_info_t;
     typename T::memory_type_t;
-} && requires(typename T::status_t s) {
+} && requires(T t, typename T::status_t s) {
     { T::STATUS_SUCCESS } -> std::convertible_to<typename T::status_t>;
     { T::MEM_TYPE_VRAM } -> std::convertible_to<typename T::memory_type_t>;
     { T::status_to_string(s) } -> std::convertible_to<std::string>;
-    { T::init() } -> std::convertible_to<typename T::status_t>;
-    { T::shutdown() } -> std::convertible_to<typename T::status_t>;
+    { t.init() } -> std::convertible_to<typename T::status_t>;
+    { t.shutdown() } -> std::convertible_to<typename T::status_t>;
 };
 
 /**
@@ -90,95 +90,101 @@ public:
     // ── Constructor ───────────────────────────────────────────────────────────
     backend() noexcept = default;
 
-    // ── Static lifecycle ──────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    static void initialize() { check_status(AmdsmiBackend::init(), "amdsmi_init"); }
+    void initialize() { check_status(m_amdsmi.init(), "amdsmi_init"); }
 
-    static void shutdown() noexcept { AmdsmiBackend::shutdown(); }
+    void shutdown() noexcept { m_amdsmi.shutdown(); }
 
-    [[nodiscard]] static version_t get_lib_version()
+    [[nodiscard]] version_t get_lib_version()
     {
         version_t ver{};
-        check_status(AmdsmiBackend::get_version(&ver), "amdsmi_get_lib_version");
+        check_status(m_amdsmi.get_version(&ver), "amdsmi_get_lib_version");
         return ver;
     }
 
-    // ── Static enumeration ────────────────────────────────────────────────────
+    // ── Enumeration ───────────────────────────────────────────────────────────
 
-    [[nodiscard]] static std::vector<processor_handle> enumerate_gpu_handles()
+    [[nodiscard]] std::vector<processor_handle> enumerate_gpu_handles()
     {
         return enumerate_handles(
-            [](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
-                return AmdsmiBackend::get_processor_handles(socket, count, procs);
+            [this](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
+                return m_amdsmi.get_processor_handles(socket, count, procs);
             },
             "amdsmi_get_processor_handles");
     }
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    [[nodiscard]] static std::vector<processor_handle> enumerate_nic_handles()
+    [[nodiscard]] std::vector<processor_handle> enumerate_nic_handles()
     {
         return enumerate_handles(
-            [](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
-                return AmdsmiBackend::get_processor_handles_by_type(
+            [this](socket_handle socket, std::uint32_t* count, processor_handle* procs) {
+                return m_amdsmi.get_processor_handles_by_type(
                     socket, AMDSMI_PROCESSOR_TYPE_AMD_NIC, procs, count);
             },
             "amdsmi_get_processor_handles_by_type");
     }
 #endif
 
-    // ── Per-device forwarding (called by backend_proxy) ───────────────────────
-    // Each method takes an explicit handle and returns the raw status code.
-    // Error checking and type conversion are the caller's responsibility.
+    // ── Per-device forwarding ─────────────────────────────────────────────────
+    // Each method throws std::runtime_error on AMD SMI failure.
 
-    [[nodiscard]] status_t get_metrics_info(processor_handle h, gpu_metrics_t* out) const
+    void get_metrics_info(processor_handle h, gpu_metrics_t* out) const
     {
-        return m_amdsmi.get_metrics_info(h, out);
+        check_status(m_amdsmi.get_metrics_info(h, out), "amdsmi_get_gpu_metrics_info");
     }
 
-    [[nodiscard]] status_t get_gpu_asic_info(processor_handle h, asic_info_t* out) const
+    void get_gpu_asic_info(processor_handle h, asic_info_t* out) const
     {
-        return m_amdsmi.get_gpu_asic_info(h, out);
+        check_status(m_amdsmi.get_gpu_asic_info(h, out), "amdsmi_get_gpu_asic_info");
     }
 
-    [[nodiscard]] status_t get_memory_usage(processor_handle h, memory_type_t type,
-                                            std::uint64_t* out) const
+    void get_memory_usage(processor_handle h, memory_type_t type,
+                          std::uint64_t* out) const
     {
-        return m_amdsmi.get_memory_usage(h, type, out);
+        check_status(m_amdsmi.get_memory_usage(h, type, out),
+                     "amdsmi_get_gpu_memory_usage");
     }
 
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
-    [[nodiscard]] status_t get_gpu_process_list(processor_handle h, std::uint32_t* count,
-                                                proc_info_t* list) const
+    // Returns false without throwing when the process list is unavailable (capability
+    // probe).
+    [[nodiscard]] bool try_get_gpu_process_list(processor_handle h, std::uint32_t* count,
+                                                proc_info_t* list) const noexcept
     {
-        return m_amdsmi.get_gpu_process_list(h, count, list);
+        return m_amdsmi.get_gpu_process_list(h, count, list) == STATUS_SUCCESS;
+    }
+
+    void get_gpu_process_list(processor_handle h, std::uint32_t* count,
+                              proc_info_t* list) const
+    {
+        check_status(m_amdsmi.get_gpu_process_list(h, count, list),
+                     "amdsmi_get_gpu_process_list");
     }
 #endif
 
 #if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
-    [[nodiscard]] status_t get_nic_asic_info(processor_handle h,
-                                             nic_asic_info_t* out) const
+    void get_nic_asic_info(processor_handle h, nic_asic_info_t* out) const
     {
-        return m_amdsmi.get_nic_asic_info(h, out);
+        check_status(m_amdsmi.get_nic_asic_info(h, out), "amdsmi_get_nic_asic_info");
     }
 
-    [[nodiscard]] status_t get_nic_port_info(processor_handle h,
-                                             nic_port_info_t* out) const
+    void get_nic_port_info(processor_handle h, nic_port_info_t* out) const
     {
-        return m_amdsmi.get_nic_port_info(h, out);
+        check_status(m_amdsmi.get_nic_port_info(h, out), "amdsmi_get_nic_port_info");
     }
 
-    [[nodiscard]] status_t get_nic_rdma_dev_info(processor_handle         h,
-                                                 nic_rdma_devices_info_t* out) const
+    void get_nic_rdma_dev_info(processor_handle h, nic_rdma_devices_info_t* out) const
     {
-        return m_amdsmi.get_nic_rdma_dev_info(h, out);
+        check_status(m_amdsmi.get_nic_rdma_dev_info(h, out),
+                     "amdsmi_get_nic_rdma_dev_info");
     }
 
-    [[nodiscard]] status_t get_nic_rdma_port_statistics(processor_handle h,
-                                                        std::uint8_t     port_idx,
-                                                        std::uint32_t*   count,
-                                                        nic_stat_t*      stats) const
+    void get_nic_rdma_port_statistics(processor_handle h, std::uint8_t port_idx,
+                                      std::uint32_t* count, nic_stat_t* stats) const
     {
-        return m_amdsmi.get_nic_rdma_port_statistics(h, port_idx, count, stats);
+        check_status(m_amdsmi.get_nic_rdma_port_statistics(h, port_idx, count, stats),
+                     "amdsmi_get_nic_rdma_port_statistics");
     }
 #endif
 
@@ -187,41 +193,31 @@ private:
 
     static void check_status(status_t status, const char* func)
     {
-        if(status == AmdsmiBackend::STATUS_SUCCESS)
-        {
-            return;
-        }
+        if(status == STATUS_SUCCESS) return;
         throw std::runtime_error(std::string(func) +
-                                 " failed: " + AmdsmiBackend::status_to_string(status));
+                                 " failed: " + status_to_string(status));
     }
 
     template <typename QueryFn>
-    [[nodiscard]] static std::vector<processor_handle> enumerate_handles(
-        QueryFn query, const char* fn_name)
+    [[nodiscard]] std::vector<processor_handle> enumerate_handles(QueryFn     query,
+                                                                  const char* fn_name)
     {
         std::vector<processor_handle> result;
 
         std::uint32_t socket_count = 0;
-        check_status(AmdsmiBackend::get_socket_handles(&socket_count, nullptr),
+        check_status(m_amdsmi.get_socket_handles(&socket_count, nullptr),
                      "amdsmi_get_socket_handles (count)");
 
-        if(socket_count == 0)
-        {
-            return result;
-        }
+        if(socket_count == 0) return result;
 
         std::vector<socket_handle> sockets(socket_count);
-        check_status(AmdsmiBackend::get_socket_handles(&socket_count, sockets.data()),
+        check_status(m_amdsmi.get_socket_handles(&socket_count, sockets.data()),
                      "amdsmi_get_socket_handles (data)");
 
         for(auto socket : sockets)
         {
             std::uint32_t count = 0;
-            if(query(socket, &count, nullptr) != AmdsmiBackend::STATUS_SUCCESS ||
-               count == 0)
-            {
-                continue;
-            }
+            if(query(socket, &count, nullptr) != STATUS_SUCCESS || count == 0) continue;
 
             std::vector<processor_handle> procs(count);
             check_status(query(socket, &count, procs.data()),

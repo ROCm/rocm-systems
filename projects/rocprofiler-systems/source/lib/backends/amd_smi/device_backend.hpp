@@ -11,9 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <stdexcept>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace rocprofsys::backends::amd_smi
@@ -56,16 +54,14 @@ public:
     [[nodiscard]] asic_info get_gpu_asic_info() const
     {
         typename Backend::asic_info_t raw{};
-        check_call(m_session->get_gpu_asic_info(m_handle, &raw),
-                   "amdsmi_get_gpu_asic_info");
+        m_session->get_gpu_asic_info(m_handle, &raw);
         return { raw.market_name, raw.vendor_name };
     }
 
     [[nodiscard]] metrics get_gpu_metrics() const
     {
         typename Backend::gpu_metrics_t raw{};
-        check_call(m_session->get_metrics_info(m_handle, &raw),
-                   "amdsmi_get_gpu_metrics_info");
+        m_session->get_metrics_info(m_handle, &raw);
 
         metrics out{};
         convert_power(raw, out);
@@ -81,8 +77,7 @@ public:
     [[nodiscard]] std::uint64_t get_memory_usage() const
     {
         std::uint64_t usage = 0;
-        check_call(m_session->get_memory_usage(m_handle, Backend::MEM_TYPE_VRAM, &usage),
-                   "amdsmi_get_gpu_memory_usage");
+        m_session->get_memory_usage(m_handle, Backend::MEM_TYPE_VRAM, &usage);
         return usage;
     }
 
@@ -90,14 +85,11 @@ public:
     {
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         std::uint32_t count = 0;
-        if(m_session->get_gpu_process_list(m_handle, &count, nullptr) !=
-               Backend::STATUS_SUCCESS ||
-           count == 0)
+        if(!m_session->try_get_gpu_process_list(m_handle, &count, nullptr) || count == 0)
             return 0;
 
         std::vector<typename Backend::proc_info_t> procs(count);
-        check_call(m_session->get_gpu_process_list(m_handle, &count, procs.data()),
-                   "amdsmi_get_gpu_process_list");
+        m_session->get_gpu_process_list(m_handle, &count, procs.data());
 
         std::uint64_t cumulative = 0;
         for(const auto& proc : procs)
@@ -112,8 +104,7 @@ public:
     {
 #if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
         std::uint32_t count = 0;
-        return m_session->get_gpu_process_list(m_handle, &count, nullptr) ==
-               Backend::STATUS_SUCCESS;
+        return m_session->try_get_gpu_process_list(m_handle, &count, nullptr);
 #else
         return false;
 #endif
@@ -125,16 +116,14 @@ public:
     [[nodiscard]] nic::asic_info get_nic_asic_info() const
     {
         typename Backend::nic_asic_info_t raw{};
-        check_call(m_session->get_nic_asic_info(m_handle, &raw),
-                   "amdsmi_get_nic_asic_info");
+        m_session->get_nic_asic_info(m_handle, &raw);
         return { raw.product_name, raw.vendor_name };
     }
 
     [[nodiscard]] nic::port_info get_nic_port_info() const
     {
         typename Backend::nic_port_info_t raw{};
-        check_call(m_session->get_nic_port_info(m_handle, &raw),
-                   "amdsmi_get_nic_port_info");
+        m_session->get_nic_port_info(m_handle, &raw);
         if(raw.num_ports == 0) return {};
         return { raw.ports[0].netdev };
     }
@@ -142,8 +131,7 @@ public:
     [[nodiscard]] nic::rdma_info get_nic_rdma_info() const
     {
         auto raw = std::make_unique<typename Backend::nic_rdma_devices_info_t>();
-        check_call(m_session->get_nic_rdma_dev_info(m_handle, raw.get()),
-                   "amdsmi_get_nic_rdma_dev_info");
+        m_session->get_nic_rdma_dev_info(m_handle, raw.get());
         if(raw->num_rdma_dev == 0) return { 0 };
         return { raw->rdma_dev_info[0].num_rdma_ports };
     }
@@ -152,16 +140,13 @@ public:
         std::uint8_t rdma_port_idx) const
     {
         std::uint32_t count = 0;
-        check_call(m_session->get_nic_rdma_port_statistics(m_handle, rdma_port_idx,
-                                                           &count, nullptr),
-                   "amdsmi_get_nic_rdma_port_statistics (count)");
+        m_session->get_nic_rdma_port_statistics(m_handle, rdma_port_idx, &count, nullptr);
 
         if(count == 0) return {};
 
         std::vector<typename Backend::nic_stat_t> raw_stats(count);
-        check_call(m_session->get_nic_rdma_port_statistics(m_handle, rdma_port_idx,
-                                                           &count, raw_stats.data()),
-                   "amdsmi_get_nic_rdma_port_statistics (data)");
+        m_session->get_nic_rdma_port_statistics(m_handle, rdma_port_idx, &count,
+                                                raw_stats.data());
 
         std::vector<nic::stat_entry> result;
         result.reserve(count);
@@ -173,15 +158,6 @@ public:
 
 private:
     using gpu_metrics_t = typename Backend::gpu_metrics_t;
-
-    // ── Error checking ────────────────────────────────────────────────────────
-
-    static void check_call(typename Backend::status_t status, std::string_view func)
-    {
-        if(status == Backend::STATUS_SUCCESS) return;
-        throw std::runtime_error(std::string(func) +
-                                 " failed: " + Backend::status_to_string(status));
-    }
 
     // ── Metric conversion ─────────────────────────────────────────────────────
 

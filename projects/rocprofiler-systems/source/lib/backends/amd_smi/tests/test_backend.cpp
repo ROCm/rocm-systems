@@ -51,13 +51,13 @@ protected:
 TEST_F(BackendTest, initialize_calls_backend_init)
 {
     EXPECT_CALL(*testing::g_mock_backend, init()).WillOnce(Return(k_ok));
-    sut_t::initialize();
+    m_session.initialize();
 }
 
 TEST_F(BackendTest, initialize_throws_on_backend_error)
 {
     EXPECT_CALL(*testing::g_mock_backend, init()).WillOnce(Return(k_err));
-    EXPECT_THROW(sut_t::initialize(), std::runtime_error);
+    EXPECT_THROW(m_session.initialize(), std::runtime_error);
 }
 
 TEST_F(BackendTest, initialize_error_message_contains_function_name)
@@ -67,7 +67,7 @@ TEST_F(BackendTest, initialize_error_message_contains_function_name)
         {
             try
             {
-                sut_t::initialize();
+                m_session.initialize();
             } catch(const std::runtime_error& ex)
             {
                 EXPECT_THAT(ex.what(), HasSubstr("amdsmi_init"));
@@ -80,13 +80,13 @@ TEST_F(BackendTest, initialize_error_message_contains_function_name)
 TEST_F(BackendTest, shutdown_calls_backend_shutdown)
 {
     EXPECT_CALL(*testing::g_mock_backend, shutdown()).WillOnce(Return(k_ok));
-    sut_t::shutdown();
+    m_session.shutdown();
 }
 
 TEST_F(BackendTest, shutdown_is_noexcept)
 {
     EXPECT_CALL(*testing::g_mock_backend, shutdown()).WillOnce(Return(k_err));
-    EXPECT_NO_THROW(sut_t::shutdown());
+    EXPECT_NO_THROW(m_session.shutdown());
 }
 
 TEST_F(BackendTest, get_lib_version_returns_version_fields)
@@ -97,7 +97,7 @@ TEST_F(BackendTest, get_lib_version_returns_version_fields)
     EXPECT_CALL(*testing::g_mock_backend, get_version(NotNull()))
         .WillOnce(DoAll(SetArgPointee<0>(raw), Return(k_ok)));
 
-    auto ver = sut_t::get_lib_version();
+    auto ver = m_session.get_lib_version();
     EXPECT_EQ(ver.major, 26U);
     EXPECT_EQ(ver.minor, 3U);
     EXPECT_EQ(ver.release, 0U);
@@ -106,7 +106,7 @@ TEST_F(BackendTest, get_lib_version_returns_version_fields)
 TEST_F(BackendTest, get_lib_version_throws_on_backend_error)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_version(_)).WillOnce(Return(k_err));
-    EXPECT_THROW(static_cast<void>(sut_t::get_lib_version()), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(m_session.get_lib_version()), std::runtime_error);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,14 +118,15 @@ TEST_F(BackendTest, enumerate_gpu_handles_returns_empty_when_no_sockets)
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<0>(0U), Return(k_ok)));
 
-    EXPECT_TRUE(sut_t::enumerate_gpu_handles().empty());
+    EXPECT_TRUE(m_session.enumerate_gpu_handles().empty());
 }
 
 TEST_F(BackendTest, enumerate_gpu_handles_throws_on_socket_count_error)
 {
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), IsNull()))
         .WillOnce(Return(k_err));
-    EXPECT_THROW(static_cast<void>(sut_t::enumerate_gpu_handles()), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(m_session.enumerate_gpu_handles()),
+                 std::runtime_error);
 }
 
 TEST_F(BackendTest, enumerate_gpu_handles_throws_on_socket_data_error)
@@ -136,7 +137,8 @@ TEST_F(BackendTest, enumerate_gpu_handles_throws_on_socket_data_error)
     EXPECT_CALL(*testing::g_mock_backend, get_socket_handles(NotNull(), NotNull()))
         .WillOnce(Return(k_err));
 
-    EXPECT_THROW(static_cast<void>(sut_t::enumerate_gpu_handles()), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(m_session.enumerate_gpu_handles()),
+                 std::runtime_error);
 }
 
 TEST_F(BackendTest, enumerate_gpu_handles_skips_socket_with_no_processors)
@@ -153,7 +155,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_skips_socket_with_no_processors)
                 get_processor_handles(k_socket, NotNull(), IsNull()))
         .WillOnce(DoAll(SetArgPointee<1>(0U), Return(k_ok)));
 
-    EXPECT_TRUE(sut_t::enumerate_gpu_handles().empty());
+    EXPECT_TRUE(m_session.enumerate_gpu_handles().empty());
 }
 
 TEST_F(BackendTest, enumerate_gpu_handles_returns_handles_from_single_socket)
@@ -175,7 +177,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_returns_handles_from_single_socket)
         .WillOnce(DoAll(SetArgPointee<1>(2U), SetArrayArgument<2>(k_procs, k_procs + 2),
                         Return(k_ok)));
 
-    auto handles = sut_t::enumerate_gpu_handles();
+    auto handles = m_session.enumerate_gpu_handles();
     ASSERT_EQ(handles.size(), 2U);
     EXPECT_EQ(handles[0], k_procs[0]);
     EXPECT_EQ(handles[1], k_procs[1]);
@@ -208,7 +210,7 @@ TEST_F(BackendTest, enumerate_gpu_handles_aggregates_across_two_sockets)
         .WillOnce(DoAll(SetArgPointee<1>(1U),
                         SetArrayArgument<2>(&k_proc_b, &k_proc_b + 1), Return(k_ok)));
 
-    auto handles = sut_t::enumerate_gpu_handles();
+    auto handles = m_session.enumerate_gpu_handles();
     ASSERT_EQ(handles.size(), 2U);
     EXPECT_EQ(handles[0], k_proc_a);
     EXPECT_EQ(handles[1], k_proc_b);
@@ -231,7 +233,8 @@ TEST_F(BackendTest, enumerate_gpu_handles_throws_on_processor_data_error)
                 get_processor_handles(k_socket, NotNull(), NotNull()))
         .WillOnce(Return(k_err));
 
-    EXPECT_THROW(static_cast<void>(sut_t::enumerate_gpu_handles()), std::runtime_error);
+    EXPECT_THROW(static_cast<void>(m_session.enumerate_gpu_handles()),
+                 std::runtime_error);
 }
 
 }  // namespace rocprofsys::backends::amd_smi
