@@ -13,53 +13,30 @@
 #endif
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
-#include <log.hpp>
 #ifdef MPI_SUPPORT
 #include <mpi.h>
 #endif
-
-// Initialize device-side logd_constants for rocshmem QP error reporting.
-// Must be called from a TU that links rocshmem's device bitcode.
-static void initLogdConstants(int rank) {
-  using namespace rocshmem;
-  log_pe_number = rank;
-  uint32_t log_flags = logd_constants::SHOW_ERROR | logd_constants::SHOW_WARN;
-  struct logd_constants host_logd{rank, log_flags};
-  struct logd_constants* logd_addr{nullptr};
-  if (hipGetSymbolAddress(reinterpret_cast<void**>(&logd_addr),
-                          HIP_SYMBOL(logd_constants)) == hipSuccess) {
-    hipMemcpy(logd_addr, &host_logd, sizeof(host_logd), hipMemcpyDefault);
-  }
-}
-
 // Initialize rocshmem before ncclCommInit so that rocshmem_malloc etc. work.
 // Called via test_pre_init_callback from common.cu's main(), after MPI_Init.
+// GIN_TYPE=5 (GDA) device symbol init is handled by rocshmem_gin_init_constmem()
+// called from gin_host_rocshmem_gda.cc after QP creation.
 static void rocshmemPreInit(int rank, int nranks) {
   const char *gin_type = getenv("NCCL_GIN_TYPE");
-  int type = gin_type ? atoi(gin_type) : 0;
+  if (!gin_type || atoi(gin_type) != 4) return;
 
-  // Set the correct GPU before any device symbol init.
+  // GIN_TYPE=4 (rocshmem API) needs full rocshmem_init.
   int nGpus = 0;
   hipGetDeviceCount(&nGpus);
   if (nGpus > 0) hipSetDevice(rank % nGpus);
 
-  // GIN_TYPE=4 (rocshmem API) needs full rocshmem_init.
-  if (type == 4) {
-    rocshmem::rocshmem_uniqueid_t uid;
-    if (rank == 0) rocshmem::rocshmem_get_uniqueid(&uid);
+  rocshmem::rocshmem_uniqueid_t uid;
+  if (rank == 0) rocshmem::rocshmem_get_uniqueid(&uid);
 #ifdef MPI_SUPPORT
-    MPI_Bcast(&uid, sizeof(uid), MPI_BYTE, 0, MPI_COMM_WORLD);
+  MPI_Bcast(&uid, sizeof(uid), MPI_BYTE, 0, MPI_COMM_WORLD);
 #endif
-    rocshmem::rocshmem_init_attr_t attr;
-    rocshmem::rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
-    rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
-    return;
-  }
-
-  // GIN_TYPE=5 (GDA QP) — no rocshmem_init needed, just device logd.
-  if (type == 5) {
-    initLogdConstants(rank);
-  }
+  rocshmem::rocshmem_init_attr_t attr;
+  rocshmem::rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &attr);
+  rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
 }
 // Register the callback at static init time (before main)
 static struct RocshmemCallbackRegistrar {

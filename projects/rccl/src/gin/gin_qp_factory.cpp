@@ -76,6 +76,17 @@
 
 using namespace rocshmem;
 
+// Forward declarations for RCCL's IB verbs wrappers (from ibvwrap.h).
+// We declare them here instead of including ibvwrap.h to avoid IB type
+// clashes between RCCL's ibvcore.h and rocshmem's ibv_core.hpp.
+// ncclResult_t is int.
+int wrap_ibv_reg_mr_iova2(struct ibv_mr **ret, struct ibv_pd *pd, void *addr,
+                          size_t length, uint64_t iova, int access);
+int wrap_ibv_reg_dmabuf_mr(struct ibv_mr **ret, struct ibv_pd *pd,
+                           uint64_t offset, size_t length, uint64_t iova,
+                           int fd, int access);
+int wrap_ibv_dereg_mr(struct ibv_mr *mr);
+
 ///////////////////////////////////////////////////////////////////////////////
 // Internal types
 ///////////////////////////////////////////////////////////////////////////////
@@ -1360,7 +1371,7 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
   struct ibv_mr *mr = nullptr;
 
 #if HIP_VERSION >= 70000000
-  if (ibv.is_dmabuf_supported()) {
+  {
     int fd = -1;
     static size_t page_size = sysconf(_SC_PAGESIZE);
     size_t aligned_size = (size + page_size - 1) & ~(page_size - 1);
@@ -1372,9 +1383,9 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
 #if 0
       // iova=0: offset-based addressing, no baseAddr needed on device side.
       // Requires NIC support (mlx5 yes, bnxt no as of 2026-06).
-      mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, 0, fd, access);
+      wrap_ibv_reg_dmabuf_mr(&mr, pd, 0, aligned_size, 0, fd, access);
 #else
-      mr = ibv.reg_dmabuf_mr(pd, 0, aligned_size, (uint64_t)addr, fd, access);
+      wrap_ibv_reg_dmabuf_mr(&mr, pd, 0, aligned_size, (uint64_t)addr, fd, access);
 #endif
       if (mr) {
         gin_dmabuf_fd_map[(uintptr_t)mr] = fd;
@@ -1393,9 +1404,9 @@ int rocshmem_gin_reg_mr_vmm(rocshmem_gin_qp_set_t qp_set,
   if (!mr) {
 #if 0
     // iova=0 fallback for NICs that support offset-based addressing
-    mr = ibv.reg_mr_iova2(pd, addr, size, 0, access);
+    wrap_ibv_reg_mr_iova2(&mr, pd, addr, size, 0, access);
 #else
-    mr = ibv.reg_mr_iova2(pd, addr, size, (uintptr_t)addr, access);
+    wrap_ibv_reg_mr_iova2(&mr, pd, addr, size, (uintptr_t)addr, access);
 #endif
   }
   if (!mr) return -1;
@@ -1413,7 +1424,7 @@ void rocshmem_gin_dereg_mr(void *mr) {
     close(it->second);
     gin_dmabuf_fd_map.erase(it);
   }
-  ibv.dereg_mr((struct ibv_mr*)mr);
+  wrap_ibv_dereg_mr((struct ibv_mr*)mr);
 }
 
 int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set) {

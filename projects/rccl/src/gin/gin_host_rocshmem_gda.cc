@@ -110,6 +110,11 @@ ncclResult_t ncclGinRocshmemGdaCreateContext(struct ncclComm *comm, void *collCo
     }
     // gpu_qp_ptrs is a GPU array of QueuePair* — store in GPU context
     ctx->gpuCtxHost.qps = (rocshmem::QueuePair**)gpu_qp_ptrs;
+
+    // Initialize rocshmem __constant__ device memory with the detected provider.
+    // Initialize rocshmem __constant__ device memory (constmem + logd).
+    // Implementation lives in librocshmem.a; resolved via -rdynamic.
+    rocshmem_gin_init_constmem(rocshmem_gin_get_provider(ctx->qpSet), ctx->rank);
   }
 
   // Allocate signal and counter arrays on GPU

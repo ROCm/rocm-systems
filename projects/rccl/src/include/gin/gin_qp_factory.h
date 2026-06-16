@@ -142,6 +142,18 @@ GIN_QP_API int rocshmem_gin_get_provider(rocshmem_gin_qp_set_t qp_set);
  */
 GIN_QP_API int rocshmem_gin_probe_devices(void);
 
+/**
+ * @brief Initialize rocshmem __constant__ device memory for the GIN QP path.
+ *
+ * Sets constmem.gda_provider and logd_constants so that QueuePair device
+ * dispatchers use the fast scalar constant cache and error reporting works.
+ * Called automatically after QP creation.
+ *
+ * @param[in] provider GDAProvider enum value from rocshmem_gin_get_provider().
+ * @param[in] rank     This rank's index (for device-side log messages).
+ */
+GIN_QP_API void rocshmem_gin_init_constmem(int provider, int rank);
+
 
 #ifdef __cplusplus
 }
