@@ -77,7 +77,7 @@ TEST(gpu_temperature, TrackLabelMatchesSelectedReading)
                  "Edge Temp");
 }
 
-// int64_t path preserves sub-zero °C for temperature metrics.
+// std::int64_t path preserves sub-zero °C for temperature metrics.
 TEST(gpu_temperature, NegativeCelsiusPreservedWhenSelected)
 {
     const auto m = make_temp_metrics(-3, 40);
