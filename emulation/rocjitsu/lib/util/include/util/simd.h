@@ -358,22 +358,24 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
 /// zero-magnitude result (e.g. trunc(-0.3) yields +0.0 instead of -0.0) and
 /// (b) mangle the payload/quiet bit of a NaN input instead of returning it
 /// unchanged. The scalar generated bodies these SIMD fast paths must match use
-/// the libc functions, which preserve sign-of-zero and pass NaNs through
-/// verbatim. So we run the stdx intrinsic for the finite, nonzero-result lanes
-/// and then repair the two edge cases by blend:
-///   - NaN input lane: return the input bits unchanged.
+/// the compiler's scalar std:: functions. Clang lowers signaling NaNs to quiet
+/// NaNs here, and GCC scalar wrappers below quiet them explicitly so the scalar
+/// and SIMD paths keep the same lane bits. The NaN repair is selected per
+/// operation and compiler policy instead of hardcoding one libc policy. We run
+/// the stdx intrinsic for
+/// the finite, nonzero-result lanes and then repair the two edge cases by blend:
+///   - NaN input lane: return the scalar-compiler-matching NaN bits.
 ///   - zero-magnitude result lane: copy the input's sign bit onto the +0 the
 ///     intrinsic produced (IEEE-754 round-to-integer keeps the operand sign on
 ///     a zero result, so this is exactly the sign of the *input*).
 /// Bit-identical to the scalar reference at every native width.
-template <class Float, class Round> native<Float> round_fixup_simd(native<Float> a, Round round) {
+template <class Float, bool QuietNan, class Round>
+native<Float> round_fixup_simd(native<Float> a, Round round) {
   using F = native<Float>;
   using U = std::conditional_t<sizeof(Float) == 4, native<uint32_t>, native<uint64_t>>;
   using Bits = typename U::value_type;
   static_assert(sizeof(Bits) == sizeof(Float));
   constexpr Bits kSign = Bits(1) << (sizeof(Bits) * 8 - 1);
-  // Quiet bit = MSB of the mantissa (bit 22 for f32, bit 51 for f64).
-  constexpr Bits kQuiet = Bits(1) << (sizeof(Float) == 4 ? 22 : 51);
 
   const U ai = std::bit_cast<U>(a);
   F r = round(a);
@@ -386,39 +388,51 @@ template <class Float, class Round> native<Float> round_fixup_simd(native<Float>
   // narrow widths. `r == 0` matches both +0 and -0 lanes.
   const F signed_zero = std::bit_cast<F>(ai & U(kSign));
   stdx::where(r == F(Float(0)), r) = signed_zero;
-  // NaN input -> canonical quiet NaN (sign + payload preserved, quiet bit set),
-  // exactly what scalar `std::trunc/ceil/floor/nearbyint` produce: qNaN passes
-  // through unchanged and sNaN is quieted. The stdx intrinsic instead clears the
-  // quiet bit at narrow widths, so blend the bit-correct value in explicitly.
-  const F quieted = std::bit_cast<F>(ai | U(kQuiet));
-  stdx::where(stdx::isnan(a), r) = quieted;
+  // NaN input: repair to the scalar path for this compiler and operation.
+  // Clang quiets sNaNs for these scalar std:: calls. GCC's scalar wrappers
+  // below quiet explicitly, so the SIMD repair follows that same policy.
+#if defined(__clang__) || defined(__GNUC__)
+  constexpr bool kQuietNan = true;
+#else
+  static_assert(QuietNan, "round_fixup_simd needs a compiler-specific signaling-NaN policy");
+  constexpr bool kQuietNan = QuietNan;
+#endif
+  F nan_result;
+  if constexpr (kQuietNan) {
+    // Quiet bit = MSB of the mantissa (bit 22 for f32, bit 51 for f64).
+    constexpr Bits kQuiet = Bits(1) << (sizeof(Float) == 4 ? 22 : 51);
+    nan_result = std::bit_cast<F>(ai | U(kQuiet));
+  } else {
+    nan_result = std::bit_cast<F>(ai);
+  }
+  stdx::where(stdx::isnan(a), r) = nan_result;
   return r;
 }
 
 inline native<float> trunc_simd(native<float> a) {
-  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::trunc(x); });
+  return round_fixup_simd<float, false>(a, [](native<float> x) { return stdx::trunc(x); });
 }
 inline native<float> ceil_simd(native<float> a) {
-  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::ceil(x); });
+  return round_fixup_simd<float, false>(a, [](native<float> x) { return stdx::ceil(x); });
 }
 inline native<float> floor_simd(native<float> a) {
-  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::floor(x); });
+  return round_fixup_simd<float, false>(a, [](native<float> x) { return stdx::floor(x); });
 }
 inline native<float> rndne_simd(native<float> a) {
-  return round_fixup_simd<float>(a, [](native<float> x) { return stdx::nearbyint(x); });
+  return round_fixup_simd<float, true>(a, [](native<float> x) { return stdx::nearbyint(x); });
 }
 
 inline native<double> trunc_simd(native<double> a) {
-  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::trunc(x); });
+  return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::trunc(x); });
 }
 inline native<double> ceil_simd(native<double> a) {
-  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::ceil(x); });
+  return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::ceil(x); });
 }
 inline native<double> floor_simd(native<double> a) {
-  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::floor(x); });
+  return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::floor(x); });
 }
 inline native<double> rndne_simd(native<double> a) {
-  return round_fixup_simd<double>(a, [](native<double> x) { return stdx::nearbyint(x); });
+  return round_fixup_simd<double, true>(a, [](native<double> x) { return stdx::nearbyint(x); });
 }
 
 /// Scalar round-to-integer matching the round_fixup_simd / AMD-hardware NaN
