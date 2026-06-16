@@ -1,0 +1,200 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "backends/amd_smi/sdma_feature.hpp"
+
+#include <concepts>
+#include <cstdint>
+#include <memory>
+
+#include <amd_smi/amdsmi.h>
+
+namespace rocprofsys::backends::amd_smi
+{
+
+/**
+ * @brief Thin wrapper around AMD SMI C API for dependency injection and testing.
+ *
+ * This struct provides static methods that directly forward to the AMD SMI library.
+ * It serves as an abstraction layer that can be mocked in tests through the
+ * backend_factory.
+ */
+struct backend
+{
+    /**
+     * @brief Initialize the AMD SMI library.
+     * @param init_flags Initialization flags (default: AMDSMI_INIT_AMD_GPUS).
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t init(std::uint64_t init_flags = AMDSMI_INIT_AMD_GPUS)
+    {
+        return amdsmi_init(init_flags);
+    }
+
+    /**
+     * @brief Shutdown the AMD SMI library.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t shutdown() { return amdsmi_shut_down(); }
+
+    /**
+     * @brief Get AMD SMI library version information.
+     * @param version Pointer to structure to receive version information.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_version(amdsmi_version_t* version)
+    {
+        return amdsmi_get_lib_version(version);
+    }
+
+    /**
+     * @brief Get all socket handles in the system.
+     * @param socket_count Pointer to receive the number of sockets (input/output).
+     * @param socket_handles Pointer to array to receive socket handles (can be nullptr
+     * for count query).
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_socket_handles(std::uint32_t*        socket_count,
+                                              amdsmi_socket_handle* socket_handles)
+    {
+        return amdsmi_get_socket_handles(socket_count, socket_handles);
+    }
+
+    /**
+     * @brief Get processor handles for a specific socket.
+     * @param socket_handle Socket to query.
+     * @param processor_count Pointer to receive the number of processors (input/output).
+     * @param processor_handles Pointer to array to receive processor handles (can be
+     * nullptr for count query).
+     * @return AMD SMI status code indicating success or failure.
+     *
+     * @note This function only returns GPU processors. For NICs, use
+     * get_processor_handles_by_type() with AMDSMI_PROCESSOR_TYPE_AMD_NIC.
+     */
+    static amdsmi_status_t get_processor_handles(
+        amdsmi_socket_handle socket_handle, std::uint32_t* processor_count,
+        amdsmi_processor_handle* processor_handles)
+    {
+        return amdsmi_get_processor_handles(socket_handle, processor_count,
+                                            processor_handles);
+    }
+
+#if defined(ROCPROFSYS_BUILD_AINIC) && ROCPROFSYS_BUILD_AINIC == 1
+    /**
+     * @brief Get processor handles of a specific type for a socket.
+     * @param socket_handle Socket to query.
+     * @param processor_type Type of processor to enumerate (GPU, NIC, CPU).
+     * @param processor_handles Pointer to array to receive processor handles (can be
+     * nullptr for count query).
+     * @param processor_count Pointer to receive the number of processors (input/output).
+     * @return AMD SMI status code indicating success or failure.
+     *
+     * @note This is required for enumerating NICs. amdsmi_get_processor_handles()
+     * only returns GPUs. Requires AMD SMI >= 26.3.
+     */
+    static amdsmi_status_t get_processor_handles_by_type(
+        amdsmi_socket_handle socket_handle, processor_type_t processor_type,
+        amdsmi_processor_handle* processor_handles, std::uint32_t* processor_count)
+    {
+        return amdsmi_get_processor_handles_by_type(socket_handle, processor_type,
+                                                    processor_handles, processor_count);
+    }
+#endif
+
+    /**
+     * @brief Get the type of a processor (GPU, NIC, etc.).
+     * @param processor_handle Processor to query.
+     * @param processor_type Pointer to receive the processor type.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_processor_type(amdsmi_processor_handle processor_handle,
+                                              processor_type_t*       processor_type)
+    {
+        return amdsmi_get_processor_type(processor_handle, processor_type);
+    }
+
+    /**
+     * @brief Get GPU memory usage for a specific memory type.
+     * @param processor_handle GPU processor to query.
+     * @param type Memory type (e.g., VRAM, GTT).
+     * @param usage Pointer to receive memory usage in bytes.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_memory_usage(amdsmi_processor_handle processor_handle,
+                                            amdsmi_memory_type_t    type,
+                                            std::uint64_t*          usage)
+    {
+        return amdsmi_get_gpu_memory_usage(processor_handle, type, usage);
+    }
+
+    /**
+     * @brief Get GPU metrics information (temperature, power, clocks, etc.).
+     * @param processor_handle GPU processor to query.
+     * @param metrics Pointer to structure to receive GPU metrics.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_metrics_info(amdsmi_processor_handle processor_handle,
+                                            amdsmi_gpu_metrics_t*   metrics)
+    {
+        return amdsmi_get_gpu_metrics_info(processor_handle, metrics);
+    }
+
+    /**
+     * @brief Get GPU ASIC information including vendor and product names.
+     * @param processor_handle GPU processor to query.
+     * @param asic_info Pointer to structure to receive ASIC information.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_gpu_asic_info(amdsmi_processor_handle processor_handle,
+                                             amdsmi_asic_info_t*     asic_info)
+    {
+        return amdsmi_get_gpu_asic_info(processor_handle, asic_info);
+    }
+
+    /**
+     * @brief Get GPU process list with per-process SDMA usage.
+     *
+     * Returns the list of processes using the GPU, including cumulative SDMA
+     * usage in microseconds per process. Used for computing SDMA utilization.
+     *
+     * @param processor_handle GPU processor to query.
+     * @param max_processes Pointer to max process count (input/output).
+     * @param list Pointer to array to receive process info (can be nullptr for count
+     * query).
+     * @return AMD SMI status code indicating success or failure.
+     *
+     * @note Requires AMD SMI >= 26.3. Guarded by AMD_SMI_SDMA_SUPPORTED.
+     */
+#if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    static amdsmi_status_t get_gpu_process_list(amdsmi_processor_handle processor_handle,
+                                                std::uint32_t*          max_processes,
+                                                amdsmi_proc_info_t*     list)
+    {
+        return amdsmi_get_gpu_process_list(processor_handle, max_processes, list);
+    }
+#endif
+};
+
+/**
+ * @brief Factory for creating backend instances.
+ *
+ * Provides a factory method for creating backend instances. This enables
+ * dependency injection and allows for substituting mock backends in tests.
+ */
+struct backend_factory
+{
+    using backend_t = backend;
+
+    /**
+     * @brief Create a new backend instance.
+     * @return Shared pointer to the backend instance.
+     */
+    static std::shared_ptr<backend_t> create_backend()
+    {
+        return std::make_shared<backend_t>();
+    }
+};
+
+}  // namespace rocprofsys::backends::amd_smi

@@ -28,11 +28,9 @@ def gen_vector_cmp_class(
     L.append('  uint64_t exec = wf.exec();')
     if is_cmpx:
         L.append('  uint64_t result = 0;')
-    elif dst:
-        # VOP3: initialize from destination register for inactive lanes.
-        L.append(f'  uint64_t vcc = {dst[0]}.read_scalar64(wf);')
     else:
-        L.append('  uint64_t vcc = wf.vcc();')
+        # All v_cmp variants zero inactive lanes regardless of encoding.
+        L.append('  uint64_t vcc = 0;')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if dtype == 'f64':
@@ -66,43 +64,45 @@ def gen_vector_cmp_class(
         L.append('    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;')
         L.append('    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;')
     elif dtype == 'f16':
-        # Read raw f16 bits first for sNaN/qNaN detection (bit 9 is the
-        # quiet NaN bit in IEEE 754 binary16), then convert to f32 for
-        # the remaining class checks. The f16→f32 conversion may turn
-        # sNaN into qNaN, so we cannot rely on the converted value.
+        # Classify directly from the raw f16 bit fields. Converting to f32
+        # first is lossy for this purpose: an f16 denormal widens to an f32
+        # *normal*, so std::isnormal would misclassify every f16 denormal as
+        # normal. The exponent/mantissa/sign decode below distinguishes all ten
+        # classes on the true f16 value (bit 9 of the mantissa is the quiet-NaN
+        # bit in IEEE 754 binary16).
         L.append(
             f'    uint16_t s0_raw = static_cast<uint16_t>({src[0]}.read_lane(wf, lane));'
         )
-        L.append(f'    float s0 = util::f16_to_f32(s0_raw);')
         if is_vop3:
-            L.extend(vop3_src_mod('s0', 0, has_abs))
+            # VOP3 abs/neg apply to the f16 value: abs clears the sign bit, neg
+            # flips it (abs before neg, matching neg(abs(x))).
+            if has_abs:
+                L.append('    if (inst_.abs & (1u << 0)) s0_raw &= 0x7FFFu;')
+            L.append('    if (inst_.neg & (1u << 0)) s0_raw ^= 0x8000u;')
         L.append(f'    uint32_t mask = {src[1]}.read_lane(wf, lane);')
         L.append('    bool match = false;')
+        L.append('    uint16_t f16_exp = (s0_raw >> 10) & 0x1F;')
+        L.append('    uint16_t f16_mant = s0_raw & 0x3FF;')
+        L.append('    bool f16_sign = (s0_raw & 0x8000) != 0;')
+        L.append('    bool is_nan = (f16_exp == 0x1F) && (f16_mant != 0);')
+        L.append('    bool is_inf = (f16_exp == 0x1F) && (f16_mant == 0);')
+        L.append('    bool is_zero = (f16_exp == 0) && (f16_mant == 0);')
+        L.append('    bool is_denorm = (f16_exp == 0) && (f16_mant != 0);')
+        L.append('    bool is_normal = (f16_exp >= 1) && (f16_exp <= 30);')
         L.append(
-            '    bool is_f16_nan = ((s0_raw & 0x7C00) == 0x7C00) && ((s0_raw & 0x03FF) != 0);'
+            '    if ((mask & 0x001) && is_nan && (s0_raw & 0x0200) == 0) match = true;'
         )
         L.append(
-            '    if ((mask & 0x001) && is_f16_nan && (s0_raw & 0x0200) == 0) match = true;'
+            '    if ((mask & 0x002) && is_nan && (s0_raw & 0x0200) != 0) match = true;'
         )
-        L.append(
-            '    if ((mask & 0x002) && is_f16_nan && (s0_raw & 0x0200) != 0) match = true;'
-        )
-        L.append('    if ((mask & 0x004) && std::isinf(s0) && s0 < 0) match = true;')
-        L.append('    if ((mask & 0x008) && std::isnormal(s0) && s0 < 0) match = true;')
-        L.append(
-            '    if ((mask & 0x010) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && std::signbit(s0)) match = true;'
-        )
-        L.append(
-            '    if ((mask & 0x020) && s0 == 0.0f && std::signbit(s0)) match = true;'
-        )
-        L.append(
-            '    if ((mask & 0x040) && s0 == 0.0f && !std::signbit(s0)) match = true;'
-        )
-        L.append(
-            '    if ((mask & 0x080) && !std::isnormal(s0) && !std::isinf(s0) && !std::isnan(s0) && s0 != 0.0f && !std::signbit(s0)) match = true;'
-        )
-        L.append('    if ((mask & 0x100) && std::isnormal(s0) && s0 > 0) match = true;')
-        L.append('    if ((mask & 0x200) && std::isinf(s0) && s0 > 0) match = true;')
+        L.append('    if ((mask & 0x004) && is_inf && f16_sign) match = true;')
+        L.append('    if ((mask & 0x008) && is_normal && f16_sign) match = true;')
+        L.append('    if ((mask & 0x010) && is_denorm && f16_sign) match = true;')
+        L.append('    if ((mask & 0x020) && is_zero && f16_sign) match = true;')
+        L.append('    if ((mask & 0x040) && is_zero && !f16_sign) match = true;')
+        L.append('    if ((mask & 0x080) && is_denorm && !f16_sign) match = true;')
+        L.append('    if ((mask & 0x100) && is_normal && !f16_sign) match = true;')
+        L.append('    if ((mask & 0x200) && is_inf && !f16_sign) match = true;')
     else:
         L.append(f'    float s0 = std::bit_cast<float>({src[0]}.read_lane(wf, lane));')
         if is_vop3:
@@ -275,17 +275,12 @@ def gen_vector_cmp(
 
     VOPC (VOP2-like): result always goes to VCC.
     VOP3: result goes to dst[0] (explicit SGPR pair, may be VCC or any SGPR).
-    Inactive lanes preserve the destination register's existing bits.
+    Inactive lanes are zeroed in the result regardless of encoding.
     """
     L = []
     L.append('  uint64_t exec = wf.exec();')
-    if dst:
-        # VOP3: initialize from the destination register so inactive
-        # lanes preserve its existing bits (not VCC).
-        L.append(f'  uint64_t vcc = {dst[0]}.read_scalar64(wf);')
-    else:
-        # VOPC: destination is VCC.
-        L.append('  uint64_t vcc = wf.vcc();')
+    # All v_cmp variants zero inactive lanes regardless of encoding.
+    L.append('  uint64_t vcc = 0;')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
 

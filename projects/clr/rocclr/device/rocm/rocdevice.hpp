@@ -474,11 +474,14 @@ class Device : public NullDevice {
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
 
-  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) override;
+  virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
+                                        amd::Memory::HandleType handle_type) override;
 
-  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const;
+  bool ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
+                                amd::Memory::HandleType handle_type) const;
 
-  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle) override;
+  virtual amd::Memory* ImportShareableVMMHandle(void* osHandle,
+                                                amd::Memory::HandleType handle_type) override;
 
   virtual bool SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                             cl_set_device_clock_mode_output_amd* pSetClockModeOutput) override;
@@ -490,6 +493,8 @@ class Device : public NullDevice {
   virtual void RetainGlobalSignal(void* signal) const override;
   virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const override;
   virtual void DestroyHwEvent(void* hw_event) const override;
+  virtual void ResetHwEvents(const std::vector<void*>& hw_events) const override;
+  virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket() const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const override;
@@ -783,12 +788,6 @@ class Device : public NullDevice {
   friend void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data);
 
  public:
-
-  //! Count of schedulerQueue_ instances per device
-  //! Windows AQL device-enqueue path.
-  std::atomic<uint32_t> hasSchedulerQueue_{0};
-  static std::atomic<bool> skipHsaShutdown_;
-
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
