@@ -363,7 +363,7 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(uintptr_t raddr, uint32_t rkey,
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
                    raddr, byteswap<uint32_t>(rkey),
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
-                   reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   reinterpret_cast<uintptr_t>(atomic_laddr), byteswap<uint32_t>(atomic_lkey)};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
@@ -414,9 +414,9 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(uintptr_t raddr,
 
   // construct the WQE on the stack
   gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
-                   raddr, rkey,
+                   raddr, byteswap<uint32_t>(rkey),
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
-                   reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+                   reinterpret_cast<uintptr_t>(atomic_laddr), byteswap<uint32_t>(atomic_lkey)};
 
   // copy to SQ
   mlx5_sq.buf[sq_idx] = wqe;
