@@ -231,6 +231,7 @@ __device__ void QueuePair::bnxt_quiet_single() {
   bnxt_poll_cq_until(bnxt_sq.depth);
 }
 
+template<bool CheckSQ>
 __device__ void QueuePair::bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
     uint32_t rkey, uintptr_t laddr, uint32_t lkey, uint8_t opcode) {
   struct bnxt_re_bsqe hdr;
@@ -247,7 +248,9 @@ __device__ void QueuePair::bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
   inline_msg = static_cast<int32_t>(length) <= static_cast<int32_t>(inline_threshold) &&
                opcode == gda_op_rdma_write;
 
-  bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
+  if constexpr (CheckSQ) {
+    bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
+  }
 
   hdr_ptr  = (struct bnxt_re_bsqe*) bnxt_re_get_hwqe(&bnxt_sq, 0);
   rdma_ptr = (struct bnxt_re_rdma*) bnxt_re_get_hwqe(&bnxt_sq, 1);
@@ -326,7 +329,8 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
     lock<Scope>(&bnxt_sq.lock);
   }
 
-  bnxt_write_rma_wqe(length, raddr, rkey, laddr, lkey, opcode);
+  constexpr bool check_sq = (Scope != QpScope::Exclusive);
+  bnxt_write_rma_wqe<check_sq>(length, raddr, rkey, laddr, lkey, opcode);
 
   if (ring_db) {
     bnxt_ring_doorbell(bnxt_sq.tail);
@@ -337,6 +341,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
   }
 }
 
+template<bool CheckSQ>
 __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
     bool fetching, bool fence) {
@@ -353,7 +358,9 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey
   uint32_t atomic_idx = 0;
   uint32_t length = sizeof(uint64_t);
 
-  bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
+  if constexpr (CheckSQ) {
+    bnxt_poll_cq_until(GDA_BNXT_WQE_SLOT_COUNT);
+  }
 
   hdr_ptr = (struct bnxt_re_bsqe*)   bnxt_re_get_hwqe(&bnxt_sq, 0);
   amo_ptr = (struct bnxt_re_atomic*) bnxt_re_get_hwqe(&bnxt_sq, 1);
@@ -443,7 +450,8 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
     lock<Scope>(&bnxt_sq.lock);
   }
 
-  atomic_idx = bnxt_write_amo_wqe(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
+  constexpr bool check_sq = (Scope != QpScope::Exclusive);
+  atomic_idx = bnxt_write_amo_wqe<check_sq>(raddr, rkey, opcode, atomic_data, atomic_cmp, fetching, fence);
 
   bnxt_ring_doorbell(bnxt_sq.tail);
 

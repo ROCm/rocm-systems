@@ -386,8 +386,10 @@ class QueuePair {
 #endif
 #if defined(GDA_BNXT)
 
+  template<bool CheckSQ = true>
   __device__ void bnxt_write_rma_wqe(int32_t length, uintptr_t raddr,
       uint32_t rkey, uintptr_t laddr, uint32_t lkey, uint8_t opcode);
+  template<bool CheckSQ = true>
   __device__ uint32_t bnxt_write_amo_wqe(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetching, bool fence);
