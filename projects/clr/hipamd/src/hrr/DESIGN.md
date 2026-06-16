@@ -429,6 +429,30 @@ before the launch, and `capture_hipLaunchByPtr` snapshots it (a copy, since the 
 `hipLaunchByPtr` moves the exec out via `PopExec`) and feeds it through the same
 signature-driven serialization path.
 
+### Pointers Embedded in By-Value Struct Args (`value_kind == 3`)
+
+`KernelSignature` classifies an argument as a GPU pointer only when
+`desc.type_ == T_POINTER`. A pointer that is a *member* of a struct passed by
+value is reported as a plain scalar, so the type metadata cannot say "bytes
+`o..o+7` of this argument are a device address". This is common in PyTorch/ATen
+`<<<>>>` kernels: `vectorized_elementwise_kernel` takes a `std::array<char*,N>`
+by value, and `reduce_kernel` takes a ~720-byte config struct that mixes scalar
+sizes/strides with device pointers at arbitrary offsets (e.g. +656, +664). Before
+this was handled, those addresses were stored verbatim and replay launched the
+kernel with the original (untranslated) GPU VAs — a guaranteed memory fault.
+
+Capture detects them by value: for every non-pointer argument,
+`find_embedded_ptr_offsets` walks each 8-byte-aligned word and asks the runtime
+(`hipPointerGetAttributes`, via `g_real_table` so it is not itself captured)
+whether the word is a live device/unified allocation. Matching offsets are
+recorded as a new arg encoding `value_kind == 3`: the raw struct bytes followed
+by `u16 n_ptrs` and `n_ptrs × u16` byte offsets. Probing perturbs the thread's
+HIP last-error, so `hip::tls.last_command_error_/last_error_` are saved and
+restored around the scan. At replay, `replay_kernel_launch` copies the struct
+bytes and overwrites each recorded offset with `translate_ptr(rec)` before
+launch, so embedded pointers resolve to live allocations exactly like top-level
+pointer args. Old archives (no `value_kind == 3`) parse unchanged.
+
 `co_hash` is always written as 0 in kernel launch events — no cheap mapping from
 kernel to code object at dispatch time. Playback resolves kernels by name, scanning
 all loaded modules.

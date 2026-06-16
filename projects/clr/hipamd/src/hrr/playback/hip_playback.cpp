@@ -250,6 +250,9 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   [+28..29] num_args (uint16_t)
 //   [+30..31] num_snapshots (uint16_t, always 0)
 //   per arg:  u8 value_kind, u16 size, <size> bytes data
+//             value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
+//                         3=scalar/struct with embedded gpu pointer(s);
+//             kind 3 appends u16 n_ptrs then n_ptrs * u16 byte offsets.
 
 static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) {
     // Skip the 32-byte header; kernel launch has a variable-length binary format.
@@ -347,14 +350,28 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
         memcpy(&arg_size, p, 2); p += 2;
         if (p + arg_size > end) break;
 
+        const uint8_t* data = p;
+        p += arg_size;
+
+        // value_kind 3 carries a trailing list of embedded-pointer byte offsets.
+        std::vector<uint16_t> ptr_offsets;
+        if (value_kind == 3) {
+            if (p + 2 > end) break;
+            uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
+            for (uint16_t k = 0; k < n_ptrs; k++) {
+                if (p + 2 > end) { n_ptrs = k; break; }
+                uint16_t off; memcpy(&off, p, 2); p += 2;
+                ptr_offsets.push_back(off);
+            }
+        }
+
         if (value_kind == 2) {  // hidden arg — skip
-            p += arg_size;
             continue;
         }
         arg_storage.emplace_back();
         auto& storage = arg_storage.back();
-        if (value_kind == 1 && arg_size >= 8) {  // GPU pointer
-            uint64_t rec_ptr; memcpy(&rec_ptr, p, 8);
+        if (value_kind == 1 && arg_size >= 8) {  // whole-arg GPU pointer
+            uint64_t rec_ptr; memcpy(&rec_ptr, data, 8);
             void* live = ctx.translate_ptr(rec_ptr);
             storage.resize(sizeof(void*));
             memcpy(storage.data(), &live, sizeof(void*));
@@ -362,22 +379,33 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl) 
                 fprintf(stderr, "[HRR]   arg[%u]: ptr 0x%llx -> %p%s\n",
                         i, (unsigned long long)rec_ptr, live,
                         live ? "" : " (MISSING!)");
+        } else if (value_kind == 3) {  // scalar/struct with embedded gpu pointer(s)
+            storage.assign(data, data + arg_size);
+            for (uint16_t off : ptr_offsets) {
+                if (static_cast<size_t>(off) + 8 > arg_size) continue;
+                uint64_t rec_ptr; memcpy(&rec_ptr, storage.data() + off, 8);
+                void* live = ctx.translate_ptr(rec_ptr);
+                memcpy(storage.data() + off, &live, sizeof(void*));
+                if (ctx.verbose)
+                    fprintf(stderr, "[HRR]   arg[%u]: embedded ptr @+%u 0x%llx -> %p%s\n",
+                            i, off, (unsigned long long)rec_ptr, live,
+                            live ? "" : " (MISSING!)");
+            }
         } else {
-            storage.assign(p, p + arg_size);
+            storage.assign(data, data + arg_size);
             if (ctx.verbose) {
                 // Print scalar args as hex bytes for debugging
                 fprintf(stderr, "[HRR]   arg[%u]: scalar %u bytes = ", i, arg_size);
                 for (uint16_t b = 0; b < arg_size && b < 8; b++)
-                    fprintf(stderr, "%02x", p[b]);
+                    fprintf(stderr, "%02x", data[b]);
                 if (arg_size > 8) fprintf(stderr, "...");
                 // Also print as u32/u64 for convenience
-                if (arg_size == 4) { uint32_t v; memcpy(&v, p, 4); fprintf(stderr, " (u32=%u)", v); }
-                if (arg_size == 8) { uint64_t v; memcpy(&v, p, 8); fprintf(stderr, " (u64=%llu)", (unsigned long long)v); }
+                if (arg_size == 4) { uint32_t v; memcpy(&v, data, 4); fprintf(stderr, " (u32=%u)", v); }
+                if (arg_size == 8) { uint64_t v; memcpy(&v, data, 8); fprintf(stderr, " (u64=%llu)", (unsigned long long)v); }
                 fprintf(stderr, "\n");
             }
         }
         arg_ptrs.push_back(storage.data());
-        p += arg_size;
     }
 
     hipStream_t stream = ctx.translate_stream(stream_rec);

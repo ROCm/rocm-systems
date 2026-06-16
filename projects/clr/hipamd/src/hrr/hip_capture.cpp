@@ -52,8 +52,11 @@
 #include <atomic>
 #include <climits>
 #include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -124,10 +127,43 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 //   u16  num_args
 //   u16  num_snapshots (always 0)
 //   for each arg:
-//     u8   value_kind  (0=scalar, 1=pointer/gpu addr)
+//     u8   value_kind  (0=scalar, 1=pointer/gpu addr, 2=hidden,
+//                       3=scalar/struct with embedded gpu pointer(s))
 //     u16  size
 //     u8[] data (size bytes)
+//     if value_kind == 3:
+//       u16   n_ptrs
+//       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte gpu ptr)
 // ---------------------------------------------------------------------------
+
+// Locate device pointers embedded inside a by-value kernel argument.
+//
+// KernelSignature marks an argument as a plain scalar (desc.type_ != T_POINTER)
+// whenever the pointer is a *member* of a struct passed by value — e.g. the
+// std::array<char*,N> that ATen's vectorized_elementwise_kernel takes through
+// the <<<>>> path. The type metadata cannot say "bytes 0..7 are an address",
+// so the only robust way to find such pointers is to ask the runtime whether
+// each 8-byte aligned word is a live device allocation. Probing perturbs the
+// calling thread's HIP last-error state, so we save and restore it.
+static void find_embedded_ptr_offsets(const uint8_t* data, size_t size,
+                                      std::vector<uint16_t>& offsets) {
+  if (!data || !g_real_table.hipPointerGetAttributes_fn) return;
+  const hipError_t saved_cmd = hip::tls.last_command_error_;
+  const hipError_t saved_err = hip::tls.last_error_;
+  for (size_t j = 0; j + sizeof(void*) <= size; j += sizeof(void*)) {
+    uint64_t cand;
+    std::memcpy(&cand, data + j, sizeof(cand));
+    if (cand < 0x10000ULL) continue;  // small scalars are never device VAs
+    hipPointerAttribute_t attr{};
+    if (g_real_table.hipPointerGetAttributes_fn(
+            &attr, reinterpret_cast<const void*>(cand)) == hipSuccess &&
+        (attr.type == hipMemoryTypeDevice || attr.type == hipMemoryTypeUnified)) {
+      offsets.push_back(static_cast<uint16_t>(j));
+    }
+  }
+  hip::tls.last_command_error_ = saved_cmd;
+  hip::tls.last_error_         = saved_err;
+}
 
 static void serialize_kernel_launch(
     const char*                 kernel_name,
@@ -183,31 +219,70 @@ static void serialize_kernel_launch(
   push_u16(num_args);
   push_u16(0);  // num_snapshots
 
+  // HIP_HRR_DEBUG_ARGS=<non-empty> dumps every captured arg (kind, size, full
+  // bytes, detected embedded-pointer offsets) — used to confirm pointer layout.
+  static const bool dbg = []() {
+    const char* e = std::getenv("HIP_HRR_DEBUG_ARGS");
+    return e != nullptr && e[0] != '\0';
+  }();
+
+  // Serialize one argument: a whole-arg pointer (kind 1), or a scalar/struct
+  // that we additionally scan for embedded device pointers (kind 3 if any are
+  // found, else kind 0). `bytes` may be null (unavailable) -> zero-filled.
+  auto emit_arg = [&](uint32_t idx, bool is_ptr,
+                      const uint8_t* bytes, uint16_t sz) {
+    if (is_ptr) {
+      push_u8(1); push_u16(sz);
+      if (bytes) push_bytes(bytes, sz);
+      else for (uint16_t j = 0; j < sz; j++) push_u8(0);
+      if (dbg) {
+        uint64_t v = 0; if (bytes && sz >= 8) std::memcpy(&v, bytes, 8);
+        std::fprintf(stderr, "[HRR args] %s arg[%u] kind=1(ptr) size=%u value=0x%llx\n",
+                     kernel_name, idx, sz, (unsigned long long)v);
+      }
+      return;
+    }
+    std::vector<uint16_t> offs;
+    find_embedded_ptr_offsets(bytes, sz, offs);
+    uint8_t kind = offs.empty() ? 0 : 3;
+    push_u8(kind); push_u16(sz);
+    if (bytes) push_bytes(bytes, sz);
+    else for (uint16_t j = 0; j < sz; j++) push_u8(0);
+    if (kind == 3) {
+      push_u16(static_cast<uint16_t>(offs.size()));
+      for (uint16_t o : offs) push_u16(o);
+    }
+    if (dbg) {
+      std::string hex; char tmp[16];
+      for (uint16_t b = 0; bytes && b < sz; b++) {
+        std::snprintf(tmp, sizeof(tmp), "%02x", bytes[b]);
+        hex += tmp;
+      }
+      std::string off_str;
+      for (uint16_t o : offs) { std::snprintf(tmp, sizeof(tmp), "%u ", o); off_str += tmp; }
+      std::fprintf(stderr, "[HRR args] %s arg[%u] kind=%u size=%u bytes=%s ptr_off=[%s]\n",
+                   kernel_name, idx, kind, sz, hex.c_str(), off_str.c_str());
+    }
+  };
+
   if (kbuf && ksz > 0) {
     const auto* buf_bytes = static_cast<const uint8_t*>(kbuf);
     for (uint32_t i = 0; i < n_all; i++) {
       const auto& desc = sig.at(i);
       if (desc.info_.hidden_) continue;
-      uint8_t kind = (desc.type_ == T_POINTER) ? 1 : 0;
       uint16_t sz = static_cast<uint16_t>(desc.size_);
-      push_u8(kind); push_u16(sz);
-      if (desc.offset_ + sz <= ksz)
-        push_bytes(buf_bytes + desc.offset_, sz);
-      else
-        for (uint16_t j = 0; j < sz; j++) push_u8(0);
+      const uint8_t* bytes =
+          (desc.offset_ + sz <= ksz) ? buf_bytes + desc.offset_ : nullptr;
+      emit_arg(i, desc.type_ == T_POINTER, bytes, sz);
     }
   } else if (kernel_params) {
     uint32_t param_idx = 0;
     for (uint32_t i = 0; i < n_all; i++) {
       const auto& desc = sig.at(i);
       if (desc.info_.hidden_) { continue; }
-      uint8_t kind = (desc.type_ == T_POINTER) ? 1 : 0;
       uint16_t sz = static_cast<uint16_t>(desc.size_);
-      push_u8(kind); push_u16(sz);
-      if (kernel_params[param_idx])
-        push_bytes(kernel_params[param_idx], sz);
-      else
-        for (uint16_t j = 0; j < sz; j++) push_u8(0);
+      emit_arg(i, desc.type_ == T_POINTER,
+               static_cast<const uint8_t*>(kernel_params[param_idx]), sz);
       param_idx++;
     }
   }

@@ -82,11 +82,13 @@ struct StreamWaitEventEvent {
   uint32_t flags;
 };
 
-// Kernel argument (value_kind: 0=scalar, 1=gpu-pointer)
+// Kernel argument (value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
+// 3=scalar/struct with embedded gpu pointer(s) at ptr_offsets)
 struct KernelArg {
   uint8_t  value_kind;
   uint16_t size;
   std::vector<uint8_t> data;
+  std::vector<uint16_t> ptr_offsets;  // only for value_kind == 3
 };
 
 // Buffer snapshot (always empty in in-tree captures)

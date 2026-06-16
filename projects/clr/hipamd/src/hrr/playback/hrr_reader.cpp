@@ -135,6 +135,15 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
     if (p + arg.size > end) return false;
     arg.data.assign(p, p + arg.size);
     p += arg.size;
+    if (arg.value_kind == 3) {  // trailing embedded-pointer offset list
+      if (p + 2 > end) return false;
+      uint16_t n_ptrs; memcpy(&n_ptrs, p, 2); p += 2;
+      for (uint16_t k = 0; k < n_ptrs; k++) {
+        if (p + 2 > end) return false;
+        uint16_t off; memcpy(&off, p, 2); p += 2;
+        arg.ptr_offsets.push_back(off);
+      }
+    }
     kl.args.push_back(std::move(arg));
   }
 
