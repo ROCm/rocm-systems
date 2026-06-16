@@ -16,9 +16,6 @@ namespace rocprofsys::backends::amd_smi::gpu
 // 16-bit sentinel must be checked explicitly when reading from the wider POD field.
 constexpr std::uint32_t METRIC_VALUE_NOT_SUPPORTED_16 = 0xFFFF;
 constexpr std::uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xFFFFFFFFFFFFFFFFULL;
-// Full uint32_t range (e.g. int64_t unsupported / error values cast to std::uint32_t).
-constexpr std::uint32_t METRIC_VALUE_NOT_SUPPORTED_32 =
-    std::numeric_limits<std::uint32_t>::max();
 
 constexpr size_t MAX_NUM_VCN        = 4;
 constexpr size_t MAX_NUM_JPEG       = 32;
@@ -46,11 +43,11 @@ struct metrics
     std::uint32_t                        current_socket_power = 0;
     std::uint32_t                        average_socket_power = 0;
     std::uint64_t                        memory_usage         = 0;
-    std::uint32_t                        hotspot_temperature  = 0;
-    std::uint32_t                        edge_temperature     = 0;
     std::uint32_t                        gfx_activity         = 0;
     std::uint32_t                        umc_activity         = 0;
     std::uint32_t                        mm_activity          = 0;
+    std::int64_t                         hotspot_temperature  = 0;
+    std::int64_t                         edge_temperature     = 0;
     std::array<xcp_metrics, MAX_NUM_XCP> xcp_stats;
 
     // Device-level VCN/JPEG activity (Radeon GPUs)

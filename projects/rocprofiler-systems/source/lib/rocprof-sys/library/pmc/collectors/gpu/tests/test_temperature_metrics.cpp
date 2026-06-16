@@ -31,7 +31,7 @@ make_temp_enabled(bool hotspot, bool edge)
 }
 
 metrics
-make_temp_metrics(std::uint32_t hotspot_c, std::uint32_t edge_c)
+make_temp_metrics(std::int64_t hotspot_c, std::int64_t edge_c)
 {
     metrics m{};
     m.hotspot_temperature = hotspot_c;
@@ -75,4 +75,12 @@ TEST(gpu_temperature, TrackLabelMatchesSelectedReading)
                  "Hotspot Temp");
     EXPECT_STREQ(gpu_temperature_track_label(make_temp_enabled(false, true)),
                  "Edge Temp");
+}
+
+// int64_t path preserves sub-zero °C for temperature metrics.
+TEST(gpu_temperature, NegativeCelsiusPreservedWhenSelected)
+{
+    const auto m = make_temp_metrics(-3, 40);
+    EXPECT_DOUBLE_EQ(select_gpu_temperature(make_temp_enabled(true, false), m), -3.0);
+    EXPECT_DOUBLE_EQ(select_gpu_temperature(make_temp_enabled(false, true), m), 40.0);
 }

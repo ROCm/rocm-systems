@@ -22,8 +22,8 @@ concept gpu_backend_contract = requires(const Backend backend) {
     { backend.get_gpu_asic_info() } -> std::same_as<asic_info>;
     { backend.get_gpu_metrics() } -> std::same_as<metrics>;
     { backend.get_memory_usage() } -> std::same_as<std::uint64_t>;
-    { backend.get_hotspot_temperature() } -> std::same_as<std::uint32_t>;
-    { backend.get_edge_temperature() } -> std::same_as<std::uint32_t>;
+    { backend.get_hotspot_temperature() } -> std::same_as<std::int64_t>;
+    { backend.get_edge_temperature() } -> std::same_as<std::int64_t>;
     { backend.get_raw_sdma_usage() } -> std::same_as<std::uint64_t>;
     { backend.is_sdma_supported() } -> std::same_as<bool>;
 };
@@ -220,20 +220,21 @@ private:
             m_supported_metrics.bits.memory_usage = 0;
         }
 
+        // The API amdsmi_get_temp_metric signals "not available" with a non-success
+        // status, which the backend turns into std::runtime_error. The value is not
+        // filled with MAX_UINT32 unlike other metrics.
         try
         {
-            const auto hotspot = m_backend->get_hotspot_temperature();
-            m_supported_metrics.bits.hotspot_temperature =
-                is_metric_supported(hotspot, METRIC_VALUE_NOT_SUPPORTED_32) ? 1 : 0;
+            (void) m_backend->get_hotspot_temperature();
+            m_supported_metrics.bits.hotspot_temperature = 1;
         } catch(const std::runtime_error&)
         {
             m_supported_metrics.bits.hotspot_temperature = 0;
         }
         try
         {
-            const auto edge = m_backend->get_edge_temperature();
-            m_supported_metrics.bits.edge_temperature =
-                is_metric_supported(edge, METRIC_VALUE_NOT_SUPPORTED_32) ? 1 : 0;
+            (void) m_backend->get_edge_temperature();
+            m_supported_metrics.bits.edge_temperature = 1;
         } catch(const std::runtime_error&)
         {
             m_supported_metrics.bits.edge_temperature = 0;

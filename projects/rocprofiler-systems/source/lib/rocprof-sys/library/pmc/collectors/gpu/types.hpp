@@ -32,7 +32,6 @@ using backend::MAX_NUM_VCN;
 using backend::MAX_NUM_XCP;
 using backend::MAX_NUM_XGMI_LINKS;
 using backend::METRIC_VALUE_NOT_SUPPORTED_16;
-using backend::METRIC_VALUE_NOT_SUPPORTED_32;
 using backend::METRIC_VALUE_NOT_SUPPORTED_64;
 
 /**
