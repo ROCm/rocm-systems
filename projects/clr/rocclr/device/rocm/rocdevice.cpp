@@ -250,34 +250,20 @@ Device::~Device() {
 void NullDevice::tearDown() {}
 
 void Device::WaitForHsaAsyncHandlersIdle() {
-  constexpr int kDrainTimeoutMs = 5000;
-  const std::chrono::steady_clock::time_point start_time = std::chrono::steady_clock::now();
-  const std::chrono::steady_clock::duration fast_timeout =
-      std::chrono::milliseconds(kDrainTimeoutMs);
-
-  auto sumQueuedHandlers = [this]() -> uint64_t {
-    uint64_t sum = 0;
+  std::vector<VirtualGPU*> snapshot;
+  {
     std::scoped_lock lock(vgpusAccess_);
     for (VirtualGPU* vgpu : vgpus_) {
       if (vgpu != nullptr) {
-        sum += vgpu->QueuedAsyncHandlers().load(std::memory_order_acquire);
+        vgpu->retain();
+        snapshot.push_back(vgpu);
       }
     }
-    return sum;
-  };
+  }
 
-  while (sumQueuedHandlers() != 0) {
-    if (std::chrono::steady_clock::now() - start_time > fast_timeout) {
-      const uint64_t remaining = sumQueuedHandlers();
-      if (remaining != 0) {
-        LogPrintfError(
-            "WaitForHsaAsyncHandlersIdle: %d ms elapsed, VirtualGPU queued_async total=%llu; "
-            "proceeding with device destruction.",
-            kDrainTimeoutMs, static_cast<unsigned long long>(remaining));
-      }
-      return;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  for (VirtualGPU* vgpu : snapshot) {
+    vgpu->DrainAsyncHandlers();
+    vgpu->release();
   }
 }
 

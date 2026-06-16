@@ -402,7 +402,9 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
   }
 
   // Return false, so the callback will not be called again for this signal
-  gpu->QueuedAsyncHandlers()--;
+  if (gpu->QueuedAsyncHandlers().fetch_sub(1, std::memory_order_acq_rel) == 1) {
+    gpu->NotifyAsyncHandlersIdle();
+  }
   gpu->release();
   return false;
 }
@@ -705,7 +707,9 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
       hsa_status_t result = Hsa::signal_async_handler(
           prof_signal->signal_, HSA_SIGNAL_CONDITION_LT, init_value, &HsaAmdSignalHandler, ts);
       if (HSA_STATUS_SUCCESS != result) {
-        gpu_.QueuedAsyncHandlers()--;
+        if (gpu_.QueuedAsyncHandlers().fetch_sub(1, std::memory_order_acq_rel) == 1) {
+          gpu_.NotifyAsyncHandlersIdle();
+        }
         ts->gpu()->release();
         LogError("hsa_amd_signal_async_handler() failed to set the handler!");
       } else {
@@ -2032,6 +2036,20 @@ VirtualGPU::~VirtualGPU() {
     amd::disableHostcalls(hostcallBuffer_);
     roc_device_.hostFree(hostcallBuffer_, hostcallBufferSize_);
   }
+}
+
+// ================================================================================================
+void VirtualGPU::DrainAsyncHandlers() {
+  amd::ScopedLock lock(async_handlers_lock_);
+  while (QueuedAsyncHandlers().load(std::memory_order_acquire) != 0) {
+    async_handlers_lock_.wait();
+  }
+}
+
+// ================================================================================================
+void VirtualGPU::NotifyAsyncHandlersIdle() const {
+  amd::ScopedLock lock(async_handlers_lock_);
+  async_handlers_lock_.notifyAll();
 }
 
 // ================================================================================================

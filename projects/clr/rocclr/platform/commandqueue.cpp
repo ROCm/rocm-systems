@@ -80,6 +80,9 @@ bool HostQueue::terminate() {
         lastCommand->release();
       }
     }
+    if (vdev() != nullptr) {
+      vdev()->DrainAsyncHandlers();
+    }
     thread_.Release();
     thread_.acceptingCommands_ = false;
   } else {

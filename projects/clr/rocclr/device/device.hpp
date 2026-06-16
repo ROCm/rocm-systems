@@ -1349,6 +1349,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void ReleaseSdmaEngines() {}  //!< Release SDMA engine assignments (ROCm specific)
   virtual void ReleaseAllHwQueues() {}
   virtual void ReleaseHwQueue() {}
+  //! Wait for backend async handlers that still hold this virtual device.
+  virtual void DrainAsyncHandlers() {}
   //!< Request a system-scope release fence on the next AQL packet (ROCm specific)
   virtual void addSystemScope() {}
 

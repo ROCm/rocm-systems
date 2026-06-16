@@ -15,6 +15,7 @@
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
+#include "thread/monitor.hpp"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -503,6 +504,8 @@ class VirtualGPU : public device::VirtualDevice {
   virtual void ReleaseSdmaEngines() final;  //!< Release SDMA engine assignments
   virtual void ReleaseAllHwQueues() final;
   virtual void ReleaseHwQueue() final;
+  void DrainAsyncHandlers() final;
+  void NotifyAsyncHandlersIdle() const;
 
   /**
    * @brief Waits on an outstanding kernel without regard to how
@@ -845,6 +848,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! SDMA engine affinity tracking for this VirtualGPU/stream
   uint32_t assigned_sdma_engine_ = 0;           //!< Assigned SDMA engine mask for all operations
+
+  mutable amd::Monitor async_handlers_lock_;
 
   void* hostcallBuffer_;        //!< Hostcall buffer
   size_t hostcallBufferSize_ = 0; //!< Byte size of hostcallBuffer_, for hostFree

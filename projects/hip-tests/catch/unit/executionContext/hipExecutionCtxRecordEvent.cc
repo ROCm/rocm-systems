@@ -34,7 +34,7 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordWaitEvent_Sanity) {
 
   HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
   REQUIRE(green_ctx != nullptr);
-  
+
   hipStream_t stream = nullptr;
   HIP_CHECK(hipExecutionCtxStreamCreate(&stream, green_ctx, hipStreamNonBlocking, 0x0));
   REQUIRE(stream != nullptr);
