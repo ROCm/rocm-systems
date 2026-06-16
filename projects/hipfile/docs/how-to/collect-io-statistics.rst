@@ -31,6 +31,8 @@ This is step 1 of the workflow. hipFile controls statistics collection through t
 
 .. code:: shell
 
+   export HIPFILE_STATS_LEVEL=1
+
 For background on ``HIPFILE_STATS_LEVEL`` and other environment variables, see :doc:`/reference/hipFile-environment-variables`.
 
 .. note::

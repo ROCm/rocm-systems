@@ -24,7 +24,7 @@ Prerequisites
 *************
 
 - A supported AMD GPU with the ROCm stack installed
-- hipFile built and installed (see the project ``INSTALL.md``)
+- hipFile built and installed (see :doc:`/install/install`)
 - A file system that supports ``O_DIRECT``, such as ext4 or XFS
 - The HIP runtime development headers (``hip/hip_runtime_api.h``)
 
