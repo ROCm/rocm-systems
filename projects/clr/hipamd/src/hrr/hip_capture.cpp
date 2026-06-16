@@ -103,6 +103,24 @@ const char* hip_capture_output_dir() {
   return HIP_HRR_CAPTURE_OUTPUT;
 }
 
+// HIP_HRR_DEBUG_ARGS=<non-empty> also enables provenance tracing: every H2D
+// memcpy destination is logged so a kernel pointer arg can be matched to the
+// copy that filled it. Evaluated once.
+static bool hrr_dbg_args_enabled() {
+  static const bool e = []() {
+    const char* v = std::getenv("HIP_HRR_DEBUG_ARGS");
+    return v != nullptr && v[0] != '\0';
+  }();
+  return e;
+}
+
+static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
+  if (hrr_dbg_args_enabled())
+    std::fprintf(stderr, "[HRR h2d] %s dst=0x%llx size=%zu\n", api,
+                 (unsigned long long)reinterpret_cast<uintptr_t>(dst),
+                 sz);
+}
+
 // Parse the extra[] sentinel format for packed kernarg buffers.
 static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_size) {
   if (!extra) return false;
@@ -356,9 +374,10 @@ hipError_t capture_hipMemcpy(void* dst, const void* src,
   hipError_t r = g_real_table.hipMemcpy_fn(dst, src, sizeBytes, kind);
   if (r == hipSuccess) {
     hrr_cap::Hash128 h{0, 0};
-    if (kind == hipMemcpyHostToDevice && src && sizeBytes > 0)
+    if (kind == hipMemcpyHostToDevice && src && sizeBytes > 0) {
       h = hrr_cap::writer::write_blob(src, sizeBytes);
-    else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0)
+      hrr_trace_h2d("hipMemcpy", dst, sizeBytes);
+    } else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0)
       h = hrr_cap::writer::write_blob(dst, sizeBytes);  // host dst valid after sync call
     hrr_args_hipMemcpy a{};
     a.ret           = static_cast<int32_t>(r);
@@ -381,6 +400,7 @@ hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
     hrr_cap::Hash128 h{0, 0};
     if (kind == hipMemcpyHostToDevice && src && sizeBytes > 0) {
       h = hrr_cap::writer::write_blob(src, sizeBytes);
+      hrr_trace_h2d("hipMemcpyAsync", dst, sizeBytes);
     } else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0) {
       // Sync the stream so host dst is valid before we snapshot it.
       hipError_t sync_r = g_real_table.hipStreamSynchronize_fn(stream);
@@ -409,6 +429,7 @@ hipError_t capture_hipMemcpyHtoD(hipDeviceptr_t dst, const void* src, size_t siz
   if (r == hipSuccess) {
     hrr_cap::Hash128 h{0, 0};
     if (src && sizeBytes > 0) h = hrr_cap::writer::write_blob(src, sizeBytes);
+    hrr_trace_h2d("hipMemcpyHtoD", reinterpret_cast<const void*>(dst), sizeBytes);
     hrr_args_hipMemcpyHtoD a{};
     a.ret          = static_cast<int32_t>(r);
     a.dst          = reinterpret_cast<uint64_t>(dst);
@@ -427,6 +448,7 @@ hipError_t capture_hipMemcpyHtoDAsync(hipDeviceptr_t dst, const void* src,
   if (r == hipSuccess) {
     hrr_cap::Hash128 h{0, 0};
     if (src && sizeBytes > 0) h = hrr_cap::writer::write_blob(src, sizeBytes);
+    hrr_trace_h2d("hipMemcpyHtoDAsync", reinterpret_cast<const void*>(dst), sizeBytes);
     hrr_args_hipMemcpyHtoDAsync a{};
     a.ret          = static_cast<int32_t>(r);
     a.dst          = reinterpret_cast<uint64_t>(dst);
@@ -498,6 +520,7 @@ hipError_t capture_hipMemcpyWithStream(void* dst, const void* src,
     hrr_cap::Hash128 h{0, 0};
     if (kind == hipMemcpyHostToDevice && src && sizeBytes > 0) {
       h = hrr_cap::writer::write_blob(src, sizeBytes);
+      hrr_trace_h2d("hipMemcpyWithStream", dst, sizeBytes);
     } else if (kind == hipMemcpyDeviceToHost && dst && sizeBytes > 0) {
       // Call is synchronous — dst is valid immediately after return.
       h = hrr_cap::writer::write_blob(dst, sizeBytes);

@@ -169,6 +169,25 @@ static void print_info(const hrr::Archive& archive, bool show_events) {
                  kl.grid[0], kl.grid[1], kl.grid[2],
                  kl.block[0], kl.block[1], kl.block[2],
                  kl.args.size());
+          // Per-arg detail: print pointer values so a kernel input can be
+          // matched to the H2D copy (or prior kernel output) that filled it.
+          for (size_t ai = 0; ai < kl.args.size(); ++ai) {
+            const auto& arg = kl.args[ai];
+            if (arg.value_kind == 1 && arg.data.size() >= 8) {
+              uint64_t p;
+              memcpy(&p, arg.data.data(), 8);
+              printf(" arg[%zu]=ptr:0x%llx", ai, (unsigned long long)p);
+            } else if (arg.value_kind == 3) {
+              for (uint16_t off : arg.ptr_offsets) {
+                if (off + 8u <= arg.data.size()) {
+                  uint64_t p;
+                  memcpy(&p, arg.data.data() + off, 8);
+                  printf(" arg[%zu]+%u=ptr:0x%llx", ai, off,
+                         (unsigned long long)p);
+                }
+              }
+            }
+          }
         }
         break;
       case HRR_API_HIPSTREAMCREATE:
