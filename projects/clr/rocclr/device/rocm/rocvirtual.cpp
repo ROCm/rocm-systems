@@ -380,11 +380,11 @@ bool HsaAmdSignalHandler(hsa_signal_value_t value, void* arg) {
 
   VirtualGPU* const gpu = ts->gpu();
 
-  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), signals_size(%zu)",
-          static_cast<uint32_t>(value), arg, ts->Signals().size());
-
   // Save callback signal
   hsa_signal_t callback_signal = ts->GetCallbackSignal();
+
+  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Handler: value(%d), timestamp(%p), callback_signal(0x%lx)",
+          static_cast<uint32_t>(value), arg, callback_signal.handle);
 
   bool isBlocking = ts->GetBlocking();
 
