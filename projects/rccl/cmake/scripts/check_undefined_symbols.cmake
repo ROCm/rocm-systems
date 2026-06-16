@@ -117,8 +117,10 @@ if(libatomic_path AND EXISTS "${libatomic_path}")
         endif()
       endif()
     endforeach()
-    # Step 3: record the libatomic failure with the offending symbols.
-    string(APPEND failures "libatomic dependency (misaligned/oversized atomic):${atomic_report}\n")
+    # Step 3: only fail if librccl itself references libatomic symbols (ldd lists transitive deps too).
+    if(NOT atomic_report STREQUAL "")
+      string(APPEND failures "libatomic dependency (misaligned/oversized atomic):${atomic_report}\n")
+    endif()
   endif()
 endif()
 
