@@ -1549,7 +1549,7 @@ async fn exec_start<C: MirageCtl + 'static>(
         println!("{}", r.exec);
         return Ok(ExitCode::from(0));
     }
-    let code = follow_attach(ctl.as_ref(), &r).await?;
+    let code = follow_attach(ctl.clone(), &r).await?;
     if !a.keep {
         let _ = ctl.exec_remove(&r);
     }
@@ -1598,16 +1598,110 @@ fn parse_signal(s: &str) -> anyhow::Result<i32> {
 
 // ----- attach/logs/run -------------------------------------------------------
 
-async fn attach_cmd<C: MirageCtl>(ctl: Arc<C>, a: AttachArgs) -> anyhow::Result<ExitCode> {
+async fn attach_cmd<C: MirageCtl + 'static>(
+    ctl: Arc<C>,
+    a: AttachArgs,
+) -> anyhow::Result<ExitCode> {
     let r = ExecRef {
         session: a.session,
         exec: a.exec,
     };
-    follow_attach(ctl.as_ref(), &r).await
+    follow_attach(ctl, &r).await
 }
 
-async fn follow_attach<C: MirageCtl>(ctl: &C, r: &ExecRef) -> anyhow::Result<ExitCode> {
+/// Put the controlling terminal into raw mode for the duration of an
+/// interactive attach, restoring the original settings on drop.
+///
+/// When attached to an interactive workload (e.g. `bash`) the remote
+/// PTY owns echo and line editing, so the local terminal must forward
+/// every keystroke verbatim instead of cooking/echoing it. Returns
+/// `None` (a no-op) when stdin isn't a TTY, e.g. piped or redirected.
+struct RawModeGuard {
+    fd: i32,
+    original: libc::termios,
+}
+
+impl RawModeGuard {
+    fn enable_if_tty() -> Option<Self> {
+        use std::os::fd::AsRawFd as _;
+        let fd = std::io::stdin().as_raw_fd();
+        // SAFETY: `fd` is the process stdin; the termios calls only read
+        // and write a stack-allocated `termios` we own.
+        unsafe {
+            if libc::isatty(fd) != 1 {
+                return None;
+            }
+            let mut original: libc::termios = std::mem::zeroed();
+            if libc::tcgetattr(fd, &mut original) != 0 {
+                return None;
+            }
+            let mut raw = original;
+            libc::cfmakeraw(&mut raw);
+            if libc::tcsetattr(fd, libc::TCSANOW, &raw) != 0 {
+                return None;
+            }
+            Some(RawModeGuard { fd, original })
+        }
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        // SAFETY: restoring the saved termios on the same fd.
+        unsafe {
+            libc::tcsetattr(self.fd, libc::TCSANOW, &self.original);
+        }
+    }
+}
+
+async fn follow_attach<C: MirageCtl + 'static>(
+    ctl: Arc<C>,
+    r: &ExecRef,
+) -> anyhow::Result<ExitCode> {
     let mut s = ctl.session_attach(r)?;
+
+    // Forward this process's stdin to the workload's stdin (node 0).
+    // Without this an interactive workload such as `bash` blocks forever
+    // waiting for input that never arrives. The host exposes node 0's
+    // stdin as a FIFO that a bridge task pumps into the workload's PTY;
+    // `session_stdin` writes there. Reads are blocking, so they run on a
+    // dedicated thread that exits on EOF or the first write error (the
+    // workload went away). The thread is detached: the attach loop below
+    // owns the lifetime and the process exits shortly after it returns.
+    let _raw = RawModeGuard::enable_if_tty();
+    let stdin_ctl = ctl.clone();
+    let stdin_ref = r.clone();
+    std::thread::spawn(move || {
+        use std::io::Read as _;
+        let mut stdin = std::io::stdin().lock();
+        let mut buf = [0u8; 4096];
+        loop {
+            match stdin.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    // The exec's stdin FIFO is created asynchronously by
+                    // the host just after the exec is submitted, so the
+                    // first write can briefly race ahead of it. Retry
+                    // transient failures so opening keystrokes aren't
+                    // dropped; give up if it never appears (the workload
+                    // is gone) so the thread can't spin forever.
+                    let mut attempts = 0;
+                    loop {
+                        match stdin_ctl.session_stdin(&stdin_ref, &buf[..n]) {
+                            Ok(()) => break,
+                            Err(_) if attempts < 250 => {
+                                attempts += 1;
+                                std::thread::sleep(Duration::from_millis(20));
+                            }
+                            Err(_) => return,
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
     let mut stdout = std::io::stdout().lock();
     let mut stderr = std::io::stderr().lock();
     let mut exit: i32 = 0;
@@ -1634,7 +1728,7 @@ async fn follow_attach<C: MirageCtl>(ctl: &C, r: &ExecRef) -> anyhow::Result<Exi
     Ok(ExitCode::from((exit & 0xff) as u8))
 }
 
-async fn logs_cmd<C: MirageCtl>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<ExitCode> {
+async fn logs_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<ExitCode> {
     let layout = mirage_core::paths::SessionLayout::for_id(&a.session).exec(&a.exec);
     if !layout.root.exists() {
         anyhow::bail!("exec not found: {}", a.exec);
@@ -1663,7 +1757,7 @@ async fn logs_cmd<C: MirageCtl>(ctl: Arc<C>, a: LogsArgs) -> anyhow::Result<Exit
         session: a.session,
         exec: a.exec,
     };
-    follow_attach(ctl.as_ref(), &r).await?;
+    follow_attach(ctl, &r).await?;
     Ok(ExitCode::from(0))
 }
 
@@ -1727,7 +1821,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
     };
     let r = ctl.session_exec(&def)?;
     tracing::info!(session = %sid, exec = %r.exec, "exec submitted; attaching");
-    let code = follow_attach(ctl.as_ref(), &r).await?;
+    let code = follow_attach(ctl.clone(), &r).await?;
     if created && !a.keep_session {
         let _ = ctl.session_destroy(&sid);
     }
