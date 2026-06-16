@@ -13,8 +13,8 @@ from typing import Any, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
-from interface.factory import create_profile_artifact_writer
-from interface.profile_artifacts import ProfilePassContext
+from interface.factory import create_profile_data_writer
+from interface.profile_data import ProfilePassContext
 from utils.logger import (
     console_debug,
     console_error,
@@ -216,7 +216,7 @@ def run_prof(
         console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
         return
 
-    create_profile_artifact_writer(format_rocprof_output).finalize_pass(pass_context)
+    create_profile_data_writer(format_rocprof_output).finalize_pass(pass_context)
 
 
 def _build_profile_pass_context(
@@ -294,7 +294,7 @@ def get_submodules(package_name: str) -> list[str]:
 def v3_counter_csv_to_v2_csv(
     counter_file: str, agent_info_filepath: str, converted_csv_file: str
 ) -> None:
-    """Compatibility wrapper for CSV artifact conversion."""
+    """Compatibility wrapper for CSV profile data conversion."""
     from interface.csv_data import v3_counter_csv_to_v2_csv as convert_counter_csv
 
     convert_counter_csv(counter_file, agent_info_filepath, converted_csv_file)
@@ -308,7 +308,7 @@ def convert_native_counter_collection_csv(workload_dir: str) -> None:
 
 
 def process_rocprofv3_output(workload_dir: str, using_native_tool: bool) -> list[str]:
-    """Compatibility wrapper for rocprofv3 CSV artifact processing."""
+    """Compatibility wrapper for rocprofv3 CSV profile data processing."""
     from interface.csv_data import process_rocprofv3_output as process_output
 
     return process_output(workload_dir, using_native_tool)
@@ -320,7 +320,7 @@ def save_torch_trace_inputs(
     fbase: str,
     output_format: str = "rocpd",
 ) -> None:
-    """Compatibility wrapper for torch trace artifact retention."""
+    """Compatibility wrapper for torch trace data retention."""
     from interface.csv_data import save_torch_trace_inputs as save_inputs
 
     save_inputs(workload_dir, fbase, output_format)
@@ -328,7 +328,7 @@ def save_torch_trace_inputs(
 
 @demarcate
 def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
-    """Compatibility wrapper for Kokkos trace artifact processing."""
+    """Compatibility wrapper for Kokkos trace data processing."""
     from interface.csv_data import process_kokkos_trace_output as process_output
 
     process_output(workload_dir, fbase)

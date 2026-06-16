@@ -13,8 +13,8 @@ from typing import Any, Optional, TextIO
 import pandas as pd
 
 import config
-from interface.factory import create_profile_artifact_reader
-from interface.profile_artifacts import ArtifactReaderOptions
+from interface.factory import create_profile_data_reader
+from interface.profile_data import ProfileDataReaderOptions
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
 from utils.logger import (
@@ -402,9 +402,9 @@ class OmniAnalyze_Base:
         output_file = Path(out) if out else workload_dir / "pmc_perf.csv"
 
         profiling_config = file_io.load_profiling_config(str(workload_dir))
-        reader = create_profile_artifact_reader(
+        reader = create_profile_data_reader(
             profiling_config,
-            ArtifactReaderOptions(
+            ProfileDataReaderOptions(
                 join_type=profiling_config.get("join_type", "grid"),
                 kokkos_trace=profiling_config.get("kokkos_trace", False),
             ),
@@ -440,15 +440,15 @@ class OmniAnalyze_Base:
     def prepare_profile_data_directory(self, directory: Path) -> None:
         """Ensure the profiling directory has pmc_perf.csv for analysis."""
         profiling_config = file_io.load_profiling_config(str(directory))
-        reader = create_profile_artifact_reader(
+        reader = create_profile_data_reader(
             profiling_config,
-            ArtifactReaderOptions(
+            ProfileDataReaderOptions(
                 join_type=profiling_config.get("join_type", "grid"),
                 kokkos_trace=profiling_config.get("kokkos_trace", False),
             ),
         )
         pmc_perf = directory / "pmc_perf.csv"
-        if not reader.has_artifacts(directory):
+        if not reader.has_profile_data(directory):
             console_error(
                 f"No profiling data found in {directory}.\n"
                 f"Expected: pmc_perf.csv or results_*.csv\n"

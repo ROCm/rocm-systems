@@ -11,8 +11,8 @@ import pandas as pd
 import yaml
 
 import config
-from interface.factory import create_profile_artifact_reader
-from interface.profile_artifacts import ArtifactReaderOptions
+from interface.factory import create_profile_data_reader
+from interface.profile_data import ProfileDataReaderOptions
 from utils.logger import (
     console_error,
     console_log,
@@ -462,9 +462,9 @@ def _read_single_df_pmc(
     verbose: int,
     node_name: Optional[str] = None,
 ) -> pd.DataFrame:
-    reader = create_profile_artifact_reader(
+    reader = create_profile_data_reader(
         config_dict,
-        ArtifactReaderOptions(
+        ProfileDataReaderOptions(
             kernel_verbose=kernel_verbose,
             verbose=verbose,
         ),

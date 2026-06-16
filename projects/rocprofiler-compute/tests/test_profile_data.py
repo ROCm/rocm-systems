@@ -5,33 +5,33 @@ from pathlib import Path
 
 import pandas as pd
 
-from interface.csv_data import CsvAnalysisData, CsvProfileArtifactWriter
+from interface.csv_data import CsvAnalysisData, CsvProfileDataWriter
 from interface.factory import (
-    create_profile_artifact_reader,
-    create_profile_artifact_writer,
+    create_profile_data_reader,
+    create_profile_data_writer,
 )
 from interface.pmc_frame import to_canonical_pmc_frame
-from interface.profile_artifacts import ArtifactReaderOptions, ProfilePassContext
-from interface.rocpd_data import RocpdAnalysisData, RocpdProfileArtifactWriter
+from interface.profile_data import ProfileDataReaderOptions, ProfilePassContext
+from interface.rocpd_data import RocpdAnalysisData, RocpdProfileDataWriter
 from orchestrator.rocprofv3 import Rocprofv3ProfileOrchestrator
 
 
 def test_factory_selects_csv_and_rocpd_implementations():
-    csv_reader = create_profile_artifact_reader(
+    csv_reader = create_profile_data_reader(
         {"format_rocprof_output": "csv"},
-        ArtifactReaderOptions(),
+        ProfileDataReaderOptions(),
     )
-    rocpd_reader = create_profile_artifact_reader(
+    rocpd_reader = create_profile_data_reader(
         {"format_rocprof_output": "rocpd"},
-        ArtifactReaderOptions(),
+        ProfileDataReaderOptions(),
     )
 
-    assert type(csv_reader).__name__ == "CsvProfileArtifactReader"
-    assert type(rocpd_reader).__name__ == "RocpdProfileArtifactReader"
-    assert isinstance(create_profile_artifact_writer("csv"), CsvProfileArtifactWriter)
+    assert type(csv_reader).__name__ == "CsvProfileDataReader"
+    assert type(rocpd_reader).__name__ == "RocpdProfileDataReader"
+    assert isinstance(create_profile_data_writer("csv"), CsvProfileDataWriter)
     assert isinstance(
-        create_profile_artifact_writer("rocpd"),
-        RocpdProfileArtifactWriter,
+        create_profile_data_writer("rocpd"),
+        RocpdProfileDataWriter,
     )
 
 
@@ -121,8 +121,8 @@ def test_rocprofv3_profile_orchestrator_delegates_to_writer(monkeypatch, tmp_pat
             calls.append(context)
 
     monkeypatch.setattr(
-        "orchestrator.rocprofv3.create_profile_artifact_writer",
-        lambda artifact_format: FakeWriter(),
+        "orchestrator.rocprofv3.create_profile_data_writer",
+        lambda data_format: FakeWriter(),
     )
     context = ProfilePassContext(
         workload_dir=tmp_path,

@@ -1,54 +1,54 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Factory helpers for profile artifact readers and writers."""
+"""Factory helpers for profile data readers and writers."""
 
-from interface.profile_artifacts import (
-    ArtifactReaderOptions,
-    ProfileArtifactFormat,
-    ProfileArtifactReader,
-    ProfileArtifactWriter,
+from interface.profile_data import (
+    ProfileDataFormat,
+    ProfileDataReader,
+    ProfileDataReaderOptions,
+    ProfileDataWriter,
 )
 from utils.logger import console_error
 
 
-def create_profile_artifact_reader(
+def create_profile_data_reader(
     profiling_config: dict,
-    options: ArtifactReaderOptions,
-) -> ProfileArtifactReader:
-    """Create a reader for the profiling artifact format."""
-    artifact_format = _artifact_format_from_config(profiling_config)
-    if artifact_format == "rocpd":
-        from interface.rocpd_data import RocpdProfileArtifactReader
+    options: ProfileDataReaderOptions,
+) -> ProfileDataReader:
+    """Create a reader for the profile data format."""
+    data_format = _data_format_from_config(profiling_config)
+    if data_format == "rocpd":
+        from interface.rocpd_data import RocpdProfileDataReader
 
-        return RocpdProfileArtifactReader(options)
+        return RocpdProfileDataReader(options)
 
-    from interface.csv_data import CsvProfileArtifactReader
+    from interface.csv_data import CsvProfileDataReader
 
-    return CsvProfileArtifactReader(options)
+    return CsvProfileDataReader(options)
 
 
-def create_profile_artifact_writer(
+def create_profile_data_writer(
     format_rocprof_output: str,
-) -> ProfileArtifactWriter:
-    """Create a writer for the profiling artifact format."""
+) -> ProfileDataWriter:
+    """Create a writer for the profile data format."""
     if format_rocprof_output == "rocpd":
-        from interface.rocpd_data import RocpdProfileArtifactWriter
+        from interface.rocpd_data import RocpdProfileDataWriter
 
-        return RocpdProfileArtifactWriter()
+        return RocpdProfileDataWriter()
 
     if format_rocprof_output == "csv":
-        from interface.csv_data import CsvProfileArtifactWriter
+        from interface.csv_data import CsvProfileDataWriter
 
-        return CsvProfileArtifactWriter()
+        return CsvProfileDataWriter()
 
     console_error(f"Unknown format_rocprof_output: {format_rocprof_output}")
-    from interface.csv_data import CsvProfileArtifactWriter
+    from interface.csv_data import CsvProfileDataWriter
 
-    return CsvProfileArtifactWriter()
+    return CsvProfileDataWriter()
 
 
-def _artifact_format_from_config(profiling_config: dict) -> ProfileArtifactFormat:
+def _data_format_from_config(profiling_config: dict) -> ProfileDataFormat:
     configured_format = profiling_config.get("format_rocprof_output", "rocpd")
     if configured_format == "csv":
         return "csv"

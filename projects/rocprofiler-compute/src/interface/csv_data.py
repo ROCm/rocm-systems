@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""CSV profile artifact readers and writers."""
+"""CSV profile data readers and writers."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import utils.utils_profile_csv as csv_ops
 from interface.pmc_frame import prepare_pmc_frame
-from interface.profile_artifacts import ArtifactReaderOptions, ProfilePassContext
+from interface.profile_data import ProfileDataReaderOptions, ProfilePassContext
 from utils.logger import (
     console_debug,
     console_error,
@@ -82,7 +82,7 @@ def pmc_perf_path(workload_dir: Path) -> Path:
 
 
 def find_csv_result_files(workload_dir: Path, kokkos_trace: bool) -> list[Path]:
-    """Find CSV result files for profile counter artifacts."""
+    """Find CSV result files for profile counter data."""
     files = [
         file for pattern in CSV_RESULT_PATTERNS for file in workload_dir.glob(pattern)
     ]
@@ -698,13 +698,13 @@ def _save_csv_torch_trace_inputs(
 
 
 class CsvAnalysisData:
-    """Read and materialize CSV artifacts for analyze mode."""
+    """Read and materialize CSV profile data for analyze mode."""
 
     def __init__(self, join_type: str = "grid", kokkos_trace: bool = False) -> None:
         self._join_type = join_type
         self._kokkos_trace = kokkos_trace
 
-    def has_artifacts(self, workload_dir: Path) -> bool:
+    def has_profile_data(self, workload_dir: Path) -> bool:
         return pmc_perf_path(workload_dir).exists() or bool(
             find_csv_result_files(workload_dir, self._kokkos_trace)
         )
@@ -749,7 +749,7 @@ class CsvAnalysisData:
 
 
 class CsvProfileData:
-    """Write and normalize CSV artifacts for profile mode."""
+    """Write and normalize CSV profile data for profile mode."""
 
     def normalize_counter_rows(self, combined_results: list[dict]) -> None:
         csv_ops.add_column_to_rows(
@@ -787,18 +787,18 @@ class CsvProfileData:
         csv_ops.write_csv_from_dicts(str(csv_path), rows)
 
 
-class CsvProfileArtifactReader:
-    """Read current CSV profile artifacts."""
+class CsvProfileDataReader:
+    """Read current CSV profile data."""
 
-    def __init__(self, options: ArtifactReaderOptions) -> None:
+    def __init__(self, options: ProfileDataReaderOptions) -> None:
         self._options = options
         self._csv_data = CsvAnalysisData(
             join_type=options.join_type,
             kokkos_trace=options.kokkos_trace,
         )
 
-    def has_artifacts(self, workload_dir: Path) -> bool:
-        return self._csv_data.has_artifacts(workload_dir)
+    def has_profile_data(self, workload_dir: Path) -> bool:
+        return self._csv_data.has_profile_data(workload_dir)
 
     def materialize_pmc_perf(self, workload_dir: Path, output_path: Path) -> Path:
         return self._csv_data.materialize_pmc_perf(workload_dir, output_path)
@@ -811,8 +811,8 @@ class CsvProfileArtifactReader:
         )
 
 
-class CsvProfileArtifactWriter:
-    """Finalize current CSV profile artifacts."""
+class CsvProfileDataWriter:
+    """Finalize current CSV profile data."""
 
     def finalize_pass(self, context: ProfilePassContext) -> None:
         result_files = self._process_csv_outputs(context)

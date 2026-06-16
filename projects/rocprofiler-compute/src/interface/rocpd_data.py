@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ROCPD profile artifact readers and writers."""
+"""ROCPD profile data readers and writers."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from interface import csv_data
 from interface.pmc_frame import prepare_pmc_frame, to_canonical_pmc_frame
-from interface.profile_artifacts import ArtifactReaderOptions, ProfilePassContext
+from interface.profile_data import ProfileDataReaderOptions, ProfilePassContext
 from utils.logger import console_debug, console_error, console_warning
 
 if TYPE_CHECKING:
@@ -237,7 +237,7 @@ def _rocpd_marker_trace_path(context: ProfilePassContext) -> Path:
 
 
 class RocpdProfileData:
-    """Write and normalize ROCPD artifacts for profile mode."""
+    """Write and normalize ROCPD profile data for profile mode."""
 
     def update_native_counter_events(
         self,
@@ -333,9 +333,9 @@ class RocpdProfileData:
 
 
 class RocpdAnalysisData:
-    """Read and materialize ROCPD artifacts for analyze mode."""
+    """Read and materialize ROCPD profile data for analyze mode."""
 
-    def has_artifacts(self, workload_dir: Path) -> bool:
+    def has_profile_data(self, workload_dir: Path) -> bool:
         return csv_data.pmc_perf_path(workload_dir).exists() or bool(
             self.find_result_files(workload_dir)
         )
@@ -391,15 +391,15 @@ class RocpdAnalysisData:
         )
 
 
-class RocpdProfileArtifactReader:
-    """Read current ROCPD profile artifacts."""
+class RocpdProfileDataReader:
+    """Read current ROCPD profile data."""
 
-    def __init__(self, options: ArtifactReaderOptions) -> None:
+    def __init__(self, options: ProfileDataReaderOptions) -> None:
         self._options = options
         self._rocpd_data = RocpdAnalysisData()
 
-    def has_artifacts(self, workload_dir: Path) -> bool:
-        return self._rocpd_data.has_artifacts(workload_dir)
+    def has_profile_data(self, workload_dir: Path) -> bool:
+        return self._rocpd_data.has_profile_data(workload_dir)
 
     def materialize_pmc_perf(self, workload_dir: Path, output_path: Path) -> Path:
         return self._rocpd_data.materialize_pmc_perf(workload_dir, output_path)
@@ -412,8 +412,8 @@ class RocpdProfileArtifactReader:
         )
 
 
-class RocpdProfileArtifactWriter:
-    """Finalize current ROCPD profile artifacts."""
+class RocpdProfileDataWriter:
+    """Finalize current ROCPD profile data."""
 
     def finalize_pass(self, context: ProfilePassContext) -> None:
         rocpd_profile_data = RocpdProfileData()

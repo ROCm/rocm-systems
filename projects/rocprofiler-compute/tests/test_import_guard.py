@@ -35,18 +35,18 @@ def test_import_guard_allows_stdlib_and_project():
         assert config is not None
 
 
-def test_import_guard_allows_artifact_writer_factory():
-    """Verify profile artifact writer imports stay profile-mode safe."""
+def test_import_guard_allows_profile_data_writer_factory():
+    """Verify profile data writer imports stay profile-mode safe."""
     pandas_was_cached = "pandas" in sys.modules
     if pandas_was_cached:
         del sys.modules["pandas"]
 
     try:
         with ProfileModeImportGuard():
-            from interface.factory import create_profile_artifact_writer
+            from interface.factory import create_profile_data_writer
 
-            csv_writer = create_profile_artifact_writer("csv")
-            rocpd_writer = create_profile_artifact_writer("rocpd")
+            csv_writer = create_profile_data_writer("csv")
+            rocpd_writer = create_profile_data_writer("rocpd")
 
         assert csv_writer is not None
         assert rocpd_writer is not None

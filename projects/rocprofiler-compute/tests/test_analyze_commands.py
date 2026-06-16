@@ -15,8 +15,8 @@ import pytest
 from rocprof_compute_analyze.analysis_cli import cli_analysis
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
-from utils.profile_artifacts.factory import create_profile_artifact_reader
-from utils.profile_artifacts.interfaces import ArtifactReaderOptions
+from interface.factory import create_profile_data_reader
+from interface.profile_data import ProfileDataReaderOptions
 from utils.parser import load_pc_sampling_data
 from utils.pc_sampling_analysis import load_pc_sample_records
 
@@ -2191,7 +2191,7 @@ def test_join_prof_renames_sq_accum_prev_hires_to_bucket_target(tmp_path):
     assert "SQ_WAVES" in merged.columns
 
 
-def test_profile_artifact_reader_materializes_csv_results(tmp_path):
+def test_profile_data_reader_materializes_csv_results(tmp_path):
     """CSV readers materialize current results_pmc_perf artifacts."""
     (tmp_path / "profiling_config.yaml").write_text(
         "format_rocprof_output: csv\njoin_type: kernel\n"
@@ -2204,9 +2204,9 @@ def test_profile_artifact_reader_materializes_csv_results(tmp_path):
         header + "0,kernel_a,0,1024,64,32,0,8,4,10\n"
     )
 
-    reader = create_profile_artifact_reader(
+    reader = create_profile_data_reader(
         {"format_rocprof_output": "csv", "join_type": "kernel"},
-        ArtifactReaderOptions(join_type="kernel"),
+        ProfileDataReaderOptions(join_type="kernel"),
     )
     reader.materialize_pmc_perf(tmp_path, tmp_path / "pmc_perf.csv")
     pmc_frame = reader.read_pmc_frame(tmp_path)
@@ -2215,7 +2215,7 @@ def test_profile_artifact_reader_materializes_csv_results(tmp_path):
     assert pmc_frame["SQ_WAVES"].tolist() == [10]
 
 
-def test_profile_artifact_reader_materializes_rocpd_results(tmp_path):
+def test_profile_data_reader_materializes_rocpd_results(tmp_path):
     """ROCPD readers preserve current legacy results_*.csv materialization."""
     (tmp_path / "profiling_config.yaml").write_text("format_rocprof_output: rocpd\n")
     (tmp_path / "results_pmc_perf_0.csv").write_text(
@@ -2226,9 +2226,9 @@ def test_profile_artifact_reader_materializes_rocpd_results(tmp_path):
         "0,2,1024,64,32,0,4,0,8,kernel_a,0,10,20,SQ_BUSY,5\n"
     )
 
-    reader = create_profile_artifact_reader(
+    reader = create_profile_data_reader(
         {"format_rocprof_output": "rocpd"},
-        ArtifactReaderOptions(),
+        ProfileDataReaderOptions(),
     )
     reader.materialize_pmc_perf(tmp_path, tmp_path / "pmc_perf.csv")
     pmc_frame = reader.read_pmc_frame(tmp_path)

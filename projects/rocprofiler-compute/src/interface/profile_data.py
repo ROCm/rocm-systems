@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Shared contracts for profile artifact access."""
+"""Shared contracts for profile data access."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, Literal, Protocol
 if TYPE_CHECKING:
     import pandas as pd
 
-ProfileArtifactFormat = Literal["csv", "rocpd"]
+ProfileDataFormat = Literal["csv", "rocpd"]
 
 
 @dataclass(frozen=True)
-class ArtifactReaderOptions:
-    """Options needed to read and materialize profiling artifacts."""
+class ProfileDataReaderOptions:
+    """Options needed to read and materialize profile data."""
 
     join_type: str = "grid"
     kokkos_trace: bool = False
@@ -38,11 +38,11 @@ class ProfilePassContext:
     kokkos_trace_enabled: bool = False
 
 
-class ProfileArtifactReader(Protocol):
-    """Read profile artifacts without exposing their storage layout."""
+class ProfileDataReader(Protocol):
+    """Read profile data without exposing its storage layout."""
 
-    def has_artifacts(self, workload_dir: Path) -> bool:
-        """Return True if this reader can find profile artifacts."""
+    def has_profile_data(self, workload_dir: Path) -> bool:
+        """Return True if this reader can find profile data."""
 
     def materialize_pmc_perf(self, workload_dir: Path, output_path: Path) -> Path:
         """Ensure a pmc_perf.csv file exists and return its path."""
@@ -51,8 +51,8 @@ class ProfileArtifactReader(Protocol):
         """Return the canonical PMC DataFrame for analysis."""
 
 
-class ProfileArtifactWriter(Protocol):
-    """Finalize profile artifacts after a profiling pass."""
+class ProfileDataWriter(Protocol):
+    """Finalize profile data after a profiling pass."""
 
     def finalize_pass(self, context: ProfilePassContext) -> None:
-        """Finalize artifacts for one profiling pass."""
+        """Finalize profile data for one profiling pass."""
