@@ -128,12 +128,15 @@ jobs:
           if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
             INCLUDED_LABELS=""
+            EXCLUDED_LABELS="${{ env.EXCLUDED_LABELS }}"
           else
             MODE=Continuous
             INCLUDED_LABELS="gpu"
+            EXCLUDED_LABELS="${{ env.EXCLUDED_LABELS }}|slow"
           fi
           echo "mode=${MODE}" >> $GITHUB_OUTPUT
           echo "included_labels=${INCLUDED_LABELS}" >> $GITHUB_OUTPUT
+          echo "excluded_labels=${EXCLUDED_LABELS}" >> $GITHUB_OUTPUT
 
       - name: Install MPI
         run: |
@@ -191,7 +194,7 @@ jobs:
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -E "${{ env.EXCLUDED_TESTS }}" \
-            -LE "${{ env.EXCLUDED_LABELS }}" \
+            -LE "${{ steps.setup_env.outputs.excluded_labels }}" \
             ${LABEL_ARG}
 
       - name: Check for Leftover Buffered Files
