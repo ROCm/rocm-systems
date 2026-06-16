@@ -46,11 +46,10 @@ target_include_directories(hotswap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(hotswap_test PRIVATE amd_comgr)
 
 # Unit tests for the gfx-target / ASIC-revision query logic. The test compiles
-# the portable hotswap_gfx_query.cpp unit alongside the test TU and supplies its
-# own stubs for the HSA entry points, so this target needs the relevant headers
-# but must NOT link the real HSA library (doing so would clash with the in-file
-# stubs). Because the test no longer pulls in the tool TU (and its <elf.h> /
-# platform-I/O dependencies), it builds on both Linux and Windows.
+# the portable hotswap_gfx_query.cpp unit alongside the test translation unit 
+# and supplies its own stubs for the HSA entry points, so this target needs 
+# the relevant headers but must NOT link the real HSA library (doing so would 
+# clash with the in-file stubs). 
 add_executable(hotswap_tool_test
   tests/hotswap_tool_test.cpp
   hotswap_gfx_query.cpp

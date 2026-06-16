@@ -10,7 +10,7 @@
 // The query helpers — query_agent_gfx_revision(), extract_gfx_target() and the
 // AgentGfxRevision type — live in their own translation unit (compiled in
 // alongside this test), so the test includes only the small
-// hotswap_gfx_query.hpp header rather than the whole tool TU. The HSA entry
+// hotswap_gfx_query.hpp header. The HSA entry
 // points the query calls are replaced with in-file stubs (linked in place of
 // the real libraries) so the query can be driven entirely from the test without
 // GPU hardware:
@@ -18,9 +18,8 @@
 //   * ISA name        <- hsa_agent_iterate_isas / hsa_isa_get_info_alt
 //   * ASIC revision   <- hsa_agent_get_info(HSA_AMD_AGENT_INFO_ASIC_REVISION)
 //
-// This path is portable: it depends only on HSA (not libdrm, KFD sysfs, or
-// <elf.h>), so the same query/gate logic is exercised for both Linux and
-// Windows builds.
+// This path is portable: it depends only on HSA so the same query/gate logic is 
+// exercised for both Linux and Windows builds.
 //
 //===----------------------------------------------------------------------===//
 

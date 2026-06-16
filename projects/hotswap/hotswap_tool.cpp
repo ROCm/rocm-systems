@@ -35,7 +35,7 @@
 
 // The agent's gfx target and ASIC revision are read through the HSA runtime
 // (HSA_AMD_AGENT_INFO_ASIC_REVISION) in hotswap_gfx_query.{hpp,cpp}, which is
-// portable across Linux and Windows. No libdrm / KFD-sysfs access is required.
+// portable across Linux and Windows. 
 
 #define HSA_HOTSWAP_EXPORT __attribute__((visibility("default")))
 

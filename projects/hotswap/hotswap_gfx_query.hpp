@@ -45,15 +45,11 @@ std::string extract_gfx_target(const std::string &isa_name);
 // gate_allows_hotswap() (below) to decide whether to act.
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent);
 
-// Clears the per-agent-handle cache used by query_agent_gfx_revision(). This is
-// a test seam: unit tests run many scenarios in a single process and must not
-// inherit cached results keyed on a reused handle. Not intended for production
-// use.
+// Clears the per-agent-handle cache used by query_agent_gfx_revision(). 
 void reset_gfx_revision_cache();
 
 // HotSwap's activation policy: rewriting is performed only for gfx1250 silicon
 // at ASIC revision A0 (and only when the revision was successfully queried).
-// This is the single source of truth shared by the tool and its unit tests.
 bool gate_allows_hotswap(const AgentGfxRevision &gfx);
 
 } // namespace rocr::hotswap
