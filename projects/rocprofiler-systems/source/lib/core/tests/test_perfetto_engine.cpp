@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 
 #include "core/perfetto/engine.hpp"
+#include "core/perfetto/engine_impl.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "core/perfetto/session_backend.hpp"
 #include "core/perfetto/sinks.hpp"
@@ -17,6 +18,8 @@
 #include <thread>
 #include <variant>
 #include <vector>
+
+#include <unistd.h>
 
 namespace
 {
@@ -123,6 +126,216 @@ TEST_F(session_backend_policy_test, start_and_stop_sequence_is_mockable)
     }
 
     rocprofsys::core::flush_and_stop_session(backend, *started);
+}
+
+// ----------------------------------------------------------------------------
+// basic_perfetto_engine policy backend seam
+// ----------------------------------------------------------------------------
+namespace
+{
+struct mock_backend_session
+{};
+
+class mock_perfetto_backend_recorder
+{
+public:
+    MOCK_METHOD(void, init_sdk, (const rocprofsys::core::engine_config&) );
+    MOCK_METHOD(mock_backend_session*, start_session,
+                (const rocprofsys::core::engine_config&,
+                 rocprofsys::core::perfetto_engine_mode, int) );
+    MOCK_METHOD(void, flush_and_stop, (mock_backend_session*) );
+    MOCK_METHOD(std::vector<char>, read_trace, (mock_backend_session*) );
+    MOCK_METHOD(void, destroy_session, (mock_backend_session*) );
+    MOCK_METHOD(void, release_session, (mock_backend_session*) );
+};
+
+std::unique_ptr<mock_perfetto_backend_recorder> g_mock_perfetto_backend;
+
+struct mock_perfetto_backend
+{
+    using session_ptr = mock_backend_session*;
+
+    void init_sdk(const rocprofsys::core::engine_config& cfg) const
+    {
+        g_mock_perfetto_backend->init_sdk(cfg);
+    }
+
+    [[nodiscard]] session_ptr start_session(const rocprofsys::core::engine_config& cfg,
+                                            rocprofsys::core::perfetto_engine_mode mode,
+                                            int fd) const
+    {
+        return g_mock_perfetto_backend->start_session(cfg, mode, fd);
+    }
+
+    void flush_and_stop(session_ptr& session) const
+    {
+        g_mock_perfetto_backend->flush_and_stop(session);
+    }
+
+    [[nodiscard]] std::vector<char> read_trace(session_ptr& session) const
+    {
+        return g_mock_perfetto_backend->read_trace(session);
+    }
+
+    void destroy_session(session_ptr& session) const noexcept
+    {
+        g_mock_perfetto_backend->destroy_session(session);
+        session = nullptr;
+    }
+
+    void release_session(session_ptr& session) const noexcept
+    {
+        g_mock_perfetto_backend->release_session(session);
+        session = nullptr;
+    }
+};
+
+static_assert(rocprofsys::core::perfetto_backend<mock_perfetto_backend>);
+
+class perfetto_engine_backend_policy_test : public ::testing::Test
+{
+protected:
+    using mock_engine = rocprofsys::core::basic_perfetto_engine<mock_perfetto_backend>;
+
+    void SetUp() override
+    {
+        g_mock_perfetto_backend =
+            std::make_unique<::testing::StrictMock<mock_perfetto_backend_recorder>>();
+    }
+
+    void TearDown() override { g_mock_perfetto_backend.reset(); }
+
+    mock_backend_session m_session{};
+};
+}  // namespace
+
+TEST_F(perfetto_engine_backend_policy_test, init_sdk_delegates_config_to_backend_policy)
+{
+    auto cfg = make_test_config();
+    cfg.disabled_categories.push_back("mock-category");
+    cfg.suppress_sdk_log_output = true;
+    mock_engine engine{ cfg };
+
+    EXPECT_CALL(*g_mock_perfetto_backend, init_sdk(::testing::_))
+        .WillOnce([&cfg](const rocprofsys::core::engine_config& observed) {
+            EXPECT_EQ(observed.buffer_size_kb, cfg.buffer_size_kb);
+            EXPECT_EQ(observed.shmem_size_hint_kb, cfg.shmem_size_hint_kb);
+            EXPECT_EQ(observed.flush_period_ms, cfg.flush_period_ms);
+            EXPECT_EQ(observed.fill_policy, cfg.fill_policy);
+            EXPECT_EQ(observed.backend, cfg.backend);
+            EXPECT_EQ(observed.disabled_categories, cfg.disabled_categories);
+            EXPECT_EQ(observed.suppress_sdk_log_output, cfg.suppress_sdk_log_output);
+        });
+
+    engine.init_sdk();
+}
+
+TEST_F(perfetto_engine_backend_policy_test, live_start_and_stop_use_backend_policy)
+{
+    mock_engine engine{ make_test_config() };
+
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(*g_mock_perfetto_backend,
+                    start_session(::testing::_,
+                                  rocprofsys::core::perfetto_engine_mode::live_fd, 17))
+            .WillOnce(::testing::Return(&m_session));
+        EXPECT_CALL(*g_mock_perfetto_backend, flush_and_stop(&m_session));
+    }
+
+    engine.start(mock_engine::mode::live_fd, 17);
+    EXPECT_TRUE(engine.is_running());
+    engine.stop();
+    EXPECT_FALSE(engine.is_running());
+}
+
+TEST_F(perfetto_engine_backend_policy_test,
+       cached_start_uses_backend_policy_and_stop_drains_collected_bytes)
+{
+    mock_engine                  engine{ make_test_config() };
+    rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(
+            *g_mock_perfetto_backend,
+            start_session(::testing::_,
+                          rocprofsys::core::perfetto_engine_mode::cached_interceptor, -1))
+            .WillOnce(::testing::Return(&m_session));
+        EXPECT_CALL(*g_mock_perfetto_backend, flush_and_stop(&m_session));
+    }
+
+    engine.start(mock_engine::mode::cached_interceptor, sink);
+    engine.preregister_pids({ 42 });
+    const std::vector<char> payload{ 'm', 'o', 'c', 'k' };
+    engine.collect_packet_bytes(42, payload.data(), payload.size());
+
+    engine.stop();
+
+    const auto& rec = std::get<rocprofsys::core::recording_sink>(sink);
+    ASSERT_EQ(rec.records().size(), 1u);
+    EXPECT_EQ(rec.records()[0].first, 42);
+    EXPECT_TRUE(rec.finalized());
+}
+
+TEST_F(perfetto_engine_backend_policy_test,
+       read_and_forget_session_are_backend_operations)
+{
+    mock_engine engine{ make_test_config() };
+
+    EXPECT_CALL(
+        *g_mock_perfetto_backend,
+        start_session(::testing::_, rocprofsys::core::perfetto_engine_mode::live_fd, 3))
+        .WillOnce(::testing::Return(&m_session));
+    engine.start(mock_engine::mode::live_fd, 3);
+
+    const auto pid = static_cast<pid_t>(::getpid());
+    EXPECT_CALL(*g_mock_perfetto_backend, read_trace(&m_session))
+        .WillOnce(::testing::Return(std::vector<char>{ 'o', 'k' }));
+    EXPECT_EQ(engine.read_trace(pid), (std::vector<char>{ 'o', 'k' }));
+
+    EXPECT_CALL(*g_mock_perfetto_backend, release_session(&m_session));
+    engine.forget_session(pid);
+    EXPECT_TRUE(engine.read_trace(pid).empty());
+}
+
+TEST_F(perfetto_engine_backend_policy_test, destroy_session_is_backend_operation)
+{
+    mock_engine engine{ make_test_config() };
+
+    EXPECT_CALL(
+        *g_mock_perfetto_backend,
+        start_session(::testing::_, rocprofsys::core::perfetto_engine_mode::live_fd, 5))
+        .WillOnce(::testing::Return(&m_session));
+    engine.start(mock_engine::mode::live_fd, 5);
+
+    const auto pid = static_cast<pid_t>(::getpid());
+    EXPECT_CALL(*g_mock_perfetto_backend, destroy_session(&m_session));
+    engine.destroy_session(pid);
+    EXPECT_TRUE(engine.read_trace(pid).empty());
+}
+
+TEST_F(perfetto_engine_backend_policy_test,
+       system_or_all_backend_does_not_start_backend_session)
+{
+    EXPECT_CALL(*g_mock_perfetto_backend,
+                start_session(::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
+
+    for(auto backend : { rocprofsys::core::engine_config::backend_t::system,
+                         rocprofsys::core::engine_config::backend_t::all })
+    {
+        auto cfg    = make_test_config();
+        cfg.backend = backend;
+        mock_engine                  engine{ cfg };
+        rocprofsys::core::trace_sink sink{ rocprofsys::core::recording_sink{} };
+
+        engine.start(mock_engine::mode::live_fd, 9);
+        EXPECT_FALSE(engine.is_running());
+
+        engine.start(mock_engine::mode::cached_interceptor, sink);
+        EXPECT_FALSE(engine.is_running());
+    }
 }
 
 TEST(perfetto_engine, construct_from_config_literal_no_config_access)

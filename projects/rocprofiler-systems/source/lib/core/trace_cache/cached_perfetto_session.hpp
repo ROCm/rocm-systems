@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/perfetto/fwd.hpp"
 #include "core/perfetto/output_layout.hpp"
 #include "core/perfetto/sinks.hpp"
 
@@ -15,11 +16,6 @@ namespace rocprofsys
 {
 class output_file_registry;
 class track_registry;
-
-namespace core
-{
-class perfetto_engine;
-}  // namespace core
 
 namespace trace_cache
 {

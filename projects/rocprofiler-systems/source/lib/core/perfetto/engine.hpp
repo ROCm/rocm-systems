@@ -3,10 +3,12 @@
 
 #pragma once
 
+#include "fwd.hpp"
+#include "sinks.hpp"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -14,23 +16,8 @@
 
 #include <sys/types.h>
 
-#include "sinks.hpp"
-
-namespace perfetto
-{
-class TracingSession;
-}
-
 namespace rocprofsys::core
 {
-struct tracing_session_deleter
-{
-    void operator()(::perfetto::TracingSession* session) const noexcept;
-};
-
-using tracing_session_ptr =
-    std::unique_ptr<::perfetto::TracingSession, tracing_session_deleter>;
-
 // POD snapshot of the perfetto-relevant configuration. Built once at engine
 // construction by build_engine_config_from_settings(); the engine never reads
 // rocprofsys::config::* again after that. Tests construct it with literals to
@@ -59,110 +46,71 @@ struct engine_config
     bool                     suppress_sdk_log_output = false;
 };
 
+enum class perfetto_engine_mode
+{
+    live_fd,
+    cached_interceptor,
+};
+
 // Reads the live config::get_perfetto_* getters once and returns a snapshot.
 // Called once per process by whoever constructs the perfetto_engine.
 engine_config
 build_engine_config_from_settings();
 
-// Owns Perfetto SDK init + the per-pid TracingSession map.
+using cached_engine_collect_fn = void (*)(void*, int, const void*, std::size_t) noexcept;
+
+void*
+activate_cached_engine(void* engine, cached_engine_collect_fn collect) noexcept;
+
+bool
+clear_active_cached_engine(void* expected, void** observed) noexcept;
+
+// Owns Perfetto SDK init + the per-pid tracing session map.
 //
-// Two modes:
-// - live_fd: SDK writes to fd (optional) + internal buffer. stop() flushes
-//   and halts; bytes are read and pushed to a sink by the orchestrator
-//   (perfetto.cpp shim) because it owns the tmp-file vs ReadTraceBlocking
-//   selection. No engine-side sink reference.
-// - cached_interceptor: per-thread TLS interceptor copies packet bytes
-//   keyed by the thread's emitting_pid; stop() drains those into the
-//   bound sink via on_source_drained / finalize. Bytes never touch a fd.
-class perfetto_engine
+// The Backend policy is the compile-time seam around the concrete Perfetto SDK.
+// Production uses perfetto_sdk_backend; tests can instantiate
+// basic_perfetto_engine<mock_backend> and verify engine orchestration without a
+// real Perfetto session or SDK global state.
+template <perfetto_backend Backend>
+class basic_perfetto_engine
 {
 public:
-    enum class mode
-    {
-        live_fd,
-        cached_interceptor,
-    };
+    using mode        = perfetto_engine_mode;
+    using backend_t   = Backend;
+    using session_ptr = typename Backend::session_ptr;
 
-    explicit perfetto_engine(engine_config cfg);
-    ~perfetto_engine() noexcept;
+    explicit basic_perfetto_engine(engine_config cfg);
+    ~basic_perfetto_engine() noexcept;
 
-    // Engine address must be stable for the full lifetime of any cached
-    // session: cached_interceptor's ThreadLocalState caches the
-    // perfetto_engine* at first emission per thread and dereferences it on
-    // every later OnTracePacket. Allowing copy or move would let a caller
-    // dangle that cached pointer. Owners hold the engine via unique_ptr.
-    perfetto_engine(const perfetto_engine&)            = delete;
-    perfetto_engine& operator=(const perfetto_engine&) = delete;
-    perfetto_engine(perfetto_engine&&)                 = delete;
-    perfetto_engine& operator=(perfetto_engine&&)      = delete;
+    basic_perfetto_engine(const basic_perfetto_engine&)            = delete;
+    basic_perfetto_engine& operator=(const basic_perfetto_engine&) = delete;
+    basic_perfetto_engine(basic_perfetto_engine&&)                 = delete;
+    basic_perfetto_engine& operator=(basic_perfetto_engine&&)      = delete;
 
-    // Initialises the Perfetto SDK once per process via std::call_once.
-    // Safe to call from every engine instance; only the first wins.
     void init_sdk();
-
-    // Live-mode start. fd >= 0 streams output to the file descriptor in
-    // addition to the SDK's internal buffer (legacy ROCPROFSYS_USE_TMP_FILES
-    // path); fd == -1 disables on-disk capture. Calling start() while
-    // running warns and replaces the existing session.
     void start(mode m, int fd);
-
-    // Cached-mode start. Sink is bound for stop()-time drain via the
-    // per-thread interceptor; emitting threads must have
-    // set_emitting_pid(pid) called before their first TRACE_EVENT_*.
     void start(mode m, trace_sink& sink);
-
-    // Flushes and stops the active session.
-    // - live_fd:           flush + StopBlocking only (orchestrator drains).
-    // - cached_interceptor: flush + StopBlocking, then drain per-pid
-    //                       collected bytes through the bound sink
-    //                       (on_source_drained per pid, then finalize();
-    //                       first per-source exception is rethrown after
-    //                       finalize per drain contract).
-    // No-op when no session is active.
     void stop();
 
-    // Reads the trace bytes from the session for the given pid via
-    // ReadTraceBlocking. Returns an empty vector when no session exists.
-    // Caller is responsible for disposing the session via destroy_session
-    // afterwards if desired.
     [[nodiscard]] std::vector<char> read_trace(pid_t pid);
+    void                            destroy_session(pid_t pid);
+    void                            forget_session(pid_t pid);
+    [[nodiscard]] bool              is_running() const noexcept;
 
-    // Destroys the per-pid session: equivalent to .reset() on the slot.
-    // Use this when the session is genuinely done (e.g. post-stop cleanup).
-    // Paired with forget_session() which DETACHES without destroying.
-    void destroy_session(pid_t pid);
-
-    // Detaches the engine's ownership of the per-pid session without
-    // destroying the underlying TracingSession. Used by fork_gotcha in the
-    // forked child to drop the inherited session pointer that the PARENT
-    // process still owns; calling reset() in the child would corrupt the
-    // parent's state. Paired with destroy_session() which DESTROYS.
-    void forget_session(pid_t pid);
-
-    // Whether a session is currently active.
-    [[nodiscard]] bool is_running() const noexcept;
-
-    // Pre-creates per-pid byte buffer slots so cached emission stays
-    // lock-free on the hot path. MUST be called between start(cached_…)
-    // and the first emit from any parser thread; callers know the full
-    // pid set up front (it comes from the cache_manager's processor
-    // configs). Subsequent collect_packet_bytes calls for unknown pids
-    // are dropped with an error log.
     void preregister_pids(const std::vector<int>& source_pids);
-
-    // Called by the cached-mode interceptor TLS to append per-pid bytes
-    // during emission. Public so the TU-private interceptor inside the
-    // .cpp can reach it without crossing the private-member boundary; not
-    // intended for outside callers. noexcept because it runs inside the
-    // Perfetto SDK callback frame, which is not exception-safe; internal
-    // bad_alloc is caught and the packet is dropped with LOG_ERROR.
     void collect_packet_bytes(int pid, const void* data, std::size_t size) noexcept;
 
 private:
+    static constexpr std::size_t COLLECTED_BYTES_SLAB_SIZE =
+        std::size_t{ 8 } * 1024 * 1024;
+
     [[nodiscard]] bool is_system_backend() const noexcept;
     void               start_session(pid_t pid, int fd, mode m);
+    static void        collect_thunk(void* engine, int pid, const void* data,
+                                     std::size_t size) noexcept;
 
     engine_config m_cfg{};
+    Backend       m_backend{};
     pid_t         m_active_pid{ 0 };
     bool          m_running{ false };
     mode          m_current_mode{ mode::live_fd };
@@ -175,20 +123,14 @@ private:
     std::atomic<bool>                          m_collected_bytes_frozen{ false };
     std::atomic<std::size_t>                   m_dropped_packet_count{ 0 };
 
-    static std::once_flag s_sdk_init_flag;
-
-    // The header only needs the opaque TracingSession handle; TraceConfig and
-    // SDK setup details stay local to engine.cpp while session ownership remains
-    // explicit in the engine state.
-    std::unordered_map<pid_t, tracing_session_ptr> m_sessions{};
+    std::unordered_map<pid_t, session_ptr> m_sessions{};
 };
 
-// Thread-local pid tag consumed by the cached-mode interceptor TLS to key
-// each thread's emissions to a pid. Tagging threads is the emitter's
-// responsibility — call set_emitting_pid(pid) before the first
-// TRACE_EVENT_* on the thread. Free functions because they operate on a
-// TU-local thread_local; the class scope these previously lived under
-// implied non-existent object state.
+extern template class basic_perfetto_engine<perfetto_sdk_backend>;
+
+// Thread-local pid tag consumed by the cached-mode interceptor TLS to key each
+// thread's emissions to a pid. Tagging threads is the emitter's responsibility —
+// call set_emitting_pid(pid) before the first TRACE_EVENT_* on the thread.
 void
 set_emitting_pid(int pid) noexcept;
 

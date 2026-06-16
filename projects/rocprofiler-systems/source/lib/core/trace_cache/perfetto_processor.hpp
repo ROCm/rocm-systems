@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+
 #include "agent_manager.hpp"
 #include "config.hpp"
 #include "core/output_file_registry.hpp"
@@ -19,11 +20,6 @@
 namespace rocprofsys
 {
 class track_registry;
-
-namespace core
-{
-class perfetto_engine;
-}
 
 namespace trace_cache
 {

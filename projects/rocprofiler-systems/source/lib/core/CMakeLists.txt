@@ -55,6 +55,7 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/category_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/driver.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perfetto/engine_impl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/fwd.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/locked_file_append.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perfetto/output_layout.hpp

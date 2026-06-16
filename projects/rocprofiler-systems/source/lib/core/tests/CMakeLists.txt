@@ -44,7 +44,12 @@ target_include_directories(
 
 target_link_libraries(
     perfetto-engine-tests
-    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-core-library
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-logger
+        rocprofiler-systems-headers
+        rocprofiler-systems-timemory
 )
 
 target_include_directories(perfetto-engine-tests PRIVATE ${PROJECT_SOURCE_DIR}/source/lib)

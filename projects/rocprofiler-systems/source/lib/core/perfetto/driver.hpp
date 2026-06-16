@@ -3,15 +3,13 @@
 
 #pragma once
 
+#include "core/perfetto/fwd.hpp"
+
 #include <memory>
 #include <sys/types.h>
 
 namespace rocprofsys
 {
-namespace core
-{
-class perfetto_engine;
-}
 inline namespace config
 {
 struct tmp_file;

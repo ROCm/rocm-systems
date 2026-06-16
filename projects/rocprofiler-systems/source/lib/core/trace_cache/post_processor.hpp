@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/output_file_registry.hpp"
+#include "core/perfetto/fwd.hpp"
 #include "core/progress/tracker.hpp"
 #include "core/trace_cache/data_types.hpp"
 
@@ -14,10 +15,6 @@
 namespace rocprofsys
 {
 class track_registry;
-namespace core
-{
-class perfetto_engine;
-}
 }  // namespace rocprofsys
 
 namespace rocprofsys::trace_cache
