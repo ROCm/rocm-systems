@@ -48,6 +48,9 @@ daemon = ["dep:mirage_daemon"]
 # `mirage_dashboard/webui`).
 webui = ["daemon", "mirage_daemon/webui"]
 
+[build-dependencies]
+serde_json = "1.0"
+
 [dev-dependencies]
 mirage_builtin = { workspace = true }
 assert_cmd = "2"

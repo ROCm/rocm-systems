@@ -73,6 +73,10 @@ enum TopCmd {
     #[command(alias = "daemon")]
     Webui(WebuiArgs),
 
+    /// Show version, copyright, and the third-party crates mirage is
+    /// built from (with their licenses).
+    About,
+
     /// All control-plane subcommands (profile, session, exec, run,
     /// attach, logs, paths, schema) are flattened in here.
     #[command(flatten)]
@@ -130,6 +134,22 @@ const SUBCOMMANDS: &[&str] = &[
     "about",
     "help",
 ];
+
+/// The third-party dependency/license manifest, generated at build time
+/// by `build.rs` from `cargo metadata` and embedded into the binary.
+const THIRD_PARTY: &str = include_str!(concat!(env!("OUT_DIR"), "/about.txt"));
+
+/// Print version, copyright, and the embedded third-party manifest for
+/// `mirage about`.
+fn print_about() {
+    println!("mirage {}", env!("CARGO_PKG_VERSION"));
+    println!("A UX for the rocjitsu (and other) GPU emulators.");
+    println!();
+    println!("Copyright (c) Advanced Micro Devices, Inc. All rights reserved.");
+    println!("Licensed under the terms of mirage's LICENSE.");
+    println!();
+    print!("{THIRD_PARTY}");
+}
 
 /// Make `mirage` a drop-in replacement for the `rocjitsu` CLI by routing
 /// bare `mirage [opts] -- <app> [args…]` invocations to `mirage run`.
@@ -208,6 +228,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<ExitCode> {
         #[cfg(feature = "daemon")]
         TopCmd::Webui(args) => {
             mirage_daemon::run(args)?;
+            Ok(ExitCode::from(0))
+        }
+        TopCmd::About => {
+            print_about();
             Ok(ExitCode::from(0))
         }
         TopCmd::Ctl(cmd) => {
