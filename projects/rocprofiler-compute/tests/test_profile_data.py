@@ -57,13 +57,11 @@ def test_csv_analysis_materializes_joined_pmc_perf(tmp_path):
 
 def test_rocpd_analysis_materializes_legacy_results(tmp_path):
     (tmp_path / "results_a.csv").write_text(
-        "Dispatch_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-        "0,kernel,SQ_WAVES,1\n",
+        "Dispatch_ID,Kernel_Name,Counter_Name,Counter_Value\n0,kernel,SQ_WAVES,1\n",
         encoding="utf-8",
     )
     (tmp_path / "results_b.csv").write_text(
-        "Dispatch_ID,Kernel_Name,Counter_Name,Counter_Value\n"
-        "1,kernel,GRBM_COUNT,2\n",
+        "Dispatch_ID,Kernel_Name,Counter_Name,Counter_Value\n1,kernel,GRBM_COUNT,2\n",
         encoding="utf-8",
     )
 
@@ -79,30 +77,28 @@ def test_rocpd_analysis_materializes_legacy_results(tmp_path):
 
 
 def test_rocpd_long_counter_rows_convert_to_canonical_frame():
-    frame = pd.DataFrame(
-        [
-            {
-                "Dispatch_ID": 7,
-                "GPU_ID": 3,
-                "Kernel_Name": "kernel",
-                "Grid_Size": 64,
-                "Workgroup_Size": 256,
-                "LDS_Per_Workgroup": 0,
-                "Counter_Name": "SQ_WAVES",
-                "Counter_Value": 11,
-            },
-            {
-                "Dispatch_ID": 7,
-                "GPU_ID": 3,
-                "Kernel_Name": "kernel",
-                "Grid_Size": 64,
-                "Workgroup_Size": 256,
-                "LDS_Per_Workgroup": 0,
-                "Counter_Name": "GRBM_COUNT",
-                "Counter_Value": 22,
-            },
-        ]
-    )
+    frame = pd.DataFrame([
+        {
+            "Dispatch_ID": 7,
+            "GPU_ID": 3,
+            "Kernel_Name": "kernel",
+            "Grid_Size": 64,
+            "Workgroup_Size": 256,
+            "LDS_Per_Workgroup": 0,
+            "Counter_Name": "SQ_WAVES",
+            "Counter_Value": 11,
+        },
+        {
+            "Dispatch_ID": 7,
+            "GPU_ID": 3,
+            "Kernel_Name": "kernel",
+            "Grid_Size": 64,
+            "Workgroup_Size": 256,
+            "LDS_Per_Workgroup": 0,
+            "Counter_Name": "GRBM_COUNT",
+            "Counter_Value": 22,
+        },
+    ])
 
     canonical_frame = to_canonical_pmc_frame(frame)
 

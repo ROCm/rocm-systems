@@ -83,9 +83,7 @@ def convert_dbs_to_csv(
     with ExitStack() as stack:
         writers = {
             path: csv.writer(
-                stack.enter_context(
-                    Path(path).open("w", newline="", encoding="utf-8")
-                )
+                stack.enter_context(Path(path).open("w", newline="", encoding="utf-8"))
             )
             for path in queries
         }
@@ -225,14 +223,20 @@ def _get_dispatch_to_event_map(
 
 
 def _rocpd_counter_collection_path(context: ProfilePassContext) -> Path:
-    return context.workload_dir / "out" / "pmc_1" / (
-        f"{context.fbase}_counter_collection.csv"
+    return (
+        context.workload_dir
+        / "out"
+        / "pmc_1"
+        / (f"{context.fbase}_counter_collection.csv")
     )
 
 
 def _rocpd_marker_trace_path(context: ProfilePassContext) -> Path:
-    return context.workload_dir / "out" / "pmc_1" / (
-        f"{context.fbase}_marker_api_trace.csv"
+    return (
+        context.workload_dir
+        / "out"
+        / "pmc_1"
+        / (f"{context.fbase}_marker_api_trace.csv")
     )
 
 

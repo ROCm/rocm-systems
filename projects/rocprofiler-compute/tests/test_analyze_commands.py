@@ -12,11 +12,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from interface.factory import create_profile_data_reader
+from interface.profile_data import ProfileDataReaderOptions
 from rocprof_compute_analyze.analysis_cli import cli_analysis
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
-from interface.factory import create_profile_data_reader
-from interface.profile_data import ProfileDataReaderOptions
 from utils.parser import load_pc_sampling_data
 from utils.pc_sampling_analysis import load_pc_sample_records
 

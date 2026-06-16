@@ -88,9 +88,7 @@ def find_csv_result_files(workload_dir: Path, kokkos_trace: bool) -> list[Path]:
     ]
     if kokkos_trace:
         return [
-            file
-            for file in files
-            if not file.name.endswith("_marker_api_trace.csv")
+            file for file in files if not file.name.endswith("_marker_api_trace.csv")
         ]
     return files
 
@@ -259,8 +257,8 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         if path.is_file()
     ]
     combined_results = csv_ops.concat_csv_files(marker_files)
-    marker_path = Path(workload_dir) / "out" / "pmc_1" / (
-        f"results_{fbase}_marker_api_trace.csv"
+    marker_path = (
+        Path(workload_dir) / "out" / "pmc_1" / (f"results_{fbase}_marker_api_trace.csv")
     )
     csv_ops.write_csv_from_dicts(str(marker_path), combined_results)
 
@@ -549,9 +547,7 @@ def _rename_accumulator_columns(
         return ordered_fieldnames
 
     accum_mapping = {
-        col: "SQ_ACCUM_PREV_HIRES"
-        for col in result[0]
-        if col.endswith("_ACCUM")
+        col: "SQ_ACCUM_PREV_HIRES" for col in result[0] if col.endswith("_ACCUM")
     }
     if not accum_mapping:
         return ordered_fieldnames
@@ -650,9 +646,7 @@ def _convert_rocprofv3_counter_file(counter_file: str) -> bool:
             str(converted_csv_file),
         )
     except Exception as error:
-        console_warning(
-            f"Error converting {counter_file} from v3 to v2 csv: {error}"
-        )
+        console_warning(f"Error converting {counter_file} from v3 to v2 csv: {error}")
         return False
     return True
 
@@ -686,9 +680,7 @@ def _save_csv_torch_trace_inputs(
     marker_files = list(src_dir.glob("*/*_marker_api_trace.csv"))
     (Path(workload_dir) / fbase).mkdir(parents=True, exist_ok=True)
     for src_counter in counter_files:
-        dst_counter = (
-            Path(workload_dir) / fbase / ("torch_trace_" + src_counter.name)
-        )
+        dst_counter = Path(workload_dir) / fbase / ("torch_trace_" + src_counter.name)
         shutil.copyfile(src_counter, dst_counter)
         console_log("torch trace", f"Copied Counter Collection: {dst_counter}")
     for src_marker in marker_files:
