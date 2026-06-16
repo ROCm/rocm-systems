@@ -20,30 +20,13 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """BDF string parsing and formatting unit tests."""
 
-import sys
 import unittest
-
-# Allow direct execution: walk up to find the 'common/' package root
-import os as _os
-
-_d = _os.path.dirname(_os.path.abspath(__file__))
-while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, "common")):
-    _d = _os.path.dirname(_d)
-sys.path.insert(0, _d)
-del _d, _os
 
 import common.helpers as common
 
 amdsmi_path = None  # BDF tests do not require the amdsmi library.
 
-verbose = common.VERBOSITY_NORMAL
-if "-q" in sys.argv or "--quiet" in sys.argv:
-    verbose = common.VERBOSITY_QUIET
-elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
-    verbose = common.VERBOSITY_VERBOSE
 
-
-import os
 import sys
 
 # common.helpers owns path resolution, sys.path setup, and amdsmi loading — borrow the
@@ -205,7 +188,3 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             inval_test.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL
         )
         return
-
-
-if __name__ == "__main__":
-    unittest.main()

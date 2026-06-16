@@ -140,6 +140,26 @@ VERBOSITY_NORMAL = 1  # default (dot-per-test)
 VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
 
 
+def _parse_verbose(argv=None):
+    """Resolve the verbosity selector from *argv* (defaults to ``sys.argv``).
+
+    ``-q``/``--quiet`` -> QUIET; ``-v``/``-vv``/``--verbose`` -> VERBOSE;
+    otherwise NORMAL.  Parsed once at import as the module-level ``verbose`` so
+    every runner and test module shares a single source of truth instead of
+    re-parsing ``sys.argv`` in each file.
+    """
+    argv = sys.argv if argv is None else argv
+    if "-q" in argv or "--quiet" in argv:
+        return VERBOSITY_QUIET
+    if any(a in ("-v", "-vv", "--verbose") for a in argv):
+        return VERBOSITY_VERBOSE
+    return VERBOSITY_NORMAL
+
+
+# Shared verbosity for the whole process (runners + the test modules they import).
+verbose = _parse_verbose()
+
+
 def _print_test_ids(suite):
     for test in suite:
         if isinstance(test, unittest.TestSuite):

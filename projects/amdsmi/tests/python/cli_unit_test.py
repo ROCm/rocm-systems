@@ -49,11 +49,7 @@ sys.path.insert(0, _here)
 
 import common.helpers as common
 
-verbose = common.VERBOSITY_NORMAL
-if "-q" in sys.argv or "--quiet" in sys.argv:
-    verbose = common.VERBOSITY_QUIET
-elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
-    verbose = common.VERBOSITY_VERBOSE
+verbose = common.verbose
 
 if "-h" in sys.argv or "--help" in sys.argv:
     common.print_unittest_help()

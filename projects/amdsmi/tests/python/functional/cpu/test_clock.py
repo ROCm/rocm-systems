@@ -20,18 +20,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """CPU clock: set clock frequency, SOC P-state."""
 
-import os
-import sys
 import unittest
-
-# Allow direct execution: walk up to find the 'common/' package root
-import os as _os
-
-_d = _os.path.dirname(_os.path.abspath(__file__))
-while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, "common")):
-    _d = _os.path.dirname(_d)
-sys.path.insert(0, _d)
-del _d, _os
 
 import common.helpers as common
 
@@ -40,17 +29,11 @@ import common.helpers as common
 # (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
 from common.helpers import amdsmi
 
-verbose = common.VERBOSITY_NORMAL
-if "-q" in sys.argv or "--quiet" in sys.argv:
-    verbose = common.VERBOSITY_QUIET
-elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
-    verbose = common.VERBOSITY_VERBOSE
-
 
 class TestCpuClock(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.common = common.Common(verbose)
+        cls.common = common.Common(common.verbose)
 
     @classmethod
     def tearDownClass(cls):
@@ -295,25 +278,3 @@ class TestCpuClock(unittest.TestCase):
             max_width=max_width,
         )
         return
-
-
-if __name__ == "__main__":
-    if os.geteuid() != 0:
-        print("Warning: Some tests may require elevated privileges (sudo/root).\n", file=sys.stderr)
-    verbose = common.VERBOSITY_NORMAL
-    if "-q" in sys.argv or "--quiet" in sys.argv:
-        verbose = common.VERBOSITY_QUIET
-    elif any(a in ("-v", "-vv", "--verbose") for a in sys.argv):
-        verbose = common.VERBOSITY_VERBOSE
-    if not ("-k" in sys.argv or "--keyword" in sys.argv):
-        if verbose > common.VERBOSITY_QUIET:
-            common.print_tests(__name__)
-    if "-h" in sys.argv or "--help" in sys.argv:
-        unittest.main()
-    if verbose < common.VERBOSITY_VERBOSE:
-        common.print_legend()
-    runner = unittest.TextTestRunner(
-        stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
-    )
-    common.expand_glob_k_arg(globals())
-    unittest.main(testRunner=runner)

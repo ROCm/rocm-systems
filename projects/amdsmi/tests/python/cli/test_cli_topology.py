@@ -25,18 +25,8 @@ import json
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import unittest
-
-# Allow direct execution: walk up to find the 'common/' package root
-import os as _os
-
-_d = _os.path.dirname(_os.path.abspath(__file__))
-while _d != _os.path.dirname(_d) and not _os.path.isdir(_os.path.join(_d, "common")):
-    _d = _os.path.dirname(_d)
-sys.path.insert(0, _d)
-del _d, _os
 
 import common.helpers as common
 import common.runcmd as runcmd
@@ -47,8 +37,6 @@ from cli.base import TestCliBase
 # (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
 from common.helpers import amdsmi
 
-verbose = 1
-
 
 class TestCliTopology(TestCliBase):
     TMP_FILENAME = "_tmp.log"
@@ -56,7 +44,7 @@ class TestCliTopology(TestCliBase):
 
     @classmethod
     def setUpClass(cls):
-        cls.common = common.Common(verbose)
+        cls.common = common.Common(common.verbose)
         cls.util = runcmd.Util("WARNING")
 
         # Record starting values; running here (once per class) rather than in
@@ -254,7 +242,3 @@ class TestCliTopology(TestCliBase):
         )
         self.RunCmds(cmds)
         return
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -366,12 +366,20 @@ All support `-v`, `-b`, `-q`, and `-k "pattern"`. Run from source by substitutin
 /opt/rocm/share/amd_smi/tests/python_unittest/cli_unit_test.py -k "gpu" -v
 ```
 
-**Run a single feature file directly** (individual test files are also executable):
+**Narrow to a single feature file** with `-k` on the matching runner. The individual
+`test_*.py` files are *not* meant to be run directly — they are plain unittest modules that
+the three runners discover, import, and execute. The runners own path resolution, verbosity,
+filtering, and the amdsmi import, so a leaf file has no `sys.path` bootstrap of its own;
+invoking one with `python test_power.py` simply raises `ModuleNotFoundError: common`, the same
+as running a pytest test file directly. Always go through a runner with a `-k` filter:
 
 ```shell
-/opt/rocm/share/amd_smi/tests/python_unittest/unit/gpu/test_clock.py -v
-/opt/rocm/share/amd_smi/tests/python_unittest/unit/gpu/test_clock.py -k freq -v
-/opt/rocm/share/amd_smi/tests/python_unittest/functional/gpu/test_power.py -v
+# functional/gpu/test_power.py -> integration_test.py with a -k filter
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "functional.gpu.test_power" -v
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_power" -v
+
+# unit/bdf/test_bdf.py -> unit_tests.py
+/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -k "unit.bdf.test_bdf" -v
 ```
 
 **Equivalent matrix between Python and C++:**
