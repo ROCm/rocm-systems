@@ -28,6 +28,7 @@
 #include <iostream>
 
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 // Category mask covering all telemetry categories
 static constexpr uint32_t kAllCategories =
@@ -83,19 +84,39 @@ void TestFabricRead::Run(void) {
     // not NOT_INIT.
     {
       amdsmi_fabric_telemetry_t* probe = nullptr;
+      DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
       err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, &probe);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                            AMDSMI_STATUS_NOT_SUPPORTED);
       ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
       if (err == AMDSMI_STATUS_SUCCESS) {
         ASSERT_NE(probe, nullptr);
+        DISPLAY_AMDSMI_API("amdsmi_get_fabric_telemetry_data", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
         err = amdsmi_get_fabric_telemetry_data(device, probe);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
+        DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
         err = amdsmi_free_fabric_telemetry(device, probe);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
       } else {
         amdsmi_fabric_telemetry_t dummy = {};
+        DISPLAY_AMDSMI_API("amdsmi_get_fabric_telemetry_data", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
         err = amdsmi_get_fabric_telemetry_data(device, &dummy);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
+        DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                           VERB(STANDARD));
         err = amdsmi_free_fabric_telemetry(device, &dummy);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         ASSERT_NE(err, AMDSMI_STATUS_NOT_INIT);
       }
     }
@@ -104,7 +125,11 @@ void TestFabricRead::Run(void) {
     IF_VERB(STANDARD) { std::cout << "\t** Testing amdsmi_get_gpu_fabric_info()" << std::endl; }
 
     amdsmi_fabric_info_t fabric_info = {};
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_fabric_info(device, &fabric_info);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NO_DATA, AMDSMI_STATUS_NOT_SUPPORTED);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
@@ -137,7 +162,10 @@ void TestFabricRead::Run(void) {
     }
 
     // Null-pointer validation
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_get_gpu_fabric_info(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     // ── amdsmi_alloc_fabric_telemetry / amdsmi_get_fabric_telemetry_data ──
@@ -149,7 +177,11 @@ void TestFabricRead::Run(void) {
     }
 
     amdsmi_fabric_telemetry_t* tel = nullptr;
+    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, &tel);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NOT_SUPPORTED);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
@@ -162,7 +194,11 @@ void TestFabricRead::Run(void) {
     CHK_ERR_ASRT(err)
     ASSERT_NE(tel, nullptr);
 
+    DISPLAY_AMDSMI_API("amdsmi_get_fabric_telemetry_data", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_get_fabric_telemetry_data(device, tel);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                          AMDSMI_STATUS_NOT_SUPPORTED);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**amdsmi_get_fabric_telemetry_data() is not supported"
@@ -170,7 +206,11 @@ void TestFabricRead::Run(void) {
                   << std::endl;
       }
       // Still free the allocated buffer before continuing
-      amdsmi_free_fabric_telemetry(device, tel);
+      DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
+      err = amdsmi_free_fabric_telemetry(device, tel);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                            AMDSMI_STATUS_NOT_SUPPORTED);
       continue;
     }
     CHK_ERR_ASRT(err)
@@ -205,14 +245,23 @@ void TestFabricRead::Run(void) {
     }
 
     // ── amdsmi_free_fabric_telemetry ──────────────────────────────────────
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_free_fabric_telemetry(device, tel);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
 
     // Null-pointer validation for alloc/free
+    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_free_fabric_telemetry(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }
