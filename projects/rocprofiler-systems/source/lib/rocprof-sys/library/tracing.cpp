@@ -5,13 +5,20 @@
 #include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
+#include "core/track_registry.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <timemory/hash/types.hpp>
 #include <timemory/process/threading.hpp>
+
+#include <unistd.h>
 
 #include "logger/debug.hpp"
 
@@ -24,6 +31,20 @@ get_timemory_hash_ids(std::int64_t _tid = threading::get_id());
 
 tim::hash_alias_ptr_t&
 get_timemory_hash_aliases(std::int64_t _tid = threading::get_id());
+
+track_registry&
+process_default_registry()
+{
+    static auto _v = track_registry{};
+    return _v;
+}
+
+track_registry&
+active_or_default_registry()
+{
+    auto* reg = get_active_track_registry();
+    return reg ? *reg : process_default_registry();
+}
 
 tim::hash_map_ptr_t&
 get_timemory_hash_ids(std::int64_t _tid)
@@ -49,15 +70,48 @@ bool debug_user =
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids()
 {
-    static auto _v = std::unordered_map<hash_value_t, std::string>{};
-    return _v;
+    return active_or_default_registry().map();
 }
 
 std::mutex&
 get_perfetto_track_uuids_mutex()
 {
-    static auto _mtx = std::mutex{};
-    return _mtx;
+    return active_or_default_registry().mutex();
+}
+
+namespace
+{
+::perfetto::Track
+make_synthetic_process_track(int pid)
+{
+    const auto seed  = std::hash<std::string>{}(std::string{ "rocprofsys_process" });
+    const auto _uuid = hash_combine_all(seed, static_cast<std::int64_t>(pid));
+    return ::perfetto::Track{ _uuid };
+}
+}  // namespace
+
+::perfetto::Track
+get_active_process_track()
+{
+    const auto pid = core::get_emitting_pid();
+    if(pid <= 0) return ::perfetto::ProcessTrack::Current();
+    if(pid == static_cast<int>(::getpid())) return ::perfetto::ProcessTrack::Current();
+    return make_synthetic_process_track(pid);
+}
+
+void
+ensure_synthetic_process_track_emitted(int pid)
+{
+    if(pid <= 0) return;
+    if(pid == static_cast<int>(::getpid())) return;
+
+    static thread_local std::unordered_set<int> s_emitted{};
+    if(!s_emitted.insert(pid).second) return;
+
+    auto _track = make_synthetic_process_track(pid);
+    auto _desc  = _track.Serialize();
+    _desc.mutable_process()->set_pid(pid);
+    ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 }
 
 void

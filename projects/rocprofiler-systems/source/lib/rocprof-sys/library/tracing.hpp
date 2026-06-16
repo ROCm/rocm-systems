@@ -8,7 +8,8 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
-#include "core/perfetto.hpp"
+#include "core/perfetto/category_registry.hpp"
+#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -48,8 +49,26 @@ namespace rocprofsys
 {
 namespace tracing
 {
-using interval_data_instances           = thread_data<std::vector<bool>>;
-using hash_value_t                      = tim::hash_value_t;
+using interval_data_instances = thread_data<std::vector<bool>>;
+using hash_value_t            = tim::hash_value_t;
+
+constexpr std::uint64_t
+hash_combine(std::uint64_t seed, std::uint64_t value) noexcept
+{
+    constexpr std::uint64_t golden_ratio = 0x9e3779b97f4a7c17ULL;
+    return seed ^ (value + golden_ratio + (seed << 6) + (seed >> 2));
+}
+
+template <typename... Args>
+inline std::uint64_t
+hash_combine_all(std::uint64_t seed, Args&&... args) noexcept
+{
+    ((seed =
+          hash_combine(seed, std::hash<std::decay_t<Args>>{}(std::forward<Args>(args)))),
+     ...);
+    return seed;
+}
+
 using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
     comp::cpu_clock, comp::cpu_util, comp::kernel_mode_time, comp::num_major_page_faults,
     comp::num_minor_page_faults, comp::page_rss, comp::peak_rss, comp::papi_array_t,
@@ -71,6 +90,12 @@ get_perfetto_track_uuids();
 
 std::mutex&
 get_perfetto_track_uuids_mutex();
+
+::perfetto::Track
+get_active_process_track();
+
+void
+ensure_synthetic_process_track_emitted(int pid);
 
 void
 copy_timemory_hash_ids();
@@ -148,9 +173,11 @@ template <typename CategoryT, typename... Args>
 auto
 get_perfetto_category_uuid(Args&&... _args)
 {
-    return tim::hash::get_hash_id(tim::hash::get_hash_id(fmt::format(
-                                      "rocprofsys_{}", trait::name<CategoryT>::value)),
-                                  std::forward<Args>(_args)...);
+    const auto seed = std::hash<std::string>{}(
+        fmt::format("rocprofsys_{}", trait::name<CategoryT>::value));
+    return hash_combine_all(
+        seed, std::forward<Args>(_args)...,
+        static_cast<std::int64_t>(::rocprofsys::core::get_emitting_pid()));
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,
@@ -165,7 +192,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
 
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
-        const auto _track = TrackT(_uuid, ::perfetto::ProcessTrack::Current());
+        const auto _track = TrackT(_uuid, get_active_process_track());
         auto       _desc  = _track.Serialize();
 
         auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
@@ -192,7 +219,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     }
 #endif
 
-    return TrackT(_uuid, ::perfetto::ProcessTrack::Current());
+    return TrackT(_uuid, get_active_process_track());
 }
 
 template <typename Tp = std::uint64_t>
