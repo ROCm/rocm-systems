@@ -147,7 +147,7 @@ Please install it for your OS distribution. e.g: for Ubuntu: \"sudo apt-get inst
 ")
 endif()
 
-find_library(NUMA NAME numa REQUIRED)
+find_library(NUMA NAMES numa REQUIRED)
 link_libraries(${NUMA})
 
 get_property(
