@@ -31,6 +31,18 @@ jobs:
     env:
       # Matrix variables go here in JSON notation.
       # '>-' strips newlines
+      CXX_COMPILER: >-
+        [
+          "amdclang++",
+          "clang++",
+          "g++"
+        ]
+      CXX_STANDARD: >-
+        [
+          20,
+          23
+        ]
+      # Note: If adding distros or ROCm versions, ensure they have been properly excluded.
       SUPPORTED_PLATFORMS: >-
         [
           "rocky",
@@ -40,19 +52,29 @@ jobs:
         ]
       ROCM_VERSIONS: >-
         [
-          "7.2.2"
+          "7.2.2",
+          "7.13.0",
+          "nightly"
         ]
-      # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries,
-      # passed through to GHA's strategy.matrix include/exclude keys
-      # so non-rectangular combinations (e.g. ubuntu x 7.13.0 only) can
-      # be expressed without abandoning the base cross-product.
+      # MATRIX_INCLUDE / MATRIX_EXCLUDE: extra/removed matrix entries, passed
+      # through to GHA's strategy.matrix include/exclude keys so non-rectangular
+      # combinations can be expressed without abandoning the base cross-product.
       MATRIX_INCLUDE: >-
-        [
-          {"supported_platforms": "ubuntu", "rocm_versions": "7.13.0"},
-          {"supported_platforms": "ubuntu", "rocm_versions": "nightly"}
-        ]
-      MATRIX_EXCLUDE: >-
         []
+      # 7.13.0 and nightly are ubuntu-only targets. They live in the base
+      # ROCM_VERSIONS axis and are removed from every other distro via
+      # MATRIX_EXCLUDE below. This is cleaner than specifying the full
+      # combination of CI parameters in include as the matrix axes grow.
+      MATRIX_EXCLUDE: >-
+        [
+          {"supported_platforms": "rocky8", "cxx_standard": 23},
+          {"supported_platforms": "rocky", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "rocky", "rocm_versions": "nightly"},
+          {"supported_platforms": "rocky8", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "rocky8", "rocm_versions": "nightly"},
+          {"supported_platforms": "suse", "rocm_versions": "7.13.0"},
+          {"supported_platforms": "suse", "rocm_versions": "nightly"}
+        ]
     steps:
       - name: Fetching code repository...
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -203,5 +225,7 @@ jobs:
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image }}
       ci_image_nvidia: ${{ fromJSON(needs.Precheck.outputs.ci_images)[format('{0}-{1}', matrix.supported_platforms, matrix.rocm_versions)].ci_image_nvidia }}
+      cxx_compiler: ${{ matrix.cxx_compiler }}
+      cxx_standard: ${{ matrix.cxx_standard }}
       platform: ${{ matrix.supported_platforms }}
       rocm_version: ${{ matrix.rocm_versions }}

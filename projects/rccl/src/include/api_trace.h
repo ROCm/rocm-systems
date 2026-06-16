@@ -31,7 +31,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 5
+#define RCCL_API_TRACE_VERSION_PATCH 6
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
@@ -125,7 +125,7 @@ typedef ncclResult_t (*ncclCommAbort_fn_t)(ncclComm_t comm);
 typedef ncclResult_t (*ncclCommRevoke_fn_t)(ncclComm_t comm, int revokeFlags);
 
 typedef ncclResult_t (*ncclCommShrink_fn_t)(ncclComm_t comm, int* excludeRanksList,
-                                            int excludeRanksCount, ncclComm_t *newcomm, 
+                                            int excludeRanksCount, ncclComm_t *newcomm,
                                             ncclConfig_t* config, int shrinkFlags);
 
 typedef ncclResult_t (*ncclCommSplit_fn_t)(ncclComm_t comm, int color, int key,
@@ -175,11 +175,11 @@ typedef ncclResult_t (*ncclCommResume_fn_t)(ncclComm_t comm);
 typedef ncclResult_t (*ncclCommMemStats_fn_t)(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
 typedef ncclResult_t (*ncclPutSignal_fn_t)(const void* localbuff, size_t count, ncclDataType_t datatype,
     int peer, ncclWindow_t peerWin, size_t peerWinOffset,
-    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, hipStream_t stream);
 typedef ncclResult_t (*ncclSignal_fn_t)(int peer, int sigIdx, int ctx, unsigned int flags,
-    ncclComm_t comm, cudaStream_t stream);
+    ncclComm_t comm, hipStream_t stream);
 typedef ncclResult_t (*ncclWaitSignal_fn_t)(int nDesc, ncclWaitSignalDesc_t* signalDescs,
-    ncclComm_t comm, cudaStream_t stream);
+    ncclComm_t comm, hipStream_t stream);
 
 typedef struct rcclApiFuncTable
 {
