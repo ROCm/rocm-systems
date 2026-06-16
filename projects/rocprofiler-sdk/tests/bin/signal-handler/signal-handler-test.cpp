@@ -48,10 +48,12 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cerrno>
 #include <cstdarg>
 
 #include <atomic>
 #include <stdexcept>
+#include <string>
 
 namespace
 {
@@ -211,7 +213,18 @@ mode_good_fork()
 
     for(int i = 0; i < NUM_CHILDREN; i++)
     {
-        pipe(pipes[i]);
+        if(pipe(pipes[i]) != 0)
+        {
+            for(int j = 0; j < i; j++)
+            {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+
+            throw std::runtime_error(
+                std::string("signal-handler-test pipe() failed with error code ") +
+                std::to_string(errno));
+        }
         pid_t pid = fork();
         if(pid == 0)
         {

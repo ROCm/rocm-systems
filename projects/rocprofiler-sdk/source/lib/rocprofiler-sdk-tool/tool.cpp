@@ -105,6 +105,7 @@
 #include <iomanip>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -214,26 +215,49 @@ is_handled_signal(int signum)
 
 struct signal_worker_state
 {
-    int               eventfd       = -1;
-    std::atomic<int>  finalize_done = {0};
-    std::atomic<bool> handling      = {false};
-    std::atomic<bool> finalized     = {false};
-    int               signo         = 0;
-    std::thread       thread        = {};
-    int               timeout_sec   = 10;
+    int                   eventfd       = -1;
+    std::atomic<uint32_t> finalize_done = {};
+    // set to 1 when `rocprofv3_error_signal_handler` owns the signal path (re-entry guard +
+    // interceptor bypass).
+    std::atomic<uint32_t> handling    = {0};
+    std::atomic_flag      finalized   = ATOMIC_FLAG_INIT;
+    int                   signo       = {0};
+    std::thread           thread      = {};
+    int                   timeout_sec = {10};
 };
+
+static_assert(std::atomic<uint32_t>::is_always_lock_free,
+              "rocprofv3 signal path requires lock-free finalize_done atomic support");
 
 auto&
 get_signal_worker(bool reset = false)
 {
     static auto*& _v = common::static_object<signal_worker_state>::construct();
+    auto&         sw = *CHECK_NOTNULL(_v);
+
+    const auto reset_signal_worker_state = [](signal_worker_state& obj) {
+        if(obj.eventfd >= 0)
+        {
+            if(::close(obj.eventfd) != 0)
+            {
+                ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
+                             << strerror(errno);
+            }
+        }
+
+        std::memset(static_cast<void*>(&obj), 0, sizeof(obj));
+        ::new(static_cast<void*>(&obj)) signal_worker_state{};
+    };
+
     if(reset)
     {
-        // After fork, parent's state (eventfd, thread, atomics) is stale.
-        // Zero everything and reconstruct in place.
-        std::memset(static_cast<void*>(_v), 0, sizeof(signal_worker_state));
+        // Post-fork child: parent's eventfd duplicate and std::thread are invalid. Close the fd
+        // first, then reset storage and value-construct so defaults live only in
+        // signal_worker_state (we do not run ~std::thread() on a possibly-joinable parent thread).
+        reset_signal_worker_state(sw);
     }
-    return *CHECK_NOTNULL(_v);
+
+    return sw;
 }
 
 struct buffer_ids
@@ -2381,7 +2405,11 @@ void
 finalize_rocprofv3(std::string_view context)
 {
     auto& sw = get_signal_worker();
-    if(sw.finalized.exchange(true)) return;
+    if(sw.finalized.test_and_set(std::memory_order_acq_rel))
+    {
+        ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
+        return;
+    }
 
     ROCP_INFO << "invoked: finalize_rocprofv3";
     if(client_finalizer && client_identifier)
@@ -4430,6 +4458,11 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
         auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
         auto ifs      = std::ifstream{fname};
         auto children = std::vector<pid_t>{};
+        if(!ifs.is_open())
+        {
+            ROCP_WARNING << "signal worker: failed to open " << fname << ": " << strerror(errno);
+            return children;
+        }
         while(ifs)
         {
             pid_t child_pid = 0;
@@ -4496,7 +4529,7 @@ signal_finalization_worker()
         this_tid,
         this_func);
 
-    sw.finalize_done.store(1, std::memory_order_release);
+    sw.finalize_done.store(1u, std::memory_order_release);
     syscall(SYS_futex, &sw.finalize_done, FUTEX_WAKE, 1, nullptr, nullptr, 0);
 }
 
@@ -4512,9 +4545,9 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     // All processes (parent and children) need to flush and die.
     // For well-behaved apps, use --disable-signal-handlers (atexit handles everything).
 
-    // Re-entry guard
-    bool expected = false;
-    if(!sw.handling.compare_exchange_strong(expected, true, std::memory_order_acquire)) return;
+    // Re-entry guard: lock-free compare-exchange (see static_assert on `handling`).
+    uint32_t expected = 0;
+    if(!sw.handling.compare_exchange_strong(expected, 1u, std::memory_order_acquire)) return;
 
     // For testing: allow quick_exit path
     if(signal_handler_exit) ::quick_exit(signo);
@@ -4553,7 +4586,12 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             for(int j = 1; j <= attempt && j < 4; j++)
                 elapsed += backoff_sec[j];
 
-            // technically unsafe, but otherwise the process looks hung to users
+            // Logging here is not async-signal-safe in the strict POSIX sense (Abseil may take
+            // locks). In practice this path is still safe enough for diagnostics: the handler is
+            // one-shot (re-entry guard above), SA_NODEFER is not set on our installed action so the
+            // same thread cannot be re-entered for another signal while we're here, and other
+            // threads may log concurrently (Abseil is thread-safe). We keep this message so users
+            // see progress during long flushes.
             ROCP_WARNING << fmt::format(
                 "signalhandler: waiting for worker thread to flush profiling data: ~{}s elapsed...",
                 elapsed);
@@ -4641,9 +4679,7 @@ rocprofiler_configure(uint32_t                 version,
     add_destructor(execution_profile);
 
     // in case main wrapper is not used
-    ::atexit([]() {
-        if(!get_signal_worker().finalized.load()) finalize_rocprofv3("atexit");
-    });
+    ::atexit([]() { finalize_rocprofv3("atexit"); });
 
     tool::get_tmp_file_name_callback() = [](domain_type type) -> std::string {
         return compose_tmp_file_name(tool::get_config(), type);
@@ -4721,7 +4757,7 @@ rocprofv3_signal(int signum, sighandler_t handler)
 {
     if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
 
-    if(get_signal_worker().handling.load(std::memory_order_relaxed))
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_signal_function()(signum, handler);
 
     if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
@@ -4741,7 +4777,7 @@ rocprofv3_sigaction(int signum,
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    if(get_signal_worker().handling.load(std::memory_order_relaxed))
+    if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_sigaction_function()(signum, act, oldact);
 
     if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
@@ -4798,7 +4834,7 @@ rocprofv3_main(int argc, char** argv, char** envp)
 
     initialize_rocprofv3();
 
-    // Resolve dlsym'd function pointers at init time (not in call_once later)
+    // Resolve dlsym'd function pointers at init time (before interceptors run).
     if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
