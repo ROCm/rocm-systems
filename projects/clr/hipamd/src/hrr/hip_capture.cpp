@@ -49,6 +49,7 @@
 #include "../hip_code_object.hpp"
 #include "../hip_platform.hpp"   // PlatformState::Instance()
 
+#include <algorithm>
 #include <atomic>
 #include <climits>
 #include <csignal>
@@ -81,7 +82,9 @@ std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_t
 HipCompilerDispatchTable g_real_compiler_table{};
 std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
 
-// TLS dims saved by __hipPushCallConfiguration for use by hipLaunchByPtr
+// TLS dims saved by __hipPushCallConfiguration — used only as a fallback by
+// hipLaunchByPtr when the exec stack is empty (the exec stack top() is the
+// authoritative source for both the <<<>>> and legacy hipConfigureCall paths).
 static thread_local dim3        g_pushed_grid{};
 static thread_local dim3        g_pushed_block{};
 static thread_local size_t      g_pushed_shared{};
@@ -237,8 +240,9 @@ static void serialize_kernel_launch(
       else for (uint16_t j = 0; j < sz; j++) push_u8(0);
       if (dbg) {
         uint64_t v = 0; if (bytes && sz >= 8) std::memcpy(&v, bytes, 8);
-        std::fprintf(stderr, "[HRR args] %s arg[%u] kind=1(ptr) size=%u value=0x%llx\n",
-                     kernel_name, idx, sz, (unsigned long long)v);
+        std::fprintf(stderr, "[HRR args] %s arg[%u] kind=1(ptr) size=%u value=0x%llx%s\n",
+                     kernel_name, idx, sz, (unsigned long long)v,
+                     bytes ? "" : " [TRUNCATED:no-bytes]");
       }
       return;
     }
@@ -260,13 +264,26 @@ static void serialize_kernel_launch(
       }
       std::string off_str;
       for (uint16_t o : offs) { std::snprintf(tmp, sizeof(tmp), "%u ", o); off_str += tmp; }
-      std::fprintf(stderr, "[HRR args] %s arg[%u] kind=%u size=%u bytes=%s ptr_off=[%s]\n",
-                   kernel_name, idx, kind, sz, hex.c_str(), off_str.c_str());
+      std::fprintf(stderr, "[HRR args] %s arg[%u] kind=%u size=%u bytes=%s ptr_off=[%s]%s\n",
+                   kernel_name, idx, kind, sz, hex.c_str(), off_str.c_str(),
+                   bytes ? "" : " [TRUNCATED:no-bytes]");
     }
   };
 
   if (kbuf && ksz > 0) {
     const auto* buf_bytes = static_cast<const uint8_t*>(kbuf);
+    if (dbg) {
+      uint32_t need = 0;
+      for (uint32_t i = 0; i < n_all; i++) {
+        const auto& desc = sig.at(i);
+        if (desc.info_.hidden_) continue;
+        need = std::max<uint32_t>(need,
+                 static_cast<uint32_t>(desc.offset_ + desc.size_));
+      }
+      std::fprintf(stderr, "[HRR args] %s kbuf path: ksz=%zu need=%u n_all=%u%s\n",
+                   kernel_name, ksz, need, n_all,
+                   (ksz < need) ? " [KBUF-TOO-SMALL]" : "");
+    }
     for (uint32_t i = 0; i < n_all; i++) {
       const auto& desc = sig.at(i);
       if (desc.info_.hidden_) continue;
@@ -681,14 +698,33 @@ hipError_t capture___hipPushCallConfiguration(dim3 gridDim, dim3 blockDim,
 }
 
 hipError_t capture_hipLaunchByPtr(const void* func) {
-  // The kernarg buffer is accumulated by hipSetupArgument into the per-thread
-  // exec stack (hip::tls.exec_stack_.top().arguments_), laid out by descriptor
-  // offset. The real hipLaunchByPtr PopExec's (std::move) that exec, consuming
-  // the buffer, so we must snapshot it *before* calling through. Copy (not move)
-  // to leave arguments_ intact for the real launch.
+  // Snapshot the WHOLE exec (dims + args) from the top of the per-thread exec
+  // stack *before* the real hipLaunchByPtr, which PopExec's (std::move) it.
+  //
+  // top() is the authoritative source for launch config on BOTH launch paths,
+  // because hipConfigureCall and __hipPushCallConfiguration both funnel into
+  // PlatformState::ConfigureCall(), which pushes ihipExec_t{grid,block,shared,
+  // stream}:
+  //   - modern <<<>>>:  __hipPushCallConfiguration -> ConfigureCall (push exec)
+  //   - legacy CUDA RT: hipConfigureCall -> ConfigureCall (push exec)
+  //                     + hipSetupArgument (fills exec.arguments_)
+  // The g_pushed_* shadow is only written by capture___hipPushCallConfiguration,
+  // so on the legacy hipConfigureCall path it is stale/zero. Reading dims from
+  // top() keeps dims and args from the same snapshot and is correct on both
+  // paths; fall back to g_pushed_* only if the stack is unexpectedly empty.
+  dim3        grid   = g_pushed_grid;
+  dim3        block  = g_pushed_block;
+  size_t      shared = g_pushed_shared;
+  hipStream_t stream = g_pushed_stream;
   std::vector<char> kargs;
-  if (hip_capture_enabled() && !hip::tls.exec_stack_.empty())
-    kargs = hip::tls.exec_stack_.top().arguments_;
+  if (hip_capture_enabled() && !hip::tls.exec_stack_.empty()) {
+    const auto& e = hip::tls.exec_stack_.top();
+    grid   = e.gridDim_;
+    block  = e.blockDim_;
+    shared = e.sharedMem_;
+    stream = e.hStream_;
+    kargs  = e.arguments_;  // copy (not move) to leave arguments_ intact for the real launch
+  }
 
   hipError_t r = g_real_table.hipLaunchByPtr_fn(func);
   if (r == hipSuccess && hip_capture_enabled()) {
@@ -705,9 +741,9 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
         size_t      ksz  = kargs.size();
         serialize_kernel_launch(
             kernel->name().c_str(),
-            g_pushed_grid.x, g_pushed_grid.y, g_pushed_grid.z,
-            g_pushed_block.x, g_pushed_block.y, g_pushed_block.z,
-            static_cast<uint32_t>(g_pushed_shared), g_pushed_stream,
+            grid.x, grid.y, grid.z,
+            block.x, block.y, block.z,
+            static_cast<uint32_t>(shared), stream,
             sig, nullptr, kbuf, ksz);
       }
     }

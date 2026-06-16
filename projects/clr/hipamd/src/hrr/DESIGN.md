@@ -457,6 +457,28 @@ pointer args. Old archives (no `value_kind == 3`) parse unchanged.
 kernel to code object at dispatch time. Playback resolves kernels by name, scanning
 all loaded modules.
 
+### Debugging kernel args (`HIP_HRR_DEBUG_ARGS`)
+
+Setting `HIP_HRR_DEBUG_ARGS=<non-empty>` dumps every captured arg to stderr
+(`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`). Two markers make
+common failure modes unambiguous:
+
+- `[TRUNCATED:no-bytes]` — the arg's bytes were unavailable at capture (the packed
+  kernarg buffer was shorter than the signature offset), so the arg is zero-filled.
+  A pointer arg printing `value=0x0` **without** this marker is a *genuine* null in
+  the application, **not** a capture loss. This distinction matters: a null pointer
+  arg at replay (`arg[i]: ptr 0x0 -> (nil) (MISSING!)`) is expected and harmless
+  when the original value was also null.
+- `[KBUF-TOO-SMALL]` (kbuf/`extra[]` path only) — the app-provided buffer size
+  (`ksz`) is smaller than the signature extent (`need`); trailing args will be
+  truncated. Triton-style launches that use `kernelParams[]` never hit this path.
+
+A GPU fault at a small fixed address (e.g. `0x20000`) with all captured pointer
+args translating correctly indicates a **data** divergence (a buffer's *contents*
+differ at replay so the kernel computes an out-of-bounds index), not an argument
+capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` that the nulls are genuine
+before suspecting the `<<<>>>` / kernarg capture path.
+
 ## Fat Binary Registration
 
 `__hipRegisterFatBinary` fires at C++ static-init time before shims are installed.
@@ -530,6 +552,19 @@ hrr-playback <capture.hrr> [options]
                         (silent full warm-up pass runs first to populate GPU state)
   --sync-after-launch   hipDeviceSynchronize after every kernel (surfaces GPU errors)
   --sync-after-event    hipDeviceSynchronize after every event (HW hang debug; very slow)
+```
+
+**Replay `hipMalloc` padding:** `hip_playback.cpp` replays each device allocation at
+`max(recorded_size, min(recorded_size × factor, cap))` (defaults: factor **1** for
+exact recorded sizes, cap **1 GiB**).  Legacy pool-style workloads (MIOpen / large
+virtual batch grids) may need **`HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256`** so kernels
+that over-read contiguous pools do not fault when replay uses independent
+`hipMalloc`s.  That multiplier can make large LLM replays hit **`hipErrorMemoryAllocation`**
+early; lower **`HIP_HRR_REPLAY_ALLOC_PAD_MAX`** or use factor **1** (default) to reduce VRAM.
+
+```
+HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256   # legacy padding (more VRAM; fewer pool faults)
+HIP_HRR_REPLAY_ALLOC_PAD_MAX=268435456   # example: 256 MiB cap per allocation
 ```
 
 For each D2H memcpy event that has a captured expected-data blob:
@@ -878,7 +913,10 @@ Certain HIP features interact poorly with a pure trace-and-replay model. In part
 CPU until a GPU event completes without issuing a blocking HIP synchronisation call.
 The capture records the successful `hipSuccess` return, but at replay the event may not
 yet be complete at the same point in execution (replay timing differs from original),
-causing the application logic that relied on polling to diverge.
+causing the application logic that relied on polling to diverge.  Playback therefore
+spins on `hipErrorNotReady` for `hipEventQuery`, `hipStreamQuery`, and
+`hipStreamQuery_spt` until `hipSuccess`, matching the captured return when only
+success was logged.
 
 Other HIP features with similar complications include device-side enqueue, cooperative
 groups with CPU-side barriers, and persistent kernels with CPU-side steering. These are

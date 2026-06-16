@@ -16,6 +16,7 @@
 #include "hrr_reader.h"   // hrr::hash_hex
 
 #include <hip/hip_runtime.h>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +24,7 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
+#include <mutex>
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
 // Kernel-launch handlers use this to wait for their submission turn and then
@@ -717,24 +719,67 @@ hipError_t playback_hipModuleLoad(PlaybackContext& ctx,
 // replay hipMallocs are independent and the adjacent pages are unmapped,
 // causing GPU page faults.
 //
-// Fix: over-allocate all device allocations by HRR_ALLOC_PAD_FACTOR so
-// any sub-allocation within the pool block has enough headroom.  The
-// extra memory is zero-initialized.
+// Fix (optional): over-allocate by HIP_HRR_REPLAY_ALLOC_PAD_FACTOR (legacy default
+// was 256, capped per allocation) so pool-style kernels have headroom.  Default
+// factor is now **1** (exact recorded sizes) so large captures replay without
+// multiplying VRAM; set HIP_HRR_REPLAY_ALLOC_PAD_FACTOR=256 for MIOpen-style
+// workloads that may fault without padding.  The extra memory is zero-initialized
+// when factor > 1.
 //
 // SP3AsmConv stride2 on 64×112×112 input sweeps 256 virtual batches:
 //   256 × 64 × 112 × 112 × 4 = ~781 MB from in_ptr.
 // A 1 GB cap ensures any sub-allocation has ≥800 MB headroom.
 // With 46 GB GPU and ≤30 pool allocations: 30 × 1 GB = 30 GB — within budget.
-static constexpr size_t HRR_ALLOC_PAD_FACTOR = 256;
-static constexpr size_t HRR_ALLOC_PAD_MAX    = 1ULL * 1024 * 1024 * 1024;  // 1 GB cap
+//
+// With factor 256 and a 1 GiB cap, many medium allocs each replay as 1 GiB, so
+// cumulative VRAM can exceed HBM early on large LLM captures; factor **1** avoids that.
+// Tunables: HIP_HRR_REPLAY_ALLOC_PAD_FACTOR (default **1**) and
+// HIP_HRR_REPLAY_ALLOC_PAD_MAX (default 1073741824).
+static void hrr_replay_alloc_pad_params(size_t* factor_out, size_t* max_out) {
+    static std::once_flag once;
+    static constexpr size_t kDefaultFactor = 1;
+    static constexpr size_t kDefaultMax   = 1ULL * 1024 * 1024 * 1024;
+    static size_t g_factor = kDefaultFactor;
+    static size_t g_max    = kDefaultMax;
+    std::call_once(once, [] {
+        if (const char* e = std::getenv("HIP_HRR_REPLAY_ALLOC_PAD_FACTOR")) {
+            char* end = nullptr;
+            unsigned long v = std::strtoul(e, &end, 0);
+            if (end != e) {
+                if (v <= 1)
+                    g_factor = 1;
+                else if (v <= 4096)
+                    g_factor = static_cast<size_t>(v);
+            }
+        }
+        if (const char* e = std::getenv("HIP_HRR_REPLAY_ALLOC_PAD_MAX")) {
+            char* end = nullptr;
+            unsigned long v = std::strtoul(e, &end, 0);
+            if (end != e && v > 0) g_max = static_cast<size_t>(v);
+        }
+        if (g_factor != kDefaultFactor || g_max != kDefaultMax) {
+            fprintf(stderr,
+                    "[HRR] replay alloc pad: factor=%zu max_bytes=%zu "
+                    "(HIP_HRR_REPLAY_ALLOC_PAD_* env)\n",
+                    g_factor, g_max);
+        }
+    });
+    *factor_out = g_factor;
+    *max_out    = g_max;
+}
+
+static size_t replay_padded_alloc_size(size_t orig_sz) {
+    size_t fac, mx;
+    hrr_replay_alloc_pad_params(&fac, &mx);
+    size_t pad_sz = std::min(orig_sz * fac, mx);
+    return std::max(orig_sz, pad_sz);
+}
 
 static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
                                 bool managed = false) {
     const auto* a = reinterpret_cast<const hrr_args_hipMalloc*>(pl);
     size_t orig_sz = static_cast<size_t>(a->size);
-    // Padded size: multiply by factor but cap at 256 MB.
-    size_t pad_sz = std::min(orig_sz * HRR_ALLOC_PAD_FACTOR, HRR_ALLOC_PAD_MAX);
-    pad_sz = std::max(orig_sz, pad_sz);  // never shrink
+    size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     void* live = nullptr;
     hipError_t r;
     if (managed)
@@ -772,7 +817,7 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     hipStream_t stream = ctx.translate_stream(a->stream);
     void* live = nullptr;
     size_t orig_sz = static_cast<size_t>(a->size);
-    size_t pad_sz = std::max(orig_sz, std::min(orig_sz * HRR_ALLOC_PAD_FACTOR, HRR_ALLOC_PAD_MAX));
+    size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess)
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
@@ -786,7 +831,7 @@ hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx,
     hipStream_t  stream = ctx.translate_stream(a->stream);
     void* live = nullptr;
     size_t orig_sz = static_cast<size_t>(a->size);
-    size_t pad_sz = std::max(orig_sz, std::min(orig_sz * HRR_ALLOC_PAD_FACTOR, HRR_ALLOC_PAD_MAX));
+    size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     hipError_t r = hipMallocFromPoolAsync(&live, pad_sz, pool, stream);
     if (r == hipSuccess)
         ctx.record_alloc(a->dev_ptr, live, pad_sz);
@@ -1541,6 +1586,67 @@ hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
     if (event) r = hipEventDestroy(event);
     ctx.remove_event(a->event);
     return r;
+}
+
+// Capture only records hipEventQuery / hipStreamQuery when they returned
+// hipSuccess (see hip_capture_generated.cpp).  Replay drives the API trace
+// faster than the original CPU often did relative to GPU completion, so the
+// same call can transiently return hipErrorNotReady (600).  Spin until
+// hipSuccess to match the captured observable return.
+static hipError_t replay_query_until_success(hipError_t (*once)(void*), void* arg) {
+    int spin = 0;
+    for (;;) {
+        hipError_t r = once(arg);
+        if (r == hipSuccess)
+            return hipSuccess;
+        if (r != hipErrorNotReady)
+            return r;
+        if (++spin < 1000)
+            std::this_thread::yield();
+        else
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+    }
+}
+
+struct replay_event_query_ctx {
+    hipEvent_t event;
+};
+
+static hipError_t replay_event_query_once(void* p) {
+    auto* c = static_cast<replay_event_query_ctx*>(p);
+    return hipEventQuery(c->event);
+}
+
+hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventQuery*>(pl);
+    replay_event_query_ctx c{ctx.translate_event(a->event)};
+    return replay_query_until_success(replay_event_query_once, &c);
+}
+
+struct replay_stream_query_ctx {
+    hipStream_t stream;
+};
+
+static hipError_t replay_stream_query_once(void* p) {
+    auto* c = static_cast<replay_stream_query_ctx*>(p);
+    return hipStreamQuery(c->stream);
+}
+
+static hipError_t replay_stream_query_spt_once(void* p) {
+    auto* c = static_cast<replay_stream_query_ctx*>(p);
+    return hipStreamQuery_spt(c->stream);
+}
+
+hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery*>(pl);
+    replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
+    return replay_query_until_success(replay_stream_query_once, &c);
+}
+
+hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery_spt*>(pl);
+    replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
+    return replay_query_until_success(replay_stream_query_spt_once, &c);
 }
 
 // ---------------------------------------------------------------------------

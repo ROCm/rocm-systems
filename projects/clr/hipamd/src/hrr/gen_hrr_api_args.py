@@ -190,6 +190,12 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventCreate",
     "hipEventCreateWithFlags",
     "hipEventDestroy",
+    # Query APIs — capture only logs hipSuccess (event/stream already complete).
+    # Replay may reach the same API sooner relative to GPU work; spin on
+    # hipErrorNotReady until hipSuccess.  See DESIGN.md § HIP-Specific Polling.
+    "hipEventQuery",
+    "hipStreamQuery",
+    "hipStreamQuery_spt",
     # Fat binary registration — load blob as module so kernel names resolve
     "__hipRegisterFatBinary",
     # Host memory registration — need handle map + blob restore + device ptr recording

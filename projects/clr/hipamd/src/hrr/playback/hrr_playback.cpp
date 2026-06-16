@@ -701,6 +701,11 @@ static void print_usage(const char* argv0) {
     "  --sync-after-event    hipDeviceSynchronize after EVERY event (slowest, most precise)\n"
     "  --help                Show this message\n"
     "\n"
+    "Environment (replay device allocation padding — see hip_playback.cpp):\n"
+    "  HIP_HRR_REPLAY_ALLOC_PAD_FACTOR   unsigned, default 1 (exact recorded sizes).\n"
+    "                                    Use 256 for legacy pool-style headroom (more VRAM).\n"
+    "  HIP_HRR_REPLAY_ALLOC_PAD_MAX      bytes, default 1073741824 (1 GiB cap per alloc).\n"
+    "\n"
     "Default mode: single-threaded, serialize GPU after pass, abort on first error.\n"
     "Use --sync-after-event to pinpoint the exact event causing a GPU fault or hang.\n",
     argv0);

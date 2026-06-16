@@ -756,11 +756,7 @@ static hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8
   return _r;
 }
 
-static hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventQuery*>(payload);
-  hipError_t _r = (hipError_t)hipEventQuery((hipEvent_t)ctx.translate_event(a->event));
-  return _r;
-}
+extern hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipEventRecord(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipEventRecord*>(payload);
@@ -3048,11 +3044,7 @@ static hipError_t playback_hipStreamIsCapturing(PlaybackContext& ctx, const uint
   return _r;
 }
 
-static hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery*>(payload);
-  hipError_t _r = (hipError_t)hipStreamQuery((hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
+extern hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize*>(payload);
@@ -3612,11 +3604,7 @@ static hipError_t playback_hipMemcpy2DToArrayAsync_spt(PlaybackContext& ctx, con
   return hipSuccess;
 }
 
-static hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery_spt*>(payload);
-  hipError_t _r = (hipError_t)hipStreamQuery_spt((hipStream_t)ctx.translate_stream(a->stream));
-  return _r;
-}
+extern hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamSynchronize_spt(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize_spt*>(payload);
