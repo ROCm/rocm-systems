@@ -25,6 +25,69 @@ THE SOFTWARE.
 
 #include "tdm.h"
 
+using CachePolicy = uint32_t;
+
+enum struct MemScope : uint32_t {
+    WGP = 0,    // Workgroup processor scope - warps running on the same WGP should be able to see the effect of the operation
+    SE,         // Shader engine a.k.a cluster scope
+    DEV,        // Device scope
+    SYS,        // System scope
+};
+
+enum struct TemporalHint : uint32_t {
+    RT = 0, // Regular temporal (nothing special)
+    NT,     // Not temporal 
+    HT,     // High temporal 
+    LU,     // Last use  
+    NT_RT,
+    RT_NT,
+    NT_HT,
+};
+
+__host__ __device__ constexpr CachePolicy createCachePolicy(TemporalHint temporal, MemScope scope) noexcept {
+    return static_cast<CachePolicy>(scope) << 3 | static_cast<CachePolicy>(temporal);
+}
+
+static_assert(createCachePolicy(TemporalHint::RT, MemScope::WGP) == 0);
+static_assert(createCachePolicy(TemporalHint::NT, MemScope::WGP) == 1);
+static_assert(createCachePolicy(TemporalHint::HT, MemScope::WGP) == 2);
+static_assert(createCachePolicy(TemporalHint::LU, MemScope::WGP) == 3);
+static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::WGP) == 4);
+static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::WGP) == 5);
+static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::WGP) == 6);
+static_assert(createCachePolicy(TemporalHint::RT, MemScope::SE) == 8);
+static_assert(createCachePolicy(TemporalHint::NT, MemScope::SE) == 9);
+static_assert(createCachePolicy(TemporalHint::HT, MemScope::SE) == 10);
+static_assert(createCachePolicy(TemporalHint::LU, MemScope::SE) == 11);
+static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::SE) == 12);
+static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::SE) == 13);
+static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::SE) == 14);
+static_assert(createCachePolicy(TemporalHint::RT, MemScope::DEV) == 16);
+static_assert(createCachePolicy(TemporalHint::NT, MemScope::DEV) == 17);
+static_assert(createCachePolicy(TemporalHint::HT, MemScope::DEV) == 18);
+static_assert(createCachePolicy(TemporalHint::LU, MemScope::DEV) == 19);
+static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::DEV) == 20);
+static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::DEV) == 21);
+static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::DEV) == 22);
+static_assert(createCachePolicy(TemporalHint::RT, MemScope::SYS) == 24);
+static_assert(createCachePolicy(TemporalHint::NT, MemScope::SYS) == 25);
+static_assert(createCachePolicy(TemporalHint::HT, MemScope::SYS) == 26);
+static_assert(createCachePolicy(TemporalHint::LU, MemScope::SYS) == 27);
+static_assert(createCachePolicy(TemporalHint::NT_RT, MemScope::SYS) == 28);
+static_assert(createCachePolicy(TemporalHint::RT_NT, MemScope::SYS) == 29);
+static_assert(createCachePolicy(TemporalHint::NT_HT, MemScope::SYS) == 30);
+
+/* Async load/Store APIs */
+__device__ void asyncLoadToLDS(/* ... */){
+
+}
+
+__device__ void asyncStoreFromLDS(/* ... */){
+
+}
+
+
+/* TDM APIs */
 // Higher productivity async copy wrappers on top of TDM header, which is lower level.
 // The TDM API does not have a function to set the transfer size, so we need to do it manually.
 __device__ static void setTransferSize(gfx1250_TDM_GROUP1& group1, int numElements){
@@ -35,7 +98,7 @@ __device__ static void setTransferSize(gfx1250_TDM_GROUP1& group1, int numElemen
 
 // Warp-level data copier.  Moves whole 1D tiles in between global memory and LDS using the TDM.  Both pointers ideally should be a multiple of 128-byte aligned 
 // for maximum performance.
-template<typename T>
+template<typename T, CachePolicy cp = createCachePolicy(TemporalHint::RT, MemScope::SYS)>
 struct TileMover{
   gfx1250_TDM_GROUP0 group0;
   gfx1250_TDM_GROUP1 group1;
@@ -50,13 +113,13 @@ struct TileMover{
     group0.ldsAddr((uintptr_t)shmemPtr);
     group0.globalAddr((uintptr_t)srcPtr);
     setTransferSize(group1, numElementsToProcess);
-    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{}, __hip_uint32x4{}, __hip_uint32x8{}, 0);
+    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{}, __hip_uint32x4{}, __hip_uint32x8{}, cp);
   }
 
   // An entire warp makes this call.  The dstPtr should be the same across all lanes in the warp.  Do not pass in per-lane offsets for addresses.
   __device__ void storeTile(T* dstPtr) {
     group0.globalAddr((uintptr_t)dstPtr);
-    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{}, __hip_uint32x4{}, __hip_uint32x8{}, 0);
+    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, __hip_uint32x4{}, __hip_uint32x4{}, __hip_uint32x8{}, cp);
   }
 
   template<int WAIT_CNT = 0> // Needs to be a template parameter because the count is baked into the hardware instruction
