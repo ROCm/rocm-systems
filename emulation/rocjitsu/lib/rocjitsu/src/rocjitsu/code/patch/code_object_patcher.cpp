@@ -78,8 +78,7 @@ void write_elf_tables(std::vector<uint8_t> &image, const Elf64_Ehdr &ehdr,
 void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
                        std::vector<Elf64_Shdr> &shdrs, std::vector<Elf64_Phdr> &phdrs,
                        uint64_t file_offset, std::span<const uint8_t> bytes,
-                       std::optional<size_t> grown_section_index,
-                       bool grow_load_at_segment_end) {
+                       std::optional<size_t> grown_section_index, bool grow_load_at_segment_end) {
   assert(file_offset <= image.size() && "ELF insertion offset out of bounds");
   if (bytes.empty())
     return;
@@ -184,22 +183,27 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
 [[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
 [[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rj_code_arch_t arch) {
   return target_supports_wave32(arch);
 }
 
+[[nodiscard]] bool target_uses_gfx90a_accum_offset(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA4;
+}
+
 [[nodiscard]] bool target_clears_rsrc1_mode_bits(rj_code_arch_t arch) {
   // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for GFX10
   // and GFX11 targets where they still affect floating-point behavior.
-  return arch == ROCJITSU_CODE_ARCH_RDNA4;
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250;
 }
 
 [[nodiscard]] uint32_t target_default_inst_pref_size(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                 arch == ROCJITSU_CODE_ARCH_RDNA4
+                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_GFX1250
              ? 2
              : 0;
 }
@@ -464,6 +468,16 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
   AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   translation.target_sgpr_granulated);
 
+  if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
+    // GFX90A-style descriptors encode the first AccVGPR as (field + 1) * 4.
+    // KernelDescriptorTranslator may move this base upward when semantic
+    // lowering needs ordinary VGPR scratch above the source AccVGPR window, so
+    // the patcher must write the recomputed base alongside the VGPR allocation.
+    const uint32_t encoded_accum_offset = (translation.target_accvgpr_base / 4) - 1;
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    encoded_accum_offset);
+  }
+
   if (target_uses_gfx10_plus_mode_bits(target_arch)) {
     if (target_clears_rsrc1_mode_bits(target_arch)) {
       AMDHSA_BITS_SET(desc->compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 0);
@@ -475,8 +489,9 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
   }
 
   if (target_supports_wave32(target_arch)) {
+    const uint32_t wave32 = translation.target_wave_size == 32 ? 1u : 0u;
     AMDHSA_BITS_SET(desc->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
-                    translation.target_wave_size == 32 ? 1 : 0);
+                    wave32);
   } else {
     AMDHSA_BITS_SET(desc->kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                     0);
@@ -488,14 +503,25 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
       AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX10_PLUS_INST_PREF_SIZE,
                       inst_pref);
     }
+  } else if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
+    // On GFX90A/GFX942/GFX950, AccVGPRs are placed by ACCUM_OFFSET rather than
+    // by the ordinary VGPR count. KernelDescriptorTranslator decides whether the
+    // base must move up to make room for semantic-lowering scratch; the patcher
+    // only materializes that already-translated target base.
+    assert(translation.target_accvgpr_base >= 4 &&
+           "ACCUM_OFFSET base must encode at least 4 VGPRs");
+    assert(translation.target_accvgpr_base % 4 == 0 && "ACCUM_OFFSET base must be 4-VGPR aligned");
+    AMDHSA_BITS_SET(desc->compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                    (translation.target_accvgpr_base / 4 - 1));
   }
 
   desc->private_segment_fixed_size = translation.target_private_size;
   desc->group_segment_fixed_size = translation.target_lds_size;
   AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
                   translation.target_user_sgpr_count);
+  const uint32_t enable_private_segment = translation.target_private_size != 0 ? 1u : 0u;
   AMDHSA_BITS_SET(desc->compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT,
-                  translation.target_private_size != 0 ? 1 : 0);
+                  enable_private_segment);
 
   if (prologue_entry) {
     if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
@@ -635,8 +661,7 @@ bool CodeObjectPatcher::append_cave_section(std::string_view section_name) {
       [[maybe_unused]] const uint64_t old_addr = shdrs[i].sh_addr;
       shdrs[i].sh_addr += padded_file_delta;
       assert((shdrs[i].sh_addralign <= 1 ||
-              shdrs[i].sh_addr % shdrs[i].sh_addralign ==
-                  old_addr % shdrs[i].sh_addralign) &&
+              shdrs[i].sh_addr % shdrs[i].sh_addralign == old_addr % shdrs[i].sh_addralign) &&
              "shifted allocated section lost its address alignment residue");
     }
   }

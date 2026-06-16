@@ -31,7 +31,7 @@
  *   6. ftruncate to exact size + hash verify
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -135,6 +135,13 @@ main(int argc, char *argv[])
         goto free_devbuf;
     }
 
+    /* hipMemset is async w.r.t. the host; block until it completes (testing). */
+    hip_err = hipDeviceSynchronize();
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not synchronize after memset (%d)\n", hip_err);
+        goto free_devbuf;
+    }
+
     hipfile_err = hipFileBufRegister(devbuf, alloc_size, 0);
     if (hipFileSuccess != hipfile_err.err) {
         fprintf(stderr, "Buffer register failed (%s)\n", hipFileGetOpErrorString(hipfile_err.err));
@@ -197,21 +204,10 @@ main(int argc, char *argv[])
     out_fd = -1;
 
     {
-        uint64_t hash_in, hash_out;
-
-        if (hash_file_range(in_path, 0, payload_size, &hash_in))
+        uint64_t hash;
+        if (verify_files_match(in_path, out_path, payload_size, &hash))
             goto deregister_buf;
-        if (hash_file_range(out_path, 0, payload_size, &hash_out))
-            goto deregister_buf;
-
-        if (hash_in != hash_out) {
-            fprintf(stderr, "Hash mismatch: %s=0x%016" PRIx64 "  %s=0x%016" PRIx64 "\n", in_path, hash_in,
-                    out_path, hash_out);
-            goto deregister_buf;
-        }
-
-        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path, payload_size,
-               hash_in);
+        printf("OK  %s -> %s  (%zu bytes, hash 0x%016" PRIx64 ")\n", in_path, out_path, payload_size, hash);
     }
 
     exit_status = EXIT_SUCCESS;

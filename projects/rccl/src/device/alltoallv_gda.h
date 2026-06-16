@@ -21,7 +21,7 @@ struct RunWorkColl<ncclFuncAlltoAllvGda, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SI
            void *src = (T*)work->sendbuff;
            void *dst = (T*)work->sndbuff;
            reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0,1, 1, 0, 1, 1, 0>(
-            	tid, nThreads, 0, nullptr, false, 1, (void **)&src, 1, (void **)&dst,
+            	tid, nThreads, 0, false, 1, (void **)&src, 1, (void **)&dst,
             	work->size);
         }		   
 	   work->sendSizes = (size_t*)work->sizes;
@@ -36,7 +36,7 @@ struct RunWorkColl<ncclFuncAlltoAllvGda, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SI
            void *srcR = (T*)work->tempbuff;
            void *dstR = (T*)work->recvbuff;
            reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T, 0,1, 1, 0, 1, 1, 0>(
-            	tid, nThreads, 0, nullptr, false, 1, (void **)&srcR, 1, (void **)&dstR,
+            	tid, nThreads, 0, false, 1, (void **)&srcR, 1, (void **)&dstR,
             	work->size);
        }
 

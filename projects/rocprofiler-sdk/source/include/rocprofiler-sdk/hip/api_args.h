@@ -3536,7 +3536,7 @@ typedef union rocprofiler_hip_api_args_t
     } hipExecutionCtxGetDevice;
     struct
     {
-        hipExecutionCtx_t  ctx;
+        hipExecutionCtx_t   ctx;
         unsigned long long* ctxId;
     } hipExecutionCtxGetId;
     struct
@@ -3559,6 +3559,62 @@ typedef union rocprofiler_hip_api_args_t
         hipExecutionCtx_t ctx;
         hipEvent_t        event;
     } hipExecutionCtxWaitEvent;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 29
+    struct
+    {
+        void**       dptr;
+        size_t*      bytes;
+        hipLibrary_t library;
+        const char*  name;
+    } hipLibraryGetGlobal;
+    struct
+    {
+        void**       dptr;
+        size_t*      bytes;
+        hipLibrary_t library;
+        const char*  name;
+    } hipLibraryGetManaged;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 30
+    struct
+    {
+        void**             dev_ptrs;
+        size_t*            sizes;
+        size_t             count;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemDiscardBatchAsync;
+    struct
+    {
+        hipDeviceptr_t*    dptrs;
+        size_t*            sizes;
+        size_t             count;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipDrvMemDiscardBatchAsync;
+    struct
+    {
+        void**             dptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetchLocs;
+        size_t*            prefetchLocIdxs;
+        size_t             numPrefetchLocs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipMemDiscardAndPrefetchBatchAsync;
+    struct
+    {
+        hipDeviceptr_t*    dptrs;
+        size_t*            sizes;
+        size_t             count;
+        hipMemLocation*    prefetchLocs;
+        size_t*            prefetchLocIdxs;
+        size_t             numPrefetchLocs;
+        unsigned long long flags;
+        hipStream_t        stream;
+    } hipDrvMemDiscardAndPrefetchBatchAsync;
 #endif
 } rocprofiler_hip_api_args_t;
 

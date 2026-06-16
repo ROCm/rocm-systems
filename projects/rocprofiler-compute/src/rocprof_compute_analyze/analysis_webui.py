@@ -127,10 +127,6 @@ class webui_analysis(OmniAnalyze_Base):
                 run_workload.raw_pmc = run_workload.raw_pmc.rename(
                     columns={"Dispatch_Id": "Dispatch_ID"}
                 )
-                # Create multi index dataframe with key pmc_perf
-                run_workload.raw_pmc = pd.concat(
-                    [run_workload.raw_pmc], keys=["pmc_perf"], axis=1
-                )
 
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                     df_in=run_workload.raw_pmc,
@@ -171,6 +167,7 @@ class webui_analysis(OmniAnalyze_Base):
                     run_workload.raw_pmc = self.iteration_multiplex_impute_counters(
                         run_workload.raw_pmc,
                         policy=self._profiling_config["iteration_multiplexing"],
+                        workload_dir=Path(self.dest_dir),
                     )
 
                 # Apply filters to workload data
@@ -237,19 +234,23 @@ class webui_analysis(OmniAnalyze_Base):
                     }
 
                 # All filtering will occur here
+                gpu_arch = run_workload.sys_info.iloc[0]["gpu_arch"]
                 parser.load_table_data(
                     workload=run_workload,
                     dir_path=self.dest_dir,
                     is_gui=True,
                     args=args,
-                    config=self._profiling_config,
+                    dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
                 )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
             # Generate GUI content
             # ~~~~~~~~~~~~~~~~~~~~~~~
             div_children = [
-                get_memchart(panel_configs[300]["data source"], base_data[base_run])
+                get_memchart(
+                    panel_configs.get(300, {}).get("data source"),
+                    base_data[base_run],
+                )
             ]
 
             is_roofline_valid, roofline_error_msg = validate_roofline_csv(
@@ -296,7 +297,6 @@ class webui_analysis(OmniAnalyze_Base):
                     ai_data = calc_ai_analyze(
                         workload=workload,
                         pmc_df=pmc_df,
-                        config=self._profiling_config,
                         arch_config=arch_configs,
                     )
 
@@ -335,6 +335,8 @@ class webui_analysis(OmniAnalyze_Base):
                 # Iterate over each table per section
                 for data_source in panel["data source"]:
                     for t_type, table_config in data_source.items():
+                        if table_config["id"] not in base_data[base_run].dfs:
+                            continue
                         original_df = base_data[base_run].dfs[table_config["id"]]
 
                         # The sys info table need to add index back
@@ -431,8 +433,6 @@ class webui_analysis(OmniAnalyze_Base):
             workload.raw_pmc = workload.raw_pmc.rename(
                 columns={"Dispatch_Id": "Dispatch_ID"}
             )
-            # Create multi index dataframe with key pmc_perf
-            workload.raw_pmc = pd.concat([workload.raw_pmc], keys=["pmc_perf"], axis=1)
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
@@ -466,6 +466,7 @@ class webui_analysis(OmniAnalyze_Base):
             workload.raw_pmc = self.iteration_multiplex_impute_counters(
                 workload.raw_pmc,
                 policy=self._profiling_config["iteration_multiplexing"],
+                workload_dir=Path(self.dest_dir),
             )
 
         kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(

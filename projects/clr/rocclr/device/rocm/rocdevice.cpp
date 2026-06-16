@@ -340,7 +340,7 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
   return stat;
 }
 
-hsa_ven_amd_loader_1_00_pfn_t Device::amd_loader_ext_table = {nullptr};
+hsa_ven_amd_loader_1_03_pfn_t Device::amd_loader_ext_table = {nullptr};
 
 hsa_status_t Device::loaderQueryHostAddress(const void* device, const void** host) {
   return amd_loader_ext_table.hsa_ven_amd_loader_query_host_address
@@ -1767,6 +1767,15 @@ bool Device::populateOCLDeviceConstants() {
         std::numeric_limits<uint32_t>::max();  // gfx10+ does not share SGPRs between waves
   }
 
+  // Flag for fabric handle support
+  info_.fabric_handle_ = false;
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::system_get_info(
+          static_cast<hsa_system_info_t>(HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED),
+          &info_.fabric_handle_)) {
+    LogError("HSA_AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED query failed ");
+  }
+
   return true;
 }
 
@@ -2491,30 +2500,41 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
 }
 
 // ================================================================================================
-bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle) {
+bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void* shareableHandle,
+                                      amd::Memory::HandleType handle_type) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
   hsa_vmem_handle.handle = amd_mem_obj.getUserData().hsa_handle;
-  int dmabuf_fd = 0;
 
   if (hsa_vmem_handle.handle == 0) {
     LogError("HSA Handle is not valid");
     return false;
   }
 
-  if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd, hsa_vmem_handle, flags)) !=
-      HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d", hsa_status);
-    return false;
+  if (handle_type == amd::Memory::HandleType::kHandleFabric) { //handle type fabric
+    hsa_fabric_handle_t fabric_handle;
+    if ((hsa_status = Hsa::vmem_export_fabric_handle(&fabric_handle,
+                        hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_vmem_export_fabric_handle with status: %d \n", hsa_status);
+      return false;
+    }
+    *(reinterpret_cast<hsa_fabric_handle_t*>(shareableHandle)) = fabric_handle;
+  } else {
+    int dmabuf_fd = 0;
+    if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd,
+                        hsa_vmem_handle, flags)) != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d \n", hsa_status);
+      return false;
+    }
+    *(reinterpret_cast<int*>(shareableHandle)) = dmabuf_fd;
   }
-
-  *(reinterpret_cast<int*>(shareableHandle)) = dmabuf_fd;
 
   return true;
 }
 
 // ================================================================================================
-bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) const {
+bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr,
+                                      amd::Memory::HandleType handle_type) const {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
 
@@ -2523,11 +2543,20 @@ bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) 
     return false;
   }
 
-  int dmabuf_fd = static_cast<int>(reinterpret_cast<uintptr_t>(osHandle));
-  if ((hsa_status = Hsa::vmem_import_shareable_handle(dmabuf_fd, &hsa_vmem_handle)) !=
-      HSA_STATUS_SUCCESS) {
-    LogPrintfError("Failed hsa_amd_vmem_import_shareable_handle with status: %d", hsa_status);
-    return false;
+  if (handle_type == amd::Memory::HandleType::kHandleFabric) {
+    hsa_fabric_handle_t fabric_handle = *(reinterpret_cast<hsa_fabric_handle_t*>(osHandle));
+    if ((hsa_status = Hsa::vmem_import_fabric_handle(fabric_handle, &hsa_vmem_handle))
+                        != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_amd_vmem_import_fabric_handle with status: %d \n", hsa_status);
+      return false;
+    }
+  } else {
+    int dmabuf_fd = static_cast<int>(reinterpret_cast<uintptr_t>(osHandle));
+    if ((hsa_status = Hsa::vmem_import_shareable_handle(dmabuf_fd, &hsa_vmem_handle))
+                        != HSA_STATUS_SUCCESS) {
+      LogPrintfError("Failed hsa_amd_vmem_import_shareable_handle with status: %d \n", hsa_status);
+      return false;
+    }
   }
 
   *hsa_handle_ptr = hsa_vmem_handle.handle;
@@ -2535,7 +2564,7 @@ bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) 
 }
 
 // ================================================================================================
-amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
+amd::Memory* Device::ImportShareableVMMHandle(void* osHandle, amd::Memory::HandleType handle_type) {
   amd::Memory* amd_mem_obj = new (context())
       amd::Buffer(context(), ROCCLR_MEM_PHYMEM | ROCCLR_MEM_INTERPROCESS, 0, osHandle);
   if (amd_mem_obj == nullptr) {
@@ -2543,6 +2572,7 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
     return nullptr;
   }
 
+  amd_mem_obj->getUserData().hsa_handle_type = handle_type;
   if (!amd_mem_obj->create(nullptr, false)) {
     LogError("Failed to create mem_obj from imported fd");
     amd_mem_obj->release();
@@ -3699,6 +3729,35 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
+  // Re-arm pooled signals for reuse by a new graph launch. The caller
+  // guarantees these signals belong to a completed (drained) launch, so this
+  // cannot corrupt an in-flight launch. Avoids signal_create/destroy on the
+  // hot launch path.
+  for (void* hw_event : hw_events) {
+    if (hw_event != nullptr) {
+      auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+      Hsa::signal_silent_store_relaxed(ps->signal_, 1);
+      ps->flags_.done_ = true;
+      ps->ResetCachedTiming();
+    }
+  }
+}
+
+// ================================================================================================
+void Device::QuiesceHwEvents(const std::vector<void*>& hw_events) const {
+  // Pooled signals rest in the armed state (value 1). Before destruction, store
+  // the completed value (0) so ~ProfilingSignal does not block waiting on a
+  // signal that is armed but idle (no GPU work will ever drain it).
+  for (void* hw_event : hw_events) {
+    if (hw_event != nullptr) {
+      auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
+      Hsa::signal_silent_store_relaxed(ps->signal_, 0);
+    }
+  }
+}
+
+// ================================================================================================
 uint8_t* Device::CreateBarrierPacket() const {
   static constexpr uint16_t kBarrierNopHeader =
       (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
@@ -3732,6 +3791,16 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
       pkt->completion_signal = sig;
+
+      // Prepare this signal for profiling: mark it as active and classify
+      // the packet type so checkGpuTime → addTimestamps only fires for
+      // kernel dispatches (not synthetic barriers).
+      ps->flags_.done_ = false;
+      uint16_t hdr;
+      memcpy(&hdr, raw, sizeof(hdr));
+      uint8_t pktType = hdr & ((1 << HSA_PACKET_HEADER_WIDTH_TYPE) - 1);
+      ps->flags_.isPacketDispatch_ =
+          (pktType == HSA_PACKET_TYPE_KERNEL_DISPATCH);
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait)
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
@@ -4105,4 +4174,92 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
 #endif
 #endif
+
+// ================================================================================================
+namespace {
+
+inline bool MapHandleType(amd::ExternalSemaphoreHandleType t,
+                          hsa_amd_external_semaphore_handle_type_t* out) {
+  switch (t) {
+    case amd::ExternalSemaphoreHandleType::OpaqueFd:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32;
+      return true;
+    case amd::ExternalSemaphoreHandleType::OpaqueWin32Kmt:
+      *out = HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT;
+      return true;
+    default:
+      // Reject amd:: enum values with no HSA counterpart
+      // (D3D11/D3D12Fence, NvSciSync, KeyedMutex*, TimelineSemaphore*).
+      // Types we do map (e.g. OpaqueFd, OpaqueWin32Kmt) may still fail
+      // at libhsakmt import time on platforms without KMD support;
+      // capability ground-truth lives in the lower layer.
+      return false;
+  }
+}
+
+}  // namespace
+
+// ================================================================================================
+bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& handle,
+                                amd::ExternalSemaphoreHandleType sem_handle_type) {
+  if (extSemaphore == nullptr) return false;
+
+  hsa_amd_external_semaphore_handle_descriptor_t desc = {};
+  if (!MapHandleType(sem_handle_type, &desc.type)) return false;
+
+  // Populate the descriptor union by the *mapped* HSA type, not by
+  // build platform: amd::Os::FileDesc is void* on Windows and int on
+  // POSIX, but the HSA layer reads the union member dictated by
+  // desc.type. Reading a member that wasn't written is undefined
+  // behaviour, so reject combinations where the platform's FileDesc
+  // shape doesn't match the requested handle type.
+  switch (desc.type) {
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32:
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_KMT:
+#if defined(_WIN32)
+      desc.handle.win32_handle = handle;
+      break;
+#else
+      // Win32 NT handles aren't routable through a non-Windows KMD.
+      return false;
+#endif
+    case HSA_AMD_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD:
+#if defined(_WIN32)
+      // POSIX FDs aren't routable through WDDM.
+      return false;
+#else
+      desc.handle.fd = handle;
+      break;
+#endif
+    default:
+      return false;
+  }
+
+  // Heap-allocated holder so the caller gets an opaque pointer for
+  // DestroyExtSemaphore. Storing the hsa_amd_external_semaphore_t
+  // preserves the syncobj identity that submitExternalSemaphoreCmd
+  // will consume once the queue signal/wait submission path lands.
+  auto* holder = new hsa_amd_external_semaphore_t{};
+
+  hsa_status_t s = hsa_amd_external_semaphore_handle_open(bkendDevice_, &desc, holder);
+  if (s != HSA_STATUS_SUCCESS) {
+    delete holder;
+    return false;
+  }
+
+  *extSemaphore = holder;
+  return true;
+}
+
+// ================================================================================================
+void Device::DestroyExtSemaphore(void* extSemaphore) {
+  if (extSemaphore == nullptr) return;
+  auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);
+  hsa_amd_external_semaphore_handle_close(*holder);
+  delete holder;
+}
+
 }  // namespace amd::roc

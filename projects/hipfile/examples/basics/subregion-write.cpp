@@ -26,7 +26,7 @@
  *   6. ftruncate to logical sub-region size + hash verify
  */
 
-#include "basics_common.h"
+#include "examples_common.h"
 
 #include <hipfile.h>
 #include <hip/hip_runtime_api.h>
@@ -145,6 +145,13 @@ main(int argc, char *argv[])
     hip_err = hipMemset(devbuf, 0, alloc_size);
     if (hipSuccess != hip_err) {
         fprintf(stderr, "Could not zero device buffer (%d)\n", hip_err);
+        goto deregister_buf;
+    }
+
+    /* hipMemset is async w.r.t. the host; block until it completes (testing). */
+    hip_err = hipDeviceSynchronize();
+    if (hipSuccess != hip_err) {
+        fprintf(stderr, "Could not synchronize after memset (%d)\n", hip_err);
         goto deregister_buf;
     }
 

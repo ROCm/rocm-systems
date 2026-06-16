@@ -98,6 +98,50 @@ hip::Var* DynCO::getVar(const std::string& var_name) {
   return (it != vars_.end()) ? it->second : nullptr;
 }
 
+hipError_t DynCO::GetGlobal(const std::string& name, void** dptr, size_t* bytes) {
+  std::scoped_lock lock(dclock_);
+  if (dptr != nullptr) {
+    *dptr = nullptr;
+  }
+  IHIP_RETURN_ONFAIL(getManagedVarPointer(name, dptr, bytes));
+  if ((dptr != nullptr && *dptr == nullptr) || (bytes != nullptr && *bytes == 0)) {
+    amd::Memory* mem = nullptr;
+    IHIP_RETURN_ONFAIL(GetDeviceVar(&mem, name));
+    if (dptr != nullptr) {
+      *dptr = memDevPtr(mem);
+    }
+    if (bytes != nullptr) {
+      *bytes = mem->getSize();
+    }
+  }
+  return hipSuccess;
+}
+
+hipError_t DynCO::GetManaged(const std::string& name, void** dptr, size_t* bytes) {
+  std::scoped_lock lock(dclock_);
+  auto it = vars_.find(name);
+  if (it == vars_.end() || it->second->GetVarKind() != Var::DVK_Managed) {
+    return hipErrorNotFound;
+  }
+  if (dptr != nullptr) {
+    *dptr = it->second->GetManagedVarPtr();
+  }
+  if (bytes != nullptr) {
+    *bytes = it->second->GetSize();
+  }
+  return hipSuccess;
+}
+
+std::vector<std::string> DynCO::getFunctionNames() {
+  std::scoped_lock lock(dclock_);
+  std::vector<std::string> names;
+  names.reserve(functions_.size());
+  for (const auto& kv : functions_) {
+    names.push_back(kv.first);
+  }
+  return names;
+}
+
 hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name) {
   std::scoped_lock lock(dclock_);
 
@@ -107,7 +151,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name)
 
   auto it = functions_.find(func_name);
   if (it == functions_.end()) {
-    LogPrintfError("Cannot find the function: %s ", func_name.c_str());
+    LogPrintfInfo("Cannot find the function: %s", func_name.c_str());
     return hipErrorNotFound;
   }
 
@@ -225,7 +269,14 @@ hipError_t DynCO::populateDynGlobalFuncs() {
     return hipErrorSharedObjectSymbolNotFound;
   }
 
+  // COMGR returns every AMD_COMGR_SYMBOL_TYPE_FUNC entry in the ELF, which
+  // includes C++ ABI helpers like __cxa_deleted_virtual that have no HSA
+  // kernel symbol. Filter to user-callable kernels — anything else would
+  // SIGABRT inside Function::BuildKernel's findSymbol guarantee when later
+  // resolved via hipLibraryEnumerateKernels / hipLibraryGetKernel.
+  amd::Program* amd_program = as_amd(reinterpret_cast<cl_program>(module_));
   for (auto& elem : func_names) {
+    if (amd_program == nullptr || amd_program->findSymbol(elem.c_str()) == nullptr) continue;
     functions_.insert(std::make_pair(elem, new Function(elem)));
   }
 
@@ -634,5 +685,13 @@ Var* StatCO::FindDeferredManagedVar(const void* ptr) {
     }
   }
   return nullptr;
+}
+
+// ================================================================================================
+void StatCO::ForEachFatBinaryBlob(void (*cb)(const void*)) const {
+  std::scoped_lock lock(sclock_);
+  for (const auto& [data, _] : modules_) {
+    cb(data);
+  }
 }
 }  // namespace hip

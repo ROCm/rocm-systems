@@ -500,7 +500,13 @@ enum hip_api_id_t {
   HIP_API_ID_hipExecutionCtxRecordEvent = 475,
   HIP_API_ID_hipExecutionCtxSynchronize = 476,
   HIP_API_ID_hipExecutionCtxWaitEvent = 477,
-  HIP_API_ID_LAST = 477,
+  HIP_API_ID_hipLibraryGetGlobal = 478,
+  HIP_API_ID_hipLibraryGetManaged = 479,
+  HIP_API_ID_hipMemDiscardBatchAsync = 480,
+  HIP_API_ID_hipDrvMemDiscardBatchAsync = 481,
+  HIP_API_ID_hipMemDiscardAndPrefetchBatchAsync = 482,
+  HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync = 483,
+  HIP_API_ID_LAST = 483,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -615,6 +621,8 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDrvGraphMemcpyNodeGetParams: return "hipDrvGraphMemcpyNodeGetParams";
     case HIP_API_ID_hipDrvGraphMemcpyNodeSetParams: return "hipDrvGraphMemcpyNodeSetParams";
     case HIP_API_ID_hipDrvLaunchKernelEx: return "hipDrvLaunchKernelEx";
+    case HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync: return "hipDrvMemDiscardAndPrefetchBatchAsync";
+    case HIP_API_ID_hipDrvMemDiscardBatchAsync: return "hipDrvMemDiscardBatchAsync";
     case HIP_API_ID_hipDrvMemcpy2DUnaligned: return "hipDrvMemcpy2DUnaligned";
     case HIP_API_ID_hipDrvMemcpy3D: return "hipDrvMemcpy3D";
     case HIP_API_ID_hipDrvMemcpy3DAsync: return "hipDrvMemcpy3DAsync";
@@ -794,8 +802,10 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipLaunchKernel: return "hipLaunchKernel";
     case HIP_API_ID_hipLaunchKernelExC: return "hipLaunchKernelExC";
     case HIP_API_ID_hipLibraryEnumerateKernels: return "hipLibraryEnumerateKernels";
+    case HIP_API_ID_hipLibraryGetGlobal: return "hipLibraryGetGlobal";
     case HIP_API_ID_hipLibraryGetKernel: return "hipLibraryGetKernel";
     case HIP_API_ID_hipLibraryGetKernelCount: return "hipLibraryGetKernelCount";
+    case HIP_API_ID_hipLibraryGetManaged: return "hipLibraryGetManaged";
     case HIP_API_ID_hipLibraryLoadData: return "hipLibraryLoadData";
     case HIP_API_ID_hipLibraryLoadFromFile: return "hipLibraryLoadFromFile";
     case HIP_API_ID_hipLibraryUnload: return "hipLibraryUnload";
@@ -821,6 +831,8 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMemAllocHost: return "hipMemAllocHost";
     case HIP_API_ID_hipMemAllocPitch: return "hipMemAllocPitch";
     case HIP_API_ID_hipMemCreate: return "hipMemCreate";
+    case HIP_API_ID_hipMemDiscardAndPrefetchBatchAsync: return "hipMemDiscardAndPrefetchBatchAsync";
+    case HIP_API_ID_hipMemDiscardBatchAsync: return "hipMemDiscardBatchAsync";
     case HIP_API_ID_hipMemExportToShareableHandle: return "hipMemExportToShareableHandle";
     case HIP_API_ID_hipMemGetAccess: return "hipMemGetAccess";
     case HIP_API_ID_hipMemGetAddressRange: return "hipMemGetAddressRange";
@@ -1086,6 +1098,8 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDrvGraphMemcpyNodeGetParams", name) == 0) return HIP_API_ID_hipDrvGraphMemcpyNodeGetParams;
   if (strcmp("hipDrvGraphMemcpyNodeSetParams", name) == 0) return HIP_API_ID_hipDrvGraphMemcpyNodeSetParams;
   if (strcmp("hipDrvLaunchKernelEx", name) == 0) return HIP_API_ID_hipDrvLaunchKernelEx;
+  if (strcmp("hipDrvMemDiscardAndPrefetchBatchAsync", name) == 0) return HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync;
+  if (strcmp("hipDrvMemDiscardBatchAsync", name) == 0) return HIP_API_ID_hipDrvMemDiscardBatchAsync;
   if (strcmp("hipDrvMemcpy2DUnaligned", name) == 0) return HIP_API_ID_hipDrvMemcpy2DUnaligned;
   if (strcmp("hipDrvMemcpy3D", name) == 0) return HIP_API_ID_hipDrvMemcpy3D;
   if (strcmp("hipDrvMemcpy3DAsync", name) == 0) return HIP_API_ID_hipDrvMemcpy3DAsync;
@@ -1265,8 +1279,10 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipLaunchKernel", name) == 0) return HIP_API_ID_hipLaunchKernel;
   if (strcmp("hipLaunchKernelExC", name) == 0) return HIP_API_ID_hipLaunchKernelExC;
   if (strcmp("hipLibraryEnumerateKernels", name) == 0) return HIP_API_ID_hipLibraryEnumerateKernels;
+  if (strcmp("hipLibraryGetGlobal", name) == 0) return HIP_API_ID_hipLibraryGetGlobal;
   if (strcmp("hipLibraryGetKernel", name) == 0) return HIP_API_ID_hipLibraryGetKernel;
   if (strcmp("hipLibraryGetKernelCount", name) == 0) return HIP_API_ID_hipLibraryGetKernelCount;
+  if (strcmp("hipLibraryGetManaged", name) == 0) return HIP_API_ID_hipLibraryGetManaged;
   if (strcmp("hipLibraryLoadData", name) == 0) return HIP_API_ID_hipLibraryLoadData;
   if (strcmp("hipLibraryLoadFromFile", name) == 0) return HIP_API_ID_hipLibraryLoadFromFile;
   if (strcmp("hipLibraryUnload", name) == 0) return HIP_API_ID_hipLibraryUnload;
@@ -1292,6 +1308,8 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMemAllocHost", name) == 0) return HIP_API_ID_hipMemAllocHost;
   if (strcmp("hipMemAllocPitch", name) == 0) return HIP_API_ID_hipMemAllocPitch;
   if (strcmp("hipMemCreate", name) == 0) return HIP_API_ID_hipMemCreate;
+  if (strcmp("hipMemDiscardAndPrefetchBatchAsync", name) == 0) return HIP_API_ID_hipMemDiscardAndPrefetchBatchAsync;
+  if (strcmp("hipMemDiscardBatchAsync", name) == 0) return HIP_API_ID_hipMemDiscardBatchAsync;
   if (strcmp("hipMemExportToShareableHandle", name) == 0) return HIP_API_ID_hipMemExportToShareableHandle;
   if (strcmp("hipMemGetAccess", name) == 0) return HIP_API_ID_hipMemGetAccess;
   if (strcmp("hipMemGetAddressRange", name) == 0) return HIP_API_ID_hipMemGetAddressRange;
@@ -1875,6 +1893,29 @@ typedef struct hip_api_data_s {
       void** extra;
       void* extra__val;
     } hipDrvLaunchKernelEx;
+    struct {
+      hipDeviceptr_t* dptrs;
+      hipDeviceptr_t dptrs__val;
+      size_t* sizes;
+      size_t sizes__val;
+      size_t count;
+      hipMemLocation* prefetchLocs;
+      hipMemLocation prefetchLocs__val;
+      size_t* prefetchLocIdxs;
+      size_t prefetchLocIdxs__val;
+      size_t numPrefetchLocs;
+      unsigned long long flags;
+      hipStream_t stream;
+    } hipDrvMemDiscardAndPrefetchBatchAsync;
+    struct {
+      hipDeviceptr_t* dptrs;
+      hipDeviceptr_t dptrs__val;
+      size_t* sizes;
+      size_t sizes__val;
+      size_t count;
+      unsigned long long flags;
+      hipStream_t stream;
+    } hipDrvMemDiscardBatchAsync;
     struct {
       const hip_Memcpy2D* pCopy;
       hip_Memcpy2D pCopy__val;
@@ -2946,6 +2987,15 @@ typedef struct hip_api_data_s {
       hipLibrary_t library;
     } hipLibraryEnumerateKernels;
     struct {
+      void** dptr;
+      void* dptr__val;
+      size_t* bytes;
+      size_t bytes__val;
+      hipLibrary_t library;
+      const char* name;
+      char name__val;
+    } hipLibraryGetGlobal;
+    struct {
       hipKernel_t* pKernel;
       hipKernel_t pKernel__val;
       hipLibrary_t library;
@@ -2957,6 +3007,15 @@ typedef struct hip_api_data_s {
       unsigned int count__val;
       hipLibrary_t library;
     } hipLibraryGetKernelCount;
+    struct {
+      void** dptr;
+      void* dptr__val;
+      size_t* bytes;
+      size_t bytes__val;
+      hipLibrary_t library;
+      const char* name;
+      char name__val;
+    } hipLibraryGetManaged;
     struct {
       hipLibrary_t* library;
       hipLibrary_t library__val;
@@ -3148,6 +3207,29 @@ typedef struct hip_api_data_s {
       hipMemAllocationProp prop__val;
       unsigned long long flags;
     } hipMemCreate;
+    struct {
+      void** dptrs;
+      void* dptrs__val;
+      size_t* sizes;
+      size_t sizes__val;
+      size_t count;
+      hipMemLocation* prefetchLocs;
+      hipMemLocation prefetchLocs__val;
+      size_t* prefetchLocIdxs;
+      size_t prefetchLocIdxs__val;
+      size_t numPrefetchLocs;
+      unsigned long long flags;
+      hipStream_t stream;
+    } hipMemDiscardAndPrefetchBatchAsync;
+    struct {
+      void** dev_ptrs;
+      void* dev_ptrs__val;
+      size_t* sizes;
+      size_t sizes__val;
+      size_t count;
+      unsigned long long flags;
+      hipStream_t stream;
+    } hipMemDiscardBatchAsync;
     struct {
       void* shareableHandle;
       hipMemGenericAllocationHandle_t handle;
@@ -4709,6 +4791,25 @@ typedef struct hip_api_data_s {
   cb_data.args.hipDrvLaunchKernelEx.params = (void**)kernelParams; \
   cb_data.args.hipDrvLaunchKernelEx.extra = (void**)extra; \
 };
+// hipDrvMemDiscardAndPrefetchBatchAsync[('hipDeviceptr_t*', 'dptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('hipMemLocation*', 'prefetchLocs'), ('size_t*', 'prefetchLocIdxs'), ('size_t', 'numPrefetchLocs'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+#define INIT_hipDrvMemDiscardAndPrefetchBatchAsync_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.dptrs = (hipDeviceptr_t*)dptrs; \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.sizes = (size_t*)sizes; \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.count = (size_t)count; \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocs = (hipMemLocation*)prefetchLocs; \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs = (size_t*)prefetchLocIdxs; \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.numPrefetchLocs = (size_t)numPrefetchLocs; \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.flags = (unsigned long long)flags; \
+  cb_data.args.hipDrvMemDiscardAndPrefetchBatchAsync.stream = (hipStream_t)stream; \
+};
+// hipDrvMemDiscardBatchAsync[('hipDeviceptr_t*', 'dptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+#define INIT_hipDrvMemDiscardBatchAsync_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDrvMemDiscardBatchAsync.dptrs = (hipDeviceptr_t*)dptrs; \
+  cb_data.args.hipDrvMemDiscardBatchAsync.sizes = (size_t*)sizes; \
+  cb_data.args.hipDrvMemDiscardBatchAsync.count = (size_t)count; \
+  cb_data.args.hipDrvMemDiscardBatchAsync.flags = (unsigned long long)flags; \
+  cb_data.args.hipDrvMemDiscardBatchAsync.stream = (hipStream_t)stream; \
+};
 // hipDrvMemcpy2DUnaligned[('const hip_Memcpy2D*', 'pCopy')]
 #define INIT_hipDrvMemcpy2DUnaligned_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDrvMemcpy2DUnaligned.pCopy = (const hip_Memcpy2D*)pCopy; \
@@ -5778,6 +5879,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipLibraryEnumerateKernels.numKernels = (unsigned int)numKernels; \
   cb_data.args.hipLibraryEnumerateKernels.library = (hipLibrary_t)library; \
 };
+// hipLibraryGetGlobal[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+#define INIT_hipLibraryGetGlobal_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLibraryGetGlobal.dptr = (void**)dptr; \
+  cb_data.args.hipLibraryGetGlobal.bytes = (size_t*)bytes; \
+  cb_data.args.hipLibraryGetGlobal.library = (hipLibrary_t)library; \
+  cb_data.args.hipLibraryGetGlobal.name = (name) ? strdup(name) : NULL; \
+};
 // hipLibraryGetKernel[('hipKernel_t*', 'pKernel'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
 #define INIT_hipLibraryGetKernel_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLibraryGetKernel.pKernel = (hipKernel_t*)kernel; \
@@ -5788,6 +5896,13 @@ typedef struct hip_api_data_s {
 #define INIT_hipLibraryGetKernelCount_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipLibraryGetKernelCount.count = (unsigned int*)count; \
   cb_data.args.hipLibraryGetKernelCount.library = (hipLibrary_t)library; \
+};
+// hipLibraryGetManaged[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+#define INIT_hipLibraryGetManaged_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipLibraryGetManaged.dptr = (void**)dptr; \
+  cb_data.args.hipLibraryGetManaged.bytes = (size_t*)bytes; \
+  cb_data.args.hipLibraryGetManaged.library = (hipLibrary_t)library; \
+  cb_data.args.hipLibraryGetManaged.name = (name) ? strdup(name) : NULL; \
 };
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
 #define INIT_hipLibraryLoadData_CB_ARGS_DATA(cb_data) { \
@@ -5962,6 +6077,25 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMemCreate.size = (size_t)size; \
   cb_data.args.hipMemCreate.prop = (const hipMemAllocationProp*)prop; \
   cb_data.args.hipMemCreate.flags = (unsigned long long)flags; \
+};
+// hipMemDiscardAndPrefetchBatchAsync[('void**', 'dptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('hipMemLocation*', 'prefetchLocs'), ('size_t*', 'prefetchLocIdxs'), ('size_t', 'numPrefetchLocs'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+#define INIT_hipMemDiscardAndPrefetchBatchAsync_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.dptrs = (void**)dptrs; \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.sizes = (size_t*)sizes; \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.count = (size_t)count; \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocs = (hipMemLocation*)prefetchLocs; \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs = (size_t*)prefetchLocIdxs; \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.numPrefetchLocs = (size_t)numPrefetchLocs; \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.flags = (unsigned long long)flags; \
+  cb_data.args.hipMemDiscardAndPrefetchBatchAsync.stream = (hipStream_t)stream; \
+};
+// hipMemDiscardBatchAsync[('void**', 'dev_ptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+#define INIT_hipMemDiscardBatchAsync_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMemDiscardBatchAsync.dev_ptrs = (void**)dev_ptrs; \
+  cb_data.args.hipMemDiscardBatchAsync.sizes = (size_t*)sizes; \
+  cb_data.args.hipMemDiscardBatchAsync.count = (size_t)count; \
+  cb_data.args.hipMemDiscardBatchAsync.flags = (unsigned long long)flags; \
+  cb_data.args.hipMemDiscardBatchAsync.stream = (hipStream_t)stream; \
 };
 // hipMemExportToShareableHandle[('void*', 'shareableHandle'), ('hipMemGenericAllocationHandle_t', 'handle'), ('hipMemAllocationHandleType', 'handleType'), ('unsigned long long', 'flags')]
 #define INIT_hipMemExportToShareableHandle_CB_ARGS_DATA(cb_data) { \
@@ -7517,6 +7651,18 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipDrvLaunchKernelEx.params) data->args.hipDrvLaunchKernelEx.params__val = *(data->args.hipDrvLaunchKernelEx.params);
       if (data->args.hipDrvLaunchKernelEx.extra) data->args.hipDrvLaunchKernelEx.extra__val = *(data->args.hipDrvLaunchKernelEx.extra);
       break;
+// hipDrvMemDiscardAndPrefetchBatchAsync[('hipDeviceptr_t*', 'dptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('hipMemLocation*', 'prefetchLocs'), ('size_t*', 'prefetchLocIdxs'), ('size_t', 'numPrefetchLocs'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync:
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.dptrs) data->args.hipDrvMemDiscardAndPrefetchBatchAsync.dptrs__val = *(data->args.hipDrvMemDiscardAndPrefetchBatchAsync.dptrs);
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.sizes) data->args.hipDrvMemDiscardAndPrefetchBatchAsync.sizes__val = *(data->args.hipDrvMemDiscardAndPrefetchBatchAsync.sizes);
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocs) data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocs__val = *(data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocs);
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs) data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs__val = *(data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs);
+      break;
+// hipDrvMemDiscardBatchAsync[('hipDeviceptr_t*', 'dptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipDrvMemDiscardBatchAsync:
+      if (data->args.hipDrvMemDiscardBatchAsync.dptrs) data->args.hipDrvMemDiscardBatchAsync.dptrs__val = *(data->args.hipDrvMemDiscardBatchAsync.dptrs);
+      if (data->args.hipDrvMemDiscardBatchAsync.sizes) data->args.hipDrvMemDiscardBatchAsync.sizes__val = *(data->args.hipDrvMemDiscardBatchAsync.sizes);
+      break;
 // hipDrvMemcpy2DUnaligned[('const hip_Memcpy2D*', 'pCopy')]
     case HIP_API_ID_hipDrvMemcpy2DUnaligned:
       if (data->args.hipDrvMemcpy2DUnaligned.pCopy) data->args.hipDrvMemcpy2DUnaligned.pCopy__val = *(data->args.hipDrvMemcpy2DUnaligned.pCopy);
@@ -8236,6 +8382,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipLibraryEnumerateKernels:
       if (data->args.hipLibraryEnumerateKernels.kernels) data->args.hipLibraryEnumerateKernels.kernels__val = *(data->args.hipLibraryEnumerateKernels.kernels);
       break;
+// hipLibraryGetGlobal[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+    case HIP_API_ID_hipLibraryGetGlobal:
+      if (data->args.hipLibraryGetGlobal.dptr) data->args.hipLibraryGetGlobal.dptr__val = *(data->args.hipLibraryGetGlobal.dptr);
+      if (data->args.hipLibraryGetGlobal.bytes) data->args.hipLibraryGetGlobal.bytes__val = *(data->args.hipLibraryGetGlobal.bytes);
+      if (data->args.hipLibraryGetGlobal.name) data->args.hipLibraryGetGlobal.name__val = *(data->args.hipLibraryGetGlobal.name);
+      break;
 // hipLibraryGetKernel[('hipKernel_t*', 'pKernel'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
     case HIP_API_ID_hipLibraryGetKernel:
       if (data->args.hipLibraryGetKernel.pKernel) data->args.hipLibraryGetKernel.pKernel__val = *(data->args.hipLibraryGetKernel.pKernel);
@@ -8244,6 +8396,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipLibraryGetKernelCount[('unsigned int*', 'count'), ('hipLibrary_t', 'library')]
     case HIP_API_ID_hipLibraryGetKernelCount:
       if (data->args.hipLibraryGetKernelCount.count) data->args.hipLibraryGetKernelCount.count__val = *(data->args.hipLibraryGetKernelCount.count);
+      break;
+// hipLibraryGetManaged[('void**', 'dptr'), ('size_t*', 'bytes'), ('hipLibrary_t', 'library'), ('const char*', 'name')]
+    case HIP_API_ID_hipLibraryGetManaged:
+      if (data->args.hipLibraryGetManaged.dptr) data->args.hipLibraryGetManaged.dptr__val = *(data->args.hipLibraryGetManaged.dptr);
+      if (data->args.hipLibraryGetManaged.bytes) data->args.hipLibraryGetManaged.bytes__val = *(data->args.hipLibraryGetManaged.bytes);
+      if (data->args.hipLibraryGetManaged.name) data->args.hipLibraryGetManaged.name__val = *(data->args.hipLibraryGetManaged.name);
       break;
 // hipLibraryLoadData[('hipLibrary_t*', 'library'), ('const void*', 'code'), ('hipJitOption*', 'jitOptions'), ('void**', 'jitOptionsValues'), ('unsigned int', 'numJitOptions'), ('hipLibraryOption*', 'libraryOptions'), ('void**', 'libraryOptionValues'), ('unsigned int', 'numLibraryOptions')]
     case HIP_API_ID_hipLibraryLoadData:
@@ -8361,6 +8519,18 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipMemCreate:
       if (data->args.hipMemCreate.handle) data->args.hipMemCreate.handle__val = *(data->args.hipMemCreate.handle);
       if (data->args.hipMemCreate.prop) data->args.hipMemCreate.prop__val = *(data->args.hipMemCreate.prop);
+      break;
+// hipMemDiscardAndPrefetchBatchAsync[('void**', 'dptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('hipMemLocation*', 'prefetchLocs'), ('size_t*', 'prefetchLocIdxs'), ('size_t', 'numPrefetchLocs'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipMemDiscardAndPrefetchBatchAsync:
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.dptrs) data->args.hipMemDiscardAndPrefetchBatchAsync.dptrs__val = *(data->args.hipMemDiscardAndPrefetchBatchAsync.dptrs);
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.sizes) data->args.hipMemDiscardAndPrefetchBatchAsync.sizes__val = *(data->args.hipMemDiscardAndPrefetchBatchAsync.sizes);
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocs) data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocs__val = *(data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocs);
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs) data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs__val = *(data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs);
+      break;
+// hipMemDiscardBatchAsync[('void**', 'dev_ptrs'), ('size_t*', 'sizes'), ('size_t', 'count'), ('unsigned long long', 'flags'), ('hipStream_t', 'stream')]
+    case HIP_API_ID_hipMemDiscardBatchAsync:
+      if (data->args.hipMemDiscardBatchAsync.dev_ptrs) data->args.hipMemDiscardBatchAsync.dev_ptrs__val = *(data->args.hipMemDiscardBatchAsync.dev_ptrs);
+      if (data->args.hipMemDiscardBatchAsync.sizes) data->args.hipMemDiscardBatchAsync.sizes__val = *(data->args.hipMemDiscardBatchAsync.sizes);
       break;
 // hipMemExportToShareableHandle[('void*', 'shareableHandle'), ('hipMemGenericAllocationHandle_t', 'handle'), ('hipMemAllocationHandleType', 'handleType'), ('unsigned long long', 'flags')]
     case HIP_API_ID_hipMemExportToShareableHandle:
@@ -9618,6 +9788,33 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", params="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvLaunchKernelEx.params__val); }
       if (data->args.hipDrvLaunchKernelEx.extra == NULL) oss << ", extra=NULL";
       else { oss << ", extra="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvLaunchKernelEx.extra__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDrvMemDiscardAndPrefetchBatchAsync:
+      oss << "hipDrvMemDiscardAndPrefetchBatchAsync(";
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.dptrs == NULL) oss << "dptrs=NULL";
+      else { oss << "dptrs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.dptrs__val); }
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.sizes == NULL) oss << ", sizes=NULL";
+      else { oss << ", sizes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.sizes__val); }
+      oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.count);
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocs == NULL) oss << ", prefetchLocs=NULL";
+      else { oss << ", prefetchLocs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocs__val); }
+      if (data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs == NULL) oss << ", prefetchLocIdxs=NULL";
+      else { oss << ", prefetchLocIdxs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs__val); }
+      oss << ", numPrefetchLocs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.numPrefetchLocs);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.flags);
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardAndPrefetchBatchAsync.stream);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDrvMemDiscardBatchAsync:
+      oss << "hipDrvMemDiscardBatchAsync(";
+      if (data->args.hipDrvMemDiscardBatchAsync.dptrs == NULL) oss << "dptrs=NULL";
+      else { oss << "dptrs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardBatchAsync.dptrs__val); }
+      if (data->args.hipDrvMemDiscardBatchAsync.sizes == NULL) oss << ", sizes=NULL";
+      else { oss << ", sizes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardBatchAsync.sizes__val); }
+      oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardBatchAsync.count);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardBatchAsync.flags);
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvMemDiscardBatchAsync.stream);
       oss << ")";
     break;
     case HIP_API_ID_hipDrvMemcpy2DUnaligned:
@@ -11056,6 +11253,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryEnumerateKernels.library);
       oss << ")";
     break;
+    case HIP_API_ID_hipLibraryGetGlobal:
+      oss << "hipLibraryGetGlobal(";
+      if (data->args.hipLibraryGetGlobal.dptr == NULL) oss << "dptr=NULL";
+      else { oss << "dptr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.dptr__val); }
+      if (data->args.hipLibraryGetGlobal.bytes == NULL) oss << ", bytes=NULL";
+      else { oss << ", bytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.bytes__val); }
+      oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.library);
+      if (data->args.hipLibraryGetGlobal.name == NULL) oss << ", name=NULL";
+      else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetGlobal.name__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipLibraryGetKernel:
       oss << "hipLibraryGetKernel(";
       if (data->args.hipLibraryGetKernel.pKernel == NULL) oss << "pKernel=NULL";
@@ -11070,6 +11278,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipLibraryGetKernelCount.count == NULL) oss << "count=NULL";
       else { oss << "count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernelCount.count__val); }
       oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernelCount.library);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipLibraryGetManaged:
+      oss << "hipLibraryGetManaged(";
+      if (data->args.hipLibraryGetManaged.dptr == NULL) oss << "dptr=NULL";
+      else { oss << "dptr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.dptr__val); }
+      if (data->args.hipLibraryGetManaged.bytes == NULL) oss << ", bytes=NULL";
+      else { oss << ", bytes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.bytes__val); }
+      oss << ", library="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.library);
+      if (data->args.hipLibraryGetManaged.name == NULL) oss << ", name=NULL";
+      else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetManaged.name__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipLibraryLoadData:
@@ -11311,6 +11530,33 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipMemCreate.prop == NULL) oss << ", prop=NULL";
       else { oss << ", prop="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemCreate.prop__val); }
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemCreate.flags);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipMemDiscardAndPrefetchBatchAsync:
+      oss << "hipMemDiscardAndPrefetchBatchAsync(";
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.dptrs == NULL) oss << "dptrs=NULL";
+      else { oss << "dptrs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.dptrs__val); }
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.sizes == NULL) oss << ", sizes=NULL";
+      else { oss << ", sizes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.sizes__val); }
+      oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.count);
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocs == NULL) oss << ", prefetchLocs=NULL";
+      else { oss << ", prefetchLocs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocs__val); }
+      if (data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs == NULL) oss << ", prefetchLocIdxs=NULL";
+      else { oss << ", prefetchLocIdxs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.prefetchLocIdxs__val); }
+      oss << ", numPrefetchLocs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.numPrefetchLocs);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.flags);
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardAndPrefetchBatchAsync.stream);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipMemDiscardBatchAsync:
+      oss << "hipMemDiscardBatchAsync(";
+      if (data->args.hipMemDiscardBatchAsync.dev_ptrs == NULL) oss << "dev_ptrs=NULL";
+      else { oss << "dev_ptrs="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardBatchAsync.dev_ptrs__val); }
+      if (data->args.hipMemDiscardBatchAsync.sizes == NULL) oss << ", sizes=NULL";
+      else { oss << ", sizes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardBatchAsync.sizes__val); }
+      oss << ", count="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardBatchAsync.count);
+      oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardBatchAsync.flags);
+      oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemDiscardBatchAsync.stream);
       oss << ")";
     break;
     case HIP_API_ID_hipMemExportToShareableHandle:

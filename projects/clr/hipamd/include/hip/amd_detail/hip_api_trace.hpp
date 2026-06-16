@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 28
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 30
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -530,6 +530,24 @@ typedef hipError_t (*t_hipMemPrefetchBatchAsync)(void** dev_ptrs, size_t* sizes,
                                                 hipMemLocation* prefetch_locs, size_t* prefetch_loc_idxs,
                                                 size_t num_prefetch_locs, unsigned long long flags,
                                                 hipStream_t stream);
+typedef hipError_t (*t_hipMemDiscardBatchAsync)(void** dev_ptrs, size_t* sizes, size_t count,
+                                                unsigned long long flags, hipStream_t stream);
+typedef hipError_t (*t_hipDrvMemDiscardBatchAsync)(hipDeviceptr_t* dptrs, size_t* sizes, size_t count,
+                                                   unsigned long long flags, hipStream_t stream);
+typedef hipError_t (*t_hipMemDiscardAndPrefetchBatchAsync)(void** dptrs, size_t* sizes,
+                                                           size_t count,
+                                                           hipMemLocation* prefetchLocs,
+                                                           size_t* prefetchLocIdxs,
+                                                           size_t numPrefetchLocs,
+                                                           unsigned long long flags,
+                                                           hipStream_t stream);
+typedef hipError_t (*t_hipDrvMemDiscardAndPrefetchBatchAsync)(hipDeviceptr_t* dptrs, size_t* sizes,
+                                                              size_t count,
+                                                              hipMemLocation* prefetchLocs,
+                                                              size_t* prefetchLocIdxs,
+                                                              size_t numPrefetchLocs,
+                                                              unsigned long long flags,
+                                                              hipStream_t stream);
 typedef hipError_t (*t_hipMemPtrGetInfo)(void* ptr, size_t* size);
 typedef hipError_t (*t_hipMemRangeGetAttribute)(void* data, size_t data_size,
                                                 hipMemRangeAttribute attribute, const void* dev_ptr,
@@ -1101,6 +1119,10 @@ typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t l
                                             const char* name);
 typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
                                                  hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryGetGlobal)(void** dptr, size_t* bytes,
+                                            hipLibrary_t library, const char* name);
+typedef hipError_t (*t_hipLibraryGetManaged)(void** dptr, size_t* bytes,
+                                             hipLibrary_t library, const char* name);
 typedef hipError_t (*t_hipLibraryEnumerateKernels)(hipKernel_t* kernels, unsigned int numKernels,
                                                    hipLibrary_t library);
 typedef hipError_t (*t_hipKernelGetLibrary)(hipLibrary_t* library, hipKernel_t kernel);
@@ -1790,8 +1812,18 @@ struct HipDispatchTable {
   t_hipExecutionCtxSynchronize hipExecutionCtxSynchronize_fn;
   t_hipExecutionCtxWaitEvent hipExecutionCtxWaitEvent_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
+  t_hipLibraryGetGlobal hipLibraryGetGlobal_fn;
+  t_hipLibraryGetManaged hipLibraryGetManaged_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+  t_hipMemDiscardBatchAsync hipMemDiscardBatchAsync_fn;
+  t_hipDrvMemDiscardBatchAsync hipDrvMemDiscardBatchAsync_fn;
+  t_hipMemDiscardAndPrefetchBatchAsync hipMemDiscardAndPrefetchBatchAsync_fn;
+  t_hipDrvMemDiscardAndPrefetchBatchAsync hipDrvMemDiscardAndPrefetchBatchAsync_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
 
   // ******************************************************************************************* //
   //

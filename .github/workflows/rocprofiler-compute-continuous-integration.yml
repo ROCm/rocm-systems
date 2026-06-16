@@ -94,7 +94,7 @@ jobs:
     permissions:
       packages: read
     container:
-      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-${{ matrix.system.arch }}
+      image: ghcr.io/rocm/rocprofiler-ubuntu:${{ matrix.system.os-release }}-compute-ci-multiarch
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
@@ -108,6 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event_name == 'schedule' && 'rocprofiler-compute-develop' || github.ref }}
           sparse-checkout: |
             projects/rocprofiler-compute
             shared/ctest
@@ -142,16 +143,17 @@ jobs:
           ROCM_MINOR=$(echo ${{ env.ROCM_VERSION }} | sed 's/\./ /g' | awk '{print $2}')
           ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
           wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/${ROCM_MAJOR}.${ROCM_MINOR}/ubuntu/${{ steps.setup_env.outputs.code_name }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
           apt-get install -y /tmp/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
           apt-get update
-          apt install -y amd-smi-lib libdw-dev hip-dev
+          apt install -y amd-smi-lib libdw-dev hip-dev pkg-config
           echo "✅ amdgpu and ROCm dependencies Installed!"
 
       - name: Install Latest Nightly ROCm
         run: |
           set -e
           TARBALL_ROCM_VERSION=$(ls /opt/*.tar.gz | grep -Eo '*([0-9]+\.[0-9]+\.[0-9]+)*')
-          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-${{ matrix.system.arch }}.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
+          tar -xf ${{ env.ROCM_PATH }}-${TARBALL_ROCM_VERSION}-multiarch.tar.gz -C ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }}
           ln -s ${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} ${{ env.ROCM_PATH }}
           echo "ROCm installed to: ${{ env.ROCM_PATH }}"
           echo "✅ ROCm Installation Complete!"

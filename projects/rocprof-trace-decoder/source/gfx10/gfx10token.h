@@ -26,7 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 #include "token_types.h"
 #include "trace_parser.hpp"
 
@@ -61,7 +61,10 @@ union wstart_type
             .pipe = pipe,
             .me = me,
             .count = count,
-            .isExt = 0};
+            .isExt = 0,
+            .wgid = 0,
+            .last = 0,
+            .dynvgpr = 0};
     }
 };
 } // namespace gfx10
@@ -265,20 +268,30 @@ union wave_ready_type
 
 namespace gfx10
 {
+union misc_fields
+{
+    struct
+    {
+        uint8_t spm_or_pl        : 1; // PL on gfx10, SPM on gfx11
+        uint8_t gc_rinse         : 1;
+        uint8_t reserved         : 1;
+        uint8_t save_context     : 1;
+        uint8_t tt_stall_start   : 1;
+        uint8_t tt_stall_end     : 1;
+        uint8_t DIDT_stall_start : 1;
+        uint8_t DIDT_stall_end   : 1;
+    };
+    uint8_t raw;
+};
+
 union misc_type
 {
     struct
     {
-        uint64_t header           : 7;
-        uint64_t tm               : 9;
-        uint64_t spm_or_pl        : 1; // PL on gfx10, SPM on gfx11+
-        uint64_t gc_rinse         : 1;
-        uint64_t reserved         : 1;
-        uint64_t save_context     : 1;
-        uint64_t tt_stall_start   : 1;
-        uint64_t tt_stall_end     : 1;
-        uint64_t DIDT_stall_start : 1;
-        uint64_t DIDT_stall_end   : 1;
+        uint64_t header  : 7;
+        uint64_t tm      : 9;
+        uint64_t fields  : 8;
+        uint64_t padding : 40;
     };
     uint64_t raw;
 
@@ -362,7 +375,6 @@ union new_pc_type
     const char* typestr() const { return "NEW_PC"; };
 #endif
 };
-} // namespace gfx10
 
 union reg_write_type
 {
@@ -401,9 +413,7 @@ union reg_init_type
         uint64_t pipe    : 2;
         uint64_t me      : 2;
         uint64_t type    : 2;
-        uint64_t data    : 24;
-        uint64_t context : 3;
-        uint64_t data2   : 5;
+        uint64_t data    : 32;
         uint64_t sync_id : 10;
         uint64_t rsvd    : 2;
     };
@@ -421,8 +431,21 @@ union reg_init_type
 #endif
 };
 
-namespace gfx10
+union event_type
 {
+    struct
+    {
+        uint64_t header : 8;
+        uint64_t tm     : 3;
+        uint64_t bop    : 1;
+        uint64_t evtype : 2;
+        uint64_t pipe   : 2;
+        uint64_t me     : 2;
+        uint64_t id     : 6;
+    };
+    uint64_t raw;
+};
+
 class Token
 {
 public:
@@ -471,7 +494,9 @@ class NaviTokenGenerator : public TokenGenerator
 public:
     NaviTokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time) :
     TokenGenerator(_buffer, size, _globaltime, _base_time)
-    {}
+    {
+        realtime.reserve(65536);
+    }
 
     virtual gfx10::Token next() = 0;
     bool bufferPadded() { return bit_ptr + 64 < 8 * BUFFER_SIZE; }

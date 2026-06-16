@@ -42,11 +42,11 @@ function(ais_add_libraries)
 
     # Add dependencies on external libraries
     foreach(lib IN LISTS arg_LIBS)
-        find_library(LIBRARY_PATH NAMES ${lib})
-        if(NOT LIBRARY_PATH)
+        find_library(${arg_NAME}_${lib}_LIBRARY NAMES ${lib})
+        if(NOT ${arg_NAME}_${lib}_LIBRARY)
             message(FATAL_ERROR "lib${lib} not found")
         endif()
-        target_link_libraries(${arg_NAME} PRIVATE ${LIBRARY_PATH})
+        target_link_libraries(${arg_NAME} PRIVATE ${${arg_NAME}_${lib}_LIBRARY})
     endforeach()
 
     if(BUILD_TESTING)

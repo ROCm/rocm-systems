@@ -2,10 +2,16 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
+import common
 import pytest
 
+from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from rocprof_compute_profile.profiler_rocprofiler_sdk import rocprofiler_sdk_profiler
 from utils.utils_exceptions import (
     ExecutableNotFoundError,
     NoScriptInCommandError,
@@ -13,19 +19,30 @@ from utils.utils_exceptions import (
 )
 
 
-def _make_sanitize_args(remaining, torch_trace=False):
-    """Build a minimal argparse.Namespace for sanitize() unit tests."""
-    return argparse.Namespace(
+def _make_sanitize_args(remaining, torch_trace=False, **overrides):
+    """Build a minimal argparse.Namespace for profiler_base unit tests.
+
+    Defaults satisfy sanitize(); pass **overrides to set or replace fields the
+    run_profiling() tests need (e.g. output_directory, no_native_tool, kernel,
+    or a pre-joined string ``remaining``).
+    """
+    defaults = dict(
         filter_blocks=[],
         set_selected=None,
         roof_only=False,
-        path="/tmp/test_workload",
+        output_directory="/tmp/test_workload",
         no_native_tool=False,
         iteration_multiplexing=None,
         attach_pid=None,
+        attach_duration_msec=None,
+        spatial_multiplexing=None,
         remaining=["--"] + remaining,
         torch_trace=torch_trace,
+        dispatch=None,
+        kernel=None,
     )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
 
 
 def _setup_test_files(tmp_path, remaining, setup):
@@ -222,3 +239,302 @@ def test_sanitize_no_torch_trace(tmp_path, remaining, expected_exception, setup)
             profiler.sanitize()
     else:
         profiler.sanitize()
+
+
+# ---------------------------------------------------------------------------
+# get_profiler_options(): live-attach library resolution with fallback
+# ---------------------------------------------------------------------------
+def test_attach_library_resolution_with_fallback():
+    """Unit test: attach branch picks new lib first, falls back to old, errors if
+    neither exists. resolve_rocm_library_path is mocked so the actual library
+    locations are controlled by the test, independent of the configured tool path."""
+    output_dir = Path(common.get_output_dir())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    args = argparse.Namespace(
+        remaining="-- /bin/true",
+        rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+        format_rocprof_output="csv",
+        output_directory=str(output_dir),
+        iteration_multiplexing=None,
+        attach_pid=12345,
+        attach_duration_msec=None,
+        kokkos_trace=False,
+        kernel=None,
+        dispatch=None,
+        torch_trace=False,
+    )
+    profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    resolve_target = (
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path"
+    )
+    new_lib = output_dir / "librocprofiler-sdk-rocattach.so"
+    old_lib = output_dir / "librocprofv3-attach.so"
+
+    # Case 1: new library present -> selected, fallback lookup never happens.
+    new_lib.write_text("")
+    with patch(
+        resolve_target, side_effect=[str(new_lib), str(old_lib)]
+    ) as mock_resolve:
+        options = profiler.get_profiler_options()
+    assert options["ROCPROF_ATTACH_LIBRARY"] == str(new_lib)
+    assert mock_resolve.call_count == 1
+
+    # Case 2: only old library present -> falls back to it.
+    new_lib.unlink()
+    old_lib.write_text("")
+    with patch(
+        resolve_target, side_effect=[str(new_lib), str(old_lib)]
+    ) as mock_resolve:
+        options = profiler.get_profiler_options()
+    assert options["ROCPROF_ATTACH_LIBRARY"] == str(old_lib)
+    assert mock_resolve.call_count == 2
+
+    # Case 3: neither library present -> console_error exits the process.
+    old_lib.unlink()
+    with patch(resolve_target, side_effect=[str(new_lib), str(old_lib)]):
+        with pytest.raises(SystemExit):
+            profiler.get_profiler_options()
+
+    common.clean_output_dir(True, str(output_dir))
+
+
+# ---------------------------------------------------------------------------
+# RocProfCompute.sanitize(): block 21 / block 30 experimental-gating
+# ---------------------------------------------------------------------------
+def _make_rpc_args(
+    *,
+    filter_blocks=None,
+    filter_metrics=None,
+    pc_sampling=False,
+    membw_analysis=False,
+    experimental=False,
+    mode="profile",
+) -> argparse.Namespace:
+    """Build a minimal Namespace for RocProfCompute.sanitize() unit tests."""
+    return argparse.Namespace(
+        mode=mode,
+        list_metrics=None,
+        list_blocks=None,
+        list_available_metrics=False,
+        list_sets=False,
+        specs=False,
+        filter_blocks=filter_blocks,
+        filter_metrics=filter_metrics,
+        pc_sampling=pc_sampling,
+        membw_analysis=membw_analysis,
+        experimental=experimental,
+        set_selected=None,
+        roof_only=False,
+        bench_only=False,
+        no_roof=False,
+        format_rocprof_output="csv",
+        name="unit-test",
+        output_directory="/tmp/unit-test",
+    )
+
+
+def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
+    """Construct a RocProfCompute without invoking __init__."""
+    instance = RocProfCompute.__new__(RocProfCompute)
+    # Name-mangled private attributes consumed by sanitize().
+    instance._RocProfCompute__args = args
+    instance._RocProfCompute__mode = args.mode
+    return instance
+
+
+@pytest.mark.parametrize(
+    "args, expect_error, expected_filter_blocks",
+    [
+        pytest.param(
+            _make_rpc_args(filter_blocks=["21"]),
+            True,
+            None,
+            id="block21_without_pc_sampling_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["21"], pc_sampling=True),
+            True,
+            None,
+            id="pc_sampling_without_experimental_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["pc_sampling"]),
+            True,
+            None,
+            id="block_alias_without_pc_sampling_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(pc_sampling=True, experimental=True, filter_blocks=[]),
+            False,
+            ["21"],
+            id="pc_sampling_with_experimental_injects_21",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["21"], pc_sampling=True, experimental=True),
+            False,
+            ["21"],
+            id="block21_with_pc_sampling_experimental_passes",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["30"]),
+            True,
+            None,
+            id="block30_without_membw_analysis_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(filter_blocks=["30"], membw_analysis=True),
+            True,
+            None,
+            id="membw_analysis_without_experimental_errors",
+        ),
+        pytest.param(
+            _make_rpc_args(
+                filter_blocks=["30"], membw_analysis=True, experimental=True
+            ),
+            False,
+            ["30"],
+            id="block30_with_membw_analysis_experimental_passes",
+        ),
+    ],
+)
+def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_blocks):
+    """Unit test: block 21 and block 30 require their experimental flags."""
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance.sanitize()
+    else:
+        instance.sanitize()
+        assert args.filter_blocks == expected_filter_blocks
+
+
+# ---------------------------------------------------------------------------
+# run_profiling(): PC sampling gating / increment / delegation
+# ---------------------------------------------------------------------------
+def _make_run_profiling_profiler(tmp_path, filter_blocks, perfmon_files=0):
+    """Build a RocProfCompute_Base ready to drive run_profiling() in isolation.
+
+    Uses the rocprofv3 profiler mode so the native-tool path resolves to None
+    without touching the filesystem, and seeds `perfmon_files` empty pmc_perf
+    yaml files so total_runs reflects the counter-collection pass count.
+    """
+    if perfmon_files:
+        perfmon_dir = Path(tmp_path) / "perfmon"
+        perfmon_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(perfmon_files):
+            (perfmon_dir / f"pmc_perf_{i}.yaml").write_text("")
+
+    args = _make_sanitize_args(
+        ["./app"],
+        filter_blocks=filter_blocks,
+        output_directory=str(tmp_path),
+        no_native_tool=True,
+    )
+    # run_profiling() consumes remaining as the already-joined command string.
+    args.remaining = "-- ./app"
+    soc = SimpleNamespace(_mspec=SimpleNamespace(gpu_model="MI300"))
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofv3", soc=soc)
+    profiler._filter_blocks = filter_blocks
+    return profiler
+
+
+@pytest.mark.parametrize(
+    "filter_blocks, perfmon_files, is_requested, ranks, "
+    "expect_run, expect_skip_warning, expect_multirank_warning",
+    [
+        # A requested PC sampling block delegates to PCSamplingProfile.run()
+        # and suppresses the skip warning.
+        pytest.param(
+            ["pc_sampling"],
+            0,
+            True,
+            (None, None),
+            True,
+            False,
+            False,
+            id="delegates_when_requested",
+        ),
+        # No PC sampling block requested -> skip warning, run() never called.
+        pytest.param(
+            ["2"],
+            1,
+            False,
+            (None, None),
+            False,
+            True,
+            False,
+            id="skips_when_not_requested",
+        ),
+        # Requested PC sampling adds a workload run, so 1 counter pass + 1 PC
+        # sampling pass = 2 runs with >=2 ranks -> multi-rank warning.
+        pytest.param(
+            ["21", "2"],
+            1,
+            True,
+            ("0", 2),
+            True,
+            False,
+            True,
+            id="multirank_warns_with_pc_sampling",
+        ),
+        # Not requested -> only the single counter pass -> no multi-rank warning.
+        pytest.param(
+            ["2"],
+            1,
+            False,
+            ("0", 2),
+            False,
+            True,
+            False,
+            id="multirank_silent_without_pc_sampling",
+        ),
+    ],
+)
+def test_run_profiling_pc_sampling_gating(
+    tmp_path,
+    monkeypatch,
+    filter_blocks,
+    perfmon_files,
+    is_requested,
+    ranks,
+    expect_run,
+    expect_skip_warning,
+    expect_multirank_warning,
+):
+    """run_profiling() delegates to PCSamplingProfile.run() only when a PC
+    sampling block is requested, emits the skip warning otherwise, and counts a
+    requested PC sampling pass as an extra workload run for the multi-rank
+    warning."""
+    profiler = _make_run_profiling_profiler(
+        tmp_path, filter_blocks, perfmon_files=perfmon_files
+    )
+    base = "rocprof_compute_profile.profiler_base"
+
+    mock_pc_cls = Mock()
+    instance = mock_pc_cls.return_value
+    instance.is_requested.return_value = is_requested
+    mock_warning = Mock()
+
+    monkeypatch.setattr(f"{base}.PCSamplingProfile", mock_pc_cls)
+    monkeypatch.setattr(f"{base}.print_status", Mock())
+    common.patch_console(
+        monkeypatch, base, "log", "debug", "warning", warning=mock_warning
+    )
+    monkeypatch.setattr(f"{base}.get_job_rank_and_size", Mock(return_value=ranks))
+    monkeypatch.setattr(RocProfCompute_Base, "profile", Mock(return_value=0.0))
+
+    profiler.run_profiling(version="1.0.0", prog="rocprof-compute")
+
+    assert instance.run.called is expect_run
+
+    skip_warned = any(
+        "PC sampling data collection skipped" in str(call)
+        for call in mock_warning.call_args_list
+    )
+    assert skip_warned is expect_skip_warning
+
+    multirank_warned = any(
+        "Multi-rank application detected" in str(call)
+        for call in mock_warning.call_args_list
+    )
+    assert multirank_warned is expect_multirank_warning

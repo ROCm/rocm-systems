@@ -25,9 +25,9 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include "common.hpp"
 #include "gfx11/gfx11parser.h"
 #include "gfx11/gfx11token.h"
+#include "rocprof_trace_decoder/cxx/common.hpp"
 
 namespace gfx12
 {
@@ -110,45 +110,48 @@ union wstart_type
 {
     struct
     {
-        uint64_t header     : 4;
-        uint64_t isExt      : 1;
-        uint64_t tm         : 2;
-        uint64_t sa         : 1;
-        uint64_t simd       : 2;
-        uint64_t wgp        : 4;
-        uint64_t reserved   : 1;
-        uint64_t wid        : 5;
-        uint64_t dispatcher : 5;
-        uint64_t count      : 7;
-        uint64_t zero       : 1;
-        uint64_t wgid       : 5;
-        uint64_t last       : 1;
-        uint64_t dvg        : 1;
+        uint64_t header    : 4;
+        uint64_t isExt     : 1;
+        uint64_t tm        : 2;
+        uint64_t sa        : 1;
+        uint64_t simd      : 2;
+        uint64_t wgp       : 4;
+        uint64_t reserved  : 1;
+        uint64_t wid       : 5;
+        uint64_t pipe      : 2;
+        uint64_t me        : 1;
+        uint64_t reserved2 : 2;
+        uint64_t count     : 7;
+        uint64_t extlds    : 1;
+        uint64_t wgid      : 5;
+        uint64_t last      : 1;
+        uint64_t dvg       : 1;
     };
     uint64_t raw;
 
     wstart_type_common get() const
     {
+        bool wgext = isExt && !extlds;
         return wstart_type_common{
             .tm = tm,
             .sa = sa,
             .simd = simd,
             .wgp = wgp,
             .wid = wid,
-            .pipe = dispatcher & 0x3ul,
-            .me = (dispatcher >> 2ul) & 1ul,
+            .pipe = pipe,
+            .me = me,
             .count = count,
-            .isExt = isExt,
-            .wgid = wgid,
-            .last = last,
-            .dynvgpr = dvg};
+            .isExt = wgext,
+            .wgid = wgext ? static_cast<uint64_t>(wgid) : 0,
+            .last = wgext ? static_cast<uint64_t>(last) : 0,
+            .dynvgpr = wgext ? static_cast<uint64_t>(dvg) : 0};
     }
 
 #ifdef SQTT_LOGGING
     std::stringstream print() const
     {
         std::stringstream ss;
-        ss << "wgp:" << wgp << " simd:" << simd << " wid:" << wid << " sa:" << sa << " dispatcher:" << dispatcher
+        ss << "wgp:" << wgp << " simd:" << simd << " wid:" << wid << " sa:" << sa << " pipe:" << pipe << " me:" << me
            << " count:" << count;
         return ss;
     }

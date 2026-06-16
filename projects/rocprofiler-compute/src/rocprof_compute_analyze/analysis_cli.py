@@ -15,6 +15,7 @@ from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     build_call_trees,
     build_call_trees_with_kernel_ids,
+    build_operator_summary,
     process_torch_trace_output,
     write_torch_trace_consolidated_csv,
 )
@@ -74,10 +75,6 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.raw_pmc = workload.raw_pmc.rename(
                     columns={"Dispatch_Id": "Dispatch_ID"}
                 )
-                # Create multi index dataframe with key pmc_perf
-                workload.raw_pmc = pd.concat(
-                    [workload.raw_pmc], keys=["pmc_perf"], axis=1
-                )
 
                 kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                     df_in=workload.raw_pmc,
@@ -114,6 +111,7 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.raw_pmc = self.iteration_multiplex_impute_counters(
                     workload.raw_pmc,
                     policy=self._profiling_config["iteration_multiplexing"],
+                    workload_dir=Path(path_info[0]),
                 )
 
             kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
@@ -148,12 +146,13 @@ class cli_analysis(OmniAnalyze_Base):
                 self.apply_torch_operator_filter(args, workload, path_info[0])
 
             # create the loaded table
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
             parser.load_table_data(
                 workload=workload,
                 dir_path=path_info[0],
                 is_gui=False,
                 args=args,
-                config=self._profiling_config,
+                dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
             )
 
     @demarcate
@@ -228,7 +227,6 @@ class cli_analysis(OmniAnalyze_Base):
                         ai_data = calc_ai_analyze(
                             workload=workload,
                             pmc_df=pmc_df,
-                            config=self._profiling_config,
                             arch_config=arch_config,
                         )
 
@@ -238,9 +236,12 @@ class cli_analysis(OmniAnalyze_Base):
                             ai_data=ai_data,
                         )
 
-                        ops_fig, flops_fig, ops_dt, flops_dt = (
-                            roof_obj.construct_plotly_figures(ai_data=ai_data)
-                        )
+                        (
+                            ops_fig,
+                            flops_fig,
+                            ops_dt,
+                            flops_dt,
+                        ) = roof_obj.construct_plotly_figures(ai_data=ai_data)
                         roof_obj.save_html_files(ops_fig, flops_fig, ops_dt, flops_dt)
                     else:
                         console_warning(
@@ -306,7 +307,7 @@ class cli_analysis(OmniAnalyze_Base):
                 "torch trace",
                 f"No operators matched the pattern(s): {pattern_list}",
             )
-            return
+            sys.exit(0)
 
         matched_df = consolidated_df[
             consolidated_df["Operator_Name"].isin(matched_names)
@@ -371,6 +372,7 @@ class cli_analysis(OmniAnalyze_Base):
         print("Grouped by source location, sorted by total GPU kernel duration.")
         print(f"{'=' * 80}")
         tty.show_call_tree(call_trees)
+        tty.show_operator_summary(build_operator_summary(call_trees))
         print(f"{'=' * 80}")
 
         console_log(

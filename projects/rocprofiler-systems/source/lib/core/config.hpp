@@ -5,6 +5,7 @@
 
 #include "common.hpp"
 #include "common/defines.h"
+#include "common/environment.hpp"
 #include "state.hpp"
 #include "timemory.hpp"
 #include <cstdint>
@@ -364,7 +365,10 @@ get_kill_delay();
 namespace output_filtering
 {
 bool
-is_output_enabled_for_current_mpi_rank();
+is_file_output_enabled_for_current_mpi_rank();
+
+bool
+is_log_output_enabled_for_current_mpi_rank();
 }  // namespace output_filtering
 
 std::string

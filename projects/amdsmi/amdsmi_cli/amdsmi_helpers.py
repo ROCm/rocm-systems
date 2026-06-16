@@ -33,13 +33,14 @@ import glob
 import errno
 import pwd
 import stat
-from typing import Tuple, Optional, Union
-import tempfile
+from typing import List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from enum import Enum
 from pathlib import Path
-from typing import List, Set, Union
 from functools import lru_cache
+
+if TYPE_CHECKING:
+    from amdsmi_logger import AMDSMILogger
 
 # Import amdsmi library
 from amdsmi_init import *
@@ -69,7 +70,6 @@ class AMDSMIHelpers:
 
         # Counts and Tracking variables
         self._count_of_sets_called = 0
-        self._count_of_cper_files = 0
         self._previous_set_success_check = (
             amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR
         )
@@ -119,6 +119,20 @@ class AMDSMIHelpers:
                     "Unable to determine virtualization status: " + str(e.get_error_code())
                 )
 
+        self.convert_clock_type = {
+            "sys": amdsmi_interface.AmdSmiClkType.SYS,
+            "mem": amdsmi_interface.AmdSmiClkType.MEM,
+            "df": amdsmi_interface.AmdSmiClkType.DF,
+            "fclk": amdsmi_interface.AmdSmiClkType.DF,
+            "soc": amdsmi_interface.AmdSmiClkType.SOC,
+            "dcef": amdsmi_interface.AmdSmiClkType.DCEF,
+            # vclk and dclk currently do not support levels so average clk is given for frequency levels
+            "vclk0": amdsmi_interface.AmdSmiClkType.VCLK0,
+            "vclk1": amdsmi_interface.AmdSmiClkType.VCLK1,
+            "dclk0": amdsmi_interface.AmdSmiClkType.DCLK0,
+            "dclk1": amdsmi_interface.AmdSmiClkType.DCLK1,
+        }
+
     def increment_set_count(self):
         self._count_of_sets_called += 1
 
@@ -136,12 +150,6 @@ class AMDSMIHelpers:
         This is used to determine if the last set was successful or not.
         """
         return self._previous_set_success_check
-
-    def increment_cper_count(self):
-        self._count_of_cper_files += 1
-
-    def get_cper_count(self):
-        return self._count_of_cper_files
 
     def is_virtual_os(self):
         return self._is_virtual_os
@@ -210,10 +218,38 @@ class AMDSMIHelpers:
         return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS
 
     def is_brcm_nic_initialized(self):
-        return False
+        """Returns True if a Broadcom NIC handle is enumerated.
+
+        The result is cached on first call. The init flag is checked first to
+        short-circuit on systems where no NIC stack was initialized; otherwise
+        a single C-library probe is issued and memoized.
+        """
+        if hasattr(self, "_brcm_nic_initialized_cached"):
+            return self._brcm_nic_initialized_cached
+        result = False
+        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
+            try:
+                result = len(amdsmi_interface.get_nic_handles()) > 0
+            except amdsmi_interface.AmdSmiLibraryException:
+                result = False
+        self._brcm_nic_initialized_cached = result
+        return result
 
     def is_brcm_switch_initialized(self):
-        return False
+        """Returns True if a Broadcom switch handle is enumerated.
+
+        The result is cached on first call.  See ``is_brcm_nic_initialized``.
+        """
+        if hasattr(self, "_brcm_switch_initialized_cached"):
+            return self._brcm_switch_initialized_cached
+        result = False
+        if AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_NICS:
+            try:
+                result = len(amdsmi_interface.get_switch_handles()) > 0
+            except amdsmi_interface.AmdSmiLibraryException:
+                result = False
+        self._brcm_switch_initialized_cached = result
+        return result
 
     def get_rocm_version(self):
         try:
@@ -836,6 +872,7 @@ class AMDSMIHelpers:
                 return False, args.gpu
             else:
                 logging.debug("args.gpu has an empty list")
+                return True, args.gpu
         else:
             return False, args.gpu
 
@@ -876,6 +913,7 @@ class AMDSMIHelpers:
                 return False, args.switch
             else:
                 logging.debug("args.switch has an empty list")
+                return True, args.switch
         else:
             return False, args.switch
 
@@ -916,6 +954,7 @@ class AMDSMIHelpers:
                 return False, args.nic
             else:
                 logging.debug("args.nic has an empty list")
+                return True, args.nic
         else:
             return False, args.nic
 
@@ -956,6 +995,7 @@ class AMDSMIHelpers:
                 return False, args.nic
             else:
                 logging.debug("args.nic has an empty list")
+                return True, args.nic
         else:
             return False, args.nic
 
@@ -1691,6 +1731,46 @@ class AMDSMIHelpers:
         bytes_value = pages * page_size
         return bytes_value / (1024**3)
 
+    def read_pending_gtt_pages(self):
+        """Read the pending GTT pages_limit written by `amd-smi set --gtt`.
+
+        Returns the integer ``pages_limit`` from the modprobe.d snippet
+        produced by ``amdsmi_set_ttm_pages_limit``, which will take effect
+        on the next boot once the initramfs picks it up. The file name
+        depends on the active TTM module detected by the C++ layer
+        (``amdttm``, ``amd-ttm``, or ``ttm``), so all three candidates are
+        probed in the same priority order. The ``AMDSMI_TTM_SYSFS_NAME``
+        environment variable (when set to one of ``amdttm`` / ``amd_ttm`` /
+        ``ttm``) is checked first to mirror the C++ override. Returns
+        ``None`` if no candidate file exists, none is readable, or none
+        contains a valid ``options <mod> ... pages_limit=<int>`` directive.
+        """
+        candidates = ["amdttm", "amd-ttm", "ttm"]
+        override = os.environ.get("AMDSMI_TTM_SYSFS_NAME", "").strip()
+        if override:
+            # Mirror C++ ttm_modprobe_name(): sysfs "amd_ttm" -> conf "amd-ttm".
+            override_conf = "amd-ttm" if override == "amd_ttm" else override
+            if override_conf in candidates:
+                candidates.remove(override_conf)
+            candidates.insert(0, override_conf)
+
+        pattern = re.compile(r"^\s*options\s+\S+\s+.*?pages_limit\s*=\s*(\d+)", re.MULTILINE)
+        for name in candidates:
+            path = "/etc/modprobe.d/" + name + ".conf"
+            try:
+                with open(path, "r") as f:
+                    content = f.read()
+            except (OSError, IOError):
+                continue
+            m = pattern.search(content)
+            if not m:
+                continue
+            try:
+                return int(m.group(1))
+            except ValueError:
+                continue
+        return None
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -2159,42 +2239,23 @@ class AMDSMIHelpers:
             return "unknown"
         return "UNKNOWN"
 
-    def display_cper_files_generated(self, entries, device_handle, folder, logger=None):
-        """
-        Display CPER summary lines. If a logger is provided and its destination is
-        not stdout, append the output to that file instead of printing to stdout.
+    def display_cper_files_generated(
+        self, entries, device_handle, logger: Optional["AMDSMILogger"] = None
+    ):
+        """Print one human-readable summary line per CPER entry.
+
+        Only invoked when neither ``--folder`` nor JSON output is in effect, so
+        no filename column is emitted. Header / warning lines are printed by
+        the caller (``RasCommands.ras``).
+
+        Returns:
+            list: Always returns ``[]`` (kept for symmetry with
+            ``dump_cper_entries``).
         """
         if logger is not None and logger.is_json_format():
             return []
 
-        use_file = (
-            logger is not None
-            and logger.is_human_readable_format()
-            and logger.destination != "stdout"
-        )
-
-        # One‐time initialization: warning & header only once
-        if not getattr(self, "_cper_display_initialized", False):
-            # Warning if no folder was specified elsewhere
-            if not getattr(self, "_cper_warning_printed", False):
-                warning = (
-                    "WARNING: No CPER files will be dumped unless "
-                    "--folder=<folder_name> is specified and cper entries exist."
-                )
-                if use_file:
-                    with logger.destination.open("a", encoding="utf-8") as output_file:
-                        output_file.write(warning + "\n")
-                else:
-                    print(warning)
-                self._cper_warning_printed = True
-
-            # Print or log the header
-            self._print_header(folder, logger if use_file else None)
-            self._cper_display_initialized = True
-
-        # Loop through all entries in the dictionary.
-        for entry_index, entry in enumerate(entries.values()):
-            # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
+        for entry in entries.values():
             timestamp = entry.get("timestamp", "unknown")
             gpu_id = "-"
             output = ""
@@ -2207,44 +2268,127 @@ class AMDSMIHelpers:
                 )
                 output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
 
-            if folder:
-                prefix_for_filename = self._severity_as_string(
-                    entry.get("error_severity", "Unknown"),
-                    entry.get("notify_type", "Unknown"),
-                    True,
-                )
-                cper_data_file = f"{prefix_for_filename}_{self.get_cper_count() + 1}.cper"
-                afids = self.cper_dump_afids(cper_data_file)
-                afids_str = " ".join(map(str, afids))
-                output += f" {cper_data_file:<17} {afids_str}"
+            self.cper_print(output, logger)
+        return []
 
-            if use_file:
-                with logger.destination.open("a", encoding="utf-8") as output_file:
-                    output_file.write(output + "\n")
-            else:
-                print(output)
+    def cper_print(self, text, logger: Optional["AMDSMILogger"] = None):
+        """Write *text* to the logger's file destination or to stdout.
 
-            self.increment_cper_count()
+        When *logger* is provided and its destination is a Path (i.e. the
+        user passed ``--file``), the text is appended to that file.
+        Otherwise it is printed to stdout.
+        """
+        if logger is not None and isinstance(logger.destination, Path):
+            with logger.destination.open("a", encoding="utf-8") as f:
+                f.write(text + "\n")
+        else:
+            print(text)
 
-    def _print_header(self, folder, logger=None):
+    def _print_header(self, folder, logger: Optional["AMDSMILogger"] = None):
+        """Print the CPER column header line (skipped for JSON output)."""
         if logger is not None and logger.is_json_format():
             return
 
         header = f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}"
         if folder:
             header += f" {'file_name':<17} {'list of afids'}"
-        header += ""
-        use_file = (
-            logger is not None
-            and logger.is_human_readable_format()
-            and logger.destination != "stdout"
-        )
 
-        if use_file:
-            with logger.destination.open("a", encoding="utf-8") as output_file:
-                output_file.write(header + "\n")
-        else:
-            print(header)
+        self.cper_print(header, logger)
+
+    def _write_cper_files(
+        self,
+        folder,
+        entries,
+        cper_data,
+        device_handle,
+        file_limit=None,
+        cper_file=None,
+        cper_counter=None,
+    ):
+        """Write each CPER entry to ``<folder>/<prefix>-<n>.cper`` plus a sibling
+        ``.json`` metadata file, enforce ``file_limit`` rotation, and collect the
+        per-file display data.
+
+        This is the pure file-I/O half of the CPER dump; formatting and emission
+        live in ``dump_cper_entries``.
+
+        Returns:
+            dict: Ordered mapping of written ``cper_path`` to
+            ``[timestamp, gpu_id, severity, cper_name, raw_bytes]``.
+        """
+        if cper_counter is None:
+            cper_counter = [0]
+        folder = Path(folder)
+        folder.mkdir(parents=True, exist_ok=True)
+
+        output_rows = {}
+        for entry_index, entry in enumerate(entries.values()):
+            # Determine prefix/severity
+            error_severity = entry.get("error_severity", "").lower()
+            notify_type = entry.get("notify_type", "")
+            prefix = self._severity_as_string(error_severity, notify_type, True)
+
+            # Generate filenames
+            count = cper_counter[0] + 1
+            if cper_file:
+                cper_name = cper_file
+            else:
+                cper_name = f"{prefix}-{count}.cper"
+            json_name = f"{prefix}-{count}.json"
+            cper_path = folder / cper_name
+            json_path = folder / json_name
+
+            # Write CPER binary file
+            try:
+                self.write_binary(
+                    cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_path
+                )
+            except Exception as e:
+                logging.debug(f"Failed to write CPER file {cper_path}: {e}")
+
+            # Write JSON metadata file
+            try:
+                with json_path.open("w") as cper_json_file:
+                    json.dump(
+                        obj=entry,
+                        fp=cper_json_file,
+                        indent=2,
+                        default=lambda o: o.decode("utf-8") if isinstance(o, bytes) else o,
+                    )
+            except Exception as e:
+                logging.debug(f"Failed to write JSON file {json_path}: {e}")
+
+            # Collect data for printing. Carry the in-memory bytes alongside
+            # the path so the AFID decode loop does not have to read
+            # the file we just wrote back from disk.
+            timestamp = entry.get("timestamp", "unknown")
+            gpu_id = "-"
+            if not isinstance(device_handle, Path):
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+            severity = self._severity_as_string(error_severity, notify_type, False)
+            output_rows[cper_path] = [
+                timestamp,
+                gpu_id,
+                severity,
+                cper_name,
+                cper_data[entry_index]["bytes"],
+            ]
+            cper_counter[0] += 1
+
+        # Batch deletion if file limit is exceeded (AFTER writing ALL new files)
+        if file_limit:
+            folder_files = list(sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime))
+            if len(folder_files) > file_limit:
+                files_to_delete = len(folder_files) - file_limit
+                for old_file in folder_files[:files_to_delete]:
+                    try:
+                        old_file.unlink()
+                        json_file = old_file.with_suffix(".json")
+                        if json_file.exists():
+                            json_file.unlink()
+                    except OSError as e:
+                        logging.debug(f"Failed to delete file {old_file}: {e}")
+        return output_rows
 
     def dump_cper_entries(
         self,
@@ -2254,8 +2398,9 @@ class AMDSMIHelpers:
         device_handle,
         file_limit=None,
         cper_file=None,
-        logger=None,
-        emit=True,
+        logger: Optional["AMDSMILogger"] = None,
+        emit_inline=True,
+        cper_counter=None,
     ):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
@@ -2266,89 +2411,46 @@ class AMDSMIHelpers:
         cper_data (list): List of CPER data objects with 'bytes' and 'size' keys.
         device_handle: Device handle for GPU identification.
         file_limit (int, optional): Maximum number of files to retain in the folder.
-        cper_file (str, optional): cper file name to use when saving to folder
+        cper_file (str, optional): Override filename for the CPER binary file.
+        logger (AMDSMILogger, optional): Logger for format detection and output routing.
+        emit_inline (bool): If True, emit output inline here; if False, suppress
+            inline emission so the caller can batch the returned rows (default True).
+        cper_counter (list[int], optional): Single-element mutable counter shared
+            across calls within one ``ras`` invocation so generated filenames
+            are 1-indexed and monotonically increasing across GPUs/iterations.
+            Defaults to a fresh ``[0]`` if omitted.
+
+        Returns:
+            list: JSON row dicts when JSON format is active, otherwise ``[]``.
         """
         json_output = logger is not None and logger.is_json_format()
-
-        # Initialize header display
-        if not json_output and not getattr(self, "_cper_display_initialized", False):
-            self._print_header(folder)
-            self._cper_display_initialized = True
+        if cper_counter is None:
+            cper_counter = [0]
 
         if folder:
-            folder = Path(folder)
-            folder.mkdir(parents=True, exist_ok=True)
-
-            output_rows = {}
-
-            for entry_index, entry in enumerate(entries.values()):
-                # Determine prefix/severity
-                error_severity = entry.get("error_severity", "").lower()
-                notify_type = entry.get("notify_type", "")
-                prefix = self._severity_as_string(error_severity, notify_type, True)
-
-                # Generate filenames
-                count = self.get_cper_count() + 1
-                if cper_file:
-                    cper_name = cper_file
-                else:
-                    cper_name = f"{prefix}-{count}.cper"
-                json_name = f"{prefix}-{count}.json"
-                cper_path = folder / cper_name
-                json_path = folder / json_name
-
-                # Write CPER binary file
-                try:
-                    self.write_binary(
-                        cper_data[entry_index]["bytes"], cper_data[entry_index]["size"], cper_path
-                    )
-                except Exception as e:
-                    logging.debug(f"Failed to write CPER file {cper_path}: {e}")
-
-                # Write JSON metadata file
-                try:
-                    with json_path.open("w") as cper_json_file:
-                        json.dump(
-                            obj=entry,
-                            fp=cper_json_file,
-                            indent=2,
-                            default=lambda o: o.decode("utf-8") if isinstance(o, bytes) else o,
-                        )
-                except Exception as e:
-                    logging.debug(f"Failed to write JSON file {json_path}: {e}")
-
-                # Collect data for printing
-                timestamp = entry.get("timestamp", "unknown")
-                gpu_id = "-"
-                if not isinstance(device_handle, Path):
-                    gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-                severity = self._severity_as_string(error_severity, notify_type, False)
-                output_rows[cper_path] = [timestamp, gpu_id, severity, cper_name]
-                self.increment_cper_count()
-
-            # Batch deletion if file limit is exceeded (AFTER writing ALL new files)
-            if file_limit:
-                folder_files = list(sorted(folder.glob("*.cper"), key=lambda p: p.stat().st_mtime))
-                if len(folder_files) > file_limit:
-                    files_to_delete = len(folder_files) - file_limit
-                    for old_file in folder_files[:files_to_delete]:
-                        try:
-                            old_file.unlink()
-                            json_file = old_file.with_suffix(".json")
-                            if json_file.exists():
-                                json_file.unlink()
-                        except OSError as e:
-                            logging.debug(f"Failed to delete file {old_file}: {e}")
+            output_rows = self._write_cper_files(
+                folder,
+                entries,
+                cper_data,
+                device_handle,
+                file_limit=file_limit,
+                cper_file=cper_file,
+                cper_counter=cper_counter,
+            )
 
             # Print collected rows
             if json_output:
                 json_rows = []
                 for cper_path, row in output_rows.items():
-                    timestamp, gpu_id, severity, fname = row
+                    timestamp, gpu_id, severity, fname, raw_bytes = row
                     cper_path_str = str(cper_path)
                     json_path_str = str(Path(cper_path).with_suffix(".json"))
                     try:
-                        afids = self.cper_dump_afids(cper_path)
+                        # Convert list of integers to bytes if necessary
+                        if isinstance(raw_bytes, list):
+                            # Handle signed bytes (convert negative values to unsigned)
+                            raw_bytes = bytes(x & 0xFF for x in raw_bytes)
+                        afids = self.cper_dump_afids(raw_bytes)
                     except Exception as e:
                         afids = []
                         logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
@@ -2362,19 +2464,26 @@ class AMDSMIHelpers:
                             "afids": afids,
                         }
                     )
-                if emit:
-                    print(json.dumps(json_rows, indent=2))
+                if emit_inline:
+                    self.cper_print(json.dumps(json_rows, indent=2), logger)
                 return json_rows
             else:
                 for cper_path, row in output_rows.items():
-                    timestamp, gpu_id, severity, fname = row
+                    timestamp, gpu_id, severity, fname, raw_bytes = row
                     try:
-                        afids = self.cper_dump_afids(cper_path)
+                        # Convert list of integers to bytes if necessary
+                        if isinstance(raw_bytes, list):
+                            # Handle signed bytes (convert negative values to unsigned)
+                            raw_bytes = bytes(x & 0xFF for x in raw_bytes)
+                        afids = self.cper_dump_afids(raw_bytes)
                         afids_str = " ".join(map(str, afids))
                     except Exception as e:
                         afids_str = "Error fetching AFIDs"
                         logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
-                    print(f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}")
+                    self.cper_print(
+                        f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}",
+                        logger,
+                    )
         else:
             if json_output:
                 try:
@@ -2393,20 +2502,21 @@ class AMDSMIHelpers:
                                 "severity": severity,
                             }
                         )
-                    if emit:
-                        print(json.dumps(json_rows, indent=2))
+                    if emit_inline:
+                        self.cper_print(json.dumps(json_rows, indent=2), logger)
                     return json_rows
                 except Exception as e:
                     logging.debug(f"Failed to build json summary rows: {e}")
             else:
                 # Print entries as JSON if no folder is specified
                 try:
-                    print(
+                    self.cper_print(
                         json.dumps(
                             entries,
                             indent=2,
                             default=lambda o: o.decode("utf-8") if isinstance(o, bytes) else o,
-                        )
+                        ),
+                        logger,
                     )
                 except Exception as e:
                     logging.debug(f"Failed to dump entries as JSON: {e}")
@@ -2433,60 +2543,15 @@ class AMDSMIHelpers:
                 data_bytes = data[:size]
             f.write(data_bytes)
 
-    def binary_to_hexdump_string(self, data: Union[bytes, List[int]]) -> str:
-        """
-        Convert binary data to a hexdump string.
-
-        Args:
-            data: bytes object or list of integer byte values (0–255).
-
-        Returns:
-           A multiline string, each line showing:
-           offset (in hex), hex bytes (16 per line), and printable ASCII.
-        """
-        if isinstance(data, bytes):
-            data_ints = list(data)
+    def cper_dump_afids(self, cper_file: Union[bytes, Path]):
+        # Normalize the input to raw bytes. Callers pass either the in-memory
+        # CPER bytes (the --cper write path and the --afid --folder read path,
+        # which reads with O_NOFOLLOW) or a Path to a .cper file (the
+        # --afid --cper-file read path).
+        if isinstance(cper_file, Path):
+            raw = cper_file.read_bytes()
         else:
-            # Allow list of ints or single-character strings
-            data_ints = []
-            for b in data:
-                if isinstance(b, int):
-                    data_ints.append(b)
-                elif isinstance(b, str) and len(b) == 1:
-                    data_ints.append(ord(b))
-                else:
-                    raise ValueError(f"Invalid type in data: {type(b)}")
-
-        lines: List[str] = []
-        size = len(data_ints)
-
-        for offset in range(0, size, 16):
-            chunk = data_ints[offset : offset + 16]
-            hex_values = " ".join(f"{b:02x}" for b in chunk)
-            # Pad hex_values to 16*3-1 = 47 chars (two hex digits + space)
-            hex_values = hex_values.ljust(16 * 3 - 1)
-            ascii_values = "".join(chr(b) if 32 <= b <= 126 else "." for b in chunk)
-            lines.append(f"{offset:08x}  {hex_values}  |{ascii_values}|")
-
-        return "\n".join(lines)
-
-    def cper_dump_afids(self, cper_file):
-        # 1) Fetch the CPER “file” and ensure we have raw bytes
-        raw_data = cper_file
-        if hasattr(raw_data, "read"):
-            # fetch_cper_file returned a file‐object
-            raw = raw_data.read()
-        elif isinstance(raw_data, Path):
-            # Path: read the bytes directly
-            raw = raw_data.read_bytes()
-        elif isinstance(raw_data, str):
-            # fetch_cper_file returned a filename
-            with open(raw_data, "rb") as f:
-                raw = f.read()
-        else:
-            # assume it's already bytes
-            raw = raw_data
-        self.binary_to_hexdump_string(raw)
+            raw = cper_file
         try:
             afids, num_afids = amdsmi_interface.amdsmi_get_afids_from_cper(raw)
             return afids
@@ -2549,61 +2614,85 @@ class AMDSMIHelpers:
             return False
         return True
 
-    def ras_cper(self, args, device_handle, logger, gpu_idx, emit_json=True):
-        # Parse severity mask dynamically from the --severity option.
-        severity_mask = 0
-        # drop duplicates of args
-        logging.debug(args)
+    def _emit_cper_output(
+        self,
+        entries,
+        cper_data,
+        device_handle,
+        args,
+        logger: "AMDSMILogger",
+        collected_json_rows,
+        emit_inline,
+        cper_counter,
+    ):
+        """Dispatch CPER output to the appropriate handler.
 
-        for sev in list(set(args.severity)):
-            if sev == "all":
-                # Set bits for NON_FATAL_UNCORRECTED (0), FATAL (1), and NON_FATAL_CORRECTED (2)
-                severity_mask |= (1 << 0) | (1 << 1) | (1 << 2)
-            elif sev == "fatal":
-                # Set bit corresponding to AMDSMI_CPER_SEV_FATAL (which is 1)
-                severity_mask |= 1 << 1
-            elif sev in ("nonfatal", "nonfatal-uncorrected"):
-                # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_UNCORRECTED (which is 0)
-                severity_mask |= 1 << 0
-            elif sev in ("nonfatal-corrected", "corrected"):
-                # Set bit corresponding to AMDSMI_CPER_SEV_NON_FATAL_CORRECTED (which is 2)
-                severity_mask |= 1 << 2
+        When ``--folder`` is specified or JSON format is active, writes CPER files
+        and/or emits structured JSON via dump_cper_entries().
+        Otherwise, prints a human-readable summary via display_cper_files_generated().
 
-        buffer_size = 1048576
-
-        # Decide where to send human-readable output
-        dest = getattr(logger, "destination", "stdout") if logger is not None else "stdout"
-        log_to_file = dest != "stdout"
-        if log_to_file:
-            # destination is usually a Path; fall back to Path(string) if needed
-            log_path = dest if isinstance(dest, Path) else Path(dest)
+        Note:
+            *collected_json_rows* is mutated in place (extended with new rows).
+        """
+        if args.folder or logger.is_json_format():
+            cper_rows = self.dump_cper_entries(
+                args.folder,
+                entries,
+                cper_data,
+                device_handle,
+                args.file_limit,
+                logger=logger,
+                emit_inline=emit_inline,
+                cper_counter=cper_counter,
+            )
+            collected_json_rows.extend(cper_rows)
         else:
-            log_path = None
+            self.display_cper_files_generated(entries, device_handle, logger=logger)
+
+    def ras_cper(self, args, device_handle, logger, gpu_idx, emit_inline=True, cper_counter=None):
+        """Fetch and process CPER entries for a single GPU.
+
+        Handles:
+        - Parsing severity mask from args.severity
+        - Fetching CPER entries from the kernel driver in a loop
+        - Dispatching output via _emit_cper_output()
+
+        Args:
+            args: Parsed CLI arguments (severity, folder, file_limit, follow, cursor, etc.)
+            device_handle: GPU device handle
+            logger: AMDSMILogger instance for format detection and output routing
+            gpu_idx: Index into args.cursor for this GPU
+            emit_inline: Whether to emit output inline here vs. return rows for
+                the caller to batch (default True)
+            cper_counter: Single-element mutable counter shared across GPUs/iterations.
+                Defaults to a fresh ``[0]`` if omitted.
+
+        Returns:
+            list: Collected JSON rows (empty list if not JSON format)
+
+        Side effects:
+            ``args.cursor[gpu_idx]`` is updated with the new cursor position.
+        """
+        severity_mask = self._parse_cper_severity_mask(args.severity)
+        buffer_size = 1048576
+        if cper_counter is None:
+            cper_counter = [0]
 
         gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-        if (
-            args.follow
-            and not logger.is_json_format()
-            and not getattr(self, "_cper_follow_prompted", False)
-        ):
-            print("Press CTRL + C to stop.")
-            self._cper_follow_prompted = True
 
         primary_partition = self.is_primary_partition(device_handle, gpu_id)
         if not primary_partition:
             return []
 
-        if args.folder and not getattr(self, "_cper_folder_prompted", False):
-            self._cper_folder_prompted = True
-
         logger.set_cper_exit_message(False)
-        self.stop = False
 
         num_entries = 0
         collected_json_rows = []
+        entries = {}
+        cper_data = []
         while True:
             try:
-                entries, new_cursor, cper_data, status_code = (
+                entries, new_cursor, cper_data, _status_code = (
                     amdsmi_interface.amdsmi_get_gpu_cper_entries(
                         device_handle, severity_mask, buffer_size, args.cursor[gpu_idx]
                     )
@@ -2625,9 +2714,7 @@ class AMDSMIHelpers:
                         "Error accessing CPER files. This command requires CPER to be enabled."
                     ) from e
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
-                    raise FileExistsError(
-                        "Error opening CPER file. Unable to read CPER File"
-                    ) from e
+                    raise OSError("Error opening CPER file. Unable to read CPER File") from e
                 else:
                     logging.debug(f"Cannot retrieve CPER entries: {e}")
                     break
@@ -2635,107 +2722,56 @@ class AMDSMIHelpers:
             args.cursor[gpu_idx] = new_cursor
             if len(entries) == 0:
                 break
-            if args.decode and args.cper_file:
-                if args.json:
-                    self.dump_cper_entries_as_json(entries, cper_data, device_handle)
-                elif args.folder:
-                    self.dump_cper_entries(
-                        args.folder, entries, cper_data, device_handle, args.file_limit
-                    )
-                else:
-                    with tempfile.TemporaryDirectory() as tmp_dir:
-                        self.dump_cper_entries(
-                            tmp_dir,
-                            entries,
-                            cper_data,
-                            device_handle,
-                            args.file_limit,
-                            cper_file=os.path.basename(args.cper_file),
-                        )
 
-            # When a file destination is set, temporarily redirect stdout
-            # so that helper print() calls go into that file.
-            if log_to_file and log_path is not None:
-                orig_stdout = sys.stdout
-                try:
-                    try:
-                        log_path.parent.mkdir(parents=True, exist_ok=True)
-                    except Exception:
-                        pass
-                    with log_path.open("a", encoding="utf-8") as f:
-                        sys.stdout = f
-                        if args.folder or logger.is_json_format():
-                            cper_rows = self.dump_cper_entries(
-                                args.folder,
-                                entries,
-                                cper_data,
-                                device_handle,
-                                args.file_limit,
-                                logger=logger,
-                                emit=emit_json,
-                            )
-                            collected_json_rows.extend(cper_rows)
-                        else:
-                            self.display_cper_files_generated(entries, device_handle, args.folder)
-                finally:
-                    sys.stdout = orig_stdout
-            else:
-                if args.folder or logger.is_json_format():
-                    cper_rows = self.dump_cper_entries(
-                        args.folder,
-                        entries,
-                        cper_data,
-                        device_handle,
-                        args.file_limit,
-                        logger=logger,
-                        emit=emit_json,
-                    )
-                    collected_json_rows.extend(cper_rows)
-                else:
-                    self.display_cper_files_generated(entries, device_handle, args.folder)
+            self._emit_cper_output(
+                entries,
+                cper_data,
+                device_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+            )
 
         if num_entries == 0 and not args.follow:
-            # If nothing was found, still emit the warning/header logic
-            # using the same redirection logic.
-            if log_to_file and log_path is not None:
-                orig_stdout = sys.stdout
-                try:
-                    try:
-                        log_path.parent.mkdir(parents=True, exist_ok=True)
-                    except Exception:
-                        pass
-                    with log_path.open("a", encoding="utf-8") as f:
-                        sys.stdout = f
-                        if args.folder or logger.is_json_format():
-                            cper_rows = self.dump_cper_entries(
-                                args.folder,
-                                entries,
-                                cper_data,
-                                device_handle,
-                                args.file_limit,
-                                logger=logger,
-                                emit=emit_json,
-                            )
-                            collected_json_rows.extend(cper_rows)
-                        else:
-                            self.display_cper_files_generated(entries, device_handle, args.folder)
-                finally:
-                    sys.stdout = orig_stdout
-            else:
-                if args.folder or logger.is_json_format():
-                    cper_rows = self.dump_cper_entries(
-                        args.folder,
-                        entries,
-                        cper_data,
-                        device_handle,
-                        args.file_limit,
-                        logger=logger,
-                        emit=emit_json,
-                    )
-                    collected_json_rows.extend(cper_rows)
-                else:
-                    self.display_cper_files_generated(entries, device_handle, args.folder)
+            # If nothing was found, still emit the warning/header logic.
+            self._emit_cper_output(
+                entries,
+                cper_data,
+                device_handle,
+                args,
+                logger,
+                collected_json_rows,
+                emit_inline,
+                cper_counter,
+            )
         return collected_json_rows
+
+    @staticmethod
+    def _parse_cper_severity_mask(severity_list):
+        """Convert a list of severity strings into a bitmask.
+
+        Supported values: ``"all"``, ``"fatal"``, ``"nonfatal"`` /
+        ``"nonfatal-uncorrected"``, ``"corrected"`` / ``"nonfatal-corrected"``.
+
+        Args:
+            severity_list: List of severity strings from --severity arg
+
+        Returns:
+            int: Bitmask for CPER severity filtering
+        """
+        severity_mask = 0
+        for sev in set(severity_list):
+            if sev == "all":
+                severity_mask |= (1 << 0) | (1 << 1) | (1 << 2)
+            elif sev == "fatal":
+                severity_mask |= 1 << 1
+            elif sev in ("nonfatal", "nonfatal-uncorrected"):
+                severity_mask |= 1 << 0
+            elif sev in ("nonfatal-corrected", "corrected"):
+                severity_mask |= 1 << 2
+        return severity_mask
 
     def get_bitmask_ranges(self, bitmask_dict):
         ranges = {}
@@ -2966,6 +3002,19 @@ class AMDSMIHelpers:
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_D,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_USR,
             amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_04_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_B,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_HBM_D,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075_GTA_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_075_UCIE,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAA,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_A,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_065_UCIEAM_C,
+            amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDAN_075,
         ]
 
         for temp_type in gpu_board_temp_types:

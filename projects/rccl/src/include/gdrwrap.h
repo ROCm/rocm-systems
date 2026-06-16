@@ -13,17 +13,14 @@
 #include <stdint.h> // for standard [u]intX_t types
 #include <stdio.h>
 #include <stdlib.h>
+#include <mutex>
 #include "archinfo.h"
 
 // These can be used if the GDR library isn't thread safe
-#include <pthread.h>
-extern pthread_mutex_t gdrLock;
-#define GDRLOCK() pthread_mutex_lock(&gdrLock)
-#define GDRUNLOCK() pthread_mutex_unlock(&gdrLock)
+std::mutex& getGdrMutex();
 #define GDRLOCKCALL(cmd, ret) do {                      \
-    GDRLOCK();                                          \
+    std::lock_guard<std::mutex> lock(getGdrMutex());   \
     ret = cmd;                                          \
-    GDRUNLOCK();                                        \
 } while(false)
 
 #define GDRCHECK(cmd) do {                              \
@@ -39,7 +36,7 @@ extern pthread_mutex_t gdrLock;
 // This is required as the GDR memory is mapped WC
 #if !defined(__NVCC__)
 #if defined(__PPC__)
-static inline void wc_store_fence(void) { asm volatile("sync") ; }
+static inline void wc_store_fence(void) { asm volatile("sync" : : : "memory"); }
 #elif defined(__x86_64__)
 #include <immintrin.h>
 static inline void wc_store_fence(void) { _mm_sfence(); }
@@ -180,7 +177,9 @@ static gdr_t ncclGdrInit() {
 }
 
 template <typename T>
-static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle) {
+static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle,
+                                      struct ncclMemManager* manager,
+                                      ncclMemType_t memType = ncclMemPersist) {
   // gdr_info_t info; // unused variable - compiler warning
   size_t mapSize;
   // gdr_mh_t mh;     // unused variable - compiler warning
@@ -193,9 +192,9 @@ static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** 
   ALIGN_SIZE(mapSize, GPU_PAGE_SIZE);
   // GDRCOPY Pinned buffer has to be GPU_PAGE_SIZE aligned too
 #if defined(HIP_UNCACHED_MEMORY)
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, hipDeviceMallocUncached));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType, hipDeviceMallocUncached));
 #else
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, hipDeviceMallocFinegrained));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType, hipDeviceMallocFinegrained));
 #endif
   gdr_mem_desc_t* md;
   NCCLCHECK(ncclCalloc(&md, 1));
@@ -222,13 +221,14 @@ static ncclResult_t ncclGdrCudaCopy(void *gdrHandle, T* dst, T* src, size_t nele
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
+static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* manager) {
   gdr_mem_desc_t *md = (gdr_mem_desc_t*)gdrHandle;
-  CUDACHECK(cudaFree(md->gdrDevMem));
+  NCCLCHECK(ncclCudaFree(md->gdrDevMem, manager));
   free(md);
 
   return ncclSuccess;
 }
+
 #else
 static gdr_t ncclGdrInit() {
   int libMajor, libMinor, drvMajor, drvMinor;
@@ -261,7 +261,9 @@ error:
 }
 
 template <typename T>
-static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle) {
+static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** gdrHandle,
+                                      struct ncclMemManager* manager,
+                                      ncclMemType_t memType = ncclMemPersist) {
   gdr_info_t info;
   size_t mapSize;
   gdr_mh_t mh;
@@ -273,7 +275,7 @@ static ncclResult_t ncclGdrCudaCalloc(T** ptr, T** devPtr, size_t nelem, void** 
   // GDRCOPY Pinned buffer has to be a minimum of a GPU_PAGE_SIZE
   ALIGN_SIZE(mapSize, GPU_PAGE_SIZE);
   // GDRCOPY Pinned buffer has to be GPU_PAGE_SIZE aligned too
-  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1));
+  NCCLCHECK(ncclCudaCalloc(&devMem, mapSize+GPU_PAGE_SIZE-1, manager, memType));
   uint64_t alignedAddr = (((uint64_t) devMem) + GPU_PAGE_OFFSET) & GPU_PAGE_MASK;
   size_t align = alignedAddr - (uint64_t)devMem;
 
@@ -313,15 +315,49 @@ static ncclResult_t ncclGdrCudaCopy(void *gdrHandle, T* dst, T* src, size_t nele
   return ncclSuccess;
 }
 
-static ncclResult_t ncclGdrCudaFree(void* gdrHandle) {
+static ncclResult_t ncclGdrCudaFree(void* gdrHandle, struct ncclMemManager* manager) {
   gdr_mem_desc_t *md = (gdr_mem_desc_t*)gdrHandle;
   NCCLCHECK(wrap_gdr_unmap(ncclGdrCopy, md->gdrMh, md->gdrMap, md->gdrMapSize));
   NCCLCHECK(wrap_gdr_unpin_buffer(ncclGdrCopy, md->gdrMh));
-  NCCLCHECK(ncclCudaFree(md->gdrDevMem));
+  NCCLCHECK(ncclCudaFree(md->gdrDevMem, manager));
   free(md);
 
   return ncclSuccess;
 }
 #endif
+
+// Helper: Allocate memory accessible from CPU (either GDR or host memory)
+template <typename T>
+static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
+                                          void **gdrHandle, struct ncclMemManager* manager, bool forceHost = false) {
+  if (ncclGdrCopy && !forceHost) {
+    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, manager));
+  } else {
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
+#else
+    CUDACHECK(hipHostMalloc((void **)ptr, nelem * sizeof(T)));
+#endif
+    memset((void *)*ptr, 0, nelem * sizeof(T));
+    *devPtr = *ptr;
+    if (gdrHandle) *gdrHandle = NULL;  // Mark as host allocated by nulling GDR handle
+  }
+  return ncclSuccess;
+}
+
+// Helper: Free memory allocated by allocMemCPUAccessible
+template <typename T>
+static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* manager) {
+  if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
+    NCCLCHECK(ncclGdrCudaFree(gdrHandle, manager));
+  } else {  // Otherwise, it was host memory (or GDR was off)
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
+    NCCLCHECK(ncclCuMemHostFree(ptr));
+#else
+    CUDACHECK(hipHostFree(ptr));
+#endif
+  }
+  return ncclSuccess;
+}
 
 #endif // End include guard

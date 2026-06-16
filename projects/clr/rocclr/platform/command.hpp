@@ -282,9 +282,8 @@ union CopyMetadata {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
-    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
     uint32_t copyOpType_ : 3;           //!< Operation type (CopyOpType)
-    uint32_t reserved_ : 23;            //!< Reserved for future use
+    uint32_t reserved_ : 24;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -292,7 +291,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(kSrcAccessOrderStream),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
@@ -300,7 +298,6 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(srcAccessOrder),
-        preferCE_(0),
         copyOpType_(kCopyOpLinear),
         reserved_(0) {}
 };
@@ -1529,6 +1526,9 @@ class AccumulateCommand : public Command {
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
+  //! When false, the destructor does not destroy hw_events_ (an external owner,
+  //! e.g. the graph signal pool, reclaims them instead).
+  bool owns_hw_events_ = true;
 
  public:
   //! Create a new Marker
@@ -1540,9 +1540,11 @@ class AccumulateCommand : public Command {
   virtual ~AccumulateCommand();
 
   //! Add HW event to the list for later cleanup.
-  //! Does not retain — caller owns the reference. Attached events are
-  //! released via ReleaseGlobalSignal in ~AccumulateCommand when the
-  //! profiling signals are destroyed after graph completion.
+  //! Does not retain — caller owns the reference. By default (owns_hw_events_ ==
+  //! true) attached events are released via ReleaseGlobalSignal in
+  //! ~AccumulateCommand after graph completion. If an external owner recycles
+  //! them (see setOwnsHwEvents(false), e.g. the graph signal pool), the
+  //! destructor leaves them untouched.
   void addHwEvent(void* hw_event, Device* device = nullptr) {
     if (hw_event != nullptr) {
       Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
@@ -1551,6 +1553,14 @@ class AccumulateCommand : public Command {
       }
     }
   }
+
+  //! Get HW events map (for profiling pre-patched graph signals)
+  const std::unordered_map<Device*, std::vector<void*>>& getHwEvents() const { return hw_events_; }
+
+  //! Control whether the destructor destroys the attached HW event signals.
+  //! Set to false when an external owner (e.g. the graph signal pool) recycles
+  //! them across launches instead.
+  void setOwnsHwEvents(bool owns) { owns_hw_events_ = owns; }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
@@ -2090,6 +2100,29 @@ class SvmPrefetchBatchAsyncCommand : public Command {
   size_t count_;                              //!< Number of prefetch operations
 };
 
+class SvmDiscardBatchAsyncCommand : public Command {
+ public:
+  SvmDiscardBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                              std::vector<size_t>& sizes)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmDiscardBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+
+ private:
+  std::vector<void*> dev_ptrs_;  //!< Array of device pointers to memory for discard
+  std::vector<size_t> sizes_;    //!< Array of sizes for discard
+  size_t count_;                 //!< Number of discard operations
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
@@ -2162,6 +2195,7 @@ union ComputeCommand {
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
   SvmPrefetchBatchAsyncCommand cmd29;
+  SvmDiscardBatchAsyncCommand cmd30;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

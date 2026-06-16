@@ -302,7 +302,7 @@ Use the following command to view the available domains:
      ``kfd_page_fault``, ``kfd_page_migrate``, ``kfd_queue``,
      ``kfd_event_queue``, ``kfd_event_unmap_from_gpu``, and
      ``kfd_event_dropped_events``. Requires ``HSA_XNACK=1``, an XNACK-capable
-     GPU, and ROCProfiler-SDK version 1.2.2 or above.
+     GPU, and ROCm 7.13 or later (ROCProfiler-SDK version 1.2.2 or above).
 
 For example, the following is a valid configuration:
 
@@ -336,13 +336,27 @@ ROCpd outputs:
 
 * ``unified_memory.txt`` -- human-readable per-GPU summary with fault counts,
   trigger breakdown (``gpu_page_fault``, ``cpu_page_fault``, ``prefetch``), and
-  host-to-device / device-to-host migration bandwidth.
+  host-to-device / device-to-host effective migration throughput when migration
+  events are present.
 * ``unified_memory.json`` -- machine-readable equivalent with the same fields
   plus an ``xnack_enabled`` flag and an always-present
-  ``device_to_device`` direction bucket for schema stability.
+  ``device_to_device`` direction bucket for schema stability. Migration buckets
+  can remain at zero on systems that do not generate KFD migration events.
 
-Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and
-ROCProfiler-SDK 1.2.2 or above. The KFD tracing domains
+The migration-throughput value is computed as migrated bytes divided by KFD
+page-migration event duration. It is an end-to-end migration-service metric and
+should not be interpreted as PCIe, XGMI, SDMA, HBM, or raw memory-subsystem
+bandwidth.
+
+On MI300A and other systems where CPU and GPU agents point to the same physical
+HBM, page faults can occur without page migrations because there is no separate
+CPU memory and GPU memory to migrate between. In that topology, the
+unified-memory view is expected to be fault-only: page-fault totals and trigger
+breakdowns can populate, migration counters remain zero, and the Perfetto
+migration-throughput track is not shown.
+
+Requires an XNACK-capable AMD GPU with ``HSA_XNACK=1`` and ROCm 7.13 or later
+(ROCProfiler-SDK 1.2.2 or above). The KFD tracing domains
 (``kfd_page_fault``, ``kfd_page_migrate``) are enabled automatically when this
 setting is on -- you do not need to add ``kfd_events`` to
 ``ROCPROFSYS_ROCM_DOMAINS`` separately.
@@ -351,6 +365,9 @@ setting is on -- you do not need to add ``kfd_events`` to
 
    export HSA_XNACK=1
    export ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=ON
+
+For a step-by-step workflow with examples and sample output, see
+:doc:`Unified memory profiling <./unified-memory-profiling>`.
 
 ROCPROFSYS_SELECTED_REGIONS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -380,6 +397,15 @@ Filtering on ``Region2`` captures only activity inside the inner ``Region2`` sco
 
    When combined with ``roctxProfilerPause`` / ``roctxProfilerResume``, a pause issued
    outside an active target region is ignored — each region entry resets the pause state.
+
+.. note::
+
+   Counter tracks may show a small latency between the region boundary and the
+   closing zero-valued sentinel sample.  This is expected behavior — the sentinel
+   is written by a callback that executes after ``roctxRangeStop()`` returns, so a
+   gap of a few tens of microseconds is normal and does not indicate any problem
+   with the trace.  Increasing the process-sampling frequency
+   (``ROCPROFSYS_PROCESS_SAMPLING_FREQ``) will reduce this gap.
 
 Example: trace only activity inside a region named ``Compute``:
 

@@ -84,12 +84,17 @@ ISA_TO_ID = {
   # Yellow_Carp
   "gfx1035" : [0x164d, 0x1681],
 
-  # Navi31
-  "gfx1100": [0x7448, 0x7449, 0x744a, 0x744c, 0x745e],
-  # Navi32
-  "gfx1101": [0x7470, 0x747e],
-  # Navi33
-  "gfx1102": [0x7480, 0x7483, 0x7489, 0x7499],
+  # Navi31 (RDNA3) - Radeon RX 7900 series, Pro W7800, Pro V710
+  "gfx1100" : [0x7448, 0x7449, 0x744a, 0x744c, 0x745e, 0x7460, 0x7461],
+  # Navi32 (RDNA3) - Radeon RX 7800/7700 series, Pro W7700
+  "gfx1101" : [0x7470, 0x747e],
+  # Navi33 (RDNA3) - Radeon RX 7600 series, Pro W7500/W7400
+  "gfx1102" : [0x7480, 0x7481, 0x7483, 0x7489, 0x7499],
+
+  # Navi44 (RDNA4) - Radeon RX 9060 series
+  "gfx1200" : [0x7590],
+  # Navi48 (RDNA4) - Radeon RX 9070 series
+  "gfx1201" : [0x7550, 0x7551],
 }
 
 def staticVars(**kwargs):
@@ -259,6 +264,12 @@ def main():
     """ Prints the list of available AMD GCN target names extracted from rocminfo, a tool
         shipped with this script to enumerate GPU agents available on a working ROCm stack."""
     target_list = readFromROCMINFO(True)
+  elif "HSA_MODEL_TOPOLOGY" in os.environ:
+    # Model topology (FFM): sysfs and PCI-based paths do not describe
+    # the simulated agents; use rocminfo so targets match the HSA model.
+    target_list = readFromROCMINFO()
+  elif os.environ.get("HSA_ENABLE_DTIF") == "1":
+    target_list = readFromROCMINFO()
   else:
     """Prints the list of available AMD GCN ISA
 

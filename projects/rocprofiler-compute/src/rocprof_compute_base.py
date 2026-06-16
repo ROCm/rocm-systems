@@ -3,8 +3,10 @@
 
 import argparse
 import importlib
+import shutil
 import socket
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -12,6 +14,7 @@ from typing import Any, Optional
 import config
 from argparser import omniarg_parser
 from rocprof_compute_soc.soc_base import OmniSoC_Base
+from roofline.run_benchmark import run_roofline_benchmark
 from utils.logger import (
     console_debug,
     console_error,
@@ -29,17 +32,19 @@ from utils.specs import (
 )
 from utils.utils_common import (
     build_metric_list,
+    canonical_config_arch,
     detect_rocprof,
-    get_panel_alias,
-    get_rank,
+    get_arch_panel_id_to_alias,
+    get_job_rank_and_size,
     get_version,
     get_version_display,
     load_panel_configs,
     parse_sets_yaml,
+    reconfigure_stdio_utf8,
     replace_env,
     replace_rank,
     resolve_rocm_library_path,
-    set_locale_encoding,
+    validate_roofline_csv,
 )
 from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
@@ -67,7 +72,7 @@ class RocProfCompute:
             self.__args.verbose, self.__args.quiet, self.__mode, gui_value
         )
         setattr(self.__args, "loglevel", self.__loglevel)
-        set_locale_encoding()
+        reconfigure_stdio_utf8()
 
         self.sanitize()
 
@@ -85,7 +90,8 @@ class RocProfCompute:
         self.handle_list_args()
 
         if self.__mode == "profile":
-            self.detect_profiler()
+            if not getattr(self.__args, "bench_only", False):
+                self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
 
@@ -130,7 +136,7 @@ class RocProfCompute:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
             self.__analyze_mode = "tui"
-        elif self.__args.output_format == "db":
+        elif self.__args.output_format in ("db", "csv"):
             self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
@@ -146,23 +152,9 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
 
-        block = False
-        if (hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics) or (
-            hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks
-        ):
-            block = True
+        self._validate_list_option_exclusions()
 
-        if self.__args.list_metrics is not None and block:
-            console_error("Cannot use --list-metrics with --blocks")
-        if self.__args.list_blocks is not None and block:
-            console_error("Cannot use --list-blocks with --blocks")
-        if (
-            hasattr(self.__args, "list_available_metrics")
-            and self.__args.list_available_metrics
-        ) and block:
-            console_error("Cannot use --list-available-metrics with --blocks")
-
-        # Validate block 30 requires --membw-analysis and --experimental
+        # Validate block 30 / block 21 require their respective experimental flags
         filter_list: list[str] = []
         if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
             filter_list = self.__args.filter_blocks
@@ -176,11 +168,31 @@ class RocProfCompute:
             ):
                 if not self.__args.membw_analysis or not self.__args.experimental:
                     console_error(
-                        "Block 30 (Memory Bandwidth Analysis) is an experimental :"
-                        f"feature.\n"
+                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
+                        "feature.\n"
                         f'To use "-b {block_input}", you must also specify: '
-                        f"--membw-analysis --experimental"
+                        "--membw-analysis --experimental"
                     )
+            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
+            # from the profiling config yaml.
+            if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
+                if not self.__args.pc_sampling or not self.__args.experimental:
+                    console_error(
+                        "Block 21 (PC Sampling) is an experimental feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        "--pc-sampling --experimental"
+                    )
+
+        # When --pc-sampling is set, inject "21" into filter_blocks so the
+        # profiling config yaml records it and downstream code is unchanged.
+        if self.__mode == "profile" and self.__args.pc_sampling:
+            current = list(self.__args.filter_blocks or [])
+            if "21" not in current:
+                current.append("21")
+            self.__args.filter_blocks = current
+
+        if self.__mode == "profile":
+            self._validate_profile_mode_arguments()
 
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
@@ -210,19 +222,7 @@ class RocProfCompute:
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
             ):
-                # Remove if statement and the else code block in a future release.
-                if self.__args.path == str(Path.cwd() / "workloads"):
-                    console_error("Either --output-directory or --name is required")
-                else:
-                    console_warning(
-                        "--path is deprecated and will be removed in future releases."
-                    )
-
-                if self.__args.subpath != "gpu_model":
-                    console_warning(
-                        "--subpath is deprecated and will be "
-                        "removed in future releases."
-                    )
+                console_error("Either --output-directory or --name is required")
 
             if self.__args.name is not None and "/" in self.__args.name:
                 console_error('"/" is not permitted in profile name')
@@ -236,9 +236,10 @@ class RocProfCompute:
             )
 
             # Add MPI rank to workload path if available
-            if get_rank() is not None:
+            mpi_rank, _ = get_job_rank_and_size()
+            if mpi_rank is not None:
                 self.__args.output_directory = str(
-                    Path(self.__args.output_directory) / f"{get_rank()}"
+                    Path(self.__args.output_directory) / f"{mpi_rank}"
                 )
             # OR, Add gpu model name to workload path
             else:
@@ -253,9 +254,10 @@ class RocProfCompute:
 
         # Add MPI rank to workload path if %rank% is not present in output directory
         # and rank is available
-        if "%rank%" not in self.__args.output_directory and get_rank() is not None:
+        mpi_rank, _ = get_job_rank_and_size()
+        if "%rank%" not in self.__args.output_directory and mpi_rank is not None:
             self.__args.output_directory = str(
-                Path(self.__args.output_directory) / f"{get_rank()}"
+                Path(self.__args.output_directory) / f"{mpi_rank}"
             )
 
         # Replace parameters with actual values in workload path
@@ -267,7 +269,7 @@ class RocProfCompute:
         self.__args.output_directory = replace_env(self.__args.output_directory)
 
         # Replace %rank% with actual rank value in workload path
-        if "%rank%" in self.__args.output_directory and get_rank() is None:
+        if "%rank%" in self.__args.output_directory and mpi_rank is None:
             console_warning(
                 "Ignoring %%rank%% placeholder in output directory"
                 " since no MPI rank was detected."
@@ -342,6 +344,68 @@ class RocProfCompute:
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
+        args = self.__args
+        torch_operator = args.torch_operator
+        list_torch_operators = args.list_torch_operators
+
+        if torch_operator is not None or list_torch_operators:
+            if args.gui is not None:
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators are not "
+                    "supported in --gui mode. Please remove --gui or run "
+                    "without the torch-operator flags.",
+                )
+            if args.tui:
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators are not "
+                    "supported in --tui mode. Please remove --tui or run "
+                    "without the torch-operator flags.",
+                )
+            if args.spatial_multiplexing:
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators do not yet "
+                    "support multi-node analysis via --spatial-multiplexing. "
+                    "Please remove one of these options.",
+                )
+            if args.output_format != "stdout":
+                console_error(
+                    "torch trace",
+                    "--torch-operator and --list-torch-operators are only "
+                    "supported with --output-format stdout (the default). "
+                    "The matched operator call tree is printed directly to "
+                    "stdout and is not captured in txt, csv, or db output. "
+                    "Remove the --output-format option or drop the "
+                    "torch-operator flags.",
+                )
+
+            if torch_operator is not None:
+                if args.list_stats:
+                    console_warning(
+                        "torch trace",
+                        "--torch-operator is ignored by --list-stats; the "
+                        "full kernel stats table will be shown regardless "
+                        "of the operator filter.",
+                    )
+                if args.list_nodes:
+                    console_warning(
+                        "torch trace",
+                        "--torch-operator is ignored by --list-nodes; the "
+                        "node enumeration does not respect the operator "
+                        "filter.",
+                    )
+                if list_torch_operators:
+                    console_warning(
+                        "torch trace",
+                        "--torch-operator is ignored when "
+                        "--list-torch-operators is used; the full operator "
+                        "tree will be shown. Drop --list-torch-operators to "
+                        "apply the operator filter to the analysis, or drop "
+                        "--torch-operator to list all operators.",
+                    )
+
         # Block all filters during spatial-multiplexing
         if self.__args.spatial_multiplexing:
             self.__args.gpu_id = None
@@ -369,8 +433,10 @@ class RocProfCompute:
     def list_metrics(self) -> None:
         for_current_arch = getattr(self.__args, "list_available_metrics", False)
         arch = self.__mspec.gpu_arch if for_current_arch else self.__args.list_metrics
+        config_arch = canonical_config_arch(arch) or arch
+        config_root = Path(self.__args.config_dir) / config_arch
 
-        if arch in self.__supported_archs.keys():
+        if arch in self.__supported_archs.keys() or config_root.is_dir():
             sys_info = self.__mspec.get_class_members() if for_current_arch else None
             metric_list = self._build_arch_metric_list(arch, sys_info)
             for key, value in metric_list.items():
@@ -383,15 +449,17 @@ class RocProfCompute:
     @demarcate
     def list_blocks(self) -> None:
         arch = self.__args.list_blocks
+        config_arch = canonical_config_arch(arch) or arch
+        config_root = Path(self.__args.config_dir) / config_arch
 
-        if arch in self.__supported_archs.keys():
+        if arch in self.__supported_archs.keys() or config_root.is_dir():
             metric_list = self._build_arch_metric_list(arch, sys_info=None)
+            top_panels = {k: v for k, v in metric_list.items() if "." not in k}
+            panel_alias_dict = get_arch_panel_id_to_alias(arch)
             print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
-            panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
-            for key, value in metric_list.items():
-                if key.count(".") > 0:
-                    continue
-                print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
+            for key, value in top_panels.items():
+                alias = panel_alias_dict.get(key, "")
+                print(f"{key:<8} {alias:<16} {value}")
             sys.exit(0)
         else:
             console_error("Unsupported arch")
@@ -403,7 +471,10 @@ class RocProfCompute:
     ) -> dict[str, str]:
         """Load panel configs for arch and build metric_list.
         Returns the metric_list dictionary."""
-        panel_configs = load_panel_configs([str(Path(self.__args.config_dir) / arch)])
+        config_arch = canonical_config_arch(arch) or arch
+        panel_configs = load_panel_configs([
+            str(Path(self.__args.config_dir) / config_arch)
+        ])
         return build_metric_list(panel_configs, sys_info)
 
     @demarcate
@@ -484,18 +555,11 @@ class RocProfCompute:
     def run_profiler(self) -> None:
         self.print_graphic()
 
-        # Replace parameters in output directory when either:
-        # 1. --output-directory is explicitly given by user
-        # 2. --path and --output-directory are set to default workload directory.
-        # NOTE: --output-directory is given higher priority than --path
-        # as --path is deprecated and will be removed in future releases.
-        if self.__args.output_directory != str(
-            Path.cwd() / "workloads"
-        ) or self.__args.path == str(Path.cwd() / "workloads"):
-            self.replace_parameters_in_output_directory()
-            # Set path to output_directory for roofline
-            # Remove this while removing roofline from profiling mode
-            self.__args.path = self.__args.output_directory
+        self.replace_parameters_in_output_directory()
+
+        if self.__args.bench_only:
+            self._run_bench_only()
+            return
 
         self.load_soc_specs()
 
@@ -507,7 +571,7 @@ class RocProfCompute:
             console_error(str(e))
 
         # Create workload directory if it does not exist
-        p = Path(self.__args.path)
+        p = Path(self.__args.output_directory)
         if not p.exists():
             try:
                 p.mkdir(parents=True, exist_ok=False)
@@ -515,7 +579,7 @@ class RocProfCompute:
                 console_error("Directory already exists.")
 
         # enable file-based logging
-        setup_file_handler(self.__args.loglevel, self.__args.path)
+        setup_file_handler(self.__args.loglevel, self.__args.output_directory)
 
         profiler.pre_processing()
 
@@ -537,11 +601,104 @@ class RocProfCompute:
         post_duration = int(time_end_post - time_end_prof)
         console_debug(f'time taken for "post_processing" was {post_duration} seconds')
 
+    def _validate_profile_mode_arguments(self) -> None:
+        """Validate that the profile-mode invocation is internally consistent.
+
+        Covers the mutual exclusion among action-selection flags
+        (--block, --set, --roof-only, --bench-only) and the
+        --bench-only / --no-roof conflict.
+        """
+        args = self.__args
+        if (
+            sum((
+                bool(getattr(args, "filter_blocks", None)),
+                bool(getattr(args, "set_selected", None)),
+                bool(getattr(args, "roof_only", False)),
+                bool(getattr(args, "bench_only", False)),
+            ))
+            > 1
+        ):
+            console_error(
+                "--block, --set, --roof-only, and --bench-only"
+                " are mutually exclusive options."
+                " Please use only one of them."
+            )
+
+        if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
+            console_error("--bench-only cannot be used with --no-roof.")
+
+    def _validate_list_option_exclusions(self) -> None:
+        """Validate that list/discovery options aren't combined with --block.
+        Applies to both profile and analyze mode.
+        """
+        args = self.__args
+        block_active = bool(
+            getattr(args, "filter_blocks", None)
+            or getattr(args, "filter_metrics", None)
+        )
+        if not block_active:
+            return
+
+        if args.list_metrics is not None:
+            console_error("Cannot use --list-metrics with --blocks")
+        if args.list_blocks is not None:
+            console_error("Cannot use --list-blocks with --blocks")
+        if getattr(args, "list_available_metrics", False):
+            console_error("Cannot use --list-available-metrics with --blocks")
+
+    @demarcate
+    def _run_bench_only(self) -> None:
+        """Run standalone roofline microbenchmark execution.
+
+        The microbenchmark is written to a temp location first and only
+        promoted to the workload directory after passing validation.
+        """
+        output_dir = Path(self.__args.output_directory)
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        setup_file_handler(self.__args.loglevel, str(output_dir))
+
+        roofline_csv = output_dir / "roofline.csv"
+        existing_roofline = roofline_csv.is_file()
+        console_log(
+            "roofline",
+            f"Running roofline microbenchmark on device {self.__args.device}",
+        )
+
+        with tempfile.TemporaryDirectory(prefix="rocprof_bench_") as tmp_dir:
+            tmp_csv = Path(tmp_dir) / "roofline.csv"
+            try:
+                run_roofline_benchmark(
+                    self.__args.device, tmp_csv, self.__mspec.cache_sizes
+                )
+            except Exception as e:
+                console_error(f"Benchmark execution failed: {e}")
+
+            is_valid, error_message = validate_roofline_csv(tmp_dir)
+            if not is_valid:
+                console_error(
+                    f"Invalid roofline.csv: {error_message}",
+                    exit=False,
+                )
+                return
+
+            shutil.move(str(tmp_csv), str(roofline_csv))
+
+        if existing_roofline:
+            console_warning(f"Overwrote existing {roofline_csv}")
+
+        console_log(
+            "roofline",
+            f"Roofline data saved to {roofline_csv}",
+        )
+
     @demarcate
     def run_analysis(self) -> None:
-        # Lazy import file_io since its only used in analysis mode
-        # This will prevent analysis dependencies
-        # leakage into profile mode path
+        # Lazy import pandas and file_io since they are only used in analysis
+        # mode. This keeps analysis deps out of the profile path.
+        import pandas as pd
+
         from utils import file_io
 
         self.print_graphic()
@@ -585,7 +742,7 @@ class RocProfCompute:
             else:
                 sysinfo_path = file_io.find_1st_sub_dir(base_path)
 
-            sys_info = file_io.load_sys_info(f"{sysinfo_path}/sysinfo.csv")
+            sys_info = pd.read_csv(f"{sysinfo_path}/sysinfo.csv")
             sys_info_dict = {
                 key: value[0] for key, value in sys_info.to_dict("list").items()
             }

@@ -64,12 +64,17 @@ class CodeobjTableTranslatorTest : public ::testing::Test
 {
 protected:
     CodeobjTableTranslator translator;
+    CachedTable cached;
 
     void SetUp() override
     {
         translator.insert({1000, 100, 1}); // [1000, 1100), id=1
         translator.insert({2000, 200, 2}); // [2000, 2200), id=2
         translator.insert({3000, 50, 3});  // [3000, 3050), id=3
+
+        cached.write().insert({1000, 100, 1});
+        cached.write().insert({2000, 200, 2});
+        cached.write().insert({3000, 50, 3});
     }
 };
 
@@ -79,7 +84,7 @@ TEST_F(CodeobjTableTranslatorTest, FindCodeobjInRangeSuccess)
 
     EXPECT_TRUE(translator.find_codeobj_in_range(1050, out));
     EXPECT_EQ(out.id, 1);
-    EXPECT_EQ(out.vbegin, 1000);
+    EXPECT_EQ(out.addr, 1000);
 
     EXPECT_TRUE(translator.find_codeobj_in_range(2100, out));
     EXPECT_EQ(out.id, 2);
@@ -102,15 +107,15 @@ TEST_F(CodeobjTableTranslatorTest, CacheWorksCorrectly)
     address_range_t out;
 
     // First lookup
-    EXPECT_TRUE(translator.find_codeobj_in_range(1050, out));
+    EXPECT_TRUE(cached.find(1050, out));
     EXPECT_EQ(out.id, 1);
 
     // Second lookup in same range should use cache
-    EXPECT_TRUE(translator.find_codeobj_in_range(1075, out));
+    EXPECT_TRUE(cached.find(1075, out));
     EXPECT_EQ(out.id, 1);
 
     // Lookup in different range
-    EXPECT_TRUE(translator.find_codeobj_in_range(2050, out));
+    EXPECT_TRUE(cached.find(2050, out));
     EXPECT_EQ(out.id, 2);
 }
 
@@ -137,18 +142,18 @@ TEST_F(CodeobjTableTranslatorTest, ClearCacheAfterModification)
     address_range_t out;
 
     // Populate cache
-    EXPECT_TRUE(translator.find_codeobj_in_range(1050, out));
+    EXPECT_TRUE(cached.find(1050, out));
 
-    // Remove should clear cache
-    translator.remove(1000);
+    // Mutating through write() should clear the cache
+    cached.write().remove(1000);
 
     // Now the cached segment should not be used
-    EXPECT_FALSE(translator.find_codeobj_in_range(1075, out));
+    EXPECT_FALSE(cached.find(1075, out));
 }
 
 TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsValidPc)
 {
-    pcinfo_t pc = translator.ToPcV2(1050);
+    pcinfo_t pc = ToPcV2(cached, 1050);
     EXPECT_EQ(pc.code_object_id, 1);
     EXPECT_EQ(pc.address, 50); // Offset from base
 }
@@ -156,7 +161,7 @@ TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsValidPc)
 TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsInvalidPcForOutOfRange)
 {
     // When PC is not in any code object, returns raw address with code_object_id=0
-    pcinfo_t pc = translator.ToPcV2(500);
+    pcinfo_t pc = ToPcV2(cached, 500);
     EXPECT_EQ(pc.code_object_id, 0);
     EXPECT_EQ(pc.address, 500); // Raw address preserved
 }
@@ -164,12 +169,12 @@ TEST_F(CodeobjTableTranslatorTest, ToPcV2ReturnsInvalidPcForOutOfRange)
 TEST_F(CodeobjTableTranslatorTest, ToPcV2AtBoundary)
 {
     // Test at exact start of range
-    pcinfo_t pc_start = translator.ToPcV2(1000);
+    pcinfo_t pc_start = ToPcV2(cached, 1000);
     EXPECT_EQ(pc_start.code_object_id, 1);
     EXPECT_EQ(pc_start.address, 0);
 
     // Test at end boundary (should be out of range - returns raw address)
-    pcinfo_t pc_end = translator.ToPcV2(1100);
+    pcinfo_t pc_end = ToPcV2(cached, 1100);
     EXPECT_EQ(pc_end.code_object_id, 0);
     EXPECT_EQ(pc_end.address, 1100); // Raw address preserved
 }

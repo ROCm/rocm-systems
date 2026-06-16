@@ -22,29 +22,23 @@
 import ctypes
 import json
 import os
+import shutil
 import stat
 import sys
+import tempfile
 
 import unittest
 
 import common
 import runcmd
 
-amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
-if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(
-        f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.'
-    )
-sys.path.append(amdsmi_path)
-try:
-    import amdsmi
-except ImportError:
-    raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
+# common.py owns path resolution, sys.path setup, and amdsmi loading — borrow the reference.
+from common import amdsmi
 
 # Module-level default; __main__ overwrites this with the actual parsed value.
 # It must exist at module scope so setUpClass/setUp can reference it before
 # __main__ runs (e.g. when loaded by an external test runner).
-verbose = 1
+verbose = common.VERBOSITY_NORMAL
 
 
 class TestAmdSmiCli(unittest.TestCase):
@@ -283,6 +277,9 @@ class TestAmdSmiCli(unittest.TestCase):
                             elif sub_arg == "PARTITION":  # arg --memory-partition
                                 for memory_partition_mode in self.memory_partition_modes:
                                     options.append(f"{items[item_index]} {memory_partition_mode}")
+                            elif sub_arg == "MODE":  # arg --compute-partition-mem-alloc-mode
+                                for mem_alloc_mode in ["CAPPING", "ALL"]:
+                                    options.append(f"{items[item_index]} {mem_alloc_mode}")
                             elif sub_arg == "WATTS":  # arg --power-cap
                                 for power_type in self.power_types:
                                     options.append(f"--power-cap {{min_power}} {power_type}")
@@ -761,10 +758,20 @@ class TestAmdSmiCli(unittest.TestCase):
         # Find all available command line args
         cmd_args = []
         found = False
+        cmd_indent = None
         for line in lines:
             if found:
                 if not line:
                     break
+                indent = len(line) - len(line.lstrip())
+                # The first command establishes the command column. Lines that
+                # are indented further are wrapped description continuations
+                # (e.g. the "devices" tail of the long fabric help text) and
+                # must be skipped so they aren't parsed as subcommands.
+                if cmd_indent is None:
+                    cmd_indent = indent
+                elif indent > cmd_indent:
+                    continue
                 items = line.split()
                 cmd_args.append(items[0])
                 continue
@@ -849,6 +856,9 @@ class TestAmdSmiCli(unittest.TestCase):
             ("amd-smi set --memory-partition", self.FAIL),
             ("amd-smi set --memory-partition NPS3", self.FAIL),
             ("amd-smi set --memory-partition INVALID", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode HALF", self.FAIL),
+            ("amd-smi set --compute-partition-mem-alloc-mode INVALID", self.FAIL),
             ("amd-smi set --process-isolation", self.FAIL),
             ("amd-smi set --process-isolation 2", self.FAIL),
             ("amd-smi set --clk-limit", self.FAIL),
@@ -877,6 +887,10 @@ class TestAmdSmiCli(unittest.TestCase):
             ("amd-smi ras --cper --severity INVALID", self.FAIL),
             ("amd-smi ras --afid", self.FAIL),
             ("amd-smi ras --afid INVALID", self.FAIL),
+            # --afid --folder requires an existing directory of CPER records
+            ("amd-smi ras --afid --folder /nonexistent_amdsmi_pr4812_dir", self.FAIL),
+            # --decode is not a valid flag
+            ("amd-smi ras --decode", self.FAIL),
             # Test invalid watch order
             ("amd-smi monitor --interval 2 --watch 1", self.FAIL),
             ("amd-smi monitor --watch_time 2 --watch 1", self.FAIL),
@@ -1143,6 +1157,21 @@ class TestAmdSmiCli(unittest.TestCase):
                     (f"amd-smi set --memory-partition {memory_partition} --gpu {index}", self.PASS)
                 )
 
+            # set --compute-partition-mem-alloc-mode defaults
+            try:
+                mem_alloc_mode = self.static_data["gpu_data"][index]["partition"][
+                    "compute_partition_mem_alloc_mode"
+                ]
+            except (KeyError, TypeError):
+                mem_alloc_mode = "N/A"
+            if mem_alloc_mode not in ("N/A", "INVALID"):
+                cmds.append(
+                    (
+                        f"amd-smi set --compute-partition-mem-alloc-mode {mem_alloc_mode} --gpu {index}",
+                        self.PASS,
+                    )
+                )
+
             # set --power-cap defaults
             for power_type in self.power_types:
                 socket_power_limit = self.static_data["gpu_data"][index]["limit"][power_type][
@@ -1328,6 +1357,74 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
+    def test_ras_afid_folder(self):
+        """Exercise the pure-Python validation/decode branches of
+        ``amd-smi ras --afid --folder`` against on-disk fixtures (no GPU needed).
+        """
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi ras --afid --folder"
+        self.common.print(msg)
+
+        if self.PrintCmdsOnly:
+            return
+
+        tmp_dir = tempfile.mkdtemp(prefix="amdsmi_ras_afid_")
+        try:
+            # A real but undecodable .cper (non-empty garbage bytes): decodes to
+            # "decode failed" in the table, but the command still exits 0.
+            garbage = os.path.join(tmp_dir, "garbage.cper")
+            with open(garbage, "wb") as fout:
+                fout.write(b"\x00" * 64)
+
+            # An existing folder with no .cper files.
+            empty_dir = os.path.join(tmp_dir, "empty")
+            os.mkdir(empty_dir)
+
+            # A symlink to a folder that does contain a .cper, so only the
+            # symlink rejection (not a missing-file error) can make this FAIL.
+            target_dir = os.path.join(tmp_dir, "target")
+            os.mkdir(target_dir)
+            with open(os.path.join(target_dir, "g.cper"), "wb") as fout:
+                fout.write(b"\x00" * 64)
+            symlink_dir = os.path.join(tmp_dir, "link")
+            os.symlink(target_dir, symlink_dir)
+
+            cmds = [
+                # Folder with a (garbage) .cper: undecodable rows are reported but
+                # the command exits 0.
+                (f"amd-smi ras --afid --folder {tmp_dir}", self.PASS),
+                # --cper-file and --folder are mutually exclusive under --afid.
+                (f"amd-smi ras --afid --cper-file {garbage} --folder {tmp_dir}", self.FAIL),
+                # Nonexistent folder.
+                (f"amd-smi ras --afid --folder {os.path.join(tmp_dir, 'nope')}", self.FAIL),
+                # Existing folder with no .cper files.
+                (f"amd-smi ras --afid --folder {empty_dir}", self.FAIL),
+                # Symlinked folder is refused even though it contains a .cper.
+                (f"amd-smi ras --afid --folder {symlink_dir}", self.FAIL),
+            ]
+            self.RunCmds(cmds)
+
+            # The --json output must be a flat list of per-file objects, not a
+            # doubly-wrapped [[...]]. Guards against the logger wrapping a list
+            # assigned to self.output a second time.
+            cmd = f"amd-smi ras --afid --folder {tmp_dir} --json"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            json_data = json.loads(data)
+            self.assertIsInstance(json_data, list, f"'{cmd}' did not emit a JSON list")
+            for entry in json_data:
+                self.assertIsInstance(
+                    entry,
+                    dict,
+                    f"'{cmd}' emitted a non-object element (double-wrapped?): {entry!r}",
+                )
+                self.assertIn("cper_file", entry)
+                self.assertIn("afids", entry)
+                self.assertIn("decode_failed", entry)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        return
+
     def test_node(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi node"
@@ -1339,11 +1436,27 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
+    def test_fabric(self):
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi fabric"
+        self.common.print(msg)
+
+        cmds = self.CreateCmds(
+            "fabric", "Fabric arguments:", "Device Arguments:", "Command Modifiers:", ""
+        )
+        self.RunCmds(cmds)
+        return
+
     def test_static_mem_carveout_gtt(self):
         """Test static --mem-carveout and node --gtt flags (display mode only)"""
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi static --mem-carveout and node --gtt"
         self.common.print(msg)
+        cmds = self.CreateCmds(
+            "fabric", "Fabric arguments:", "Device Arguments:", "Command Modifiers:", ""
+        )
+        self.RunCmds(cmds)
+        return
 
         # Test mem-carveout display (static subcommand)
         cmd = "amd-smi static --mem-carveout"
@@ -1399,23 +1512,40 @@ class TestAmdSmiCli(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    verbose = 1
+    verbose = common.VERBOSITY_NORMAL
     if "-q" in sys.argv or "--quiet" in sys.argv:
-        verbose = 0
+        verbose = common.VERBOSITY_QUIET
     elif "-v" in sys.argv or "--verbose" in sys.argv:
-        verbose = 2
+        verbose = common.VERBOSITY_VERBOSE
 
-    if verbose:
-        print("AMD SMI CLI Tests")
+    if "-h" in sys.argv or "--help" in sys.argv:
+        common.print_unittest_help()
+        common.print_amdsmi_path_help()
+        sys.exit(0)
 
-    # Detect if ran without sudo or root privileges
+    if "-l" in sys.argv or "--list" in sys.argv:
+        common.print_tests(__name__)
+        sys.exit(0)
+
     if os.geteuid() != 0:
         print(
-            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n"
+            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
+            file=sys.stderr,
         )
-        print("Please relaunch with elevated privileges.\n")
+        print("Please relaunch with elevated privileges.\n", file=sys.stderr)
         sys.exit(1)
 
-    runner = unittest.TextTestRunner(verbosity=verbose)
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if verbose < common.VERBOSITY_VERBOSE:
+        common.print_legend()
+
+    if verbose > common.VERBOSITY_QUIET:
+        print("AMD SMI CLI Tests")
+
+    runner = common.GTestSummaryRunner(
+        stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose)
+    )
+
     unittest.main(testRunner=runner)
     sys.exit(0)

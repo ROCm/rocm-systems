@@ -2,27 +2,24 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import ast
 import json
 import re
-import warnings
 from pathlib import Path
 from typing import Any, Optional, Union
 
-import astunparse
-import numpy as np
 import pandas as pd
 
 from utils import schema
-from utils.debug_row_tracker import DebugRowTracker, debug_row_tracker
 from utils.logger import console_debug, console_error, console_warning, demarcate
-from utils.pattern_matching import PatternMatcherEngine
+from utils.metrics.evaluation_pipeline import eval_metric
+from utils.metrics.expression import gen_counter_list
+from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
-    BUILD_IN_VARS,
-    SUPPORTED_DENOM,
+    METRIC_ID_RE,
     SUPPORTED_FIELD,
-    calc_builtin_var,
+    convert_filter_blocks_to_panel_ids,
+    convert_metric_id_to_panel_info,
     expand_placeholder_ranges,
     normalize_filter_to_str_list,
 )
@@ -32,696 +29,17 @@ from utils.utils_common import (
 
 # NB:
 # Ammolite is unique gemstone from the Rocky Mountains.
-# "ammolite__" is a special internal prefix to mark build-in global variables
-# calculated or parsed from raw data sources. Its range is only in this file.
-# Any other general prefixes string, like "buildin__", might be used by the
-# editor. Whenever change it to a new one, replace all appearances in this file.
+# "ammolite__" is a special internal prefix used by the shared metrics
+# evaluation code to mark build-in global variables calculated or parsed from
+# raw data sources. Other generic prefixes, like "buildin__", might be used by
+# the editor. Whenever this prefix changes, update all shared metric helpers.
 
 # 001 is ID of pmc_kernel_top.csv table
 PMC_KERNEL_TOP_TABLE_ID: int = 1
 # 002 is ID of pmc_dispatch_info.csv table
 PMC_DISPATCH_INFO_TABLE_ID: int = 2
 
-SUPPORTED_CALL: dict[str, str] = {
-    # If the below has a single arg, like(expr), it is an aggr,
-    # in which case it turns into a pandas function.
-    # If it has args like a list [], it turns into a Python function.
-    "MIN": "to_min",
-    "MAX": "to_max",
-    # simple aggr
-    "AVG": "to_avg",
-    "MEDIAN": "to_median",
-    "STD": "to_std",
-    # functions apply to whole column of df or a single value
-    "TO_INT": "to_int",
-    "SUM": "to_sum",
-    # Support the below with 2 inputs
-    "ROUND": "to_round",
-    "QUANTILE": "to_quantile",
-    "MOD": "to_mod",
-    # Concat operation from the memory chart "active cus"
-    "CONCAT": "to_concat",
-    # Threshold-based clamping for multi-pass profiling noise
-    "NOISE_CLAMP": "to_noise_clamp",
-}
-
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
-
-# ------------------------------------------------------------------------------
-
-
-def to_min(*args: Any) -> float:
-    if len(args) == 1 and isinstance(args[0], pd.Series):
-        return args[0].min()
-    elif min(args) is None:
-        return np.nan
-    else:
-        return min(args)
-
-
-def to_max(*args: Any) -> Union[float, np.ndarray]:
-    if len(args) == 1 and isinstance(args[0], pd.Series):
-        return args[0].max()
-    elif len(args) == 2 and (
-        isinstance(args[0], pd.Series) or isinstance(args[1], pd.Series)
-    ):
-        return np.maximum(args[0], args[1])
-    elif max(args) == None:
-        return np.nan
-    else:
-        return max(args)
-
-
-def to_avg(
-    a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
-) -> Union[float, np.floating]:
-    if a is None:
-        return np.nan
-    if np.isscalar(a) and pd.isna(a):
-        return np.nan
-    elif isinstance(a, pd.Series):
-        if a.empty:
-            return np.nan
-        elif np.isnan(a).all():
-            return np.nan
-        else:
-            return a.mean()
-    elif isinstance(a, (np.ndarray, list)):
-        arr = np.array(a)
-        if arr.size == 0:
-            return np.nan
-        elif np.isnan(arr).all():
-            return np.nan
-        else:
-            return np.nanmean(arr)
-    elif isinstance(a, (int, float, np.number)):
-        if np.isnan(a):
-            return np.nan
-        else:
-            return float(a)
-    elif isinstance(a, str):
-        if not a or a == "N/A":
-            return np.nan
-        return float(a)
-    else:
-        raise Exception(f"to_avg: unsupported type: {type(a)}")
-
-
-def to_median(a: Union[pd.Series, None]) -> float:
-    if a is None:
-        return np.nan
-    elif isinstance(a, pd.Series):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            return a.median()
-    else:
-        raise Exception("to_median: unsupported type.")
-
-
-def to_std(a: pd.Series) -> float:
-    if isinstance(a, pd.Series):
-        # Define std as 0.0 if there is only one element
-        if len(a) <= 1:
-            return 0.0
-        return a.std()
-    else:
-        raise Exception("to_std: unsupported type.")
-
-
-def to_int(
-    a: Union[int, float, str, np.integer, pd.Series, None],
-) -> Union[int, float, pd.Series]:
-    if a is None:
-        return np.nan
-    if np.isscalar(a) and pd.isna(a):
-        return np.nan
-    elif isinstance(a, (int, float, np.integer)):
-        return int(a)
-    elif isinstance(a, pd.Series):
-        # "Int64" handles null values
-        return a.astype("Int64")
-    elif isinstance(a, str):
-        return int(a)
-    else:
-        raise Exception("to_int: unsupported type.")
-
-
-def to_sum(a: Union[pd.Series, int, float, np.number, None]) -> float:
-    if a is None:
-        return np.nan
-    elif isinstance(a, (int, float, np.number)):
-        if np.isnan(a):
-            return np.nan
-        return float(a)
-    elif isinstance(a, pd.Series):
-        if a.empty:
-            return np.nan
-        elif np.isnan(a).all():
-            return np.nan
-        return a.sum()
-    else:
-        raise Exception("to_sum: unsupported type.")
-
-
-def to_round(a: Union[pd.Series, float], b: int) -> Union[pd.Series, float]:
-    if isinstance(a, pd.Series):
-        return a.round(b)
-    else:
-        return round(a, b)
-
-
-def to_quantile(a: Union[pd.Series, None], b: float) -> float:
-    if a is None:
-        return np.nan
-    elif isinstance(a, pd.Series):
-        return a.quantile(b)
-    else:
-        raise Exception("to_quantile: unsupported type.")
-
-
-def to_mod(
-    a: Union[pd.Series, float], b: Union[pd.Series, float]
-) -> Union[pd.Series, float]:
-    if isinstance(a, pd.Series):
-        return a.mod(b)
-    else:
-        return a % b
-
-
-def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
-    return str(a) + str(b)
-
-
-class NoiseClamper:
-    """
-    Tracks and clamps negative values from multi-pass counter variance.
-
-    Negative counts are physically impossible - they result from run-to-run
-    variance when counters are collected across multiple profiling passes.
-    This class clamps negatives to 0 and tracks deviations for diagnostics.
-    """
-
-    WARN_THRESHOLD = 0.01  # 1% relative error threshold
-
-    def __init__(self) -> None:
-        self._count = 0
-        self._max_rel_error = 0.0
-
-    def clamp(
-        self,
-        difference: Union[pd.Series, float, np.ndarray],
-        reference: Union[pd.Series, float, np.ndarray],
-    ) -> Union[pd.Series, float, np.ndarray]:
-        """Clamp negative values to 0 and track significant deviations."""
-        if difference is None or (np.isscalar(difference) and pd.isna(difference)):
-            return np.nan
-        if np.isscalar(difference):
-            return self._clamp_scalar(difference, reference)
-        return self._clamp_array(difference, reference)
-
-    def _clamp_scalar(self, difference: float, reference: float) -> float:
-        """Clamp a single scalar value."""
-        if difference >= 0:
-            return difference
-        rel_error = self._compute_relative_error(abs(difference), reference)
-        self._record_if_significant(1, rel_error)
-        return 0.0
-
-    def _clamp_array(
-        self,
-        difference: Union[pd.Series, np.ndarray],
-        reference: Union[pd.Series, np.ndarray, float],
-    ) -> Union[pd.Series, np.ndarray]:
-        """Clamp negative values in an array or Series."""
-        result = difference.copy()
-        negative_mask = result < 0
-
-        if not np.any(negative_mask):
-            return result
-
-        safe_ref = self._make_safe_reference(reference)
-        rel_errors = self._compute_relative_errors(result, negative_mask, safe_ref)
-        result = self._apply_clamp(result, negative_mask)
-        self._record_significant_deviations(rel_errors)
-
-        return result
-
-    def _make_safe_reference(
-        self, reference: Union[pd.Series, np.ndarray, float]
-    ) -> Union[pd.Series, np.ndarray, float]:
-        """Replace zero values with NaN to avoid division errors."""
-        if isinstance(reference, pd.Series):
-            return reference.replace(0, np.nan)
-        if isinstance(reference, np.ndarray):
-            return np.where(reference == 0, np.nan, reference)
-        return reference if reference != 0 else np.nan
-
-    def _compute_relative_error(self, abs_diff: float, reference: float) -> float:
-        """Compute relative error for a scalar, handling zero reference."""
-        if reference == 0:
-            return 0.0
-        return abs_diff / abs(reference)
-
-    def _compute_relative_errors(
-        self,
-        result: Union[pd.Series, np.ndarray],
-        negative_mask: Union[pd.Series, np.ndarray],
-        safe_ref: Union[pd.Series, np.ndarray, float],
-    ) -> np.ndarray:
-        """Compute relative errors for all negative values."""
-        ref_vals = (
-            safe_ref[negative_mask]
-            if hasattr(safe_ref, "__getitem__") and not np.isscalar(safe_ref)
-            else safe_ref
-        )
-        return np.abs(result[negative_mask]) / np.abs(ref_vals)
-
-    def _apply_clamp(
-        self,
-        result: Union[pd.Series, np.ndarray],
-        negative_mask: Union[pd.Series, np.ndarray],
-    ) -> Union[pd.Series, np.ndarray]:
-        """Set negative values to zero."""
-        if isinstance(result, pd.Series):
-            result.loc[negative_mask] = 0
-        else:
-            result[negative_mask] = 0
-        return result
-
-    def _record_if_significant(self, count: int, rel_error: float) -> None:
-        """Record stats if error exceeds threshold."""
-        if rel_error >= self.WARN_THRESHOLD:
-            self._record_stats(count, rel_error)
-
-    def _record_significant_deviations(self, rel_errors: np.ndarray) -> None:
-        """Record stats for all values exceeding threshold."""
-        warn_mask = rel_errors >= self.WARN_THRESHOLD
-        if np.any(warn_mask):
-            self._record_stats(int(np.sum(warn_mask)), float(np.max(rel_errors)))
-
-    def _record_stats(self, count: int, max_rel: float) -> None:
-        """Update running statistics."""
-        self._count += count
-        self._max_rel_error = max(self._max_rel_error, max_rel)
-
-    def clear(self) -> None:
-        """Reset collected statistics."""
-        self._count = 0
-        self._max_rel_error = 0.0
-
-    def get_stats(self) -> dict:
-        """Return copy of current statistics."""
-        return {"count": self._count, "max_rel": self._max_rel_error}
-
-    def print_summary(self) -> None:
-        """Print summary if significant variance was detected."""
-        if self._count == 0:
-            return
-        max_pct = self._max_rel_error * 100
-        console_warning(
-            f"Counter variance corrected: {self._count} value(s) adjusted "
-            f"(max {max_pct:.1f}% deviation from multi-pass collection)."
-        )
-
-
-# Global instance for backward compatibility with YAML expressions
-_noise_clamper = NoiseClamper()
-
-
-def to_noise_clamp(
-    difference: Union[pd.Series, float, np.ndarray],
-    reference: Union[pd.Series, float, np.ndarray],
-) -> Union[pd.Series, float, np.ndarray]:
-    """Clamp negative values from multi-pass variance. Delegates to global tracker."""
-    return _noise_clamper.clamp(difference, reference)
-
-
-def clear_noise_clamp_warnings() -> None:
-    """Clear collected stats."""
-    _noise_clamper.clear()
-
-
-def get_noise_clamp_warnings() -> dict:
-    """Return collected stats."""
-    return _noise_clamper.get_stats()
-
-
-def print_noise_clamp_summary() -> None:
-    """Print summary if significant variance was detected."""
-    _noise_clamper.print_summary()
-
-
-class CodeTransformer(ast.NodeTransformer):
-    """
-    Python AST visitor to transform user defined equation string to df format
-    """
-
-    def visit_Call(self, node: ast.Call) -> ast.Call:
-        self.generic_visit(node)
-        if isinstance(node.func, ast.Name):
-            if node.func.id in SUPPORTED_CALL:
-                node.func.id = SUPPORTED_CALL[node.func.id]
-            else:
-                raise Exception("Unknown call:", node.func.id)
-        return node
-
-    def visit_IfExp(self, node: ast.IfExp) -> ast.Expr:
-        self.generic_visit(node)
-
-        if isinstance(node.body, ast.Constant):
-            raise Exception(
-                "Don't support body of IF with number only! Has to be expr with "
-                "df['column']."
-            )
-
-        new_node = ast.Expr(
-            value=ast.Call(
-                func=ast.Attribute(value=node.body, attr="where", ctx=ast.Load()),
-                args=[node.test, node.orelse],
-                keywords=[],
-            )
-        )
-
-        return new_node
-
-    # NB:
-    # visit_Name is for replacing HW counter to its df expr. In this way, we
-    # could support any HW counter names, which is easier than regex.
-    #
-    # There are 2 limitations:
-    #   - It is not straightforward to support types other than simple column
-    #     in df, such as [], (). If we need to support those, have to implement
-    #     in correct way or work around.
-    #   - The 'raw_pmc_df' is hack code. For other data sources, like wavefront
-    #     data,We need to think about template or pass it as a parameter.
-    def visit_Name(self, node: ast.Name) -> Union[ast.Name, ast.Subscript]:
-        self.generic_visit(node)
-        if (not node.id.startswith("ammolite__")) and (not node.id in SUPPORTED_CALL):
-            return ast.Subscript(
-                value=ast.Name(id="raw_pmc_df", ctx=ast.Load()),
-                slice=ast.Constant(value=node.id),
-                ctx=ast.Load(),
-            )
-
-        return node
-
-
-class MetricEvaluator:
-    """Encapsulates metric evaluation logic and eliminates global variables."""
-
-    def __init__(
-        self,
-        raw_pmc_df: Union[pd.DataFrame, dict],
-        sys_vars: dict[str, Any],
-        empirical_peaks: dict[str, Any],
-    ) -> None:
-        self.raw_pmc_df = raw_pmc_df
-        self.sys_vars = sys_vars
-        self.empirical_peaks = empirical_peaks
-
-    def eval_expression(self, expr: str) -> Union[str, float, int]:
-        """Evaluate a single expression with proper local context."""
-        try:
-            # Create comprehensive local context
-            local_expr_context = {}
-            local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
-            local_expr_context.update(self.sys_vars)
-            local_expr_context.update(self.empirical_peaks)
-
-            # Add utility functions to local context
-            local_expr_context.update({
-                "to_min": to_min,
-                "to_max": to_max,
-                "to_avg": to_avg,
-                "to_median": to_median,
-                "to_std": to_std,
-                "to_int": to_int,
-                "to_sum": to_sum,
-                "to_round": to_round,
-                "to_quantile": to_quantile,
-                "to_mod": to_mod,
-                "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
-            })
-
-            eval_result = eval(
-                compile(expr, "<string>", "eval"),
-                {},
-                local_expr_context,
-            )
-
-            # Only return "N/A" for scalar NA values
-            # For vectors/Series, return as-is to preserve shape for
-            # downstream operations
-            # Note: None and pd.NA are not detected as scalar by np.isscalar()
-            if (
-                eval_result is None
-                or eval_result is pd.NA
-                or (np.isscalar(eval_result) and pd.isna(eval_result))
-            ):
-                # Do not give warning if None is explicitly specified in expression
-                if "None" not in expr:
-                    console_warning(
-                        f"Could not evaluate expression '{expr}' - likely "
-                        "due to missing counter data."
-                    )
-                else:
-                    console_debug(
-                        f"Expression '{expr}' evaluated to None - likely "
-                        "explicitly specified."
-                    )
-                return "N/A"
-            else:
-                return eval_result
-
-        except (TypeError, NameError, KeyError) as exception:
-            if "empirical_peak" in str(exception):
-                console_warning(f"Missing empirical peak data: {exception}.")
-                return "N/A"
-            else:
-                console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
-                return "N/A"
-
-        except AttributeError as attribute_error:
-            console_warning(
-                f"Failed to evaluate expression '{expr}': {attribute_error}."
-            )
-            return "N/A"
-
-        except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
-            return "N/A"
-
-        except ValueError as value_error:
-            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
-            return "N/A"
-
-
-def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
-    """
-    Convert user defined equation string to eval executable string.
-    For example,
-        input:
-            AVG(100  * SQ_ACTIVE_INST_SCA / ( GRBM_GUI_ACTIVE * $numCU ))
-        output:
-            to_avg(
-                100 * raw_pmc_df["pmc_perf"]["SQ_ACTIVE_INST_SCA"] /
-                (
-                    raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] *
-                    numCU
-                )
-            )
-        input:
-            AVG(
-                (
-                    TCC_EA_RDREQ_LEVEL_31 / TCC_EA_RDREQ_31
-                )
-                if (TCC_EA_RDREQ_31 != 0)
-                else (0)
-            )
-        output:
-            to_avg(
-                (
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] /
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
-                ).where(
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] != 0,
-                    0
-                )
-            )
-        We can not handle the below for now:
-        input:
-            AVG(
-                (
-                    0
-                    if (TCC_EA_RDREQ_31 == 0)
-                    else (
-                        TCC_EA_RDREQ_LEVEL_31 /
-                        TCC_EA_RDREQ_31
-                    )
-                )
-            )
-        But potential workaround is:
-        output:
-            to_avg(
-                raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"].where(
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] == 0,
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] /
-                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
-                )
-            )
-    """
-    if coll_level is None:
-        raise Exception("Error: coll_level can not be None.")
-
-    if not equation:
-        return ""
-
-    equation_string = str(equation)
-
-    # build-in variable starts with '$', python can not handle it.
-    # replace '$' with 'ammolite__'.
-    equation_string = re.sub(r"\$", "ammolite__", equation_string)
-
-    # convert equation string to intermediate expression in df array format
-    ast_node = ast.parse(equation_string)
-    transformer = CodeTransformer()
-    transformer.visit(ast_node)
-
-    equation_string = astunparse.unparse(ast_node)
-
-    # correct column name/label in df with [], such as TCC_HIT[0],
-    # the target is df['TCC_HIT[0]']
-    equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
-
-    # apply coll_level
-    if config.get("format_rocprof_output") == "rocpd":
-        # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
-        equation_string = re.sub(
-            "SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", equation_string
-        )
-        equation_string = re.sub(
-            r"raw_pmc_df",
-            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
-            equation_string,
-        )
-    else:
-        # Use pmc_perf.csv for all counters
-        equation_string = re.sub(
-            r"raw_pmc_df",
-            f"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']",
-            equation_string,
-        )
-        # Use coll_level csv for SQ_ACCUM_PREV_HIRES counter only
-        equation_string = re.sub(
-            rf"raw_pmc_df['{schema.PMC_PERF_FILE_PREFIX}']['SQ_ACCUM_PREV_HIRES']",
-            f"raw_pmc_df['{coll_level}']['SQ_ACCUM_PREV_HIRES']",
-            equation_string,
-        )
-    return equation_string
-
-
-def update_denominator_string(equation: str, normal_unit: str) -> str:
-    """
-    Update $denom in equation with runtime normalization unit.
-    """
-    if not equation:
-        return ""
-
-    equation_string = str(equation)
-
-    if normal_unit in SUPPORTED_DENOM.keys():
-        equation_string = re.sub(
-            r"\$denom", SUPPORTED_DENOM[normal_unit], equation_string
-        )
-
-    return equation_string
-
-
-def update_normal_unit_string(equation: str, normal_unit: str) -> str:
-    """
-    Update $normUnit in equation with runtime normalization unit.
-    It is string replacement for display only.
-    """
-
-    # TODO: We might want to do it for subtitle contains $normUnit
-    if not equation:
-        return ""
-
-    return re.sub(
-        r"\((?P<PREFIX>\w*)\s+\+\s+(\$normUnit\))",
-        rf"\g<PREFIX> {re.sub('_', ' ', normal_unit)}",
-        str(equation),
-    ).capitalize()
-
-
-def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
-    function_filter = {
-        "MIN": None,
-        "MAX": None,
-        "AVG": None,
-        "ROUND": None,
-        "TO_INT": None,
-        "GB": None,
-        "STD": None,
-        "GFLOP": None,
-        "GOP": None,
-        "OP": None,
-        "CU": None,
-        "NC": None,
-        "UC": None,
-        "CC": None,
-        "RW": None,
-        "GIOP": None,
-        "GFLOPs": None,
-        "CONCAT": None,
-        "MOD": None,
-    }
-
-    built_in_counter = [
-        "LDS_Per_Workgroup",
-        "Grid_Size",
-        "Workgroup_Size",
-        "Arch_VGPR",
-        "Accum_VGPR",
-        "SGPR",
-        "Scratch_Per_Workitem",
-        "Start_Timestamp",
-        "End_Timestamp",
-    ]
-
-    visited = False
-    counters = []
-    if not isinstance(formula, str):
-        return visited, counters
-    try:
-        tree = ast.parse(
-            formula
-            .replace("$normUnit", "SQ_WAVES")
-            .replace("$denom", "SQ_WAVES")
-            .replace(
-                "$numActiveCUs",
-                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
-                "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-                "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
-            )
-            .replace("$", "")
-        )
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                val = (
-                    str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
-                )
-                if val.isupper() and val not in function_filter:
-                    counters.append(val)
-                    visited = True
-                if val in built_in_counter:
-                    visited = True
-    except Exception:
-        pass
-
-    return visited, counters
 
 
 @demarcate
@@ -729,15 +47,15 @@ def build_dfs(
     arch_configs: schema.ArchConfig,
     filter_metrics: Optional[list[str]],
     sys_info: pd.Series,
+    profiling_config: dict[str, Any],
+    arch: Optional[str] = None,
 ) -> None:
+    """Build a dataframe template for each table in each panel. Analyze-mode
+    filter_metrics overrides profile-mode filter_blocks; tables that fail the
+    active filter are omitted from arch_configs.dfs. Alias tokens (e.g. "lds",
+    "roofline") in either filter are resolved against arch's panel aliases.
     """
-    Build dataframe for each type of data source within each panel.
 
-    Each dataframe will be used as a template to load data with each run later.
-    For now, support "metric_table" and "raw_csv_table". Otherwise, put an empty df.
-    """
-
-    # TODO: more error checking for filter_metrics!!
     simple_box = {
         "Min": ["MIN(", ")"],
         "Q1": ["QUANTILE(", ", 0.25)"],
@@ -746,9 +64,23 @@ def build_dfs(
         "Max": ["MAX(", ")"],
     }
 
-    dfs = {}
-    dfs_type = {}
-    metric_counters = {}
+    dfs: dict[int, pd.DataFrame] = {}
+    dfs_type: dict[int, str] = {}
+    dfs_expressions: dict[int, list[str]] = {}
+    metric_counters: dict[str, list[str]] = {}
+
+    if filter_metrics:
+        numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
+        alias_tokens = [t for t in filter_metrics if not METRIC_ID_RE.match(str(t))]
+        user_metric_filter: Optional[list[str]] = numeric_tokens or None
+        profile_panel_filter: set[int] = convert_filter_blocks_to_panel_ids(
+            alias_tokens, arch
+        )
+    else:
+        user_metric_filter = None
+        profile_panel_filter = convert_filter_blocks_to_panel_ids(
+            profiling_config.get("filter_blocks", []), arch
+        )
 
     arch_configs.panel_configs = expand_placeholder_ranges(
         arch_configs.panel_configs, sys_info
@@ -756,468 +88,183 @@ def build_dfs(
 
     for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
-            for type, data_config in data_source.items():
-                if type == "metric_table":
-                    headers = ["Metric_ID"]
-                    data_source_idx = str(data_config["id"] // 100)
+            for table_type, data_config in data_source.items():
+                table_id = data_config["id"]
+                file_data_source_idx = str(table_id // 100)
 
-                    if (
-                        "cli_style" in data_config
-                        and data_config["cli_style"] == "simple_box"
+                if table_type == "metric_table":
+                    df, expressions = _build_metric_table_df(
+                        panel=panel,
+                        data_config=data_config,
+                        simple_box=simple_box,
+                        panel_id=panel_id,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
+                        metric_counters=metric_counters,
+                    )
+                    # Filter excluded every metric in this panel; skip the empty table.
+                    if data_config["metric"] and df.empty:
+                        continue
+                    dfs_expressions[table_id] = expressions
+
+                elif table_type == "raw_csv_table":
+                    if not _metric_passes_filter(
+                        metric_id=file_data_source_idx,
+                        panel_id=panel_id,
+                        data_source_idx=file_data_source_idx,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
                     ):
-                        headers.append(data_config["header"]["metric"])
-                        for k in simple_box.keys():
-                            headers.append(k)
-
-                        for key, tile in data_config["header"].items():
-                            if key != "metric" and key != "expr":
-                                headers.append(tile)
-                    else:
-                        headers.append(data_config["header"]["metric"])
-                        for key, tile in data_config["header"].items():
-                            if key != "metric":
-                                headers.append(tile)
-
-                    headers.append("coll_level")
-
-                    # Only add Metrics Description column if it is defined in the panel
-                    if "metrics_description" in panel:
-                        headers.append("Description")
-
-                    df = pd.DataFrame(columns=headers)
-
-                    for i, (key, entries) in enumerate(data_config["metric"].items()):
-                        data_source_idx = (
-                            f"{data_config['id'] // 100}.{data_config['id'] % 100}"
+                        continue
+                    if data_config.get("columnwise"):
+                        df = pd.DataFrame(
+                            [data_config["source"]],
+                            columns=["from_csv_columnwise"],
                         )
-                        metric_idx = f"{data_source_idx}.{i}"
-                        eqn_content = []
-
-                        if (
-                            (not filter_metrics)
-                            or (
-                                metric_idx in filter_metrics
-                            )  # no filter  # metric in filter
-                            or
-                            # the whole table in filter
-                            (data_source_idx in filter_metrics)
-                            or
-                            # the whole IP block in filter
-                            (str(panel_id // 100) in filter_metrics)
-                        ):
-                            values = [metric_idx, key]
-
-                            if (
-                                "cli_style" in data_config
-                                and data_config["cli_style"] == "simple_box"
-                            ):
-                                for k, v in entries.items():
-                                    if k == "expr":
-                                        for bv in simple_box.values():
-                                            values.append(bv[0] + v + bv[1])
-                                    else:
-                                        if k not in {"coll_level", "alias"}:
-                                            values.append(v)
-                            else:
-                                for k, v in entries.items():
-                                    if k not in {"coll_level", "alias"}:
-                                        values.append(v)
-                                        eqn_content.append(v)
-
-                            if "alias" in entries.keys():
-                                values.append(entries["alias"])
-
-                            values.append(
-                                entries.get("coll_level", schema.PMC_PERF_FILE_PREFIX)
-                            )
-
-                            if "metrics_description" in panel:
-                                values.append(panel["metrics_description"].get(key, ""))
-
-                            df_new_row = pd.DataFrame([values], columns=headers)
-                            df = pd.concat([df, df_new_row])
-
-                        # generate mapping of counters and metrics
-                        filtered_counters = {}
-                        formula_visited = False
-
-                        for formula in eqn_content:
-                            if formula is not None and formula != "None":
-                                visited, counters = gen_counter_list(formula)
-                                if visited:
-                                    formula_visited = True
-                                for counter in counters:
-                                    filtered_counters[counter] = None
-
-                        if filtered_counters or formula_visited:
-                            metric_counters[key] = list(filtered_counters)
-
-                    df.set_index("Metric_ID", inplace=True)
-                elif type == "raw_csv_table":
-                    data_source_idx = str(data_config["id"] // 100)
-                    if (
-                        (not filter_metrics)
-                        or (data_source_idx == "0")  # no filter
-                        or (data_source_idx in filter_metrics)
-                    ):
-                        if "columnwise" in data_config and data_config["columnwise"]:
-                            df = pd.DataFrame(
-                                [data_config["source"]], columns=["from_csv_columnwise"]
-                            )
-                        else:
-                            df = pd.DataFrame(
-                                [data_config["source"]], columns=["from_csv"]
-                            )
                     else:
-                        df = pd.DataFrame()
-                elif type == "pc_sampling_table":
-                    data_source_idx = str(data_config["id"] // 100)
+                        df = pd.DataFrame([data_config["source"]], columns=["from_csv"])
+
+                elif table_type == "pc_sampling_table":
+                    if not _metric_passes_filter(
+                        metric_id=file_data_source_idx,
+                        panel_id=panel_id,
+                        data_source_idx=file_data_source_idx,
+                        user_metric_filter=user_metric_filter,
+                        profile_panel_filter=profile_panel_filter,
+                    ):
+                        continue
                     df = pd.DataFrame(
                         [data_config["source"]], columns=["from_pc_sampling"]
                     )
+
                 else:
                     df = pd.DataFrame()
 
-                dfs[data_config["id"]] = df
-                dfs_type[data_config["id"]] = type
+                dfs[table_id] = df
+                dfs_type[table_id] = table_type
 
-    setattr(arch_configs, "dfs", dfs)
-    setattr(arch_configs, "dfs_type", dfs_type)
-    setattr(arch_configs, "metric_counters", metric_counters)
+    arch_configs.dfs = dfs
+    arch_configs.dfs_type = dfs_type
+    arch_configs.dfs_expressions = dfs_expressions
+    arch_configs.metric_counters = metric_counters
 
 
-def build_metric_value_string(
-    dfs: dict, dfs_type: dict, normal_unit: str, profiling_config: dict
-) -> None:
+def _metric_passes_filter(
+    metric_id: str,
+    panel_id: int,
+    data_source_idx: str,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+) -> bool:
+    """Return True if a metric or table identified by metric_id passes the
+    active filter. metric_id is the file-level id for raw_csv / pc_sampling
+    tables, or the per-metric id (e.g. "2.1.0") for metric_table rows.
     """
-    Apply the real eval string to its field in the metric_table df.
-    """
-
-    for id, df in dfs.items():
-        if dfs_type[id] == "metric_table":
-            for expr in df.columns:
-                if expr in SUPPORTED_FIELD:
-                    # NB: apply all build-in before building the whole string
-                    df[expr] = df[expr].apply(
-                        update_denominator_string, normal_unit=normal_unit
-                    )
-
-                    # NB: there should be a faster way to do with single apply
-                    if not df.empty:
-                        for i in range(df.shape[0]):
-                            row_idx_label = df.index.to_list()[i]
-                            if expr.lower() != "alias":
-                                df.at[row_idx_label, expr] = build_eval_string(
-                                    df.at[row_idx_label, expr],
-                                    df.at[row_idx_label, "coll_level"],
-                                    profiling_config,
-                                )
-
-                elif expr.lower() == "unit" or expr.lower() == "units":
-                    df[expr] = df[expr].apply(
-                        update_normal_unit_string, normal_unit=normal_unit
-                    )
-
-
-def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
-    """Create empirical peaks dictionary"""
-    empirical_peaks = {}
-
-    if not empirical_peaks_df.empty:
-        peak_data_row = empirical_peaks_df.iloc[0]
-        for col in empirical_peaks_df.columns:
-            empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
-    else:
-        peak_names = [
-            "FP16Flops",
-            "FP32Flops",
-            "FP64Flops",
-            "MFMAF64Flops",
-            "MFMAF32Flops",
-            "MFMAF16Flops",
-            "MFMABF16Flops",
-            "MFMAF8Flops",
-            "MFMAI8Ops",
-            "HBMBw",
-            "L2Bw",
-            "L1Bw",
-            "LDSBw",
-            "MFMAF6F4Flops",
-        ]
-        # initialize peaks to 0
-        for peak_name in peak_names:
-            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = np.nan
-
-    return empirical_peaks
-
-
-def create_sys_vars(sys_info: pd.Series) -> dict[str, Union[int, float]]:
-    """Create variables from sys.info."""
-    sys_vars_collection = {}
-
-    sys_vars_config = [
-        ("se_per_gpu", int, "se_per_gpu"),
-        ("pipes_per_gpu", int, "pipes_per_gpu"),
-        ("cu_per_gpu", int, "cu_per_gpu"),
-        ("simd_per_cu", int, "simd_per_cu"),
-        ("sqc_per_gpu", int, "sqc_per_gpu"),
-        ("lds_banks_per_cu", int, "lds_banks_per_cu"),
-        ("cur_sclk", float, "cur_sclk"),
-        ("cur_mclk", float, "cur_mclk"),
-        ("max_mclk", float, "max_mclk"),
-        ("max_sclk", float, "max_sclk"),
-        ("max_waves_per_cu", int, "max_waves_per_cu"),
-        ("num_hbm_channels", float, "num_hbm_channels"),
-        ("num_xcd", int, "num_xcd"),
-        ("wave_size", int, "wave_size"),
-    ]
-
-    for var_name, var_type, attr_name in sys_vars_config:
-        variable_value = var_type(getattr(sys_info, attr_name))
-        if np.isnan(variable_value) or variable_value == 0:
-            console_warning(
-                f"{attr_name} is not available in sysinfo.csv, please provide the "
-                "correct value using --specs-correction"
-            )
-        sys_vars_collection[f"ammolite__{var_name}"] = variable_value
-
-    # Special case for total_l2_chan
-    total_l2_channel_count = calc_builtin_var("$total_l2_chan", sys_info.to_dict())
-    if np.isnan(total_l2_channel_count) or total_l2_channel_count == 0:
-        console_warning(
-            "total_l2_chan is not available in sysinfo.csv, please provide the correct "
-            "value using --specs-correction"
-        )
-    sys_vars_collection["ammolite__total_l2_chan"] = total_l2_channel_count
-
-    return sys_vars_collection
-
-
-def calc_builtin_vars(
-    raw_pmc_df: Union[pd.DataFrame, dict],
-    config: dict,
-    sys_vars: dict[str, Union[int, float]],
-) -> dict[str, Optional[Union[str, float, int]]]:
-    """Calculate built-in variables"""
-    # TODO: fix all $normUnit in Unit column or title
-    # build and eval all derived build-in global variables
-    builtin_vars_collection = {}
-
-    # First pass: calculate per-XCD values
-    for variable_key, variable_value in BUILD_IN_VARS.items():
-        if "PER_XCD" not in variable_key:
-            continue
-
-        # NB: assume all built-in vars from pmc_perf.csv for now
-        eval_string = build_eval_string(
-            variable_value, schema.PMC_PERF_FILE_PREFIX, config
-        )
-        try:
-            # Create temporary evaluator for this calculation
-            # Pass sys_vars so that $num_xcd and other system variables are available
-            temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
-            calculation_result = temporary_evaluator.eval_expression(eval_string)
-            # Convert "N/A" string to np.nan to maintain numeric type for calculations
-            if np.isscalar(calculation_result) and calculation_result == "N/A":
-                calculation_result = np.nan
-            builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
-        except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
-
-    # Second pass: calculate remaining variables that depend on per-XCD values
-    for variable_key, variable_value in BUILD_IN_VARS.items():
-        if "PER_XCD" in variable_key:
-            continue
-
-        eval_string = build_eval_string(
-            variable_value, schema.PMC_PERF_FILE_PREFIX, config
-        )
-        try:
-            # Merge sys_vars with builtin_vars_collection for second pass
-            combined_vars = {**sys_vars, **builtin_vars_collection}
-            temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
-            calculation_result = temporary_evaluator.eval_expression(eval_string)
-            # Convert "N/A" string to np.nan to maintain numeric type for calculations
-            if np.isscalar(calculation_result) and calculation_result == "N/A":
-                calculation_result = np.nan
-            builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
-        except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
-
-    return builtin_vars_collection
-
-
-@demarcate
-def eval_metric(
-    dfs: dict,
-    dfs_type: dict,
-    sys_info: pd.Series,
-    empirical_peaks_df: pd.DataFrame,
-    raw_pmc_df: Union[pd.DataFrame, dict],
-    debug: bool,
-    config: dict,
-) -> None:
-    """
-    Execute the expr string for each metric in the df.
-    """
-
-    # confirm no illogical counter values (only consider non-roofline runs)
-    roof_only_run = sys_info.ip_blocks == "roofline"
-    if (
-        (not roof_only_run)
-        and hasattr(raw_pmc_df.get("pmc_perf", {}), "GRBM_GUI_ACTIVE")
-        and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
+    if panel_id <= 100 or data_source_idx == "0":
+        return True
+    if user_metric_filter is None and not profile_panel_filter:
+        return True
+    if user_metric_filter and (
+        metric_id in user_metric_filter
+        or data_source_idx in user_metric_filter
+        or str(panel_id // 100) in user_metric_filter
     ):
-        console_warning("Dectected GRBM_GUI_ACTIVE == 0")
-        console_error("Hauting execution for warning above.")
+        return True
+    if profile_panel_filter:
+        file_id, _, _ = convert_metric_id_to_panel_info(metric_id)
+        return int(file_id) in profile_panel_filter
+    return False
 
-    sys_vars = create_sys_vars(sys_info)
-    empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
-    builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
-    sys_vars.update(builtin_vars)
 
-    # Clear any previous noise clamp warnings before this analysis
-    clear_noise_clamp_warnings()
+def _build_metric_table_df(
+    panel: dict[str, Any],
+    data_config: dict[str, Any],
+    simple_box: dict[str, list[str]],
+    panel_id: int,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+    metric_counters: dict[str, list[str]],
+) -> tuple[pd.DataFrame, list[str]]:
+    """Build the metric_table dataframe and its list of formula strings for
+    data_config, dropping rows the active filter excludes. Updates
+    metric_counters in place.
+    """
+    table_id = data_config["id"]
+    table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
+    is_simple_box = data_config.get("cli_style") == "simple_box"
 
-    # Create metric evaluator
-    metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
+    headers: list[str] = ["Metric_ID", data_config["header"]["metric"]]
+    header_keys: set[str] = set(data_config["header"]) - {"metric", "expr"}
+    if is_simple_box:
+        headers.extend(simple_box)
+        for key, tile in data_config["header"].items():
+            if key != "metric" and key != "expr":
+                headers.append(tile)
+    else:
+        for key, tile in data_config["header"].items():
+            if key != "metric":
+                headers.append(tile)
+    if "metrics_description" in panel:
+        headers.append("Description")
 
-    exprs_to_eval = []
-    debug_tracker = DebugRowTracker() if debug else None
+    rows: list[list[Any]] = []
+    expressions: list[str] = []
+    metric_entries = data_config["metric"]
+    for i, (key, entries) in enumerate(metric_entries.items()):
+        metric_idx = f"{table_data_source_idx}.{i}"
 
-    # Hmmm... apply + lambda should just work
-    # df['Value'] = df['Value'].apply(
-    #     lambda s: eval(
-    #         compile(str(s), '<string>', 'eval')
-    #     )
-    # )
-    for df_id, df in dfs.items():
-        if dfs_type[df_id] == "metric_table":
-            for row_id, row in df.iterrows():
-                for expr in df.columns:
-                    if expr in SUPPORTED_FIELD and expr.lower() != "alias":
-                        if row[expr]:
-                            exprs_to_eval.append((df_id, row_id, expr, row[expr]))
-
-                            if debug:
-                                debug_row_tracker(
-                                    expr,
-                                    row[expr],
-                                    metric_evaluator,
-                                    raw_pmc_df,
-                                    show_inputs=debug_tracker.should_show_inputs(
-                                        df_id, row_id
-                                    ),
-                                )
-                        else:
-                            # If not insert nan, the whole col might be treated
-                            # as string but not nubmer if there is NONE
-                            row[expr] = ""
-
-    for df_id, row_id, col, expr in exprs_to_eval:
-        noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
-        eval_result = metric_evaluator.eval_expression(expr)
-        noise_clamp_count_new = get_noise_clamp_warnings()["count"]
-        if (
-            noise_clamp_count_new > noise_clamp_count_prev
-            and "Metric" in dfs[df_id].columns
+        if not _metric_passes_filter(
+            metric_id=metric_idx,
+            panel_id=panel_id,
+            data_source_idx=table_data_source_idx,
+            user_metric_filter=user_metric_filter,
+            profile_panel_filter=profile_panel_filter,
         ):
-            metric_name = dfs[df_id].loc[row_id, "Metric"]
-            console_warning(
-                f"Variance corrected for metric: {row_id} {metric_name} {col}"
-            )
-        dfs[df_id].loc[row_id, col] = eval_result
-
-    # Print aggregated summary of any noise clamping warnings
-    print_noise_clamp_summary()
-
-    # Check for metrics exceeding theoretical peak due to dual-issue
-    validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
-
-
-def validate_dual_issue_metrics(
-    dfs: dict,
-    dfs_type: dict,
-    sys_info: pd.Series,
-    raw_pmc_df: Union[pd.DataFrame, dict],
-) -> None:
-    """
-    Check if VALU Utilization or VALU FLOPs metrics exceed theoretical peak.
-    Warns about dual-issue behavior.
-    For MI350 (gfx950), additionally verify SQ_ACTIVE_INST_VALU2 counter.
-    """
-    gpu_arch = sys_info.get("gpu_arch", "")
-
-    # Metrics to check for dual-issue warnings
-    valu_utilization_metrics = ["VALU Utilization"]
-    valu_flops_metrics = ["VALU FLOPs (F64)"]
-
-    for df_id, df in dfs.items():
-        if dfs_type[df_id] != "metric_table":
-            continue
-        if "Metric" not in df.columns or "Value" not in df.columns:
             continue
 
-        has_peak_column = "Peak (Empirical)" in df.columns or "Peak" in df.columns
-        peak_col = "Peak (Empirical)" if "Peak (Empirical)" in df.columns else "Peak"
+        values: list[Any] = [metric_idx, key]
+        eqn_content: list[Any] = []
+        if is_simple_box:
+            for k, v in entries.items():
+                if k == "expr":
+                    for bv in simple_box.values():
+                        values.append(bv[0] + v + bv[1])
+                    eqn_content.append(v)
+                elif k not in {"coll_level", "alias"} and k in header_keys:
+                    values.append(v)
+        else:
+            for k, v in entries.items():
+                if k not in {"coll_level", "alias"} and k in header_keys:
+                    values.append(v)
+                    eqn_content.append(v)
+        expressions.extend(
+            v for v in eqn_content if isinstance(v, str) and v and v != "None"
+        )
 
-        if not has_peak_column:
-            continue
+        if "alias" in entries:
+            values.append(entries["alias"])
+        if "metrics_description" in panel:
+            values.append(panel["metrics_description"].get(key, ""))
 
-        for _, row in df.iterrows():
-            metric_name = row.get("Metric", "")
+        rows.append(values)
 
-            if metric_name not in valu_utilization_metrics + valu_flops_metrics:
+        filtered_counters: dict[str, None] = {}
+        formula_visited = False
+        for formula in eqn_content:
+            if formula is None or formula == "None":
                 continue
+            visited, counters = gen_counter_list(formula)
+            if visited:
+                formula_visited = True
+            for counter in counters:
+                filtered_counters[counter] = None
 
-            try:
-                value = float(row.get("Value", 0))
-                peak = float(row.get(peak_col, 0))
+        if filtered_counters or formula_visited:
+            metric_counters[key] = list(filtered_counters)
 
-                if peak > 0 and value > peak:
-                    (value / peak) * 100
-                    dual_issue_confirmed = False
-                    if gpu_arch == "gfx950":
-                        if isinstance(raw_pmc_df, dict) and "pmc_perf" in raw_pmc_df:
-                            pmc_df = raw_pmc_df["pmc_perf"]
-                            if "SQ_ACTIVE_INST_VALU2" in pmc_df.columns:
-                                valu2_sum = pmc_df["SQ_ACTIVE_INST_VALU2"].sum()
-                                if valu2_sum > 0:
-                                    dual_issue_confirmed = True
-
-                    # Determine warning message based on metric type
-                    faq_url = (
-                        "https://rocm.docs.amd.com/projects/"
-                        "rocprofiler-compute/en/latest/reference/"
-                        "faq.html#why-does-valu-utilization-exceed-"
-                        "the-theoretical-peak"
-                    )
-
-                    if metric_name in valu_utilization_metrics:
-                        warning_msg = (
-                            "VALU Utilization can go up to 200% "
-                            "because CU can dual-issue instructions. "
-                            f"See {faq_url} for more information."
-                        )
-                    else:  # VALU FLOPs metrics
-                        warning_msg = (
-                            "VALU FLOPs can exceed the peak value "
-                            "because these instructions can be "
-                            "dual-issued in specific circumstances. "
-                            f"See {faq_url} for more information."
-                        )
-
-                    if gpu_arch == "gfx950" and dual_issue_confirmed:
-                        warning_msg += (
-                            " (Dual-issue activity detected "
-                            "via SQ_ACTIVE_INST_VALU2 counter)"
-                        )
-
-                    console_warning(warning_msg)
-
-            except (ValueError, TypeError):
-                # Skip if the value or peak cannot be converted to a float
-                continue
+    df = pd.DataFrame(rows, columns=headers)
+    df.set_index("Metric_ID", inplace=True)
+    return df, expressions
 
 
 @demarcate
@@ -1234,7 +281,7 @@ def apply_filters(
     # Apply node filter
     if workload.filter_nodes:
         filtered_df = filtered_df.loc[
-            filtered_df[schema.PMC_PERF_FILE_PREFIX]["Node"]
+            filtered_df["Node"]
             .astype(str)
             .isin(normalize_filter_to_str_list(workload.filter_nodes))
         ]
@@ -1244,7 +291,7 @@ def apply_filters(
     # Apply GPU ID filter
     if workload.filter_gpu_ids:
         filtered_df = filtered_df.loc[
-            filtered_df[schema.PMC_PERF_FILE_PREFIX]["GPU_ID"]
+            filtered_df["GPU_ID"]
             .astype(str)
             .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
         ]
@@ -1303,13 +350,11 @@ def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataF
             kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
 
         if selected_kernels:
-            df = df.loc[
-                df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].isin(selected_kernels)
-            ]
+            df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
 
     elif all(isinstance(kernel_id, str) for kernel_id in workload.filter_kernel_ids):
         # Handle string kernel names
-        cleaned_dataframe = df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].apply(
+        cleaned_dataframe = df["Kernel_Name"].apply(
             lambda kernel_name: (
                 kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
             )
@@ -1339,10 +384,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         and ">" in workload.filter_dispatch_ids[0]
     ):
         dispatch_match = re.match(r"\>\s*(\d+)", workload.filter_dispatch_ids[0])
-        df = df[
-            df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"]
-            > int(dispatch_match.group(1))
-        ]
+        df = df[df["Dispatch_ID"] > int(dispatch_match.group(1))]
     else:
         selected_dispatches = [
             int(dispatch_str) for dispatch_str in workload.filter_dispatch_ids
@@ -1380,7 +422,7 @@ def search_key_in_json(file_path: Path, search_key: str) -> Union[list, dict, No
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
-    with open(file_path) as file:
+    with open(file_path, encoding="utf-8") as file:
         data = json.load(file)
         found = find_key_recursively(data, search_key)
         if found is None:
@@ -1872,12 +914,6 @@ def load_non_mertrics_table(
                     f"Couldn't load {csv_file.name}. "
                     "This may result in missing analysis data."
                 )
-        # NB: Special case for sysinfo. Probably room for improvement in this whole
-        # function design
-        elif "from_csv_columnwise" in df.columns and id == 101:
-            tmp[df_id] = workload.sys_info.transpose()
-            # All transposed columns should be marked with a general header
-            tmp[df_id].columns = ["Info"]
         elif "from_csv_columnwise" in df.columns:
             # NB:
             #   Another way might be doing transpose in tty like metric_table.
@@ -1905,12 +941,9 @@ def load_non_mertrics_table(
     workload.dfs.update(tmp)
 
 
-torch_operator_matcher = PatternMatcherEngine(mode="glob-hierarchy")
-
-
 def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
     """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
-    return torch_operator_matcher.matches(pattern, operator_name)
+    return fnmatch_glob_matches(pattern, operator_name)
 
 
 @demarcate
@@ -1919,7 +952,7 @@ def load_table_data(
     dir_path: str,
     is_gui: bool,
     args: argparse.Namespace,
-    config: dict,
+    dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
 ) -> None:
     """
@@ -1933,11 +966,11 @@ def load_table_data(
     eval_metric(
         workload.dfs,
         workload.dfs_type,
+        dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
         apply_filters(workload, dir_path, is_gui, args.debug),
         args.debug,
-        config,
     )
 
 
