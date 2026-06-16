@@ -5,8 +5,6 @@
 include(AISAddExecutable)
 include(AISUseGTest)
 
-find_package(Boost COMPONENTS program_options REQUIRED)
-
 set(SHARED_SOURCE_FILES
     common/magic-word.cpp
 )
@@ -31,6 +29,7 @@ set(SYSTEM_TEST_SOURCE_FILES
 set(TEST_SYSINCLS
     ${HIPFILE_INCLUDE_PATH}
     ${HIPFILE_TEST_COMMON_PATH}
+    ${HIPFILE_THIRD_PARTY_PATH}
 )
 
 if(AIS_BUILD_NVIDIA_DETAIL)
@@ -63,7 +62,6 @@ ais_add_test_executable(
     SYSINCLS ${TEST_SYSINCLS}
 )
 target_link_libraries(hipfile_system_tests PRIVATE GTest::gtest)
-target_link_libraries(hipfile_system_tests PRIVATE Boost::program_options)
 
 ais_gtest_discover_tests(
     hipfile_system_tests

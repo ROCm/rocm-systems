@@ -97,8 +97,8 @@ class MetricEvaluator:
                     )
                 elif not caught:
                     console_warning(
-                        f"Could not evaluate expression '{expr}' - likely "
-                        "due to missing counter data."
+                        f"Expression '{expr}' evaluated to N/A "
+                        "(divide-by-zero or empty counter data)."
                     )
                 return "N/A"
             else:

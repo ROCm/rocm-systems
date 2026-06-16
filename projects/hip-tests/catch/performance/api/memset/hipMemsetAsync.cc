@@ -1,0 +1,71 @@
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <hip_test_common.hh>
+#include <performance_common.hh>
+#include <resource_guards.hh>
+
+/**
+ * @addtogroup memset memset
+ * @{
+ * @ingroup PerformanceTestMemory
+ */
+
+class MemsetAsyncBenchmark : public Benchmark<MemsetAsyncBenchmark> {
+ public:
+  MemsetAsyncBenchmark(LinearAllocs allocation_type, size_t size)
+      : dst_(allocation_type, size), size_(size), stream_(Streams::created) {}
+
+  void operator()() {
+    TIMED_SECTION_STREAM(kTimerTypeEvent, stream_.stream()) {
+      HIP_CHECK(hipMemsetAsync(dst_.ptr(), 17, size_, stream_.stream()));
+    }
+    HIP_CHECK(hipStreamSynchronize(stream_.stream()));
+  }
+
+ private:
+  LinearAllocGuard<void> dst_;
+  const size_t size_;
+  StreamGuard stream_;
+};
+
+static void RunBenchmark(LinearAllocs allocation_type, size_t size) {
+  MemsetAsyncBenchmark benchmark(allocation_type, size);
+  benchmark.AddSectionName(std::to_string(size));
+  benchmark.AddSectionName(GetAllocationSectionName(allocation_type));
+  benchmark.Run();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Executes `hipMemsetAsync`:
+ *    -# Allocation size
+ *      - Small: 4 KB
+ *      - Medium: 4 MB
+ *      - Large: 16 MB
+ *    -# Allocation type
+ *      - device
+ *      - host
+ *      - managed
+ * Test source
+ * ------------------------
+ * - performance/api/memset/hipMemsetAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Performance_hipMemsetAsync) {
+  const auto size = GENERATE(4_KB, 4_MB, 16_MB);
+  const auto allocation_type = GENERATE(LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc,
+                                        LinearAllocs::hipMallocManaged);
+  RunBenchmark(allocation_type, size);
+}
+
+/**
+ * End doxygen group PerformanceTest.
+ * @}
+ */

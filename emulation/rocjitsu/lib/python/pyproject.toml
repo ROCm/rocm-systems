@@ -10,5 +10,8 @@ requires-python = ">=3.10"
 license = "MIT"
 dependencies = ["cgen"]
 
+[tool.black]
+skip-string-normalization = true
+
 [tool.setuptools.packages.find]
 include = ["amdisa*"]

@@ -27,16 +27,17 @@ import os
 
 try:
     import ctypes
-
-    # RTLD_GLOBAL so Python + librocpd bind the same SQLite, avoiding mixed-lib symbol collisions
-    sqlite3lib = ctypes.CDLL("libsqlite3.so", mode=ctypes.RTLD_GLOBAL)
-except Exception:
-    pass
-
-try:
     import sqlite3
 
-    sqlite3.connect(":memory:")  # Test if sqlite3 is available
+    # import the _sqlite3 C extension to ensure it's loaded before librocpd's
+    # sqlite3 symbols are loaded, avoiding mixed-lib symbol collisions
+    import _sqlite3
+
+    sqlite3.connect(":memory:")  # Test that sqlite3 works after these imports
+    # promote the SQLite3 symbols introduced by _sqlite3 to global scope so that
+    # librocpd and Python use the same SQLite library, avoiding mixed-lib symbol
+    # collisions
+    _sqlite3lib = ctypes.CDLL(_sqlite3.__file__, mode=ctypes.RTLD_GLOBAL)
 except Exception:
     pass
 

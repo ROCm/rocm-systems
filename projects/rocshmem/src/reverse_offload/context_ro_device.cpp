@@ -771,4 +771,14 @@ __device__ volatile char *ROContext::get_status_flag() {
   return status_addr;
 }
 
+/******************************************************************************
+ **************** TILE API STUB IMPLEMENTATION (NOT IMPLEMENTED) **************
+ *****************************************************************************/
+
+__device__ int ROContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
+                                                [[maybe_unused]] uint64_t flags) {
+  LOGD_WARN("Tile API not implemented for reverse offload backend");
+  return ROCSHMEM_ERROR;
+}
+
 }  // namespace rocshmem

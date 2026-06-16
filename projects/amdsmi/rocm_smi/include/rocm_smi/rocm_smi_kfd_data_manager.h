@@ -31,20 +31,20 @@
  * /sys/class/kfd/kfd/proc/<pid> when opening /dev/kfd. These persist until
  * process termination, blocking driver reloads and partition changes.
  *
- * This module uses fork-and-exit pattern: KFD operations run in short-lived
- * child processes that exit immediately, ensuring prompt cleanup.
+ * KFD operations run in short-lived child processes that exit immediately,
+ * ensuring prompt cleanup.
  *
  * CACHING:
  * --------
  * Batch queries support time-based caching with O(1) lookup by gpu_id.
- * On cache miss, a single fork refreshes data for ALL GPUs.
+ * On cache miss, a single child spawn refreshes data for ALL GPUs.
  * Cache is invalidated if any GPU query fails (full invalidation).
  *
  * TYPICAL TIMING (per query):
  * ---------------------------
  *   - Cache hit:             < 1 us (O(1) hash lookup)
- *   - Cache miss (fork):     200-800 us typical
- *     - Fork overhead:       100-300 us
+ *   - Cache miss (spawn):    200-800 us typical
+ *     - Spawn overhead:      100-300 us
  *     - IOCTL execution:     50-200 us
  *     - Cleanup verification: 10-50 us (stat-based polling)
  *
@@ -71,7 +71,7 @@ namespace amd::smi::kfd {
 
 /// Configuration for KFD Data Manager timing and behavior
 struct KFDManagerConfig {
-  /// Use legacy direct ioctl instead of fork pattern (default: false)
+  /// Use legacy direct ioctl instead of spawning a child (default: false)
   /// Set AMDSMI_KFD_USE_ORIG_VRAM=1 to enable
   bool use_original_vram_fcn = false;
 
@@ -123,7 +123,7 @@ KFDManagerConfig GetCurrentConfig();
 
 /// Batch query with caching - O(1) cache lookup by gpu_id
 /// If target's cache is valid, returns immediately
-/// Otherwise, refreshes cache for ALL gpu_ids in one fork
+/// Otherwise, refreshes cache for ALL gpu_ids in one child spawn
 [[nodiscard]] QueryResult ExecuteBatchQueryCached(OpType op, const std::vector<uint32_t>& gpu_ids,
                                                   uint32_t target_gpu_id);
 

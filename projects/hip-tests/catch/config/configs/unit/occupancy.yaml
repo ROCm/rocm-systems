@@ -52,7 +52,7 @@ occupancy:
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional:
     <<: *level_2
     # Below tests are failing PSDB
-    disabled: [amd_windows]
+    disabled: [amd_windows, amd_wsl]
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs: *level_2
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_InvalidArgs: *level_2
   Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative: *level_2

@@ -166,6 +166,7 @@ struct testColl alltoAllTest = {
   AlltoAllvInitData,
   AlltoAllvGetBw,
   AlltoAllvRunColl,
+  NULL,
   NULL
 };
 

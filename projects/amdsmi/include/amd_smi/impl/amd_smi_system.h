@@ -37,6 +37,7 @@
 #include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"
 #include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
 #endif  // BRCM_NIC
+
 namespace amd::smi {
 
 // Singleton: Only one system in an application

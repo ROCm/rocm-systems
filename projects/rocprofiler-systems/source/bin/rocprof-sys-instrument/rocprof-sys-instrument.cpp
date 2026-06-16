@@ -21,7 +21,6 @@
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/console.hpp>
 #include <timemory/utility/delimit.hpp>
-#include <timemory/utility/demangle.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/signals.hpp>
 
@@ -1793,15 +1792,16 @@ main(int argc, char** argv)
 
     verbprintf(0, "Finding instrumentation functions...\n");
 
-    auto* init_func      = find_function(new_objects, "rocprofsys_init");
-    auto* fini_func      = find_function(new_objects, "rocprofsys_finalize");
-    auto* env_func       = find_function(new_objects, "rocprofsys_set_env");
-    auto* mpi_func       = find_function(new_objects, "rocprofsys_set_mpi");
-    auto* entr_trace     = find_function(new_objects, "rocprofsys_push_trace");
-    auto* exit_trace     = find_function(new_objects, "rocprofsys_pop_trace");
-    auto* reg_src_func   = find_function(new_objects, "rocprofsys_register_source");
-    auto* reg_cov_func   = find_function(new_objects, "rocprofsys_register_coverage");
-    auto* set_instr_func = find_function(new_objects, "rocprofsys_set_instrumented");
+    auto* init_func       = find_function(new_objects, "rocprofsys_init");
+    auto* fini_func       = find_function(new_objects, "rocprofsys_finalize");
+    auto* env_func        = find_function(new_objects, "rocprofsys_set_env");
+    auto* mpi_func        = find_function(new_objects, "rocprofsys_set_mpi");
+    auto* entr_trace      = find_function(new_objects, "rocprofsys_push_trace");
+    auto* entr_trace_args = find_function(new_objects, "rocprofsys_push_trace_with_args");
+    auto* exit_trace      = find_function(new_objects, "rocprofsys_pop_trace");
+    auto* reg_src_func    = find_function(new_objects, "rocprofsys_register_source");
+    auto* reg_cov_func    = find_function(new_objects, "rocprofsys_register_coverage");
+    auto* set_instr_func  = find_function(new_objects, "rocprofsys_set_instrumented");
 
     //----------------------------------------------------------------------------------//
     //
@@ -1931,6 +1931,10 @@ main(int argc, char** argv)
                       itr.second.c_str());
         }
     }
+    if(!entr_trace_args)
+        verbprintf(0, "Warning! could not find optional function :: "
+                      "'rocprofsys_push_trace_with_args'. Falling back to "
+                      "'rocprofsys_push_trace'\n");
 
     //----------------------------------------------------------------------------------//
     //
@@ -1976,6 +1980,11 @@ main(int argc, char** argv)
 
     if(main_func) main_sign.get();
 
+    // There is no need to use rocprofsys_push_trace_with_args here. This is only used
+    // for process attach (--pid). Even then, the source_object value will match the name
+    // of this binary, which is already the label of the root region pushed by
+    // rocprofsys_postinit (in dl.cpp), so attaching it as an argument here would be
+    // redundant
     auto main_call_args = rocprofsys_call_expr(main_sign.get());
     auto init_call_args = rocprofsys_call_expr(instr_mode, binary_rewrite, "");
     auto fini_call_args = rocprofsys_call_expr();
@@ -2247,7 +2256,7 @@ main(int argc, char** argv)
         for(const auto& itr : instrumented_module_functions)
         {
             if(itr.function == main_func) continue;
-            auto _count = itr(addr_space, entr_trace, exit_trace);
+            auto _count = itr(addr_space, entr_trace, entr_trace_args, exit_trace);
             _pass_info[itr.module_name].first += _count.first;
             _pass_info[itr.module_name].second += _count.second;
 
@@ -2330,22 +2339,22 @@ main(int argc, char** argv)
             verbprintf(
                 1,
                 "Using insertion set failed. Restarting with individual insertion...\n");
-            auto _execute_batch = [&addr_space, &entr_trace, &exit_trace](size_t _beg,
-                                                                          size_t _end) {
+            auto _execute_batch = [&addr_space, &entr_trace, &entr_trace_args,
+                                   &exit_trace](size_t _beg, size_t _end) {
                 verbprintf(1, "Instrumenting batch of functions [%lu, %lu)\n",
                            (unsigned long) _beg, (unsigned long) _end);
                 addr_space->beginInsertionSet();
                 auto itr = instrumented_module_functions.begin();
                 std::advance(itr, _beg);
                 for(size_t i = _beg; i < _end; ++i, ++itr)
-                    (*itr)(addr_space, entr_trace, exit_trace);
+                    (*itr)(addr_space, entr_trace, entr_trace_args, exit_trace);
                 bool _modified = true;
                 bool _success  = addr_space->finalizeInsertionSet(true, &_modified);
                 return _success;
             };
 
             auto execute_batch = [&_execute_batch, &addr_space, &entr_trace,
-                                  &exit_trace](size_t _beg) {
+                                  &entr_trace_args, &exit_trace](size_t _beg) {
                 if(!_execute_batch(_beg, _beg + batch_size))
                 {
                     verbprintf(1,
@@ -2357,7 +2366,7 @@ main(int argc, char** argv)
                     std::advance(itr, _beg);
                     for(size_t i = _beg; i < _beg + batch_size && itr != _end; ++i, ++itr)
                     {
-                        (*itr)(addr_space, entr_trace, exit_trace);
+                        (*itr)(addr_space, entr_trace, entr_trace_args, exit_trace);
                     }
                 }
                 return _beg + batch_size;

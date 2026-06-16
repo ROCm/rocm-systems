@@ -4,8 +4,7 @@
 /// @file hip_memcpy_test.cpp
 /// @brief Validates hipMemcpy H2D and D2H data correctness on simulated GPU.
 ///
-/// Compiled with hipcc. Requires LD_PRELOAD=librocjitsu_kmd.so and
-/// RJ_CONFIG/RJ_SCHEMA env vars.
+/// Compiled with hipcc. Requires LD_PRELOAD=librocjitsu_kmd.so.
 
 #include <hip/hip_runtime.h>
 #include <vector>
@@ -18,8 +17,7 @@ int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   int rc = RUN_ALL_TESTS();
   (void)hipDeviceReset();
-  _exit(rc); // HIP atexit handlers call hsa_shut_down() which hangs without a
-             // real GPU; device state is already reset above.
+  return rc;
 }
 
 #define HIP_ASSERT(call)                                                                           \

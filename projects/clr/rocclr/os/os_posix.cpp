@@ -50,11 +50,34 @@
 namespace amd {
 
 namespace {
-thread_local std::vector<uint64_t> runtime_set_affinity_mask;
-thread_local bool runtime_set_affinity_mask_valid = false;
-thread_local uint32_t runtime_set_affinity_node = static_cast<uint32_t>(-1);
-thread_local std::vector<uint64_t> original_affinity_mask;
-thread_local bool original_affinity_mask_valid = false;
+struct ThreadAffinityState {
+  std::vector<uint64_t> runtime_set_affinity_mask;
+  bool runtime_set_affinity_mask_valid = false;
+  uint32_t runtime_set_affinity_node = static_cast<uint32_t>(-1);
+  std::vector<uint64_t> original_affinity_mask;
+  bool original_affinity_mask_valid = false;
+};
+
+ThreadAffinityState*& GetThreadAffinityStatePtr() {
+  thread_local ThreadAffinityState* state = nullptr;
+  return state;
+}
+
+ThreadAffinityState& GetThreadAffinityState() {
+  // Runtime teardown can run after non-trivial TLS destructors at process exit.
+  // Keep only a trivial TLS pointer so affinity reset never observes destroyed vector storage.
+  ThreadAffinityState*& state = GetThreadAffinityStatePtr();
+  if (state == nullptr) {
+    state = new ThreadAffinityState();
+  }
+  return *state;
+}
+
+void ReleaseThreadAffinityState() {
+  ThreadAffinityState*& state = GetThreadAffinityStatePtr();
+  delete state;
+  state = nullptr;
+}
 
 bool GetCurrentThreadAffinity(std::vector<uint64_t>* affinity) {
   const uint32_t size = CPU_ALLOC_SIZE(amd::Os::processorCount());
@@ -426,36 +449,6 @@ bool Os::isThreadAlive(const Thread& thread) {
   return ::pthread_kill((pthread_t)thread.handle(), 0) == 0;
 }
 
-static size_t tlsSize = 0;
-
-// Try to guess the size of TLS (plus some frames)
-void* guessTlsSizeThread(void* param) {
-  address stackBase;
-  address currentFrame;
-  size_t stackSize;
-  Os::currentStackInfo(&stackBase, &stackSize);
-  currentFrame = reinterpret_cast<address>(&stackSize);
-  tlsSize = stackBase - currentFrame;
-  // align up to page boundary
-  tlsSize = alignUp(tlsSize, amd::Os::pageSize());
-  return NULL;
-}
-
-static void guessTlsSize(void) {
-  int retval;
-  pthread_t handle;
-  pthread_attr_t threadAttr;
-
-  ::pthread_attr_init(&threadAttr);
-  retval = ::pthread_create(&handle, &threadAttr, guessTlsSizeThread, NULL);
-  if (retval == 0) {
-    pthread_join(handle, NULL);
-  } else {
-    fatal("pthread_create() failed with default stack size");
-  }
-  ::pthread_attr_destroy(&threadAttr);
-}
-
 const void* Os::createOsThread(amd::Thread* thread) {
   pthread_attr_t threadAttr;
   ::pthread_attr_init(&threadAttr);
@@ -466,20 +459,25 @@ const void* Os::createOsThread(amd::Thread* thread) {
       fatal("pthread_attr_getguardsize() failed");
     }
 
-    static std::once_flag initOnce;
-    std::call_once(initOnce, guessTlsSize);
-    ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize + tlsSize);
+    if (0 != ::pthread_attr_setstacksize(&threadAttr, thread->stackSize_ + guardsize)) {
+      fatal("pthread_attr_setstacksize() failed");
+    }
   }
 
   // We never plan the use join, so free the resources now.
-  ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED);
+  if (0 != ::pthread_attr_setdetachstate(&threadAttr, PTHREAD_CREATE_DETACHED)) {
+    fatal("pthread_attr_setdetachstate() failed");
+  }
 
   pthread_t handle = 0;
   if (0 != ::pthread_create(&handle, &threadAttr, (void* (*)(void*)) & Thread::entry, thread)) {
     thread->setState(Thread::FAILED);
+    guarantee(false, "pthread_create() failed");
   }
 
-  ::pthread_attr_destroy(&threadAttr);
+  if (0 != ::pthread_attr_destroy(&threadAttr)) {
+    fatal("pthread_attr_destroy() failed");
+  };
   return reinterpret_cast<const void*>(handle);
 }
 
@@ -826,6 +824,10 @@ bool Os::CloseFileHandle(FileDesc fdesc) {
   return true;
 }
 
+amd::Os::FileDesc Os::DupFileHandle(FileDesc fdesc) {
+  return dup(fdesc);
+}
+
 bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
   if ((fd_ptr == nullptr) || (sz_ptr == nullptr)) {
     return false;
@@ -1148,7 +1150,10 @@ bool NumaNode::SchedSetAffinity() {
 
 // ================================================================================================
 bool NumaNode::SchedSetAffinityIfAllowed() {
-  if (runtime_set_affinity_mask_valid && runtime_set_affinity_node == node_index_) {
+  ThreadAffinityState* affinity_state = GetThreadAffinityStatePtr();
+  const bool had_affinity_state = (affinity_state != nullptr);
+  if (affinity_state != nullptr && affinity_state->runtime_set_affinity_mask_valid &&
+      affinity_state->runtime_set_affinity_node == node_index_) {
     return true;
   }
 
@@ -1158,32 +1163,43 @@ bool NumaNode::SchedSetAffinityIfAllowed() {
   }
 
   const bool current_mask_is_runtime_set =
-      runtime_set_affinity_mask_valid &&
-      IsSameAffinity(current_affinity, runtime_set_affinity_mask);
+      affinity_state != nullptr && affinity_state->runtime_set_affinity_mask_valid &&
+      IsSameAffinity(current_affinity, affinity_state->runtime_set_affinity_mask);
   if (!current_mask_is_runtime_set && !IsUnrestrictedAffinity(current_affinity)) {
     // Respect application, launcher, or cpuset affinity masks.
     return false;
   }
 
-  if (!original_affinity_mask_valid) {
-    original_affinity_mask = current_affinity;
-    original_affinity_mask_valid = true;
+  affinity_state = &GetThreadAffinityState();
+  if (!affinity_state->original_affinity_mask_valid) {
+    affinity_state->original_affinity_mask = current_affinity;
+    affinity_state->original_affinity_mask_valid = true;
   }
 
   if (!SchedSetAffinity()) {
+    if (!had_affinity_state) {
+      ReleaseThreadAffinityState();
+    }
     return false;
   }
 
-  runtime_set_affinity_mask_valid = GetCurrentThreadAffinity(&runtime_set_affinity_mask);
-  if (runtime_set_affinity_mask_valid) {
-    runtime_set_affinity_node = node_index_;
+  affinity_state->runtime_set_affinity_mask_valid =
+      GetCurrentThreadAffinity(&affinity_state->runtime_set_affinity_mask);
+  if (affinity_state->runtime_set_affinity_mask_valid) {
+    affinity_state->runtime_set_affinity_node = node_index_;
+  } else {
+    SetCurrentThreadAffinity(affinity_state->original_affinity_mask);
+    ReleaseThreadAffinityState();
+    return false;
   }
-  return runtime_set_affinity_mask_valid;
+  return true;
 }
 
 // ================================================================================================
 bool resetThreadAffinity() {
-  if (!runtime_set_affinity_mask_valid || !original_affinity_mask_valid) {
+  ThreadAffinityState* affinity_state = GetThreadAffinityStatePtr();
+  if (affinity_state == nullptr || !affinity_state->runtime_set_affinity_mask_valid ||
+      !affinity_state->original_affinity_mask_valid) {
     return false;
   }
 
@@ -1192,22 +1208,14 @@ bool resetThreadAffinity() {
     return false;
   }
 
-  if (!IsSameAffinity(current_affinity, runtime_set_affinity_mask)) {
+  if (!IsSameAffinity(current_affinity, affinity_state->runtime_set_affinity_mask)) {
     // The application changed affinity after ROCclr. Leave it intact.
-    runtime_set_affinity_mask_valid = false;
-    runtime_set_affinity_node = static_cast<uint32_t>(-1);
-    original_affinity_mask_valid = false;
-    original_affinity_mask.clear();
-    runtime_set_affinity_mask.clear();
+    ReleaseThreadAffinityState();
     return false;
   }
 
-  const bool restored = SetCurrentThreadAffinity(original_affinity_mask);
-  runtime_set_affinity_mask_valid = false;
-  runtime_set_affinity_node = static_cast<uint32_t>(-1);
-  original_affinity_mask_valid = false;
-  original_affinity_mask.clear();
-  runtime_set_affinity_mask.clear();
+  const bool restored = SetCurrentThreadAffinity(affinity_state->original_affinity_mask);
+  ReleaseThreadAffinityState();
   return restored;
 }
 }  // namespace numa

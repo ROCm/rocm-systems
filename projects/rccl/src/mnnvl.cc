@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2015-2024, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "mnnvl.h"
 #include "transport.h"
@@ -75,7 +76,7 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     CUresult err;
 
     // Allocate FABRIC handle compatible memory
-    ncclResult_t ret = ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN);
+    ncclResult_t ret = ncclCuMemAlloc(&ptr, &handle, CU_MEM_HANDLE_TYPE_FABRIC, CUDA_IPC_MIN, comm->memManager, ncclMemOffload);
     if (ret != ncclSuccess) {
       // Return an error if this is a MNNVL capable system but FABRIC handles are not supported
       WARN("MNNVL (cliqueSize %d) is available but not working on this system. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
@@ -93,13 +94,13 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
     // it was removed, so future maintainers don't re-add it expecting it to work.
       const char *errStr;
       (void) cuGetErrorString(err, &errStr);
-      NCCLCHECK(ncclCuMemFree(ptr));
+      NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
       // Return an error if this is a MNNVL capable system but it's not working
       WARN("MNNVL rank%d (cliqueSize %d) is available but not working on this system: cuMemExportToShareableHandle/cuMemImportFromShareableHandle failed: %s. Check afmctl. Set NCCL_MNNVL_ENABLE=0 to ignore this issue.",
           comm->rank, comm->clique.size, errStr);
       return ncclSystemError;
     }
-    NCCLCHECK(ncclCuMemFree(ptr));
+    NCCLCHECK(ncclCuMemFree(ptr, comm->memManager));
 
     // Force the CUMEM handle type to be FABRIC for MNNVL
     ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;

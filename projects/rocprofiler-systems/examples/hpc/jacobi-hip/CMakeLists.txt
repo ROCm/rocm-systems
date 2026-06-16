@@ -3,6 +3,7 @@
 
 check_rocprofsys_disable_examples("jacobi-hip" _JACOBI_HIP_DISABLED)
 check_rocprofsys_disable_examples("mpi" _MPI_DISABLED)
+
 if(_JACOBI_HIP_DISABLED OR _MPI_DISABLED)
     return()
 endif()
@@ -22,6 +23,7 @@ if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
 endif()
 
 find_package(MPI QUIET COMPONENTS CXX)
+
 if(NOT MPI_CXX_FOUND)
     rocprofiler_systems_message(AUTHOR_WARNING "MPI not found, this is required for jacobi-hip example")
     return()

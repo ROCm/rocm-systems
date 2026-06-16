@@ -10,7 +10,6 @@
 #include <timemory/settings/macros.hpp>
 #include <timemory/tpls/cereal/archives.hpp>
 #include <timemory/tpls/cereal/cereal/external/base64.hpp>
-#include <timemory/utility/demangle.hpp>
 
 #include <algorithm>
 #include <array>

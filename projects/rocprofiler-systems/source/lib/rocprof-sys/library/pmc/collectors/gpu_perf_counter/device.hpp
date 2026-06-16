@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -22,15 +23,57 @@
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
 
-template <typename Driver>
+// Contract the GPU perf-counter collector requires of its backend (rocprofiler-sdk).
+template <typename Backend>
+concept backend_contract = requires(
+    Backend backend, typename Backend::context_id_t context,
+    typename Backend::agent_id_t agent, typename Backend::buffer_id_t buffer,
+    typename Backend::user_data_t user_data, typename Backend::counter_flag_t flags,
+    typename Backend::counter_record_t  record,
+    typename Backend::counter_record_t* records,
+    typename Backend::counter_id_t* counter_id, typename Backend::counter_id_t counter,
+    typename Backend::counter_id_t*                counters,
+    typename Backend::counter_config_id_t*         config,
+    typename Backend::available_counters_cb_t      counter_cb,
+    typename Backend::device_counting_service_cb_t service_cb, size_t* record_count,
+    void* data) {
+    {
+        Backend::make_agent_id(std::uint64_t{})
+    } -> std::same_as<typename Backend::agent_id_t>;
+    { backend.create_context(&context) } -> std::same_as<typename Backend::status_t>;
+    { backend.start_context(context) } -> std::same_as<typename Backend::status_t>;
+    { backend.stop_context(context) } -> std::same_as<typename Backend::status_t>;
+    {
+        backend.sample_device_counting_service(context, user_data, flags, records,
+                                               record_count)
+    } -> std::same_as<typename Backend::status_t>;
+    {
+        backend.query_record_counter_id(record, counter_id)
+    } -> std::same_as<typename Backend::status_t>;
+    {
+        backend.query_counter_details(counter)
+    } -> std::same_as<std::vector<counter_metadata>>;
+    {
+        backend.iterate_agent_supported_counters(agent, counter_cb, data)
+    } -> std::same_as<typename Backend::status_t>;
+    {
+        backend.create_counter_config(agent, counters, size_t{}, config)
+    } -> std::same_as<typename Backend::status_t>;
+    {
+        backend.configure_device_counting_service(context, buffer, agent, service_cb,
+                                                  data)
+    } -> std::same_as<typename Backend::status_t>;
+};
+
+template <backend_contract Backend>
 class device
 {
 public:
-    device(std::shared_ptr<Driver> driver, typename Driver::context_id_t context,
-           std::shared_ptr<rocprofsys::agent>   agent,
-           typename Driver::counter_config_id_t profile_config,
-           std::vector<counter_metadata>        counter_meta)
-    : m_driver_api{ std::move(driver) }
+    device(std::shared_ptr<Backend> backend, typename Backend::context_id_t context,
+           std::shared_ptr<rocprofsys::agent>    agent,
+           typename Backend::counter_config_id_t profile_config,
+           std::vector<counter_metadata>         counter_meta)
+    : m_backend_api{ std::move(backend) }
     , m_context{ context }
     , m_agent{ std::move(agent) }
     , m_profile_config{ profile_config }
@@ -78,17 +121,17 @@ public:
 
         auto rec_count = m_record_buffer.size();
 
-        const auto status = m_driver_api->sample_device_counting_service(
-            m_context, {}, Driver::flag_none, m_record_buffer.data(), &rec_count);
+        const auto status = m_backend_api->sample_device_counting_service(
+            m_context, {}, Backend::flag_none, m_record_buffer.data(), &rec_count);
 
-        if(status == Driver::status_hsa_not_loaded)
+        if(status == Backend::status_hsa_not_loaded)
         {
             LOG_DEBUG("HSA not loaded for device {} (status={}). Ignoring error.",
                       m_agent->device_type_index, static_cast<int>(status));
             return m_result_cache;
         }
 
-        if(status != Driver::status_success)
+        if(status != Backend::status_success)
         {
             LOG_WARNING("Sample failed for device {} (status={})",
                         m_agent->device_type_index, static_cast<int>(status));
@@ -104,8 +147,8 @@ public:
         {
             const auto& record = m_record_buffer[idx];
 
-            typename Driver::counter_id_t config_id{};
-            m_driver_api->query_record_counter_id(record, &config_id);
+            typename Backend::counter_id_t config_id{};
+            m_backend_api->query_record_counter_id(record, &config_id);
             auto   id      = config_id.handle;
             auto   raw     = record.counter_value;
             auto   prev_it = m_prev_values.find(id);
@@ -125,8 +168,8 @@ public:
     {
         if(m_context_started) return;
 
-        auto status = m_driver_api->start_context(m_context);
-        if(status == Driver::status_success)
+        auto status = m_backend_api->start_context(m_context);
+        if(status == Backend::status_success)
         {
             m_context_started = true;
             m_prev_values.clear();
@@ -144,8 +187,8 @@ public:
 
     void stop()
     {
-        auto status = m_driver_api->stop_context(m_context);
-        if(status != Driver::status_success)
+        auto status = m_backend_api->stop_context(m_context);
+        if(status != Backend::status_success)
         {
             LOG_WARNING("Failed to stop context for device {} (status={})",
                         m_agent->device_type_index, static_cast<int>(status));
@@ -153,15 +196,15 @@ public:
     }
 
 private:
-    std::shared_ptr<Driver>                        m_driver_api;
-    typename Driver::context_id_t                  m_context;
-    std::shared_ptr<rocprofsys::agent>             m_agent;
-    typename Driver::counter_config_id_t           m_profile_config;
-    std::vector<counter_metadata>                  m_counter_meta;
-    std::vector<typename Driver::counter_record_t> m_record_buffer;
-    metrics                                        m_result_cache;
-    std::unordered_map<counter_id_t, double>       m_prev_values;
-    bool                                           m_context_started = false;
+    std::shared_ptr<Backend>                        m_backend_api;
+    typename Backend::context_id_t                  m_context;
+    std::shared_ptr<rocprofsys::agent>              m_agent;
+    typename Backend::counter_config_id_t           m_profile_config;
+    std::vector<counter_metadata>                   m_counter_meta;
+    std::vector<typename Backend::counter_record_t> m_record_buffer;
+    metrics                                         m_result_cache;
+    std::unordered_map<counter_id_t, double>        m_prev_values;
+    bool                                            m_context_started = false;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

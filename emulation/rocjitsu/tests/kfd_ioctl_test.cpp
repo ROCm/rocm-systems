@@ -1,7 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/simulated_driver.h"
+#include "rocjitsu/vm/virtual_machine.h"
+
+#include "embedded_schema.h"
+#include "simdojo/sim/simulation.h"
 
 #include <gtest/gtest.h>
 
@@ -17,16 +23,32 @@
 namespace {
 
 const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/amdgpu_cdna4.json";
-const std::string SCHEMA_PATH = std::string(SCHEMA_DIR) + "/simulation_config.fbs";
 constexpr uint32_t kGpuId = 38144;
 
 class KfdIoctlTest : public ::testing::Test {
 protected:
   void SetUp() override {
     setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1);
-    setenv("RJ_SCHEMA", SCHEMA_PATH.c_str(), 1);
-    driver_ = rocjitsu::SimulatedDriver::create_default();
-    ASSERT_NE(driver_, nullptr);
+    loaded_ = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
+    auto *soc = loaded_.soc();
+    auto num_xcds = soc->num_xcds();
+
+    loaded_.engine_config.max_ticks = 0;
+    loaded_.engine_config.await_primaries = true;
+    engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);
+
+    auto root = loaded_.take_root();
+    root.release();
+    auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
+    driver_ = vm->driver();
+
+    engine_->topology().set_root(std::move(vm));
+    loaded_.wire_links(engine_->topology());
+    soc->wire_backing(engine_->topology());
+    engine_->build();
+    engine_->register_as_primary();
+
+    driver_->setup_topology(loaded_.device, num_xcds);
     int fd = driver_->open();
     ASSERT_GE(fd, 0);
   }
@@ -36,7 +58,9 @@ protected:
       driver_->close();
   }
 
-  std::unique_ptr<rocjitsu::SimulatedDriver> driver_;
+  rocjitsu::config::LoadedConfig loaded_;
+  std::unique_ptr<simdojo::SimulationEngine> engine_;
+  rocjitsu::SimulatedDriver *driver_ = nullptr;
 };
 
 TEST_F(KfdIoctlTest, SetMemoryPolicy) {
@@ -106,14 +130,15 @@ TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {
   attrs[1].type = KFD_IOCTL_SVM_ATTR_SET_FLAGS;
   attrs[1].value = KFD_IOCTL_SVM_FLAG_GPU_EXEC;
 
-  int rc = driver_->ioctl(AMDKFD_IOC_SVM, svm_args);
+  unsigned long svm_request = rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size());
+  int rc = driver_->ioctl(svm_request, svm_args);
   EXPECT_EQ(rc, 0);
 
   svm_args->op = KFD_IOCTL_SVM_OP_GET_ATTR;
   attrs[0].value = 0;
   attrs[1].value = 0;
 
-  rc = driver_->ioctl(AMDKFD_IOC_SVM, svm_args);
+  rc = driver_->ioctl(svm_request, svm_args);
   EXPECT_EQ(rc, 0);
   EXPECT_EQ(attrs[0].value, kGpuId);
   EXPECT_EQ(attrs[1].value, KFD_IOCTL_SVM_FLAG_GPU_EXEC);

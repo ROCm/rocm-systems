@@ -2,17 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
-#include <cstdint>
-
-#include <timemory/units.hpp>
+#include "common/units.hpp"
 
 #include "logger/debug.hpp"
+
+#include <cstdint>
 
 namespace rocprofsys
 {
 namespace perf
 {
-namespace units = ::tim::units;
 
 event_type
 get_event_type(std::string_view _v)

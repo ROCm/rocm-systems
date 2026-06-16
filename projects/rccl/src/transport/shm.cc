@@ -1,13 +1,15 @@
 /*************************************************************************
- * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "comm.h"
 #include "shmutils.h"
 #include "shm.h"
 #include "transport.h"
+#include "compiler.h"
 
 #define SHM_PATH_MAX 128
 #define SHM_HANDLE_TYPE ncclCuMemHandleType
@@ -224,7 +226,7 @@ static ncclResult_t shmRecvConnect(struct ncclComm* comm, struct ncclConnect* co
   return ncclSuccess;
 }
 
-static ncclResult_t shmSendFree(struct ncclConnector* send) {
+static ncclResult_t shmSendFree(struct ncclComm* comm, struct ncclConnector* send) {
   struct shmRecvResources* resources = (struct shmRecvResources*)send->transportResources;
   if (resources) {
     NCCLCHECK(ncclShmIpcClose(&resources->remDesc));
@@ -234,7 +236,7 @@ static ncclResult_t shmSendFree(struct ncclConnector* send) {
   return ncclSuccess;
 }
 
-static ncclResult_t shmRecvFree(struct ncclConnector* recv) {
+static ncclResult_t shmRecvFree(struct ncclComm* comm, struct ncclConnector* recv) {
   struct shmRecvResources* resources = (struct shmRecvResources*)recv->transportResources;
   if (resources) {
     NCCLCHECK(ncclShmIpcClose(&resources->remDesc));
@@ -254,7 +256,7 @@ static ncclResult_t shmSendProxyConnect(struct ncclProxyConnection* connection, 
   proxyInfo->shmFifo = reqInfo->shmFifo;
   proxyInfo->sendMem = reqInfo->sendMem;
   proxyInfo->recvMem = reqInfo->recvMem;
-  NCCLCHECKGOTO(ncclCudaCalloc(&proxyInfo->devFifo, proxyState->buffSizes[NCCL_PROTO_SIMPLE]), ret, fail);
+  NCCLCHECKGOTO(ncclCudaCalloc(&proxyInfo->devFifo, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager), ret, fail);
   NCCLCHECKGOTO(ncclCudaHostCalloc(&proxyInfo->ceRecvMem, 1), ret, fail);
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&proxyInfo->stream, cudaStreamNonBlocking), ret, fail);
   for (int i=0; i<NCCL_STEPS; i++) {
@@ -269,7 +271,7 @@ exit:
   return ret;
 fail:
   if (proxyInfo->ceRecvMem) ncclCudaHostFree(proxyInfo->ceRecvMem);
-  if (proxyInfo->devFifo) (void)ncclCudaFree(proxyInfo->devFifo);
+  if (proxyInfo->devFifo) (void)ncclCudaFree(proxyInfo->devFifo, proxyState->memManager);
   free(proxyInfo);
   goto exit;
 }
@@ -284,7 +286,7 @@ static ncclResult_t shmRecvProxyConnect(struct ncclProxyConnection* connection, 
   proxyInfo->shmFifo = reqInfo->shmFifo;
   proxyInfo->sendMem = reqInfo->sendMem;
   proxyInfo->recvMem = reqInfo->recvMem;
-  NCCLCHECKGOTO(ncclCudaCalloc(&proxyInfo->devFifo, proxyState->buffSizes[NCCL_PROTO_SIMPLE]), ret, fail);
+  NCCLCHECKGOTO(ncclCudaCalloc(&proxyInfo->devFifo, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager), ret, fail);
   NCCLCHECKGOTO(ncclCudaHostCalloc(&proxyInfo->ceRecvMem, 1), ret, fail);
   CUDACHECKGOTO(cudaStreamCreateWithFlags(&proxyInfo->stream, cudaStreamNonBlocking), ret, fail);
   for (int i=0; i<NCCL_STEPS; i++) {
@@ -297,7 +299,7 @@ exit:
   return ret;
 fail:
   if (proxyInfo->ceRecvMem) ncclCudaHostFree(proxyInfo->ceRecvMem);
-  if (proxyInfo->devFifo) (void)ncclCudaFree(proxyInfo->devFifo);
+  if (proxyInfo->devFifo) (void)ncclCudaFree(proxyInfo->devFifo, proxyState->memManager);
   free(proxyInfo);
   goto exit;
 }
@@ -308,7 +310,7 @@ static ncclResult_t shmSendProxyFree(struct ncclProxyConnection* connection, str
   if (resources) {
     if (useMemcpySend) {
       CUDACHECK(cudaStreamDestroy(resources->stream));
-      NCCLCHECK(ncclCudaFree(resources->devFifo));
+      NCCLCHECK(ncclCudaFree(resources->devFifo, proxyState->memManager));
       NCCLCHECK(ncclCudaHostFree(resources->ceRecvMem));
       for (int i=0; i<NCCL_STEPS; i++) {
         CUDACHECK(cudaEventDestroy(resources->events[i]));
@@ -327,7 +329,7 @@ static ncclResult_t shmRecvProxyFree(struct ncclProxyConnection* connection, str
   if (resources) {
     if (useMemcpyRecv) {
       CUDACHECK(cudaStreamDestroy(resources->stream));
-      NCCLCHECK(ncclCudaFree(resources->devFifo));
+      NCCLCHECK(ncclCudaFree(resources->devFifo, proxyState->memManager));
       NCCLCHECK(ncclCudaHostFree(resources->ceRecvMem));
       for (int i=0; i<NCCL_STEPS; i++) {
         CUDACHECK(cudaEventDestroy(resources->events[i]));
@@ -373,13 +375,13 @@ static ncclResult_t shmSendProxyProgress(struct ncclProxyState* proxyState, stru
           CUDACHECK(cudaMemcpyAsync(resources->shmFifo+buffSlot*stepSize, resources->devFifo+buffSlot*stepSize, size, cudaMemcpyDeviceToHost, resources->stream));
           CUDACHECK(cudaEventRecord(resources->events[buffSlot], resources->stream));
           resources->recvMem->connFifo[buffSlot].size = size;
-          __sync_synchronize(); // make sure connFifo[].size is visible
+          std::atomic_thread_fence(std::memory_order_seq_cst); // make sure connFifo[].size is visible
           sub->transmitted += args->sliceSteps;
         }
       }
       if (sub->done < sub->transmitted) {
         int buffSlot = (sub->base+sub->done)%NCCL_STEPS;
-        cudaError_t res = cudaEventQuery(resources->events[buffSlot]);
+        cudaError_t res = CUDACLEARERROR(cudaEventQuery(resources->events[buffSlot]));
         if (res != cudaErrorNotReady) CUDACHECK(res);
         if (res == cudaSuccess) {
           sub->done += args->sliceSteps;
@@ -436,7 +438,7 @@ static ncclResult_t shmRecvProxyProgress(struct ncclProxyState* proxyState, stru
       }
       if (sub->done < sub->transmitted) {
         int buffSlot = (sub->base+sub->done)%NCCL_STEPS;
-        cudaError_t res = cudaEventQuery(resources->events[buffSlot]);
+        cudaError_t res = CUDACLEARERROR(cudaEventQuery(resources->events[buffSlot]));
         if (res != cudaErrorNotReady) CUDACHECK(res);
         if (res == cudaSuccess) {
           sub->done += args->sliceSteps;

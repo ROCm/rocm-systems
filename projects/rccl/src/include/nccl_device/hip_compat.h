@@ -30,6 +30,9 @@
   #define NCCL_DEVICE_COMPILE 0
 #endif
 
+// Backward-compat aliases for the IR bitcode binding layer (PR #6435).
+#define NCCL_CHECK_CUDACC NCCL_DEVICE_COMPILE
+
 ////////////////////////////////////////////////////////////////////////////////
 // Device function qualifiers
 ////////////////////////////////////////////////////////////////////////////////
@@ -72,6 +75,8 @@
 #else
   #define NCCL_DEVICE_ARCH 0
 #endif
+
+#define NCCL_CHECK_CUDA_ARCH NCCL_DEVICE_ARCH
 
 // Hopper+ features (multimem, etc.) - NVIDIA only
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900

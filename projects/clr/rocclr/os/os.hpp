@@ -49,6 +49,8 @@ class Os : AllStatic {
 
   // Closes the file Handle
   static bool CloseFileHandle(FileDesc fdesc);
+  // Duplicates the file Handle. Returns FDescInit() on failure.
+  static FileDesc DupFileHandle(FileDesc fdesc);
   // Given a valid file name, returns file descriptor and file size
   static bool GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr);
 

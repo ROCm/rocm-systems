@@ -117,6 +117,11 @@ RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_nc
 #if RCCL_API_TRACE_VERSION_PATCH >= 4
 RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommRevoke, ncclCommRevoke, ncclCommRevoke_fn, comm, revokeFlags)
 #endif
+#if RCCL_API_TRACE_VERSION_PATCH >= 5
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommSuspend, ncclCommSuspend, ncclCommSuspend_fn, comm, flags)
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommResume, ncclCommResume, ncclCommResume_fn, comm)
+RCCL_API_INFO_DEFINITION_V(ROCPROFILER_RCCL_TABLE_ID, ROCPROFILER_RCCL_API_ID_ncclCommMemStats, ncclCommMemStats, ncclCommMemStats_fn, comm, stat, value)
+#endif
 
 #else
 #    error                                                                                         \

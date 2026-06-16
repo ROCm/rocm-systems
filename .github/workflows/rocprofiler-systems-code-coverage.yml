@@ -95,20 +95,15 @@ jobs:
           apt-get remove -y --purge 'libopenmpi-dev' 'libopenmpi3' 'openmpi-bin' 'openmpi-common' &&
           apt-get autoremove -y --purge &&
           apt-get upgrade -y &&
-          apt-get install -y libomp-dev gcovr libmpich-dev mpich &&
+          apt-get install -y libomp-dev libtbb-dev \
+            libdw-dev libdwarf-dev libelf-dev libiberty-dev \
+            libmpich-dev mpich &&
           apt-get autoclean
 
-    - name: Install Python Test Dependencies
+    - name: Install gcovr
       timeout-minutes: 10
       shell: bash
-      working-directory: projects/rocprofiler-systems/
-      run: |
-        for env_dir in /opt/conda/envs/py3.{8,9,10,11,12,13}/; do
-          if [ -d "${env_dir}" ] && [ -x "${env_dir}bin/python3" ]; then
-            echo "Installing requirements into ${env_dir}"
-            "${env_dir}bin/python3" -m pip install -r requirements.txt
-          fi
-        done
+      run: pip3 install 'gcovr>=8.4'
 
     - name: Sync gcov with GCC
       shell: bash
@@ -130,15 +125,10 @@ jobs:
         echo "CMake version: $(cmake --version | head -n 1)"
         echo "Compiler version: $(gcc --version | head -n 1)"
         cmake --preset coverage \
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
-          -DROCPROFSYS_BUILD_CI=ON \
-          -DROCPROFSYS_USE_MPI=ON \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          "-DROCPROFSYS_PYTHON_ENVS=py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
-          -DROCPROFSYS_MAX_THREADS=64 \
-          "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;videodecode;jpegdecode;openmp" \
-          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }} \
-          -DUSE_CLANG_OMP=OFF
+          -DROCPROFSYS_PYTHON_ENVS=py3.12 \
+          "-DROCPROFSYS_DISABLE_EXAMPLES=transpose;rccl;videodecode;jpegdecode;openmp;roctx;scratch-memory;unified-memory;transferBench;hpc;sdma_test" \
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Build
       timeout-minutes: 60
@@ -213,7 +203,7 @@ jobs:
         echo 'EOF' >> $GITHUB_OUTPUT
 
     - name: Write Code Coverage Comment
-      if: always() && github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request'
       timeout-minutes: 5
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:

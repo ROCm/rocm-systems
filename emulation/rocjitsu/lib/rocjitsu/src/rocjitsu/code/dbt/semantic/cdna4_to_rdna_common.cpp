@@ -6,12 +6,14 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 
+#include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/patch/instruction_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/machine_insts.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <cstring>
+#include <string>
 #include <utility>
 
 namespace rocjitsu {
@@ -27,10 +29,12 @@ build_rdna_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uin
   return {w0, w1};
 }
 
-std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
+ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
-    return {};
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot lower v_lshl_add_u64 without a complete 64-bit raw "
+                                "encoding");
 
   cdna4::Vop3MachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
@@ -38,10 +42,23 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
   const uint16_t src0 = src.src0;
   const uint16_t src2 = src.src2;
 
+  if (host_arch != ROCJITSU_CODE_ARCH_RDNA3 && host_arch != ROCJITSU_CODE_ARCH_RDNA4)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " v_lshl_add_u64 lowering only supports RDNA3/RDNA4 hosts");
+  if (vdst == 255)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " v_lshl_add_u64 lowering needs two destination VGPRs but vdst "
+                                "is v255");
+
   constexpr uint16_t kVccLo = 106;
   constexpr uint16_t kOpAddCoU32 = 768;
   constexpr uint16_t kOpAddCoCiU32 = 288;
   constexpr uint8_t kSoppWaitAlu = 8;
+
+  // This lowering introduces VCC as the explicit carry register. VCC is special
+  // scalar state, not a liveness-allocated scratch SGPR pair, so it must not
+  // grow the ordinary SGPR descriptor allocation. Treating it as normal SGPRs
+  // makes valid RDNA targets look unsupported once diagnostics become fatal.
 
   std::vector<uint32_t> words;
 
@@ -68,15 +85,15 @@ std::vector<uint32_t> lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch
     words.push_back(w1);
   }
 
-  return words;
+  return ExpandResult::success(std::move(words));
 }
 
 } // namespace
 
-std::vector<uint32_t> expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst,
-                                                           uint32_t host_arch, uint64_t,
-                                                           const LivenessAnalysis &,
-                                                           const LaneLayout *, const LaneLayout *) {
+ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint32_t host_arch,
+                                                  uint64_t, const LivenessAnalysis &,
+                                                  TranslationContext &, const LaneLayout *,
+                                                  const LaneLayout *) {
   return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch));
 }
 

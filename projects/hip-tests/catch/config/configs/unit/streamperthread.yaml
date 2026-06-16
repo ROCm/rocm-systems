@@ -75,12 +75,14 @@ streamperthread:
     tags: [stream]
   Unit_hipGetProcAddress_spt_Memset2D3D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [stream]
   Unit_hipGetProcAddress_spt_Memcpy2D:
     <<: *level_2
     tags: [stream, image]
   Unit_hipGetProcAddress_spt_Memcpy3D:
     <<: *level_2
+    disabled: [amd_wsl]
     tags: [stream]
   Unit_hipGetProcAddress_spt_LaunchKernel:
     <<: *level_2

@@ -3072,7 +3072,7 @@ extern "C"
             _first = false;
         }
 
-        if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
+        if(!rocprofsys::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
         if(!tim::settings::enabled()) return nullptr;
 
         if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;

@@ -24,6 +24,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/test_encodings.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/test_encodings.h"
@@ -221,6 +222,9 @@ TEST(InstructionExecutionHarness, Rdna3_5) {
   RUN_HARNESS(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5");
 }
 TEST(InstructionExecutionHarness, Rdna4) { RUN_HARNESS(rdna4, ROCJITSU_CODE_ARCH_RDNA4, "rdna4"); }
+TEST(InstructionExecutionHarness, Gfx1250) {
+  RUN_HARNESS(gfx1250, ROCJITSU_CODE_ARCH_GFX1250, "gfx1250");
+}
 
 #undef RUN_HARNESS
 

@@ -11,7 +11,6 @@
 #include <spdlog/fmt/ranges.h>
 
 #include <timemory/defines.h>
-#include <timemory/utility/demangle.hpp>
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
@@ -32,7 +31,7 @@
         {                                                                                \
             std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);         \
             LOG_WARNING("rocprofiler-sdk call [{}] failed with error code {} :: {}",     \
-                        #result, status_msg);                                            \
+                        #result, static_cast<int>(CHECKSTATUS), status_msg);             \
         }                                                                                \
     }
 

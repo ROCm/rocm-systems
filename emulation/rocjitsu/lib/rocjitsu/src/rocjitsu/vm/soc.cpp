@@ -158,4 +158,27 @@ void SoC::initialize() {
   }
 }
 
+const std::vector<amdgpu::ComputeUnitCore *> &SoC::all_cus() {
+  if (all_cus_cache_.empty()) {
+    for (auto *x : xcds_)
+      for (uint32_t s = 0; s < x->num_shader_engines(); ++s)
+        for (auto *cu : x->shader_engine(s)->compute_units())
+          all_cus_cache_.push_back(cu);
+  }
+  return all_cus_cache_;
+}
+
+void SoC::run_to_idle() {
+  if (exec_mode_ == simdojo::ExecMode::FUNCTIONAL) {
+    bool progress = true;
+    while (progress) {
+      progress = false;
+      for (auto *xcd : xcds_)
+        for (auto *se : xcd->shader_engines())
+          if (se->spi().step())
+            progress = true;
+    }
+  }
+}
+
 } // namespace rocjitsu

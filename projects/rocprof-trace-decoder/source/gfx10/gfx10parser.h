@@ -93,7 +93,7 @@ class TokenGenerator : public NaviTokenGenerator
 {
 public:
     TokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time);
-    Token next() override;
+    Token next() final;
 
 private:
     TokenLookupTable lookupbits;

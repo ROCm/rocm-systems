@@ -444,9 +444,7 @@ HIP_TEST_CASE(Unit_hipPointerGetAttributes_GpuIter_Managed__Memory) {
   int* managed_ptr{nullptr};
   for (int i = 0; i < deviceCount; i++) {
     HIP_CHECK(hipSetDevice(i));
-    int managed_memory = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
-    if (!managed_memory) {
+    if (!HipTest::isManagedMemorySupportedOnDevice(i)) {
       INFO("Managed memory access not supported on the device" << i);
     } else {
       // Allocating the memory and test changes only if managed

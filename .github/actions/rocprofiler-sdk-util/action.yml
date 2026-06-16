@@ -41,10 +41,6 @@ inputs:
     description: 'Enable rocprof-trace-decoder build'
     required: false
     default: 'false'
-  install-nightly-rocm:
-    description: 'Install latest nightly ROCm'
-    required: false
-    default: 'true'
   build-jobs:
     description: 'Number of parallel build jobs'
     required: false
@@ -74,17 +70,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install Latest Nightly ROCm
-      if: ${{ inputs.install-nightly-rocm == 'true' }}
-      shell: bash
-      working-directory: /tmp
-      run: |
-        mv "${{ inputs.rocm-path }}-${{ inputs.gpu-target }}.tar.gz" .
-        rm -rf ${{ inputs.rocm-path }}*
-        mkdir -p "${{ inputs.rocm-path }}"
-        tar -xf "rocm-${{ inputs.gpu-target }}.tar.gz" -C "${{ inputs.rocm-path }}"
-        echo "ROCm installed to: ${{ inputs.rocm-path }}"
-
     - name: Setup environment variables
       shell: bash
       run: |
@@ -118,8 +103,6 @@ runs:
       shell: bash
       working-directory: projects/rocr-runtime
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install ROCR-Runtime..."
         cmake -B build \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -139,8 +122,6 @@ runs:
       run: |
         export HIP_DIR=$PWD/hip
         export CLR_DIR=$PWD/clr
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$PATH
         echo "Install HIP..."
         cd $CLR_DIR
         cmake \
@@ -164,7 +145,6 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-register
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
         export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
@@ -183,8 +163,6 @@ runs:
       shell: bash
       working-directory: projects/aqlprofile
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install Aqlprofile..."
         cmake -B build-aqlprofile \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -201,8 +179,6 @@ runs:
       if: ${{ inputs.enable-rocdecode-build == 'true' }}
       shell: bash
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Building & Installing ROCDecode..."
         cmake -B build-rocdecode \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
@@ -219,8 +195,6 @@ runs:
       if: ${{ inputs.enable-rocjpeg-build == 'true' }}
       shell: bash
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Building & Installing ROCJPEG..."
         cmake -B build-rocjpeg \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
@@ -238,8 +212,6 @@ runs:
       shell: bash
       working-directory: projects/rocprof-trace-decoder
       run: |
-        export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install rocprof-trace-decoder..."
         rm -f ${{ inputs.rocm-path }}/lib/librocprof-trace-decoder*
         rm -f ${{ inputs.rocm-path }}/lib64/librocprof-trace-decoder*

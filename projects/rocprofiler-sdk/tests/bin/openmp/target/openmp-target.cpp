@@ -22,8 +22,11 @@
 
 #include <rocprofiler-sdk-roctx/roctx.h>
 
-#include <math.h>
-#include <stdio.h>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <string_view>
 
 constexpr float  EPS_FLOAT  = 1.0e-7f;
 constexpr double EPS_DOUBLE = 1.0e-15;
@@ -52,8 +55,22 @@ vmul(T* a, T* b, T* c, int N)
 }
 
 int
-main()
+main(int argc, char** argv)
 {
+    auto*    exe_name = ::basename(argv[0]);
+    uint64_t nitr     = 1;
+    for(int i = 1; i < argc; ++i)
+    {
+        auto _arg = std::string_view{argv[i]};
+        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            fprintf(stderr, "usage: %s [NUM_ITERATION (%lu)]\n", exe_name, nitr);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    if(argc > 1) nitr = std::stoul(argv[1]);
+
     auto range_id = roctxRangeStart("main");
 
     constexpr int N = 100000;
@@ -77,8 +94,11 @@ main()
         validate_d[i]   = a_d[i] * b_d[i];
     }
 
-    vmul(a_i, b_i, c_i, N);
-    vmul(a_f, b_f, c_f, N);
+    for(uint64_t i = 0; i < nitr; i++)
+    {
+        vmul(a_i, b_i, c_i, N);
+        vmul(a_f, b_f, c_f, N);
+    }
 
     auto tid = roctx_thread_id_t{};
     // get the thread id recognized by rocprofiler-sdk from roctx

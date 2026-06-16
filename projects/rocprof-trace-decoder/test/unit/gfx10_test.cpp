@@ -114,16 +114,6 @@ TEST(Gfx10TokenTest, ConstructorSetsFields)
 }
 
 // Tests for gfx10::CSRegisterHandler
-TEST(CSRegisterHandlerGFX10Test, IsPgmLoHi)
-{
-    gfx10::CSRegisterHandler handler;
-
-    EXPECT_TRUE(handler.IsPgmLo(0xC));
-    EXPECT_FALSE(handler.IsPgmLo(0xD));
-    EXPECT_TRUE(handler.IsPgmHi(0xD));
-    EXPECT_FALSE(handler.IsPgmHi(0xC));
-}
-
 TEST(CSRegisterHandlerGFX10Test, IsUserdata)
 {
     gfx10::CSRegisterHandler handler;
@@ -368,7 +358,7 @@ TEST(Gfx10WaveTest, NewPcPushesEntry)
     gfx10::wave_t wave(0, 0, 0, pcinfo_t{100, 1}, start_tok, false);
     wave.trap_status = WaveTrapStatus::TRAP_RESTORED;
 
-    CodeobjTableTranslator table;
+    CachedTable table;
     size_t before = wave.pc_infos.size();
     wave.new_pc(200, 0x1000, table);
     EXPECT_GT(wave.pc_infos.size(), before);

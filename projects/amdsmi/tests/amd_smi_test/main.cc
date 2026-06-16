@@ -23,10 +23,12 @@
 
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "functional/api_support_read.h"
+#include "functional/computepartition_memallocmode_read_write.h"
 #include "functional/computepartition_read_write.h"
 #include "functional/cross_process_serialization.h"
 #include "functional/err_cnt_read.h"
 #include "functional/evt_notif_read_write.h"
+#include "functional/fabric_read.h"
 #include "functional/fan_read.h"
 #include "functional/fan_read_write.h"
 #include "functional/frequencies_read.h"
@@ -37,6 +39,7 @@
 #include "functional/gpu_partition_metrics_read.h"
 #include "functional/hw_topology_read.h"
 #include "functional/id_info_read.h"
+#include "functional/kfd_atfork_read.h"
 #include "functional/mem_page_info_read.h"
 #include "functional/mem_util_read.h"
 #include "functional/memory_read_write.h"
@@ -225,6 +228,11 @@ TEST(amdsmitstReadOnly, TestMemUtilRead) {
   RunGenericTest(&tst);
 }
 
+TEST(amdsmitstReadOnly, TestKfdAtforkRead) {
+  TestKfdAtforkRead tst;
+  RunGenericTest(&tst);
+}
+
 TEST(amdsmitstReadOnly, TestIdInfoRead) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestIdInfoRead tst;
@@ -306,6 +314,12 @@ TEST(amdsmitstReadWrite, TestComputePartitionReadWrite) {
   RunGenericTest(&tst);
 }
 
+TEST(amdsmitstReadWrite, TestComputePartitionMemAllocModeReadWrite) {
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestComputePartitionMemAllocModeReadWrite tst;
+  RunGenericTest(&tst);
+}
+
 TEST(amdsmitstReadWrite, TestMemoryPartitionReadWrite) {
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestMemoryPartitionReadWrite tst;
@@ -327,6 +341,12 @@ TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
   TestMemoryReadWrite tst;
   RunGenericTest(&tst);
 }
+
+TEST(amdsmitstReadOnly, TestFabricRead) {
+  TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
 /*
 TEST(amdsmitstReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;

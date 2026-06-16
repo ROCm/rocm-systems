@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include "net_ib_limits.h"
+#include "plugin/nccl_net.h"  /* NCCL_NET_MAX_DEVS_PER_NIC */
 
 #ifdef __cplusplus
 #include "nccl.h"  /* ncclResult_t */
@@ -61,7 +62,8 @@ struct ncclIbCastResiliencyState {
   int  outstandingRequests;
   int  outstandingRecovery;
   int  ndevs;
-  int  devState[4];
+  int  devState[NCCL_NET_MAX_DEVS_PER_NIC];
+  int  recoveryCount[NCCL_NET_MAX_DEVS_PER_NIC];
 };
 
 /* Fills out with the current resiliency state of the communicator.

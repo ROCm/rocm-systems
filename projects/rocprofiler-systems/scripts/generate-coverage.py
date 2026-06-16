@@ -51,7 +51,6 @@ def find_tool(name: str, required: bool = True) -> Optional[str]:
 
 def run_gcovr(
     *,
-    gcovr_cmd: str,
     gcov_cmd: str,
     source_dir: Path,
     build_dir: Path,
@@ -64,8 +63,9 @@ def run_gcovr(
     xml_path = output_dir / f"{label}.xml"
     html_path = output_dir / f"{label}.html"
 
+    gcovr_cmd = [sys.executable, "-m", "gcovr"]
     cmd = [
-        gcovr_cmd,
+        *gcovr_cmd,
         "--root",
         str(source_dir),
         "--gcov-executable",
@@ -73,6 +73,8 @@ def run_gcovr(
         "--exclude-unreachable-branches",
         "--exclude-throw-branches",
         "--gcov-ignore-parse-errors",
+        "--merge-lines",
+        "--merge-mode-functions=merge-use-line-max",
         "-s",
         "-p",
         "--json",
@@ -262,12 +264,6 @@ def main():
         help="Baseline coverage JSON for delta comparison",
     )
     parser.add_argument(
-        "--gcovr",
-        type=str,
-        default=None,
-        help="Path to gcovr executable",
-    )
-    parser.add_argument(
         "--gcov",
         type=str,
         default=None,
@@ -279,8 +275,6 @@ def main():
     source_dir = args.source_dir.resolve()
     build_dir = args.build_dir.resolve()
     output_dir = (args.output_dir or source_dir / ".codecov").resolve()
-
-    gcovr_cmd = args.gcovr or find_tool("gcovr")
     gcov_cmd = args.gcov or find_tool("gcov")
 
     gitignore_path = output_dir / ".gitignore"
@@ -292,12 +286,10 @@ def main():
     print(f"Build dir:   {build_dir}")
     print(f"Output dir:  {output_dir}")
     print(f"Label:       {args.label}")
-    print(f"gcovr:       {gcovr_cmd}")
     print(f"gcov:        {gcov_cmd}")
     print()
 
     json_path = run_gcovr(
-        gcovr_cmd=gcovr_cmd,
         gcov_cmd=gcov_cmd,
         source_dir=source_dir,
         build_dir=build_dir,

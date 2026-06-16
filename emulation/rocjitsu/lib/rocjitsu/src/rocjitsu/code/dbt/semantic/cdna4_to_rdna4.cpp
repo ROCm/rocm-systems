@@ -17,8 +17,8 @@
 #include "rocjitsu/code/dbt/generated/matrix_conversions.h"
 
 #include <bit>
-#include <cassert>
 #include <cstring>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -95,23 +95,30 @@ build_vop3(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1 = 0, uint16_t
 /// @details AccVGPR N is represented as unified VGPR N+256 in the current
 /// descriptor translation model. If the destination already aliases that
 /// unified register, a NOP preserves the source instruction slot.
-std::vector<uint32_t> lower_accvgpr_read(const Instruction &inst) {
+ExpandResult lower_accvgpr_read(const Instruction &inst) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
-    return {};
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot lower AccVGPR read without a complete 64-bit raw "
+                                "encoding");
 
   cdna4::Vop3pMachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
 
   const uint16_t dst_vgpr = src.vdst;
   const uint16_t src_acc = src.src0;
-  assert(src_acc >= 768 && src_acc <= 1023);
+  if (src_acc < 768 || src_acc > 1023)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " AccVGPR read lowering expected src0 in the AccVGPR operand "
+                                "range 768..1023, got " +
+                                std::to_string(src_acc));
   const uint16_t src_unified = src_acc - 512;
 
   if (dst_vgpr == src_unified)
-    return {build_s_nop()};
+    return ExpandResult::success({build_s_nop()});
 
-  return {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), 256 + src_unified)};
+  return ExpandResult::success(
+      {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), static_cast<uint16_t>(256 + src_unified))});
 }
 
 constexpr uint8_t kSoppWaitIdle = 0x0A;
@@ -133,11 +140,12 @@ constexpr uint8_t kOpWmmaF32_16x16x16_F16 = 64;
 /// @details WMMA Wave64 writes all 64 lanes but swaps rows 4-7 and 8-11 vs
 /// MFMA layout. The ds_bpermute tail corrects the affected lanes using the
 /// generated matrix conversion table.
-std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
-                                                  const LivenessAnalysis &liveness) {
+ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const LivenessAnalysis &liveness,
+                                         TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
-    return {};
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " cannot lower MFMA without a complete 64-bit raw encoding");
 
   cdna4::Vop3pMfmaMachineInst mfma{};
   std::memcpy(&mfma, raw, sizeof(mfma));
@@ -148,24 +156,53 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
   const uint16_t src2 = mfma.src2;
 
   if (src2 >= 256)
-    return {};
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) +
+            " MFMA lowering only supports a VGPR accumulator source; got src2 operand " +
+            std::to_string(src2),
+        {"Add an MFMA lowering path for non-VGPR accumulator operands."});
 
-  assert(src0 >= 256 && src1 >= 256 && "MFMA VGPR sources expected");
+  if (src0 < 256 || src1 < 256)
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                    " MFMA lowering expected VGPR matrix sources, got src0=" +
+                                    std::to_string(src0) + " src1=" + std::to_string(src1),
+                                {"Add an MFMA lowering path for scalar or inline-constant "
+                                 "matrix operands."});
 
   auto exec_save_opt = liveness.find_free_sgpr_pair(&inst);
   if (!exec_save_opt)
-    return {};
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) +
+            " MFMA lowering could not find a free SGPR pair to save EXEC",
+        {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
+         "lowerings."});
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
 
   auto tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
   if (!tmp_sgpr_opt)
-    return {};
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) +
+            " MFMA lowering could not find a temporary SGPR after the EXEC save pair",
+        {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
+         "lowerings."});
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
 
   auto free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
   if (!free_reg)
-    return {};
+    return ExpandResult::failed(
+        std::string(inst.mnemonic()) +
+            " MFMA lowering could not find a free VGPR for ds_bpermute addresses at or above v" +
+            std::to_string(vdst + 4),
+        {"Reduce VGPR pressure, improve liveness, or add VGPR spill support for semantic "
+         "lowerings."});
   const uint8_t vaddr = static_cast<uint8_t>(*free_reg);
+
+  // Record feedback only after the full scratch allocation succeeds. A failed
+  // lowering returns empty and should not grow descriptor resources for code
+  // that was never emitted.
+  context.require_sgprs(static_cast<uint32_t>(kExecSave) + 2);
+  context.require_sgprs(static_cast<uint32_t>(kTmpSgpr) + 1);
+  context.require_vgprs(static_cast<uint32_t>(vaddr) + 1);
 
   std::vector<uint32_t> words;
 
@@ -229,36 +266,40 @@ std::vector<uint32_t> lower_mfma_f32_16x16x16_f16(const Instruction &inst,
 
   words.push_back(build_s_mov_b64(kExecLo, kExecSave));
 
-  return words;
+  return ExpandResult::success(std::move(words));
 }
 
-std::vector<uint32_t> expand_waitcnt(const Instruction &inst, uint32_t, uint64_t,
-                                     const LivenessAnalysis &, const LaneLayout *,
-                                     const LaneLayout *) {
+ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, const LivenessAnalysis &,
+                            TranslationContext &, const LaneLayout *, const LaneLayout *) {
   if (!inst.raw_encoding())
-    return {};
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " matched the waitcnt expansion rule without raw encoding");
+  if (static_cast<size_t>(inst.size()) < sizeof(cdna4::SoppMachineInst))
+    return ExpandResult::failed(std::string(inst.mnemonic()) +
+                                " matched the waitcnt expansion rule with a truncated SOPP "
+                                "encoding");
   const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
-  return encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16));
+  return ExpandResult::success(encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16)));
 }
 
-std::vector<uint32_t> expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
-                                          const LivenessAnalysis &, const LaneLayout *,
-                                          const LaneLayout *) {
+ExpandResult expand_accvgpr_read(const Instruction &inst, uint32_t, uint64_t,
+                                 const LivenessAnalysis &, TranslationContext &, const LaneLayout *,
+                                 const LaneLayout *) {
   return lower_accvgpr_read(inst);
 }
 
-std::vector<uint32_t> expand_accvgpr_write(const Instruction &, uint32_t, uint64_t,
-                                           const LivenessAnalysis &, const LaneLayout *,
-                                           const LaneLayout *) {
+ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, const LivenessAnalysis &,
+                                  TranslationContext &, const LaneLayout *, const LaneLayout *) {
   // AccVGPR writes are already represented by the unified VGPR mapping that
   // descriptor translation reserves for RDNA targets.
-  return {build_s_nop()};
+  return ExpandResult::success({build_s_nop()});
 }
 
-std::vector<uint32_t> expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,
-                                                   const LivenessAnalysis &liveness,
-                                                   const LaneLayout *, const LaneLayout *) {
-  return lower_mfma_f32_16x16x16_f16(inst, liveness);
+ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,
+                                          const LivenessAnalysis &liveness,
+                                          TranslationContext &context, const LaneLayout *,
+                                          const LaneLayout *) {
+  return lower_mfma_f32_16x16x16_f16(inst, liveness, context);
 }
 
 // CDNA4 encoding IDs (encoding_id = w0 >> 23, from CDNA4 instruction words).

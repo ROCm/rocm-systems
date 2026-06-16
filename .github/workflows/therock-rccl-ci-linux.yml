@@ -7,6 +7,9 @@ on:
         type: string
       artifact_group:
         type: string
+      package_version:
+        type: string
+        required: true
       cmake_options:
         type: string
 
@@ -38,7 +41,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 794702ebd137f1fdde4bf65c02eba5fe14a0676a # 2026-05-19 commit
+          ref: 685f8c3b89006309b34a7c16de17e841400f0d76 # 2025-05-29 commit
 
       - name: Install python deps
         run: |
@@ -73,7 +76,7 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
+          package_version: ${{ inputs.package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
@@ -82,8 +85,8 @@ jobs:
       - name: Build therock-dist
         run: cmake --build TheRock/build
 
-      - name: Build therock-archives
-        run: cmake --build TheRock/build --target therock-archives
+      - name: Build therock-artifacts
+        run: cmake --build TheRock/build --target therock-artifacts
 
       - name: Report
         #if: ${{ !cancelled() }}
@@ -91,9 +94,6 @@ jobs:
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 TheRock/build/dist/rocm
-          echo "Artifact Archives:"
-          echo "------------------"
-          ls -lh TheRock/build/artifacts/*.tar.xz
           echo "Artifacts:"
           echo "----------"
           du -h -d 1 TheRock/build/artifacts
@@ -109,6 +109,13 @@ jobs:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
 
+      - name: Push artifacts
+        run: |
+          python3 TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build \
+            --stage all
+
       - name: Post Build Upload
         if: always()
         run: |
@@ -120,7 +127,8 @@ jobs:
 
   therock-test-linux-multi-node:
     name: "Test multi-node"
-    if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+    # TODO: Re-enable gfx94X-dcgpu and gfx950-dcgpu multi-node tests once the clusters are stable again.
+    if: false
     permissions:
       contents: read
       id-token: write
@@ -129,7 +137,7 @@ jobs:
     with:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-vultr-mi325-scale-runner # Disabling gfx950 runner till lab move completes
+      test_runs_on: ruby-linux-slurm-scale-runner
       artifact_run_id: ${{ github.run_id }}
 
   therock-test-linux-single-node:

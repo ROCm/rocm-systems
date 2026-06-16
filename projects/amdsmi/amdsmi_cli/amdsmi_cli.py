@@ -150,7 +150,7 @@ if __name__ == "__main__":
     amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(
         amd_smi_commands.version,
-        amd_smi_commands.list,
+        amd_smi_commands.list_devices,
         amd_smi_commands.static,
         amd_smi_commands.firmware,
         amd_smi_commands.bad_pages,
@@ -166,6 +166,7 @@ if __name__ == "__main__":
         amd_smi_commands.partition,
         amd_smi_commands.ras,
         amd_smi_commands.node,
+        amd_smi_commands.fabric,
         amd_smi_commands.rocm_smi,
         amd_smi_commands.default,
         sys_argv=sys.argv,

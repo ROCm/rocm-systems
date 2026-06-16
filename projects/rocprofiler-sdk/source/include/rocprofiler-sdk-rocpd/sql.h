@@ -57,8 +57,9 @@ typedef enum ROCPD_EXPERIMENTAL rocpd_sql_schema_kind_t
     ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS,
-    ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+    ROCPD_SQL_SCHEMA_ROCPD_METADATA,
     ROCPD_SQL_SCHEMA_LAST,
+    ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS = ROCPD_SQL_SCHEMA_ROCPD_METADATA,
 } rocpd_sql_schema_kind_t;
 
 /**
@@ -96,6 +97,7 @@ typedef struct ROCPD_EXPERIMENTAL rocpd_sql_schema_jinja_variables_t
  * @param [in] engine Schema conforms to this SQL database engine
  * @param [in] kind Schema category
  * @param [in] options Schema options included in content
+ * @param [in] schema_version Schema version triplet (schema_version_triplet) being requested
  * @param [in] variables Jinja variables which were substituted
  * @param [in] schema_path Filesystem path to base schema file
  * @param [in] schema_content SQL schema content is pass to database
@@ -105,6 +107,7 @@ ROCPD_EXPERIMENTAL typedef void (*rocpd_sql_load_schema_cb_t)(
     rocpd_sql_engine_t                        engine,
     rocpd_sql_schema_kind_t                   kind,
     rocpd_sql_options_t                       options,
+    rocpd_version_triplet_t                   schema_version,
     const rocpd_sql_schema_jinja_variables_t* variables,
     const char*                               schema_path,
     const char*                               schema_content,
@@ -140,11 +143,53 @@ ROCPD_EXPERIMENTAL rocpd_status_t
 rocpd_sql_load_schema(rocpd_sql_engine_t                        engine,
                       rocpd_sql_schema_kind_t                   kind,
                       rocpd_sql_options_t                       options,
+                      rocpd_version_triplet_t                   schema_version,
                       const rocpd_sql_schema_jinja_variables_t* variables,
                       rocpd_sql_load_schema_cb_t                callback,
                       const char**                              schema_path_hints,
                       uint64_t                                  num_schema_path_hints,
-                      void* user_data) ROCPD_API ROCPD_NONNULL(5);
+                      void* user_data) ROCPD_API ROCPD_NONNULL(6);
+
+/**
+ * @brief (experimental) Callback invoked by ::rocpd_query_supported_schema_versions for each
+ * discovered set of schema versions.
+ *
+ * @param [in] engine SQL engine for which versions were resolved
+ * @param [in] versions Array of distinct schema version triplets, sorted ascending
+ * @param [in] num_versions Number of entries in @p versions (may be 0)
+ * @param [in] user_data User provided data passed through from
+ * ::rocpd_query_supported_schema_versions
+ * @return ::rocpd_status_t Value returned by the callback is propagated back to the caller of
+ * ::rocpd_query_supported_schema_versions
+ */
+ROCPD_EXPERIMENTAL typedef rocpd_status_t (*rocpd_query_supported_schema_versions_cb_t)(
+    rocpd_sql_engine_t             engine,
+    const rocpd_version_triplet_t* versions,
+    uint64_t                       num_versions,
+    void*                          user_data);
+
+/**
+ * @brief (experimental) Invoke a callback with the list of distinct SQL schema versions declared
+ * in `versions.yml` for the resolved schema search path (same resolution rules as
+ * ::rocpd_sql_load_schema).
+ *
+ * @param [in] engine Must be ::ROCPD_SQL_ENGINE_SQLITE3 (reserved for future engines)
+ * @param [in] schema_path_hints Optional search path prefixes (same as ::rocpd_sql_load_schema)
+ * @param [in] num_schema_path_hints Length of @p schema_path_hints (same as
+ * ::rocpd_sql_load_schema)
+ * @param [in] callback Callback function invoked with the sorted list of schema versions
+ * @param [in] user_data Pointer passed back into @p callback
+ * @return ::rocpd_status_t
+ * @retval ROCPD_STATUS_SUCCESS Callback invoked successfully (possibly with @p num_versions == 0)
+ * @retval ROCPD_STATUS_ERROR_SQL_INVALID_ENGINE Unsupported @p engine
+ * @retval Any value returned by @p callback is propagated directly to the caller
+ */
+ROCPD_EXPERIMENTAL rocpd_status_t
+rocpd_query_supported_schema_versions(rocpd_sql_engine_t engine,
+                                      const char**       schema_path_hints,
+                                      uint64_t           num_schema_path_hints,
+                                      rocpd_query_supported_schema_versions_cb_t callback,
+                                      void* user_data) ROCPD_API ROCPD_NONNULL(4);
 
 /** @} */
 

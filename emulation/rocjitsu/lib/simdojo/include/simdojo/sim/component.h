@@ -237,6 +237,10 @@ public:
   /// @returns Pointer to the child, or nullptr if not found.
   Component *find_child(const std::string &name) const;
 
+  /// @brief Move all children from another composite into this one.
+  /// @details Used to absorb a component's subtree without changing paths.
+  void adopt_children(CompositeComponent &donor);
+
   /// @brief Recursively collect all components in the subtree, including this composite.
   /// @param[out] out Vector to append components into.
   void collect_components(std::vector<Component *> &out);

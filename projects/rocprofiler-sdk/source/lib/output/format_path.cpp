@@ -180,8 +180,7 @@ get_mpi_size()
     // Check if rocprofv3.py specified which env variable to use (to support subprocesses)
     if(auto size_var = common::get_env<std::string>(mpi_size_env_var_name, ""); !size_var.empty())
     {
-        auto* size_val = std::getenv(size_var.c_str());
-        if(size_val == nullptr)
+        if(!common::get_env_optional(size_var).has_value())
         {
             ROCP_FATAL << fmt::format("Environment variable {} is set to '{}', but '{}' is not "
                                       "set in the environment",
@@ -211,8 +210,7 @@ get_mpi_rank()
     // Check if rocprofv3.py specified which env variable to use (to support subprocesses)
     if(auto rank_var = common::get_env<std::string>(mpi_rank_env_var_name, ""); !rank_var.empty())
     {
-        auto* rank_val = std::getenv(rank_var.c_str());
-        if(rank_val == nullptr)
+        if(!common::get_env_optional(rank_var).has_value())
         {
             ROCP_FATAL << fmt::format("Environment variable {} is set to '{}', but '{}' is not "
                                       "set in the environment",

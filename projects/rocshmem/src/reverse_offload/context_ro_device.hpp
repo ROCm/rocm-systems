@@ -238,6 +238,128 @@ class ROContext : public Context {
   __device__ uint64_t signal_fetch_wg(const uint64_t *sig_addr);
   __device__ uint64_t signal_fetch_wave(const uint64_t *sig_addr);
 
+  /**************************************************************************
+   ****************** TILE API METHODS (NOT IMPLEMENTED) ********************
+   *************************************************************************/
+
+  // RMA PUT operations - Type-erased interface
+  __device__ int tile_put(void* dst_data, const void* src_data,
+                          const size_t* dst_strides, const size_t* src_strides,
+                          const size_t* start_coord, const size_t* boundary,
+                          int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_put_wave(void* dst_data, const void* src_data,
+                               const size_t* dst_strides, const size_t* src_strides,
+                               const size_t* start_coord, const size_t* boundary,
+                               int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_put_wg(void* dst_data, const void* src_data,
+                             const size_t* dst_strides, const size_t* src_strides,
+                             const size_t* start_coord, const size_t* boundary,
+                             int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // RMA GET operations - Type-erased interface
+  __device__ int tile_get(void* dst_data, const void* src_data,
+                          const size_t* dst_strides, const size_t* src_strides,
+                          const size_t* start_coord, const size_t* boundary,
+                          int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_get_wave(void* dst_data, const void* src_data,
+                               const size_t* dst_strides, const size_t* src_strides,
+                               const size_t* start_coord, const size_t* boundary,
+                               int ndim, size_t element_size, int pe, uint64_t flags);
+
+  __device__ int tile_get_wg(void* dst_data, const void* src_data,
+                             const size_t* dst_strides, const size_t* src_strides,
+                             const size_t* start_coord, const size_t* boundary,
+                             int ndim, size_t element_size, int pe, uint64_t flags);
+
+  // Collective operations - Allgather - Type-erased interface
+  __device__ int tile_allgather(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                const size_t* dst_strides, const size_t* src_strides,
+                                const size_t* start_coord, const size_t* boundary,
+                                int ndim, size_t element_size, uint64_t flags);
+
+  __device__ int tile_allgather_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                     const size_t* dst_strides, const size_t* src_strides,
+                                     const size_t* start_coord, const size_t* boundary,
+                                     int ndim, size_t element_size, uint64_t flags);
+
+  __device__ int tile_allgather_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                   const size_t* dst_strides, const size_t* src_strides,
+                                   const size_t* start_coord, const size_t* boundary,
+                                   int ndim, size_t element_size, uint64_t flags);
+
+  // Collective operations - Broadcast - Type-erased interface
+  __device__ int tile_broadcast(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                const size_t* dst_strides, const size_t* src_strides,
+                                const size_t* start_coord, const size_t* boundary,
+                                int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  __device__ int tile_broadcast_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                     const size_t* dst_strides, const size_t* src_strides,
+                                     const size_t* start_coord, const size_t* boundary,
+                                     int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  __device__ int tile_broadcast_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                   const size_t* dst_strides, const size_t* src_strides,
+                                   const size_t* start_coord, const size_t* boundary,
+                                   int ndim, size_t element_size, int pe_root, uint64_t flags);
+
+  // Collective wait - No change needed
+  __device__ int tile_collective_wait(rocshmem_team_t team, uint64_t flags);
+
+  // SUM Reduction operations - Type-erased interface
+  __device__ int tile_sum_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                 const size_t* dst_strides, const size_t* src_strides,
+                                 const size_t* start_coord, const size_t* boundary,
+                                 int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_sum_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                      const size_t* dst_strides, const size_t* src_strides,
+                                      const size_t* start_coord, const size_t* boundary,
+                                      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_sum_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                    const size_t* dst_strides, const size_t* src_strides,
+                                    const size_t* start_coord, const size_t* boundary,
+                                    int ndim, size_t element_size, int root, uint64_t flags);
+
+  // MAX Reduction operations - Type-erased interface
+  __device__ int tile_max_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                 const size_t* dst_strides, const size_t* src_strides,
+                                 const size_t* start_coord, const size_t* boundary,
+                                 int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_max_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                      const size_t* dst_strides, const size_t* src_strides,
+                                      const size_t* start_coord, const size_t* boundary,
+                                      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_max_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                    const size_t* dst_strides, const size_t* src_strides,
+                                    const size_t* start_coord, const size_t* boundary,
+                                    int ndim, size_t element_size, int root, uint64_t flags);
+
+  // MIN Reduction operations - Type-erased interface
+  __device__ int tile_min_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                 const size_t* dst_strides, const size_t* src_strides,
+                                 const size_t* start_coord, const size_t* boundary,
+                                 int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_min_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                      const size_t* dst_strides, const size_t* src_strides,
+                                      const size_t* start_coord, const size_t* boundary,
+                                      int ndim, size_t element_size, int root, uint64_t flags);
+
+  __device__ int tile_min_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
+                                    const size_t* dst_strides, const size_t* src_strides,
+                                    const size_t* start_coord, const size_t* boundary,
+                                    int ndim, size_t element_size, int root, uint64_t flags);
+
+  // Rooted SUM Reduction operations
+  // Rooted MAX Reduction operations
+  // Rooted MIN Reduction operations
  private:
   __device__ uint64_t *get_atomic_ret_buf();
 
