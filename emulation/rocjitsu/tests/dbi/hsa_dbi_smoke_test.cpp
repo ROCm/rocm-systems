@@ -303,8 +303,6 @@ protected:
     for (const auto &block : blocks) {
       uint64_t cur = block->start_offset();
       for (const Instruction &inst : block->instructions()) {
-        // const bool is_vadd = inst.mnemonic().find("v_add_f32") != std::string_view::npos;
-        // if (is_vadd && is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
         if (is_relocatable_anchor(inst, cur, text_bytes, ROCJITSU_CODE_ARCH_CDNA2)) {
           anchor_offsets_.push_back(cur); // Instrumentor will need offset
           anchor_mnemonics_.push_back(std::string(inst.mnemonic()));
@@ -317,7 +315,7 @@ protected:
       if (anchor_count_ == 2)
         break;
     }
-    ASSERT_NE(anchor_count_, 0u) << "No relocatable v_add_f32 anchor in vector_add_gfx90a.o; "
+    ASSERT_NE(anchor_count_, 0u) << "No relocatable anchor in vector_add_gfx90a.o; "
                                     "did the compiler change the lowering?";
 
     // Apply the inline-nop trampoline.
@@ -385,8 +383,8 @@ TEST_F(HsaDbiSmokeStatic, PatchedElfActuallyContainsInstrumentation) {
   ASSERT_NE(patched_elf_bytes_, original_elf_bytes_)
       << "Patched ELF is byte-identical to original - patcher silently no-oped?";
 
-  // (b) The patched .text at anchor_offset_ now decodes as s_branch, not the
-  //     original v_add_f32 we recorded as anchor_mnemonics_[idx].
+  // (b) The patched .text at anchor_offsets_[idx] now decodes as s_branch, not the
+  //     original instructions we recorded as anchor_mnemonics_[idx].
   AmdGpuCodeObject patched(patched_elf_bytes_.data(), patched_elf_bytes_.size());
   ASSERT_TRUE(patched.is_valid());
   ASSERT_FALSE(patched.text_sections().empty());
@@ -514,7 +512,7 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
 
   // The real check: patched dispatch must produce the same buffer as the
   // original. Bit-identical because the trampoline body is just s_nop 0
-  // around the relocated v_add_f32.
+  // around the relocated instruction.
   auto patched_out = dispatch_vector_add(patched_elf_bytes_, gpu, cpu, a, b, N);
   ASSERT_EQ(patched_out.size(), N) << "patched dispatch failed (empty result)";
   assert_kernel_wrote_output(patched_out, "patched");
@@ -523,10 +521,10 @@ TEST_F(HsaDbiSmokeHardware, PatchedKernelDispatchMatchesOriginal) {
          "should be semantically a no-op";
 }
 
-// "Sabotage" verification: overwrite the s_nop 0 placeholder in the patched
-// trampoline with s_endpgm 0. If the GPU genuinely takes the trampoline
-// path, every wave terminates before reaching the relocated v_add_f32 and
-// the output stays at the pre-dispatch zero pattern. If the trampoline is
+// "Sabotage" verification: overwrite the s_nop 0 placeholders in the patched
+// trampolines with s_endpgm 0 one at a time. If the GPU genuinely takes the trampoline
+// path, every wave terminates before reaching the relocated instruction and
+// the output stays at the pre-dispatch zero pattern. If that trampoline is
 // somehow bypassed (e.g., the forward s_branch didn't take effect), the
 // kernel would still produce the golden output.
 //
@@ -616,9 +614,19 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
 
   // Revert first trampoline in sabotaged
   std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSNop0, sizeof(kSNop0));
+  auto unsabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
+  ASSERT_EQ(unsabotaged_out.size(), N)
+      << "HSA error before unsabotaged run could finish";
+
+  for (uint32_t i = 0; i < N; ++i) {
+    ASSERT_LT(std::abs(unsabotaged_out[i] - golden[i]), 1e-5f) << "Unsabotaged code differs from golden";
+  }
+
 
   // Perform same change and test for second trampoline
-  uint64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
+  int64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
+  EXPECT_TRUE(offset_between_anchors)
+    << "Both selected trampolines have the same trampoline offset";
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset() + offset_between_anchors,
               sizeof(pre_overwrite));
   ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0

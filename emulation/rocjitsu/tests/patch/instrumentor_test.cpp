@@ -584,12 +584,6 @@ std::vector<uint8_t> make_gfx950_elf_with_two_nops() {
   return image;
 }
 
-/*
-std::vector<uint8_t> make_gfx950_elf_with_100_nops() {
-  return make_gfx950_elf_with_nop_text(400);
-}
-*/
-
 TEST(Instrumentor, AddPointByOffsetResolvesValidatedSite) {
   auto image = make_gfx950_elf_with_two_nops();
   AmdGpuCodeObject obj(image.data(), image.size());

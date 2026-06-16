@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <array>
+#include <unordered_set>
 #include <cstring>
 #include <string_view>
 #include <utility>
@@ -100,29 +101,32 @@ std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
                 rj_code_arch_t arch, std::string *error_out) {
+  auto fail = [&](const char *msg) {
+    report(error_out, (msg + (", anchor_offset = " + std::to_string(anchor_offset))).c_str());
+  };
   // TODO: consume filter_flags to filter anchors based on InstFlags.
   if (pt.filter_flags != 0) {
-    report(error_out, "InstrumentationPoint::filter_flags must be 0 temporarily");
+    fail("InstrumentationPoint::filter_flags must be 0 temporarily");
     return std::nullopt;
   }
   // TODO: support AfterInst / BlockEntry / BlockExit.
   if (pt.kind != InstrumentationKind::BeforeInst) {
-    report(error_out, "InstrumentationPoint::kind must be BeforeInst temporarily");
+    fail("InstrumentationPoint::kind must be BeforeInst temporarily");
     return std::nullopt;
   }
   // TODO: consume probe_obj / probe_symbol when probe-call trampolines are
   // supported.
   if (pt.probe_obj != nullptr) {
-    report(error_out, "InstrumentationPoint::probe_obj must be null temporarily");
+    fail("InstrumentationPoint::probe_obj must be null temporarily");
     return std::nullopt;
   }
   if (!pt.probe_symbol.empty()) {
-    report(error_out, "InstrumentationPoint::probe_symbol must be empty temporarily");
+    fail("InstrumentationPoint::probe_symbol must be empty temporarily");
     return std::nullopt;
   }
   // TODO: consume force_full_exec when EXEC policy management is implemented
   if (pt.force_full_exec) {
-    report(error_out, "InstrumentationPoint::force_full_exec must be false temporarily");
+    fail("InstrumentationPoint::force_full_exec must be false temporarily");
     return std::nullopt;
   }
 
@@ -247,26 +251,21 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
   // successes accumulate in `sites` but are only published to `result.sites`
   // if `errors` ends up empty. Multi-site callers therefore can't tell
   // *which* points succeeded when any fail — only the failures are itemized.
-  // TODO: Currently only supporting single site so this is fine for now but
-  // revisit when exposing multi-site to callers.
   std::vector<ResolvedInstrumentationSite> sites;
+  std::unordered_set<uint64_t> site_offsets;
   sites.reserve(points_.size());
   for (const auto &pt : points_) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
     if (anchor == nullptr) {
-      result.errors.emplace_back("no decoded instruction starts at the requested anchor_offset");
+      result.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " + std::to_string(pt.anchor_offset));
       continue;
     }
 
-    bool cont = false;
-    for (const auto &st : sites) {
-      if (st.anchor_offset == pt.anchor_offset) {
-        result.errors.emplace_back("multiple points requested the same anchor_offset");
-        cont = true;
-      }
-    }
-    if (cont)
+    if (site_offsets.find(pt.anchor_offset) != site_offsets.end()) {
+      result.errors.emplace_back("multiple points requested the same anchor_offset = " + std::to_string(pt.anchor_offset));
       continue;
+    }
+
     std::string err;
     auto site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &err);
     if (!site) {
@@ -274,6 +273,7 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
       continue;
     }
     sites.push_back(std::move(*site));
+    site_offsets.insert(site->anchor_offset);
   }
 
   if (result.errors.empty())
@@ -297,7 +297,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   patched_ = true;
 
-  // Temporary restriction: exactly one queued point.
   if (points_.empty()) {
     result.errors.emplace_back("Instrumentor::patch requires at least one queued point; got zero");
     return result;
