@@ -1,0 +1,185 @@
+# =============================================================================
+# RDNA3.5 (gfx115x) - RDNA3.5 GL1 Cache (L1 Cache) Performance Metrics
+# =============================================================================
+# GL1 cache is the shared L1 cache serving multiple WGPs within a Shader Engine
+# Cache hierarchy: GL0 Cache (TCP) -> GL1 Cache -> GL2 Cache
+# =============================================================================
+
+Panel Config:
+  id: 1100
+  title: GL1 Cache (L1)
+  data source:
+  # =========================================================================
+  # GL1 Cache Utilization
+  # =========================================================================
+  - metric_table:
+      id: 1101
+      title: "GL1 Cache Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL1 Cache Busy:
+          avg: SUM(100 * GL1C_BUSY) / SUM(GL1C_CYCLE)
+          min: MIN(100 * GL1C_BUSY / GL1C_CYCLE)
+          max: MAX(100 * GL1C_BUSY / GL1C_CYCLE)
+          unit: Percent
+        GL1 Cache Starve:
+          avg: SUM(100 * GL1C_STARVE) / SUM(GL1C_CYCLE)
+          min: MIN(100 * GL1C_STARVE / GL1C_CYCLE)
+          max: MAX(100 * GL1C_STARVE / GL1C_CYCLE)
+          unit: Percent
+
+  # =========================================================================
+  # GL1 Cache Request Statistics
+  # =========================================================================
+  - metric_table:
+      id: 1102
+      title: "GL1 Cache Request Statistics"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: SUM(GL1C_REQ_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_sum / $denom)
+          max: MAX(GL1C_REQ_sum / $denom)
+          unit: (Count + $normUnit)
+        Read Requests:
+          avg: SUM(GL1C_REQ_READ_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_READ_sum / $denom)
+          max: MAX(GL1C_REQ_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        Write Requests:
+          avg: SUM(GL1C_REQ_WRITE_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_WRITE_sum / $denom)
+          max: MAX(GL1C_REQ_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
+        Miss Requests:
+          avg: SUM(GL1C_REQ_MISS_sum) / SUM($denom)
+          min: MIN(GL1C_REQ_MISS_sum / $denom)
+          max: MAX(GL1C_REQ_MISS_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GL1 Cache Performance
+  # =========================================================================
+  - metric_table:
+      id: 1103
+      title: "GL1 Cache Performance"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Hit Rate:
+          avg: SUM(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum)) / SUM(GL1C_REQ_sum)
+          min: MIN(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
+          max: MAX(100 * (GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum)
+          unit: Percent
+
+  # =========================================================================
+  # GL1-GL2 Interface
+  # =========================================================================
+  - metric_table:
+      id: 1104
+      title: "GL1-GL2 Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2 Read Requests:
+          avg: SUM(GL1C_GL2_REQ_READ_sum) / SUM($denom)
+          min: MIN(GL1C_GL2_REQ_READ_sum / $denom)
+          max: MAX(GL1C_GL2_REQ_READ_sum / $denom)
+          unit: (Count + $normUnit)
+        GL2 Read 128B Requests:
+          avg: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
+          min: MIN(GL1C_GL2_REQ_READ_128B_sum / $denom)
+          max: MAX(GL1C_GL2_REQ_READ_128B_sum / $denom)
+          unit: (Count + $normUnit)
+        GL2 Write Requests:
+          avg: SUM(GL1C_GL2_REQ_WRITE_sum) / SUM($denom)
+          min: MIN(GL1C_GL2_REQ_WRITE_sum / $denom)
+          max: MAX(GL1C_GL2_REQ_WRITE_sum / $denom)
+          unit: (Count + $normUnit)
+
+  # =========================================================================
+  # GL1 Cache Stalls
+  # =========================================================================
+  - metric_table:
+      id: 1105
+      title: "GL1 Cache Stalls"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2 Stall:
+          avg: SUM(GL1C_STALL_GL2_GL1_sum) / SUM($denom)
+          min: MIN(GL1C_STALL_GL2_GL1_sum / $denom)
+          max: MAX(GL1C_STALL_GL2_GL1_sum / $denom)
+          unit: (Cycles + $normUnit)
+        LFIFO Full Stall:
+          avg: SUM(GL1C_STALL_LFIFO_FULL_sum) / SUM($denom)
+          min: MIN(GL1C_STALL_LFIFO_FULL_sum / $denom)
+          max: MAX(GL1C_STALL_LFIFO_FULL_sum / $denom)
+          unit: (Cycles + $normUnit)
+
+  metrics_description:
+    GL1 Cache Busy: >-
+      Percentage of cycles the GL1 cache is actively processing requests. GL1 cache is
+      shared across multiple Workgroup Processors within a Shader Engine. High utilization
+      indicates active memory traffic from the GL0 caches.
+    GL1 Cache Starve: >-
+      Percentage of cycles the GL1 cache had no pending requests. High starvation indicates
+      either compute-bound workloads with minimal memory traffic, or effective GL0 caching
+      reducing traffic to GL1.
+    Total Requests: >-
+      Total number of requests received by the GL1 cache from all GL0 caches (TCP instances)
+      within the shader engine. This represents aggregated memory traffic from multiple
+      Workgroup Processors.
+    Read Requests: >-
+      Number of read requests to the GL1 cache. High read counts indicate memory-intensive
+      load operations that missed in GL0. Compare with miss requests to assess GL1 cache
+      effectiveness.
+    Write Requests: >-
+      Number of write requests to the GL1 cache. Write traffic includes stores that missed
+      in GL0 and cache writebacks. High write counts may indicate write-intensive workloads.
+    Miss Requests: >-
+      Number of GL1 cache requests that missed and required fetching from GL2. High miss
+      counts increase memory latency and traffic to GL2. Consider improving data locality
+      at the shader engine level.
+    Hit Rate: >-
+      Percentage of GL1 cache requests serviced from cache. Higher hit rates reduce traffic
+      to GL2 and improve performance. Low hit rates may indicate working sets exceeding GL1
+      capacity or poor data locality across Workgroup Processors.
+    GL2 Read Requests: >-
+      Number of read requests forwarded from GL1 to GL2 cache due to misses. This represents
+      GL1 miss traffic that consumes GL2 bandwidth. High counts may indicate GL1 capacity
+      limitations.
+    GL2 Read 128B Requests: >-
+      Number of 128-byte read requests forwarded from GL1 to GL2 cache. This represents
+      large cache line fetches for memory-intensive workloads.
+    GL2 Write Requests: >-
+      Number of write requests forwarded from GL1 to GL2 cache. This includes writebacks
+      and stores that missed in GL1.
+    GL2 Stall: >-
+      Cycles the GL1 cache was stalled waiting for GL2 to accept requests. High stall counts
+      indicate GL2 bandwidth saturation or contention, limiting GL1 throughput.
+    LFIFO Full Stall: >-
+      Cycles the GL1 cache was stalled due to the LFIFO (Load FIFO) being full. High stall
+      counts indicate data return path congestion from GL2 to GL1.

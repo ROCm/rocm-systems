@@ -759,6 +759,8 @@ inline void execute_s_bfe_i32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
     uint32_t width = (field >> 16) & 127u;
     if (width == 0)
       return 0u;
+    if (offset + width > 32)
+      width = 32 - offset;
     uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);
     uint32_t extracted = (base >> offset) & mask;
     if (width < 32 && (extracted & (1u << (width - 1))))
@@ -778,6 +780,8 @@ inline void execute_s_bfe_i64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
     uint32_t width = (field >> 16) & 127u;
     if (width == 0)
       return static_cast<int64_t>(0);
+    if (offset + width > 64)
+      width = 64 - offset;
     uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);
     uint64_t extracted = (base >> offset) & mask;
     if (width < 64 && (extracted & (1ULL << (width - 1))))
@@ -796,6 +800,8 @@ inline void execute_s_bfe_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
     uint32_t width = (field >> 16) & 127u;
     if (width == 0)
       return 0u;
+    if (offset + width > 32)
+      width = 32 - offset;
     uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);
     return (base >> offset) & mask;
   }();
@@ -812,6 +818,8 @@ inline void execute_s_bfe_u64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
     uint32_t width = (field >> 16) & 127u;
     if (width == 0)
       return static_cast<uint64_t>(0);
+    if (offset + width > 64)
+      width = 64 - offset;
     uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);
     return (base >> offset) & mask;
   }();
@@ -973,7 +981,7 @@ inline void execute_s_cls_i32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   uint32_t result = [&]() {
     int32_t sv = static_cast<int32_t>(inst.ssrc0.read_scalar(wf));
     if (sv == 0 || sv == -1)
-      return 32u;
+      return 31u;
     uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
     return static_cast<uint32_t>(std::countl_zero(u)) - 1u;
   }();
@@ -987,7 +995,7 @@ inline void execute_s_cls_i32_i64_sop1([[maybe_unused]] Inst &inst,
   int64_t result = [&]() {
     int32_t sv = static_cast<int32_t>(static_cast<int64_t>(inst.ssrc0.read_scalar64(wf)));
     if (sv == 0 || sv == -1)
-      return 32u;
+      return 31u;
     uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);
     return static_cast<uint32_t>(std::countl_zero(u)) - 1u;
   }();
@@ -3666,8 +3674,8 @@ inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     util::native<uint32_t> u = a;
     util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;
-    auto c = util::clz_u32_simd(u);
-    util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;
+    auto c = util::clz_u32_simd(u) - 1u;
+    util::stdx::where(u == 0u, c) = 31u;
     return c;
   });
   uint64_t exec = wf.exec();
@@ -3677,7 +3685,7 @@ inline void execute_v_cls_i32_vop1([[maybe_unused]] Inst &inst, [[maybe_unused]]
     inst.vdst.write_lane(wf, lane, [&]() {
       auto s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
       uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
-      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
+      return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1;
     }());
   }
 }
@@ -3687,8 +3695,8 @@ inline void execute_v_cls_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
   ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, [](auto a) {
     util::native<uint32_t> u = a;
     util::stdx::where((a & 0x80000000u) != 0u, u) = ~a;
-    auto c = util::clz_u32_simd(u);
-    util::stdx::where(u == 0u, c) = 0xFFFFFFFFu;
+    auto c = util::clz_u32_simd(u) - 1u;
+    util::stdx::where(u == 0u, c) = 31u;
     return c;
   });
   uint64_t exec = wf.exec();
@@ -3698,7 +3706,7 @@ inline void execute_v_cls_i32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
     inst.vdst.write_lane(wf, lane, [&]() {
       auto s = static_cast<int32_t>(inst.src0.read_lane(wf, lane));
       uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);
-      return a == 0 ? static_cast<uint32_t>(-1) : static_cast<uint32_t>(std::countl_zero(a));
+      return a == 0 ? 31u : static_cast<uint32_t>(std::countl_zero(a)) - 1;
     }());
   }
 }
