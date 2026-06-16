@@ -2100,6 +2100,29 @@ class SvmPrefetchBatchAsyncCommand : public Command {
   size_t count_;                              //!< Number of prefetch operations
 };
 
+class SvmDiscardBatchAsyncCommand : public Command {
+ public:
+  SvmDiscardBatchAsyncCommand(HostQueue& queue, std::vector<void*>& dev_ptrs,
+                              std::vector<size_t>& sizes)
+      : Command(queue, 1),
+        dev_ptrs_(std::move(dev_ptrs)),
+        sizes_(std::move(sizes)),
+        count_(dev_ptrs_.size()) {
+    assert(sizes_.size() == count_ && "sizes vector must match dev_ptrs size");
+  }
+
+  virtual void submit(device::VirtualDevice& device) { device.SubmitSvmDiscardBatchAsync(*this); }
+
+  void* const* DevicePointers() const { return dev_ptrs_.data(); }
+  const size_t* Sizes() const { return sizes_.data(); }
+  size_t Count() const { return count_; }
+
+ private:
+  std::vector<void*> dev_ptrs_;  //!< Array of device pointers to memory for discard
+  std::vector<size_t> sizes_;    //!< Array of sizes for discard
+  size_t count_;                 //!< Number of discard operations
+};
+
 /*! \brief  A virtual map memory command.
  *
  */
@@ -2172,6 +2195,7 @@ union ComputeCommand {
   VirtualMapCommand cmd27;
   BatchMemoryOperationCommand cmd28;
   SvmPrefetchBatchAsyncCommand cmd29;
+  SvmDiscardBatchAsyncCommand cmd30;
   ComputeCommand() {}
   ~ComputeCommand() {}
 };

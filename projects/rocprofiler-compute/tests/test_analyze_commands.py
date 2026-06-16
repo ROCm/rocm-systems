@@ -15,6 +15,8 @@ import pytest
 from rocprof_compute_analyze.analysis_cli import cli_analysis
 from utils.metrics.expression import build_eval_string
 from utils.metrics.metric_evaluator import MetricEvaluator
+from utils.parser import load_pc_sampling_data
+from utils.pc_sampling_analysis import load_pc_sample_records
 
 config = {}
 config["cleanup"] = True
@@ -1336,28 +1338,25 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
 def test_pc_sampling_basic_coverage():
     """Test PC sampling functions with minimal data"""
 
-    import tempfile
-
-    from utils.parser import load_pc_sampling_data, search_pc_sampling_record
-
     class MockWorkload:
         filter_kernel_ids = []
 
     workload = MockWorkload()
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        result = load_pc_sampling_data(workload, temp_dir, "none", "count")
-        assert result.empty
+    assert load_pc_sampling_data(workload, "none", "count", None).empty
+    assert load_pc_sampling_data(workload, "missing", "count", None).empty
 
-        result = load_pc_sampling_data(workload, temp_dir, "missing", "count")
-        assert result.empty
+    workload.filter_kernel_ids = [0, 1, 2]  # Multiple kernels
+    assert load_pc_sampling_data(workload, "test", "count", None).empty
 
-        workload.filter_kernel_ids = [0, 1, 2]  # Multiple kernels
-        result = load_pc_sampling_data(workload, temp_dir, "test", "count")
-        assert result.empty
-
-        result = search_pc_sampling_record([])
-        assert result is None
+    empty_records = load_pc_sample_records({
+        "buffer_records": {
+            "pc_sample_stochastic": [],
+            "pc_sample_host_trap": [],
+            "kernel_dispatch": [],
+        },
+    })
+    assert empty_records.empty
 
 
 @pytest.mark.division_by_zero
@@ -2106,10 +2105,6 @@ def test_apply_kernel_filter_string_names(mock_workload_for_filter):
 def test_pc_sampling_single_kernel_uses_workload_dfs():
     """Test single kernel filter reads from workload.dfs[1],
     kernel index out of bounds warning."""
-    import tempfile
-
-    from utils.parser import load_pc_sampling_data
-
     # Create mock workload with dfs populated
     workload = Mock()
     workload.dfs = {
@@ -2119,51 +2114,26 @@ def test_pc_sampling_single_kernel_uses_workload_dfs():
             "Sum(ns)": [900, 800, 200],
         }),
     }
+    tool_data = {
+        "buffer_records": {"pc_sample_stochastic": [{}], "pc_sample_host_trap": []}
+    }
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Create stochastic PC sampling file to trigger single kernel path
-        stochastic_path = Path(temp_dir) / "test_pc_sampling_stochastic.csv"
-        stochastic_path.write_text("Correlation_Id,Instruction,Instruction_Comment\n")
+    # Kernel index out of bounds warns and returns empty.
+    workload.filter_kernel_ids = [99]
+    with patch("utils.parser.console_warning") as mock_warning:
+        result = load_pc_sampling_data(workload, "test", "count", tool_data)
+        mock_warning.assert_called()
+        call_args_str = str(mock_warning.call_args)
+        assert "out of bounds" in call_args_str or "99" in call_args_str
+        assert result.empty
 
-        # Create kernel trace file
-        kernel_trace_path = Path(temp_dir) / "test_kernel_trace.csv"
-        kernel_trace_path.write_text(
-            "Dispatch_Id,Kernel_Id,Kernel_Name\n1,0,kernel_a\n"
-        )
-
-        # Test with single kernel filter - valid index
-        workload.filter_kernel_ids = [0]  # kernel_a
-        # Since json file is missing, it should return empty and warn
-        with patch("utils.parser.console_warning") as mock_warning:
-            result = load_pc_sampling_data(workload, temp_dir, "test", "count")
-            # Should warn about missing json file
-            assert result.empty
-
-        # Test kernel index out of bounds warning
-        workload.filter_kernel_ids = [99]  # Out of bounds
-
-        # Create json file to trigger the bounds check
-        json_path = Path(temp_dir) / "test_results.json"
-        json_path.write_text("{}")
-
-        with patch("utils.parser.console_warning") as mock_warning:
-            result = load_pc_sampling_data(workload, temp_dir, "test", "count")
-            # Should warn about index out of bounds
-            mock_warning.assert_called()
-            call_args_str = str(mock_warning.call_args)
-            assert "out of bounds" in call_args_str or "99" in call_args_str
-            assert result.empty
-
-        # Test that kernel name is extracted from workload.dfs[1]
-        workload.filter_kernel_ids = [1]  # kernel_b
-        with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
-            mock_per_kernel.return_value = pd.DataFrame()
-            load_pc_sampling_data(workload, temp_dir, "test", "count")
-            # Verify the kernel name extracted from dfs[1] is kernel_b
-            if mock_per_kernel.called:
-                call_kwargs = mock_per_kernel.call_args
-                # The kernel_name argument should be "kernel_b"
-                assert "kernel_b" in str(call_kwargs)
+    # Kernel name is extracted from workload.dfs[1].
+    workload.filter_kernel_ids = [1]  # kernel_b
+    with patch("utils.parser.load_pc_sampling_data_per_kernel") as mock_per_kernel:
+        mock_per_kernel.return_value = pd.DataFrame()
+        load_pc_sampling_data(workload, "test", "count", tool_data)
+        if mock_per_kernel.called:
+            assert "kernel_b" in str(mock_per_kernel.call_args)
 
 
 # =============================================================================
