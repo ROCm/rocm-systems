@@ -1107,6 +1107,17 @@ set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")
 
+## Post-build sanity check: fail the build if librccl.so has unresolved (undefined) symbols that would only surface at dlopen()/ctypes.CDLL() time.
+if(NCCL_OS_LINUX AND BUILD_SHARED_LIBS AND CHECK_UNDEFINED_SYMBOLS)
+  add_custom_command(TARGET rccl POST_BUILD
+    COMMENT "Checking librccl for undefined symbols"
+    COMMAND ${CMAKE_COMMAND}
+            -DRCCL_LIB=$<TARGET_FILE:rccl>
+            -P ${PROJECT_SOURCE_DIR}/cmake/scripts/check_undefined_symbols.cmake
+    VERBATIM
+  )
+endif()
+
 if(NOT BUILD_SHARED_LIBS)
   # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
   # You also need to invoke amdclang++ again to trigger GPU code generation.

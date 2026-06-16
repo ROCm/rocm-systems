@@ -17,6 +17,7 @@ build_release=true
 debug_fast=false
 build_static=false
 build_tests=false
+check_undefined_symbols=true
 build_verbose=false
 clean_build=true
 dump_asm=false
@@ -73,6 +74,7 @@ function display_help()
     echo "    -l|--local_gpu_only        Only compile for local GPU architecture"
     echo "       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)"
     echo "       --no_clean              Don't delete files if they already exist"
+    echo "       --no-undef-check        Skip the post-build check for undefined symbols in librccl"
     echo "       --no-device-linker      Disable device linker, use standard -fgpu-rdc"
     echo "       --openmp-test-enable    Enable OpenMP in rccl unit tests"
     echo "    -p|--package_build         Build RCCL package"
@@ -114,7 +116,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,amdgpu_targets:,cmake-options:,debug,debug-fast,dependencies,device-linker,disable-roctx,disable-sym-kernels,disable-warp-speed,dump-asm,enable-code-coverage,enable_backtrace,enable-mpi-tests,fast,force-reduce-pipeline,generate-sym-kernels,help,install,jobs:,kernel-resource-use,local_gpu_only,log-trace,no_clean,no-device-linker,no-undef-check,openmp-test-enable,package_build,prefix:,quiet-warnings,rm-legacy-include-dir,rocshmem,roctx-enable,run_tests_all,run_tests_quick,static,tests_build,time-trace,verbose -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -153,6 +155,7 @@ while true; do
          --log-trace)                log_trace=true;                                                                                   shift ;;
          --no_clean)                 clean_build=false;                                                                                shift ;;
          --no-device-linker)         device_linker=false;                                                                              shift ;;
+         --no-undef-check)           check_undefined_symbols=false;                                                                    shift ;;
          --openmp-test-enable)       openmp_test_enabled=true;                                                                         shift ;;
     -p | --package_build)            build_package=true;                                                                               shift ;;
          --prefix)                   install_library=true; install_prefix=${2};                                                        shift 2 ;;
@@ -406,6 +409,11 @@ fi
 # Suppress Warnings
 if [[ "${quiet_warnings}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DQUIET_WARNINGS=ON"
+fi
+
+# Skip post-build undefined-symbol check on librccl
+if [[ "${check_undefined_symbols}" == false ]]; then
+    cmake_common_options="${cmake_common_options} -DCHECK_UNDEFINED_SYMBOLS=OFF"
 fi
 
 
