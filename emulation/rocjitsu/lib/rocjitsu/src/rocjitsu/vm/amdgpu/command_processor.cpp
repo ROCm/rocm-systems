@@ -1266,6 +1266,7 @@ constexpr uint8_t SUBOP_POLL_MEM_64B = 5;
 
 // Packet sizes in dwords.
 constexpr uint32_t COPY_LINEAR_SIZE = 7;
+constexpr uint32_t COPY_LINEAR_BROADCAST_SIZE = 9;
 constexpr uint32_t FENCE_SIZE = 4;
 constexpr uint32_t TRAP_SIZE = 2;
 constexpr uint32_t POLL_REGMEM_SIZE = 6;
@@ -1277,6 +1278,7 @@ constexpr uint32_t GCR_GFX1250_SIZE = 6;
 constexpr uint32_t COPY_LINEAR_WAITSIGNAL_GFX1250_SIZE = 19;
 constexpr uint32_t FENCE_64B_GFX1250_SIZE = 5;
 constexpr uint32_t POLL_MEM_64B_GFX1250_SIZE = 8;
+constexpr uint32_t COPY_LINEAR_BROADCAST_FLAG = 1u << 27;
 // NOP_BASE_SIZE intentionally omitted — NOP is handled inline.
 } // namespace sdma
 
@@ -1466,7 +1468,12 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         reschedule_current_packet();
         return;
       }
-      if (header & (1u << 28)) {
+      // GFX12.5 COPY_LINEAR uses bit 28 for NPD metadata. The two-destination
+      // broadcast form is marked by bit 27 and extends the packet with DW7/DW8.
+      bool is_broadcast_copy = uses_gfx1250_sdma_packets()
+                                   ? (header & sdma::COPY_LINEAR_BROADCAST_FLAG) != 0
+                                   : (header & (1u << 28)) != 0;
+      if (is_broadcast_copy) {
         uint64_t dst2_va = static_cast<uint64_t>(dw(7)) | (static_cast<uint64_t>(dw(8)) << 32);
         auto *dst2_ptr = resolve(dst2_va);
         if (!dst2_ptr) {
@@ -1479,7 +1486,7 @@ void CommandProcessor::process_sdma_ring(HwQueue &queue, uint64_t read_idx, uint
         std::memcpy(dst2_ptr, src_ptr, count);
         for (auto *l2 : l2_caches_)
           l2->invalidate_range(dst2_va, count);
-        pkt_dwords = 9;
+        pkt_dwords = sdma::COPY_LINEAR_BROADCAST_SIZE;
       } else {
         std::memcpy(dst_ptr, src_ptr, count);
         for (auto *l2 : l2_caches_)

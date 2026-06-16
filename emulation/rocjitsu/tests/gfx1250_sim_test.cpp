@@ -731,6 +731,27 @@ TEST(Gfx1250SdmaTest, CopyLinearUnresolvedDstDoesNotAdvance) {
   EXPECT_NE(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
 }
 
+TEST(Gfx1250SdmaTest, CopyLinearNpdBitDoesNotDecodeAsBroadcast) {
+  Gfx1250Sim sim;
+  TranslatedSdmaQueueForTest queue(sim);
+  constexpr uint32_t kCopyBytes = 128;
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
+    queue.src()[i] = static_cast<uint8_t>(i ^ 0x4d);
+    queue.dst()[i] = 0;
+  }
+
+  auto *packet = queue.ring();
+  packet[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8) | (1u << 28);
+  packet[1] = kCopyBytes - 1;
+  write_sdma_qword_va(packet, 3, 4, queue.src_va());
+  write_sdma_qword_va(packet, 5, 6, queue.dst_va());
+
+  queue.submit(7);
+  ASSERT_TRUE(sim.engine->step());
+  EXPECT_EQ(queue.read_idx(), 7u * sizeof(uint32_t));
+  EXPECT_EQ(std::memcmp(queue.dst(), queue.src(), kCopyBytes), 0);
+}
+
 TEST(Gfx1250SdmaTest, PollMem64ResolvesTranslatedAddress) {
   Gfx1250Sim sim;
   TranslatedSdmaQueueForTest queue(sim);
