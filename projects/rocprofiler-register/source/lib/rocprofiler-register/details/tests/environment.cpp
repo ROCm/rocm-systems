@@ -23,16 +23,7 @@
 #include <gtest/gtest.h>
 
 #if defined(_WIN32)
-#    ifndef WIN32_LEAN_AND_MEAN
-#        define WIN32_LEAN_AND_MEAN
-#    endif
-#    ifndef NOMINMAX
-#        define NOMINMAX
-#    endif
-#    ifndef NOGDI
-#        define NOGDI
-#    endif
-#    include <windows.h>
+#    include "details/platform/windows/encoding.hpp"  // also pulls in rocprofiler_register_windows.h
 #endif
 
 #include <cstdlib>
@@ -46,8 +37,8 @@ void
 unset_env(const char* name)
 {
 #if defined(_WIN32)
-    ::_putenv_s(name, "");
-    ::SetEnvironmentVariableA(name, nullptr);
+    auto wide_name = rocprofiler_register::platform::encoding::utf8_to_wide(name);
+    ::SetEnvironmentVariableW(wide_name.c_str(), nullptr);
 #else
     ::unsetenv(name);
 #endif

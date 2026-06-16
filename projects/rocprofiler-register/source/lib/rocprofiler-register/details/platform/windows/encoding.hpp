@@ -23,26 +23,15 @@
 #pragma once
 
 // WINDOWS-DIVERGENCE: shared UTF-8 <-> UTF-16 conversion helpers used by the
-// Win32 platform-abstraction sources (windows/loader.cpp, windows/pe_parser.cpp).
-// Plan §6.7 mandates a single conversion helper pair so that all wide/narrow
-// conversions go through the same MultiByteToWideChar / WideCharToMultiByte
-// invocation pattern. Header-only because the helpers are short, used in only
-// a handful of translation units, and depend solely on <windows.h>.
+// Win32 platform-abstraction sources (windows/loader.cpp, windows/pe_parser.cpp,
+// details/environment.cpp). Header-only because the helpers are short, used in
+// only a handful of translation units, and depend solely on <windows.h>.
 
 #if !defined(_WIN32)
 #    error "details/platform/windows/encoding.hpp is Windows-only"
 #endif
 
-#ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#    define NOMINMAX
-#endif
-#ifndef NOGDI
-#    define NOGDI
-#endif
-#include <windows.h>
+#include "details/platform/windows/rocprofiler_register_windows.h"
 
 #include <string>
 #include <string_view>
@@ -61,12 +50,8 @@ utf8_to_wide(std::string_view utf8)
         CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
     if(required <= 0) return std::wstring{};
     auto result = std::wstring(static_cast<size_t>(required), L'\0');
-    ::MultiByteToWideChar(CP_UTF8,
-                          0,
-                          utf8.data(),
-                          static_cast<int>(utf8.size()),
-                          result.data(),
-                          required);
+    ::MultiByteToWideChar(
+        CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), result.data(), required);
     return result;
 }
 

@@ -28,16 +28,7 @@
 // against the C runtime's snapshot of the environment block; if anything in the
 // process called SetEnvironmentVariableW, getenv() can return stale data. Use
 // GetEnvironmentVariableW so we always see the current Win32 environment.
-#    ifndef WIN32_LEAN_AND_MEAN
-#        define WIN32_LEAN_AND_MEAN
-#    endif
-#    ifndef NOMINMAX
-#        define NOMINMAX
-#    endif
-#    ifndef NOGDI
-#        define NOGDI
-#    endif
-#    include <windows.h>
+#    include "details/platform/windows/encoding.hpp"  // also pulls in rocprofiler_register_windows.h
 #endif
 
 namespace rocprofiler_register
@@ -47,35 +38,8 @@ namespace common
 #if defined(_WIN32)
 namespace
 {
-std::wstring
-utf8_to_wide(std::string_view utf8)
-{
-    if(utf8.empty()) return std::wstring{};
-    auto required = ::MultiByteToWideChar(
-        CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
-    if(required <= 0) return std::wstring{};
-    auto result = std::wstring(static_cast<size_t>(required), L'\0');
-    ::MultiByteToWideChar(CP_UTF8,
-                          0,
-                          utf8.data(),
-                          static_cast<int>(utf8.size()),
-                          result.data(),
-                          required);
-    return result;
-}
-
-std::string
-wide_to_utf8(const wchar_t* wide, int wide_len)
-{
-    if(wide_len <= 0) return std::string{};
-    auto required =
-        ::WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, nullptr, 0, nullptr, nullptr);
-    if(required <= 0) return std::string{};
-    auto result = std::string(static_cast<size_t>(required), '\0');
-    ::WideCharToMultiByte(
-        CP_UTF8, 0, wide, wide_len, result.data(), required, nullptr, nullptr);
-    return result;
-}
+using platform::encoding::utf8_to_wide;
+using platform::encoding::wide_to_utf8;
 }  // namespace
 
 std::optional<std::string>
@@ -92,9 +56,9 @@ read_env_string(std::string_view env_id)
 
     auto buffer = std::wstring(static_cast<size_t>(required), L'\0');
     ::SetLastError(ERROR_SUCCESS);
-    auto written =
-        ::GetEnvironmentVariableW(wide_name.c_str(), buffer.data(), required);
-    // written == 0 can mean empty value (success) or failure; use GetLastError to tell apart.
+    auto written = ::GetEnvironmentVariableW(wide_name.c_str(), buffer.data(), required);
+    // written == 0 can mean empty value (success) or failure; use GetLastError to tell
+    // apart.
     if(written == 0 && ::GetLastError() != ERROR_SUCCESS) return std::nullopt;
     // 'written' is character count excluding NUL.
     return wide_to_utf8(buffer.data(), static_cast<int>(written));
@@ -125,8 +89,8 @@ std::optional<std::string>
 read_env_string(std::string_view env_id)
 {
     if(env_id.empty()) return std::nullopt;
-    auto name_str = std::string{ env_id };
-    auto*       env_var  = std::getenv(name_str.c_str());
+    auto  name_str = std::string{ env_id };
+    auto* env_var  = std::getenv(name_str.c_str());
     if(env_var == nullptr) return std::nullopt;
     return std::string{ env_var };
 }

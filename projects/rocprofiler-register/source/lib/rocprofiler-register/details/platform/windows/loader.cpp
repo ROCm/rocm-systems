@@ -27,23 +27,13 @@
 #include "details/platform/loader.hpp"
 
 #include "details/filesystem.hpp"
-#include "details/platform/windows/encoding.hpp"
-
-#ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#    define NOMINMAX
-#endif
-#ifndef NOGDI
-#    define NOGDI
-#endif
-#include <windows.h>
+#include "details/platform/windows/encoding.hpp"  // also pulls in rocprofiler_register_windows.h
 //
 #include <psapi.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -56,6 +46,17 @@ namespace
 {
 using encoding::utf8_to_wide;
 using encoding::wide_to_utf8;
+
+// RAII owner for a LoadLibrary handle. FreeLibrary is called on destruction
+// unless release() is used to hand ownership to a caller.
+struct hmodule_deleter
+{
+    void operator()(HMODULE h) const noexcept
+    {
+        if(h) ::FreeLibrary(h);
+    }
+};
+using unique_hmodule = std::unique_ptr<std::remove_pointer_t<HMODULE>, hmodule_deleter>;
 
 // Return the absolute filesystem path of the DLL that contains this code.
 // Used by the multi-attempt fallback to look for sibling DLLs alongside
@@ -75,8 +76,8 @@ this_module_directory()
     auto buffer = std::wstring(MAX_PATH, L'\0');
     while(true)
     {
-        auto written =
-            ::GetModuleFileNameW(handle, buffer.data(), static_cast<DWORD>(buffer.size()));
+        auto written = ::GetModuleFileNameW(
+            handle, buffer.data(), static_cast<DWORD>(buffer.size()));
         if(written == 0) return std::wstring{};
         if(written < buffer.size())
         {
@@ -99,7 +100,7 @@ ensure_dll_suffix(const std::wstring& name)
     constexpr std::wstring_view kSuffix = L".dll";
     if(name.size() >= kSuffix.size())
     {
-        auto tail = std::wstring_view{ name }.substr(name.size() - kSuffix.size());
+        auto tail  = std::wstring_view{ name }.substr(name.size() - kSuffix.size());
         auto match = true;
         for(size_t i = 0; i < kSuffix.size(); ++i)
         {
@@ -122,8 +123,8 @@ module_path_for_handle(HMODULE handle)
     auto buffer = std::wstring(MAX_PATH, L'\0');
     while(true)
     {
-        auto written =
-            ::GetModuleFileNameW(handle, buffer.data(), static_cast<DWORD>(buffer.size()));
+        auto written = ::GetModuleFileNameW(
+            handle, buffer.data(), static_cast<DWORD>(buffer.size()));
         if(written == 0) return std::string{};
         if(written < buffer.size())
         {
@@ -160,16 +161,19 @@ module_open_with_fallback(const char* name) noexcept
     auto wide = utf8_to_wide(name);
     if(wide.empty()) return nullptr;
 
+    // Each attempt wraps the raw HMODULE in a unique_hmodule so that any
+    // handle acquired but not returned is freed automatically.
+
     // 1) Try as-given.
-    auto* handle = ::LoadLibraryW(wide.c_str());
-    if(handle != nullptr) return reinterpret_cast<module_handle_t>(handle);
+    if(auto h = unique_hmodule{ ::LoadLibraryW(wide.c_str()) })
+        return reinterpret_cast<module_handle_t>(h.release());
 
     // 2) Try with ".dll" suffix appended if not already present.
     auto with_suffix = ensure_dll_suffix(wide);
     if(with_suffix != wide)
     {
-        handle = ::LoadLibraryW(with_suffix.c_str());
-        if(handle != nullptr) return reinterpret_cast<module_handle_t>(handle);
+        if(auto h = unique_hmodule{ ::LoadLibraryW(with_suffix.c_str()) })
+            return reinterpret_cast<module_handle_t>(h.release());
     }
 
     // 3) Try CWD-prefixed path.
@@ -193,8 +197,8 @@ module_open_with_fallback(const char* name) noexcept
     if(!cwd_buf.empty())
     {
         auto cwd_path = cwd_buf + L"\\" + with_suffix;
-        handle        = ::LoadLibraryW(cwd_path.c_str());
-        if(handle != nullptr) return reinterpret_cast<module_handle_t>(handle);
+        if(auto h = unique_hmodule{ ::LoadLibraryW(cwd_path.c_str()) })
+            return reinterpret_cast<module_handle_t>(h.release());
     }
 
     // 4) Try alongside the rocprofiler-register DLL itself.
@@ -202,8 +206,8 @@ module_open_with_fallback(const char* name) noexcept
     if(!reg_dir.empty())
     {
         auto sibling = reg_dir + L"\\" + with_suffix;
-        handle       = ::LoadLibraryW(sibling.c_str());
-        if(handle != nullptr) return reinterpret_cast<module_handle_t>(handle);
+        if(auto h = unique_hmodule{ ::LoadLibraryW(sibling.c_str()) })
+            return reinterpret_cast<module_handle_t>(h.release());
     }
 
     return nullptr;
@@ -213,8 +217,7 @@ void*
 module_sym(module_handle_t handle, const char* sym) noexcept
 {
     if(handle == nullptr || sym == nullptr) return nullptr;
-    auto* proc =
-        ::GetProcAddress(reinterpret_cast<HMODULE>(handle), sym);
+    auto* proc = ::GetProcAddress(reinterpret_cast<HMODULE>(handle), sym);
     return reinterpret_cast<void*>(proc);
 }
 
@@ -301,12 +304,12 @@ get_segment_addresses(std::uint32_t pid)
     auto* current_handle = ::GetCurrentProcess();
     auto  current_pid    = ::GetCurrentProcessId();
 
-    auto  process_handle = HANDLE{ current_handle };
-    auto  needs_close    = false;
+    auto process_handle = HANDLE{ current_handle };
+    auto needs_close    = false;
     if(pid != current_pid)
     {
-        process_handle = ::OpenProcess(
-            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+        process_handle =
+            ::OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
         if(process_handle == nullptr) return data;
         needs_close = true;
     }
@@ -383,7 +386,7 @@ get_segment_addresses(std::uint32_t pid)
         auto start     = reinterpret_cast<std::uintptr_t>(info.lpBaseOfDll);
         // Exclusive upper bound: matches the half-open [start, last) semantics
         // used by _in_address_range (addr >= start && addr < last).
-        auto last      = start + static_cast<std::uintptr_t>(info.SizeOfImage);
+        auto last = start + static_cast<std::uintptr_t>(info.SizeOfImage);
         entry.ranges.emplace_back(module_address_range{ start, last });
         data.emplace_back(std::move(entry));
     }

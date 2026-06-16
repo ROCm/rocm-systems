@@ -26,18 +26,7 @@
 
 #include "details/platform/pe_parser.hpp"
 
-#include "details/platform/windows/encoding.hpp"
-
-#ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#    define NOMINMAX
-#endif
-#ifndef NOGDI
-#    define NOGDI
-#endif
-#include <windows.h>
+#include "details/platform/windows/encoding.hpp"  // also pulls in rocprofiler_register_windows.h
 //
 #include <psapi.h>
 
@@ -56,14 +45,19 @@ using encoding::wide_to_utf8;
 bool
 prot_is_readable(DWORD protect) noexcept
 {
-    return (protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ |
-                       PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY |
-                       PAGE_EXECUTE_WRITECOPY)) != 0;
+    // PAGE_GUARD is a modifier: accessing a guard page raises
+    // STATUS_GUARD_PAGE_VIOLATION. Treat guarded pages as non-accessible regardless of
+    // the base protection bits.
+    if((protect & PAGE_GUARD) != 0) return false;
+    return (protect &
+            (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+             PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY)) != 0;
 }
 
 bool
 prot_is_writable(DWORD protect) noexcept
 {
+    if((protect & PAGE_GUARD) != 0) return false;
     return (protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY |
                        PAGE_EXECUTE_WRITECOPY)) != 0;
 }
@@ -71,9 +65,9 @@ prot_is_writable(DWORD protect) noexcept
 bool
 prot_is_executable(DWORD protect) noexcept
 {
-    return (protect &
-            (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
-             PAGE_EXECUTE_WRITECOPY)) != 0;
+    if((protect & PAGE_GUARD) != 0) return false;
+    return (protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                       PAGE_EXECUTE_WRITECOPY)) != 0;
 }
 
 std::string

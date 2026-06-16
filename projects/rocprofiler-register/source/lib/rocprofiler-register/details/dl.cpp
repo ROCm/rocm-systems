@@ -61,12 +61,17 @@ get_linked_path(std::string_view name, open_modes_vec_t&& open_modes)
 
     auto name_str = std::string{ name };
 
-    // Prefer the already-loaded handle (no refcount bump). A non-empty
-    // open_modes signals a noload-only lookup (e.g. get_this_library_path
-    // passes { RTLD_NOLOAD | RTLD_LAZY } to avoid loading a second copy of
-    // the rocprofiler-register DSO when its soname is missing or renamed);
-    // in that case do not fall back to a transient open. When open_modes is
-    // empty the caller has no preference and a transient open is acceptable.
+    // Prefer the already-loaded handle (no refcount bump).
+    //
+    // open_modes carries POSIX dlopen flags (e.g. RTLD_NOLOAD | RTLD_LAZY).
+    // On Linux those flags are forwarded to dlopen; on Windows the Win32
+    // loader has no equivalent flag set, so we use open_modes only as a
+    // boolean: non-empty == "caller wants noload-only" (skip the fallback
+    // transient open), empty == "any open is acceptable".
+    //
+    // The canonical noload-only caller is get_this_library_path, which passes
+    // { RTLD_NOLOAD | RTLD_LAZY } to avoid loading a second copy of the
+    // rocprofiler-register DSO when its soname is missing or renamed.
     auto* handle = platform::module_open_already_loaded(name_str.c_str());
     auto  opened = false;
     if(handle == nullptr && open_modes.empty())
