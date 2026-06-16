@@ -8,8 +8,10 @@
 
 #include <sys/types.h>
 
+#include <concepts>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace rocprofsys::output
@@ -60,8 +62,8 @@ struct build_result
 // Pure: no I/O, no globals. Per-node rows are sorted descending by
 // size_bytes.
 [[nodiscard]] build_result
-build_tree(const std::vector<output_file>&      rows,
-           const std::vector<process_metadata>& processes);
+build_tree(std::span<const output_file>      rows,
+           std::span<const process_metadata> processes);
 
 // Post-order roll-up of own_size_bytes and cumulative_size_bytes over
 // the final (post-collapse) tree. Unknown row sizes contribute zero.
@@ -70,7 +72,7 @@ compute_subtree_sizes(std::vector<process_node>& roots);
 
 // Post-order visitor. `fn` is taken by lvalue so a stateful functor
 // is not moved-from between siblings.
-template <typename F>
+template <std::invocable<process_node&> F>
 void
 for_each_post(process_node& node, F&& fn)
 {

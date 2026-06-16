@@ -15,11 +15,6 @@ namespace rocprofsys::output
 // Maximum GPU-id tokens rendered before the list is truncated.
 inline constexpr std::size_t MAX_RENDERED_GPU_IDS = 16;
 
-// Word-boundary preferred; falls back to byte chunking with UTF-8
-// continuation-byte backoff so multi-byte code points never split.
-[[nodiscard]] std::vector<std::string>
-wrap_to_width(std::string_view content, std::size_t width);
-
 // Display column count assuming every UTF-8 code point is one column
 // wide (true for ASCII plus the box-drawing and bullet glyphs the
 // summary uses). Counts UTF-8 lead bytes, ignoring continuation bytes.
@@ -45,11 +40,6 @@ format_gpu_ids(const std::vector<int>& gpu_ids);
 // Two-decimal seconds; "?" for non-positive durations.
 [[nodiscard]] std::string
 format_duration(std::chrono::nanoseconds dur);
-
-// Wraps `s` in single quotes and escapes any embedded single quote so
-// the result pastes safely as a single shell argument.
-[[nodiscard]] std::string
-escape_for_shell_single_quotes(std::string_view s);
 
 // Drops C0 control bytes, DEL, and CSI escape sequences (ESC [ ... letter)
 // so peer-controlled strings cannot inject terminal effects when rendered

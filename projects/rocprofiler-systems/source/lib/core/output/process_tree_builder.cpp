@@ -4,6 +4,7 @@
 #include "output/process_tree_builder.hpp"
 
 #include <algorithm>
+#include <span>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -23,11 +24,10 @@ make_node(const process_metadata& meta)
 void
 sort_rows_desc_by_size(process_node& node)
 {
-    std::sort(node.rows.begin(), node.rows.end(),
-              [](const output_file& a, const output_file& b) {
-                  if(a.size_bytes && b.size_bytes) return *a.size_bytes > *b.size_bytes;
-                  return a.size_bytes.has_value() && !b.size_bytes.has_value();
-              });
+    std::ranges::sort(node.rows, [](const output_file& a, const output_file& b) {
+        if(a.size_bytes && b.size_bytes) return *a.size_bytes > *b.size_bytes;
+        return a.size_bytes.has_value() && !b.size_bytes.has_value();
+    });
 }
 
 struct subtree_walk
@@ -98,8 +98,7 @@ extract_subtree(std::unordered_map<pid_t, process_node>&             nodes,
 }  // namespace
 
 build_result
-build_tree(const std::vector<output_file>&      rows,
-           const std::vector<process_metadata>& processes)
+build_tree(std::span<const output_file> rows, std::span<const process_metadata> processes)
 {
     build_result result{};
 
@@ -144,7 +143,7 @@ build_tree(const std::vector<output_file>&      rows,
     sorted_pids.reserve(nodes.size());
     for(const auto& kv : nodes)
         sorted_pids.push_back(kv.first);
-    std::sort(sorted_pids.begin(), sorted_pids.end());
+    std::ranges::sort(sorted_pids);
 
     // O(N) precompute keeps subtree construction O(N) instead of O(N^2).
     std::unordered_map<pid_t, std::vector<pid_t>> children_by_ppid;
@@ -152,26 +151,24 @@ build_tree(const std::vector<output_file>&      rows,
     for(pid_t pid : sorted_pids)
     {
         const auto& meta = nodes.at(pid).meta;
-        if(meta.ppid != -1 && nodes.find(meta.ppid) != nodes.end())
+        if(meta.ppid != -1 && nodes.contains(meta.ppid))
             children_by_ppid[meta.ppid].push_back(pid);
     }
     for(auto& [_, vec] : children_by_ppid)
-        std::sort(vec.begin(), vec.end());
+        std::ranges::sort(vec);
 
     std::vector<pid_t> root_pids;
     for(pid_t pid : sorted_pids)
     {
         const auto& meta = nodes.at(pid).meta;
-        if(meta.ppid == -1 || nodes.find(meta.ppid) == nodes.end())
-            root_pids.push_back(pid);
+        if(meta.ppid == -1 || !nodes.contains(meta.ppid)) root_pids.push_back(pid);
     }
 
     result.roots.reserve(root_pids.size());
     for(pid_t pid : root_pids)
         result.roots.push_back(extract_subtree(nodes, children_by_ppid, pid));
 
-    std::sort(result.diagnostics.missing_metadata_pids.begin(),
-              result.diagnostics.missing_metadata_pids.end());
+    std::ranges::sort(result.diagnostics.missing_metadata_pids);
 
     return result;
 }
@@ -179,7 +176,7 @@ build_tree(const std::vector<output_file>&      rows,
 namespace
 {
 std::uintmax_t
-sum_known_row_sizes(const std::vector<output_file>& rows)
+sum_known_row_sizes(std::span<const output_file> rows)
 {
     std::uintmax_t total = 0;
     for(const auto& file : rows)

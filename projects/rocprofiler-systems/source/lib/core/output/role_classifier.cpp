@@ -4,6 +4,7 @@
 #include "output/role_classifier.hpp"
 
 #include <algorithm>
+#include <vector>
 
 namespace rocprofsys::output
 {
@@ -15,18 +16,18 @@ void
 merge_unique(std::vector<int>& dst, const std::vector<int>& src)
 {
     dst.insert(dst.end(), src.begin(), src.end());
-    std::sort(dst.begin(), dst.end());
-    dst.erase(std::unique(dst.begin(), dst.end()), dst.end());
+
+    std::ranges::sort(dst);
+    const auto duplicates = std::ranges::unique(dst);
+    dst.erase(duplicates.begin(), duplicates.end());
 }
 
 bool
 any_child_is_gpu(const process_node& node)
 {
-    for(const auto& c : node.children)
-    {
-        if(c.role.has_value() && *c.role == role_hint::gpu) return true;
-    }
-    return false;
+    return std::ranges::any_of(node.children, [](const process_node& child) {
+        return child.role == role_hint::gpu;
+    });
 }
 }  // namespace
 

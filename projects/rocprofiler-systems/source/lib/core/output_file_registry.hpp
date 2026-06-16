@@ -29,9 +29,7 @@ enum class output_format
 
 struct output_file
 {
-    std::string                   label;
     std::string                   path;
-    std::string                   viewer;
     pid_t                         pid{ -1 };
     std::optional<std::uintmax_t> size_bytes{};
     output_format                 format{ output_format::perfetto };
@@ -59,9 +57,6 @@ public:
 
     void register_file(std::string path, output_format format,
                        std::optional<pid_t> pid = std::nullopt);
-    void register_file(std::string path, output_format format,
-                       const std::string&   component_name,
-                       std::optional<pid_t> pid = std::nullopt);
 
     // Filtered to the current session. Older records stay in internal
     // storage so an in-flight prior-session registration can still
@@ -85,8 +80,7 @@ public:
     [[nodiscard]] std::uint64_t bump_session();
 
 private:
-    static output_file make_entry(std::string path, output_format format,
-                                  const std::string& component_name = {});
+    static output_file make_entry(std::string path, output_format format);
 
     void push_entry(output_file&& entry, std::optional<pid_t> pid);
 

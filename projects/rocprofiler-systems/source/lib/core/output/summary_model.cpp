@@ -13,8 +13,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::output
 {
@@ -22,7 +24,7 @@ namespace rocprofsys::output
 namespace
 {
 std::size_t
-count_distinct_pids(const std::vector<output_file>& rows)
+count_distinct_pids(std::span<const output_file> rows)
 {
     std::unordered_set<pid_t> pid_set;
     for(const auto& row : rows)
@@ -31,7 +33,7 @@ count_distinct_pids(const std::vector<output_file>& rows)
 }
 
 std::string
-derive_output_dir(const run_metadata& meta, const std::vector<output_file>& rows)
+derive_output_dir(const run_metadata& meta, std::span<const output_file> rows)
 {
     if(!meta.output_dir_abs.empty()) return meta.output_dir_abs;
     if(rows.empty()) return "?";
@@ -40,7 +42,7 @@ derive_output_dir(const run_metadata& meta, const std::vector<output_file>& rows
 }
 
 std::uintmax_t
-total_known_output_bytes(const std::vector<output_file>& rows)
+total_known_output_bytes(std::span<const output_file> rows)
 {
     std::uintmax_t total = 0;
     for(const auto& row : rows)
@@ -49,14 +51,19 @@ total_known_output_bytes(const std::vector<output_file>& rows)
 }
 
 std::vector<int>
-union_of_utilized_gpus(const std::vector<process_node>& roots)
+union_of_utilized_gpus(std::span<const process_node> roots)
 {
     std::vector<int> utilized;
     for(const auto& root : roots)
+    {
         utilized.insert(utilized.end(), root.effective_gpu_ids.begin(),
                         root.effective_gpu_ids.end());
-    std::sort(utilized.begin(), utilized.end());
-    utilized.erase(std::unique(utilized.begin(), utilized.end()), utilized.end());
+    }
+
+    std::ranges::sort(utilized);
+    const auto duplicates = std::ranges::unique(utilized);
+    utilized.erase(duplicates.begin(), duplicates.end());
+
     return utilized;
 }
 }  // namespace

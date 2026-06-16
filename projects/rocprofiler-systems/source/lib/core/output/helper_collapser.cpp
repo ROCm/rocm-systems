@@ -4,6 +4,7 @@
 #include "output/helper_collapser.hpp"
 
 #include <algorithm>
+#include <ranges>
 #include <utility>
 
 namespace rocprofsys::output
@@ -37,17 +38,13 @@ is_helper(const process_node& node)
 process_node
 make_range_node(const std::vector<process_node>& group)
 {
+    const auto pids =
+        group | std::views::transform([](const process_node& g) { return g.meta.pid; });
+    const auto [min_pid, max_pid] = std::ranges::minmax(pids);
+
     process_node node{};
-    helper_range range{};
-    range.count   = group.size();
-    range.min_pid = group.front().meta.pid;
-    range.max_pid = group.front().meta.pid;
-    for(const auto& g : group)
-    {
-        if(g.meta.pid < range.min_pid) range.min_pid = g.meta.pid;
-        if(g.meta.pid > range.max_pid) range.max_pid = g.meta.pid;
-    }
-    node.collapsed = range;
+    node.collapsed =
+        helper_range{ .min_pid = min_pid, .max_pid = max_pid, .count = group.size() };
     return node;
 }
 
