@@ -353,14 +353,14 @@ class QueuePair {
       uint8_t opcode, ActiveWFInfo &wf_info, bool ring_db);
 
   __device__ __attribute__((noinline)) void
-  post_wqe_rma_single(int32_t size, uintptr_t laddr, uint32_t lkey,
+  post_wqe_rma_single(int32_t length, uintptr_t laddr, uint32_t lkey,
       uintptr_t raddr, uint32_t rkey, uint8_t opcode, bool ring_db);
 
 #if defined(GDA_MLX5)
   __device__ uint64_t mlx5_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch = false, bool fence = false);
-  __device__ void mlx5_post_wqe_rma_single(int32_t size, uintptr_t laddr,
+  __device__ void mlx5_post_wqe_rma_single(int32_t length, uintptr_t laddr,
       uint32_t lkey, uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, bool ring_db);
   __device__ void mlx5_post_wqe_rma(int32_t length, uintptr_t raddr,
@@ -380,7 +380,7 @@ class QueuePair {
   __device__ uint64_t bnxt_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetching = false, bool fence = false);
-  __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
+  __device__ void bnxt_post_wqe_rma_single(int32_t length, uintptr_t laddr,
       uint32_t lkey, uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, bool ring_db);
   __device__ void bnxt_post_wqe_rma(int32_t length, uintptr_t raddr,
@@ -393,7 +393,7 @@ class QueuePair {
   __device__ uint64_t ionic_post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch = false, bool fence = false);
-  __device__ void ionic_post_wqe_rma_single(int32_t size,
+  __device__ void ionic_post_wqe_rma_single(int32_t length,
       uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
       uint32_t rkey, uint8_t opcode, bool ring_db);
   __device__ void ionic_post_wqe_rma(int32_t length, uintptr_t raddr,

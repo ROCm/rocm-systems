@@ -310,12 +310,12 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int32_t length,
   }
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t size,
+__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
     uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey,
     uint8_t opcode, bool ring_db) {
   lock(&bnxt_sq.lock);
 
-  bnxt_write_rma_wqe(size, raddr, rkey, laddr, lkey, opcode);
+  bnxt_write_rma_wqe(length, raddr, rkey, laddr, lkey, opcode);
 
   if (ring_db) {
     bnxt_ring_doorbell(bnxt_sq.tail);
