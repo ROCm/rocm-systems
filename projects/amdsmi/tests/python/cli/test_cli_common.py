@@ -40,14 +40,10 @@ import common.helpers as common
 import common.runcmd as runcmd
 from cli.base import TestCliBase
 
-amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
-if not os.path.exists(amdsmi_path):
-    raise FileNotFoundError(f'AMDSMI_PATH "{amdsmi_path}" does not exist.')
-sys.path.append(amdsmi_path)
-try:
-    import amdsmi
-except ImportError as exc:
-    raise ImportError(f'Could not import "{amdsmi_path}"') from exc
+# common.helpers owns path resolution, sys.path setup, and amdsmi loading — borrow the
+# reference so AMDSMI_PATH/ROCM_HOME/ROCM_PATH resolution and the stale-package check
+# (see ROCM-1552 / PR #6359) are not duplicated or bypassed here.
+from common.helpers import amdsmi
 
 verbose = 1
 
