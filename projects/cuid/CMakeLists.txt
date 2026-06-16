@@ -167,6 +167,28 @@ if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# Unified post-install wrapper: runs the library post-install always, and the
+# daemon post-install automatically when the daemon binary is present.
+if(UNIX AND NOT APPLE)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/amdcuid_postinst_wrapper.sh.in
+        ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/amdcuid_prerm_wrapper.sh.in
+        ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
+        @ONLY
+    )
+    install(
+        PROGRAMS
+            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_postinst.sh
+            ${CMAKE_CURRENT_BINARY_DIR}/amdcuid_prerm.sh
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/${AMDCUID}
+        COMPONENT ${LIB_COMPONENT}
+    )
+endif()
+
 # Uninstall target
 # NOTE: /etc/amdcuid/ (HMAC key + config) is intentionally left in place by
 #       the prerm script to preserve existing CUID values across reinstalls.

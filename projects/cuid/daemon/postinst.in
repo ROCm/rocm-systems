@@ -110,7 +110,7 @@ fi
 # To apply future config changes, edit the config file then run:
 #   sudo systemctl restart amdcuid_daemon
 if [ -d /run/systemd/system ]; then
-    ln -s -f -r @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/amdcuid/amdcuid_daemon.service \
+    ln -s -f -r @CMAKE_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/amdcuid/amdcuid_daemon.service \
         "$SYSTEMD_UNIT_DIR/amdcuid_daemon.service"
 fi
 systemctl daemon-reload

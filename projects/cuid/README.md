@@ -121,6 +121,7 @@ The below instructions allow the building of the CUID project and also the insta
 mkdir build
 cd build
 # Set CMAKE_INSTALL_PREFIX as needed (default is typically /opt/rocm/core)
+# Add -DBUILD_DAEMON=ON to also build the daemon (optional)
 cmake -DCMAKE_INSTALL_PREFIX=/opt/rocm ..
 make
 # Use sudo if installing to a system prefix like /opt
@@ -128,7 +129,8 @@ sudo make install
 # Replace <install-prefix> with the value used for CMAKE_INSTALL_PREFIX above
 sudo <install-prefix>/share/amdcuid/amdcuid_postinst.sh
 ```
-Both static and shared libraries are built.
+
+Both static and shared libraries are built. The post-install script is a unified entry point: it always provisions the HMAC key required by the library, and automatically configures the `systemd` service and `udev` rules if the daemon was also installed.
 
 If users need to uninstall the CUID project, they can do so with the following instructions:
 
@@ -138,6 +140,8 @@ cd build
 sudo <install-prefix>/share/amdcuid/amdcuid_prerm.sh
 sudo make uninstall
 ```
+
+The pre-removal script automatically stops and removes the `systemd` service and `udev` rules if the daemon is installed, and skips those steps otherwise. The HMAC key and daemon config in `/etc/amdcuid/` are intentionally preserved so that reinstalls keep the same CUID values. To fully purge all configuration, run `sudo rm -rf /etc/amdcuid` after uninstalling.
 
 Documentation can be built using the following instructions:
 

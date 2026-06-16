@@ -1,0 +1,64 @@
+#!/bin/sh
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Unified pre-removal entry point for amdcuid.
+# Template processed by CMake to generate the installed 'amdcuid_prerm.sh'.
+# Do not edit the generated script directly; edit this '.in' template instead.
+#
+# Automatically runs the daemon pre-removal steps when the daemon binary is
+# present, then leaves the HMAC key and config in place (per the intentional
+# policy of amdcuid_prerm.sh) so CUIDs remain stable across reinstalls.
+#
+# NOTE: /etc/amdcuid/ (the HMAC key and daemon config) is intentionally
+# preserved so that reinstalls keep the same CUID values.
+# To fully purge configuration run: sudo rm -rf @AMDCUID_SHARED_CONFIG_DIR@
+
+DAEMON_PRERM="@CMAKE_INSTALL_FULL_DATADIR@/@AMDCUID@/amdcuid_prerm.sh"
+DAEMON_BIN="@CMAKE_INSTALL_FULL_BINDIR@/amdcuid_daemon"
+
+echo "=== amdcuid pre-removal ==="
+
+# --- Daemon pre-removal (only when daemon is installed) ---
+echo ""
+if [ -x "$DAEMON_BIN" ]; then
+    echo "Step 1: Daemon binary detected at $DAEMON_BIN."
+    echo "        Running daemon pre-removal (stopping service, removing udev rules)..."
+    if [ -x "$DAEMON_PRERM" ]; then
+        "$DAEMON_PRERM"
+        DAEMON_RC=$?
+        if [ $DAEMON_RC -ne 0 ]; then
+            echo "ERROR: Daemon pre-removal failed (exit code $DAEMON_RC)." >&2
+            exit $DAEMON_RC
+        fi
+        echo "Daemon pre-removal complete."
+    else
+        echo "ERROR: Daemon pre-removal script not found at $DAEMON_PRERM." >&2
+        exit 1
+    fi
+else
+    echo "Step 1: Daemon binary not found — skipping daemon pre-removal."
+fi
+
+echo ""
+echo "=== amdcuid pre-removal complete ==="
+echo ""
+echo "Note: /etc/amdcuid/ (HMAC key and config) has been preserved."
+echo "      To fully purge configuration run: sudo rm -rf @AMDCUID_SHARED_CONFIG_DIR@"

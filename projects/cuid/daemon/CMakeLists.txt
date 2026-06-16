@@ -34,7 +34,6 @@ message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
 message("------------Compiler: " ${CMAKE_CXX_COMPILER})
 message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
 message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
-message("-Pkg.-Install Prefix: " ${CPACK_PACKAGING_INSTALL_PREFIX})
 message("-CMake inst. Bindir : " ${CMAKE_INSTALL_BINDIR})
 message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
@@ -64,7 +63,7 @@ target_include_directories(${AMDCUID_DAEMON_EXECUTABLE} PRIVATE ${INC_DIR})
 # location.
 target_compile_definitions(
     ${AMDCUID_DAEMON_EXECUTABLE}
-    PRIVATE AMDCUID_CONFIG_DIR="${CMAKE_INSTALL_SYSCONFDIR}"
+    PRIVATE AMDCUID_CONFIG_DIR="${AMDCUID_SHARED_CONFIG_DIR}"
 )
 
 # Link against the CUID library

@@ -28,7 +28,6 @@ message("-----------BuildType: " ${CMAKE_BUILD_TYPE})
 message("------------Compiler: " ${CMAKE_CXX_COMPILER})
 message("-------------Version: " ${CMAKE_CXX_COMPILER_VERSION})
 message("------Install Prefix: " ${CMAKE_INSTALL_PREFIX})
-message("-Pkg.-Install Prefix: " ${CPACK_PACKAGING_INSTALL_PREFIX})
 message("-CMake inst. Bindir : " ${CMAKE_INSTALL_BINDIR})
 message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
@@ -42,9 +41,11 @@ find_package(GTest CONFIG QUIET)
 if(NOT GTest_FOUND)
     find_package(GTest MODULE QUIET)
 endif()
-# If GTest is still not found, we'll fetch it from source in the next step.
-if (NOT GTest_FOUND)
-    # Download and compile googletest to ensure it's available
+# If GTest is still not found, fetch it from source.
+# FetchContent defines GTest::gtest / GTest::gtest_main; find_package CONFIG
+# mode does the same. find_package MODULE mode defines GTest::GTest / GTest::Main,
+# so create aliases to normalize all three paths to a single target name.
+if(NOT GTest_FOUND)
     message("GTest not found on system. Fetching from source...")
     include(FetchContent)
     FetchContent_Declare(
@@ -53,6 +54,10 @@ if (NOT GTest_FOUND)
         GIT_TAG v1.14.0
     )
     FetchContent_MakeAvailable(googletest)
+elseif(TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+    # MODULE mode found GTest::GTest — create the canonical aliases expected below.
+    add_library(GTest::gtest ALIAS GTest::GTest)
+    add_library(GTest::gtest_main ALIAS GTest::Main)
 endif()
 
 set(AMDCUID_TST_EXECUTABLE amdcuid_test)
@@ -74,8 +79,8 @@ target_include_directories(amdcuid_test PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 target_link_libraries(
     ${AMDCUID_TST_EXECUTABLE}
     amdcuid_static
-    GTest::GTest
-    GTest::Main
+    GTest::gtest
+    GTest::gtest_main
 )
 
 # Register tests with CTest
