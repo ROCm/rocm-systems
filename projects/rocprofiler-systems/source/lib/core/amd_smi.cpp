@@ -1,8 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "backends/amd_smi/ainic_feature.hpp"
+#include "backends/amd_smi/sdma_feature.hpp"
+
 #include "core/amd_smi.hpp"
-#include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
 #include "timemory.hpp"

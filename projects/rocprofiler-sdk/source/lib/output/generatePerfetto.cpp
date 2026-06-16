@@ -111,8 +111,8 @@ write_perfetto(
         buffer_config->set_fill_policy(
             ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER);
     else
-        ROCP_FATAL << "Unsupport perfetto buffer fill policy: '" << ocfg.perfetto_buffer_fill_policy
-                   << "'. Supported: discard, ring_buffer";
+        ROCP_FATAL << "Unsupported perfetto buffer fill policy: '"
+                   << ocfg.perfetto_buffer_fill_policy << "'. Supported: discard, ring_buffer";
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");  // this MUST be track_event
@@ -125,7 +125,7 @@ write_perfetto(
     else if(ocfg.perfetto_backend == "system")
         args.backends |= ::perfetto::kSystemBackend;
     else
-        ROCP_FATAL << "Unsupport perfetto backend: '" << ocfg.perfetto_backend
+        ROCP_FATAL << "Unsupported perfetto backend: '" << ocfg.perfetto_backend
                    << "'. Supported: inprocess, system";
 
     ::perfetto::Tracing::Initialize(args);
@@ -894,7 +894,7 @@ write_perfetto(
                 else if(itr.operation == ROCPROFILER_MEMORY_ALLOCATION_FREE ||
                         itr.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_FREE)
                 {
-                    // Store free memory operations in seperate vector to pair with agent
+                    // Store free memory operations in separate vector to pair with agent
                     // and allocation size in following loop
                     free_mem_info.push_back(free_memory_information{
                         itr.start_timestamp, itr.end_timestamp, itr.address});

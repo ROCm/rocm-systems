@@ -16,14 +16,14 @@
 
 #define MAX_STR_LEN 255
 
-#define NUM_LIBS 4
+#define NUM_LIBS 5
 static char* libNames[NUM_LIBS];
 char* ncclPluginLibPaths[NUM_LIBS];
 static void *libHandles[NUM_LIBS];
-static const char *pluginNames[NUM_LIBS] = { "NET", "TUNER", "PROFILER", "ENV" };
-static const char *pluginPrefix[NUM_LIBS] = { "librccl-net", "libnccl-tuner", "libnccl-profiler", "libnccl-env" };
-static const char *pluginFallback[NUM_LIBS] = { "", "Using internal tuner plugin.", "", "" };
-static unsigned long subsys[NUM_LIBS] = { NCCL_INIT|NCCL_NET, NCCL_INIT|NCCL_TUNING, NCCL_INIT, NCCL_INIT|NCCL_ENV };
+static const char *pluginNames[NUM_LIBS] = { "NET", "GIN", "TUNER", "PROFILER", "ENV" };
+static const char *pluginPrefix[NUM_LIBS] = { "librccl-net", "libnccl-gin", "libnccl-tuner", "libnccl-profiler", "libnccl-env" };
+static const char *pluginFallback[NUM_LIBS] = { "", "", "", "", "" };
+static unsigned long subsys[NUM_LIBS] = { NCCL_INIT|NCCL_NET, NCCL_INIT|NCCL_NET, NCCL_INIT|NCCL_TUNING, NCCL_INIT, NCCL_INIT|NCCL_ENV };
 
 static void* tryOpenLib(char* name, int* err, char* errStr) {
   *err = 0;

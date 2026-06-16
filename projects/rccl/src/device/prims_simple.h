@@ -6,10 +6,6 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#if defined(ENABLE_NPKIT)
-#include "npkit/npkit.h"
-#endif
-
 #include "rccl_metadata.h"
 #include "network/unpack/unpack.h"
 #include <cassert>
@@ -68,15 +64,6 @@ class Primitives<
   uint64_t barrier_next_pat = 0;
   int repeat;
   bool skip_fence = 0;
-
-#if defined(ENABLE_NPKIT)
-public:
-  int npKitCtxIdx = 0;
-  uint64_t npKitDataProcessEntryTime = 0;
-  uint64_t npKitDataProcessExitTime = 0;
-  uint64_t npKitDataProcessTotalTime = 0;
-private:
-#endif
 
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -138,12 +125,6 @@ private:
 
   template <int DirectRecv, int DirectSend, int Recv, int Send, int Src, int Dst>
   __device__ __forceinline__ void waitPeer(intptr_t srcIx, intptr_t dstIx, int offset, int nelts) {
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_WAIT_PEER_ENTRY)
-    if (threadIdx.x == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_WAIT_PEER_ENTRY, nelts*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
     const bool isSendNotRecv = (Send && Recv) ? (flags & RoleWaitSend) : Send;
     // Yes, for some template arguments this code will be unreachable.  That's fine.
     // coverity[dead_error_line]
@@ -214,12 +195,6 @@ private:
       }
       step += StepPerSlice;
     }
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_WAIT_PEER_EXIT)
-    if (threadIdx.x == 0) {
-      NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_WAIT_PEER_EXIT, nelts*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-    }
-#endif
   }
 
   template<int Recv, int Send>
@@ -316,54 +291,15 @@ private:
           // We can only have one direct receive. Since srcs[0] == dstPtr+offset, skip one copy
           if (Send && Dst && ncclShmem.groups[group].srcs[0] != ncclShmem.groups[group].dsts[1]) {
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_ENTRY)
-            if (tid == 0) {
-              NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_ENTRY, sliceSize*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-                  ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-            }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
-            if (tid == 0) {
-              npKitDataProcessEntryTime = NPKIT_GET_GPU_TIMESTAMP();
-            }
-#endif
-
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, MaxSend, /*PreOpSrcs*/0>
               (tid, nworkers, /*redArg*/0, /*postOp*/false,
               1, ncclShmem.groups[group].srcs,
               fan.nsend(), ncclShmem.groups[group].dsts+1,
               workSize);
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
-            if (tid == 0) {
-              npKitDataProcessExitTime = NPKIT_GET_GPU_TIMESTAMP();
-              npKitDataProcessTotalTime += npKitDataProcessExitTime - npKitDataProcessEntryTime;
-            }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_EXIT)
-            if (tid == 0) {
-              NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_EXIT, sliceSize*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-                  ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-            }
-#endif
-
           }
         } else if (DirectSend && !DirectRecv && SrcBuf != Input && ncclShmem.groups[group].dsts[Dst] == nullptr) {
           // For broadcast in CollNet to do empty send
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_ENTRY)
-          if (tid == 0) {
-            NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_ENTRY, sliceSize*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-                ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-          }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
-          if (tid == 0) {
-            npKitDataProcessEntryTime = NPKIT_GET_GPU_TIMESTAMP();
-          }
-#endif
 
           reduceCopy<Unroll, useAcc && Dst, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs*/0>
             (tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp,
@@ -371,33 +307,7 @@ private:
             Dst, ncclShmem.groups[group].dsts,
             workSize);
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
-          if (tid == 0) {
-            npKitDataProcessExitTime = NPKIT_GET_GPU_TIMESTAMP();
-            npKitDataProcessTotalTime += npKitDataProcessExitTime - npKitDataProcessEntryTime;
-          }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_EXIT)
-          if (tid == 0) {
-            NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_EXIT, sliceSize*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-                ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-          }
-#endif
-
         } else if (ncclShmem.groups[group].srcs[0] && ncclShmem.groups[group].dsts[0]) {
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_ENTRY)
-          if (tid == 0) {
-            NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_ENTRY, sliceSize*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-                ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-          }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
-          if (tid == 0) {
-            npKitDataProcessEntryTime = NPKIT_GET_GPU_TIMESTAMP();
-          }
-#endif
 
           constexpr int PreOpSrcs = SrcBuf != Input ? 0 :
                                     DirectRecv*MaxRecv == NCCL_MAX_DIRECT_ARITY ? (1+NCCL_MAX_DIRECT_ARITY) : 1;
@@ -419,20 +329,6 @@ private:
                 Send * fan.nsend() + Dst, ncclShmem.groups[group].dsts,
                 workSize, ncclShmem.groups[group].acc);
           }
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_PRIM_COLLECT_DATA_PROCESS_TIME)
-          if (tid == 0) {
-            npKitDataProcessExitTime = NPKIT_GET_GPU_TIMESTAMP();
-            npKitDataProcessTotalTime += npKitDataProcessExitTime - npKitDataProcessEntryTime;
-          }
-#endif
-
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_EXIT)
-          if (tid == 0) {
-            NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_SIMPLE_REDUCE_OR_COPY_MULTI_EXIT, sliceSize*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-                ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
-          }
-#endif
 
         } else {
           // we will come here when calling prims.directSend with net peer,

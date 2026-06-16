@@ -36,13 +36,20 @@ using hsa_executable_freeze_t  = decltype(CoreApiTable::hsa_executable_freeze_fn
 using hsa_executable_destroy_t = decltype(CoreApiTable::hsa_executable_destroy_fn);
 using code_object_collection_t = std::vector<hsa_executable_t>;
 
+struct code_object_cb_entry_t
+{
+    rocprofiler_attach_code_object_cb_t cb   = nullptr;
+    void*                               data = nullptr;
+};
+
 struct code_object_registration_t
 {
-    // gates access to code_objects collection
-    std::mutex               code_objects_mutex;
-    code_object_collection_t code_objects;
-    hsa_executable_freeze_t  hsa_executable_freeze_fn  = nullptr;
-    hsa_executable_destroy_t hsa_executable_destroy_fn = nullptr;
+    // gates access to both code_objects and cb_list
+    std::mutex                          mutex;
+    code_object_collection_t            code_objects;
+    std::vector<code_object_cb_entry_t> cb_list;
+    hsa_executable_freeze_t             hsa_executable_freeze_fn  = nullptr;
+    hsa_executable_destroy_t            hsa_executable_destroy_fn = nullptr;
 };
 
 code_object_registration_t*
@@ -59,17 +66,24 @@ executable_freeze(hsa_executable_t executable, const char* options)
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
     auto  status       = registration->hsa_executable_freeze_fn(executable, options);
 
-    if(status != HSA_STATUS_SUCCESS) return status;
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        return status;
+    }
 
     ROCP_TRACE << "adding code_object " << executable.handle;
+    auto snapshot = std::vector<code_object_cb_entry_t>{};
     {
-        std::lock_guard lg(registration->code_objects_mutex);
+        std::lock_guard lg(registration->mutex);
         registration->code_objects.emplace_back(executable);
+        snapshot = std::vector<code_object_cb_entry_t>{registration->cb_list};
     }
-    auto* attach_table = rocprofiler::attach::get_dispatch_table();
-    if(attach_table->rocprofiler_attach_notify_new_code_object)
+    for(auto& entry : snapshot)
     {
-        attach_table->rocprofiler_attach_notify_new_code_object(executable, nullptr);
+        if(entry.cb)
+        {
+            entry.cb(executable, ROCPROFILER_ATTACH_CODE_OBJECT_CREATED, entry.data);
+        }
     }
     return HSA_STATUS_SUCCESS;
 }
@@ -79,8 +93,10 @@ executable_destroy(hsa_executable_t executable)
 {
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
     ROCP_TRACE << "removing code_object " << executable.handle;
+
+    auto snapshot = std::vector<code_object_cb_entry_t>{};
     {
-        std::lock_guard lg(registration->code_objects_mutex);
+        std::lock_guard lg(registration->mutex);
         auto pred = [&](const hsa_executable_t& a) { return a.handle == executable.handle; };
         auto itr  = std::find_if(
             registration->code_objects.begin(), registration->code_objects.end(), pred);
@@ -88,7 +104,22 @@ executable_destroy(hsa_executable_t executable)
         {
             ROCP_WARNING << "remove code_object could not find " << executable.handle;
         }
-        registration->code_objects.erase(itr);
+        else
+        {
+            snapshot = std::vector<code_object_cb_entry_t>{registration->cb_list};
+            registration->code_objects.erase(itr);
+        }
+    }
+
+    // Fire callbacks after erasing from the collection but before calling the real destroy.
+    // Erasing first prevents double-destroy races. Calling the real destroy last ensures the
+    // handle remains valid during callbacks, and that any handle still in code_objects is live.
+    for(auto& entry : snapshot)
+    {
+        if(entry.cb)
+        {
+            entry.cb(executable, ROCPROFILER_ATTACH_CODE_OBJECT_DESTROYED, entry.data);
+        }
     }
 
     return registration->hsa_executable_destroy_fn(executable);
@@ -99,11 +130,54 @@ iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 {
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
 
-    for(const auto& code_object : registration->code_objects)
+    auto snapshot = code_object_collection_t{};
+    {
+        std::lock_guard lg(registration->mutex);
+        snapshot = code_object_collection_t{registration->code_objects};
+    }
+    for(const auto& code_object : snapshot)
     {
         func(code_object, data);
     }
 
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+int
+add_code_object_cb(rocprofiler_attach_code_object_cb_t cb, void* data)
+{
+    if(!cb)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    auto* registration = CHECK_NOTNULL(get_code_object_registration());
+    auto  snapshot     = code_object_collection_t{};
+    {
+        auto lg = std::lock_guard{registration->mutex};
+        registration->cb_list.push_back({cb, data});
+        snapshot = code_object_collection_t{registration->code_objects};
+    }
+    for(const auto& code_object : snapshot)
+    {
+        cb(code_object, ROCPROFILER_ATTACH_CODE_OBJECT_CREATED, data);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+int
+remove_code_object_cb(rocprofiler_attach_code_object_cb_t cb)
+{
+    if(!cb)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    auto* registration = CHECK_NOTNULL(get_code_object_registration());
+    auto  lg           = std::lock_guard{registration->mutex};
+    auto  pred         = [cb](const code_object_cb_entry_t& e) { return e.cb == cb; };
+    registration->cb_list.erase(
+        std::remove_if(registration->cb_list.begin(), registration->cb_list.end(), pred),
+        registration->cb_list.end());
+    // Returns SUCCESS whether or not cb was found, to simplify cleanup paths.
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -138,6 +212,18 @@ int
 rocprofiler_attach_iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 {
     return iterate_all_code_objects(func, data);
+}
+
+int
+rocprofiler_attach_add_code_object_cb(rocprofiler_attach_code_object_cb_t cb, void* data)
+{
+    return add_code_object_cb(cb, data);
+}
+
+int
+rocprofiler_attach_remove_code_object_cb(rocprofiler_attach_code_object_cb_t cb)
+{
+    return remove_code_object_cb(cb);
 }
 
 ROCPROFILER_EXTERN_C_FINI

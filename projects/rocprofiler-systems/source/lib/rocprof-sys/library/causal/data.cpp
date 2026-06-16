@@ -7,6 +7,7 @@
 #include "binary/binary_info.hpp"
 #include "binary/link_map.hpp"
 #include "binary/scope_filter.hpp"
+#include "common/units.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
 #include "core/containers/c_array.hpp"
@@ -27,7 +28,6 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/procfs/maps.hpp>

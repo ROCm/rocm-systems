@@ -66,7 +66,6 @@
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/signals/types.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
@@ -1000,7 +999,8 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    LOG_DEBUG("rocprofsys_push_trace :: called {}", _push_count);
+    LOG_DEBUG("rocprofsys_push_trace/rocprofsys_push_trace_with_args :: called {}",
+              _push_count);
     LOG_DEBUG("rocprofsys_pop_trace  :: called {}", _pop_count);
 
     tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
@@ -1280,10 +1280,10 @@ rocprofsys_finalize_hidden(void)
 
     if(_push_count > _pop_count)
     {
-        LOG_WARNING("rocprofsys_push_trace was called more times than "
-                    "rocprofsys_pop_trace. This is not fatal, but trace output will "
-                    "not include regions that were still open during finalization :: "
-                    "pushed: {} vs. popped: {}.",
+        LOG_WARNING("rocprofsys_push_trace/rocprofsys_push_trace_with_args was called "
+                    "more times than rocprofsys_pop_trace. This is not fatal, but trace "
+                    "output will not include regions that were still open during "
+                    "finalization :: pushed: {} vs. popped: {}.",
                     _push_count, _pop_count);
     }
 

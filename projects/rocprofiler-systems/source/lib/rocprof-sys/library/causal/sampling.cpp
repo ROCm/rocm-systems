@@ -25,7 +25,6 @@
 #include <timemory/sampling/overflow.hpp>
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
-#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
 

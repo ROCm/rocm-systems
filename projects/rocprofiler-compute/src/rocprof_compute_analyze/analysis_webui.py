@@ -121,8 +121,9 @@ class webui_analysis(OmniAnalyze_Base):
             run_workload = base_data[base_run]
 
             if self.pc_sampling_only():
+                pc_sampling_data = file_io.load_pc_sampling_results(str(self.dest_dir))
                 run_workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                    str(self.dest_dir)
+                    pc_sampling_data
                 )
                 run_workload.raw_pmc = run_workload.raw_pmc.rename(
                     columns={"Dispatch_Id": "Dispatch_ID"}
@@ -143,6 +144,7 @@ class webui_analysis(OmniAnalyze_Base):
                     run_workload,
                     self.dest_dir,
                     args,
+                    pc_sampling_tool_data=pc_sampling_data,
                 )
                 parser.nullify_unevaluated_metric_values(
                     run_workload,
@@ -234,18 +236,23 @@ class webui_analysis(OmniAnalyze_Base):
                     }
 
                 # All filtering will occur here
+                gpu_arch = run_workload.sys_info.iloc[0]["gpu_arch"]
                 parser.load_table_data(
                     workload=run_workload,
                     dir_path=self.dest_dir,
                     is_gui=True,
                     args=args,
+                    dfs_expressions=self._arch_configs[gpu_arch].dfs_expressions,
                 )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
             # Generate GUI content
             # ~~~~~~~~~~~~~~~~~~~~~~~
             div_children = [
-                get_memchart(panel_configs[300]["data source"], base_data[base_run])
+                get_memchart(
+                    panel_configs.get(300, {}).get("data source"),
+                    base_data[base_run],
+                )
             ]
 
             is_roofline_valid, roofline_error_msg = validate_roofline_csv(
@@ -330,6 +337,8 @@ class webui_analysis(OmniAnalyze_Base):
                 # Iterate over each table per section
                 for data_source in panel["data source"]:
                     for t_type, table_config in data_source.items():
+                        if table_config["id"] not in base_data[base_run].dfs:
+                            continue
                         original_df = base_data[base_run].dfs[table_config["id"]]
 
                         # The sys info table need to add index back
@@ -420,8 +429,9 @@ class webui_analysis(OmniAnalyze_Base):
                 "analysis",
                 "PC sampling only -- skipping counter collection data loading",
             )
+            pc_sampling_data = file_io.load_pc_sampling_results(str(self.dest_dir))
             workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
-                str(self.dest_dir)
+                pc_sampling_data
             )
             workload.raw_pmc = workload.raw_pmc.rename(
                 columns={"Dispatch_Id": "Dispatch_ID"}
@@ -439,7 +449,9 @@ class webui_analysis(OmniAnalyze_Base):
             workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
-            parser.load_non_mertrics_table(workload, self.dest_dir, args)
+            parser.load_non_mertrics_table(
+                workload, self.dest_dir, args, pc_sampling_tool_data=pc_sampling_data
+            )
             self.arch = workload.sys_info.iloc[0]["gpu_arch"]
             return
 

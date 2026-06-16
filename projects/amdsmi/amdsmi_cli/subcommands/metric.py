@@ -3142,7 +3142,9 @@ class MetricCommands:
             args.cpu = cpu
         if core:
             args.core = core
-        if self.helpers.is_brcm_nic_initialized() and (args.brcm_nic or brcm_nic):
+        if self.helpers.is_brcm_nic_initialized() and (
+            getattr(args, "brcm_nic", False) or brcm_nic
+        ):
             args.nic_power = args.power
             args.nic_temperature = args.temperature
             args.nic_errors = args.ecc
@@ -3162,7 +3164,9 @@ class MetricCommands:
             )
             return
 
-        if self.helpers.is_brcm_switch_initialized() and (args.brcm_switch or brcm_switch):
+        if self.helpers.is_brcm_switch_initialized() and (
+            getattr(args, "brcm_switch", False) or brcm_switch
+        ):
             args.switch_power = args.power
             args.switch_errors = args.ecc
             self.logger.output = {}

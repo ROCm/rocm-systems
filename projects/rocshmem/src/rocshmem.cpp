@@ -85,7 +85,7 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
  * Begin Host Code
  **/
 
-BackendType get_backend_type() { return backend->get_backend_type(); }
+BackendType rocshmem_query_backend_type() { return backend->get_type(); }
 
 #if defined(USE_GDA) && defined(USE_RO) && defined(USE_IPC)
 static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
@@ -796,6 +796,79 @@ __host__ int rocshmem_team_split_strided(
   return 0;
 }
 
+__host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const 
+                                    rocshmem_team_config_t *xaxis_config, long xaxis_mask, 
+                                    rocshmem_team_t *xaxis_team, 
+                                    const rocshmem_team_config_t *yaxis_config, long yaxis_mask, 
+                                    rocshmem_team_t *yaxis_team)
+{
+  VERIFY_BACKEND();
+  *yaxis_team = ROCSHMEM_TEAM_INVALID;
+  *xaxis_team = ROCSHMEM_TEAM_INVALID;
+
+  if (parent_team == ROCSHMEM_TEAM_INVALID) {
+    LOG_ERROR("Parent team is invaid");
+    return ROCSHMEM_ERROR;
+  }
+  if (xrange < 1) {
+    LOG_ERROR("xrange must be >= 1 (got %d)", xrange);
+    return ROCSHMEM_ERROR;
+  }
+
+  Team *parent_team_obj = get_internal_team(parent_team);
+  const int parent_size = parent_team_obj->num_pes;
+
+  const int _xrange = (xrange > parent_size) ? parent_size : xrange;
+  const int yrange = parent_size / _xrange;
+
+  const int num_xteams = (parent_size + _xrange - 1) / _xrange;
+  const int num_yteams = _xrange;
+  const int remainder = parent_size % _xrange;
+
+  int start = 0;
+  int ret = 0;
+
+  for (int i = 0; i < num_xteams; ++i) {
+    rocshmem_team_t my_xteam;
+    int xsize = (i == num_xteams - 1 && remainder) ? remainder : _xrange;
+
+    ret = rocshmem_team_split_strided(parent_team, start, 1, xsize, xaxis_config, xaxis_mask,
+                                      &my_xteam);
+
+    if (ret) {
+      LOG_ERROR("Unable to make xteam %d out of %d", i + 1, num_xteams);
+      return ROCSHMEM_ERROR;
+    }
+    
+    start += _xrange;
+
+    if (my_xteam != ROCSHMEM_TEAM_INVALID) 
+      *xaxis_team = my_xteam;
+  }
+
+  start = 0;
+
+  for (int i = 0; i < num_yteams; ++i) {
+    rocshmem_team_t my_yteam;
+    int ysize = yrange;
+    if (remainder && i < remainder) ysize += 1;
+    
+    ret = rocshmem_team_split_strided(parent_team, start, _xrange, ysize, yaxis_config,
+                                      yaxis_mask, &my_yteam);
+
+    if (ret) {
+      LOG_ERROR("Unable to make yteam %d out of %d", i + 1, num_yteams);
+      return ROCSHMEM_ERROR;
+    }
+
+    start += 1;
+
+    if (my_yteam != ROCSHMEM_TEAM_INVALID) 
+      *yaxis_team = my_yteam;
+  }
+  return ROCSHMEM_SUCCESS;
+}
+
 __host__ void rocshmem_team_destroy(rocshmem_team_t team) {
   if (team == ROCSHMEM_TEAM_INVALID || team == ROCSHMEM_TEAM_WORLD ||
       team == ROCSHMEM_TEAM_SHARED) {
@@ -1189,11 +1262,24 @@ __host__ void rocshmem_barrier_all() {
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all();
 }
 
+__host__ void rocshmem_barrier(rocshmem_team_t team) {
+  LOG_API("host::barrier (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier(team);
+}
+
 
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream) {
   LOG_API("host::barrier_all_on_stream ()");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_all_on_stream(stream);
+}
+
+__host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
+                                         hipStream_t stream) {
+  LOG_API("host::barrier_on_stream (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->barrier_on_stream(team, stream);
 }
 
 __host__ void rocshmem_quiet_on_stream(hipStream_t stream) {
@@ -1206,6 +1292,13 @@ __host__ void rocshmem_sync_all_on_stream(hipStream_t stream) {
   LOG_API("rocshmem_sync_all_on_stream");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all_on_stream(stream);
+}
+
+__host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
+                                           hipStream_t stream) {
+  LOG_API("host::team_sync_on_stream (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_on_stream(team, stream);
 }
 
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
@@ -1269,6 +1362,12 @@ __host__ void rocshmem_sync_all() {
   LOG_API("host::sync_all");
 
   get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync_all();
+}
+
+__host__ void rocshmem_team_sync(rocshmem_team_t team) {
+  LOG_API("host::team_sync (team=%p)", team);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->sync(team);
 }
 
 template <typename T>

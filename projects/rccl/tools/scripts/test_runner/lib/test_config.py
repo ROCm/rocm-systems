@@ -14,6 +14,14 @@ from copy import deepcopy
 from pathlib import Path
 from types import MappingProxyType
 
+try:
+    import jsonschema
+    _JSONSCHEMA_AVAILABLE = True
+except ImportError:
+    _JSONSCHEMA_AVAILABLE = False
+
+_SCHEMA_PATH = Path(__file__).parent / "schema.json"
+
 # Set default WORKDIR to rccl root directory if not already defined
 # This file is at: rccl/tools/scripts/test_runner/lib/test_config.py
 # rccl root is 5 directories up
@@ -45,6 +53,9 @@ class TestConfigProcessor:
         with open(config_file, 'r') as file:
             config_data = json.load(file)
 
+        # Validate against the JSON schema
+        self._validate_schema(config_data, config_file)
+
         # Expand environment variables in paths section
         if "paths" in config_data:
             config_data["paths"] = self._expand_env_vars_in_dict(config_data["paths"])
@@ -52,6 +63,36 @@ class TestConfigProcessor:
         # Make the configuration immutable (frozen)
         self.config = MappingProxyType(config_data)
         self.config_file = config_file
+
+    @staticmethod
+    def _validate_schema(config_data, config_file):
+        """
+        Validate config_data against the bundled JSON schema.
+
+        Raises ValueError listing all schema violations if the config is
+        invalid.  Emits a warning and continues if jsonschema is not
+        installed or the schema file is missing.
+        """
+        if not _JSONSCHEMA_AVAILABLE:
+            print("WARNING: 'jsonschema' package not installed — skipping config validation. "
+                  "Install it with: pip install jsonschema")
+            return
+
+        if not _SCHEMA_PATH.exists():
+            print(f"WARNING: Schema file not found at {_SCHEMA_PATH} — skipping config validation.")
+            return
+
+        with open(_SCHEMA_PATH) as f:
+            schema = json.load(f)
+
+        validator = jsonschema.Draft7Validator(schema)
+        errors = sorted(validator.iter_errors(config_data), key=str)
+        if errors:
+            lines = [f"Configuration file '{config_file}' failed schema validation:"]
+            for e in errors:
+                path = " -> ".join(str(p) for p in e.absolute_path)
+                lines.append(f"  {path + ': ' if path else ''}{e.message}")
+            raise ValueError("\n".join(lines))
 
     def _expand_env_var(self, value):
         """
@@ -246,8 +287,12 @@ class TestConfigProcessor:
         Returns:
             list: Tests with defaults applied
         """
-        # Fields that can have defaults at config level
-        default_fields = ["is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout"]
+        # Fields that can have defaults at config level. is_pytest/test_dir/
+        # python_bin/setup_venv/venv_dir/requirements drive pytest-harness suites.
+        default_fields = [
+            "is_gtest", "binary", "num_ranks", "num_nodes", "num_gpus", "timeout",
+            "is_pytest", "test_dir", "python_bin", "setup_venv", "venv_dir", "requirements",
+        ]
 
         processed_tests = []
         for test in tests:
@@ -298,7 +343,13 @@ class TestConfigProcessor:
                 "num_ranks": combined_config.get("num_ranks"),
                 "num_nodes": combined_config.get("num_nodes"),
                 "num_gpus": combined_config.get("num_gpus", 8),
-                "timeout": combined_config.get("timeout")
+                "timeout": combined_config.get("timeout"),
+                "is_pytest": combined_config.get("is_pytest"),
+                "test_dir": combined_config.get("test_dir"),
+                "python_bin": combined_config.get("python_bin"),
+                "setup_venv": combined_config.get("setup_venv"),
+                "venv_dir": combined_config.get("venv_dir"),
+                "requirements": combined_config.get("requirements"),
             }
             # Remove None values
             config_defaults = {k: v for k, v in config_defaults.items() if v is not None}
@@ -310,7 +361,13 @@ class TestConfigProcessor:
                 "num_ranks": suite.get("num_ranks"),
                 "num_nodes": suite.get("num_nodes"),
                 "num_gpus": suite.get("num_gpus"),
-                "timeout": suite.get("timeout")
+                "timeout": suite.get("timeout"),
+                "is_pytest": suite.get("is_pytest"),
+                "test_dir": suite.get("test_dir"),
+                "python_bin": suite.get("python_bin"),
+                "setup_venv": suite.get("setup_venv"),
+                "venv_dir": suite.get("venv_dir"),
+                "requirements": suite.get("requirements"),
             }
             # Remove None values
             suite_defaults = {k: v for k, v in suite_defaults.items() if v is not None}

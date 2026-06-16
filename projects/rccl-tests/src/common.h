@@ -8,7 +8,7 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
-#define NCCL_TESTS_VERSION "2.17.9"
+#define NCCL_TESTS_VERSION "2.18.3"
 
 #include "rccl/rccl.h"
 // nccl_device.h provides the device-API public types referenced below
@@ -150,6 +150,10 @@ struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,14,0)
+  /* Optional; called from initComms after common fields are set on ncclConfig_t. */
+  void (*initCommConfig)(ncclConfig_t* config);
+#endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
   testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties);
@@ -229,7 +233,7 @@ extern testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const
 extern testResult_t InitDataReduce(void* data, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks);
 extern testResult_t InitDataApplyBias(void* expected, void* bias, const size_t count, const size_t offset, ncclDataType_t type, ncclRedOp_t op);
 extern testResult_t InitData(void* data, const size_t count, size_t offset, ncclDataType_t type, ncclRedOp_t op, const uint64_t seed, const int nranks, const int rank);
-extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, void **expectedHost, size_t nbytes, int nranks, void **bias);
+extern testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, size_t recvBytes, void **expected, size_t nbytes, void **bias);
 
 #include <unistd.h>
 

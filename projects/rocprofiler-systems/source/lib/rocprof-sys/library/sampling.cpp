@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/units.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -47,7 +48,6 @@
 #include <timemory/sampling/sampler.hpp>
 #include <timemory/sampling/timer.hpp>
 #include <timemory/storage.hpp>
-#include <timemory/units.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>

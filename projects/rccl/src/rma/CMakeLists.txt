@@ -1,8 +1,9 @@
 # RMA sources
 set(RMA_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/rma.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/rma_proxy.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/rma_ce.cc
+    src/rma/rma.cc
+    src/rma/rma_proxy.cc
+    src/rma/rma_proxy_progress.cc
+    src/rma/rma_proxy_launch.cc
 )
 
 # Add RMA sources to parent scope

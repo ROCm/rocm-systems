@@ -2627,7 +2627,10 @@ amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_han
 
 amdsmi_status_t amdsmi_get_gpu_vram_vendor(amdsmi_processor_handle processor_handle, char* brand,
                                            uint32_t len) {
-  return rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, 0, brand, len);
+  amdsmi_vram_info_t info;
+  amdsmi_status_t r = amdsmi_get_gpu_vram_info(processor_handle, &info);
+  snprintf(brand, len, "%s", info.vram_vendor);
+  return (r);
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handle,
@@ -3023,6 +3026,9 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(
 amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t* mode) {
   AMDSMI_CHECK_INIT();
+  if (mode == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   std::ostringstream ss;
   auto status = rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_get, processor_handle, 0,
                              reinterpret_cast<rsmi_compute_partition_mem_alloc_mode_t*>(mode));
@@ -3035,6 +3041,10 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition_mem_alloc_mode(
 amdsmi_status_t amdsmi_set_gpu_compute_partition_mem_alloc_mode(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_mem_alloc_mode_t mode) {
   AMDSMI_CHECK_INIT();
+  if (mode != AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_CAPPING &&
+      mode != AMDSMI_COMPUTE_PARTITION_MEM_ALLOC_ALL) {
+    return AMDSMI_STATUS_INVAL;
+  }
   return rsmi_wrapper(rsmi_dev_compute_partition_mem_alloc_mode_set, processor_handle, 0,
                       static_cast<rsmi_compute_partition_mem_alloc_mode_t>(mode));
 }

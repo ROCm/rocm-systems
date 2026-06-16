@@ -173,6 +173,13 @@ typedef ncclResult_t (*ncclCommSuspend_fn_t)(ncclComm_t comm, int flags);
 typedef ncclResult_t (*ncclCommResume_fn_t)(ncclComm_t comm);
 
 typedef ncclResult_t (*ncclCommMemStats_fn_t)(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
+typedef ncclResult_t (*ncclPutSignal_fn_t)(const void* localbuff, size_t count, ncclDataType_t datatype,
+    int peer, ncclWindow_t peerWin, size_t peerWinOffset,
+    int sigIdx, int ctx, unsigned int flags, ncclComm_t comm, cudaStream_t stream);
+typedef ncclResult_t (*ncclSignal_fn_t)(int peer, int sigIdx, int ctx, unsigned int flags,
+    ncclComm_t comm, cudaStream_t stream);
+typedef ncclResult_t (*ncclWaitSignal_fn_t)(int nDesc, ncclWaitSignalDesc_t* signalDescs,
+    ncclComm_t comm, cudaStream_t stream);
 
 typedef struct rcclApiFuncTable
 {
@@ -225,6 +232,9 @@ typedef struct rcclApiFuncTable
     ncclCommSuspend_fn_t          ncclCommSuspend_fn;
     ncclCommResume_fn_t           ncclCommResume_fn;
     ncclCommMemStats_fn_t         ncclCommMemStats_fn;
+    ncclPutSignal_fn_t            ncclPutSignal_fn;
+    ncclSignal_fn_t               ncclSignal_fn;
+    ncclWaitSignal_fn_t           ncclWaitSignal_fn;
     // ADD NEW FUNCTIONS HERE ONLY
 } rcclApiFuncTable;
 

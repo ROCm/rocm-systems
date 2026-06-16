@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "common/units.hpp"
 #include "core/categories.hpp"
 #include "core/config.hpp"
 #include "core/locking.hpp"

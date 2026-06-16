@@ -48,7 +48,11 @@ class tui_analysis(OmniAnalyze_Base):
                 " available, metrics calculation will be"
                 " skipped",
             )
-            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(self.path)
+            pc_sampling_data = file_io.load_pc_sampling_results(self.path)
+
+            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
+                pc_sampling_data
+            )
             workload.raw_pmc = workload.raw_pmc.rename(
                 columns={"Dispatch_Id": "Dispatch_ID"}
             )
@@ -69,6 +73,7 @@ class tui_analysis(OmniAnalyze_Base):
                 workload=workload,
                 dir_path=self.path,
                 args=self.args,
+                pc_sampling_tool_data=pc_sampling_data,
             )
             parser.nullify_unevaluated_metric_values(workload)
             return
@@ -119,9 +124,11 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_dfs = copy.deepcopy(workload.dfs)
 
             # Evaluate metrics aggregated across all dispatches of this kernel
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
             eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
+                self._arch_configs[gpu_arch].dfs_expressions,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
                 kernel_raw_pmc,
@@ -133,7 +140,7 @@ class tui_analysis(OmniAnalyze_Base):
     def initalize_runs(
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
-        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
+        sys_info = pd.read_csv(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
         self.generate_configs(
@@ -142,6 +149,7 @@ class tui_analysis(OmniAnalyze_Base):
             self.args.list_stats,
             self.args.filter_metrics,
             sys_info.iloc[0],
+            getattr(self, "_profiling_config", {}),
         )
         self.load_options(normalization_filter)
 

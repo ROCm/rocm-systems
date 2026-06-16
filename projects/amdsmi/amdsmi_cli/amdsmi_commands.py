@@ -88,6 +88,9 @@ class AMDSMICommands(
         self.logger = AMDSMILogger(format=format, destination=destination, helpers=self.helpers)
         self.device_handles = []
         self.device_handles_gpus = []
+        self.device_handles_brcm_nics = []
+        self.device_handles_ainics = []
+        self.device_handles_switchs = []
         self.cpu_handles = []
         self.core_handles = []
         self.node_handle = None
@@ -120,7 +123,11 @@ class AMDSMICommands(
                 )
                 exit_flag = True
 
-        if self.helpers.is_ainic_initialized():
+        if (
+            self.helpers.is_ainic_initialized()
+            or self.helpers.is_brcm_nic_initialized()
+            or self.helpers.is_brcm_switch_initialized()
+        ):
             try:
                 self.device_handles_brcm_nics = amdsmi_interface.get_nic_handles()
                 self.device_handles_ainics = amdsmi_interface.get_ainic_handles()

@@ -95,12 +95,12 @@ public:
     reset_profiles();
   }
 
-  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id, uint32_t vgpr_count,
-                                   uint32_t sgpr_count,
+  void onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint32_t wg_id,
+                                   uint32_t physical_vgpr_count, uint32_t sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override {
     profiled_dispatch(prof_wg_dispatched_, [&]() {
-      ExecutionPluginGroup::onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, vgpr_count, sgpr_count,
-                                                        wavefronts);
+      ExecutionPluginGroup::onAmdgpuWorkgroupDispatched(dispatch_id, wg_id, physical_vgpr_count,
+                                                        sgpr_count, wavefronts);
     });
   }
 

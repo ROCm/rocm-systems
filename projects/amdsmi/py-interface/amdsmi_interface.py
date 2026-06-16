@@ -4269,6 +4269,16 @@ def amdsmi_get_gpu_id(processor_handle: processor_handle_t):
 
 
 def amdsmi_get_gpu_vram_vendor(processor_handle: processor_handle_t):
+    """Deprecated: Use amdsmi_get_gpu_vram_info() instead.\
+        Will be deprecated in Rocm 9.0.
+    """
+    import warnings
+
+    warnings.warn(
+        "amdsmi_get_gpu_vram_vendor() is deprecated, use amdsmi_get_gpu_vram_info() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 

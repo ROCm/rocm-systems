@@ -180,11 +180,6 @@ struct ncclProxySubArgs {
   void* recvRequestsCache[NCCL_STEPS];
   int recvRequestsSubCount;
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_NET_SEND_ENTRY) && defined(ENABLE_NPKIT_EVENT_NET_SEND_EXIT)
-  int npKitSizesFifo[NCCL_STEPS];
-  uint64_t timestamp[NCCL_STEPS];
-#endif
-
   // Used to fetch/update the proxyOp in ProxyTrace map
   facebook_rccl::ProxyTraceRecordKey traceKey;
   facebook_rccl::ProxyTraceExtraInfo traceInfo;

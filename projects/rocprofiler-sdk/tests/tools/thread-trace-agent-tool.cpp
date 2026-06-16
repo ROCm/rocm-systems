@@ -149,7 +149,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 
         uint64_t buffer_size_bytes = buffer_size_gb << 30;
         if(agent->gfx_target_version / 10000 == 11u)
-            buffer_size_bytes = 255ul << 20;  // gfx11 limititation
+            buffer_size_bytes = 255ul << 20;  // gfx11 limitation
 
         auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, {1}});
