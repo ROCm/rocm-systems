@@ -2859,33 +2859,32 @@ is_rank_in_filter(std::string enabled_ranks_str)
     const auto world_size = get_mpi_world_size_from_env();
     if(world_size.has_value())
     {
-        if(world_size.value() == 0)
+        if(*world_size == 0)
         {
             LOG_WARNING("MPI output filtering DISABLED: total number of MPI ranks (world "
                         "size) is 0");
             return true;
         }
 
-        for(auto it = enabled_ranks.begin(); it != enabled_ranks.end();)
-        {
-            if(*it < 0 || static_cast<std::uint64_t>(*it) >= world_size.value())
-            {
-                LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
-                            "existing ranks [0-{}]. Ignoring",
-                            *it, world_size.value() - 1);
-                it = enabled_ranks.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
+        const auto ws       = *world_size;
+        const auto max_rank = ws - 1;
+        const auto in_world = [ws](std::int64_t rank) {
+            return rank >= 0 && static_cast<std::uint64_t>(rank) < ws;
+        };
 
-        if(current_rank.value() >= world_size.value())
+        std::erase_if(enabled_ranks, [&](const std::int64_t rank) {
+            if(in_world(rank)) return false;
+            LOG_WARNING("MPI output filtering: requested MPI rank {} not in range of "
+                        "existing ranks [0-{}]. Ignoring",
+                        rank, max_rank);
+            return true;
+        });
+
+        if(*current_rank >= ws)
         {
             LOG_WARNING("MPI output filtering DISABLED: MPI rank {} not in range of "
                         "existing ranks [0-{}]",
-                        current_rank.value(), world_size.value() - 1);
+                        *current_rank, max_rank);
             return true;
         }
     }
