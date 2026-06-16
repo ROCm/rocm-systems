@@ -739,7 +739,7 @@ __host__ __device__ constexpr uint32_t cache_policy_aux(CachePolicy p) {
          p == CachePolicy::SystemScope   ? 0b10001 :  // SYSTEM_NT0: sc1|sc0
          p == CachePolicy::SystemScopeNT ? 0b10011 :  // SYSTEM_NT1: sc1|sc0|nt
                                            0b00000;   // Standard / FlatCache (wave scope)
-#elif defined(__gfx1201__)
+#elif defined(__gfx1201__) || defined(__gfx1250__)
   return p == CachePolicy::DeviceScope   ? 0b10000 :  // DEVICE_RT  = scope:DEV | temporal:RT
          p == CachePolicy::NonTemporal   ? 0b10001 :  // DEVICE_NT  = scope:DEV | temporal:NT
          p == CachePolicy::SystemScope   ? 0b11000 :  // SYSTEM_RT  = scope:SYS | temporal:RT
@@ -805,7 +805,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
       } else {
         asm volatile("flat_load_dwordx4 %0, %1, glc slc" : "=v"(val) : "v"(src) : "memory");
       }
-#elif defined(__gfx1201__)
+#elif defined(__gfx1201__) || defined(__gfx1250__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
         asm volatile("flat_load_b128 %0, %1, scope:SCOPE_SE" : "=v"(val) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
@@ -844,7 +844,7 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
       } else {
         asm volatile("flat_store_dwordx4 %0, %1, glc slc" : : "v"(dst), "v"(val) : "memory");
       }
-#elif defined(__gfx1201__)
+#elif defined(__gfx1201__) || defined(__gfx1250__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
         asm volatile("flat_store_b128 %0, %1, scope:SCOPE_SE" : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
@@ -858,7 +858,6 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
     }
   }
 
-  //! The bits order might be different on various archs
   static __device__ __forceinline__ type load_buffer(const void *ptr,
                                                      uint32_t buf_size,
                                                      uint32_t offset) {
@@ -868,7 +867,6 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
         llvm_amdgcn_raw_buffer_load_b128(rsrc, offset, 0, aux));
   }
 
-  //! The bits order might be different on various archs
   static __device__ __forceinline__ void store_buffer(void *ptr,
                                                       uint32_t buf_size,
                                                       uint32_t offset,
@@ -912,7 +910,7 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
       } else {
         asm volatile("flat_load_dwordx2 %0, %1, glc slc" : "=v"(val) : "v"(src) : "memory");
       }
-#elif defined(__gfx1201__)
+#elif defined(__gfx1201__) || defined(__gfx1250__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
         asm volatile("flat_load_b64 %0, %1, scope:SCOPE_SE" : "=v"(val) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
@@ -951,7 +949,7 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
       } else {
         asm volatile("flat_store_dwordx2 %0, %1, glc slc" : : "v"(dst), "v"(val) : "memory");
       }
-#elif defined(__gfx1201__)
+#elif defined(__gfx1201__) || defined(__gfx1250__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
         asm volatile("flat_store_b64 %0, %1, scope:SCOPE_SE" : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
@@ -1017,7 +1015,7 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
       } else {
         asm volatile("flat_load_dword %0, %1, glc slc" : "=v"(val) : "v"(src) : "memory");
       }
-#elif defined(__gfx1201__)
+#elif defined(__gfx1201__) || defined(__gfx1250__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
         asm volatile("flat_load_b32 %0, %1, scope:SCOPE_SE" : "=v"(val) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
@@ -1056,7 +1054,7 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
       } else {
         asm volatile("flat_store_dword %0, %1, glc slc" : : "v"(dst), "v"(val) : "memory");
       }
-#elif defined(__gfx1201__)
+#elif defined(__gfx1201__) || defined(__gfx1250__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
         asm volatile("flat_store_b32 %0, %1, scope:SCOPE_SE" : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
@@ -1125,7 +1123,7 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
       }
   #endif
       return val;
-#elif defined(__gfx1100__) || defined(__gfx1201__)
+#elif defined(__gfx1100__) || defined(__gfx1201__) || defined(__gfx1250__)
       int32_t val32;  // Gfx11/12 forces 16-bit ops into 32-bit registers
   #if defined(__gfx1100__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
@@ -1178,7 +1176,7 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
         asm volatile("flat_store_short %0, %1, glc slc" : : "v"(dst), "v"(val16) : "memory");
       }
   #endif
-#elif defined(__gfx1100__) || defined(__gfx1201__)
+#elif defined(__gfx1100__) || defined(__gfx1201__) || defined(__gfx1250__)
       int32_t val32 = static_cast<int32_t>(val);
   #if defined(__gfx1100__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
@@ -1258,7 +1256,7 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
       }
   #endif
       return static_cast<type>(val);
-#elif defined(__gfx1100__) || defined(__gfx1201__)
+#elif defined(__gfx1100__) || defined(__gfx1201__) || defined(__gfx1250__)
       int32_t val32{};  // Gfx11/12 forces 8-bit ops into 32-bit registers
   #if defined(__gfx1100__)
       if constexpr (LoadPolicy == CachePolicy::FlatCache) {
@@ -1311,7 +1309,7 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
         asm volatile("flat_store_byte %0, %1, glc slc" : : "v"(dst), "v"(val16) : "memory");
       }
   #endif
-#elif defined(__gfx1100__) || defined(__gfx1201__)
+#elif defined(__gfx1100__) || defined(__gfx1201__) || defined(__gfx1250__)
       int32_t val32 = static_cast<int32_t>(val);
   #if defined(__gfx1100__)
       if constexpr (StorePolicy == CachePolicy::FlatCache) {
