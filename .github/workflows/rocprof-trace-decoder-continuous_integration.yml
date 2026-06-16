@@ -11,6 +11,7 @@ on:
       - '!projects/rocprof-trace-decoder/CODEOWNERS'
       - '!projects/rocprof-trace-decoder/docs/**'
       - '.github/workflows/rocprof-trace-decoder-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
   pull_request:
     paths:
       - 'projects/rocprof-trace-decoder/**'
@@ -18,6 +19,7 @@ on:
       - '!projects/rocprof-trace-decoder/CODEOWNERS'
       - '!projects/rocprof-trace-decoder/docs/**'
       - '.github/workflows/rocprof-trace-decoder-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

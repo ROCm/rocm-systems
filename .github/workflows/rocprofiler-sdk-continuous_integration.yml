@@ -9,6 +9,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -22,6 +23,7 @@ on:
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
+      - '.github/actions/rocprofiler-sdk-util/action.yml'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
