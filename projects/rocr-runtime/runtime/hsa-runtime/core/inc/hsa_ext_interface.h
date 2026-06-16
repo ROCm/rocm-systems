@@ -112,8 +112,7 @@ class ExtensionEntryPoints {
   void InitAmdExtTable();
 
   // Update Amd Ext table for Api related to Images
-  void UpdateAmdExtTable(decltype(::hsa_amd_image_create)* func_ptr,
-                         decltype(::hsa_amd_image_create_v2)* func_v2_ptr);
+  void UpdateAmdExtTable(decltype(::hsa_amd_image_create)* func_ptr);
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionEntryPoints);
 };

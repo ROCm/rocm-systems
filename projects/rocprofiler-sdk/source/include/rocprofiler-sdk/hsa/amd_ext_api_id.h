@@ -149,10 +149,6 @@ typedef enum rocprofiler_hsa_amd_ext_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_export_fabric_handle,
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_import_fabric_handle,
 #    endif
-#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
-    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_image_create_v2,
-    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_interop_map_buffer_with_size,
-#    endif
 #endif
 
     ROCPROFILER_HSA_AMD_EXT_API_ID_LAST,

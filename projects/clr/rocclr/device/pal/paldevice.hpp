@@ -132,6 +132,11 @@ class NullDevice : public amd::Device {
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment) { return nullptr; };
   virtual bool virtualFree(void* addr) { return true; }
 
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override {
+    return CL_INVALID_OPERATION;
+  }
+  virtual cl_int virtualUnmap(void* va, size_t size) override { return CL_INVALID_OPERATION; }
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice) {
     return true;
@@ -571,6 +576,10 @@ class Device : public NullDevice {
   //! Virtual address space allocation(reservation)
   virtual void* virtualAlloc(void* addr, size_t size, size_t alignment);
   virtual bool virtualFree(void* addr);
+
+  //! Direct synchronous map/unmap path
+  virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys);
+  virtual cl_int virtualUnmap(void* va, size_t size);
 
   //! Set/Get memory access set by the app
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
