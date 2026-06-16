@@ -2676,14 +2676,15 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
   }
 
   uint64_t total = 0;
-  if (rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0, RSMI_MEM_TYPE_VRAM, &total) ==
-      AMDSMI_STATUS_SUCCESS) {
+  amdsmi_status_t size_status =
+      rsmi_wrapper(rsmi_dev_memory_total_get, processor_handle, 0, RSMI_MEM_TYPE_VRAM, &total);
+  if (size_status == AMDSMI_STATUS_SUCCESS) {
     info->vram_size = total / (1024 * 1024);
   }
 
   // --- DRM ioctl fallback: vram_type + bit_width + max_bandwidth (best effort) ---
   // Failures here are non-fatal: the function still succeeds as long as the sysfs
-  // vendor read above succeeded.
+  // vendor or size read above succeeded.
   amdsmi_status_t drm_status = [&]() -> amdsmi_status_t {
     std::string render_name = gpu_device->get_gpu_path();
     std::string path = "/dev/dri/" + render_name;
@@ -2764,7 +2765,8 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
   }();
 
   // Succeed if at least one source provided data; otherwise surface the DRM error.
-  if (vendor_status != AMDSMI_STATUS_SUCCESS && drm_status != AMDSMI_STATUS_SUCCESS) {
+  if (vendor_status != AMDSMI_STATUS_SUCCESS && size_status != AMDSMI_STATUS_SUCCESS &&
+      drm_status != AMDSMI_STATUS_SUCCESS) {
     return drm_status;
   }
 

@@ -41,7 +41,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 - **Deprecated `amdsmi_get_gpu_vram_vendor()` in favor of `amdsmi_get_gpu_vram_info()`**.  
-  - The API is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and is implemented on top of `amdsmi_get_gpu_vram_info()`.
+  - `amdsmi_get_gpu_vram_vendor` is slated for removal in a future ROCm release. It now emits a `DeprecationWarning` from the Python interface and functions as a wrapper of `amdsmi_get_gpu_vram_info()`.
 
 ### Resolved Issues
 
