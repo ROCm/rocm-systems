@@ -3,17 +3,9 @@
 
 include_guard(DIRECTORY)
 
-option(
-    PROFILER_HUB_USE_SYSTEM_GTEST
-    "Use system-installed GoogleTest if available"
-    ON
-)
-
 set(GTEST_VERSION "1.14.0" CACHE STRING "Google Test version")
 
-if(PROFILER_HUB_USE_SYSTEM_GTEST)
-    find_package(GTest ${GTEST_VERSION} QUIET)
-endif()
+find_package(GTest QUIET)
 
 if(GTest_FOUND)
     message(STATUS "Using system GoogleTest (version ${GTest_VERSION})")

@@ -37,7 +37,8 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
                                      long long int *end_time, char *source,
                                      char *dest, size_t size, TestType type,
                                      ShmemContextType ctx_type, int wf_size,
-                                     rocshmem_team_t team) {
+                                     rocshmem_team_t team, int batch,
+                                     int *grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
@@ -57,33 +58,45 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
   /**
    * Calculate start index for each thread within the grid
    */
-  size_t offset = size * get_flat_id();
-  source += offset;
-  dest += offset;
+  // Each thread owns `batch` contiguous slots of `size` bytes.
+  source += size * batch * get_flat_id();
+  dest += size * batch * get_flat_id();
+
+  // Choose start_slot so that after `skip` iterations slot wraps to 0.
+  int start_slot = (batch - (skip % batch)) % batch;
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip) {
+    size_t offset = ((start_slot + i) % batch) * size;
+
+    // Quiet at batch boundaries to allow safe buffer reuse
+    if (offset == 0) {
       __syncthreads();
-      // Ensures all RMA calls from the skip loops are completed
       if(is_thread_zero_in_block()) {
         rocshmem_ctx_quiet(ctx);
       }
       __syncthreads();
-      // Capture the start time of each wavefront to identify the earliest one
-      wf_start_time[wf_id] = wall_clock64();
+      if (i == skip) {
+        // Global barrier ensures all WGs have finished their skip-region
+        // puts before any WG starts timing, preventing skip traffic from
+        // contaminating the timed window.
+        grid_barrier(grid_psync, gridDim.x);
+        // Capture the start time of each wavefront to identify the earliest one
+        wf_start_time[wf_id] = wall_clock64();
+      }
     }
+
     switch (type) {
       case TeamCtxGetTestType:
-        rocshmem_ctx_getmem(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem(ctx, dest + offset, source + offset, size, 1);
         break;
       case TeamCtxGetNBITestType:
-        rocshmem_ctx_getmem_nbi(ctx, dest, source, size, 1);
+        rocshmem_ctx_getmem_nbi(ctx, dest + offset, source + offset, size, 1);
         break;
       case TeamCtxPutTestType:
-        rocshmem_ctx_putmem(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem(ctx, dest + offset, source + offset, size, 1);
         break;
       case TeamCtxPutNBITestType:
-        rocshmem_ctx_putmem_nbi(ctx, dest, source, size, 1);
+        rocshmem_ctx_putmem_nbi(ctx, dest + offset, source + offset, size, 1);
         break;
       default:
         break;
@@ -122,9 +135,23 @@ __global__ void TeamCtxPrimitiveTest(int loop, int skip, long long int *start_ti
  *****************************************************************************/
 TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = max_msg_size * args.wg_size * args.num_wgs;
+  size_t buff_size = max_msg_size * batch_size * args.wg_size * args.num_wgs;
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
+  CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
+
+  int max_co_resident_wgs_per_cu = 0;
+  CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &max_co_resident_wgs_per_cu, TeamCtxPrimitiveTest, args.wg_size, 0));
+  const int max_sustainable_wgs =
+      max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
+  if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
+    std::cout << "Warning: Requested work-groups (" << args.num_wgs
+              << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
+              << "). Capping to " << max_sustainable_wgs
+              << " to avoid grid_barrier deadlock." << std::endl;
+    args.num_wgs = max_sustainable_wgs;
+  }
 
   switch (_type) {
     case TeamCtxPutTestType:
@@ -141,9 +168,7 @@ TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
   }
 
 
-  for(size_t i = 0; i < buff_size; i++) {
-    source[i] = static_cast<char>('a' + i % 26);
-  }
+  CHECK_HIP(hipMemset(source, 'a', buff_size));
 }
 
 TeamCtxPrimitiveTester::~TeamCtxPrimitiveTester() {
@@ -166,11 +191,13 @@ TeamCtxPrimitiveTester::~TeamCtxPrimitiveTester() {
 
   free_test_buffer(local, args.local_buf_type);
   free_test_buffer(remote);
+  CHECK_HIP(hipFree(grid_psync));
 }
 
 void TeamCtxPrimitiveTester::resetBuffers(size_t size) {
-  size_t buff_size = size * args.wg_size * args.num_wgs;
-  memset(dest, '1', buff_size);
+  size_t buff_size = size * batch_size * args.wg_size * args.num_wgs;
+  CHECK_HIP(hipMemsetAsync(dest, '1', buff_size, stream));
+  CHECK_HIP(hipMemsetAsync(grid_psync, 0, sizeof(int), stream));
 }
 
 void TeamCtxPrimitiveTester::preLaunchKernel() {
@@ -188,7 +215,7 @@ void TeamCtxPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
   hipLaunchKernelGGL(TeamCtxPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time, source,
                      dest, size, _type, _shmem_context, wf_size,
-                     team_primitive_world_dup);
+                     team_primitive_world_dup, batch_size, grid_psync);
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;
@@ -203,13 +230,24 @@ void TeamCtxPrimitiveTester::verifyResults(size_t size) {
       (_type == TeamCtxGetTestType || _type == TeamCtxGetNBITestType) ? 0 : 1;
 
   if (args.myid == check_id) {
-    size_t buff_size = size * args.wg_size * args.num_wgs;
-    for (uint64_t i = 0; i < buff_size; i++) {
-      if (dest[i] != source[i]) {
-        std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << " Got " << dest[i] << ", Expected "
-                  << source[i] << std::endl;
-        exit(-1);
+    int start_slot = (batch_size - (args.skip % batch_size)) % batch_size;
+    int verify_iters = std::min(batch_size, num_loops + args.skip);
+    size_t buf_bytes = size * batch_size;
+    size_t concurrency = args.wg_size * args.num_wgs;
+
+    for (size_t b = 0; b < concurrency; b++) {
+      for (int iter = 0; iter < verify_iters; iter++) {
+        int slot = (start_slot + iter) % batch_size;
+        for (size_t i = 0; i < size; i++) {
+          if (dest[b * buf_bytes + slot * size + i] != 'a') {
+            std::cerr << "Data validation error at buffer " << b
+                      << " slot " << slot << " idx " << i << std::endl;
+            std::cerr << " Got " << (int)(unsigned char)dest[b * buf_bytes + slot * size + i]
+                      << ", Expected " << (int)(unsigned char)'a'
+                      << std::endl;
+            exit(-1);
+          }
+        }
       }
     }
   }

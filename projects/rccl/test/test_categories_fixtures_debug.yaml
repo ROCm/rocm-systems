@@ -19,6 +19,7 @@ test_categories:
       - "Rcclwrap.*"
       - "TransportTest.*"
       - "ArgCheckTest.*"
+      - "DdaIpcEligibilityTest.*"
       - "NetSocketTests.*"
       - "Ipcsocket.*"
       - "XmlTest.*"

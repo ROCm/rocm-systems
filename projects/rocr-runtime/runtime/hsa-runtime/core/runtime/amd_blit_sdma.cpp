@@ -2285,7 +2285,11 @@ void BlitSdma<useGCR, scopeFields>::BuildPoll64bCommand(char* cmd_addr, void* ad
   pkt->MASK_LO_UNION.mask_31_0 = 0xffffffff;
   pkt->MASK_HI_UNION.mask_63_32 = 0xffffffff;
 
+  pkt->HEADER_UNION.sys = 1;  // Address is in system memory.
   pkt->DW7_UNION.retry_count = 0;  // Infinite retry
+
+  if (scopeFields)
+    pkt->DW7_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 }
 
 template <bool useGCR, bool scopeFields>
@@ -2299,6 +2303,11 @@ void BlitSdma<useGCR, scopeFields>::BuildFence64bCommand(char* cmd_addr, void* f
   pkt->HEADER_UNION.op = SDMA_OP_FENCE;
   pkt->HEADER_UNION.sub_op = SDMA_SUBOP_FENCE_64B;
   pkt->HEADER_UNION.mtype = 3;
+  // Signal memory is in system memory.
+  pkt->HEADER_UNION.sys = 1;
+
+  if (scopeFields)
+    pkt->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 
   pkt->ADDR_LO_UNION.addr_31_3 = ptrlow32(fence_addr) >> 3;
   pkt->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence_addr);

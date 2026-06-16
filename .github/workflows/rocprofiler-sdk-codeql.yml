@@ -36,13 +36,13 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1201"
   PATH: "/usr/bin:$PATH"
+  SUBMODULE_PATHS: "projects/rocprofiler-sdk projects/clr projects/hip"
   EXCLUDED_PATHS: "external /tmp/build/external"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
   ENABLE_ROCR_BUILD: "false"
   ENABLE_HIP_CLR_BUILD: "false"
   ENABLE_ROCPROFILER_REGISTER_BUILD: "false"
   ENABLE_AQLPROFILE_BUILD: "false"
-  INSTALL_NIGHTLY_ROCM: "false"
 
 jobs:
   analyze:
@@ -109,7 +109,13 @@ jobs:
           projects/hip
           .github/workflows/rocprofiler-sdk-codeql.yml
           .github/workflows/rocprofiler-sdk-formatting.yml
-        submodules: 'true'
+        submodules: 'false'
+
+    - name: Init/Update submodules
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        git submodule update --init --recursive --jobs 16 -- ${SUBMODULE_PATHS}
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
@@ -130,7 +136,6 @@ jobs:
         enable-hip-clr-build: ${{ env.ENABLE_HIP_CLR_BUILD }}
         enable-rocprofiler-register-build: ${{ env.ENABLE_ROCPROFILER_REGISTER_BUILD }}
         enable-aqlprofile-build: ${{ env.ENABLE_AQLPROFILE_BUILD }}
-        install-nightly-rocm: ${{ env.INSTALL_NIGHTLY_ROCM }}
         build-jobs: '8'
         ccache-key: ccache-codeql-ubuntu-22.04-gfx94X
         ccache-variant: ccache

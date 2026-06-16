@@ -196,7 +196,7 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
   }
   if (pMemsetParams->height == 1) {
     size_t offset = 0;
-    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset);
+    amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset);
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
@@ -209,7 +209,7 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     auto sizeBytes =
         pMemsetParams->width * pMemsetParams->height * depth * pMemsetParams->elementSize;
     size_t offset = 0;
-    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset, sizeBytes);
+    amd::Memory* memObj = getMemoryObjectForCurrentDevice(pMemsetParams->dst, offset, sizeBytes);
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
@@ -1034,6 +1034,10 @@ hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size
   *dev_ptr = (HIP_MEM_POOL_USE_VM) ? mem_alloc_node->ReserveAddress() : mem_alloc_node->Execute(s);
   s->SetLastCapturedNode(mem_alloc_node);
 
+  // Track the allocation like the explicit path, so a captured escaped allocation
+  // is not misclassified as reusable and freed on hipGraphExecDestroy.
+  hip::Graph::TrackMemAllocPtr(s->GetCaptureGraph(), *dev_ptr);
+
   return hipSuccess;
 }
 
@@ -1042,6 +1046,11 @@ hipError_t capturehipFreeAsync(hipStream_t stream, void* dev_ptr) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
           "[hipGraph] Current capture node FreeAsync on stream : %p", stream);
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
+  // Mirror hipGraphAddMemFreeNode: reject a free of memory that is not a live
+  // unmatched graph allocation. Capture stays Active, so EndCapture still succeeds.
+  if (!hip::Graph::UntrackMemAllocPtr(dev_ptr)) {
+    return hipErrorInvalidValue;
+  }
   auto mem_free_node = new hip::GraphMemFreeNode(dev_ptr);
   auto status =
       ihipGraphAddNode(mem_free_node, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
@@ -1150,13 +1159,13 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
   HIP_INIT_API(hipStreamBeginCapture, stream, graph, dependencies, dependencyData, numDependencies,
                mode);
   if (dependencyData != nullptr) {
-    HIP_RETURN(hipErrorNotSupported);
+    return hipErrorNotSupported;
   } else if (graph == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   } else if (dependencies == nullptr && numDependencies != 0) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   } else if (dependencies != nullptr && numDependencies == 0) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hip::Graph* g = reinterpret_cast<hip::Graph*>(graph);
   const std::vector<Node> nodes = g->GetNodes();
@@ -1547,7 +1556,7 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
                                hipGraphNode_t* pErrorNode, char* pLogBuffer, size_t bufferSize) {
   HIP_INIT_API(hipGraphInstantiate, pGraphExec, graph);
   if (pGraphExec == nullptr || graph == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hip::GraphExec* ge;
   hipError_t status = ihipGraphInstantiate(&ge, reinterpret_cast<hip::Graph*>(graph));
@@ -1848,7 +1857,7 @@ hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParam
   }
   if (pNodeParams->height > 1 &&
       pNodeParams->pitch < (pNodeParams->width * pNodeParams->elementSize)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   HIP_RETURN(reinterpret_cast<hip::GraphMemsetNode*>(node)->SetParams(pNodeParams));
 }
@@ -2698,7 +2707,7 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
             oldGraphExecNodes[i]->GetParentGraph()->Device()) {
           *updateResult_out = hipGraphExecUpdateErrorUnsupportedFunctionChange;
           *hErrorNode_out = reinterpret_cast<hipGraphNode_t>(newGraphNodes[i]);
-          HIP_RETURN(hipErrorGraphExecUpdateFailure);
+          return hipErrorGraphExecUpdateFailure;
         }
       }
 
@@ -2787,9 +2796,13 @@ hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
   // The address must be provided during the node creation time
   pNodeParams->dptr =
       (HIP_MEM_POOL_USE_VM) ? mem_alloc_node->ReserveAddress() : mem_alloc_node->Execute();
+  if (pNodeParams->dptr == nullptr) {
+    amd::ScopedLock lock(hip::Graph::graphSetLock_);
+    hgraph->RemoveNode(node);
+    HIP_RETURN(hipErrorOutOfMemory);
+  }
   *pGraphNode = reinterpret_cast<hipGraphNode_t>(node);
-  amd::ScopedLock lock(hip::Graph::graphSetLock_);
-  hgraph->memAllocNodePtrs_.insert(pNodeParams->dptr);
+  hip::Graph::TrackMemAllocPtr(hgraph, pNodeParams->dptr);
   HIP_RETURN(status);
 }
 
@@ -2811,7 +2824,7 @@ hipError_t ihipGraphAddMemFreeNode(hip::GraphNode** graphNode, hip::Graph* graph
                                    void* dptr) {
   // Is memory passed to be free'd valid
   size_t offset = 0;
-  auto memory = getMemoryObject(dptr, offset);
+  auto memory = getMemoryObjectForCurrentDevice(dptr, offset);
   if (memory == nullptr) {
     if (HIP_MEM_POOL_USE_VM) {
       // When VM is on the address must be valid and may point to a VA object
@@ -2838,24 +2851,10 @@ hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       dev_ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  // memAllocNodePtrs_ stores only local to graph alloc dptrs whose free node is not added.
-  // and so we need to traverse all graphs of graphSet_ and below cases are handled.
-  // 1) Free node cannot be added twice to the same graph
-  // 2) Free node if it part of another graph cannot be added to this graph
+  // Reject if dev_ptr is not a live unmatched graph allocation (also rejects a
+  // duplicate free; matches an alloc registered under another graph).
   hip::GraphNode* pNode;
-  bool bGraphFound = false;
-  {
-    amd::ScopedLock lock(hip::Graph::graphSetLock_);
-    for (auto itGraph : hip::Graph::graphSet_) {
-      std::unordered_set<void*>::iterator itDevPtr = itGraph->memAllocNodePtrs_.find(dev_ptr);
-      if (itDevPtr != itGraph->memAllocNodePtrs_.end()) {
-        bGraphFound = true;
-        itGraph->memAllocNodePtrs_.erase(itDevPtr);
-        break;
-      }
-    }
-  }
-  if (bGraphFound == false) {
+  if (!hip::Graph::UntrackMemAllocPtr(dev_ptr)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto status = ihipGraphAddMemFreeNode(&pNode, reinterpret_cast<hip::Graph*>(graph),
@@ -3119,7 +3118,7 @@ hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned 
 hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char* path, unsigned int flags) {
   HIP_INIT_API(hipGraphDebugDotPrint, graph, path, flags);
   if (graph == nullptr || path == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hip::Graph* hip_graph = reinterpret_cast<hip::Graph*>(graph);
   HIP_RETURN(ihipGraphDebugDotPrint(hip_graph, path, flags));
@@ -3290,7 +3289,7 @@ hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
       }
       // Is memory passed to be free'd valid
       offset = 0;
-      memory = getMemoryObject(nodeParams->free.dptr, offset);
+      memory = getMemoryObjectForCurrentDevice(nodeParams->free.dptr, offset);
       if (memory == nullptr) {
         if (HIP_MEM_POOL_USE_VM) {
           // When VM is on the address must be valid and may point to a VA object
@@ -3435,7 +3434,7 @@ hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGr
   }
   // Is memory passed to be free'd valid
   size_t offset = 0;
-  auto memory = getMemoryObject(dptr, offset);
+  auto memory = getMemoryObjectForCurrentDevice(dptr, offset);
   if (memory == nullptr) {
     if (HIP_MEM_POOL_USE_VM) {
       // When VM is on the address must be valid and may point to a VA object
@@ -3667,7 +3666,7 @@ hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t* phGraphNode, hipGraph_t hGr
   // Check nodeParams fields
   if (nodeParams->count <= 0 || nodeParams->count > 256 || nodeParams->paramArray == nullptr ||
       nodeParams->flags != 0 || nodeParams->ctx == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   hip::GraphNode* node = new hip::hipGraphBatchMemOpNode(nodeParams);
@@ -3699,7 +3698,7 @@ hipError_t hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode,
   // Check nodeParams fields
   if (nodeParams->count <= 0 || nodeParams->count > 256 || nodeParams->paramArray == nullptr ||
       nodeParams->flags != 0 || nodeParams->ctx == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   HIP_RETURN(reinterpret_cast<hip::hipGraphBatchMemOpNode*>(n)->SetParams(nodeParams));
 }
@@ -3716,7 +3715,7 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
   // Check nodeParams fields
   if (nodeParams->count <= 0 || nodeParams->count > 256 || nodeParams->paramArray == nullptr ||
       nodeParams->flags != 0 || nodeParams->ctx == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
   hip::GraphNode* clonedNode = reinterpret_cast<hip::GraphExec*>(graphExec)->GetClonedNode(n);
   if (clonedNode == nullptr) {

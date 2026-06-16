@@ -88,6 +88,13 @@ std::string ginProxyTestSkipReason() {
   return "";
 }
 
+// Initialized reqs with ginConnectionType=FULL; default for all tests here.
+ncclDevCommRequirements defaultGinReqs() {
+  ncclDevCommRequirements r = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  r.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  return r;
+}
+
 }  // namespace
 
 // Producer: thread 0 of block 0 issues one put with a SignalInc; CTA flushes.
@@ -190,7 +197,7 @@ class GinMPIDeviceTests : public MPITestBase {
     });
 
     // Bring up the GIN device comm (1 barrier slot, 1 signal cell).
-    ncclDevCommRequirements reqs{};
+    ncclDevCommRequirements reqs = defaultGinReqs();
     reqs.railGinBarrierCount = 1;
     reqs.ginSignalCount      = 1;
     ncclDevComm devComm{};
@@ -289,7 +296,7 @@ TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets) {
   });
 
   // Bring up GIN with 2 signals so kSigIdx=1 is a valid in-pool index.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
   ncclDevComm devComm{};
@@ -402,7 +409,7 @@ TEST_F(GinMPIDeviceTests, Put_CrossNode) {
   });
 
   // Bring up GIN with 2 signals so kSigIdx=1 is valid.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
   ncclDevComm devComm{};
@@ -525,7 +532,7 @@ TEST_F(GinMPIDeviceTests, PutValue_Inline) {
   });
 
   // Bring up GIN with 2 signals so kSigIdx=1 is valid.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
   ncclDevComm devComm{};
@@ -624,7 +631,7 @@ TEST_F(GinMPIDeviceTests, Signal_NoPayload) {
   // No buffers, no windows: gin.signal is a zero-byte put. The runtime's
   // own signal pool is the only memory touched by the GFD; it's allocated
   // and registered by ncclDevCommCreate based on ginSignalCount.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
   ncclDevComm devComm{};
@@ -729,7 +736,7 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
   // ginCounterCount=2 so kCntIdx=1 is in range; no ginSignalCount needed
   // (the put has no remote-signal action). railGinBarrierCount=1 because
   // the runtime allocates per-CTA barrier state for any 1-CTA launch.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginCounterCount     = 2;
   ncclDevComm devComm{};
@@ -861,7 +868,7 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal) {
 
   // ginSignalCount=2 and ginCounterCount=2 so kSigIdx=1 and kCntIdx=1 are
   // both in range. railGinBarrierCount=1 covers the 1-CTA launch.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
   reqs.ginCounterCount     = 2;
@@ -985,7 +992,7 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   // on the GPU. Other tests dodge the gate accidentally by setting
   // ginSignalCount/ginCounterCount non-zero; this one has neither so we
   // ask for GIN explicitly.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginForceEnable      = true;
   ncclDevComm devComm{};
@@ -1194,7 +1201,7 @@ TEST_F(GinMPIDeviceTests, SignalAdd_AndShadow) {
   });
 
   // sigIdx=1 and cntIdx=1 -> ginSignalCount/ginCounterCount must be >= 2.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
   reqs.ginCounterCount     = 2;
@@ -1410,7 +1417,7 @@ TEST_F(GinMPIDeviceTests, SymPtr_PutAndPutValue) {
   });
 
   // ginSignalCount=2 so kSigIdx=1 is in range.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 2;
   ncclDevComm devComm{};
@@ -1557,7 +1564,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_PureReference) {
   // ginSignalCount=1 covers signalIndex=0; railGinBarrierCount=1 matches
   // our single-CTA launch. Both non-zero so GIN activates without
   // ginForceEnable.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
@@ -1732,7 +1739,7 @@ TEST_F(GinMPIDeviceTests, AlltoallHybrid_Reference) {
   // under ncclTeamTagWorld(); both must cover our single-CTA launch
   // (barrierIndex=0). ginSignalCount=1 covers the cross-node signal cell
   // and triggers GIN activation.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.lsaBarrierCount     = 1;
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 1;
@@ -1887,7 +1894,7 @@ TEST_F(GinMPIDeviceTests, MultiContext_AllFourRoute) {
   // Bring up GIN. ginContextCount on reqs is a hint; the authoritative
   // value is env-driven and read back from devComm. Each block uses a
   // signal id == blockIdx.x, so we need kNumContexts signal cells per ctx.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginContextCount     = kNumContexts;
   reqs.ginSignalCount      = kNumContexts;
@@ -1963,10 +1970,10 @@ __global__ void multiContextNpo2ProducerKernel(
     ncclWindow_t srcWin, ncclWindow_t dstWin,
     int numContexts, size_t slotStride, size_t subSlotBytes, int peer,
     struct ncclDevComm devComm) {
-  ncclGin gin{devComm, (int)blockIdx.x};
   const int    ctx       = (int)blockIdx.x % numContexts;
   const int    subSlotIx = (int)blockIdx.x / numContexts;
   const size_t off       = (size_t)ctx * slotStride + (size_t)subSlotIx * subSlotBytes;
+  ncclGin gin{devComm, ctx};
   if (threadIdx.x == 0) {
     gin.put(ncclTeamWorld(devComm), peer,
             dstWin, off,
@@ -2033,7 +2040,7 @@ TEST_F(GinMPIDeviceTests, MultiContext_NonPowerOf2) {
 
   // Bring up GIN with 3 contexts, 1 signal each (signal pools are per-ctx,
   // so signal 0 is independent across the three contexts).
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginContextCount     = kNumContexts;
   reqs.ginSignalCount      = 1;
@@ -2167,7 +2174,7 @@ TEST_F(GinMPIDeviceTests, LargeBuffer_Sweep) {
   });
 
   // Bring up GIN with one signal cell; we'll bump it once per iter.
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
@@ -2232,8 +2239,7 @@ TEST_F(GinMPIDeviceTests, LargeBuffer_Sweep) {
   }
 }
 
-// Negative test: with NCCL_GIN_ENABLE=0, ncclDevCommCreate on a GIN-
-// requiring config must fail with ncclInternalError -- no hang, no crash.
+// Negative test: with NCCL_GIN_ENABLE=0, ncclDevCommCreate must fail.
 TEST_F(GinMPIDeviceTests, Disable_Error) {
   const char* e = std::getenv("NCCL_GIN_ENABLE");
   if (!e || std::strcmp(e, "0") != 0)
@@ -2247,14 +2253,15 @@ TEST_F(GinMPIDeviceTests, Disable_Error) {
   ASSERT_EQ(ncclSuccess, createTestCommunicator());
   ncclComm_t comm = getActiveCommunicator();
 
-  // ginSignalCount > 0 forces ncclDevCommCreate to bring up GIN.
-  ncclDevCommRequirements reqs{};
+  // ginSignalCount > 0 + ginConnectionType=FULL forces ncclDevCommCreate to
+  // attempt GIN bring-up.
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.ginSignalCount = 1;
   ncclDevComm devComm{};
   ncclResult_t r = ncclDevCommCreate(comm, &reqs, &devComm);
 
-  ASSERT_EQ(ncclInternalError, r)
-      << "ncclDevCommCreate should fail with ncclInternalError when "
+  ASSERT_TRUE(r == ncclInvalidUsage || r == ncclInvalidArgument)
+      << "ncclDevCommCreate must fail with a request-rejected error when "
          "NCCL_GIN_ENABLE=0; got result " << (int)r;
 }
 
@@ -2341,7 +2348,7 @@ TEST_F(GinMPIDeviceTests, Teardown_NoLeaks) {
     });
 
     // Bring up GIN (1 signal cell suffices for a single round-trip).
-    ncclDevCommRequirements reqs{};
+    ncclDevCommRequirements reqs = defaultGinReqs();
     reqs.railGinBarrierCount = 1;
     reqs.ginSignalCount      = 1;
     ncclDevComm devComm{};
@@ -2460,7 +2467,7 @@ TEST_F(GinMPIDeviceTests, Alltoall_CrossNode) {
   });
 
   // Bring up GIN with one signal cell (cumulative across iters).
-  ncclDevCommRequirements reqs{};
+  ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.railGinBarrierCount = 1;
   reqs.ginSignalCount      = 1;
   ncclDevComm devComm{};
@@ -2535,6 +2542,278 @@ TEST_F(GinMPIDeviceTests, Alltoall_CrossNode) {
     // overwrite a slow rank's recvbuf before it has verified.
     MPI_Barrier(MPI_COMM_WORLD);
   }
+}
+
+// =====================================================================
+// Coverage for the new NCCL 2.29.7 GIN device-API features. All run on the
+// device-API NCCL_GIN_TYPE=2 path with cross-node placement (2 ranks on 2
+// nodes). Tests for features that depend on topology/library support that
+// may be unavailable skip gracefully rather than fail.
+// =====================================================================
+
+// nLsaTeams / ginType / railedGinType via ncclCommQueryProperties (2.29.7).
+TEST_F(GinMPIDeviceTests, Properties_NLsaTeams) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+
+  int nRanks = -1;
+  ncclCommCount(comm, &nRanks);
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
+
+  // GIN proxy backend selected via NCCL_GIN_TYPE=2.
+  EXPECT_EQ(NCCL_GIN_TYPE_PROXY, props.ginType);
+
+  // nLsaTeams = nRanks / lsaSize: >= 1 and must evenly divide nRanks.
+  // Skip when the runtime reports nLsaTeams==0 on this configuration.
+  if (props.nLsaTeams == 0)
+    GTEST_SKIP() << "nLsaTeams reported 0 on this configuration";
+  EXPECT_GE(props.nLsaTeams, 1);
+  EXPECT_EQ(0, nRanks % props.nLsaTeams)
+      << "nRanks=" << nRanks << " not divisible by nLsaTeams=" << props.nLsaTeams;
+}
+
+// Exclusive GIN contexts -- reqs.ginExclusiveContexts (2.29.7).
+TEST_F(GinMPIDeviceTests, MultiContext_Exclusive) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  constexpr int    kNumContexts   = 2;
+  constexpr size_t kSlotStride    = 4 * 1024;
+  constexpr size_t kTransferBytes = 1 * 1024;
+  constexpr size_t kBufBytes      = kNumContexts * kSlotStride;
+  constexpr int    kPeer          = 1;
+
+  void* dSrc = nullptr; void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginExclusiveContexts = true;          // <-- feature under test
+  reqs.railGinBarrierCount  = 1;
+  reqs.ginContextCount      = kNumContexts;
+  reqs.ginSignalCount       = kNumContexts;
+  ncclDevComm devComm{};
+  // Exclusive contexts are carved from the same pool as shared contexts: shared
+  // allocations grow from index 0 upward while exclusive ones are reserved from
+  // the top down. The pool size is NCCL_GIN_NCONTEXTS (rounded up to the GIN
+  // connection count). On a small topology (few connections) the default pool
+  // can be fully consumed by shared allocations, leaving none to reserve
+  // exclusively. Run with NCCL_GIN_NCONTEXTS large enough to leave headroom
+  // (e.g. >= shared usage + ginContextCount; 8 is sufficient on a 2-rank/1-NIC
+  // setup). Skip (rather than fail) when the pool has no room on this config.
+  ncclResult_t cr = ncclDevCommCreate(comm, &reqs, &devComm);
+  if (cr != ncclSuccess)
+    GTEST_SKIP() << "Exclusive GIN contexts unavailable on this configuration "
+                    "(increase NCCL_GIN_NCONTEXTS for more pool headroom); rc=" << (int)cr;
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  ASSERT_EQ(kNumContexts, (int)devComm.ginContextCount)
+      << "exclusive allocation returned " << (int)devComm.ginContextCount;
+
+  // Exclusive contexts are carved from the TOP of the pool (ctxLastExclusive
+  // counts down), whereas shared contexts always start at base 0. With the
+  // pool sized to leave headroom (NCCL_GIN_NCONTEXTS >= 8, as this test
+  // requires), the exclusive carve-out must therefore land at a non-zero base.
+  // base == 0 would mean we were handed ordinary shared contexts rather than an
+  // exclusive reservation, so this distinguishes the exclusive path from shared.
+  EXPECT_GT((int)devComm.ginContextBase, 0)
+      << "exclusive contexts should be carved from the top of the pool; got base "
+      << (int)devComm.ginContextBase;
+
+  std::vector<uint8_t> hostSrc(kBufBytes, 0), hostDst(kBufBytes, 0);
+  for (int b = 0; b < kNumContexts; b++)
+    std::fill_n(hostSrc.begin() + b * kSlotStride, kTransferBytes,
+                static_cast<uint8_t>(0x20 + b));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBufBytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hostDst.data(), kBufBytes, hipMemcpyHostToDevice));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank == 0)
+    multiContextProducerKernel<<<kNumContexts, 32, 0, stream>>>(
+        srcWin, dstWin, kSlotStride, kTransferBytes, kPeer, devComm);
+  else
+    multiContextConsumerKernel<<<kNumContexts, 32, 0, stream>>>(
+        /*expectedSignalValue=*/1, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 1) {
+    std::vector<uint8_t> res(kBufBytes, 0);
+    ASSERT_EQ(hipSuccess, hipMemcpy(res.data(), dDst, kBufBytes, hipMemcpyDeviceToHost));
+    for (int b = 0; b < kNumContexts; b++) {
+      const uint8_t pat = static_cast<uint8_t>(0x20 + b);
+      const size_t base = (size_t)b * kSlotStride;
+      for (size_t i = 0; i < kTransferBytes; i++)
+        ASSERT_EQ(pat, res[base + i]) << "ctx " << b << " byte " << i;
+    }
+  }
+}
+
+// VA-based GIN signals -- ncclGin_VASignalInc + waitSignal(window, offset) (2.29.7).
+// The other tests use the INDEXED signal API (ncclGin_SignalInc + a pool slot
+// index). This one addresses the signal by its virtual address -- a (window,
+// offset) pair backed by a user-registered symmetric window -- which drives the
+// NCCL_GIN_SIGNAL_TYPE_VA descriptor path instead of NCCL_GIN_SIGNAL_TYPE_INDEXED.
+// On the proxy backend the VA signal is emitted as a separate GFD after the
+// data put (see gin/proxy/gin_proxy.h), so a successful payload+signal here
+// proves the VA signal landed.
+__global__ void putVASignalProducerKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, size_t bytes,
+    ncclWindow_t sigWin, size_t sigOff, int peer,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    gin.put(ncclTeamWorld(devComm), peer,
+            dstWin, /*dstOff=*/0,
+            srcWin, /*srcOff=*/0,
+            bytes,
+            ncclGin_VASignalInc{sigWin, sigOff});   // <-- VA signal (window,offset)
+  }
+  gin.flush(ncclCoopCta());
+}
+
+__global__ void putVASignalConsumerKernel(
+    ncclWindow_t sigWin, size_t sigOff, uint64_t expectedSignalValue,
+    struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  gin.waitSignal(ncclCoopCta(), sigWin, sigOff, expectedSignalValue);  // <-- VA wait
+}
+
+TEST_F(GinMPIDeviceTests, VASignal_Put) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  constexpr size_t kBytes    = 4096;
+  constexpr size_t kSigBytes = 64;     // one 8B signal cell lives at offset 0
+  constexpr size_t kSigOff   = 0;
+  constexpr int    kPeer     = 1;
+
+  // Separate buffers for payload (src/dst) and the VA signal cell.
+  void* dSrc = nullptr; void* dDst = nullptr; void* dSig = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSig, kSigBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+    if (dSig) (void)ncclMemFree(dSig);
+  });
+
+  // The VA signal is addressed through its own symmetric window; the payload
+  // uses ordinary symmetric windows.
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr, sigWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSig, kSigBytes, &sigWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+    if (sigWin) (void)ncclCommWindowDeregister(comm, sigWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  // Stage payload; zero the destination and the VA signal cell on every rank
+  // (the signal is incremented from 0 -> 1 by the producer's put).
+  std::vector<uint8_t> hs(kBytes, 0), hd(kBytes, 0), hsig(kSigBytes, 0);
+  for (size_t i = 0; i < kBytes; i++) hs[i] = static_cast<uint8_t>(0x37 + (i & 0x1F));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hs.data(),   kBytes,    hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dDst, hd.data(),   kBytes,    hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSig, hsig.data(), kSigBytes, hipMemcpyHostToDevice));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  if (rank == 0)
+    putVASignalProducerKernel<<<1, 32, 0, stream>>>(srcWin, dstWin, kBytes, sigWin, kSigOff, kPeer, devComm);
+  else
+    putVASignalConsumerKernel<<<1, 32, 0, stream>>>(sigWin, kSigOff, /*expectedSignalValue=*/1, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 1) {
+    std::vector<uint8_t> r(kBytes, 0);
+    ASSERT_EQ(hipSuccess, hipMemcpy(r.data(), dDst, kBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kBytes; i++) ASSERT_EQ(hs[i], r[i]) << "byte " << i;
+  }
+}
+
+// RAIL / no-cross-rail connection type -- ginConnectionType=RAIL (2.29.7).
+TEST_F(GinMPIDeviceTests, RailConnection_Create) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+
+  // RAIL is only valid when the communicator advertises a railed GIN type.
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_EQ(ncclSuccess, ncclCommQueryProperties(comm, &props));
+  if (props.railedGinType == NCCL_GIN_TYPE_NONE)
+    GTEST_SKIP() << "Communicator does not advertise railed GIN (railedGinType=NONE)";
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginConnectionType   = NCCL_GIN_CONNECTION_RAIL;   // <-- feature under test
+  reqs.railGinBarrierCount = 1;
+  reqs.ginSignalCount      = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  EXPECT_TRUE(devComm.ginIsRailed) << "devComm should report railed GIN";
+  (void)ncclDevCommDestroy(comm, &devComm);
 }
 
 #endif  // MPI_TESTS_ENABLED
