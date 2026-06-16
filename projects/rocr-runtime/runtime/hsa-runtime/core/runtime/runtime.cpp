@@ -2470,8 +2470,10 @@ hsa_status_t Runtime::Load() {
   // Initialize IPC support mode
   InitIPCDmaBufSupport();
 
-  // Load svm profiler
+  // Load svm profiler (Linux-only: relies on KFD SMI events via poll/eventfd)
+#ifdef __linux__
   svm_profile_.reset(new AMD::SvmProfileControl);
+#endif
 
   return HSA_STATUS_SUCCESS;
 }
