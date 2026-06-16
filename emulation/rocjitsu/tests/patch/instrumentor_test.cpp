@@ -1432,8 +1432,9 @@ TEST(InstrumentorSpill, BuilderPlanFeedsSpillFormula) {
   TrampolinePlan plan;
   std::string err;
   // s5 live: the planner must avoid it; the rest are free.
-  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, make_sgpr_set({5}),
-                                                 probe_summary.ordinary_clobbers, &err));
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(
+      plan, ProbeCallingConvention::AmdGpuFuncNoArgsReturnS30S31, make_sgpr_set({5}),
+      probe_summary.ordinary_clobbers, &err));
 
   const RegisterSet clobbers =
       compute_instrumentation_clobbers(probe_summary, plan.builder_clobbers);

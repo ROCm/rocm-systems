@@ -44,7 +44,6 @@ namespace {
   return false;
 }
 
-
 // First even-aligned SGPR pair with both lanes free of @p unavailable, within the
 // conservative cross-family allocatable bound. nullopt if none.
 [[nodiscard]] std::optional<uint16_t> find_free_sgpr_pair(const RegisterSet &unavailable) {
@@ -118,13 +117,23 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   return out;
 }
 
-bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const RegisterSet &live_at_anchor,
+bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, ProbeCallingConvention cc,
+                                        const RegisterSet &live_at_anchor,
                                         const RegisterSet &probe_body_clobbers,
                                         std::string *error_out) {
-  // Link pair is the fixed ABI pair s[30:31] for now, so reject if either lane
-  // is live
-  // TODO: Supporting other pairs is deferred
-  constexpr uint16_t kLinkPairBase = 30;
+  // The link pair is whatever the probe's calling convention returns through,
+  // so the call site and the probe body agree on one pair. An unknown
+  // convention cannot be called.
+  const std::optional<uint16_t> link_base = link_pair_for(cc);
+  if (!link_base) {
+    report(error_out, "probe-call resource planning: unknown probe calling convention; cannot "
+                      "derive the return-link pair");
+    return false;
+  }
+  const uint16_t kLinkPairBase = *link_base;
+
+  // Reject if either lane of the link pair is live at the anchor; saving a live
+  // link pair is deferred.
   if (any_sgpr_in_range(live_at_anchor, kLinkPairBase, 2)) {
     report(error_out, "probe-call resource planning: return-link pair s[30:31] is live at the "
                       "anchor; cannot yet save a live link pair");
@@ -178,6 +187,73 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const RegisterSet 
   plan.builder_clobbers = link_pair | target_pair_set;
   plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
   return true;
+}
+
+std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan,
+                                                                  std::string *error_out) {
+  if (!plan.is_probe_call) {
+    report(error_out, "emit_probe_call: plan is not a probe call (run plan_probe_call first)");
+    return std::nullopt;
+  }
+
+  const uint16_t link = plan.link_pair_base;
+  const uint16_t target_lo = plan.target_pair_base;
+  const uint16_t target_hi = static_cast<uint16_t>(plan.target_pair_base + 1);
+  // Literal-constant scalar source code; the 32-bit literal follows the word.
+  constexpr uint16_t kLiteralConstant = 0xFF;
+
+  std::vector<uint32_t> env;
+
+  // SCC save (prologue): capture SCC into the temp without disturbing it. The
+  // matching restore is emitted after the call but still before the relocated
+  // original.
+  if (plan.preserve_scc)
+    env.push_back(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
+                                      scalar_positive_inline_u32(0), plan.arch));
+
+  // Target-address materialization. s_getpc_b64 writes the runtime VA of the
+  // *next* instruction (the s_add_u32 below) into the target pair; the
+  // build-time delta to the probe body is then folded in via the 64-bit add
+  // chain (s_add_u32 sets carry -> SCC, s_addc_u32 consumes it). Both sides are
+  // .text-relative and share the load base, so the delta is a pure layout
+  // distance. The adds always use the literal form so the word count is
+  // independent of the (layout-dependent) delta value (see before_word_count).
+  const size_t getpc_index = env.size();
+  env.push_back(build_s_getpc_b64(target_lo, plan.arch));
+  const uint64_t va_after_getpc =
+      plan.trampoline_offset + static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
+  const uint64_t delta = static_cast<uint64_t>(static_cast<int64_t>(plan.probe_target_offset) -
+                                               static_cast<int64_t>(va_after_getpc));
+  env.push_back(build_s_add_u32(target_lo, target_lo, kLiteralConstant, plan.arch));
+  env.push_back(static_cast<uint32_t>(delta & 0xFFFFFFFFu));
+  env.push_back(build_s_addc_u32(target_hi, target_hi, kLiteralConstant, plan.arch));
+  env.push_back(static_cast<uint32_t>(delta >> 32));
+
+  // The call: writes the return PC into the cc-derived link pair, jumps to the
+  // materialized target. The probe returns here via s_setpc_b64 of the same pair.
+  env.push_back(build_s_swappc_b64(link, target_lo, plan.arch));
+
+  // SCC restore (epilogue): set SCC from the saved temp before the relocated
+  // original runs.
+  if (plan.preserve_scc)
+    env.push_back(build_s_cmp_lg_u32(plan.scc_temp, scalar_positive_inline_u32(0), plan.arch));
+
+  // Plan/emit drift guard: the planner committed to this many envelope words and
+  // the orchestrator sized the layout around it. A mismatch means the two
+  // disagree about the envelope shape.
+  if (env.size() != plan.before_word_count) {
+    report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
+                      "before_word_count");
+    return std::nullopt;
+  }
+
+  // Hand the synthesized envelope to build() for layout and branch math so the
+  // SOPP range checks are shared with the inline path.
+  TrampolinePlan emit_plan = plan;
+  emit_plan.before_items.assign(1, InlineAsmItem{std::move(env)});
+  emit_plan.after_items.clear();
+  emit_plan.emit_original = true;
+  return build(emit_plan, error_out);
 }
 
 } // namespace rocjitsu
