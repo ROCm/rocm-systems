@@ -237,8 +237,19 @@ pub async fn run(config: HostConfig, shutdown: Arc<Notify>) -> Result<()> {
                     if !exec_layout.def().exists() {
                         continue;
                     }
-                    if exec_layout.status().exists() {
-                        // already handled (possibly by a previous host run)
+                    // Skip execs this host has already handled (e.g. across
+                    // a host restart). A per-node host keys this off *its
+                    // own* node result, not the exec-wide `status.json`: in
+                    // a multi-node containerised session that shared status
+                    // is written by the rank-0 aggregator, so keying off it
+                    // would make a worker (rank > 0) treat the exec as done
+                    // before running its own rank — leaving its `exit_code`
+                    // unwritten and the aggregator waiting on it forever.
+                    let already_handled = match host_rank {
+                        Some(rank) => exec_layout.node(rank).exit_code().exists(),
+                        None => exec_layout.status().exists(),
+                    };
+                    if already_handled {
                         seen.insert(eid);
                         continue;
                     }
