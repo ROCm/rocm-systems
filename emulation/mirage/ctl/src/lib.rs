@@ -509,6 +509,11 @@ pub struct RunArgs {
     /// Profile to use. Defaults to the `mi450x` builtin.
     #[arg(long, default_value = "mi450x")]
     profile: String,
+    /// Override the profile's emulator backend (e.g. `rocjitsu`,
+    /// `rocjitsu-dbt`, `hotswap`, `noop`). See `mirage emulators` for
+    /// the available backends.
+    #[arg(long)]
+    emulator: Option<String>,
     /// Reuse an existing session by id.
     #[arg(long, conflicts_with_all = ["keep_session"])]
     session: Option<SessionId>,
@@ -1178,6 +1183,7 @@ fn apply_profile_overrides(
     image: Option<String>,
     mounts: &[String],
     provider: Option<String>,
+    emulator: Option<String>,
     exec_mode: Option<ExecModeArg>,
     options: &[String],
     config: Option<String>,
@@ -1186,6 +1192,7 @@ fn apply_profile_overrides(
     if image.is_none()
         && mounts.is_empty()
         && provider.is_none()
+        && emulator.is_none()
         && exec_mode.is_none()
         && options.is_empty()
         && config.is_none()
@@ -1223,6 +1230,19 @@ fn apply_profile_overrides(
     }
 
     // Emulator overrides.
+    if let Some(name) = emulator {
+        if find_emulator(&name).is_none() {
+            let available = registry()
+                .into_iter()
+                .map(|e| e.name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!(
+                "unknown emulator `{name}`; available backends: {available}"
+            );
+        }
+        profile.emulator.emulator = name;
+    }
     if let Some(mode) = exec_mode {
         profile.emulator.exec_mode = mode.into();
     }
@@ -1297,6 +1317,7 @@ async fn session_start<C: MirageCtl>(
         args.image,
         &args.mounts,
         args.provider,
+        None,
         args.exec_mode,
         &args.options,
         args.config,
@@ -1796,6 +1817,7 @@ async fn run_cmd<C: MirageCtl + 'static>(ctl: Arc<C>, a: RunArgs) -> anyhow::Res
                 a.image.clone(),
                 &a.mounts,
                 a.provider.clone(),
+                a.emulator.clone(),
                 a.exec_mode,
                 &a.options,
                 a.config.clone(),
@@ -2056,8 +2078,8 @@ mod tests {
     #[test]
     fn no_overrides_keeps_by_name_ref() {
         let mut p = sample_profile();
-        let r =
-            apply_profile_overrides(&mut p, None, &[], None, None, &[], None, "mi450x").unwrap();
+        let r = apply_profile_overrides(&mut p, None, &[], None, None, None, &[], None, "mi450x")
+            .unwrap();
         assert_eq!(r, MaybeRef::Ref("mi450x".to_string()));
     }
 
@@ -2068,6 +2090,7 @@ mod tests {
             &mut p,
             None,
             &[],
+            None,
             None,
             Some(ExecModeArg::Clocked),
             &["gpu_model=cdna4".to_string(), "queues=8".to_string()],
