@@ -197,8 +197,7 @@ class RocprofilerSdkProfileOrchestrator:
             )
         if not Path(rocprofiler_attach_library_path).exists():
             console_error(
-                "No live attach library found at "
-                f"{rocprofiler_attach_library_path}."
+                f"No live attach library found at {rocprofiler_attach_library_path}."
             )
         return rocprofiler_attach_library_path
 
