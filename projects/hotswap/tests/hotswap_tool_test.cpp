@@ -52,6 +52,7 @@ FakeEnv g_env;
 using rocr::hotswap::AgentGfxRevision;
 using rocr::hotswap::gate_allows_hotswap;
 using rocr::hotswap::query_agent_gfx_revision;
+using rocr::hotswap::reset_gfx_revision_cache;
 
 // ---------------------------------------------------------------------------
 // Stubs replacing the real HSA symbols referenced by the tool.
@@ -104,20 +105,22 @@ hsa_status_t hsa_agent_get_info(hsa_agent_t /*agent*/,
 // ---------------------------------------------------------------------------
 namespace {
 
-int tests_passed = 0;
+int tests_total = 0;
 int tests_failed = 0;
 
-void check(bool cond, const char *name) {
-  if (cond) {
-    ++tests_passed;
-    printf("  PASS: %s\n", name);
-  } else {
+void run(const char *name, bool cond) {
+  printf("  %s: %s\n", cond ? "PASS" : "FAIL", name);
+  if (!cond)
     ++tests_failed;
-    fprintf(stderr, "  FAIL: %s\n", name);
-  }
+  ++tests_total;
 }
 
-void reset_env() { g_env = FakeEnv{}; }
+// Reset both the fake HSA environment and the query module's per-handle cache
+// before each test, so results never leak across tests via a reused handle.
+void reset_env() {
+  g_env = FakeEnv{};
+  reset_gfx_revision_cache();
+}
 
 uint64_t g_next_handle = 1000;
 hsa_agent_t fresh_agent() {
@@ -143,9 +146,9 @@ void test_Gfx1250A0Passes() {
   g_env.isa_name = kGfx1250Isa;
   g_env.asic_revision = 0;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  check(g.gfx_target == "gfx1250", "gfx target parsed as gfx1250");
-  check(g.revision_valid && g.asic_revision == 0, "ASIC revision is A0 (0)");
-  check(gate_allows_hotswap(g) == true, "gate allows gfx1250 A0");
+  run("gfx target parsed as gfx1250", g.gfx_target == "gfx1250");
+  run("ASIC revision is A0 (0)", g.revision_valid && g.asic_revision == 0);
+  run("gate allows gfx1250 A0", gate_allows_hotswap(g) == true);
 }
 
 // Feature-suffixed ISA names still resolve to the bare gfx target.
@@ -155,9 +158,8 @@ void test_Gfx1250FeatureSuffixParsed() {
   g_env.isa_name = kGfx1250IsaWithFeatures;
   g_env.asic_revision = 0;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  check(g.gfx_target == "gfx1250",
-        "feature suffix stripped -> gfx1250");
-  check(gate_allows_hotswap(g) == true, "gate allows suffixed gfx1250 A0");
+  run("feature suffix stripped -> gfx1250", g.gfx_target == "gfx1250");
+  run("gate allows suffixed gfx1250 A0", gate_allows_hotswap(g) == true);
 }
 
 // A different gfx target -> gate blocks (and the ASIC revision is irrelevant).
@@ -167,8 +169,8 @@ void test_NonGfx1250Blocks() {
   g_env.isa_name = kGfx942Isa;
   g_env.asic_revision = 0;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  check(g.gfx_target == "gfx942", "gfx target parsed as gfx942");
-  check(gate_allows_hotswap(g) == false, "gate blocks gfx942");
+  run("gfx target parsed as gfx942", g.gfx_target == "gfx942");
+  run("gate blocks gfx942", gate_allows_hotswap(g) == false);
 }
 
 // Exact-match gating: a near-miss target (gfx1251) must not be treated as
@@ -179,8 +181,8 @@ void test_NearMissTargetBlocks() {
   g_env.isa_name = kGfx1251Isa;
   g_env.asic_revision = 0;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  check(g.gfx_target == "gfx1251", "gfx target parsed as gfx1251");
-  check(gate_allows_hotswap(g) == false, "gate blocks gfx1251 (exact match)");
+  run("gfx target parsed as gfx1251", g.gfx_target == "gfx1251");
+  run("gate blocks gfx1251 (exact match)", gate_allows_hotswap(g) == false);
 }
 
 // gfx1250 but a non-A0 stepping -> gate blocks.
@@ -190,8 +192,8 @@ void test_Gfx1250NonA0Blocks() {
   g_env.isa_name = kGfx1250Isa;
   g_env.asic_revision = 1;  // A1
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  check(g.revision_valid && g.asic_revision == 1, "ASIC revision is A1 (1)");
-  check(gate_allows_hotswap(g) == false, "gate blocks gfx1250 A1");
+  run("ASIC revision is A1 (1)", g.revision_valid && g.asic_revision == 1);
+  run("gate blocks gfx1250 A1", gate_allows_hotswap(g) == false);
 }
 
 // ASIC revision query failure -> revision_valid false and gate blocks, even for
@@ -202,12 +204,12 @@ void test_AsicRevisionQueryFailure() {
   g_env.isa_name = kGfx1250Isa;
   g_env.asic_rev_ok = false;
   const AgentGfxRevision g = query_agent_gfx_revision(fresh_agent());
-  check(g.gfx_target == "gfx1250", "gfx target still parsed");
-  check(g.revision_valid == false, "revision marked invalid on query failure");
-  check(gate_allows_hotswap(g) == false,
-        "gate blocks when ASIC revision is unavailable");
-  check(g.asic_revision == 0 && g_env.asic_rev_calls == 1,
-        "ASIC revision query was attempted once");
+  run("gfx target still parsed", g.gfx_target == "gfx1250");
+  run("revision marked invalid on query failure", g.revision_valid == false);
+  run("gate blocks when ASIC revision is unavailable",
+      gate_allows_hotswap(g) == false);
+  run("ASIC revision query was attempted once",
+      g.asic_revision == 0 && g_env.asic_rev_calls == 1);
 }
 
 // Result is cached per agent handle: a repeat call does not re-query HSA.
@@ -221,11 +223,11 @@ void test_ResultIsCachedPerHandle() {
   const int isa_after_first = g_env.isa_query_calls;
   const int rev_after_first = g_env.asic_rev_calls;
   const AgentGfxRevision second = query_agent_gfx_revision(agent);
-  check(first.gfx_target == "gfx1250" && second.gfx_target == "gfx1250",
-        "cached result stays gfx1250");
-  check(g_env.isa_query_calls == isa_after_first &&
-            g_env.asic_rev_calls == rev_after_first,
-        "second call served from cache (no re-query)");
+  run("cached result stays gfx1250",
+      first.gfx_target == "gfx1250" && second.gfx_target == "gfx1250");
+  run("second call served from cache (no re-query)",
+      g_env.isa_query_calls == isa_after_first &&
+          g_env.asic_rev_calls == rev_after_first);
 }
 
 // Distinct handles are evaluated independently (not conflated by the cache).
@@ -239,9 +241,9 @@ void test_DistinctHandlesIndependent() {
   // Different agent, different ISA: must be re-evaluated, not cached as a1.
   g_env.isa_name = kGfx942Isa;
   const AgentGfxRevision a2 = query_agent_gfx_revision(fresh_agent());
-  check(gate_allows_hotswap(a1) == true, "first handle (gfx1250 A0) passes");
-  check(a2.gfx_target == "gfx942" && gate_allows_hotswap(a2) == false,
-        "distinct handle (gfx942) evaluated independently");
+  run("first handle (gfx1250 A0) passes", gate_allows_hotswap(a1) == true);
+  run("distinct handle (gfx942) evaluated independently",
+      a2.gfx_target == "gfx942" && gate_allows_hotswap(a2) == false);
 }
 
 }  // namespace
@@ -256,6 +258,6 @@ int main() {
   test_ResultIsCachedPerHandle();
   test_DistinctHandlesIndependent();
 
-  printf("\n%d passed, %d failed\n", tests_passed, tests_failed);
+  printf("\n%d passed, %d failed\n", tests_total - tests_failed, tests_failed);
   return tests_failed ? EXIT_FAILURE : EXIT_SUCCESS;
 }

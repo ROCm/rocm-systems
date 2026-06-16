@@ -52,14 +52,16 @@ std::string extract_gfx_target(const std::string &isa_name) {
   return isa_name.substr(pos, end - isa_name.begin() - pos);
 }
 
-AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
-  static std::mutex cache_mutex;
-  static std::unordered_map<uint64_t, AgentGfxRevision> cache;
+namespace {
+std::mutex g_cache_mutex;
+std::unordered_map<uint64_t, AgentGfxRevision> g_cache;
+} // namespace
 
+AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
   {
-    std::scoped_lock lock(cache_mutex);
-    const auto it = cache.find(agent.handle);
-    if (it != cache.end()) {
+    std::scoped_lock lock(g_cache_mutex);
+    const auto it = g_cache.find(agent.handle);
+    if (it != g_cache.end()) {
       return it->second;
     }
   }
@@ -81,10 +83,15 @@ AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
           info.asic_revision, info.revision_valid ? "yes" : "no");
 
   {
-    std::scoped_lock lock(cache_mutex);
-    cache[agent.handle] = info;
+    std::scoped_lock lock(g_cache_mutex);
+    g_cache[agent.handle] = info;
   }
   return info;
+}
+
+void reset_gfx_revision_cache() {
+  std::scoped_lock lock(g_cache_mutex);
+  g_cache.clear();
 }
 
 bool gate_allows_hotswap(const AgentGfxRevision &gfx) {
