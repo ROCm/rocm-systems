@@ -48,7 +48,11 @@ class tui_analysis(OmniAnalyze_Base):
                 " available, metrics calculation will be"
                 " skipped",
             )
-            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(self.path)
+            pc_sampling_data = file_io.load_pc_sampling_results(self.path)
+
+            workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
+                pc_sampling_data
+            )
             workload.raw_pmc = workload.raw_pmc.rename(
                 columns={"Dispatch_Id": "Dispatch_ID"}
             )
@@ -69,6 +73,7 @@ class tui_analysis(OmniAnalyze_Base):
                 workload=workload,
                 dir_path=self.path,
                 args=self.args,
+                pc_sampling_tool_data=pc_sampling_data,
             )
             parser.nullify_unevaluated_metric_values(workload)
             return

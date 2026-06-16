@@ -15,10 +15,10 @@ validation suite.
 
 ## Source Files
 
-- `unified-memory.cpp` - Implements 16 managed-memory test scenarios (basic
+- `unified-memory.cpp` - Implements 19 managed-memory test scenarios (basic
   faulting, ping-pong, prefetch, pressure, concurrent kernels, fine-grain
   access), CLI argument parsing, and a configurable subset runner (defaults to
-  the first 6 tests, which is what the e2e validator expects).
+  the first 9 tests, which is what the e2e validator expects).
 
 ## Prerequisites
 
@@ -66,13 +66,13 @@ cmake --build <build_dir> --target unified-memory
 ## Running
 
 ```bash
-# Default: 64 MB per allocation, 512 MB pressure pool, 8 ping-pong iterations, first 6 tests
+# Default: 64 MB per allocation, 512 MB pressure pool, 8 ping-pong iterations, first 9 tests
 ./unified-memory
 
 # Smaller workload matching the e2e validation path
 ./unified-memory -s 32 -p 256 -i 4
 
-# Run the full set of 16 tests
+# Run the full set of 19 tests
 ./unified-memory -a
 ```
 
@@ -84,7 +84,7 @@ cmake --build <build_dir> --target unified-memory
 | `-p, --pressure <MB>` | Managed memory for the pressure test | 512 |
 | `-d, --device <ID>` | GPU device ID | 0 |
 | `-i, --iterations <N>` | Ping-pong iterations | 8 |
-| `-a, --all` | Run all 16 tests (default: first 6 only) | off |
+| `-a, --all` | Run all 19 tests (default: first 9 only) | off |
 
 Running on a host without XNACK support, or without `HSA_XNACK=1`, will not
 crash, but no KFD page-fault / page-migration events will be captured under
