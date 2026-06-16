@@ -1,17 +1,17 @@
 .. meta::
-  :description: Tutorial showing how to query the hipFile library version at compile time and runtime using version macros and the hipFileGetVersion() function.
-  :keywords: hipFile, version, HIPFILE_VERSION_MAJOR, HIPFILE_VERSION_MINOR, HIPFILE_VERSION_PATCH, hipFileGetVersion, ROCm, tutorial
+   :description: Tutorial showing how to query the hipFile library version at compile time and runtime using version macros and the hipFileGetVersion() function.
+   :keywords: hipFile, version, HIPFILE_VERSION_MAJOR, HIPFILE_VERSION_MINOR, HIPFILE_VERSION_PATCH, hipFileGetVersion, ROCm, tutorial
 
 *************************
 Query the hipFile version
 *************************
 
-This tutorial demonstrates how to retrieve the hipFile library version using both compile-time macros and the runtime ``hipFileGetVersion()`` function. Knowing the library version is useful when you need to conditionally compile code against different hipFile releases or confirm that the installed runtime library matches expectations.
+This tutorial demonstrates how to retrieve the hipFile library version using compile-time macros and the runtime ``hipFileGetVersion()`` function. Knowing the library version is useful when you need to conditionally compile code against different hipFile releases. It also lets you confirm that the installed runtime library matches expectations.
 
 Prerequisites
 *************
 
-Before working through this example, make sure you have:
+Before working through this example, verify you have:
 
 - hipFile installed (see :doc:`/install/install`)
 - A C++ compiler and CMake
@@ -139,9 +139,3 @@ When you run the built ``get-version`` binary, you see output similar to the fol
    Version from hipFileGetVersion() (major.minor.patch): 0.2.0
 
 The two version strings are identical when the header and the shared library come from the same hipFile release. If you see different values, the installed header and shared library are from different builds.
-
-Next steps
-**********
-
-- See :doc:`/reference/api-reference` for the full Core and versioning API group, including ``hipFileGetVersion()`` and the version macros.
-- To start performing direct-to-GPU I/O after confirming your version, explore the GPU I/O driver lifecycle functions such as ``hipFileDriverOpen()`` in :doc:`/reference/api-reference`.

@@ -6,13 +6,10 @@
 File handle, buffer, and RDMA API reference
 *******************************************
 
-This page documents the hipFile functions and types for registering and deregistering file handles and GPU memory buffers with the hipFile driver. It also covers the RDMA-related types and macros used with userspace RDMA filesystems.
+This page documents the hipFile functions and types for registering and deregistering file handles and GPU memory buffers with the hipFile driver. 
 
-For a walkthrough of synchronous reads and writes using registered handles and buffers, see :doc:`/tutorials/synchronous-file-copy`. For the synchronous read and write function signatures, see :doc:`/reference/api-synchronous-io`.
+For a walkthrough of synchronous reads and writes using registered handles and buffers, see :doc:`/tutorials/copy-a-file`. For the synchronous read and write function signatures, see :doc:`/reference/api-synchronous-io`.
 
-.. note::
-
-   The ``hipFileHandleTypeOpaqueWin32`` and ``hipFileHandleTypeUserspaceFS`` handle types and RDMA functionality are not currently supported on AMD. Setting RDMA options in hipFile API calls has no effect.
 
 File handle types
 *****************
@@ -24,14 +21,6 @@ File handle types
 
 .. doxygentypedef:: hipFileHandle_t
 
-RDMA types and macros
-*********************
-
-.. doxygengroup:: rdma
-   :content-only:
-
-.. doxygengroup:: rdma_flags
-   :content-only:
 
 Filesystem operations
 *********************

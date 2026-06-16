@@ -3,32 +3,55 @@ subtrees:
   - caption: Install
     entries:
       - file: install/install
+        title: Install
       - file: install/build-from-source
+        title: Build from source
       - file: install/python-bindings
+        title: Install Python bindings
   - caption: How to
     entries:
       - file: how-to/register-file-and-buffer
+        title: Register a file and buffer
       - file: how-to/use-with-fio
+        title: Use fio
       - file: how-to/use-python-api
-      - file: how-to/collect-io-statistics
-      - file: how-to/hipFile-ais-stats-tool
+        title: Use the Python API
   - caption: Tutorials
     entries:
       - file: tutorials/copy-a-file
+        title: Copying a file
       - file: tutorials/synchronous-file-copy
+        title: Synchronous file copy
       - file: tutorials/async-multistream-io
+        title: Asynchronous multistream I/O
       - file: tutorials/get-version
+        title: Query the hipFile version
       - file: tutorials/python-file-copy
+        title: Python file copy
       - file: tutorials/python-gpu-io
+        title: Python GPU I/O
   - caption: Reference
     entries:
-      - file: reference/hipFile-io-backends
-      - file: reference/filesystem-requirements
-      - file: reference/hipFile-driver-lifecycle
-      - file: reference/hipFile-file-registration
-      - file: reference/hipFile-buffer-registration
-      - file: reference/statistics-collection
-      - file: reference/hipFile-environment-variables
-      - file: reference/api-reference
-      - file: reference/errors
-      - file: reference/python-api-reference
+      - file: reference/hipFile-io-backends.rst
+        title: Fastpath and fallback backends
+      - file: reference/hipFile-file-registration.rst
+        title: File registration
+      - file: reference/hipFile-buffer-registration.rst
+        title: Buffer registration
+      - file: reference/hipFile-reference-count.rst
+        title: Reference counting
+      - file: reference/hipFile-ais-stats-tool.rst
+        title: ais-stats tool
+      - file: reference/hipFile-environment-variables.rst
+        title: Environment variables
+      - file: reference/hipFile-api-reference.rst
+        title: API reference
+        subtrees:
+        - entries:
+          - file: reference/api-synchronous-io
+          - file: reference/api-driver
+          - file: reference/api-file-and-buffer
+          - file: reference/api-async
+          - file: reference/api-batch
+          - file: reference/api-errors
+          - file: reference/api-python
