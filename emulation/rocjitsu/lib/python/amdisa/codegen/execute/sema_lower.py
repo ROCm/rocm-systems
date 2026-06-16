@@ -1110,7 +1110,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return s == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countr_zero(s)); }}()',
     'cls': '[&]() {{ int32_t sv = static_cast<int32_t>({0});'
-    ' if (sv == 0 || sv == -1) return 32u;'
+    ' if (sv == 0 || sv == -1) return 31u;'
     ' uint32_t u = sv < 0 ? ~static_cast<uint32_t>(sv) : static_cast<uint32_t>(sv);'
     ' return static_cast<uint32_t>(std::countl_zero(u)) - 1u; }}()',
     'wqm': '[&]() {{ uint32_t s = {0}; uint32_t r = 0;'
@@ -1377,12 +1377,14 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i32': '[&]() {{ uint32_t base = {0}, field = {1};'
     ' uint32_t offset = field & 31u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return 0u;'
+    ' if (offset + width > 32) width = 32 - offset;'
     ' uint32_t mask = width >= 32 ? ~0u : ((1u << width) - 1u);'
     ' uint32_t extracted = (base >> offset) & mask;'
     ' if (width < 32 && (extracted & (1u << (width - 1))))'
@@ -1393,6 +1395,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<uint64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' return (base >> offset) & mask; }}()',
     'bfe_i64': '[&]() {{ uint64_t base = {0};'
@@ -1400,6 +1403,7 @@ _INLINE_BINARY_OPS: dict[str, str] = {
     ' uint32_t offset = field & 63u;'
     ' uint32_t width = (field >> 16) & 127u;'
     ' if (width == 0) return static_cast<int64_t>(0);'
+    ' if (offset + width > 64) width = 64 - offset;'
     ' uint64_t mask = width >= 64 ? ~0ULL : ((1ULL << width) - 1ULL);'
     ' uint64_t extracted = (base >> offset) & mask;'
     ' if (width < 64 && (extracted & (1ULL << (width - 1))))'
