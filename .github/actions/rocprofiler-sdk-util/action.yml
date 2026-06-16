@@ -110,6 +110,7 @@ runs:
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/llvm/bin/clang++ \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           .
         cmake --build build --target all --parallel ${{ inputs.build-jobs }}
         cmake --build build --target install
@@ -130,6 +131,7 @@ runs:
           -DHIP_PLATFORM=amd \
           -DCMAKE_PREFIX_PATH='${{ inputs.rocm-path }};${{ inputs.rocm-path }}/llvm' \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DHIP_LLVM_ROOT=${{ inputs.rocm-path }}/llvm \
           -DHIP_CATCH_TEST=0 \
           -DCLR_BUILD_HIP=ON \
@@ -151,6 +153,7 @@ runs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           .
@@ -168,6 +171,7 @@ runs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           .
@@ -182,6 +186,7 @@ runs:
         echo "Building & Installing ROCDecode..."
         cmake -B build-rocdecode \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
@@ -198,6 +203,7 @@ runs:
         echo "Building & Installing ROCJPEG..."
         cmake -B build-rocjpeg \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_CXX_COMPILER=${{ inputs.rocm-path }}/lib/llvm/bin/amdclang++ \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
@@ -219,6 +225,7 @@ runs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
           -DCMAKE_PREFIX_PATH=${{ inputs.rocm-path }} \
           -DCMAKE_INSTALL_PREFIX=${{ inputs.rocm-path }} \
+          -DCMAKE_INSTALL_LIBDIR=lib \
           -DCMAKE_C_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.compiler-launcher }} \
           .
