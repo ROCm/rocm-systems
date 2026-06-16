@@ -279,12 +279,11 @@ static std::string find_interposer_lib() {
     return {};
   self[n] = '\0';
   auto bin_dir = std::filesystem::path(self).parent_path();
-  // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu_kmd.so
-  // Build layout: build/tools/rocjitsu/rocjitsu → build/lib/.../librocjitsu_kmd.so
+  // Installed layout: <prefix>/bin/rocjitsu → <prefix>/lib/librocjitsu.so
+  // Build layout: build/tools/rocjitsu/rocjitsu → build/librocjitsu.so
   for (auto &candidate : {
-           bin_dir / ".." / "lib" / "librocjitsu_kmd.so",
-           bin_dir / ".." / ".." / "lib" / "rocjitsu" / "src" / "rocjitsu" / "kmd" / "linux" /
-               "librocjitsu_kmd.so",
+           bin_dir / ".." / "lib" / "librocjitsu.so",
+           bin_dir / ".." / ".." / "librocjitsu.so",
        }) {
     if (std::filesystem::exists(candidate))
       return std::filesystem::canonical(candidate).string();
@@ -385,7 +384,7 @@ int main(int argc, char *argv[]) {
 
   auto lib_path = find_interposer_lib();
   if (lib_path.empty()) {
-    std::cerr << "rocjitsu: could not find librocjitsu_kmd.so\n";
+    std::cerr << "rocjitsu: could not find librocjitsu.so\n";
     return 1;
   }
 

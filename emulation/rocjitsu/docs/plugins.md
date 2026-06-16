@@ -52,7 +52,7 @@ When `file` is in `RJ_SINKS`, each plugin writes to
 
 ```bash
 # Interactive use (default) — output goes to stderr
-RJ_RACE=1 LD_PRELOAD=librocjitsu_kmd.so ./my_app
+RJ_RACE=1 LD_PRELOAD=librocjitsu.so ./my_app
 
 # Save race reports to files (for test harnesses)
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output LD_PRELOAD=... ./my_app

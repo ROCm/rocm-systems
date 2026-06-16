@@ -174,7 +174,7 @@ set(RJ_CDNA3_KMD_CONFIG "${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json")
 set(RJ_CLI "$<TARGET_FILE:rocjitsu_bin>")
 
 set(RJ_KMD_PRELOAD_ENV
-    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_kmd_shim>"
+    "LD_PRELOAD=$<TARGET_FILE:rocjitsu_shared>"
     "RJ_CONFIG=${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4.json"
 )
 
@@ -200,7 +200,7 @@ if(ROCMINFO_EXECUTABLE)
             RJ_CONFIG_PATH="${RJ_CDNA4_KMD_CONFIG}"
     )
     target_link_libraries(rocminfo_test PRIVATE GTest::gtest_main)
-    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(rocminfo_test rocjitsu_bin rocjitsu_shared)
 
     add_test(
         NAME "RocminfoTest.ExitsSuccessfully"
@@ -267,7 +267,7 @@ if(HSA_RUNTIME64)
     )
     target_link_libraries(hsa_init_test PRIVATE ${HSA_RUNTIME64} GTest::gtest)
     target_link_options(hsa_init_test PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR})
-    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(hsa_init_test rocjitsu_bin rocjitsu_shared)
     add_test(
         NAME "HsaTest.InitSucceeded"
         COMMAND
@@ -385,7 +385,7 @@ if(HSA_RUNTIME64)
             hsa_hooks_test
             PRIVATE HAS_HOST_AMDGPU=1 KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
         )
-        add_dependencies(hsa_hooks_test device_kernels rocjitsu_hooks)
+        add_dependencies(hsa_hooks_test device_kernels rocjitsu_shared)
         rj_configure_target(hsa_hooks_test TEST)
 
         if(HAS_RDNA4_GPU)
@@ -409,7 +409,7 @@ if(HSA_RUNTIME64)
                 PROPERTIES
                     TIMEOUT 60
                     ENVIRONMENT
-                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_hooks>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
+                        "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_shared>;RJ_DBT_TARGET_ISA=gfx1201;RJ_DBT_LOG=1"
             )
         endif()
 
@@ -581,7 +581,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             VERBATIM
         )
         add_custom_target(${TEST_NAME}_target ALL DEPENDS ${HIP_TEST_BIN})
-        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_kmd_shim)
+        add_dependencies(${TEST_NAME}_target rocjitsu_bin rocjitsu_shared)
     endfunction()
 
     # Helper: register a HIP test case run through the CLI launcher.
@@ -651,7 +651,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
             RJ_DAEMON_BIN="$<TARGET_FILE:rocjitsu_bin>"
             RJ_DAEMON_CONFIG="${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
             RJ_DAEMON_CONFIG_2GPU="${CMAKE_SOURCE_DIR}/configs/amdgpu_cdna4_kmd_2gpu.json"
-            RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_kmd_shim>"
+            RJ_PRELOAD_LIB="$<TARGET_FILE:rocjitsu_shared>"
             RJ_HIP_VECTOR_ADD_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_vector_add_test"
             RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
             RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
@@ -811,7 +811,7 @@ if(HIPCC_EXECUTABLE AND HSA_RUNTIME64)
         VERBATIM
     )
     add_custom_target(hip_cvt_narrow_test_target ALL DEPENDS ${CVT_NARROW_BIN})
-    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_kmd_shim)
+    add_dependencies(hip_cvt_narrow_test_target rocjitsu_bin rocjitsu_shared)
 
     add_test(
         NAME "CvtNarrow.AllTests"
