@@ -172,11 +172,15 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
         ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
 
-        // When the KFD device node is entirely absent (e.g. WSL2/DXG, which
-        // exposes /dev/dxg but not /dev/kfd) the hardware counter blocks cannot
-        // be armed at all, so dispatch profiling still emits one row per counter
-        // per dispatch but every Counter_Value reads back zero. Warn once so the
-        // all-zero output is not mistaken for a configuration bug.
+        // When the KFD device node is absent (e.g. WSL2/DXG, which exposes
+        // /dev/dxg but not /dev/kfd) hardware counters are not armed through the
+        // KFD profiler ioctl; instead aqlprofile's vendor-specific PM4 IB is
+        // submitted through the dxg path in libhsakmt. That path is gated by
+        // WSLKMT_VENDOR_PACKET (enabled by default by the WSL platform layer).
+        // A single counter is collected correctly this way, but a large
+        // multi-counter set can exceed libhsakmt's per-queue PM4 command-buffer
+        // frame and fail to arm until that limit is raised. Note this once so the
+        // behavior is understood rather than mistaken for a configuration bug.
         //
         // NOTE: this is intentionally a /dev/kfd-presence check, not the
         // counter_collection_has_device_lock() / profiler-ioctl probe used at
@@ -189,11 +193,13 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
             static std::once_flag warned_once{};
             std::call_once(warned_once, []() {
                 ROCP_WARNING
-                    << "Hardware performance counter collection is not supported on this "
-                       "platform: /dev/kfd is not present, so the KFD profiler interface "
-                       "cannot arm the counter blocks. Dispatch profiling will run but all "
-                       "Counter_Value entries will be zero. This is expected under WSL/DXG "
-                       "where /dev/kfd is not exposed.";
+                    << "/dev/kfd is not present (expected under WSL/DXG). Hardware "
+                       "performance counters are collected via the dxg vendor-packet "
+                       "path in libhsakmt rather than the KFD profiler interface; this "
+                       "requires WSLKMT_VENDOR_PACKET=1, which the WSL platform layer "
+                       "enables automatically. A single counter is collected correctly, "
+                       "but large multi-counter sets may currently fail to arm due to "
+                       "the libhsakmt PM4 command-buffer frame-size limit.";
             });
         }
     }

@@ -537,7 +537,28 @@ fetch_libhsakmt_topology([[maybe_unused]] D3DKMT_HANDLE  adapter,
 bool
 is_available()
 {
-    return probe_libdxcore();
+    const bool avail = probe_libdxcore();
+
+    // On WSL the dxg/libhsakmt path only honors the vendor-specific PM4 IB
+    // packets that aqlprofile emits for hardware counter collection when
+    // WSLKMT_VENDOR_PACKET is set; otherwise the embedded PM4 IB is silently
+    // dropped and every Counter_Value reads back zero. Opt in by default on WSL
+    // so counters work out of the box, using overwrite=0 so an explicit user
+    // setting always wins. This must run before the HSA runtime / libhsakmt
+    // initializes its dxg runtime (which reads the variable once per process);
+    // is_available() is called during agent discovery at rocprofiler init, well
+    // before any profiling queue is created. The function-local static ensures
+    // the setenv happens at most once.
+    if(avail)
+    {
+        static const bool _vendor_packet_enabled = []() {
+            ::setenv("WSLKMT_VENDOR_PACKET", "1", /*overwrite=*/0);
+            return true;
+        }();
+        (void) _vendor_packet_enabled;
+    }
+
+    return avail;
 }
 
 std::vector<unique_agent_t>
@@ -664,6 +685,12 @@ enumerate()
         out.emplace_back(new rocprofiler_agent_t{cpu}, agent_deleter);
     }
 
+    // Index within GPU-type agents only (0-based). Distinct from logical_node_id,
+    // which is shared across all agent types (the synthesized CPU occupies 0, so
+    // the GPU's logical_node_id starts at 1). VISIBLE_DEVICES filtering matches on
+    // logical_node_type_id, so the first GPU must be 0 here regardless of the CPU.
+    uint32_t gpu_type_index = 0;
+
     for(uint32_t i = 0; i < e.NumAdapters; ++i)
     {
         const auto& a = infos[i];
@@ -747,8 +774,9 @@ enumerate()
         info.logical_node_id      = logical;
         info.node_id              = static_cast<uint32_t>(logical);
         info.id.handle            = logical + offset;
-        info.logical_node_type_id = logical;
+        info.logical_node_type_id = gpu_type_index;
         ++logical;
+        ++gpu_type_index;
 
         info.vendor_id   = devids.DeviceIds.VendorID;
         info.device_id   = devids.DeviceIds.DeviceID;
