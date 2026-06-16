@@ -1,0 +1,8 @@
+# Bulk formatting / copyright-header commits that should not appear in git blame.
+# Tell git to skip these revisions when running:
+#   git blame --ignore-revs-file projects/rccl/.git-blame-ignore-revs <file>
+# or set globally:
+#   git config blame.ignoreRevsFile projects/rccl/.git-blame-ignore-revs
+
+# [AICOMRCCL-1281] Standardise copyright headers to NCCL SPDX format
+7d696395fc0f77d3dadc722aa5099cc123642031
