@@ -78,12 +78,20 @@ if "--list" in sys.argv or "-l" in sys.argv:
     common.print_test_ids(suite)
     sys.exit(0)
 
+# Detect if ran without sudo or root privileges
+if os.geteuid() != 0:
+    print(
+        "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
+        file=sys.stderr,
+    )
+    print("Please relaunch with elevated privileges.\n", file=sys.stderr)
+    sys.exit(1)
+
 if verbose < common.VERBOSITY_VERBOSE:
     common.print_legend()
 
 if verbose > common.VERBOSITY_QUIET:
-    print("AMD SMI CLI Tests\n")
-    print("Running tests...\n")
+    print("AMD SMI CLI Tests")
 
 runner = common.GTestSummaryRunner(
     stream=sys.stderr,
