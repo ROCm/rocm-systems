@@ -61,6 +61,17 @@ uint64_t mock_code_object_translator_t::get_load_base(size_t object_id) const
     return 0;
 }
 
+uint64_t mock_code_object_translator_t::get_load_size(size_t object_id) const
+{
+    for (const auto& info : m_mem_code_obj_info)
+        if (info.id == object_id)
+            return info.load_size;
+    for (const auto& info : m_file_code_obj_info)
+        if (info.id == object_id)
+            return info.load_size;
+    return 0;
+}
+
 void mock_code_object_translator_t::add_symbols(size_t object_id,
                                                 const std::vector<rocprofiler_compute_tool::symbol_t>& symbols)
 {

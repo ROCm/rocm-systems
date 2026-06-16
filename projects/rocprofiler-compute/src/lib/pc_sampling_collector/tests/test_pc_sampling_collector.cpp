@@ -50,45 +50,53 @@ TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjects_WritesTheirIds)
     EXPECT_EQ(m_writer->get_start_code_obj_ids()[1], m_mem_info.code_object_id);
 }
 
-TEST_F(test_pc_sampling_collector_t, ProvidedCodeObjectSymbols_WritesThem)
+TEST_F(test_pc_sampling_collector_t, WritesOneSpanSymbolPerCodeObject)
 {
+    // write() now disassembles the whole loaded range under a single span symbol
+    // per code object, independent of named ELF symbols.
     m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    const std::vector<symbol_t> symbols0 = {{"name0", 0x10, 0x1000, 1}, {"name1", 0x20, 0x2000, 0x60}};
-    const std::vector<symbol_t> symbols1 = {{"name2", 0x11, 0x1001, 1}, {"name3", 0x21, 0x2001, 0x61}};
-    m_translator->add_symbols(m_file_info.code_object_id, symbols0);
-    m_translator->add_symbols(m_mem_info.code_object_id, symbols1);
+    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 4};
+    m_translator->add_instruction(instruction);
+
     m_pc_sampling_collector->write(*m_writer);
-    EXPECT_EQ(m_writer->get_symbol_descriptions().size(), 4);
-    EXPECT_EQ(m_writer->get_symbol_descriptions()[0].name, symbols0[0].name);
-    EXPECT_EQ(m_writer->get_symbol_descriptions()[1].name, symbols0[1].name);
-    EXPECT_EQ(m_writer->get_symbol_descriptions()[2].name, symbols1[0].name);
-    EXPECT_EQ(m_writer->get_symbol_descriptions()[3].name, symbols1[1].name);
+
+    // One span symbol per code object, each covering the full load_size.
+    ASSERT_EQ(m_writer->get_symbol_descriptions().size(), 2u);
+    EXPECT_EQ(m_writer->get_symbol_descriptions()[0].size, m_file_info.load_size);
+    EXPECT_EQ(m_writer->get_symbol_descriptions()[1].size, m_mem_info.load_size);
+    EXPECT_EQ(m_writer->get_symbol_descriptions()[0].code_object_offset, 0u);
 }
 
-TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructions_WritesThem)
+TEST_F(test_pc_sampling_collector_t, WritesInstructionsAcrossTheWholeLoadedRange)
 {
-    m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 2}};
-    m_translator->add_symbols(m_file_info.code_object_id, symbols);
-    m_translator->add_symbols(m_mem_info.code_object_id, symbols);
-    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 1};
+    // Fixed-size instruction; the walk covers [load_base, load_base + load_size).
+    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 4};
     m_translator->add_instruction(instruction);
+
     m_pc_sampling_collector->write(*m_writer);
-    EXPECT_EQ(m_writer->get_instruction_descriptions().size(), symbols[0].size * 2);
+
+    // load_size / inst.size instructions, regardless of named symbols.
+    const size_t expected = m_mem_info.load_size / instruction.size;
+    EXPECT_EQ(m_writer->get_instruction_descriptions().size(), expected);
+    // The walk queries the decoder at load_base + offset across the range.
+    const auto& queries = m_translator->get_instruction_queries();
+    ASSERT_FALSE(queries.empty());
+    EXPECT_EQ(queries.front().second, m_mem_info.load_base);
 }
 
-TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
+TEST_F(test_pc_sampling_collector_t, UndecodableRegionDoesNotAbortWalk)
 {
-    m_pc_sampling_collector->on_code_object_load(m_file_info);
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 2}};
-    m_translator->add_symbols(m_file_info.code_object_id, symbols);
-    m_translator->add_symbols(m_mem_info.code_object_id, symbols);
-    const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 0};
+    // size 0 models an undecodable word; the walk must skip it and keep going,
+    // not loop forever or throw.
+    const instruction_t instruction = {"", "", 0x1000, 0x0, 0};
     m_translator->add_instruction(instruction);
-    EXPECT_THROW(m_pc_sampling_collector->write(*m_writer), std::runtime_error);
+
+    EXPECT_NO_THROW(m_pc_sampling_collector->write(*m_writer));
+    EXPECT_EQ(m_writer->get_instruction_descriptions().size(), 0u);
+    EXPECT_EQ(m_writer->get_end_code_obj_count(), 1u);
 }
 
 TEST_F(test_pc_sampling_collector_t, WriteSamples_DedupsAndRoutesByKind)
@@ -196,9 +204,8 @@ TEST_F(test_pc_sampling_collector_t, SnapshotSources_CopiesSourcesParsedFromInst
                               ("rpc_snapshot_out_" + std::to_string(::getpid()));
 
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
-    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 1}};
-    m_translator->add_symbols(m_mem_info.code_object_id, symbols);
-    // Comment parses to rel_src.
+    // Comment parses to rel_src. The full-range walk surfaces it without needing
+    // a named symbol.
     m_translator->add_instruction({"v_add", rel_src.string() + ":7", 0x1000, 0x10, 1});
 
     const size_t copied = m_pc_sampling_collector->snapshot_sources(out_root);

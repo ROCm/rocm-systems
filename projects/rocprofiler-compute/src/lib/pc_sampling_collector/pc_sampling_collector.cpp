@@ -55,21 +55,39 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
     for (const auto& id : m_translator->get_code_object_ids())
     {
         writer.start_code_obj(id);
-        const auto& symbols = m_translator->get_symbols(id);
-        for (const auto& sym : symbols)
+
+        // Disassemble the whole loaded code-object range, not just named symbols.
+        // PC samples can land on any instruction, including code that has no ELF
+        // symbol; analyze joins each sample's code_object_offset to an entry here,
+        // so every loaded instruction must be present. Group them under one span
+        // symbol -- the consumer flattens symbols and reads only the instruction
+        // list, keyed by the loaded-basis code_obj_offset.
+        const uint64_t base      = m_translator->get_load_base(id);
+        const uint64_t range_end = base + m_translator->get_load_size(id);
+
+        symbol_t span{};
+        span.name               = "<code object>";
+        span.virtual_address    = base;
+        span.code_object_offset = 0;
+        span.size               = range_end - base;
+        writer.start_symbol(span);
+
+        uint64_t pc = base;
+        while (pc < range_end)
         {
-            writer.start_symbol(sym);
-            uint64_t       pc  = sym.virtual_address;
-            const uint64_t end = sym.virtual_address + sym.size;
-            while (pc < end)
+            const auto inst = m_translator->get_instruction(id, pc);
+            if (inst.size == 0)
             {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                Expects(inst.size);
-                writer.write_instruction(inst);
-                pc += inst.size;
+                // Undecodable padding/data: advance a word so the walk progresses
+                // instead of aborting the whole code object.
+                pc += sizeof(uint32_t);
+                continue;
             }
-            writer.end_symbol();
+            writer.write_instruction(inst);
+            pc += inst.size;
         }
+
+        writer.end_symbol();
         writer.end_code_obj();
     }
 }
@@ -167,7 +185,7 @@ size_t pc_sampling_collector_impl_t::snapshot_sources(const std::filesystem::pat
     // accumulating one string per instruction.
     std::set<std::string> unique_refs;
     for_each_instruction(
-        [&unique_refs, &snapshotter](uint64_t /*id*/, const symbol_t& /*sym*/, const instruction_t& inst)
+        [&unique_refs, &snapshotter](uint64_t /*id*/, const instruction_t& inst)
         {
             if (const auto ref = snapshotter->parse_ref(inst.comment))
             {

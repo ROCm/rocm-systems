@@ -83,18 +83,22 @@ void pc_sampling_collector_impl_t::for_each_instruction(Fn&& fn)
 {
     for (const auto& id : m_translator->get_code_object_ids())
     {
-        const auto& symbols = m_translator->get_symbols(id);
-        for (const auto& sym : symbols)
+        // Walk the whole loaded range so callers (e.g. source snapshotting) see
+        // every instruction, including code outside named symbols.
+        const uint64_t base      = m_translator->get_load_base(id);
+        const uint64_t range_end = base + m_translator->get_load_size(id);
+
+        uint64_t pc = base;
+        while (pc < range_end)
         {
-            uint64_t       pc  = sym.virtual_address;
-            const uint64_t end = sym.virtual_address + sym.size;
-            while (pc < end)
+            const auto inst = m_translator->get_instruction(id, pc);
+            if (inst.size == 0)
             {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                Expects(inst.size);
-                fn(id, sym, inst);
-                pc += inst.size;
+                pc += sizeof(uint32_t);
+                continue;
             }
+            fn(id, inst);
+            pc += inst.size;
         }
     }
 }

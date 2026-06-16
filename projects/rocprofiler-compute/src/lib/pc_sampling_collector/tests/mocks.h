@@ -42,6 +42,7 @@ public:
     rocprofiler_compute_tool::instruction_t get_instruction(size_t object_id,
                                                             uint64_t virtual_address) const override;
     uint64_t get_load_base(size_t object_id) const override;
+    uint64_t get_load_size(size_t object_id) const override;
 
     void add_symbols(size_t object_id, const std::vector<rocprofiler_compute_tool::symbol_t>& symbols);
     void add_instruction(const rocprofiler_compute_tool::instruction_t& instruction);
