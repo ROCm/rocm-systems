@@ -13,6 +13,9 @@ on:
       ci_image:
         required: true
         type: string
+      cxx_compiler:
+        required: true
+        type: string
       platform:
         required: true
         type: string
@@ -29,14 +32,8 @@ jobs:
 
   compile_on_NVIDIA:
     env:
-      AIS_INPUT_CXX_COMPILER: ${{ matrix.supported_compilers }}
+      AIS_INPUT_CXX_COMPILER: ${{ inputs.cxx_compiler }}
     runs-on: [ubuntu-24.04]
-    strategy:
-      fail-fast: false
-      matrix:
-        supported_compilers:
-          - g++
-          - clang++
     steps:
       - name: Set early AIS CI environment variables
         run: |
@@ -81,7 +78,7 @@ jobs:
               cp -R /mnt/ais /ais
               mkdir -p /ais/build/hipfile
             '
-      - name: Generate build files for hipFile targeting the NVIDIA platform (${{ matrix.supported_compilers }})
+      - name: Generate build files for hipFile targeting the NVIDIA platform (${{ inputs.cxx_compiler }})
         run: |
           docker exec \
             -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
@@ -95,7 +92,7 @@ jobs:
                 -DCMAKE_HIP_PLATFORM=nvidia \
                 ../../rocm-systems/projects/hipfile
             '
-      - name: Build hipFile for the NVIDIA platform (${{ matrix.supported_compilers }})
+      - name: Build hipFile for the NVIDIA platform (${{ inputs.cxx_compiler }})
         run: |
           docker exec \
             -t \
