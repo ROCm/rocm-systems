@@ -1692,6 +1692,119 @@ void KFDSVMRangeTest::HMMProfilingEvent(int gpuNode) {
 
 }
 
+/*
+ * No-access unmap test: setting KFD_IOCTL_SVM_ATTR_NO_ACCESS on a mapped range
+ * must silently unmap it from the GPU (UNMAP_FROM_GPU) and must NOT trigger a
+ * queue eviction (QUEUE_EVICTION). Guards against the jemalloc eviction storm
+ * regressing.
+ */
+struct NoAccessEventParams {
+    int nodeid;
+    pthread_barrier_t *barrier;
+    volatile int *stop;
+    int queue_eviction;
+    int unmap_from_gpu;
+};
+
+unsigned int CountSMIEventThread(void *p) {
+    struct NoAccessEventParams *a = (struct NoAccessEventParams *)p;
+    char msg[HSA_SMI_EVENT_MSG_SIZE];
+    struct pollfd fds = {0};
+    HSAuint64 events;
+    int fd;
+
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtOpenSMI, g_baseTest->m_hsakmt_current_ctx,
+                                   a->nodeid, &fd), a->nodeid);
+    events = HSA_SMI_EVENT_MASK_FROM_INDEX(HSA_SMI_EVENT_INDEX_MAX) - 1;
+    EXPECT_EQ_GPU(write(fd, &events, sizeof(events)), sizeof(events), a->nodeid);
+
+    pthread_barrier_wait(a->barrier);
+
+    fds.fd = fd;
+    fds.events = POLLIN;
+    while (!*a->stop) {
+        if (poll(&fds, 1, 200) <= 0)
+            continue;
+        memset(msg, 0, sizeof(msg));
+        if (read(fd, msg, HSA_SMI_EVENT_MSG_SIZE) <= 0)
+            continue;
+        int event_id = 0;
+        sscanf(msg, "%x", &event_id);
+        if (event_id == HSA_SMI_EVENT_QUEUE_EVICTION)
+            a->queue_eviction++;
+        else if (event_id == HSA_SMI_EVENT_UNMAP_FROM_GPU)
+            a->unmap_from_gpu++;
+    }
+    close(fd);
+    return 0;
+}
+
+void KFDSVMRangeTest::NoAccessUnmapTest(int gpuNode) {
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
+        return;
+    }
+    if (Get_Version()->KernelInterfaceMinorVersion < 10)
+        return;
+
+    const HsaNodeProperties *pNodeProperties =
+        Get_NodeInfo()->GetNodeProperties(gpuNode);
+    if (pNodeProperties->Integrated || Get_NodeInfo()->IsAppAPU(gpuNode)) {
+        LOG() << "Skipping test on APU." << std::endl;
+        return;
+    }
+
+    int BufSize = PAGE_SIZE;
+    HsaSVMRange sysBuffer(BufSize, gpuNode);
+    HSAuint32 *pBuf = sysBuffer.As<HSAuint32 *>();
+
+    /* Force the range to actually be mapped to the GPU before revoking. */
+    SDMAQueue sdmaQueue;
+    ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
+    sdmaQueue.PlaceAndSubmitPacket(SDMAWriteDataPacket(sdmaQueue.GetFamilyId(),
+                                   pBuf, 0x12345678));
+    sdmaQueue.Wait4PacketConsumption();
+    EXPECT_TRUE_GPU(WaitOnValue(pBuf, 0x12345678), gpuNode);
+    EXPECT_SUCCESS_GPU(sdmaQueue.Destroy(), gpuNode);
+
+    pthread_barrier_t barrier;
+    ASSERT_SUCCESS(pthread_barrier_init(&barrier, NULL, 2));
+    volatile int stop = 0;
+    struct NoAccessEventParams pArgs = {gpuNode, &barrier, &stop, 0, 0};
+    uint64_t threadId;
+    ASSERT_EQ(true, StartThread(&CountSMIEventThread, &pArgs, threadId));
+    pthread_barrier_wait(&barrier);
+
+    /* Revoke GPU access: must silently unmap, never evict queues. */
+    HSA_SVM_ATTRIBUTE attr;
+    attr.type = HSA_SVM_ATTR_NO_ACCESS;
+    attr.value = (HSAuint32)gpuNode;
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMSetAttr, m_hsakmt_current_ctx,
+                                   pBuf, BufSize, 1, &attr), gpuNode);
+
+    /* Drop pages the way an allocator would; range already unmapped => no evict. */
+    madvise(pBuf, BufSize, MADV_DONTNEED);
+
+    usleep(200000);
+    stop = 1;
+    WaitForThread(threadId);
+
+    EXPECT_EQ_GPU(pArgs.queue_eviction, 0, gpuNode);
+    EXPECT_GE_GPU(pArgs.unmap_from_gpu, 1, gpuNode);
+
+    ASSERT_SUCCESS(pthread_barrier_destroy(&barrier));
+}
+
+TEST_P(KFDSVMRangeTest, NoAccessUnmapTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->NoAccessUnmapTest(gpuNode);
+    }));
+    TEST_END;
+}
+
+
 TEST_P(KFDSVMRangeTest, HMMProfilingEvent) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
