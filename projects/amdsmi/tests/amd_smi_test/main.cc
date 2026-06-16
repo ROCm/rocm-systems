@@ -270,17 +270,14 @@ TEST(GpuFunctionalReadOnly, TestAPISupportRead) {
   RunGenericTest(&tst);
 }
 
-/*
 TEST(GpuFunctionalReadOnly, TestMutualExclusion) {
   TestMutualExclusion tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();
   tst.SetUp();
-  PRINT_VERBOSITY();
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-*/
 
 TEST(GpuFunctionalReadWrite, TestComputePartitionReadWrite) {
   if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
