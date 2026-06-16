@@ -16,7 +16,7 @@ The ROCR Debug Agent (ROCdebug-agent) is a library that can be loaded by the ROC
 
 This functionality is provided for all AMD GPUs supported by the ROCm Debugger API Library :doc:`(ROCdbgapi) <rocdbgapi:index>`.
 
-The code is open source and hosted at https://github.com/ROCm/rocr_debug_agent
+The code is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocr-debug-agent>`__.
 
 .. grid:: 2
   :gutter: 3
