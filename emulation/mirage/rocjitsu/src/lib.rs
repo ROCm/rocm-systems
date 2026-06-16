@@ -32,6 +32,7 @@ use mirage_core::session::{SessionHealth, SessionId};
 use mirage_core::topology::TopologyDef;
 
 pub mod daemon;
+pub mod dbt;
 
 /// rocjitsu [`EmulatorBackend`] implementation. Bundles the
 /// rocjitsu-specific injection (the KMD `LD_PRELOAD` plus the
