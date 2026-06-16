@@ -35,6 +35,7 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
      ncclIbGdrSupport() == ncclSuccess;
   if (peerMemSupport) return ncclSuccess;
 
+#if !defined(__HIP_PLATFORM_AMD__)
   int cudaDev;
   CUDACHECK(cudaGetDevice(&cudaDev));
   int dmaBufSupportOnDevice = 1;
@@ -43,6 +44,12 @@ static ncclResult_t ncclGinIbGdrGpuSupport(bool gdaki) {
 
   WARN("Unable to use GIN: Peermem is not supported, and device %d does not support DMA-BUF.", cudaDev);
   return ncclInvalidUsage;
+#else
+  if (ncclIbDmaBufSupport(0) == ncclSuccess) return ncclSuccess;
+
+  WARN("Unable to use GIN: Peermem is not supported, nor DMA-BUF.");
+  return ncclInvalidUsage;
+#endif
 }
 
 NCCL_PARAM(GinType, "GIN_TYPE", -1);
@@ -67,7 +74,9 @@ ncclResult_t ncclGinIbGdakiInit() {
 }
 
 extern ncclGin_t ncclGinIb;
+#if !defined(__HIP_PLATFORM_AMD__)
 extern ncclGin_t ncclGinIbGdaki;
+#endif // !defined(__HIP_PLATFORM_AMD__)
 extern ncclGin_t ncclGinIbProxy;
 
 // Initlialize GDAKI or PROXY backend. ginType can force a particular backend.
@@ -76,7 +85,9 @@ ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t lo
   NCCLCHECK(ncclIbInitDevices(logFunction, nullptr));
   if (ncclNIbDevs == 0) return ncclInternalError; // Caught in plugin init code, not propagated to user.
 
+#if !defined(__HIP_PLATFORM_AMD__)
   if (ginType == NCCL_GIN_TYPE_GDAKI) goto try_gdaki;
+#endif // !defined(__HIP_PLATFORM_AMD__)
   if (ginType == NCCL_GIN_TYPE_PROXY) goto try_proxy;
   if (ginType != -1) {
     INFO(NCCL_INIT|NCCL_NET, "NET_IB: no support for GIN type %ld", ncclParamGinType());
@@ -85,6 +96,7 @@ ncclResult_t ncclGinIbInitType(void** ctx, uint64_t commId, ncclDebugLogger_t lo
 
   bool gdrSupport;
 
+#if !defined(__HIP_PLATFORM_AMD__)
   // First try GDAKI
 try_gdaki:
   NCCLCHECK(ncclGinIbGdakiInit());
@@ -94,6 +106,7 @@ try_gdaki:
   if (!gdrSupport) return ncclInternalError;
   if (ginIb) memcpy(ginIb, &ncclGinIbGdaki, sizeof(ncclGinIb));
   goto end;
+#endif // !defined(__HIP_PLATFORM_AMD__)
 
   // Then Proxy
 try_proxy:
@@ -112,12 +125,28 @@ ncclResult_t ncclGinIbInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFun
   return ncclGinIbInitType(ctx, commId, logFunction, ncclParamGinType(), &ncclGinIb);
 }
 
-// GIN Entry point, which will then morph into either the GDAKI or PROXY backend
-ncclGin_t ncclGinIb = {
-  "GIN_IB",
-  ncclGinIbInit,
-  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-};
+// Forward declarations for Proxy functions referenced in ncclGinIb dispatcher below.
+ncclResult_t ncclGinIbProxyGetProperties(int dev, ncclNetProperties_t* props);
+ncclResult_t ncclGinIbProxyRegMrSym(void* collComm, void* data, size_t size, int type, uint64_t mr_flags, void** mhandle, void **ginHandle);
+ncclResult_t ncclGinIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t size, int type, uint64_t offset, int fd, uint64_t mr_flags, void** mhandle, void **ginHandle);
+ncclResult_t ncclGinIbProxyDeregMrSym(void* collComm, void* mhandle);
+ncclResult_t ncclGinIbProxyIPut(void *collComm, uint64_t srcOff, void *srcMhandle, size_t size,
+                                uint64_t dstOff, void *dstMhandle, uint32_t rank, int connectionId,
+                                void **request);
+ncclResult_t ncclGinIbProxyIPutSignal(void *collComm, uint64_t srcOff, void *srcMhandle,
+                                      size_t size, uint64_t dstOff, void *dstMhandle, uint32_t rank,
+                                      uint64_t signalOff, void *signalMhandle, uint64_t signalValue,
+                                      uint32_t signalOp, int connectionId, void **request);
+ncclResult_t ncclGinIbProxyTest(void *collComm, void *request, int *done);
+ncclResult_t ncclGinIbFinalize(void *ctx);
+ncclResult_t ncclGinIbConnect(void *ctx, void *handles[], int nranks, int rank, int nConnections,
+                              int queueDepth, void *listenComm, void **collComm);
+ncclResult_t ncclGinIbCloseColl(void* collComm);
+
+// [RCCL] ncclGinIb (the "GIN_IB" built-in) is defined *after* ncclGinIbProxy,
+// near the end of this file. It must be defined there so its initializer binds
+// to the v13-shaped (NCCL 2.30) ncclGin_t op definitions further down, not to
+// the stale v12-era forward declarations above (which would mis-shape it).
 
 ncclResult_t ncclGinIbFinalize(void *ctx) {
   if (ctx) free(ctx);
@@ -270,6 +299,7 @@ ncclResult_t ncclGinIbCloseColl(void* collComm) {
   return ncclSuccess;
 }
 
+#if !defined(__HIP_PLATFORM_AMD__)
 #include "gdaki/gin_host_gdaki.h"
 
 ncclResult_t ncclGinIbGdakiInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
@@ -365,6 +395,7 @@ ncclGin_t ncclGinIbGdaki = {
   ncclGinIbGdakiQueryLastError,
   ncclGinIbFinalize
 };
+#endif // !defined(__HIP_PLATFORM_AMD__)
 
 
 struct ncclIbGinProxyMrHandle {
@@ -485,7 +516,7 @@ ncclResult_t ncclGinIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
   struct ncclIbGinProxyMrHandle *ginMrHandle;
   NCCLCHECK(ncclCalloc(&ginMrHandle, 1));
 
-  NCCLCHECKNOWARN(ncclIbRegMrDmaBufInternal(cComm->recvComm, data, size, type, offset, fd, mr_flags, (void **)&ginMrHandle->mrHandle), NCCL_NET);
+  NCCLCHECKNOWARN(ncclIbRegMrDmaBuf(cComm->recvComm, data, size, type, offset, fd, (void**)&ginMrHandle->mrHandle), NCCL_NET);
 
   NCCLCHECK(ncclCalloc(&ginMrHandle->base_vas, cComm->nranks));
   NCCLCHECK(ncclCalloc(&ginMrHandle->rkeys, cComm->nranks));
@@ -823,5 +854,36 @@ ncclGin_t ncclGinIbProxy = {
   ncclGinIbProxyTest,
   NULL,
   NULL,
+  ncclGinIbFinalize
+};
+
+// [RCCL] NCCL 2.29.7 introduced a top-level "ncclGinIb" dispatcher that picks
+// between GDAKI and Proxy at runtime. AMD doesn't ship the GDAKI driver-mode
+// kernels yet, so ncclGinIb points at the Proxy implementation -- a strict
+// subset that always works on ROCm HCAs. Defined here (after the proxy ops)
+// so it binds to the v13 ncclGin_t layout (NCCL 2.30). It mirrors the prior
+// behaviour exactly: same ops as before, with the new v13-only slots
+// (createContext/destroyContext/iget/iflush) left NULL as in the v12 subset.
+ncclGin_t ncclGinIb = {
+  "GIN_IB",
+  ncclGinIbInit,                 // dispatcher init (honours NCCL_GIN_TYPE)
+  ncclIbDevices,
+  ncclGinIbProxyGetProperties,
+  ncclIbListen,
+  ncclGinIbConnect,
+  NULL,                          // createContext (subset; NULL as in prior v12 table)
+  ncclGinIbProxyRegMrSym,
+  ncclGinIbProxyRegMrSymDmaBuf,
+  ncclGinIbProxyDeregMrSym,
+  NULL,                          // destroyContext (subset)
+  ncclGinIbCloseColl,
+  ncclIbCloseListen,
+  ncclGinIbProxyIPut,
+  ncclGinIbProxyIPutSignal,
+  NULL,                          // iget (added in v13 ncclGin_t; GIN_IB has no get)
+  NULL,                          // iflush (added in v13 ncclGin_t)
+  ncclGinIbProxyTest,
+  NULL,                          // ginProgress
+  NULL,                          // queryLastError
   ncclGinIbFinalize
 };

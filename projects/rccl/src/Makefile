@@ -11,18 +11,12 @@ include ../makefiles/version.mk
 INCEXPORTS  := nccl.h nccl_device.h \
 	$(patsubst include/%,%,$(wildcard include/nccl_device/*.h include/nccl_device/*/*.h include/nccl_device/*/*/*.h))
 
-# On Linux use real net_socket and net_ib; on Windows use stubs (avoid multiple definition)
-TRANSPORT_CC = $(wildcard transport/*.cc)
-ifeq ($(NCCL_OS_LINUX), 1)
-TRANSPORT_CC := $(filter-out transport/net_socket_stub.cc transport/net_ib_stub.cc,$(TRANSPORT_CC))
-endif
-
 LIBSRCFILES := \
 	bootstrap.cc channel.cc collectives.cc debug.cc enqueue.cc group.cc \
 	init.cc proxy.cc transport.cc mnnvl.cc allocator.cc dev_runtime.cc sym_kernels.cc ce_coll.cc mem_manager.cc \
 	$(wildcard graph/*.cc) \
 	$(wildcard misc/*.cc) \
-	$(TRANSPORT_CC) \
+	$(wildcard transport/*.cc) \
 	$(wildcard transport/net_ib/*.cc) \
 	$(wildcard transport/net_ib/gdaki/*.cc) \
 	$(wildcard register/*.cc) \

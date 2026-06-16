@@ -28,7 +28,10 @@ struct ncclDevrWindow {
   struct ncclWindow_vidmem* vidmem; // key for intrusive map
   struct ncclDevrWindow* next; // next for intrusive map
   struct ncclComm* comm; // comm for intrusive map window <> comm look up
+  void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]; // IB MR handles per GIN connection (proxy-only path)
+  ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]; // device-side GIN window handles (proxy-only path)
 };
+
 struct ncclDevrWindowSorted;
 struct ncclDevrTeam;
 

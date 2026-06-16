@@ -109,3 +109,11 @@ ncclResult_t ncclInitEnv(void) {
 const char* ncclEnvPluginGetEnv(const char* name) {
   return getenv(name);
 }
+
+// ncclParamIsCacheDisabled is defined in src/param/param.cc, which topo_expl
+// does not link (doing so pulls in the entire param registry/parsers subsystem
+// added by the NCCL 2.30 sync). topo_expl never disables param caching, so
+// report "not disabled" (i.e. caching enabled, the normal runtime behavior).
+extern "C" bool ncclParamIsCacheDisabled(const char* key) {
+  return false;
+}

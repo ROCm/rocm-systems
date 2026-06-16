@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/gfx1250/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/isa.h"
@@ -45,6 +46,8 @@ std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
     return std::make_unique<IsaDecoder<rdna3_5::Isa>>();
   case ROCJITSU_CODE_ARCH_RDNA4:
     return std::make_unique<IsaDecoder<rdna4::Isa>>();
+  case ROCJITSU_CODE_ARCH_GFX1250:
+    return std::make_unique<IsaDecoder<gfx1250::Isa>>();
   default:
     return nullptr;
   }

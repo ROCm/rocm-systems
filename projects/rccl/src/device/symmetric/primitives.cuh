@@ -218,6 +218,16 @@ template<> struct ncclSymkAccumType<FuncSum, __nv_fp8_e5m2, false> { using Type 
 template<> struct ncclSymkAccumType<FuncSumPostDiv, __nv_fp8_e4m3, false> { using Type = __half; };
 template<> struct ncclSymkAccumType<FuncSumPostDiv, __nv_fp8_e5m2, false> { using Type = __half; };
 #endif
+#if defined(__HIP_PLATFORM_AMD__)
+// The upstream bf16/fp8 specializations above are gated behind
+// __CUDA_{BF16,FP8}_TYPES_EXIST__ and keyed on CUDA type names; re-key them on the
+// RCCL device types. bf16 and fp8 both reduce in a float accumulator: the fp8
+// software type used on non-fp8 arches (e.g. gfx908) has no __half conversion, so
+// fp8 accumulates in float (which casts cleanly on every arch).
+template<> struct ncclSymkAccumType<FuncSumPostDiv, hip_bfloat16, false> { using Type = float; };
+template<> struct ncclSymkAccumType<FuncSumPostDiv, rccl_float8, false> { using Type = float; };
+template<> struct ncclSymkAccumType<FuncSumPostDiv, rccl_bfloat8, false> { using Type = float; };
+#endif
 
 // Accumulator type held in smem for GIN algos.
 template<template<typename> typename Red, typename T>

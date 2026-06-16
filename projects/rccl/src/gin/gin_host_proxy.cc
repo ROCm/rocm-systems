@@ -74,49 +74,9 @@ struct ginProxyCtx {
   void* ginCtx; // from plugin
 };
 
-// Depending on GDR, allocate memory on the CPU or GPU.
-// host_flags is not used for now, but it is here for future use.
-template <typename T>
-static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
-                                          void **gdrHandle, bool forceHost = false) {
-  if (ncclGdrCopy && !forceHost) {
-    NCCLCHECK(ncclGdrCudaCalloc(ptr, devPtr, nelem, gdrHandle, NULL));
-  } else {
-    NCCLCHECK(ncclCuMemHostAlloc((void **)ptr, NULL, nelem * sizeof(T)));
-    memset((void *)*ptr, 0, nelem * sizeof(T));
-    *devPtr = *ptr;
-    if (gdrHandle) *gdrHandle = NULL;  // Mark as host allocated by nulling GDR handle
-  }
-  return ncclSuccess;
-}
-
-// [RCCL] Manager-aware overload added by the NCCL 2.29.7 sync; the manager
-// argument is currently ignored (memory tracking lives in mem_manager.cc and
-// isn't wired through this path yet).
-template <typename T>
-static ncclResult_t allocMemCPUAccessible(T **ptr, T **devPtr, size_t nelem, int host_flags,
-                                          void **gdrHandle, struct ncclMemManager* /*manager*/,
-                                          bool forceHost = false) {
-  return allocMemCPUAccessible(ptr, devPtr, nelem, host_flags, gdrHandle, forceHost);
-}
-
-// Depending on GDR, free memory on the CPU or GPU.
-template <typename T>
-static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle) {
-  if (gdrHandle != NULL) {  // If a GDR handle exists, it was GDR memory
-    NCCLCHECK(ncclGdrCudaFree(gdrHandle, NULL));
-  } else {  // Otherwise, it was host memory (or GDR was off)
-    NCCLCHECK(ncclCuMemHostFree(ptr));
-  }
-  return ncclSuccess;
-}
-
-// [RCCL] Manager-aware overload added by the NCCL 2.29.7 sync; the manager
-// argument is currently ignored.
-template <typename T>
-static ncclResult_t freeMemCPUAccessible(T *ptr, void *gdrHandle, struct ncclMemManager* /*manager*/) {
-  return freeMemCPUAccessible(ptr, gdrHandle);
-}
+// allocMemCPUAccessible / freeMemCPUAccessible are provided by gdrwrap.h
+// (manager-aware, with the AMD hipHostMalloc/hipHostFree path); the local
+// stopgap copies were removed during the develop merge.
 
 // [RCCL] Upstream's GIN backend dispatch pointer (v2.30.3-1); set to *proxyGin at init (see ginBackend = *proxyGin).
 static ncclGin_t* ginBackend;

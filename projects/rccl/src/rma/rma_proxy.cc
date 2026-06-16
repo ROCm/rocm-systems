@@ -17,7 +17,6 @@
 #include "compiler.h"
 #include "rma/rma.h"
 #include "rma/rma_proxy.h"
-#include "rma/rma_proxy_mem.h"
 #include "dev_runtime.h"
 #if !defined(NCCL_OS_WINDOWS)
 #include "nccl_device/gin/proxy/gin_proxy_device_host_common.h"
@@ -26,17 +25,15 @@
 #endif
 #include "os.h"
 
-
 extern int64_t ncclParamDmaBufEnable();
 extern int64_t ncclParamIbDataDirect();
 extern int64_t ncclParamGinEnable();
 extern int64_t ncclParamGinType();
 
-// [RCCL] CPU-accessible alloc/free helpers moved to rma/rma_proxy_mem.h so the
-// split-out rma_proxy_launch.cc can share them (templates need header linkage).
-
 NCCL_PARAM(RmaProxyDumpSignal, "RMA_PROXY_DUMP_SIGNAL", -1);
 NCCL_PARAM(RmaProxyQueueSize, "RMA_PROXY_QUEUE_SIZE", -1);
+RCCL_PARAM(RmaProxyUseDMABUF, "RMA_USE_DMABUF", 0);
+
 
 #include <signal.h>
 static ncclRmaProxyState* ncclLastRmaProxyState;
@@ -46,6 +43,7 @@ void ncclDumpRmaProxyState(int signal);
 
 // ---- Internal helpers ----
 
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
 static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
                                 bool forceNonDataDirect = false) {
   if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
@@ -70,33 +68,50 @@ static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
 
   return ncclInvalidUsage;
 }
+#else
+static ncclResult_t getDmaBufFd(void *addr, size_t length, int *fd,
+                                bool sym_buffer) {
+  if (ncclParamDmaBufEnable() == 0) return ncclInvalidUsage;
+#if HIP_VERSION >= 70000000
+  static size_t hostPageSize = ncclOsGetPageSize();
+  size_t alignedSize = length;
+  uint64_t offset;
+  ncclResult_t ret = ncclSuccess;
+  ALIGN_SIZE(alignedSize, hostPageSize);
+#if HIP_VERSION >= 71260540
+  if (ncclCuMemEnable() && sym_buffer) {
+    CUCHECK(cuMemGetHandleForAddressRange((void *)fd, (CUdeviceptr)addr, alignedSize,
+                                          CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0));
+  } else
+#endif
+  {
+    HSACHECKGOTO(hsa_amd_portable_export_dmabuf((const void*)addr, alignedSize, fd, &offset), ret, fail);
+  }
+  return ret;
+fail:
+  return ret;
+#endif
+  return ncclInvalidUsage;
+}
+#endif
 
 // Check if the GIN plugin supports DMA-BUF, if so we can try to get the DMA-BUF handle from CUDA,
 // if that fails we fallback to non-DMA-BUF
 static ncclResult_t ncclRmaProxyRegMrSym(ncclGin_t *ginComm, void *ginCollComm, ncclNetProperties_t props, void *addr,
                                          size_t size, int type, int mr_flags, void **mhandle,
-                                         void **ginHandle) {
+                                         void **ginHandle, bool sym_buffer=false) {
   if (type == NCCL_PTR_HOST) {
     NCCLCHECK(ginComm->regMrSym(ginCollComm, addr, size, type, mr_flags, mhandle, ginHandle));
   } else if (type == NCCL_PTR_CUDA) {
     ncclResult_t dmabufResult = ncclInvalidUsage;
     if (ncclParamDmaBufEnable() && (props.ptrSupport & NCCL_PTR_DMABUF)) {
-      ncclResult_t registrationResult = ncclSuccess;
+      ncclResult_t registrationResult = ncclInternalError;
       int dmabufFd = -1;
-      dmabufResult = getDmaBufFd(addr, size, &dmabufFd);
+      dmabufResult = getDmaBufFd(addr, size, &dmabufFd, sym_buffer);
       if (dmabufResult == ncclSuccess) {
         registrationResult = ginComm->regMrSymDmaBuf(ginCollComm, addr, size, type, 0, dmabufFd,
                                                      mr_flags, mhandle, ginHandle);
         close(dmabufFd);
-      }
-      if (registrationResult != ncclSuccess) {
-        dmabufFd = -1;
-        dmabufResult = getDmaBufFd(addr, size, &dmabufFd, true);
-        if (dmabufResult == ncclSuccess) {
-          NCCLCHECK(ginComm->regMrSymDmaBuf(ginCollComm, addr, size, type, 0, dmabufFd,
-                                            mr_flags, mhandle, ginHandle));
-          close(dmabufFd);
-        }
       }
     }
     // Fallback to non-DMA-BUF if the DMA-BUF handle is not supported
@@ -118,10 +133,18 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   // Allocate the signals on the GPU and then register the memory region with the GIN plugin.
   // Enforcing strong ordering on the signals mr is vital to ensure ordering between puts and signals.
   size_t signalsBufSize = (comm->nRanks + 1) * sizeof(uint64_t);
+  ncclNetProperties_t props_tmp = rmaProxyCtx->props;
+  if (rcclParamRmaProxyUseDMABUF() == 0) {
+    props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+  }
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->signalsDev, &rmaProxyCtx->signalsCumemhandle,
-                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize, comm->memManager));
+                           CU_MEM_HANDLE_TYPE_NONE, signalsBufSize , comm->memManager));
+#else
+  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->signalsDev, signalsBufSize, hipDeviceMallocUncached));
+#endif
   CUDACHECK(cudaMemset(rmaProxyCtx->signalsDev, 0, signalsBufSize));
-  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->signalsDev, signalsBufSize,
+  NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, props_tmp, rmaProxyCtx->signalsDev, signalsBufSize,
                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
                                  &rmaProxyCtx->signalsMhandle, &rmaProxyCtx->signalsGinHandle));
   // Allocate the host buffer to track the expected values of the signals
@@ -130,6 +153,7 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   // These are allocated as CPU-accessible memory (either GDR or host memory)
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->opSeqs, &rmaProxyCtx->opSeqsDev,
                                   comm->nRanks, 0, &rmaProxyCtx->opSeqsGdrHandle, comm->memManager));
+  for (int i = 0; i < comm->nRanks; i++) rmaProxyCtx->opSeqs[i] = 1;
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->readySeqs, &rmaProxyCtx->readySeqsDev,
                                   comm->nRanks, 0, &rmaProxyCtx->readySeqsGdrHandle, comm->memManager));
   NCCLCHECK(allocMemCPUAccessible(&rmaProxyCtx->doneSeqs, &rmaProxyCtx->doneSeqsDev,
@@ -169,6 +193,7 @@ static ncclResult_t ncclRmaProxyCtxAlloc(struct ncclComm* comm, ncclGin_t* ginCo
   for (int i = 0; i < comm->nRanks; i++) {
     ncclIntruQueueConstruct(&rmaProxyCtx->inProgressQueues[i]);
   }
+
   return ncclSuccess;
 }
 
@@ -186,11 +211,15 @@ static ncclResult_t ncclRmaProxyCtxAllocGraph(struct ncclComm* comm, ncclGin_t* 
 
   // Allocate the flush buffer on the GPU and then register the memory region with the GIN plugin.
   size_t flushBufSize = comm->nRanks * sizeof(uint64_t);
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   NCCLCHECK(ncclCuMemAlloc((void **)&rmaProxyCtx->flushBufDev, &rmaProxyCtx->flushBufCumemhandle,
-                            CU_MEM_HANDLE_TYPE_NONE, flushBufSize, comm->memManager));
+                           CU_MEM_HANDLE_TYPE_NONE, flushBufSize, comm->memManager));
+#else
+  CUDACHECK(hipExtMallocWithFlags((void**)&rmaProxyCtx->flushBufDev, flushBufSize, hipDeviceMallocFinegrained));
+#endif
   CUDACHECK(cudaMemset(rmaProxyCtx->flushBufDev, 0, flushBufSize));
   NCCLCHECK(ncclRmaProxyRegMrSym(ginComm, rmaProxyCtx->ginCollComm, rmaProxyCtx->props, rmaProxyCtx->flushBufDev, flushBufSize,
-                                  NCCL_PTR_CUDA, NCCL_NET_MR_FLAG_FORCE_SO,
+                                  NCCL_PTR_HOST, NCCL_NET_MR_FLAG_FORCE_SO,
                                   &rmaProxyCtx->flushBufMhandle, &rmaProxyCtx->flushBufGinHandle));
   // Allocate and initialize persistent descriptor queue
   rmaProxyCtx->persistentQueues = ncclMemoryStackAlloc<struct ncclIntruQueue<struct ncclRmaProxyDesc, &ncclRmaProxyDesc::next>>(&comm->memPermanent, comm->nRanks);
@@ -301,12 +330,20 @@ ncclResult_t ncclRmaProxyDestroyContext(ncclGin_t* ginComm, void* rmaProxyCtx){
   // Free signals
   if (ginComm && ctx->ginCollComm && ctx->signalsMhandle)
     NCCLCHECK(ginComm->deregMrSym(ctx->ginCollComm, ctx->signalsMhandle));
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   if (ctx->signalsDev) NCCLCHECK(ncclCudaFree(ctx->signalsDev, ctx->comm->memManager));
+#else
+  if (ctx->signalsDev) CUDACHECK(hipFree(ctx->signalsDev));
+#endif
 
   // Free flush buffer
   if (ginComm && ctx->ginCollComm && ctx->flushBufMhandle)
     ginComm->deregMrSym(ctx->ginCollComm, ctx->flushBufMhandle);
+#if !defined(__HIP_PLATFORM_AMD__) && ! defined(__HIPCC__)
   if (ctx->flushBufDev) ncclCudaFree(ctx->flushBufDev, ctx->comm->memManager);
+#else
+  if (ctx->flushBufDev) CUDACHECK(hipFree(ctx->flushBufDev));
+#endif
 
   // Free CPU-accessible signals
   if (ginComm && ctx->ginCollComm && ctx->cpuAccessSignalsMhandle)
@@ -326,20 +363,29 @@ ncclResult_t ncclRmaProxyDestroyContext(ncclGin_t* ginComm, void* rmaProxyCtx){
 }
 
 // ---- Memory registration ----
-
 ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t size,
-    void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS],
-    ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]){
-      struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
-      for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
-          NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], rmaProxyState->props[n], address, size,
-                                         NCCL_PTR_CUDA, 0, &rmaHostWins[n], &rmaDevWins[n]));
-        if (rmaHostWins[n] == NULL) {
-          WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
-          return ncclSystemError;
-        }
-      }
-      return ncclSuccess;
+                                  void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS],
+                                  ncclGinWindow_t rmaDevWins[NCCL_GIN_MAX_CONNECTIONS]){
+  struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
+  for (int n = 0; n < rmaProxyState->ginCommCount; n++) {
+    ncclNetProperties_t props_tmp = rmaProxyState->props[n];
+#if HIP_VERSION >= 71260540
+    if (!ncclCuMemEnable()) {
+      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+    }
+#else
+    if (rcclParamRmaProxyUseDMABUF() == 0) {
+      props_tmp.ptrSupport &= ~NCCL_PTR_DMABUF;
+    }
+#endif
+    NCCLCHECK(ncclRmaProxyRegMrSym(rmaProxyState->ncclGin, rmaProxyState->ginComms[n], props_tmp, address, size,
+                                       NCCL_PTR_CUDA, 0, &rmaHostWins[n], &rmaDevWins[n], true));
+    if (rmaHostWins[n] == NULL) {
+      WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
+      return ncclSystemError;
+    }
+  }
+  return ncclSuccess;
 }
 
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* rmaHostWins[NCCL_GIN_MAX_CONNECTIONS]){

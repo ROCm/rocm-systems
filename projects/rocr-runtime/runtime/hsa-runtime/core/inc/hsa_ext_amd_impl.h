@@ -236,6 +236,16 @@ hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
                                         size_t* metadata_size,
                                         const void** metadata);
 
+hsa_status_t hsa_amd_interop_map_buffer_with_size(uint32_t num_agents,
+                                                  hsa_agent_t* agents,
+                                                  hsa_handle_t interop_handle,
+                                                  uint32_t flags,
+                                                  size_t size_hint,
+                                                  size_t* size,
+                                                  void** ptr,
+                                                  size_t* metadata_size,
+                                                  const void** metadata);
+
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_interop_unmap_buffer(void* ptr);
 
@@ -373,6 +383,15 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* alloc
 hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_handle_t allocHandle,
                                                            hsa_amd_memory_pool_t* pool,
                                                            hsa_amd_memory_type_t* type);
+
+// Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t handle,
+                                               uint64_t flags);
+
+// Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_vmem_import_fabric_handle(hsa_fabric_handle_t fabric_handle,
+                                               hsa_amd_vmem_alloc_handle_t* handle);
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold);

@@ -93,7 +93,7 @@ test_asic_kfd_info (__main__.TestAmdSmiPythonInterface) ...
 
   asic_info['market_name'] is: NAVI21
   asic_info['vendor_id'] is: 0x1002
-  asic_info['vendor_name'] is: Advanced Micro Devices Inc. [AMD/ATI]
+  asic_info['vendor_name'] is: Advanced Micro Devices, Inc. [AMD/ATI]
   asic_info['device_id'] is: 0x73bf
   asic_info['rev_id'] is: 0xc1
   asic_info['asic_serial'] is: 0xF8FFEB47A027DE4D
@@ -507,7 +507,7 @@ test_walkthrough (__main__.TestAmdSmiPythonInterface) ...
 
   asic_info['market_name'] is: NAVI21
   asic_info['vendor_id'] is: 0x1002
-  asic_info['vendor_name'] is: Advanced Micro Devices Inc. [AMD/ATI]
+  asic_info['vendor_name'] is: Advanced Micro Devices, Inc. [AMD/ATI]
   asic_info['device_id'] is: 0x73bf
   asic_info['rev_id'] is: 0xc1
   asic_info['subsystem_id'] is: 0xc34
@@ -649,7 +649,7 @@ test_asic_kfd_info (__main__.TestAmdSmiPythonInterface) ...
 
   asic_info['market_name'] is: NAVI21
   asic_info['vendor_id'] is: 0x1002
-  asic_info['vendor_name'] is: Advanced Micro Devices Inc. [AMD/ATI]
+  asic_info['vendor_name'] is: Advanced Micro Devices, Inc. [AMD/ATI]
   asic_info['device_id'] is: 0x73bf
   asic_info['rev_id'] is: 0xc1
   asic_info['asic_serial'] is: 0xF8FFEB47A027DE4D

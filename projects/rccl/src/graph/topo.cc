@@ -561,7 +561,13 @@ ncclResult_t ncclTopoAddPci(struct ncclXmlNode* xmlPci, struct ncclTopoSystem* s
         // Create the DEV node.
         NCCLCHECK(ncclTopoCreateNode(system, &gpudeviceNode, DEV, NCCL_TOPO_ID(systemId, busId)));
         NCCLCHECK(ncclTopoGetIntDevice(xmlPci, &gpudeviceNode->dev.device));
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+        // "sm" is repurposed as CU count on AMD, so pin the DEV node to SM60 like
+        // ncclTopoAddGpu instead of storing the CU count as a compute capability.
+        gpudeviceNode->dev.cudaCompCap = 60;
+#else
         NCCLCHECK(xmlGetAttrInt(xmlGpu, "sm", &gpudeviceNode->dev.cudaCompCap));
+#endif
         NCCLCHECK(xmlGetAttrInt(xmlGpu, "dev", &gpudeviceNode->dev.dev));
         NCCLCHECK(xmlGetAttrInt(xmlGpu, "gdr", &gpudeviceNode->dev.gdrSupport));
       }

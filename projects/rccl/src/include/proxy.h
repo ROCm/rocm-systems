@@ -186,11 +186,6 @@ struct ncclProxySubArgs {
   void* recvRequestsCache[NCCL_STEPS];
   int recvRequestsSubCount;
 
-#if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_NET_SEND_ENTRY) && defined(ENABLE_NPKIT_EVENT_NET_SEND_EXIT)
-  int npKitSizesFifo[NCCL_STEPS];
-  uint64_t timestamp[NCCL_STEPS];
-#endif
-
   // Used to fetch/update the proxyOp in ProxyTrace map
   facebook_rccl::ProxyTraceRecordKey traceKey;
   facebook_rccl::ProxyTraceExtraInfo traceInfo;
@@ -446,6 +441,17 @@ struct ncclProxyConnection {
   int needsProxyProgress;
   struct ncclIntruQueue<struct proxyMemHandle, &proxyMemHandle::next> proxyMemHandleQueue;
 };
+
+#define NCCL_PROXY_CONN_POOL_SIZE_POW2 7
+#define NCCL_PROXY_CONN_POOL_SIZE      (1 << NCCL_PROXY_CONN_POOL_SIZE_POW2)
+#define NCCL_PROXY_CONN_POOL_MASK      (NCCL_PROXY_CONN_POOL_SIZE - 1)
+struct ncclProxyConnectionPool {
+  struct ncclProxyConnection** pools;
+  int banks;
+  int offset;
+};
+ncclResult_t ncclProxyGetConnection(struct ncclProxyConnectionPool* pool, int id, struct ncclProxyConnection** conn);
+ncclResult_t ncclProxyNewConnection(struct ncclProxyConnectionPool* pool, int* id);
 
 typedef ncclResult_t (*threadFunc_t)(struct ncclProxyArgs*);
 
