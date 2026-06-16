@@ -271,6 +271,12 @@ pub const KMD_LIB_NAME: &str = "librocjitsu_kmd.so";
 /// Name used for the extracted host-side library on disk.
 pub const LIB_NAME: &str = "librocjitsu.so";
 
+/// Library file names accepted for the KMD interposer, in priority
+/// order. The dedicated KMD interposer (`librocjitsu_kmd.so`) is
+/// preferred; `librocjitsu.so` is accepted as a fallback for builds
+/// that ship a single combined library.
+pub const KMD_LIB_NAMES: &[&str] = &[KMD_LIB_NAME, LIB_NAME];
+
 /// Name of the synthesised rocjitsu `SimulationConfig` written into the
 /// per-session directory (`<session>/rj_config.json`).
 pub const RJ_CONFIG_NAME: &str = "rj_config.json";
@@ -324,34 +330,50 @@ pub fn write_config_discovery(config: &std::path::Path) -> Result<PathBuf> {
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
 /// rocjitsu-emulated workload.
 ///
-/// Prefers the extracted on-disk copy under
-/// `<MIRAGE_CACHE>/emulator/rocjitsu/`; falls back to the shared
-/// [`mirage_core::discovery`] search (ROCM_HOME, LD_LIBRARY_PATH,
-/// next-to-binary, `./emulator/rocjitsu/`, standard system/ROCm dirs,
-/// …) for workspaces that rely on a separately-installed rocjitsu.
+/// Searches, in priority order, the extracted on-disk copy under
+/// `<MIRAGE_CACHE>/emulator/rocjitsu/`, the in-tree monorepo build
+/// output (relative to the mirage binary), `$ROCM_HOME/lib`, and
+/// `$(rocm-sdk path --root)/lib`. In each location the dedicated KMD
+/// interposer (`librocjitsu_kmd.so`) is preferred, falling back to
+/// `librocjitsu.so` (see [`KMD_LIB_NAMES`]).
 pub fn kmd_preload() -> Option<PathBuf> {
-    let extracted = kmd_lib_path();
-    if extracted.exists() {
-        return Some(extracted);
-    }
-    mirage_core::discovery::find_emulator_lib(&kmd_lib_search())
+    kmd_search_dirs()
+        .iter()
+        .find_map(|dir| find_lib_in(dir, KMD_LIB_NAMES))
 }
 
-/// Shared discovery policy for the KMD interposer (`librocjitsu_kmd.so`).
-fn kmd_lib_search() -> mirage_core::discovery::LibSearch<'static> {
-    mirage_core::discovery::LibSearch {
-        file_env: &["ROCJITSU_KMD_LIB"],
-        dir_env: &["ROCJITSU_ROOT"],
-        home_env: &[],
-        lib_name: KMD_LIB_NAME,
-        // rocjitsu's in-tree KMD build output, relative to the mirage
-        // binary, so a monorepo `cargo build` finds a fresh build
-        // without extra configuration.
-        binary_relative_dirs: &["../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux"],
-        // rocjitsu may also be installed separately; keep the generic
-        // ROCm/system fallbacks.
-        system_fallbacks: true,
+/// Directories searched for the KMD interposer, in priority order:
+/// the extracted asset dir, the in-tree monorepo build output (relative
+/// to the mirage binary), `$ROCM_HOME/lib`, and the ROCm SDK install
+/// root reported by `rocm-sdk path --root` (`<root>/lib`).
+fn kmd_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![asset_dir()];
+    // rocjitsu's in-tree KMD build output, relative to the mirage
+    // binary, so a monorepo `cargo build` finds a fresh build without
+    // extra configuration.
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        dirs.push(exe_dir.join("../../../rocjitsu/build/lib/rocjitsu/src/rocjitsu/kmd/linux"));
     }
+    // ROCm install root.
+    if let Some(root) = std::env::var_os("ROCM_HOME").filter(|v| !v.is_empty()) {
+        dirs.push(PathBuf::from(root).join("lib"));
+    }
+    // ROCm SDK install root reported by the `rocm-sdk` CLI (present when
+    // a ROCm Python wheel venv is active).
+    if let Some(root) = mirage_core::discovery::rocm_sdk_root() {
+        dirs.push(root.join("lib"));
+    }
+    dirs
+}
+
+/// First existing entry of `names` inside `dir`, if any.
+fn find_lib_in(dir: &std::path::Path, names: &[&str]) -> Option<PathBuf> {
+    names
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 /// Synthesise a rocjitsu `SimulationConfig` JSON file from the given
@@ -451,22 +473,10 @@ pub fn kmd_config(def: &EmulatorDef, session: Option<&SessionId>) -> Result<Path
     Ok(cfg)
 }
 
-/// Best-effort discovery of the rocjitsu source/install root. Used
-/// only as a fallback when the embedded assets are not yet extracted.
-pub fn root() -> PathBuf {
-    if let Some(root) = std::env::var_os("ROCJITSU_ROOT") {
-        return PathBuf::from(root);
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("rocjitsu")
-}
-
 /// Returns true if rocjitsu is reachable on this machine — i.e. a
 /// system install or sibling build of the KMD library is detected.
 pub fn is_installed() -> bool {
-    mirage_core::discovery::is_lib_installed(&kmd_lib_search())
+    kmd_preload().is_some()
 }
 
 #[cfg(test)]

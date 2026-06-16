@@ -216,9 +216,6 @@ struct Caps {
     emulators: BTreeMap<String, (bool, bool)>,
     /// Plugins the backends advertise, lower-cased for matching.
     plugins: Vec<String>,
-    /// Located rocjitsu KMD library, exported to child processes so the
-    /// software emulator is discoverable.
-    kmd_lib: Option<PathBuf>,
 }
 
 impl Caps {
@@ -265,47 +262,11 @@ impl Caps {
     }
 }
 
-/// Locate `librocjitsu_kmd.so`. Honors the upstream discovery env vars
-/// first, then probes a handful of conventional install locations. When
-/// found, the path is exported as `ROCJITSU_KMD_LIB` so the spawned
-/// `mirage` processes discover the software emulator; when not found the
-/// rocjitsu rows of the matrix are skipped.
-fn locate_rocjitsu_kmd() -> Option<PathBuf> {
-    const LIB: &str = "librocjitsu_kmd.so";
-
-    if let Some(p) = std::env::var_os("ROCJITSU_KMD_LIB") {
-        let p = PathBuf::from(p);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    let mut roots: Vec<PathBuf> = Vec::new();
-    if let Some(root) = std::env::var_os("ROCJITSU_ROOT") {
-        roots.push(PathBuf::from(root).join("lib"));
-    }
-    roots.push(PathBuf::from("/opt/rocm/lib"));
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = PathBuf::from(home);
-        // Conventional TheRock build outputs in a developer checkout.
-        for rel in [
-            "TheRock/build/dist/rocm/lib",
-            "TheRock/build/emulation/rocjitsu/dist/lib",
-            "TheRock/build/emulation/rocjitsu/stage/lib",
-        ] {
-            roots.push(home.join(rel));
-        }
-    }
-    roots.into_iter().map(|r| r.join(LIB)).find(|p| p.is_file())
-}
-
 /// Query `mirage emulators --json` for the install/support state of
 /// every backend and the plugins they advertise.
-fn probe_caps(mirage_bin: &Path, kmd_lib: Option<&Path>) -> Caps {
+fn probe_caps(mirage_bin: &Path) -> Caps {
     let mut cmd = Command::new(mirage_bin);
     cmd.args(["--json", "emulators"]).env_remove("MIRAGE_LOG");
-    if let Some(lib) = kmd_lib {
-        cmd.env("ROCJITSU_KMD_LIB", lib);
-    }
     let out = cmd.output().expect("run `mirage emulators`");
     let json: serde_json::Value =
         serde_json::from_slice(&out.stdout).expect("emulators output should be JSON");
@@ -331,7 +292,6 @@ fn probe_caps(mirage_bin: &Path, kmd_lib: Option<&Path>) -> Caps {
     Caps {
         emulators,
         plugins,
-        kmd_lib: kmd_lib.map(Path::to_path_buf),
     }
 }
 
@@ -347,11 +307,10 @@ struct Env {
     state: PathBuf,
     provider: PathBuf,
     mirage_bin: PathBuf,
-    kmd_lib: Option<PathBuf>,
 }
 
 impl Env {
-    fn new(kmd_lib: Option<&Path>) -> Self {
+    fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let runtime = dir.path().join("runtime");
         let config = dir.path().join("config");
@@ -365,7 +324,6 @@ impl Env {
             state,
             provider,
             mirage_bin: PathBuf::from(env!("CARGO_BIN_EXE_mirage")),
-            kmd_lib: kmd_lib.map(Path::to_path_buf),
         }
     }
 
@@ -378,9 +336,6 @@ impl Env {
             // The mock provider records every node's pid under this dir.
             .env("MOCK_DIR", self._dir.path())
             .env_remove("MIRAGE_LOG");
-        if let Some(lib) = &self.kmd_lib {
-            c.env("ROCJITSU_KMD_LIB", lib);
-        }
         c
     }
 
@@ -456,7 +411,7 @@ fn run_combo(c: &Combo, caps: &Caps) -> Outcome {
         return Outcome::Skipped(reason);
     }
 
-    let env = Env::new(caps.kmd_lib.as_deref());
+    let env = Env::new();
     let profile = c.name();
 
     // 1. create
@@ -573,8 +528,7 @@ fn run_with_timeout(mut cmd: Command, timeout: Duration, ctx: &str) -> ExitStatu
 #[test]
 fn matrix_lifecycle_across_all_dimensions() {
     let mirage_bin = PathBuf::from(env!("CARGO_BIN_EXE_mirage"));
-    let kmd_lib = locate_rocjitsu_kmd();
-    let caps = probe_caps(&mirage_bin, kmd_lib.as_deref());
+    let caps = probe_caps(&mirage_bin);
 
     let combos = all_combos();
     let total = combos.len();
@@ -582,13 +536,6 @@ fn matrix_lifecycle_across_all_dimensions() {
     let mut skipped = 0usize;
 
     eprintln!("\nmirage testing matrix — {total} combinations\n");
-    eprintln!(
-        "  rocjitsu KMD library: {}",
-        kmd_lib
-            .as_deref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "not found (rocjitsu rows will skip)".into())
-    );
     eprintln!(
         "  {:<58}  {}",
         "COMBINATION (emulator+container+hw+payload+plugin)", "RESULT"

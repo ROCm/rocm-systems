@@ -361,12 +361,12 @@ fn string_option(def: &EmulatorDef, name: &str) -> Option<String> {
 
 /// Search policy mirage uses to locate the rocjitsu HSA tools hook
 /// library. Anchored on `librocjitsu_hooks.so`; mirrors the KMD
-/// interposer's discovery (an in-tree monorepo build, an explicit
-/// override, then generic ROCm/system fallbacks).
+/// interposer's discovery (an in-tree monorepo build, then generic
+/// ROCm/system fallbacks).
 fn hooks_lib_search() -> LibSearch<'static> {
     LibSearch {
         file_env: &["ROCJITSU_HOOKS_LIB"],
-        dir_env: &["ROCJITSU_ROOT"],
+        dir_env: &[],
         home_env: &[],
         lib_name: HOOKS_LIB_NAME,
         // rocjitsu's in-tree hooks build output, relative to the mirage

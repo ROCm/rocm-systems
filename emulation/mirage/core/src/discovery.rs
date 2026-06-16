@@ -239,7 +239,7 @@ fn non_empty_var(key: &str) -> Option<String> {
 /// CLI, which is on `PATH` when a ROCm Python wheel venv is active.
 /// Returns the trimmed `<root>` from `rocm-sdk path --root`, or `None`
 /// if the CLI is unavailable, fails, or prints nothing.
-fn rocm_sdk_root() -> Option<PathBuf> {
+pub fn rocm_sdk_root() -> Option<PathBuf> {
     let out = std::process::Command::new("rocm-sdk")
         .args(["path", "--root"])
         .output()

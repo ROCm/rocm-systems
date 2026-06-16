@@ -282,8 +282,9 @@ Invocations that name a subcommand, or that have no `--` separator (so
 | `MIRAGE_WEBUI_ADDR`          | Default bind address for `mirage webui`.                         |
 | `XDG_CONFIG_HOME` / `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` / `XDG_CACHE_HOME` | Standard XDG base directories used when the `MIRAGE_*` overrides are unset. |
 
-rocjitsu discovery additionally honours `ROCJITSU_ROOT` and
-`ROCJITSU_KMD_LIB` (see [`building.md`](building.md)).
+rocjitsu discovery additionally honours `ROCM_HOME` and the ROCm SDK
+install root reported by `rocm-sdk path --root` (see
+[`building.md`](building.md)).
 
 ## Exit codes
 

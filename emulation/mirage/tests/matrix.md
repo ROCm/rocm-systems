@@ -80,9 +80,8 @@ The reason is recorded in the test output. The following rules apply:
   DBT-translatable source ISA, so this guest is skipped even when GPU
   hardware is present.
 * **`rocjitsu` without its KMD library** — the software emulator is
-  skipped when `librocjitsu_kmd.so` cannot be located. The test honors
-  the `ROCJITSU_KMD_LIB` / `ROCJITSU_ROOT` discovery variables and probes
-  conventional install locations.
+  skipped when `mirage` reports it as not installed (its KMD library
+  could not be located by mirage's own discovery).
 * **`hazard-detection` when unavailable** — skipped when the active
   backend does not advertise the plugin.
 
@@ -101,13 +100,9 @@ cargo test --test matrix_e2e -- --nocapture
 `--nocapture` prints the per-combination `RAN` / `SKIP` table and a
 summary line (`N ran, M skipped, T total`).
 
-To exercise the `rocjitsu` rows, make the emulator's KMD library
-discoverable, for example:
-
-```sh
-ROCJITSU_KMD_LIB=/path/to/librocjitsu_kmd.so \
-  cargo test --test matrix_e2e -- --nocapture
-```
+The `rocjitsu` rows run whenever `mirage` discovers its KMD library; see
+[`building.md`](../docs/building.md) for the discovery order (a sibling
+monorepo build, `$ROCM_HOME/lib`, or `$(rocm-sdk path --root)/lib`).
 
 The containerized dimensions (`podman`, `docker`) are driven through a
 hermetic mock provider — a small shell script standing in for the

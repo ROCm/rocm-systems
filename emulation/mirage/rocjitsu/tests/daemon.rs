@@ -4,8 +4,8 @@
 //! connects a client speaking the daemon RPC protocol, performs the
 //! handshake the KMD interposer would, and verifies the daemon serves a
 //! live simulated device. The whole test is skipped when no rocjitsu KMD
-//! library is discoverable on this machine (set `ROCJITSU_KMD_LIB` to a
-//! `librocjitsu_kmd.so` to exercise it).
+//! library is discoverable on this machine (install rocjitsu under
+//! `$ROCM_HOME` or a sibling monorepo build to exercise it).
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
