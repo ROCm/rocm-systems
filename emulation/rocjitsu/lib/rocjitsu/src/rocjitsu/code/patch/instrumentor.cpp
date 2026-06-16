@@ -14,9 +14,9 @@
 #include "rocjitsu/isa/instruction.h"
 
 #include <array>
-#include <unordered_set>
 #include <cstring>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -257,12 +257,14 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
   for (const auto &pt : points_) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
     if (anchor == nullptr) {
-      result.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " + std::to_string(pt.anchor_offset));
+      result.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " +
+                                 std::to_string(pt.anchor_offset));
       continue;
     }
 
     if (site_offsets.find(pt.anchor_offset) != site_offsets.end()) {
-      result.errors.emplace_back("multiple points requested the same anchor_offset = " + std::to_string(pt.anchor_offset));
+      result.errors.emplace_back("multiple points requested the same anchor_offset = " +
+                                 std::to_string(pt.anchor_offset));
       continue;
     }
 

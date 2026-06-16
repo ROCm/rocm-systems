@@ -615,18 +615,17 @@ TEST_F(HsaDbiSmokeHardware, TrampolineIsActuallyExecutedByGpu) {
   // Revert first trampoline in sabotaged
   std::memcpy(sabotaged.data() + tramp->sectionOffset(), &kSNop0, sizeof(kSNop0));
   auto unsabotaged_out = dispatch_vector_add(sabotaged, gpu, cpu, a, b, N);
-  ASSERT_EQ(unsabotaged_out.size(), N)
-      << "HSA error before unsabotaged run could finish";
+  ASSERT_EQ(unsabotaged_out.size(), N) << "HSA error before unsabotaged run could finish";
 
   for (uint32_t i = 0; i < N; ++i) {
-    ASSERT_LT(std::abs(unsabotaged_out[i] - golden[i]), 1e-5f) << "Unsabotaged code differs from golden";
+    ASSERT_LT(std::abs(unsabotaged_out[i] - golden[i]), 1e-5f)
+        << "Unsabotaged code differs from golden";
   }
-
 
   // Perform same change and test for second trampoline
   int64_t offset_between_anchors = patches_[1].trampoline_offset - patches_[0].trampoline_offset;
   EXPECT_TRUE(offset_between_anchors)
-    << "Both selected trampolines have the same trampoline offset";
+      << "Both selected trampolines have the same trampoline offset";
   std::memcpy(&pre_overwrite, sabotaged.data() + tramp->sectionOffset() + offset_between_anchors,
               sizeof(pre_overwrite));
   ASSERT_EQ(pre_overwrite, kSNop0) << "Expected s_nop 0 (0x" << std::hex << kSNop0
