@@ -465,10 +465,8 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     }
   }
 
-  // HotSwap: when the tool is loaded, also request the supported source ISAs that
-  // can transpile to each device target, so a source bundle is extracted into the
-  // code object map for forwarding below. No-op when HotSwap is disabled.
-  if (amd::hotswap::Enabled()) {
+  // HotSwap: also request supported source ISAs for forwarding (skipped when forcing SPIRV).
+  if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
     for (auto device : devices) {
       const std::string target_gfx = device->devices()[0]->isa().processorName();
       for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
@@ -505,10 +503,9 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       auto native_co = code_obj_map.find(device_name);           // Native Code Object
       auto generic_co = code_obj_map.find(generic_target_name);  // generic Code Object
 
-      // HotSwap: when enabled, choose the first supported source bundle (in
-      // kSupportedPairs order) that can transpile to this device's target.
+      // HotSwap: pick the first supported source bundle for this device's target.
       auto hotswap_co = code_obj_map.end();
-      if (amd::hotswap::Enabled()) {
+      if (amd::hotswap::Enabled() && !HIP_FORCE_SPIRV_CODEOBJECT) {
         const std::string target_gfx = device->devices()[0]->isa().processorName();
         for (const amd::hotswap::SourceTargetPair& p : amd::hotswap::kSupportedPairs) {
           if (target_gfx != p.target) {
@@ -526,8 +523,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
         }
       }
 
-      // HotSwap: when enabled, forward the chosen source bundle first, so the HSA
-      // loader transpiles (cross-gen) or rewrites (same-ISA) every code object in it.
+      // HotSwap: forward the chosen source bundle first so the HSA loader transpiles/rewrites it.
       if (hotswap_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
         LogPrintfInfo("HotSwap: forwarding %s for transpilation to device %s",
                       hotswap_co->first.c_str(), device_name.c_str());

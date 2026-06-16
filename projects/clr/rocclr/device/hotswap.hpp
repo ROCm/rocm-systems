@@ -26,12 +26,7 @@
 namespace amd {
 namespace hotswap {
 
-// The comgr hotswap tool (loaded via HSA_TOOLS_LIB) performs the transpile/rewrite
-// at code-object load time, so its presence is the switch for all HotSwap routing
-// in CLR. Keyed off the tool's library name so unrelated HSA_TOOLS_LIB tools do not
-// trigger HotSwap behavior. When the tool is not loaded, every path is bypassed and
-// behavior is identical to upstream. (Must match the name checked in ROCR
-// runtime.cpp LoadTools.)
+// On when this tool is loaded via HSA_TOOLS_LIB (name must match ROCR LoadTools).
 inline constexpr const char* kHotswapToolLib = "libamd_comgr_hotswap_tool.so";
 
 inline bool Enabled() {
@@ -40,20 +35,16 @@ inline bool Enabled() {
          std::string(tools_lib).find(kHotswapToolLib) != std::string::npos;
 }
 
-// Allowlist of (source gfx -> target/native gfx) pairs the tool can handle. A
-// fatbin source code object is only forwarded when (source, device) is here, so we
-// never hand a code object to a device that cannot transpile it (e.g. gfx1250 ->
-// gfx950/gfx942 allowed; gfx1250 -> gfx908 rejected). gfx1250 -> gfx1250 is the
-// same-ISA stepping rewrite.
+// Allowlist of (source -> device) gfx pairs the tool handles; only these are forwarded.
 struct SourceTargetPair {
   const char* source;  // gfx processor, e.g. "gfx1250"
   const char* target;  // gfx processor, e.g. "gfx950"
 };
 
 inline constexpr SourceTargetPair kSupportedPairs[] = {
-    {"gfx1250", "gfx1250"},  // same-ISA stepping rewrite
-    {"gfx1250", "gfx950"},   // cross-gen
-    {"gfx1250", "gfx942"},   // cross-gen
+    {"gfx1250", "gfx1250"},
+    {"gfx1250", "gfx950"},
+    {"gfx1250", "gfx942"},
 };
 
 // True if (source_gfx -> target_gfx) is a supported pair.
@@ -67,8 +58,7 @@ inline bool IsSupportedPair(const std::string& source_gfx,
   return false;
 }
 
-// True if full ISA name `isa_name` ("amdgcn-amd-amdhsa--gfxNNNN[:features]") names
-// processor `gfx`, matching on the token boundary so "gfx1250" != "gfx12500".
+// True if ISA name names processor `gfx`, matched on a token boundary (gfx1250 != gfx12500).
 inline bool IsaIsGfx(const std::string& isa_name, const std::string& gfx) {
   const std::string needle = "--" + gfx;
   const std::string::size_type pos = isa_name.find(needle);
