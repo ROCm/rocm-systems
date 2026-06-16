@@ -22,10 +22,23 @@
 // PlaybackContext — central replay state
 // ---------------------------------------------------------------------------
 
+// How an alloc_map entry's live_ptr was obtained — determines which API must
+// release it at teardown. Mixing them up (e.g. hipFree on a host pointer)
+// returns errors and can corrupt allocator bookkeeping.
+enum class AllocKind : uint8_t {
+    Device,        // hipMalloc / hipMallocManaged / hipMallocPitch -> hipFree
+    HostMalloc,    // hipHostMalloc / hipMallocHost                 -> hipHostFree
+    HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister + free
+                   //   (released via host_reg_bufs; skipped in the alloc_map loop)
+    DevicePtrAlias // hipHostGetDevicePointer result  -> not separately freed
+                   //   (alias into an already-tracked pinned host allocation)
+};
+
 struct AllocEntry {
-    uint64_t rec_base;  // recorded GPU base address
-    void*    live_ptr;  // live replay GPU base address
-    size_t   size;
+    uint64_t  rec_base;  // recorded GPU base address
+    void*     live_ptr;  // live replay GPU base address
+    size_t    size;
+    AllocKind kind = AllocKind::Device;
 };
 
 struct PlaybackContext {
@@ -152,19 +165,36 @@ struct PlaybackContext {
         std::shared_lock lk(map_mutex);
         auto it = alloc_map.find(rec);
         if (it != alloc_map.end()) return it->second.live_ptr;
-        // Range search for sub-allocations
-        for (auto& [base, entry] : alloc_map) {
-            if (rec >= base && rec < base + entry.size)
-                return static_cast<char*>(entry.live_ptr) +
-                       static_cast<ptrdiff_t>(rec - base);
+        // Range search for sub-allocations. Allocations are recorded with padded
+        // sizes, so synthetic ranges can overlap; iteration order over an
+        // unordered_map is unspecified. Pick the *tightest* enclosing entry
+        // (largest base <= rec) so the result is deterministic and points at
+        // the true home allocation rather than a neighbour's over-extended pad.
+        {
+            const AllocEntry* best = nullptr;
+            for (auto& [base, entry] : alloc_map) {
+                if (rec >= base && rec < base + entry.size &&
+                    (!best || base > best->rec_base))
+                    best = &entry;
+            }
+            if (best)
+                return static_cast<char*>(best->live_ptr) +
+                       static_cast<ptrdiff_t>(rec - best->rec_base);
         }
-        // Fall back to VMM reserved-VA map (exact + range)
+        // Fall back to VMM reserved-VA map (exact + tightest-enclosing range)
         auto vit = vmm_va_map.find(rec);
         if (vit != vmm_va_map.end()) return vit->second.live;
-        for (auto& [base, va] : vmm_va_map) {
-            if (rec >= base && rec < base + va.size)
-                return static_cast<char*>(va.live) +
-                       static_cast<ptrdiff_t>(rec - base);
+        {
+            uint64_t best_base = 0; const VmmVA* best = nullptr;
+            for (auto& [base, va] : vmm_va_map) {
+                if (rec >= base && rec < base + va.size &&
+                    (!best || base > best_base)) {
+                    best = &va; best_base = base;
+                }
+            }
+            if (best)
+                return static_cast<char*>(best->live) +
+                       static_cast<ptrdiff_t>(rec - best_base);
         }
         return nullptr;
     }
@@ -239,9 +269,10 @@ struct PlaybackContext {
     }
 
     // ---- Allocation registration (exclusive lock) ----
-    void record_alloc(uint64_t rec, void* live, size_t sz) {
+    void record_alloc(uint64_t rec, void* live, size_t sz,
+                      AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
-        alloc_map[rec] = {rec, live, sz};
+        alloc_map[rec] = {rec, live, sz, kind};
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);

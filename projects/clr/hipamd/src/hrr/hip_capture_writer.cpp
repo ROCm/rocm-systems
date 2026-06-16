@@ -156,6 +156,29 @@ static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
 static bool     g_trailer_written    = false;
 
+// Async-signal-safe guard over g_buf / g_buf_len, raised by writer threads while
+// they mutate the buffer. The fatal-signal handler (emergency_finalize) runs
+// from the SIGSEGV/SIGABRT/SIGBUS chain, where pthread_mutex_trylock/unlock are
+// NOT on the POSIX async-signal-safe list: if the crash interrupts a writer
+// mid-lock, poking g_file_mu's futex from the handler is UB (deadlock/corruption).
+// std::atomic_flag is the one type the standard guarantees lock-free and usable
+// from a signal handler, so the handler probes this flag with test_and_set
+// instead of touching the mutex. Writers still hold g_file_mu for thread<->thread
+// exclusion; the flag is purely the handler<->writer signal.
+static std::atomic_flag g_buf_busy = ATOMIC_FLAG_INIT;
+
+// RAII for writer threads: take the thread<->thread mutex AND raise g_buf_busy so
+// the async-signal handler can tell a g_buf mutation is in flight. Member order
+// matters: the mutex locks first and unlocks last, with the busy window nested
+// strictly inside it.
+struct BufWriteGuard {
+  std::lock_guard<std::mutex> lk_;
+  BufWriteGuard() : lk_(g_file_mu) {
+    g_buf_busy.test_and_set(std::memory_order_acquire);
+  }
+  ~BufWriteGuard() { g_buf_busy.clear(std::memory_order_release); }
+};
+
 static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
@@ -190,7 +213,7 @@ static bool write_all_fd(int fd, const void* data, size_t len) {
 }
 
 // Drain the app buffer to the events fd. Caller must hold g_file_mu (or be the
-// signal handler that has taken it via try_lock). Does not fsync.
+// signal handler that has claimed g_buf_busy via test_and_set). Does not fsync.
 static void flush_buffer_locked() {
   if (g_events_fd < 0 || g_buf_len == 0) { g_buf_len = 0; return; }
   write_all_fd(g_events_fd, g_buf, g_buf_len);
@@ -378,7 +401,7 @@ static void index_existing_blobs_locked() {
 
 #ifndef _WIN32
 static void atfork_prepare() {
-  std::lock_guard<std::mutex> lk(g_file_mu);
+  BufWriteGuard lk;
   if (g_events_fd >= 0)
     flush_buffer_locked();
 }
@@ -513,6 +536,9 @@ bool open(const char* output_dir) {
   }
 
   if (exists) {
+    // True iff g_events_fd is the flock'd base events.bin handed over from the
+    // probe at :493. If false, we open (and must lock) the append fd ourselves.
+    const bool have_base_lock = (g_events_fd >= 0);
     if (g_events_fd < 0) {
       g_events_fd = HRR_OPEN_APPEND(events_path.c_str());
     }
@@ -520,6 +546,44 @@ bool open(const char* output_dir) {
       LogPrintfError("[HRR capture] Failed to open %s for append", events_path.c_str());
       return false;
     }
+#ifndef _WIN32
+    // If we reached the resume-append path without already holding the base
+    // lock (g_events_fd was opened just above rather than handed over from the
+    // locked probe fd at :493), the probe ::open at the top must have failed
+    // (e.g. EMFILE under a busy server) and we never acquired the flock. Two
+    // live processes would then interleave into one events.bin — the exact
+    // "big file, truncated event index" corruption flock prevents. Take the
+    // lock now; if another live process owns it, abandon the base archive and
+    // create a fresh isolated pid-<pid> sub-archive instead.
+    if (!have_base_lock &&
+        flock(g_events_fd, LOCK_EX | LOCK_NB) != 0) {
+      HRR_CLOSE(g_events_fd);
+      g_events_fd = -1;
+      char sub[64];
+      snprintf(sub, sizeof(sub), "/pid-%ld", static_cast<long>(getpid()));
+      g_output_dir = g_base_dir + sub;
+      LogPrintfInfo("[HRR capture] Base archive in use by another process; "
+                    "isolating capture to %s", g_output_dir.c_str());
+      ensure_dir(g_output_dir);
+      ensure_dir(g_output_dir + "/blobs");
+      ensure_dir(g_output_dir + "/code_objects");
+      events_path = g_output_dir + "/events.bin";
+      std::string sub_manifest = g_output_dir + "/manifest.json";
+      snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", sub_manifest.c_str());
+      g_events_fd = ::open(events_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+      if (g_events_fd < 0 || flock(g_events_fd, LOCK_EX | LOCK_NB) != 0) {
+        LogPrintfError("[HRR capture] Failed to open isolated %s for writing",
+                       events_path.c_str());
+        if (g_events_fd >= 0) { HRR_CLOSE(g_events_fd); g_events_fd = -1; }
+        return false;
+      }
+      g_seq_id.store(0, std::memory_order_relaxed);
+      g_event_count.store(0, std::memory_order_relaxed);
+      hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+      buffer_append_locked(&fh, sizeof(fh));
+      return true;
+    }
+#endif
 
     uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
     const std::string state_path = g_output_dir + "/writer_state.json";
@@ -591,7 +655,7 @@ bool open(const char* output_dir) {
 }
 
 void checkpoint() {
-  std::lock_guard<std::mutex> lk(g_file_mu);
+  BufWriteGuard lk;
   if (g_events_fd < 0) return;
   flush_buffer_locked();
   HRR_FSYNC(g_events_fd);
@@ -606,7 +670,7 @@ void flush(const char* /*output_dir*/) {
   // process that owns the base archive.
   std::string out_dir;
   {
-    std::lock_guard<std::mutex> lk(g_file_mu);
+    BufWriteGuard lk;
     out_dir = g_output_dir;
     if (g_events_fd >= 0 && !g_trailer_written) {
       hrr_eof_record rec = hrr_make_eof_record(
@@ -626,7 +690,7 @@ void flush(const char* /*output_dir*/) {
 }
 
 void close() {
-  std::lock_guard<std::mutex> lk(g_file_mu);
+  BufWriteGuard lk;
   if (g_events_fd >= 0) {
     flush_buffer_locked();
     HRR_FSYNC(g_events_fd);
@@ -658,10 +722,14 @@ static size_t append_lit(char* out, size_t off, const char* s) {
 void emergency_finalize(bool clean_shutdown) {
   if (g_events_fd < 0) return;
 
-  // Flush the in-memory buffer only if we can take the lock without blocking.
-  // If a writer thread holds it (crash mid-append), we must NOT touch g_buf —
-  // it may contain a half-formed record — so we only fsync already-written data.
-  bool locked = g_file_mu.try_lock();
+  // Flush the in-memory buffer only if no writer thread is mid-mutation.
+  // We must NOT touch g_file_mu here: pthread_mutex_trylock/unlock are not
+  // async-signal-safe, so probing the futex from a crash handler is UB. Instead
+  // probe the async-signal-safe g_buf_busy flag with test_and_set: if it was
+  // already set a writer holds g_buf (possibly a torn record in flight) so we
+  // only fsync already-written bytes; if it was clear we now own it and can
+  // safely flush. clear() releases it on the way out.
+  bool locked = !g_buf_busy.test_and_set(std::memory_order_acquire);
   if (locked) {
     flush_buffer_locked();
     // Clean-termination signals (SIGTERM/SIGINT) are NOT crashes: the recorded
@@ -676,7 +744,7 @@ void emergency_finalize(bool clean_shutdown) {
       write_all_fd(g_events_fd, &rec, sizeof(rec));
       g_trailer_written = true;
     }
-    g_file_mu.unlock();
+    g_buf_busy.clear(std::memory_order_release);
   }
   HRR_FSYNC(g_events_fd);
 
@@ -734,7 +802,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint16_t payload_le
   // fsync under the lock blocks other writers for the duration of the syscall,
   // but guarantees exactly one fsync per checkpoint and removes the race.
   {
-    std::lock_guard<std::mutex> lk(g_file_mu);
+    BufWriteGuard lk;
     if (g_events_fd < 0) return;
     hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
     buffer_append_locked(hdr, payload_len);

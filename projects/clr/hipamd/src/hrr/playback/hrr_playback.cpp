@@ -39,6 +39,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
@@ -915,8 +916,35 @@ int main(int argc, char** argv) {
 
   printf("[HRR] %s\n", ok ? "PASS" : "FAIL");
 
-  // Cleanup
-  for (auto& [rec, entry] : ctx.alloc_map)   (void)hipFree(entry.live_ptr);
+  // Cleanup.
+  // alloc_map mixes device and host allocations; each must be released with the
+  // matching API. Dispatch on AllocEntry::kind:
+  //   Device         -> hipFree
+  //   HostMalloc     -> hipHostFree
+  //   HostRegister   -> released below via host_reg_bufs (hipHostUnregister+free)
+  //   DevicePtrAlias -> not separately freed (alias into a pinned host alloc)
+  for (auto& [rec, entry] : ctx.alloc_map) {
+    switch (entry.kind) {
+      case AllocKind::Device:        (void)hipFree(entry.live_ptr);     break;
+      case AllocKind::HostMalloc:    (void)hipHostFree(entry.live_ptr); break;
+      case AllocKind::HostRegister:                                     break;
+      case AllocKind::DevicePtrAlias:                                   break;
+    }
+  }
+  // Captures routinely end mid-stream with hipHostRegister'd buffers still live;
+  // playback_hipHostUnregister never ran for them, so unregister + free each
+  // remaining backing buffer here to avoid leaking both the pinned registration
+  // and the malloc'd buffer every run.
+  for (auto& [rec, buf] : ctx.host_reg_bufs) {
+    if (!buf) continue;
+    (void)hipHostUnregister(buf);
+#ifdef _WIN32
+    _aligned_free(buf);
+#else
+    free(buf);
+#endif
+  }
+  ctx.host_reg_bufs.clear();
   for (auto& [rec, str]   : ctx.stream_map)  (void)hipStreamDestroy(str);
   for (auto& [rec, ev2]   : ctx.event_map)   (void)hipEventDestroy(ev2);
   for (hipEvent_t e : ctx.owned_timing_events) (void)hipEventDestroy(e);

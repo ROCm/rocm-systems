@@ -1722,6 +1722,11 @@ _ALLOC_CREATE_APIS: Dict[str, Tuple[str, str]] = {
     'hipHostAlloc':          ('ptr', 'size'),
 }
 
+# Subset of _ALLOC_CREATE_APIS whose output is *host* (pinned) memory and must be
+# released with hipHostFree, not hipFree. The teardown loop dispatches on the
+# AllocKind tag recorded here. APIs not listed default to AllocKind::Device.
+_HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
+
 # APIs that free device allocations: API name -> rec_ptr_param name in struct
 _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipFree':         'ptr',
@@ -1947,9 +1952,11 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     if is_alloc_create:
         rec_param, sz_param = _ALLOC_CREATE_APIS[entry.name]
         # The output ptr is stored in a local _out_{rec_param} by _playback_arg
+        kind = ("AllocKind::HostMalloc"
+                if entry.name in _HOST_ALLOC_CREATE_APIS else "AllocKind::Device")
         lines.append(f"  if ({success_cond}) {{")
         lines.append(f"    ctx.record_alloc(a->{rec_param}, _out_{rec_param},"
-                     f" static_cast<size_t>(a->{sz_param}));")
+                     f" static_cast<size_t>(a->{sz_param}), {kind});")
         lines.append(f"  }}")
     elif is_alloc_free:
         lines.append(f"  if ({success_cond}) {{")

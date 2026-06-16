@@ -1884,7 +1884,7 @@ static hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pa
   void* _out_ptr = nullptr;
   hipError_t _r = (hipError_t)hipHostMalloc((void**)&_out_ptr, (size_t)a->size, (unsigned int)a->flags);
   if (_r == hipSuccess) {
-    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size));
+    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size), AllocKind::HostMalloc);
   }
   return _r;
 }
@@ -2068,7 +2068,7 @@ static hipError_t playback_hipMallocPitch(PlaybackContext& ctx, const uint8_t* p
   size_t _out_pitch{};
   hipError_t _r = (hipError_t)hipMallocPitch((void**)&_out_ptr, &_out_pitch, (size_t)a->width, (size_t)a->height);
   if (_r == hipSuccess) {
-    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->width));
+    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->width), AllocKind::Device);
   }
   return _r;
 }

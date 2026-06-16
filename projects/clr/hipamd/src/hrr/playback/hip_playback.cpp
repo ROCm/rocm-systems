@@ -898,7 +898,8 @@ hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
     void* live = nullptr;
     hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
-    if (r == hipSuccess) ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size));
+    if (r == hipSuccess)
+        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
     return r;
 }
 
@@ -906,7 +907,8 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
     void* live = nullptr;
     hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
-    if (r == hipSuccess) ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size));
+    if (r == hipSuccess)
+        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
     return r;
 }
 
@@ -965,7 +967,7 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 
     hipError_t r = hipHostRegister(buf, sz, a->flags);
     if (r == hipSuccess) {
-        ctx.record_alloc(a->hostPtr, buf, sz);
+        ctx.record_alloc(a->hostPtr, buf, sz, AllocKind::HostRegister);
         std::unique_lock lk(ctx.map_mutex);
         ctx.host_reg_bufs[a->hostPtr] = buf;
     } else {
@@ -1039,7 +1041,7 @@ hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t*
     void* dev_ptr = nullptr;
     hipError_t r = hipHostGetDevicePointer(&dev_ptr, live_host, a->flags);
     if (r == hipSuccess) {
-        ctx.record_alloc(a->devPtr, dev_ptr, 0);
+        ctx.record_alloc(a->devPtr, dev_ptr, 0, AllocKind::DevicePtrAlias);
     }
     return r;
 }
