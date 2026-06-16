@@ -668,6 +668,7 @@ amd::Memory* Device::CreateVirtualBuffer(amd::Context& device_context, void* vpt
 
     if (!ValidateVirtualAddressRange(vaddr_base_obj, vaddr_sub_obj)) {
       LogError("Validation failed on address range, returning nullptr");
+      vaddr_sub_obj->release();
       return nullptr;
     }
   }
@@ -700,6 +701,50 @@ bool Device::DestroyVirtualBuffer(amd::Memory* vaddr_mem_obj) {
   }
 
   return true;
+}
+
+//==================================================================================================
+amd::Memory* Device::MapMemObjBookkeeping(amd::Memory* phys, void* va_ptr, size_t va_size) const {
+  if (phys == nullptr) {
+    LogError("MapMemObjBookkeeping: phys is nullptr");
+    return nullptr;
+  }
+  constexpr bool kParent = false;
+  return phys->getContext().devices()[0]->CreateVirtualBuffer(
+      phys->getContext(), va_ptr, va_size, phys->getUserData().deviceId,
+      phys->getUserData().locationType, kParent);
+}
+
+//==================================================================================================
+void Device::FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memory* phys,
+                                          void* va_ptr, bool import_vmm_for_interprocess) const {
+  assert(vaddr_sub_obj != nullptr);
+  assert(phys != nullptr);
+  assert(amd::MemObjMap::FindMemObj(va_ptr) == nullptr);
+  amd::MemObjMap::AddMemObj(va_ptr, vaddr_sub_obj);
+  vaddr_sub_obj->getUserData().phys_mem_obj = phys;
+  phys->getUserData().vaddr_mem_obj = vaddr_sub_obj;
+  if (import_vmm_for_interprocess && (phys->getMemFlags() & ROCCLR_MEM_INTERPROCESS)) {
+    vaddr_sub_obj->setVmmImported(true);
+  }
+}
+
+//==================================================================================================
+void Device::UnmapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, void* va_ptr,
+                                    bool destroy_virtual_buffer, bool release_sub_obj) const {
+  assert(vaddr_sub_obj != nullptr);
+  if (destroy_virtual_buffer) {
+    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+  }
+  amd::MemObjMap::RemoveMemObj(va_ptr);
+  if (vaddr_sub_obj->getUserData().phys_mem_obj != nullptr) {
+    vaddr_sub_obj->getUserData().phys_mem_obj->getUserData().vaddr_mem_obj = nullptr;
+    vaddr_sub_obj->getUserData().phys_mem_obj = nullptr;
+  }
+  if (release_sub_obj) {
+    // ~Memory releases parent va_ via parent_->release().
+    vaddr_sub_obj->release();
+  }
 }
 
 Device::BlitProgram::~BlitProgram() {
