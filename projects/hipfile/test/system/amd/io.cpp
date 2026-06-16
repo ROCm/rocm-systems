@@ -5,6 +5,7 @@
 
 #include "context.h"
 #include "configuration.h"
+#include "hipfile-literals.h"
 #include "hipfile-warnings.h"
 #include "hipfile.h"
 
@@ -19,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 extern SystemTestOptions test_env;
 
@@ -72,10 +74,12 @@ struct HipFileIo : public testing::TestWithParam<IoTestParam> {
     hipFileHandle_t      tmpfile_handle;
     void                *unregistered_device_buffer;
     size_t               unregistered_device_buffer_size;
+    std::vector<uint8_t> host_buffer;
 
     HipFileIo()
-        : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1024 * 1024}, tmpfile_handle{nullptr},
-          unregistered_device_buffer{nullptr}, unregistered_device_buffer_size{1024 * 1024}
+        : tmpfile{test_env.ais_capable_dir}, tmpfile_size{1_MiB}, tmpfile_handle{nullptr},
+          unregistered_device_buffer{nullptr}, unregistered_device_buffer_size{tmpfile_size},
+          host_buffer(tmpfile_size)
     {
     }
 
@@ -137,6 +141,46 @@ TEST_P(HipFileIo, ReadToUnregisteredBufferAtOffsetReturnsErrorIfOverflow)
 
     ASSERT_EQ(-hipFileInvalidValue,
               hipFileRead(tmpfile_handle, unregistered_device_buffer, io_size, 0, io_buffer_offset));
+}
+
+TEST_P(HipFileIo, readAtNegativeFileOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(-1, pread(tmpfile.fd, host_buffer.data(), host_buffer.size(), -1));
+    ASSERT_EQ(EINVAL, errno);
+
+    errno = 0;
+    ASSERT_EQ(
+        -1, hipFileRead(tmpfile_handle, unregistered_device_buffer, unregistered_device_buffer_size, -1, 0));
+    ASSERT_EQ(EINVAL, errno);
+}
+
+TEST_P(HipFileIo, writeAtNegativeFileOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(-1, pwrite(tmpfile.fd, host_buffer.data(), host_buffer.size(), -1));
+    ASSERT_EQ(EINVAL, errno);
+
+    errno = 0;
+    ASSERT_EQ(
+        -1, hipFileWrite(tmpfile_handle, unregistered_device_buffer, unregistered_device_buffer_size, -1, 0));
+    ASSERT_EQ(EINVAL, errno);
+}
+
+TEST_P(HipFileIo, readAtNegativeBufferOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(
+        -1, hipFileRead(tmpfile_handle, unregistered_device_buffer, unregistered_device_buffer_size, 0, -1));
+    ASSERT_EQ(EINVAL, errno);
+}
+
+TEST_P(HipFileIo, writeAtNegativeBufferOffsetReturnsEINVAL)
+{
+    errno = 0;
+    ASSERT_EQ(
+        -1, hipFileWrite(tmpfile_handle, unregistered_device_buffer, unregistered_device_buffer_size, 0, -1));
+    ASSERT_EQ(EINVAL, errno);
 }
 
 INSTANTIATE_TEST_SUITE_P(, HipFileIo, testing::ValuesIn(io_test_params),
