@@ -8,7 +8,7 @@ Driver lifecycle and configuration API reference
 
 Functions and types for initializing and shutting down the GPU IO driver, querying and setting driver properties, managing the library reference count, and reading or writing configuration parameters.
 
-For a walkthrough of performing I/O after the driver is open, see :doc:`/tutorials/synchronous-file-copy`.
+For a walkthrough of performing I/O after the driver is open, see :doc:`/tutorials/copy-a-file`.
 
 Version macros
 **************

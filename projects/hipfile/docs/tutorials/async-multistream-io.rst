@@ -199,6 +199,6 @@ Next steps
 - To understand the differences between the fastpath and fallback IO backends,
   see :doc:`/reference/hipFile-io-backends`.
 - For a synchronous file copy example, see
-  :doc:`/tutorials/synchronous-file-copy`.
-- To learn about file handle registration, see :doc:`/reference/registration-lifecycle`.
+  :doc:`/tutorials/copy-a-file`.
+- To learn about file handle registration, see :doc:`/reference/hipFile-file-registration`.
   For GPU buffer registration, see :doc:`/reference/hipFile-buffer-registration`.

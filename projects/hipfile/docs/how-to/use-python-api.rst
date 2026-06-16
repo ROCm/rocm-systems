@@ -22,7 +22,7 @@ Use the Python API
 
 The hipFile Python bindings let you perform GPU-accelerated file I/O from Python without writing C code. This page walks through each step of a typical workflow: opening the driver, registering buffers, reading and writing files, handling errors, and querying version and driver properties.
 
-For a complete worked example that copies a file through GPU memory and verifies the result with SHA-256 hashes, see :doc:`/tutorials/python-file-copy`. For full API signatures and class details, see :doc:`/reference/api-python`.
+For a complete worked example that copies a file through GPU memory, see :doc:`/tutorials/python-gpu-io`. For full API signatures and class details, see :doc:`/reference/api-python`.
 
 Import hipFile
 **************

@@ -8,7 +8,7 @@ Synchronous read and write API reference
 
 ``hipFileRead`` and ``hipFileWrite`` perform blocking transfers between a file and registered GPU memory. Both functions accept file and buffer offsets for fine-grained control over where data is read from or written to.
 
-Before calling these functions, register the file handle with ``hipFileHandleRegister`` and the GPU buffer with ``hipFileBufRegister``. See :doc:`/reference/api-file-and-buffer` for registration details and :doc:`/tutorials/synchronous-file-copy` for a usage walkthrough.
+Before calling these functions, register the file handle with ``hipFileHandleRegister`` and the GPU buffer with ``hipFileBufRegister``. See :doc:`/reference/api-file-and-buffer` for registration details and :doc:`/tutorials/copy-a-file` for a usage walkthrough.
 
 Offset type
 ***********

@@ -32,10 +32,8 @@ The hipFile source is in the `ROCm rocm-systems monorepo <https://github.com/ROC
    .. grid-item-card:: Tutorials
 
       * :doc:`Copy a file via GPU memory using hipFile <tutorials/copy-a-file>`
-      * :doc:`Synchronous file copy walkthrough <tutorials/synchronous-file-copy>`
       * :doc:`Async multistream I/O <tutorials/async-multistream-io>`
       * :doc:`Query the hipFile version <tutorials/get-version>`
-      * :doc:`Python file copy with verification <tutorials/python-file-copy>`
       * :doc:`Perform GPU I/O with the Python bindings <tutorials/python-gpu-io>`
 
    .. grid-item-card:: Reference

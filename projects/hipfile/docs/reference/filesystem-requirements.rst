@@ -61,4 +61,4 @@ Offset and length alignment
 
 During registration, hipFile tries to open an additional file descriptor with ``O_DIRECT``. If the file or file system doesn't support ``O_DIRECT``, the fastpath can't service the request.
 
-For alignment examples in application code, see :doc:`/tutorials/copy-a-file` or :doc:`/tutorials/synchronous-file-copy`.
+For alignment examples in application code, see :doc:`/tutorials/copy-a-file`.
