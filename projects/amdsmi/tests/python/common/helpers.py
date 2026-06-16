@@ -184,26 +184,11 @@ def print_test_ids(suite):
 
     Public entry point for the discover()-based runners (cli_unit_test.py,
     integration_test.py, unit_tests.py), which build their suite from a
-    directory rather than from a single module.  Mirrors the "Available tests:"
-    header produced by print_tests() so ``-l`` output is consistent across all
-    runners.  Written to stdout so the listing can be piped/filtered directly.
+    directory.  Emits an "Available tests:" header followed by one dotted test
+    id per line.  Written to stdout so the listing can be piped/filtered
+    directly (e.g. ``... -l | grep xgmi``) independently of test-run chatter,
+    which stays on stderr.
     """
-    print("Available tests:", file=sys.stdout)
-    _print_test_ids(suite)
-    return
-
-
-def print_tests(module_name):
-    """Print all test IDs in the given module to stdout and return.
-
-    Loads every test discovered by unittest.TestLoader from the named module
-    (pass __name__ from the script's __main__ block) and prints each ID,
-    one per line, indented by a tab.  Output goes to stdout so the listing can
-    be piped/filtered (e.g. `... -l | grep xgmi`) independently of the test-run
-    chatter, which stays on stderr.
-    """
-    loader = unittest.TestLoader()
-    suite = loader.loadTestsFromModule(sys.modules[module_name])
     print("Available tests:", file=sys.stdout)
     _print_test_ids(suite)
     return
