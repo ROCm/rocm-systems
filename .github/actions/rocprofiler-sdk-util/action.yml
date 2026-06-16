@@ -145,6 +145,7 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-register
       run: |
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
