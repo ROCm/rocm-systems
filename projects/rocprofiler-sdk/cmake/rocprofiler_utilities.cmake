@@ -1049,8 +1049,15 @@ function(rocprofiler_add_unit_test)
     # parse args
     set(_FLAG_OPTS)
     set(_SINGLE_OPTS
-        "TARGET" "TEST_LIST" "TEST_PREFIX" "TIMEOUT" "DISABLED" "PASS_REGULAR_EXPRESSION"
-        "FAIL_REGULAR_EXPRESSION" "SKIP_REGULAR_EXPRESSION" "RESOURCE_LOCK")
+        "TARGET"
+        "TEST_LIST"
+        "TEST_PREFIX"
+        "TIMEOUT"
+        "DISABLED"
+        "PASS_REGULAR_EXPRESSION"
+        "FAIL_REGULAR_EXPRESSION"
+        "SKIP_REGULAR_EXPRESSION"
+        "RESOURCE_LOCK")
     set(_MULTI_OPTS "SOURCES" "LABELS" "ENVIRONMENT" "DISABLE_TESTS" "DATA"
                     "CONFIGURE_FILES")
 
@@ -1127,7 +1134,7 @@ function(rocprofiler_add_unit_test)
 
     if(RAUT_RESOURCE_LOCK)
         set_tests_properties(${${RAUT_TEST_LIST}} PROPERTIES RESOURCE_LOCK
-                                                         "${RAUT_RESOURCE_LOCK}")
+                                                             "${RAUT_RESOURCE_LOCK}")
     endif()
 
     if(_DISABLE_TESTS_SOURCE)
