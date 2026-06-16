@@ -10,92 +10,93 @@
 #include "primitives.h"
 
 namespace {
-  template<typename T, typename RedOp, typename Proto>
+template <typename T, typename RedOp, typename Proto>
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+__device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+__device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #endif
 #ifdef ENABLE_WARP_SPEED
-    int warp = threadIdx.x / WARP_SIZE;
-    ncclRing *ring = ncclShmem.warpComm
-        ? &ncclShmem.warpChannel[warp].ring
-        : &ncclShmem.channel.ring;
+  int warp = threadIdx.x / WARP_SIZE;
+  ncclRing* ring = ncclShmem.warpComm ? &ncclShmem.warpChannel[warp].ring : &ncclShmem.channel.ring;
 #else
-    ncclRing *ring = &ncclShmem.channel.ring;
+  ncclRing* ring = &ncclShmem.channel.ring;
 #endif
-    const int rank = ring->userRanks[0];
-    const int nextRank = ring->userRanks[1];
-    const int root = work->root;
-    ssize_t size;
-    ssize_t chunkCount;
-    ssize_t channelCount;
-    ssize_t gridOffset;
+  const int rank = ring->userRanks[0];
+  const int nextRank = ring->userRanks[1];
+  const int root = work->root;
+  ssize_t size;
+  ssize_t chunkCount;
+  ssize_t channelCount;
+  ssize_t gridOffset;
 #ifdef ENABLE_WARP_SPEED
-    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+  ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &size, &gridOffset, &channelCount,
+                  &chunkCount);
 #else
-    ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+  ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
 #endif
-    size_t offset;
-    int nelem;
-    int workNthreads;
-    bool isNetOffload = work->isOneRPN && work->netRegUsed;
+  size_t offset;
+  int nelem;
+  int workNthreads;
+  bool isNetOffload = work->isOneRPN && work->netRegUsed;
 
-    T *inputBuf = (T*)work->sendbuff;
-    T *outputBuf = (T*)work->recvbuff;
-    workNthreads = isNetOffload ? WARP_SIZE : nthreads;
+  T* inputBuf = (T*)work->sendbuff;
+  T* outputBuf = (T*)work->recvbuff;
+  workNthreads = isNetOffload ? WARP_SIZE : nthreads;
 
-    if (tid < workNthreads) {
+  if (tid < workNthreads) {
       // Coverity reports that the callee treats &ring->next as an array.  However, due to the use of
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
-      Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0>
-        prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work);
+    Primitives<T, RedOp, FanSymmetric<1>, 1, Proto, 0> prims(tid, workNthreads, &ring->prev, &ring->next, inputBuf,
+                                                             outputBuf, work->redOpArg, 0, work->connIndex,
+                                                             work->connIndex, work);
 
-      for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
-        offset = gridOffset + elemOffset;
-        nelem = min(chunkCount, channelCount - elemOffset);
+    for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
+      offset = gridOffset + elemOffset;
+      nelem = min(chunkCount, channelCount - elemOffset);
 
-        if (rank == root) {
-          if (inputBuf == outputBuf || isNetOffload) {
-            prims.directSend(offset, offset, nelem);
-          } else {
-            prims.directCopySend(offset, offset, nelem);
-          }
-        } else if (nextRank == root) {
-          prims.directRecv(offset, nelem);
+      if (rank == root) {
+        if (inputBuf == outputBuf || isNetOffload) {
+          prims.directSend(offset, offset, nelem);
         } else {
-          prims.directRecvCopyDirectSend(offset, offset, nelem);
+          prims.directCopySend(offset, offset, nelem);
         }
+      } else if (nextRank == root) {
+        prims.directRecv(offset, nelem);
+      } else {
+        prims.directRecvCopyDirectSend(offset, offset, nelem);
       }
-    } else if (inputBuf != outputBuf && rank == root) {
-      inputBuf = inputBuf + gridOffset;
-      outputBuf = outputBuf + gridOffset;
-      reduceCopy<COLL_UNROLL, 0, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>
-        (tid - workNthreads, nthreads - workNthreads, work->redOpArg, false, 1, (void**)&inputBuf, 1, (void**)&outputBuf, channelCount);
     }
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
-    if (isNetOffload) barrier_sync(14, nThreads);
-#endif
+  } else if (inputBuf != outputBuf && rank == root) {
+    inputBuf = inputBuf + gridOffset;
+    outputBuf = outputBuf + gridOffset;
+    reduceCopy<COLL_UNROLL, 0, RedOp, T, 0, 1, 1, 0, 1, 1, /*PreOpSrcs=*/0>(tid - workNthreads, nthreads - workNthreads,
+                                                                            work->redOpArg, false, 1, (void**)&inputBuf,
+                                                                            1, (void**)&outputBuf, channelCount);
   }
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+  if (isNetOffload) barrier_sync(14, nThreads);
+#endif
 }
+} // namespace
 
-template<typename T, typename RedOp>
+template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    using Proto = ProtoSimple<BROADCAST_CHUNKSTEPS/BROADCAST_SLICESTEPS, BROADCAST_SLICESTEPS>;
+    using Proto = ProtoSimple<BROADCAST_CHUNKSTEPS / BROADCAST_SLICESTEPS, BROADCAST_SLICESTEPS>;
     runRing<T, RedOp, Proto>(tid, nthreads, work);
   }
 };
 
-template<typename T, typename RedOp>
+template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
     runRing<T, RedOp, ProtoLL>(tid, nthreads, work);
   }
 };
 
-template<typename T, typename RedOp>
+template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncBroadcast, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
     runRing<T, RedOp, ProtoLL128>(tid, nthreads, work);

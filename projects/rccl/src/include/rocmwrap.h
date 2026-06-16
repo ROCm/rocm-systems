@@ -13,7 +13,7 @@
 
 typedef hsa_status_t (*PFN_hsa_init)();
 typedef hsa_status_t (*PFN_hsa_system_get_info)(hsa_system_info_t attribute, void* value);
-typedef hsa_status_t (*PFN_hsa_status_string)(hsa_status_t status, const char ** status_string);
+typedef hsa_status_t (*PFN_hsa_status_string)(hsa_status_t status, const char** status_string);
 typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size_t size, int* dmabuf, uint64_t* offset);
 
 #ifdef __HIP_PLATFORM_AMD__
@@ -22,63 +22,69 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 #define CUPFN(symbol) pfn_##symbol
 #endif
 
-#define HSACHECK(cmd) do {				      \
-    hsa_status_t err = pfn_##cmd;				      \
-    if( err != HSA_STATUS_SUCCESS ) {				      \
-      const char *errStr;				      \
-      pfn_hsa_status_string(err, &errStr);	      \
+#define HSACHECK(cmd) \
+  do { \
+    hsa_status_t err = pfn_##cmd; \
+    if (err != HSA_STATUS_SUCCESS) { \
+      const char* errStr; \
+      pfn_hsa_status_string(err, &errStr); \
       WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
-      return ncclUnhandledCudaError;			      \
-    }							      \
-} while(false)
+      return ncclUnhandledCudaError; \
+    } \
+  } while (false)
 
-#define HSACHECKGOTO(cmd, res, label) do {		      \
-    hsa_status_t err = pfn_##cmd;				      \
-    if( err != HSA_STATUS_SUCCESS ) {				      \
-      const char *errStr;				      \
-      pfn_hsa_status_string(err, &errStr);	      \
+#define HSACHECKGOTO(cmd, res, label) \
+  do { \
+    hsa_status_t err = pfn_##cmd; \
+    if (err != HSA_STATUS_SUCCESS) { \
+      const char* errStr; \
+      pfn_hsa_status_string(err, &errStr); \
       WARN("HSA failure '%s' at %s:%d", errStr, __FILE__, __LINE__); \
-      res = ncclUnhandledCudaError;			      \
-      goto label;					      \
-    }							      \
-} while(false)
+      res = ncclUnhandledCudaError; \
+      goto label; \
+    } \
+  } while (false)
 
 // Check CUDA PFN driver calls
-#define CUCHECK(cmd) do {				      \
-    hipError_t err = cmd;				      \
-    if( err != hipSuccess ) {				      \
-      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__);		      \
-      (void)hipGetLastError(); /* clear sticky HIP error state */   \
-      return ncclUnhandledCudaError;			      \
-    }							      \
-} while(false)
+#define CUCHECK(cmd) \
+  do { \
+    hipError_t err = cmd; \
+    if (err != hipSuccess) { \
+      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__); \
+      (void)hipGetLastError(); /* clear sticky HIP error state */ \
+      return ncclUnhandledCudaError; \
+    } \
+  } while (false)
 
-#define CUCHECKGOTO(cmd, res, label) do {		      \
-    hipError_t err = cmd;				      \
-    if( err != hipSuccess ) {				      \
-      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__);		      \
-      (void)hipGetLastError(); /* clear sticky HIP error state */   \
-      res = ncclUnhandledCudaError;			      \
-      goto label;					      \
-    }							      \
-} while(false)
+#define CUCHECKGOTO(cmd, res, label) \
+  do { \
+    hipError_t err = cmd; \
+    if (err != hipSuccess) { \
+      WARN("HIP failure '%s' at %s:%d", hipGetErrorString(err), __FILE__, __LINE__); \
+      (void)hipGetLastError(); /* clear sticky HIP error state */ \
+      res = ncclUnhandledCudaError; \
+      goto label; \
+    } \
+  } while (false)
 
 // Report failure but clear error and continue
-#define CUCHECKIGNORE(cmd) do {						\
-    hipError_t err = cmd;						\
-    if( err != hipSuccess ) {						\
-      INFO(NCCL_ALL,"%s:%d HIP failure '%s'", __FILE__, __LINE__, hipGetErrorString(err));	\
-    }									\
-} while(false)
+#define CUCHECKIGNORE(cmd) \
+  do { \
+    hipError_t err = cmd; \
+    if (err != hipSuccess) { \
+      INFO(NCCL_ALL, "%s:%d HIP failure '%s'", __FILE__, __LINE__, hipGetErrorString(err)); \
+    } \
+  } while (false)
 
-#define CUCHECKTHREAD(cmd, args) do {					\
-    hsa_status_t err = pfn_##cmd;						\
-    if (err != HSA_STATUS_SUCCESS) {						\
-      INFO(NCCL_INIT,"%s:%d -> %d [Async thread]", __FILE__, __LINE__, err); \
-      args->ret = ncclUnhandledCudaError;				\
-      return args;							\
-    }									\
-} while(0)
+#define CUCHECKTHREAD(cmd, args) \
+  do { \
+    hsa_status_t err = pfn_##cmd; \
+    if (err != HSA_STATUS_SUCCESS) { \
+      INFO(NCCL_INIT, "%s:%d -> %d [Async thread]", __FILE__, __LINE__, err); \
+      args->ret = ncclUnhandledCudaError; \
+      return args; \
+    } \
+  } while (0)
 
 #define DECLARE_ROCM_PFN_EXTERN(symbol) extern PFN_##symbol pfn_##symbol
 
