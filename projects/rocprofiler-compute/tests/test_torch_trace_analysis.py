@@ -8,7 +8,7 @@ from pathlib import Path
 import common
 import pandas as pd
 
-from utils.rocpd_data import (
+from interface.rocpd_data import (
     COUNTERS_COLLECTION_QUERY,
     MARKER_API_TRACE_QUERY,
     convert_dbs_to_csv,
