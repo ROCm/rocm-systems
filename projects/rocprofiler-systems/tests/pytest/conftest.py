@@ -1375,8 +1375,7 @@ def _generate_rocprofsys_config_header() -> list[str]:
         _row("Default NIC:", cap.default_nic),
         *(
             lambda evts: (
-                [_row("PAPI NIC events:", evts[0])]
-                + [_row("", e) for e in evts[1:]]
+                [_row("PAPI NIC events:", evts[0])] + [_row("", e) for e in evts[1:]]
                 if evts
                 else [_row("PAPI NIC events:", "None")]
             )
