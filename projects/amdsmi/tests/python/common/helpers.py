@@ -261,49 +261,80 @@ def make_runner_verbosity(verbose):
     return VERBOSITY_NORMAL  # dots keep CI informed of progress
 
 
-def expand_glob_k_arg(caller_globals):
-    """Expand a glob pattern in a -k/--keyword argument into individual -k flags.
+def _parse_k_pattern(argv=None):
+    """Return the ``-k``/``--keyword`` filter substring from *argv*, or ``None``.
 
-    Python's unittest -k flag does substring matching only — wildcards like
-    'test_ttm*' are treated as literal strings and match nothing.  This function
-    detects when a glob pattern is supplied, finds all test method names from
-    the caller's globals that match it, and rewrites sys.argv to use one -k per
-    match.  unittest treats multiple -k flags as OR, so the result is equivalent
-    to the intended glob.
-
-    Call this from the __main__ block of any test file, passing globals():
-        common.expand_glob_k_arg(globals())
-
-    Example: -k "test_ttm*"  →  -k test_ttm_info -k test_ttm_set_dry_run
+    Accepts both the separate ("-k", "pattern") and joined ("-kpattern") forms,
+    matching the spellings unittest itself understands.
     """
-    import fnmatch
+    argv = sys.argv if argv is None else argv
+    for i, arg in enumerate(argv):
+        if arg in ("-k", "--keyword") and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith("-k") and arg != "-k":
+            return arg[2:]
+    return None
 
-    for flag in ("-k", "--keyword"):
-        try:
-            idx = sys.argv.index(flag)
-        except ValueError:
-            continue
 
-        pattern = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ""
-        if "*" not in pattern and "?" not in pattern:
-            break  # plain substring — nothing to expand
+def run_test_dir(subdir, title, top_level_dir):
+    """Discover and run every test under *top_level_dir*/*subdir*, then exit.
 
-        # Collect every test method name from all TestCase subclasses in the caller's module
-        all_test_names = []
-        for obj in list(caller_globals.values()):
-            if isinstance(obj, type) and issubclass(obj, unittest.TestCase):
-                all_test_names.extend(m for m in dir(obj) if m.startswith("test"))
-        # Deduplicate while preserving order
-        all_test_names = list(dict.fromkeys(all_test_names))
+    Single implementation of the runner boilerplate shared by the three entry
+    scripts (integration_test.py / cli_unit_test.py / unit_tests.py): it handles
+    ``-h``/``--help``, ``-k``/``--keyword`` filtering, ``-l``/``--list``, the
+    root-privilege check, the legend/title preamble, output buffering
+    (``-b``/``--buffer``) and the GTest-style summary runner.  Never returns —
+    always calls ``sys.exit()`` (0 on success, 1 on failure).
+    """
+    argv = sys.argv
 
-        matches = [n for n in all_test_names if fnmatch.fnmatch(n, pattern)]
-        if matches:
-            # Remove the single "-k glob*" pair and insert one "-k name" per match
-            del sys.argv[idx : idx + 2]
-            for i, name in enumerate(matches):
-                sys.argv.insert(idx + i * 2, flag)
-                sys.argv.insert(idx + i * 2 + 1, name)
-        break
+    # Skip legend/title/"Running" preamble when the user just wants help text.
+    if "-h" in argv or "--help" in argv:
+        print_unittest_help()
+        print_amdsmi_path_help()
+        sys.exit(0)
+
+    loader = unittest.TestLoader()
+    # -k does substring matching; wrapping in * lets globs (test_ttm*) match too.
+    k_pattern = _parse_k_pattern(argv)
+    if k_pattern:
+        loader.testNamePatterns = [f"*{k_pattern}*"]
+
+    suite = loader.discover(
+        start_dir=os.path.join(top_level_dir, subdir),
+        pattern="test_*.py",
+        top_level_dir=top_level_dir,
+    )
+
+    if "-l" in argv or "--list" in argv:
+        print_test_ids(suite)
+        sys.exit(0)
+
+    # Detect if ran without sudo or root privileges
+    if os.geteuid() != 0:
+        print(
+            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
+            file=sys.stderr,
+        )
+        print("Please relaunch with elevated privileges.\n", file=sys.stderr)
+        sys.exit(1)
+
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if verbose < VERBOSITY_VERBOSE:
+        print_legend()
+
+    if verbose > VERBOSITY_QUIET:
+        print(f"{title}\n")
+        print("Running tests...\n")
+
+    runner = GTestSummaryRunner(
+        stream=sys.stderr,
+        verbosity=make_runner_verbosity(verbose),
+        buffer="-b" in argv or "--buffer" in argv,
+    )
+    result = runner.run(suite)
+    sys.exit(0 if result.wasSuccessful() else 1)
 
 
 class GTestSummaryRunner(unittest.TextTestRunner):

@@ -40,7 +40,6 @@ Options:
 
 import os
 import sys
-import unittest
 
 # Resolve the package root (the directory containing common/) regardless of
 # where this script is installed or invoked from.
@@ -49,54 +48,4 @@ sys.path.insert(0, _here)
 
 import common.helpers as common
 
-verbose = common.verbose
-
-if "-h" in sys.argv or "--help" in sys.argv:
-    common.print_unittest_help()
-    common.print_amdsmi_path_help()
-    sys.exit(0)
-
-loader = unittest.TestLoader()
-
-# Support -k pattern filtering via unittest's built-in keyword matching
-_k_pattern = None
-for i, arg in enumerate(sys.argv):
-    if arg == "-k" and i + 1 < len(sys.argv):
-        _k_pattern = sys.argv[i + 1]
-        break
-    if arg.startswith("-k"):
-        _k_pattern = arg[2:]
-        break
-
-if _k_pattern:
-    loader.testNamePatterns = [f"*{_k_pattern}*"]
-
-cli_dir = os.path.join(_here, "cli")
-suite = loader.discover(start_dir=cli_dir, pattern="test_*.py", top_level_dir=_here)
-
-if "--list" in sys.argv or "-l" in sys.argv:
-    common.print_test_ids(suite)
-    sys.exit(0)
-
-# Detect if ran without sudo or root privileges
-if os.geteuid() != 0:
-    print(
-        "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n",
-        file=sys.stderr,
-    )
-    print("Please relaunch with elevated privileges.\n", file=sys.stderr)
-    sys.exit(1)
-
-if verbose < common.VERBOSITY_VERBOSE:
-    common.print_legend()
-
-if verbose > common.VERBOSITY_QUIET:
-    print("AMD SMI CLI Tests")
-
-runner = common.GTestSummaryRunner(
-    stream=sys.stderr,
-    verbosity=common.make_runner_verbosity(verbose),
-    buffer="-b" in sys.argv or "--buffer" in sys.argv,
-)
-result = runner.run(suite)
-sys.exit(0 if result.wasSuccessful() else 1)
+common.run_test_dir("cli", "AMD SMI CLI Tests", _here)
