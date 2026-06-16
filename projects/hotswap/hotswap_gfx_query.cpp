@@ -6,6 +6,7 @@
 
 #include "hotswap_gfx_query.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -43,16 +44,12 @@ std::string get_agent_isa_name(hsa_agent_t agent) {
 }
 
 std::string extract_gfx_target(const std::string &isa_name) {
-  const size_t pos = isa_name.find("gfx");
-  if (pos == std::string::npos) {
+  auto pos = isa_name.find("gfx");
+  if (pos == std::string::npos)
     return {};
-  }
-  size_t end = pos;
-  while (end < isa_name.size() &&
-         std::isalnum(static_cast<unsigned char>(isa_name[end]))) {
-    ++end;
-  }
-  return isa_name.substr(pos, end - pos);
+  auto end = std::find_if_not(isa_name.begin() + pos, isa_name.end(),
+                              [](unsigned char c) { return std::isalnum(c); });
+  return isa_name.substr(pos, end - isa_name.begin() - pos);
 }
 
 AgentGfxRevision query_agent_gfx_revision(hsa_agent_t agent) {
