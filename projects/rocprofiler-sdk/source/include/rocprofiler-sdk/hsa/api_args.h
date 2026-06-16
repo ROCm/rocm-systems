@@ -1573,15 +1573,15 @@ typedef union rocprofiler_hsa_api_args_t
     } hsa_amd_image_create_v2;
     struct
     {
-        uint32_t         num_agents;
-        hsa_agent_t*     agents;
-        hsa_handle_t     interop_handle;
-        uint32_t         flags;
-        size_t           size_hint;
-        size_t*          size;
-        void**           ptr;
-        size_t*          metadata_size;
-        const void**     metadata;
+        uint32_t     num_agents;
+        hsa_agent_t* agents;
+        hsa_handle_t interop_handle;
+        uint32_t     flags;
+        size_t       size_hint;
+        size_t*      size;
+        void**       ptr;
+        size_t*      metadata_size;
+        const void** metadata;
     } hsa_amd_interop_map_buffer_with_size;
 #    endif
 #endif

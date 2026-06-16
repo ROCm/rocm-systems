@@ -72,14 +72,9 @@
  * - 1.19 - hsa_amd_agent_preload
  * - 1.20 - Memory batch discard API: hsa_amd_svm_discard_batch_async
  * - 1.21 - hsa_amd_signal_get_event_id
- * - 1.22 - hsa_amd_queue_get_info: per-queue VM fault state queries
- * - 1.23 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS
- * - 1.24 - hsa_amd_external_semaphore_handle_open/hsa_amd_external_semaphore_handle_close
- * - 1.25 - hsa_amd_vmem_export_fabric_handle, hsa_amd_vmem_import_fabric_handle
- * - 1.26 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 26
+#define HSA_AMD_INTERFACE_VERSION_MINOR 21
 
 #ifdef __cplusplus
 extern "C" {
