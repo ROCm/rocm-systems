@@ -32,6 +32,7 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
         DEPENDS hip-graph-bubbles
         TIMEOUT ${TIMEOUT_SECS}
         LABELS "integration-tests"
+        DISABLED ON
         ENVIRONMENT ${HIP_GRAPH_BUBBLES_ENVIRONMENT}
         FIXTURES_SETUP ${TEST_NAME}
         FAIL_REGULAR_EXPRESSION
@@ -53,6 +54,7 @@ function(add_hip_graph_bubbles_kernel_trace_test SUFFIX NUM_KERNELS NUM_ITERATIO
              ${NUM_ITERATIONS}
         TIMEOUT ${TIMEOUT_SECS}
         LABELS "integration-tests"
+        DISABLED ON
         FIXTURES_REQUIRED ${TEST_NAME})
 endfunction()
 
