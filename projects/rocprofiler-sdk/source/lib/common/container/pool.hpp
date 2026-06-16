@@ -161,6 +161,7 @@ template <typename Tp>
 void
 pool<Tp>::release(size_type idx)
 {
+    auto _pool_lk = std::unique_lock<std::mutex>{m_pool_mtx};
     if(idx < m_pool.size())
     {
         auto _write_lk = std::unique_lock<std::mutex>{m_available_mtx};
@@ -194,7 +195,7 @@ pool<Tp>::clear(FuncT&& func)
     {
         ROCP_WARNING_IF(itr.in_use()) << fmt::format(
             "Pool object at index {} is still in use during pool clear", itr.index());
-        itr.release();
+        itr.release_without_pool_notify();
         // run cleanup lambda
         if constexpr(std::is_invocable_v<FuncT, pool_object<Tp>&>)
         {

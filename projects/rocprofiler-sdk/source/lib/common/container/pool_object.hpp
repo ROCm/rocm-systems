@@ -47,6 +47,8 @@ struct pool_object
 {
     using pool_type = pool<Tp>;
 
+    friend struct pool<Tp>;
+
     pool_object(size_t idx, bool in_use, pool_type* pool)
     : m_in_use{in_use}
     , m_index{idx}
@@ -91,6 +93,9 @@ struct pool_object
     auto index(size_t index) { m_index = index; }
 
 private:
+    bool release_without_pool_notify();
+
+private:
     Tp                m_object = {};
     std::atomic<bool> m_in_use = false;
     size_t            m_index  = 0;
@@ -109,12 +114,19 @@ template <typename Tp>
 bool
 pool_object<Tp>::release()
 {
-    bool expected = true;
-    auto val      = m_in_use.compare_exchange_strong(expected, false);
+    auto val = release_without_pool_notify();
 
     if(val && m_pool) m_pool->release(m_index);
 
     return val;
+}
+
+template <typename Tp>
+bool
+pool_object<Tp>::release_without_pool_notify()
+{
+    bool expected = true;
+    return m_in_use.compare_exchange_strong(expected, false);
 }
 }  // namespace container
 }  // namespace common
