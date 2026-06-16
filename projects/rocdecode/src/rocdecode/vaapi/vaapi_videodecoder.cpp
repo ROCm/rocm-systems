@@ -736,7 +736,7 @@ rocDecStatus VaContext::GetVaContext(int device_id, uint32_t *va_ctx_id) {
         auto it = gpu_uuids_to_render_nodes_map_.find(gpu_uuid);
         if (it == gpu_uuids_to_render_nodes_map_.end()) {
             ErrorLog(g_rocdec_logger, "GPU UUID: " + gpu_uuid + " received from HIP does not match any GPU UUID retrieved from sysfs. "
-                                      "This likely indicates a DKMS setup issue. Available render nodes map:" + render_nodes_map_str);
+                                      "This likely indicates a setup issue. Available render nodes map:" + render_nodes_map_str);
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_DEVICE_INVALID;
         }

@@ -414,7 +414,7 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, in
     auto it = gpu_uuids_to_render_nodes_map_.find(gpu_uuid);
     if (it == gpu_uuids_to_render_nodes_map_.end()) {
         ErrorLog(g_rocjpeg_logger, "GPU UUID: " + gpu_uuid + " received from HIP does not match any GPU UUID retrieved from sysfs. "
-                                  "This likely indicates a DKMS setup issue. Available render nodes map:" + render_nodes_map_str);
+                                  "This likely indicates a setup issue. Available render nodes map:" + render_nodes_map_str);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
     drm_node += std::to_string(it->second + offset);
