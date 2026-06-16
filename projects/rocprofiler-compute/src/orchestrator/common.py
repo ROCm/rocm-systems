@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 import config
 from interface.factory import create_profile_data_reader
@@ -21,7 +21,7 @@ from vendored import yaml
 if TYPE_CHECKING:
     import pandas as pd
 
-ProfilerOptions = list[str] | dict[str, str | list[str]]
+ProfilerOptions = Union[list[str], dict[str, Union[str, list[str]]]]
 
 _PROFILER_INTERNAL_RE = re.compile(
     r"^\[rocprofiler"  # rocprofiler-sdk and rocprofiler-compute tool messages

@@ -264,9 +264,7 @@ def test_attach_library_resolution_with_fallback():
         torch_trace=False,
     )
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
-    resolve_target = (
-        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path"
-    )
+    resolve_target = "orchestrator.rocprofiler_sdk.resolve_rocm_library_path"
     new_lib = output_dir / "librocprofiler-sdk-rocattach.so"
     old_lib = output_dir / "librocprofv3-attach.so"
 
