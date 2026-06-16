@@ -64,11 +64,14 @@ QueuePair::QueuePair(struct ibv_pd* pd, int gda_provider) {
     fetching_atomic_lkey = mr_fetching_atomic->lkey;
   }
 
-  int deviceId;
-  CHECK_HIP(hipGetDevice(&deviceId));
-  hipDeviceProp_t prop;
-  CHECK_HIP(hipGetDeviceProperties(&prop, deviceId));
-  int wf_size = prop.warpSize;
+  static int wf_size = 0;
+  if (wf_size == 0) {
+    int deviceId;
+    CHECK_HIP(hipGetDevice(&deviceId));
+    hipDeviceProp_t prop;
+    CHECK_HIP(hipGetDeviceProperties(&prop, deviceId));
+    wf_size = prop.warpSize;
+  }
   for(uint32_t i{0}; i < FETCHING_ATOMIC_CNT; i+=wf_size) {
     fetching_atomic_freelist->push_back(fetching_atomic + i);
   }
