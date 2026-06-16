@@ -877,44 +877,40 @@ class TestAmdSmiPython(unittest.TestCase):
             if found_error:
                 continue
 
-            # Verify min fan speed returns a sensible value
-            msg = f"\t### amdsmi_get_gpu_fan_speed_min(gpu={i}, index=0):"
+            # Verify fan speed range API returns sensible values
+            msg = f"\t### amdsmi_get_gpu_fan_speed_range(gpu={i}, index=0):"
             try:
-                fan_speed_min = amdsmi.amdsmi_get_gpu_fan_speed_min(gpu, 0)
-                self.common.print(msg, fan_speed_min)
+                fan_range = amdsmi.amdsmi_get_gpu_fan_speed_range(gpu, 0)
+                fan_speed_min = fan_range.lower_bound
+                fan_speed_max_from_range = fan_range.upper_bound
+                self.common.print(msg, f"[{fan_speed_min}, {fan_speed_max_from_range}]")
                 self.common.check_ret("", "", self.common.PASS)
-                # Detect gpu_od interface using API to verify min value
+
+                # Validate range is sensible
+                assert fan_speed_min <= fan_speed_max_from_range, (
+                    f"Min ({fan_speed_min}) must be <= max ({fan_speed_max_from_range})"
+                )
+                assert fan_speed_min <= 255, (
+                    f"Min fan speed must be <= 255, got {fan_speed_min}"
+                )
+                assert fan_speed_max_from_range <= 255, (
+                    f"Max fan speed must be <= 255, got {fan_speed_max_from_range}"
+                )
+
+                # Detect gpu_od interface (min > 0 indicates gpu_od)
                 has_gpu_od = common.has_gpu_od_interface(gpu)
                 if has_gpu_od:
-                    assert fan_speed_min >= 0 and fan_speed_min <= 100, (
-                        f"gpu_od min fan speed must be in range [0-100], got {fan_speed_min}"
+                    assert fan_speed_min > 0, (
+                        f"gpu_od min fan speed must be > 0, got {fan_speed_min}"
                     )
                 else:
                     # Legacy hwmon always has min of 0
                     assert fan_speed_min == 0, (
                         f"Legacy hwmon min fan speed must be 0, got {fan_speed_min}"
                     )
-                # Ensure min is less than max
-                assert fan_speed_min < fan_speed_max, (
-                    f"Min fan speed ({fan_speed_min}) must be < max ({fan_speed_max})"
-                )
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-                found_error = True
-
-            if found_error:
-                continue
-
-            # Verify is_gpu_od_enabled returns a boolean value
-            msg = f"\t### amdsmi_is_gpu_od_enabled(gpu={i}):"
-            try:
-                is_gpu_od = amdsmi.amdsmi_is_gpu_od_enabled(gpu)
-                self.common.print(msg, is_gpu_od)
-                self.common.check_ret("", "", self.common.PASS)
-                assert isinstance(is_gpu_od, bool), (
-                    f"amdsmi_is_gpu_od_enabled must return bool, got {type(is_gpu_od)}"
-                )
+                    assert fan_speed_max_from_range == 255, (
+                        f"Legacy hwmon max fan speed must be 255, got {fan_speed_max_from_range}"
+                    )
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
                     self.raise_exception = e
@@ -928,7 +924,7 @@ class TestAmdSmiPython(unittest.TestCase):
             # For legacy hwmon: min=0, max=255 -> mid=127
             # For gpu_od: min from API, max from API -> mid dynamically calculated
             min_value = fan_speed_min
-            max_value = fan_speed_max
+            max_value = fan_speed_max_from_range
             fan_speed = min_value + ((max_value - min_value) // 2)
 
             # Set fan speed

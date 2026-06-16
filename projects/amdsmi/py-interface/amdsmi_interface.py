@@ -5436,32 +5436,25 @@ def amdsmi_get_gpu_fan_speed_max(processor_handle: processor_handle_t, sensor_id
     return fan_speed.value
 
 
-def amdsmi_get_gpu_fan_speed_min(processor_handle: processor_handle_t, sensor_idx: int) -> int:
+def amdsmi_get_gpu_fan_speed_range(processor_handle: processor_handle_t, sensor_idx: int):
+    """Get the fan speed range (min and max PWM duty) for the specified GPU.
+
+    Returns an amdsmi_range_t object with lower_bound and upper_bound in PWM duty cycle units.
+    - Legacy hwmon GPUs: [0, 255]
+    - gpu_od GPUs (Navi3x+): dynamic range from OD_RANGE (e.g., [20, 100])
+    """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
     if not isinstance(sensor_idx, int):
         raise AmdSmiParameterException(sensor_idx, int)
-    fan_speed = ctypes.c_uint64()
+    fan_range = amdsmi_wrapper.amdsmi_range_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_fan_speed_min(
-            processor_handle, sensor_idx, ctypes.byref(fan_speed)
+        amdsmi_wrapper.amdsmi_get_gpu_fan_speed_range(
+            processor_handle, sensor_idx, ctypes.byref(fan_range)
         )
     )
 
-    return fan_speed.value
-
-
-def amdsmi_is_gpu_od_enabled(processor_handle: processor_handle_t) -> bool:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    is_enabled = ctypes.c_bool()
-    _check_res(
-        amdsmi_wrapper.amdsmi_is_gpu_od_enabled(
-            processor_handle, ctypes.byref(is_enabled)
-        )
-    )
-
-    return is_enabled.value
+    return fan_range
 
 
 def amdsmi_get_node_handle(processor_handle):

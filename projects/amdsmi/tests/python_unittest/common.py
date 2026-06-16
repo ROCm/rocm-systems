@@ -262,19 +262,149 @@ def expand_glob_k_arg(caller_globals):
         break
 
 
+class GTestSummaryRunner(unittest.TextTestRunner):
+    """TextTestRunner that appends a GTest-style pass/skip/fail summary.
+
+    After the standard unittest output, prints a colored block like::
+
+        [----------] 40 tests ran.
+        [  PASSED  ] 39 tests.
+        [  SKIPPED ] 1 test, listed below:
+        [  SKIPPED ] TestClass.test_method_name
+
+    Color scheme mirrors GTest:
+        cyan   = separator line ([----------])
+        green  = PASSED
+        yellow = SKIPPED
+        red    = FAILED
+
+    Colors are automatically suppressed when the output stream is not a TTY
+    (e.g. when piped to a file or CI log capture), so file-based runners such
+    as those in perf_tests.py will never receive ANSI escape codes in their logs.
+
+    Example::
+
+        runner = common.GTestSummaryRunner(verbosity=common.make_runner_verbosity(verbose))
+        unittest.main(testRunner=runner)
+
+        # To redirect output to stderr (e.g. when stdout is used for data):
+        runner = common.GTestSummaryRunner(stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose))
+    """
+
+    _CYAN = "\033[36m"
+    _GREEN = "\033[32m"
+    _YELLOW = "\033[33m"
+    _RED = "\033[31m"
+    _RESET = "\033[0m"
+
+    @staticmethod
+    def _plural(n):
+        return "s" if n != 1 else ""
+
+    @staticmethod
+    def _test_label(test):
+        """Return the GTest-format label for *test*.
+
+        ``TestCase.id()`` is the public API for a test's full dotted name
+        (e.g. ``"__main__.ClassName.method_name"``).  When the id starts with
+        the standard ``__main__.`` prefix we strip it, yielding
+        ``ClassName.method_name`` without risking label collisions between
+        tests from different modules that share a class name.
+        """
+        test_id = test.id()
+        if test_id.startswith("__main__."):
+            return test_id[len("__main__.") :]
+        return test_id
+
+    def _color(self, code, text):
+        """Wrap *text* in *code* only when colors are appropriate.
+
+        Colors are suppressed when the ``NO_COLOR`` environment variable is set
+        (https://no-color.org/) or when the output stream is not a real TTY.
+        """
+        if os.environ.get("NO_COLOR"):
+            return text
+        underlying = getattr(self.stream, "stream", self.stream)
+        if hasattr(underlying, "isatty") and underlying.isatty():
+            return f"{code}{text}{self._RESET}"
+        return text
+
+    def run(self, test):
+        start = time.perf_counter()
+        result = super().run(test)
+        elapsed_ms = round((time.perf_counter() - start) * 1000)
+        self._print_gtest_summary(result, elapsed_ms)
+        return result
+
+    def _print_gtest_summary(self, result, elapsed_ms):
+        """Write the GTest-style pass/skip/fail block to *self.stream*."""
+        stream = self.stream  # unittest._WritelnDecorator, supports .writeln()
+        skipped = len(result.skipped)
+        # unexpectedSuccesses are tests marked @expectedFailure that passed instead.
+        # They cause wasSuccessful() to return False, so count them as failures so
+        # the summary accurately reflects the overall run status.
+        unexpectedSuccesses = len(getattr(result, "unexpectedSuccesses", []))
+        failures = len(result.failures) + len(result.errors) + unexpectedSuccesses
+        passed = result.testsRun - skipped - failures
+
+        stream.writeln()
+        stream.writeln(
+            self._color(
+                self._CYAN,
+                f"[----------] {result.testsRun} test{self._plural(result.testsRun)} ran. ({elapsed_ms} ms total)",
+            )
+        )
+        stream.writeln(
+            self._color(self._GREEN, f"[  PASSED  ] {passed} test{self._plural(passed)}.")
+        )
+
+        if failures:
+            stream.writeln(
+                self._color(
+                    self._RED,
+                    f"[  FAILED  ] {failures} test{self._plural(failures)}, listed below:",
+                )
+            )
+            for t, _ in result.failures:
+                stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
+            for t, _ in result.errors:
+                stream.writeln(self._color(self._RED, f"[  FAILED  ] {self._test_label(t)}"))
+            # unexpectedSuccesses items are bare TestCase instances (not (test, traceback) tuples).
+            for t in getattr(result, "unexpectedSuccesses", []):
+                stream.writeln(
+                    self._color(
+                        self._RED, f"[  FAILED  ] {self._test_label(t)} (unexpected success)"
+                    )
+                )
+        if skipped:
+            stream.writeln(
+                self._color(
+                    self._YELLOW,
+                    f"[  SKIPPED ] {skipped} test{self._plural(skipped)}, listed below:",
+                )
+            )
+            for t, _ in result.skipped:
+                stream.writeln(self._color(self._YELLOW, f"[  SKIPPED ] {self._test_label(t)}"))
+        stream.writeln()
+
+
 def has_gpu_od_interface(processor_handle):
     """Check if a GPU has the gpu_od sysfs interface.
 
-    This uses the amdsmi_is_gpu_od_enabled() API to detect gpu_od support.
+    This uses the amdsmi_get_gpu_fan_speed_range() API to detect gpu_od support.
+    gpu_od GPUs have a lower_bound > 0, while legacy hwmon GPUs have lower_bound == 0.
 
     Args:
         processor_handle: amdsmi processor handle for the GPU
 
     Returns:
-        bool: True if gpu_od directory exists for this GPU
+        bool: True if gpu_od interface is available for this GPU
     """
     try:
-        return amdsmi.amdsmi_is_gpu_od_enabled(processor_handle)
+        fan_range = amdsmi.amdsmi_get_gpu_fan_speed_range(processor_handle, 0)
+        # gpu_od GPUs have lower_bound > 0 (e.g., 20)
+        # Legacy hwmon GPUs have lower_bound == 0
+        return fan_range.lower_bound > 0
     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
         return False
 

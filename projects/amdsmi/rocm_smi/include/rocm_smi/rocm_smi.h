@@ -3182,22 +3182,27 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t* max_speed);
 
 /**
- *  @brief Get the minimum fan speed value for the specified device.
+ *  @brief Get the fan speed range (minimum and maximum PWM duty) for the specified device.
  *
  *  @details Given a device index @p dv_ind, a 0-based sensor index @p sensor_ind,
- *  and a pointer to a uint64_t @p min_speed, this function will write the minimum
- *  fan speed value to the memory location @p min_speed.
- *  For legacy hwmon GPUs, this returns 0.
- *  For GPUs with the gpu_od sysfs interface (Navi3x/4x+), the minimum is read from
- *  the OD_RANGE section of the fan_minimum_pwm sysfs file (e.g., 20).
+ *  and a pointer to an rsmi_range_t @p speed_range, this function will write the
+ *  fan speed range to the memory location @p speed_range.
+ *
+ *  The range is returned in raw PWM duty cycle units (not RPM, not percentage):
+ *  - For legacy hwmon GPUs: fixed range [0, 255]
+ *  - For gpu_od GPUs (Navi3x/4x+): dynamic range from OD_RANGE (e.g., [20, 100])
+ *
+ *  This function provides a unified interface for both ASIC types and is the
+ *  recommended way to query the valid fan speed range. The range can be used
+ *  to map user-facing percentages to hardware PWM values.
  *
  *  @param[in] dv_ind a device index
  *
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  *  If a device has more than one sensor, it could be greater than 0.
  *
- *  @param[out] min_speed a pointer to uint64_t to which the minimum speed
- *  will be written
+ *  @param[out] speed_range a pointer to rsmi_range_t to which the fan speed range
+ *  (lower_bound, upper_bound) will be written, in raw PWM duty cycle units
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
@@ -3209,32 +3214,7 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, u
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_fan_speed_min_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t* min_speed);
-
-/**
- *  @brief Check if the GPU has the gpu_od sysfs interface enabled for fan control.
- *
- *  @details Given a device index @p dv_ind and a pointer to a bool @p is_enabled,
- *  this function checks whether the GPU supports the gpu_od sysfs interface for
- *  fan control (typically Navi3x/4x and newer GPUs).
- *  GPUs with gpu_od use a different fan control mechanism and have a fan speed
- *  range defined in OD_RANGE (e.g., 20-100) rather than the legacy hwmon range
- *  of 0-255.
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[out] is_enabled a pointer to bool to which the gpu_od enablement
- *  status will be written (true if gpu_od is available, false for legacy hwmon)
- *  If this parameter is nullptr, this function will return
- *  ::RSMI_STATUS_INVALID_ARGS.
- *
- *  @retval ::RSMI_STATUS_SUCCESS call was successful
- *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function with the given arguments
- *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
- *
- */
-rsmi_status_t rsmi_is_gpu_od_enabled(uint32_t dv_ind, bool* is_enabled);
+rsmi_status_t rsmi_dev_fan_speed_range_get(uint32_t dv_ind, uint32_t sensor_ind, rsmi_range_t* speed_range);
 
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
                                     rsmi_npm_info_t* npm_info);

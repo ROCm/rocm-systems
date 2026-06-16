@@ -3765,50 +3765,45 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   CATCH
 }
 
-rsmi_status_t rsmi_dev_fan_speed_min_get(uint32_t dv_ind, uint32_t sensor_ind,
-                                         uint64_t* min_speed) {
-  TRY
+rsmi_status_t rsmi_dev_fan_speed_range_get(uint32_t dv_ind, uint32_t sensor_ind,
+                                           rsmi_range_t* speed_range) {
+  TRY rsmi_status_t ret;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
+
+  // Validate pointer parameter first
+  if (speed_range == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   ++sensor_ind;  // fan sysfs files have 1-based indices
-  CHK_SUPPORT_SUBVAR_ONLY(min_speed, sensor_ind)
+  CHK_SUPPORT_SUBVAR_ONLY(speed_range, sensor_ind)
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), the minimum fan speed is from OD_RANGE.
-  // For legacy hwmon, minimum is always 0.
+  // On gpu_od GPUs (Navi3x+), the range is from OD_RANGE in fan_minimum_pwm.
+  // For legacy hwmon GPUs, the fixed range is [0, 255].
   std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
   if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
     uint64_t od_min_pwm = 0;
     uint64_t od_max_pwm = 0;
     int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
     if (parse_ret == 0) {
-      *min_speed = od_min_pwm;
+      speed_range->lower_bound = od_min_pwm;
+      speed_range->upper_bound = od_max_pwm;
       return RSMI_STATUS_SUCCESS;
     }
   }
 
-  // Legacy hwmon path - minimum is always 0
-  *min_speed = 0;
-  return RSMI_STATUS_SUCCESS;
+  // Legacy hwmon path: fixed range [0, 255]
+  speed_range->lower_bound = 0;
+  ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
+                          reinterpret_cast<int64_t*>(&speed_range->upper_bound));
+
+  return ret;
   CATCH
 }
 
-rsmi_status_t rsmi_is_gpu_od_enabled(uint32_t dv_ind, bool* is_enabled) {
-  TRY
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-  CHK_SUPPORT_NAME_ONLY(is_enabled)
-  DEVICE_MUTEX
-
-  // Check if gpu_od fan control sysfs interface exists
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  *is_enabled = amd::smi::FileExists(fan_ctrl_path.c_str());
-
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
 
 rsmi_status_t rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t* odv) {
   TRY std::ostringstream ss;

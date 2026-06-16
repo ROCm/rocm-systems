@@ -94,49 +94,27 @@ void TestFanRead::Run(void) {
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "gpu=" + std::to_string(i),
+      amdsmi_range_t fan_range;
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_range", "gpu=" + std::to_string(i),
                          VERB(STANDARD));
-      err = amdsmi_get_gpu_fan_speed_max(processor_handles_[i], 0, &val_ui64);
+      err = amdsmi_get_gpu_fan_speed_range(processor_handles_[i], 0, &fan_range);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\t**Current fan RPMs: ";
-        std::cout << static_cast<float>(val_i64) / static_cast<float>(val_ui64) * 100;
-        std::cout << "% (" << val_i64 << "/" << val_ui64 << ")" << std::endl;
+        std::cout << "\t**Fan PWM Range: [" << fan_range.lower_bound << ", "
+                  << fan_range.upper_bound << "]" << std::endl;
+        // Calculate band-relative percentage
+        if (fan_range.upper_bound > fan_range.lower_bound) {
+          float percentage = static_cast<float>(val_i64 - fan_range.lower_bound) /
+                            static_cast<float>(fan_range.upper_bound - fan_range.lower_bound) * 100.0f;
+          std::cout << "\t**Current fan usage: " << percentage << "% (PWM "
+                    << val_i64 << ")" << std::endl;
+        }
       }
       // Verify api support checking functionality is working
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "gpu=" + std::to_string(i),
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_range", "gpu=" + std::to_string(i),
                          VERB(STANDARD));
-      err = amdsmi_get_gpu_fan_speed_max(processor_handles_[i], 0, nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_min", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
-      err = amdsmi_get_gpu_fan_speed_min(processor_handles_[i], 0, &val_ui64);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) { std::cout << "\t**Min Fan Speed: " << val_ui64 << std::endl; }
-      // Verify api support checking functionality is working
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_min", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
-      err = amdsmi_get_gpu_fan_speed_min(processor_handles_[i], 0, nullptr);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-      bool is_gpu_od = false;
-      DISPLAY_AMDSMI_API("amdsmi_is_gpu_od_enabled", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
-      err = amdsmi_is_gpu_od_enabled(processor_handles_[i], &is_gpu_od);
-      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-      CHK_ERR_ASRT(err)
-      IF_VERB(STANDARD) {
-        std::cout << "\t**GPU OD Enabled: " << (is_gpu_od ? "Yes" : "No") << std::endl;
-      }
-      // Verify api support checking functionality is working
-      DISPLAY_AMDSMI_API("amdsmi_is_gpu_od_enabled", "gpu=" + std::to_string(i),
-                         VERB(STANDARD));
-      err = amdsmi_is_gpu_od_enabled(processor_handles_[i], nullptr);
+      err = amdsmi_get_gpu_fan_speed_range(processor_handles_[i], 0, nullptr);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 

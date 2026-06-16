@@ -4450,19 +4450,20 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
                                         uint32_t sensor_ind, int64_t* speed);
 
 /**
- *  @brief Get the fan speed for the specified device as a value relative to
- *  the maximum fan speed. It is not supported on virtual machine guest
+ *  @brief Get the fan speed for the specified device as a PWM duty cycle value.
+ *  It is not supported on virtual machine guest
  *
  *  @ingroup tagPhysicalStateQuery
  *
  *  @platform{gpu_bm_linux}
  *
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
- *  @p speed, this function will write the current fan speed (a value
- *  between 0 and the maximum fan speed) to the uint32_t pointed to by @p speed.
- *  For legacy hwmon GPUs the maximum is ::AMDSMI_MAX_FAN_SPEED (255).
- *  For GPUs with the gpu_od sysfs interface, use amdsmi_get_gpu_fan_speed_max()
- *  to query the actual maximum
+ *  @p speed, this function will write the current fan speed in PWM duty cycle units
+ *  (a value between the minimum and maximum for the device) to the uint32_t pointed
+ *  to by @p speed.
+ *  For legacy hwmon GPUs the range is [0, 255].
+ *  For GPUs with the gpu_od sysfs interface, use amdsmi_get_gpu_fan_speed_range()
+ *  to query the actual valid range
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4482,19 +4483,22 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handl
                                          uint32_t sensor_ind, int64_t* speed);
 
 /**
- *  @brief Get the max. fan speed of the device with provided processor handle. It is
- *  not supported on virtual machine guest
+ *  @brief Get the max. fan speed (PWM duty) of the device with provided processor handle.
+ *  It is not supported on virtual machine guest
  *
  *  @ingroup tagPhysicalStateQuery
  *
  *  @platform{gpu_bm_linux}
  *
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
- *  @p max_speed, this function will write the maximum fan speed possible to
- *  the uint32_t pointed to by @p max_speed.
+ *  @p max_speed, this function will write the maximum fan speed in PWM duty cycle units
+ *  to the uint32_t pointed to by @p max_speed.
  *  For legacy hwmon GPUs this is ::AMDSMI_MAX_FAN_SPEED (255).
  *  For GPUs with the gpu_od sysfs interface, the maximum is read from the
- *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 100)
+ *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 100).
+ *
+ *  @note This function is DEPRECATED. Use amdsmi_get_gpu_fan_speed_range() instead,
+ *  which provides both min and max in a single call
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4514,27 +4518,32 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
                                              uint32_t sensor_ind, uint64_t* max_speed);
 
 /**
- *  @brief Get the min. fan speed of the device with provided processor handle. It is
- *  not supported on virtual machine guest
+ *  @brief Get the fan speed range (minimum and maximum PWM duty) for the device with
+ *  provided processor handle. It is not supported on virtual machine guest
  *
  *  @ingroup tagPhysicalStateQuery
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Given a processor handle @p processor_handle and a pointer to a uint64_t
- *  @p min_speed, this function will write the minimum fan speed possible to
- *  the uint64_t pointed to by @p min_speed.
- *  For legacy hwmon GPUs this is 0.
- *  For GPUs with the gpu_od sysfs interface, the minimum is read from the
- *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 20)
+ *  @details Given a processor handle @p processor_handle, a 0-based sensor index
+ *  @p sensor_ind, and a pointer to an amdsmi_range_t @p fan_speed_range, this function
+ *  will write the fan speed range to the memory location @p fan_speed_range.
+ *
+ *  The range is returned in raw PWM duty cycle units (not RPM, not percentage):
+ *  - For legacy hwmon GPUs: fixed range [0, 255]
+ *  - For gpu_od GPUs (Navi3x/4x+): dynamic range from OD_RANGE (e.g., [20, 100])
+ *
+ *  This function provides a unified interface for both ASIC types and is the
+ *  recommended way to query the valid fan speed range. The range can be used
+ *  to map user-facing percentages to hardware PWM values.
  *
  *  @param[in] processor_handle a processor handle
  *
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  *  If a device has more than one sensor, it could be greater than 0.
  *
- *  @param[out] min_speed a pointer to uint64_t to which the minimum speed
- *  will be written
+ *  @param[out] fan_speed_range a pointer to amdsmi_range_t to which the fan speed range
+ *  (lower_bound, upper_bound) will be written, in raw PWM duty cycle units
  *  If this parameter is nullptr, this function will return
  *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
@@ -4542,36 +4551,8 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_fan_speed_min(amdsmi_processor_handle processor_handle,
-                                             uint32_t sensor_ind, uint64_t* min_speed);
-
-/**
- *  @brief Check if the GPU has the gpu_od sysfs interface enabled for fan control.
- *  It is not supported on virtual machine guest
- *
- *  @ingroup tagPhysicalStateQuery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, this function checks if the
- *  GPU supports the gpu_od sysfs interface for fan control (Navi3x/4x and newer GPUs).
- *  GPUs with gpu_od use a different fan control mechanism and typically have a fan
- *  speed range defined in OD_RANGE (e.g., 20-100) rather than the legacy hwmon
- *  range of 0-255.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[out] is_enabled a pointer to bool to which the gpu_od enablement
- *  status will be written (true if gpu_od is available, false for legacy hwmon)
- *  If this parameter is nullptr, this function will return
- *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided
- *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
- *  provided arguments.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_is_gpu_od_enabled(amdsmi_processor_handle processor_handle,
-                                         bool* is_enabled);
+amdsmi_status_t amdsmi_get_gpu_fan_speed_range(amdsmi_processor_handle processor_handle,
+                                               uint32_t sensor_ind, amdsmi_range_t* fan_speed_range);
 
 /**
  *  @brief Returns gpu cache info.
@@ -4655,19 +4636,20 @@ amdsmi_status_t amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_han
 amdsmi_status_t amdsmi_reset_gpu_fan(amdsmi_processor_handle processor_handle, uint32_t sensor_ind);
 
 /**
- *  @brief Set the fan speed for the specified device with the provided speed,
- *  in RPMs. It is not supported on virtual machine guest
+ *  @brief Set the fan speed for the specified device with the provided PWM duty cycle value.
+ *  It is not supported on virtual machine guest
  *
  *  @ingroup tagPhysicalStateControl
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Given a processor handle @p processor_handle and a integer value indicating
- *  speed @p speed, this function will attempt to set the fan speed to @p speed.
+ *  @details Given a processor handle @p processor_handle and an integer value indicating
+ *  PWM duty @p speed, this function will attempt to set the fan speed to @p speed.
  *  An error will be returned if the specified speed is outside the allowable
- *  range for the device. For legacy hwmon GPUs the range is 0-255.
+ *  range for the device. For legacy hwmon GPUs the range is [0, 255].
  *  For GPUs with the gpu_od sysfs interface, the valid range is determined
- *  dynamically from the OD_RANGE (e.g. 20-100).
+ *  dynamically from the OD_RANGE (e.g., [20, 100]).
+ *  Use amdsmi_get_gpu_fan_speed_range() to query the valid range for your device.
  *
  *  @note This function requires admin/sudo privileges
  *
@@ -4676,7 +4658,7 @@ amdsmi_status_t amdsmi_reset_gpu_fan(amdsmi_processor_handle processor_handle, u
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
  *  If a device has more than one sensor, it could be greater than 0.
  *
- *  @param[in] speed the speed to which the function will attempt to set the fan
+ *  @param[in] speed the PWM duty cycle speed to which the function will attempt to set the fan
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

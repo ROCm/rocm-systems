@@ -1496,8 +1496,9 @@ class AMDSMIHelpers:
             try:
                 # Check if fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                min_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_min(dev, 0)
-                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
+                fan_range = amdsmi_interface.amdsmi_get_gpu_fan_speed_range(dev, 0)
+                min_speed = fan_range.lower_bound
+                max_speed = fan_range.upper_bound
 
                 # The API already handles gpu_od vs legacy hwmon internally
                 # For legacy hwmon: min_speed = 0, max_speed = 255

@@ -1223,10 +1223,16 @@ class MetricCommands:
                     )
 
                 try:
-                    fan_max = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(args.gpu, 0)
+                    # Get fan speed range (min and max) using unified API
+                    fan_range = amdsmi_interface.amdsmi_get_gpu_fan_speed_range(args.gpu, 0)
+                    fan_min = fan_range.lower_bound
+                    fan_max = fan_range.upper_bound
                     fan_usage = "N/A"
-                    if fan_max > 0 and fan_dict["speed"] != "N/A":
-                        fan_usage = round((float(fan_speed) / float(fan_max)) * 100, 2)
+                    if fan_max > fan_min and fan_dict["speed"] != "N/A":
+                        # Band-relative percentage: 0% = min, 100% = max
+                        fan_usage = round(((float(fan_speed) - float(fan_min)) / (float(fan_max) - float(fan_min))) * 100, 2)
+                        # Clamp to [0, 100] to handle any edge cases
+                        fan_usage = max(0.0, min(100.0, fan_usage))
                         fan_usage_unit = "%"
                         if self.logger.is_human_readable_format():
                             fan_usage = f"{fan_usage} {fan_usage_unit}"
@@ -1236,7 +1242,7 @@ class MetricCommands:
                     fan_dict["usage"] = fan_usage
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug(
-                        "Failed to get fan max speed for gpu %s | %s", args.gpu, e.get_error_info()
+                        "Failed to get fan speed range for gpu %s | %s", args.gpu, e.get_error_info()
                     )
 
                 try:

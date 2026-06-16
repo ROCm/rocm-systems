@@ -2160,14 +2160,10 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed_max(amdsmi_processor_handle processor_h
   return rsmi_wrapper(rsmi_dev_fan_speed_max_get, processor_handle, 0, sensor_ind, max_speed);
 }
 
-amdsmi_status_t amdsmi_get_gpu_fan_speed_min(amdsmi_processor_handle processor_handle,
-                                             uint32_t sensor_ind, uint64_t* min_speed) {
-  return rsmi_wrapper(rsmi_dev_fan_speed_min_get, processor_handle, 0, sensor_ind, min_speed);
-}
-
-amdsmi_status_t amdsmi_is_gpu_od_enabled(amdsmi_processor_handle processor_handle,
-                                         bool* is_enabled) {
-  return rsmi_wrapper(rsmi_is_gpu_od_enabled, processor_handle, 0, is_enabled);
+amdsmi_status_t amdsmi_get_gpu_fan_speed_range(amdsmi_processor_handle processor_handle,
+                                               uint32_t sensor_ind, amdsmi_range_t* fan_speed_range) {
+  return rsmi_wrapper(rsmi_dev_fan_speed_range_get, processor_handle, 0, sensor_ind,
+                      reinterpret_cast<rsmi_range_t*>(fan_speed_range));
 }
 
 amdsmi_status_t amdsmi_reset_gpu_fan(amdsmi_processor_handle processor_handle,

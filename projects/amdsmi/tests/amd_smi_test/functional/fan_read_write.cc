@@ -95,15 +95,20 @@ void TestFanReadWrite::Run(void) {
     }
     IF_VERB(STANDARD) { std::cout << "Original fan speed: " << orig_speed << std::endl; }
 
-    // Verify max fan speed returns a sensible value for both interfaces
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "gpu=" + std::to_string(dv_ind),
+    // Get fan speed range (unified for both legacy hwmon and gpu_od)
+    amdsmi_range_t fan_range;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_range", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
-    ret = amdsmi_get_gpu_fan_speed_max(processor_handles_[dv_ind], 0, &max_speed);
+    ret = amdsmi_get_gpu_fan_speed_range(processor_handles_[dv_ind], 0, &fan_range);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
-    IF_VERB(STANDARD) { std::cout << "Max fan speed: " << max_speed << std::endl; }
-    // Max speed must be > 0 and either 255 (legacy hwmon) or <= 100 (gpu_od OD_RANGE)
-    ASSERT_GT(max_speed, static_cast<uint64_t>(0));
+    uint64_t min_speed = fan_range.lower_bound;
+    max_speed = fan_range.upper_bound;
+    IF_VERB(STANDARD) {
+      std::cout << "Fan PWM range: [" << min_speed << ", " << max_speed << "]" << std::endl;
+    }
+    // Validate range
+    ASSERT_LE(min_speed, max_speed);
     ASSERT_LE(max_speed, static_cast<uint64_t>(AMDSMI_MAX_FAN_SPEED));
 
     if (can_read_speed && orig_speed > 0) {
@@ -118,7 +123,7 @@ void TestFanReadWrite::Run(void) {
     } else {
       // Fans are idle or read is unavailable — use a safe mid-range value
       // that works for both legacy hwmon (0-255) and gpu_od (typically 20-100)
-      new_speed = max_speed / 2;
+      new_speed = min_speed + (max_speed - min_speed) / 2;
     }
 
     IF_VERB(STANDARD) { std::cout << "Setting fan speed to " << new_speed << std::endl; }

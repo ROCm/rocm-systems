@@ -3225,15 +3225,9 @@ try:
 except AttributeError:
     pass
 try:
-    amdsmi_get_gpu_fan_speed_min = _libraries['libamd_smi.so'].amdsmi_get_gpu_fan_speed_min
-    amdsmi_get_gpu_fan_speed_min.restype = amdsmi_status_t
-    amdsmi_get_gpu_fan_speed_min.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint64)]
-except AttributeError:
-    pass
-try:
-    amdsmi_is_gpu_od_enabled = _libraries['libamd_smi.so'].amdsmi_is_gpu_od_enabled
-    amdsmi_is_gpu_od_enabled.restype = amdsmi_status_t
-    amdsmi_is_gpu_od_enabled.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
+    amdsmi_get_gpu_fan_speed_range = _libraries['libamd_smi.so'].amdsmi_get_gpu_fan_speed_range
+    amdsmi_get_gpu_fan_speed_range.restype = amdsmi_status_t
+    amdsmi_get_gpu_fan_speed_range.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(struct_amdsmi_range_t)]
 except AttributeError:
     pass
 try:
@@ -5109,8 +5103,8 @@ __all__ = \
     'amdsmi_get_gpu_ecc_status', 'amdsmi_get_gpu_enumeration_info',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fabric_info',
     'amdsmi_get_gpu_fan_rpms', 'amdsmi_get_gpu_fan_speed',
-    'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_fan_speed_min',
-    'amdsmi_is_gpu_od_enabled', 'amdsmi_get_gpu_id',
+    'amdsmi_get_gpu_fan_speed_max', 'amdsmi_get_gpu_fan_speed_range',
+    'amdsmi_get_gpu_id',
     'amdsmi_get_gpu_kfd_info', 'amdsmi_get_gpu_mem_overdrive_level',
     'amdsmi_get_gpu_memory_partition',
     'amdsmi_get_gpu_memory_partition_config',
