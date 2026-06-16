@@ -1,8 +1,37 @@
-# Copyright (c) 2015-2016, NVIDIA CORPORATION. All rights reserved.
-# Modifications Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# Copyright (c) 2015-2026, NVIDIA CORPORATION & AFFILIATES. ALL RIGHTS RESERVED.
+#
+# SPDX-License-Identifier: Apache-2.0
+/build*
+failed/
+junits/
+*.xml
+/plugins/net/ib_sharp/build/
+/plugins/net/example/*.so
+/plugins/mixed/example/*.so
+/plugins/net/mock/*.so
 *.gcov
 /coverage/
-build*/
+tags
+*.swp
+.cache/
+
+# Example build artifacts
+*.o
+docs/examples/**/multiple_devices_single_process
+docs/examples/**/one_device_per_pthread
+docs/examples/**/one_device_per_process_mpi
+docs/examples/**/ring_pattern
+docs/examples/**/allreduce
+docs/examples/**/allreduce_ub
+docs/examples/**/allreduce_sm
+docs/examples/**/allgather_ce
+docs/examples/**/allreduce_device_api
+docs/examples/**/rmsnorm_lsa
+docs/examples/**/rmsnorm_multimem
+docs/examples/**/rmsnorm_gin
+docs/examples/**/rmsnorm_hybrid
+
+# RCCL-specific
 install*/
 ext/
 src/transport/net_ib_rocm.cc
