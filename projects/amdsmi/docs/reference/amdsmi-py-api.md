@@ -5589,6 +5589,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_partition_mem_alloc_mod
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_UNEXPECTED_DATA` - Unexpected data read from driver/sysfs
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing the sysfs file
 
 Example:
 
@@ -5629,8 +5630,9 @@ Exceptions that can be thrown by `amdsmi_set_gpu_compute_partition_mem_alloc_mod
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported on this device or driver version
-- `AMDSMI_STATUS_PERMISSION` - Permission Denied (requires sudo)
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied (requires sudo)
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_FILE_ERROR` - Problem accessing the sysfs file
 
 Example:
 
