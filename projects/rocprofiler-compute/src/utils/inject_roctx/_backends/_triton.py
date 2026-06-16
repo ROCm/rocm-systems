@@ -50,6 +50,8 @@ def patch_triton_launcher() -> None:
     if getattr(original_call, "_roctx_wrapped", False):
         return
 
+    call_counts: dict[str, int] = {}
+
     @wraps(original_call)
     def call_with_roctx(self: object, *args: Any, **kwargs: Any) -> object:
         kernel_name = (
@@ -59,9 +61,10 @@ def patch_triton_launcher() -> None:
         )
         if isinstance(kernel_name, dict):
             kernel_name = kernel_name.get("name", "<triton_kernel>")
-        location = resolve_user_caller_location()
         marker = f"triton.CompiledKernel.{kernel_name}"
-        _push_scope(marker, f"#1@{location}", backend=_BACKEND_NAME)
+        call_counts[marker] = call_counts.get(marker, 0) + 1
+        location = resolve_user_caller_location()
+        _push_scope(marker, f"#{call_counts[marker]}@{location}", backend=_BACKEND_NAME)
         try:
             return original_call(self, *args, **kwargs)
         finally:

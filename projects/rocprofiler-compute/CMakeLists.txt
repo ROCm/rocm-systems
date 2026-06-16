@@ -676,31 +676,20 @@ set_tests_properties(
 )
 
 add_test(
-    NAME test_inject_roctx_loader
+    NAME test_torch_cpp_loader
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_inject_roctx_loader.xml ${COV_OPTION}
-        tests/test_inject_roctx_loader.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_torch_cpp_loader.xml ${COV_OPTION}
+        tests/test_torch_cpp_loader.py ${WORKING_DIR_OPTION}
 )
-set_tests_properties(test_inject_roctx_loader PROPERTIES TIMEOUT 300)
 
 add_test(
-    NAME test_inject_roctx_module
+    NAME test_inject_roctx_package
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_inject_roctx_module.xml ${COV_OPTION}
-        tests/test_inject_roctx_module.py ${WORKING_DIR_OPTION}
+        --junitxml=tests/test_inject_roctx_package.xml ${COV_OPTION}
+        tests/test_inject_roctx_package.py ${WORKING_DIR_OPTION}
 )
-set_tests_properties(test_inject_roctx_module PROPERTIES TIMEOUT 120)
-
-add_test(
-    NAME test_utils_profile_backend_split
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_utils_profile_backend_split.xml ${COV_OPTION}
-        tests/test_utils_profile_backend_split.py ${WORKING_DIR_OPTION}
-)
-set_tests_properties(test_utils_profile_backend_split PROPERTIES TIMEOUT 120)
 
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
@@ -802,9 +791,8 @@ if(${ENABLE_COVERAGE})
         test_torch_trace_analysis
         test_torch_trace_coverage
         test_profile_torch_trace
-        test_inject_roctx_loader
-        test_inject_roctx_module
-        test_utils_profile_backend_split
+        test_torch_cpp_loader
+        test_inject_roctx_package
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")

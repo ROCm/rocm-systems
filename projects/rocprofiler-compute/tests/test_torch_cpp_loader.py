@@ -982,8 +982,10 @@ def test_python_fallback_path_still_works_without_so(monkeypatch):
         del sys.modules["utils.inject_roctx"]
     inject_roctx = importlib.import_module("utils.inject_roctx")
     try:
-        assert inject_roctx.using_c_tier() is False
-        assert inject_roctx.dump_recordfn_stats() is None
+        from utils.inject_roctx._backends import _torch as _torch_backend
+
+        assert _torch_backend.using_c_tier() is False
+        assert _torch_backend.dump_recordfn_stats() is None
         inject_roctx._push_scope("py.tier.test", "#1@test:1")
         inject_roctx._pop_scope()
     finally:
@@ -1035,14 +1037,19 @@ def test_import_does_not_apply_global_patches(monkeypatch):
         }
         for sym in (
             "install_global_wraps",
-            "install_function_apply_wrappers",
-            "using_c_tier",
-            "dump_recordfn_stats",
             "_push_scope",
             "_pop_scope",
             "resolve_user_caller_location",
         ):
             assert hasattr(inject_roctx, sym), f"public symbol missing: {sym}"
+        from utils.inject_roctx._backends import _torch as _torch_backend
+
+        for sym in (
+            "install_function_apply_wrappers",
+            "using_c_tier",
+            "dump_recordfn_stats",
+        ):
+            assert hasattr(_torch_backend, sym), f"torch backend symbol missing: {sym}"
         assert post["compile"] is pre["compile"], "torch.compile was replaced on import"
     finally:
         sys.modules.pop("utils.inject_roctx", None)

@@ -254,11 +254,6 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     """A grandchild ``Function`` subclass does not get a second ``apply`` wrapper."""
     require_torch()
 
-    try:
-        from utils import inject_roctx
-    except SystemExit:
-        pytest.skip("roctx bindings are unavailable in this environment")
-
     from utils.inject_roctx._backends import _torch as _torch_backend
 
     if not _torch_backend._resolve_torch():
@@ -284,7 +279,7 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     class Bar(Foo):
         pass
 
-    assert inject_roctx.install_function_apply_wrappers() is True
+    assert _torch_backend.install_function_apply_wrappers() is True
 
     assert getattr(
         getattr(Foo.__dict__.get("apply"), "__func__", None),
