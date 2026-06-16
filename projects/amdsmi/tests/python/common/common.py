@@ -201,10 +201,10 @@ def print_test_ids(suite):
 
     Public entry point for the discover()-based runners (cli_unit_test.py,
     integration_test.py, unit_tests.py), which build their suite from a
-    directory.  Emits an "Available tests:" header followed by one dotted test
-    id per line.  Written to stdout so the listing can be piped/filtered
-    directly (e.g. ``... -l | grep xgmi``) independently of test-run chatter,
-    which stays on stderr.
+    directory rather than from a single module.  Emits an "Available tests:"
+    header followed by one dotted test id per line.  Output goes to stdout so
+    the listing can be captured/piped independently of the normal test-run
+    output on stderr (e.g. ``... -l | grep xgmi``).
     """
     print("Available tests:", file=sys.stdout)
     _print_test_ids(suite)
