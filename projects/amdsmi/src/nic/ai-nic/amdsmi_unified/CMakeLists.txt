@@ -21,13 +21,18 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+# Capture the amd_smi project root before the project() call below opens a new
+# project scope, which would repoint PROJECT_SOURCE_DIR at this subdirectory.
+# Anchoring header paths here avoids counting "../" levels up to the root.
+set(AMD_SMI_ROOT_DIR ${PROJECT_SOURCE_DIR})
+
 project(amdsminic LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
-set(NIC_INTERFACE_HEADERS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include/amd_smi/impl/nic/amdsmi_unified/interface)
+set(NIC_INTERFACE_HEADERS_DIR ${AMD_SMI_ROOT_DIR}/include/amd_smi/impl/nic/amdsmi_unified/interface)
 set(NIC_INCLUDE_DIR ${PROJECT_ROOT}/inc ${NIC_INTERFACE_HEADERS_DIR})
 set(NIC_SOURCE_DIR ${PROJECT_ROOT}/src)
 set(NIC_BUILD_DIR ${CMAKE_BINARY_DIR}/build)
