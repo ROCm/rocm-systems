@@ -1377,6 +1377,9 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   if (!hip::isValid(hStream)) {
     HIP_RETURN(hipErrorContextIsDestroyed);
   }
+
+  STREAM_CAPTURE(hipDrvLaunchKernelEx, hStream, config, f, kernelParams, extra);
+
   int drvDeviceId = hip::Stream::DeviceId(hStream);
   const amd::Device* drvDevice = g_devices[drvDeviceId]->devices()[0];
   amd::HIPLaunchParams launch_params(config->gridDimX, config->gridDimY, config->gridDimZ,
