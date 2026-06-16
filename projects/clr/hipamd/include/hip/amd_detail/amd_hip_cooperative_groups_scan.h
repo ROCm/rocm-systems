@@ -285,6 +285,21 @@ namespace impl {
     return impl::scan<false>(group, val, op);
   }
 
+  template <typename TyGroup, typename TyVal>
+  __CG_QUALIFIER__ auto inclusive_scan(const TyGroup& group, TyVal&& val)
+  {
+    using Val = typename __hip_internal::remove_cvref<TyVal>::type;
+
+    return impl::scan<true>(group, val, cooperative_groups::plus<Val>());
+  }
+
+  template <typename TyGroup, typename TyVal>
+  __CG_QUALIFIER__ auto exclusive_scan(const TyGroup& group, TyVal&& val)
+  {
+    using Val = typename __hip_internal::remove_cvref<TyVal>::type;
+
+    return impl::scan<false>(group, val, cooperative_groups::plus<Val>());
+  }
 }
 #endif  // __cplusplus
 #endif  // HIP_INCLUDE_HIP_AMD_DETAIL_HIP_COOPERATIVE_GROUPS_SCAN_H

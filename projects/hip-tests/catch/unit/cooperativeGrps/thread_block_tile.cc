@@ -1331,26 +1331,30 @@ HIP_TEMPLATE_TEST_CASE(Unit_Thread_Block_Coalesced_Reduce_boolean, int, unsigned
   }
 }
 
-template <size_t TileSize, class Op, class T>
-void __global__ simpleScan(T* result, AggregationType* aggType)
+template <size_t TileSize, AggregationType AggType, class Op, class T>
+void __global__ simpleScan(T* result)
 {
   T value = threadIdx.x;
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<TileSize>(mygroup);
   Op op;
 
-  if (*aggType == AggregationType::InclusiveScan) {
+  if constexpr (AggType == AggregationType::InclusiveScan) {
     result[threadIdx.x] = cg::inclusive_scan(mytile, value, op);
-  } else if (*aggType == AggregationType::ExclusiveScan) {
+  } else if constexpr (AggType == AggregationType::ExclusiveScan) {
     result[threadIdx.x] = cg::exclusive_scan(mytile, value, op);
+  } else if constexpr (AggType == AggregationType::InclusiveScanDefault) {
+    result[threadIdx.x] = cg::inclusive_scan(mytile, value);
+  } else if constexpr (AggType == AggregationType::ExclusiveScanDefault) {
+    result[threadIdx.x] = cg::exclusive_scan(mytile, value);
   } else {
     assert(false && "Unexpected aggType");
   }
 }
 
 /// @tparam Op either std::plus or std::less
-template <size_t TileSize, class Op, class T>
-void testScanForTileSize(AggregationType aggType)
+template <size_t TileSize, AggregationType AggType, class Op, class T>
+void testScanForTileSize()
 {
   LinearAllocGuard<T> h_result(LinearAllocs::malloc, sizeof(T) * getWarpSize());
   LinearAllocGuard<T> d_result(LinearAllocs::hipMalloc, h_result.size_bytes());
@@ -1362,6 +1366,7 @@ void testScanForTileSize(AggregationType aggType)
   LinearAllocGuard<AggregationType> d_aggType(LinearAllocs::hipMalloc, sizeof(AggregationType));
   std::array<void*, 2> devicePtrs = { d_result.ptr(), d_aggType.ptr() };
   void* args[devicePtrs.size()];
+  AggregationType aggType = AggType;
 
   if (aggType == AggregationType::ExclusiveScan) {
     scanIdentity<T, Op>(id);
@@ -1373,8 +1378,8 @@ void testScanForTileSize(AggregationType aggType)
     args[i] = &devicePtrs[i];
   }
 
-  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(aggType), hipMemcpyHostToDevice));
-  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleScan<TileSize, Op, T>),
+  HIP_CHECK(hipMemcpy(d_aggType.ptr(), &aggType, sizeof(AggType), hipMemcpyHostToDevice));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleScan<TileSize, AggType, Op, T>),
                                        gridDim,
                                        blockDim,
                                        args,
@@ -1431,49 +1436,51 @@ void testScanForTileSize(AggregationType aggType)
 TEST_CASE(Unit_Thread_Block_Tile_Inclusive_Scan_Basic)
 {
   using Op = cooperative_groups::plus<int>;
-  AggregationType aggType = AggregationType::InclusiveScan;
+  static constexpr AggregationType AggType = AggregationType::InclusiveScan;
 
-  testScanForTileSize<1, Op, int>(aggType);
-  testScanForTileSize<2, Op, int>(aggType);
-  testScanForTileSize<4, Op, int>(aggType);
-  testScanForTileSize<8, Op, int>(aggType);
-  testScanForTileSize<16, Op, int>(aggType);
-  testScanForTileSize<32, Op, int>(aggType);
+  testScanForTileSize<1, AggType, Op, int>();
+  testScanForTileSize<2, AggType, Op, int>();
+  testScanForTileSize<4, AggType, Op, int>();
+  testScanForTileSize<8, AggType, Op, int>();
+  testScanForTileSize<16, AggType, Op, int>();
+  testScanForTileSize<32, AggType, Op, int>();
+  testScanForTileSize<32, AggregationType::InclusiveScanDefault, Op, int>();
 
   if (getWarpSize() == 64) {
-    testScanForTileSize<64, Op, int>(aggType);
+    testScanForTileSize<64, AggType, Op, int>();
   }
 }
 
 TEMPLATE_TEST_CASE(Unit_Thread_Block_Tile_Exclusive_Scan_Basic, int, half)
 {
-  AggregationType aggType = AggregationType::ExclusiveScan;
+  static constexpr AggregationType AggType = AggregationType::ExclusiveScan;
 
   SECTION("plus") {
     using Op = cooperative_groups::plus<TestType>;
-    testScanForTileSize<1, Op, TestType>(aggType);
-    testScanForTileSize<2, Op, TestType>(aggType);
-    testScanForTileSize<4, Op, TestType>(aggType);
-    testScanForTileSize<8, Op, TestType>(aggType);
-    testScanForTileSize<16, Op, TestType>(aggType);
-    testScanForTileSize<32, Op, TestType>(aggType);
+    testScanForTileSize<1, AggType, Op, TestType>();
+    testScanForTileSize<2, AggType, Op, TestType>();
+    testScanForTileSize<4, AggType, Op, TestType>();
+    testScanForTileSize<8, AggType, Op, TestType>();
+    testScanForTileSize<16, AggType, Op, TestType>();
+    testScanForTileSize<32, AggType, Op, TestType>();
+    testScanForTileSize<32, AggregationType::ExclusiveScanDefault, Op, int>();
 
     if (getWarpSize() == 64) {
-      testScanForTileSize<64, Op, TestType>(aggType);
+      testScanForTileSize<64, AggType, Op, TestType>();
     }
   }
 
   SECTION("less") {
     using Op = cooperative_groups::less<TestType>;
-    testScanForTileSize<1, Op, TestType>(aggType);
-    testScanForTileSize<2, Op, TestType>(aggType);
-    testScanForTileSize<4, Op, TestType>(aggType);
-    testScanForTileSize<8, Op, TestType>(aggType);
-    testScanForTileSize<16, Op, TestType>(aggType);
-    testScanForTileSize<32, Op, TestType>(aggType);
+    testScanForTileSize<1, AggType, Op, TestType>();
+    testScanForTileSize<2, AggType, Op, TestType>();
+    testScanForTileSize<4, AggType, Op, TestType>();
+    testScanForTileSize<8, AggType, Op, TestType>();
+    testScanForTileSize<16, AggType, Op, TestType>();
+    testScanForTileSize<32, AggType, Op, TestType>();
 
     if (getWarpSize() == 64) {
-      testScanForTileSize<64, Op, TestType>(aggType);
+      testScanForTileSize<64, AggType, Op, TestType>();
     }
   }
 }

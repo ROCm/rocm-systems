@@ -392,7 +392,13 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
   HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
 }
 
-enum class AggregationType { Reduce, InclusiveScan, ExclusiveScan};
+enum class AggregationType { Reduce,
+                             InclusiveScan,
+                             ExclusiveScan,
+                             /// @brief an inclusive scan with the default operator, i.e. cg::plus
+                             InclusiveScanDefault,
+                             /// @brief an exclusive scan with the default operator, i.e. cg::plus
+                             ExclusiveScanDefault };
 
 inline const char* aggregationTypeToStr(AggregationType aggType)
 {
@@ -403,6 +409,10 @@ inline const char* aggregationTypeToStr(AggregationType aggType)
     return "inclusive scan";
   case AggregationType::ExclusiveScan:
     return "exclusive scan";
+  case AggregationType::InclusiveScanDefault:
+    return "inclusive scan plus";
+  case AggregationType::ExclusiveScanDefault:
+    return "exclusive scan plus";
   default:
     assert(false && "Unknown aggregation type");
     return "unknown";
@@ -465,7 +475,7 @@ T calculateExpected(T* output,
                     AggregationType aggType)
 {
   T result;
-  bool inclusive = aggType != AggregationType::ExclusiveScan;
+  bool inclusive = aggType != AggregationType::ExclusiveScan && aggType != AggregationType::ExclusiveScanDefault;
   int lastLane = 64 - __builtin_clzll(mask) - 1;
   T aggregation[64];
   // the results for the previous step of the aggregation
