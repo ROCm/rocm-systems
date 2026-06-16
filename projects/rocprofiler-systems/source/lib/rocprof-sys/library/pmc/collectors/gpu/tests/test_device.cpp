@@ -47,10 +47,10 @@ protected:
 
         EXPECT_CALL(*mock_backend, get_hotspot_temperature())
             .Times(AnyNumber())
-            .WillRepeatedly(Return(0xFFFFu));
+            .WillRepeatedly(Return(METRIC_VALUE_NOT_SUPPORTED_32));
         EXPECT_CALL(*mock_backend, get_edge_temperature())
             .Times(AnyNumber())
-            .WillRepeatedly(Return(0xFFFFu));
+            .WillRepeatedly(Return(METRIC_VALUE_NOT_SUPPORTED_32));
     }
 
     /**
@@ -158,10 +158,10 @@ protected:
     {
         EXPECT_CALL(*m, get_hotspot_temperature())
             .Times(AnyNumber())
-            .WillRepeatedly(Return(0xFFFFu));
+            .WillRepeatedly(Return(METRIC_VALUE_NOT_SUPPORTED_32));
         EXPECT_CALL(*m, get_edge_temperature())
             .Times(AnyNumber())
-            .WillRepeatedly(Return(0xFFFFu));
+            .WillRepeatedly(Return(METRIC_VALUE_NOT_SUPPORTED_32));
     }
 
     /**
@@ -1786,7 +1786,7 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
         .WillOnce(Return(73u));
     EXPECT_CALL(*mock, get_edge_temperature())
         .Times(AnyNumber())
-        .WillRepeatedly(Return(0xFFFFu));
+        .WillRepeatedly(Return(METRIC_VALUE_NOT_SUPPORTED_32));
 
     device<MockBackend> dev(mock, test_index);
 

@@ -32,6 +32,7 @@ using backend::MAX_NUM_VCN;
 using backend::MAX_NUM_XCP;
 using backend::MAX_NUM_XGMI_LINKS;
 using backend::METRIC_VALUE_NOT_SUPPORTED_16;
+using backend::METRIC_VALUE_NOT_SUPPORTED_32;
 using backend::METRIC_VALUE_NOT_SUPPORTED_64;
 
 /**
@@ -104,8 +105,6 @@ socket_power_track_label(const enabled_metrics& enabled)
     return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
 }
 
-// GPU die temperature (single track): prefer hotspot when that source is enabled in the
-// user config, otherwise edge (matches ROCPD / Perfetto replay).
 [[nodiscard]] inline bool
 has_gpu_temperature_output(const enabled_metrics& enabled)
 {

@@ -220,15 +220,23 @@ private:
             m_supported_metrics.bits.memory_usage = 0;
         }
 
+        try
         {
             const auto hotspot = m_backend->get_hotspot_temperature();
             m_supported_metrics.bits.hotspot_temperature =
-                is_metric_supported(hotspot, METRIC_VALUE_NOT_SUPPORTED_16) ? 1 : 0;
+                is_metric_supported(hotspot, METRIC_VALUE_NOT_SUPPORTED_32) ? 1 : 0;
+        } catch(const std::runtime_error&)
+        {
+            m_supported_metrics.bits.hotspot_temperature = 0;
         }
+        try
         {
             const auto edge = m_backend->get_edge_temperature();
             m_supported_metrics.bits.edge_temperature =
-                is_metric_supported(edge, METRIC_VALUE_NOT_SUPPORTED_16) ? 1 : 0;
+                is_metric_supported(edge, METRIC_VALUE_NOT_SUPPORTED_32) ? 1 : 0;
+        } catch(const std::runtime_error&)
+        {
+            m_supported_metrics.bits.edge_temperature = 0;
         }
 
         metrics raw{};

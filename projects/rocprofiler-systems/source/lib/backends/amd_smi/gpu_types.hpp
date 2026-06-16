@@ -16,6 +16,9 @@ namespace rocprofsys::backends::amd_smi::gpu
 // 16-bit sentinel must be checked explicitly when reading from the wider POD field.
 constexpr std::uint32_t METRIC_VALUE_NOT_SUPPORTED_16 = 0xFFFF;
 constexpr std::uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xFFFFFFFFFFFFFFFFULL;
+// Full uint32_t range (e.g. int64_t unsupported / error values cast to std::uint32_t).
+constexpr std::uint32_t METRIC_VALUE_NOT_SUPPORTED_32 =
+    std::numeric_limits<std::uint32_t>::max();
 
 constexpr size_t MAX_NUM_VCN        = 4;
 constexpr size_t MAX_NUM_JPEG       = 32;

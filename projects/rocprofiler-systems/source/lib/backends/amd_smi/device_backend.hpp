@@ -24,7 +24,6 @@ using gpu::asic_info;
 using gpu::MAX_NUM_JPEG_V1;
 using gpu::MAX_NUM_XCP;
 using gpu::MAX_NUM_XGMI_LINKS;
-using gpu::METRIC_VALUE_NOT_SUPPORTED_16;
 using gpu::metrics;
 using gpu::populate_if_supported;
 
@@ -80,12 +79,9 @@ public:
         amdsmi_temperature_type_t sensor_type) const
     {
         std::int64_t temperature = 0;
-        if(amdsmi_get_temp_metric(m_handle, sensor_type, AMDSMI_TEMP_CURRENT,
-                                  &temperature) != AMDSMI_STATUS_SUCCESS ||
-           temperature < 0)
-        {
-            return METRIC_VALUE_NOT_SUPPORTED_16;
-        }
+        check(amdsmi_get_temp_metric(m_handle, sensor_type, AMDSMI_TEMP_CURRENT,
+                                     &temperature),
+              "get_temp_metric");
         return static_cast<std::uint32_t>(temperature);
     }
 
