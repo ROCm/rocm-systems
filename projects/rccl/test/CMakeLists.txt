@@ -258,6 +258,7 @@ if(BUILD_TESTS)
       TimeoutTests.cpp
       mem_manager/MemManagerTests.cpp
       graph/XmlTests.cpp
+      graph/TopoTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp

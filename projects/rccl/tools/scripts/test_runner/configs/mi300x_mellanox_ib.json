@@ -521,6 +521,11 @@
           "test_filter": "XmlTest.*"
         },
         {
+          "name": "TopoTest",
+          "description": "Topology construction tests",
+          "test_filter": "TopoTest.*"
+        },
+        {
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
