@@ -115,7 +115,7 @@ WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
     std::cerr << "Error: Requested work-groups (" << args.num_wgs
               << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
               << "). Reduce -w to avoid grid_barrier deadlock." << std::endl;
-    exit(0);
+    exit(-1);
   }
 
   switch (_type) {
