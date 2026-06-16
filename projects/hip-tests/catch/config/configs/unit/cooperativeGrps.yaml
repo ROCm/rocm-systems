@@ -282,4 +282,3 @@ cooperativeGrps:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
-

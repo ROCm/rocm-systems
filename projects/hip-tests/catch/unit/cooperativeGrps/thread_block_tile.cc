@@ -1148,7 +1148,7 @@ void testArgsDifferentSizesScan(AggregationType aggType)
   LinearAllocGuard<ArrayContainer<NumElems>> h_result[64];
   LinearAllocGuard<ArrayContainer<NumElems>> d_result[64];
 
-  // as we cannot pass d_result directly (because it is an array of 
+  // as we cannot pass d_result directly (because it is an array of
   // LinearAllocGuards), we convert to an array of raw device pointers
   ArrayContainer<NumElems>* h_devicePtrs[64];
   LinearAllocGuard<ArrayContainer<NumElems>*> d_devicePtrs(LinearAllocs::hipMalloc, sizeof(void*) * 64);
