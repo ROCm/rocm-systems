@@ -35,7 +35,6 @@ IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
 
-
 # Print top-level test summary if CTest is enabled
 if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
     # Get all tests from this directory and subdirectories
