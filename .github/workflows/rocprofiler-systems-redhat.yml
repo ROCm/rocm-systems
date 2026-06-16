@@ -1,6 +1,9 @@
 name: rocprofiler-systems RedHat Linux (GCC, Python, ROCm)
 run-name: redhat
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
