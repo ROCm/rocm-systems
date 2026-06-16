@@ -457,10 +457,8 @@ TEST_F(UnifiedMemoryProcessorTest, ExplicitOutputPathOverridesBackendDerivedPath
 
 TEST_F(UnifiedMemoryProcessorTest, RelativeOutputPathResolvesFromPwd)
 {
-    const auto* pwd = std::getenv("PWD");
-    ASSERT_NE(pwd, nullptr);
     const auto relative_dir = std::string{ "ump-relative" };
-    const auto expected_dir = std::string{ pwd } + "/" + relative_dir;
+    const auto expected_dir = (test_common::fs::current_path() / relative_dir).string();
     test_common::fs::remove_all(expected_dir);
     ASSERT_FALSE(test_common::fs::exists(expected_dir));
     ScopedEnv ump_output_path{ "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH", relative_dir };

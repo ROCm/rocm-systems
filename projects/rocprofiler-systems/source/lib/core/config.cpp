@@ -2727,8 +2727,7 @@ get_ump_absolute_path()
                        : path;
         }
 
-        const auto* pwd    = getenv("PWD");
-        auto        result = fmt::format("{}/{}", (pwd ? pwd : "."), path);
+        auto result = fmt::format("{}/{}", tim::filepath::get_cwd(), path);
         return (settings_are_configured())
                    ? settings::format(std::move(result), get_config()->get_tag())
                    : result;
