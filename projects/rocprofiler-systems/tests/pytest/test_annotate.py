@@ -9,7 +9,11 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.annotate]
+pytestmark = [
+    pytest.mark.annotate,
+    pytest.mark.perf_event_paranoid(2),
+    pytest.mark.papi,
+]
 
 # =============================================================================
 # Annotate fixtures
@@ -17,27 +21,14 @@ pytestmark = [pytest.mark.annotate]
 
 
 @pytest.fixture
-def annotate_papi_condition(rocprof_config) -> bool:
-    """Check if PAPI is available and usable."""
-    return rocprof_config.capabilities.papi_availability and (
-        rocprof_config.capabilities.perf_event_paranoid <= 3
-        or rocprof_config.capabilities.cap_sys_admin
-        or rocprof_config.capabilities.cap_perfmon
-    )
-
-
-@pytest.fixture
-def annotate_env(annotate_papi_condition) -> dict[str, str]:
+def annotate_env() -> dict[str, str]:
     """Environment variables for Annotate tests."""
     env = {
         "ROCPROFSYS_TRACE_LEGACY": "ON",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
     }
-    if annotate_papi_condition:
-        env["ROCPROFSYS_TIMEMORY_COMPONENTS"] = "thread_cpu_clock papi_array"
-        env["ROCPROFSYS_PAPI_EVENTS"] = "perf::PERF_COUNT_SW_CPU_CLOCK"
-    else:
-        env["ROCPROFSYS_TIMEMORY_COMPONENTS"] = "thread_cpu_clock"
+    env["ROCPROFSYS_TIMEMORY_COMPONENTS"] = "thread_cpu_clock papi_array"
+    env["ROCPROFSYS_PAPI_EVENTS"] = "perf::PERF_COUNT_SW_CPU_CLOCK"
     return env
 
 
@@ -46,7 +37,6 @@ def annotate_env(annotate_papi_condition) -> dict[str, str]:
 # =============================================================================
 
 
-@pytest.mark.annotate
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
 class TestAnnotate(RocprofsysTest):
     BINARY_REWRITE_ARGS = [
@@ -68,7 +58,7 @@ class TestAnnotate(RocprofsysTest):
     ]
     RUN_ARGS = ["30", "2", "200"]
 
-    def test_parallel_overhead(self, mode, annotate_env, annotate_papi_condition):
+    def test_parallel_overhead(self, mode, annotate_env):
 
         result = self.run_test(
             mode,
@@ -87,12 +77,8 @@ class TestAnnotate(RocprofsysTest):
             )
 
         if mode == "binary_rewrite":
-            if annotate_papi_condition:
-                key_names = ["perf::PERF_COUNT_SW_CPU_CLOCK", "thread_cpu_clock"]
-                key_counts = [8, 8]
-            else:
-                key_names = ["thread_cpu_clock"]
-                key_counts = [8]
+            key_names = ["perf::PERF_COUNT_SW_CPU_CLOCK", "thread_cpu_clock"]
+            key_counts = [8, 8]
 
             self.assert_perfetto(
                 result,

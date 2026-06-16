@@ -10,7 +10,11 @@ import pytest
 import shutil
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.nic, pytest.mark.network]
+pytestmark = [
+    pytest.mark.nic_perf,
+    pytest.mark.papi_nic,
+    pytest.mark.perf_event_paranoid(2),
+]
 
 # =============================================================================
 # NIC fixtures

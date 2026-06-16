@@ -13,7 +13,6 @@ from conftest import RocprofsysTest
 
 pytestmark = [
     pytest.mark.rocprof_config,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
 ]
 
 

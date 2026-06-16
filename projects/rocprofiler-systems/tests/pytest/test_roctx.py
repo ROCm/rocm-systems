@@ -13,7 +13,6 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.gpu,
     pytest.mark.roctx,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 
@@ -109,9 +108,6 @@ class TestROCTx(RocprofsysTest):
             "sys_run",
             pytest.param(
                 "runtime_instrument",
-                marks=pytest.mark.ci_disable(
-                    "all"
-                ),  # TODO: Remove once TheRock switches to CTest
             ),
         ],
     )
@@ -126,9 +122,6 @@ class TestROCTx(RocprofsysTest):
         self.assert_regex(result)
 
     @pytest.mark.timeout(120)
-    @pytest.mark.ci_disable(
-        "assert_rocpd"
-    )  # TODO: Deprecate once TheRock switches to CTest
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,

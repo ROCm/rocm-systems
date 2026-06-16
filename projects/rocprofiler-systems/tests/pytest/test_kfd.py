@@ -14,10 +14,11 @@ import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [
+    pytest.mark.kfd,
     pytest.mark.gpu,
     pytest.mark.xnack,
     pytest.mark.hip,
-    pytest.mark.kfd,
+    pytest.mark.sdk_min_version(RocprofsysTest.KFD_MIN_SDK_VERSION),
 ]
 
 # =============================================================================

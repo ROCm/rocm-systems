@@ -13,7 +13,7 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.scratch_memory,
     pytest.mark.gpu,
-    pytest.mark.no_docker,
+    pytest.mark.docker(False),
     pytest.mark.rocm,
 ]
 

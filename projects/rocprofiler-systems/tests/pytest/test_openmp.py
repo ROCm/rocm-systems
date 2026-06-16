@@ -12,7 +12,6 @@ from conftest import RocprofsysTest
 
 pytestmark = [
     pytest.mark.openmp,
-    pytest.mark.ci_enable,
     pytest.mark.rocm_min_version(
         "6.4"
     ),  # Requires SDK version >= 600, 6.3 ships with 500
@@ -217,7 +216,6 @@ class TestOpenMPLU(RocprofsysTest):
 # ============================================================================
 
 
-@pytest.mark.ci_disable("all")  # TODO: Deprecate once TheRock switches to CTest
 @pytest.mark.rocm
 @pytest.mark.gpu
 @pytest.mark.class_name("openmp-target")
@@ -296,9 +294,6 @@ class TestOpenMPFortran(RocprofsysTest):
                 marks=[
                     pytest.mark.slow,
                     pytest.mark.serialize,
-                    pytest.mark.ci_disable(
-                        "all"
-                    ),  # TODO: Deprecate once TheRock switches to CTest
                 ],
             ),
         ],

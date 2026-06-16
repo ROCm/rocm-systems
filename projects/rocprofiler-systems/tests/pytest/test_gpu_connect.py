@@ -11,9 +11,11 @@ from pathlib import Path
 from conftest import RocprofsysTest
 
 pytestmark = [
-    pytest.mark.gpu,
+    pytest.mark.gpu_connect,
     pytest.mark.xgmi,
     pytest.mark.rocm,
+    pytest.mark.multi_gpu(2),
+    pytest.mark.run_if_gpu_category("not apu or instinct"),
 ]
 
 # =============================================================================
@@ -51,8 +53,6 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 # =============================================================================
 
 
-@pytest.mark.multi_gpu(2)
-@pytest.mark.run_if_gpu_category("not apu or instinct")
 class TestTransferBench(RocprofsysTest):
     """Tests for GPU connectivity tests."""
 

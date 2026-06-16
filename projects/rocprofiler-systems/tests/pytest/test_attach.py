@@ -9,7 +9,10 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.attach]
+pytestmark = [
+    pytest.mark.attach,
+    pytest.mark.ptrace_scope(0),
+]
 
 # ====================================================================================== #
 # Attach fixtures

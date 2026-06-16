@@ -9,8 +9,10 @@ from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.overflow]
-
+pytestmark = [
+    pytest.mark.overflow,
+    pytest.mark.perf_event_paranoid(2),
+]
 
 # =============================================================================
 # overflow fixtures

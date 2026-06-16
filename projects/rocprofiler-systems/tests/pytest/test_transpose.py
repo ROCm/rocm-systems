@@ -27,7 +27,6 @@ from conftest import RocprofsysTest
 pytestmark = [
     pytest.mark.transpose,
     pytest.mark.gpu,
-    pytest.mark.ci_enable,  # TODO: Deprecate once TheRock switches to CTest
     pytest.mark.rocm,
 ]
 
@@ -147,9 +146,6 @@ class TestTranspose(RocprofsysTest):
             "binary_rewrite",
             pytest.param(
                 "runtime_instrument",
-                marks=pytest.mark.ci_disable(
-                    "all"
-                ),  # TODO: Deprecate once TheRock switches to CTest
             ),
             "sys_run",
         ],
@@ -209,7 +205,6 @@ class TestTranspose(RocprofsysTest):
         self.assert_regex(result)
 
     @pytest.mark.timeout(120)
-    @pytest.mark.loops
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
     def test_loops(self, mode, transpose_env):
         result = self.run_test(
