@@ -146,11 +146,10 @@ TeamCtxPrimitiveTester::TeamCtxPrimitiveTester(TesterArguments args)
   const int max_sustainable_wgs =
       max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
-    std::cout << "Warning: Requested work-groups (" << args.num_wgs
+    std::cerr << "Error: Requested work-groups (" << args.num_wgs
               << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
-              << "). Capping to " << max_sustainable_wgs
-              << " to avoid grid_barrier deadlock." << std::endl;
-    args.num_wgs = max_sustainable_wgs;
+              << "). Reduce -w to avoid grid_barrier deadlock." << std::endl;
+    exit(0);
   }
 
   switch (_type) {

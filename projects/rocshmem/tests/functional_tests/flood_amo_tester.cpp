@@ -191,9 +191,10 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
 
   // Print warning if num_wgs exceeds max co-resident work-groups
   if (static_cast<unsigned int>(args.num_wgs) > static_cast<unsigned int>(max_sustainable_wgs)) {
-    std::cout << "Warning: Number of work-groups (" << args.num_wgs
-              << ") exceeds max sustainable work-groups ("
-              << max_sustainable_wgs << ")." << std::endl;
+    std::cerr << "Error: Requested work-groups (" << args.num_wgs
+              << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
+              << "). Reduce -w to avoid grid_barrier deadlock." << std::endl;
+    exit(0);
   }
 }
 
