@@ -1598,7 +1598,7 @@ def _cleanup_temp_patterns() -> list[str]:
 
 
 @pytest.fixture(scope="session")
-def get_library_path(rocprof_config) -> str:
+def library_path(rocprof_config) -> str:
     """Computed LD_LIBRARY_PATH (rocprofsys libs + user override + ROCm LLVM libs)."""
     return rocprof_config.library_path
 
@@ -2032,7 +2032,7 @@ class RocprofsysTest:
         assert_file_regex,
         get_test_num_threads,
         test_output_dir,
-        get_library_path,
+        library_path,
     ):
 
         self.run_test = run_test
@@ -2046,7 +2046,7 @@ class RocprofsysTest:
         self.assert_file_regex = assert_file_regex
         self.num_threads = get_test_num_threads
         self.test_output_dir = test_output_dir
-        self.get_library_path = get_library_path
+        self.library_path = library_path
 
 
 # ============================================================================

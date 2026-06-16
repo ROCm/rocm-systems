@@ -125,7 +125,6 @@ class RocprofsysConfig:
 
         Args:
             name: Name of the target executable
-            python_version: Optional Python version string
 
         Returns:
             Path to the executable

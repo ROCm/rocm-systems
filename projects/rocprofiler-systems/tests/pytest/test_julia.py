@@ -91,7 +91,7 @@ class TestJulia(RocprofsysTest):
         if julia_lib_paths is None:
             pytest.skip("Unable to resolve Julia library paths")
 
-        paths = [julia_lib_paths[0], julia_lib_paths[1], self.get_library_path]
+        paths = [julia_lib_paths[0], julia_lib_paths[1], self.library_path]
         julia_environment = {
             "ROCPROFSYS_TRACE": "ON",
             "ROCPROFSYS_PROFILE": "ON",

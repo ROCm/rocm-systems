@@ -113,7 +113,8 @@ class TestEnvironment:
         that sets it, so an entry overridden by a higher layer is not repeated
         lower down. The ``[user]`` layer is limited to variables that explicitly
         override a ``[base]`` or ``[test]`` setting; other purely shell-inherited
-        values are omitted to keep the per-test output concise.
+        values are omitted to keep the per-test output concise. Layers with no
+        entries to show are omitted entirely.
         """
         sections = {
             "base": [k for k in self.base if k not in self.test and k not in self.user],
@@ -122,8 +123,11 @@ class TestEnvironment:
         }
         lines: list[str] = []
         for layer in ENV_LAYER_ORDER:
+            keys = sorted(sections[layer])
+            if not keys:
+                continue
             lines.append(f"[{layer}]")
-            for key in sorted(sections[layer]):
+            for key in keys:
                 lines.append(self._format_entry(layer, key))
         return lines
 
