@@ -436,8 +436,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // It better be elf if its neither compressed nor uncompressed
   if (!is_compressed && !is_uncompressed) {
     if (IsCodeObjectElf(image_)) {
-      // Load the binary directly
-      auto elf_size = amd::Elf::getElfSize(image_);
+      auto elf_size = amd::Elf::getElfSize(image_, image_size_);
+      // If we got 0, validation has failed.
+      if (elf_size == 0) {
+        LogPrintfError(
+            "Invalid ELF code object: failed size/bounds validation, image_size is: %zu",
+            image_size_);
+        return hipErrorInvalidImage;
+      }
       for (auto* device : devices) {
         if (hipSuccess != AddDevProgram(device, image_, elf_size, fdesc))
           return hipErrorInvalidImage;

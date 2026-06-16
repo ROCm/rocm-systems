@@ -1,0 +1,6 @@
+---
+oob:
+  OOB_hip_module_load_over:
+    <<: *level_4
+    disabled: [windows, amd_windows, nvidia_linux, nvidia_windows]
+    tags: [oob]
