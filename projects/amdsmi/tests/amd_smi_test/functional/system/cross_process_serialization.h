@@ -25,7 +25,7 @@
 
 #include <string>
 
-#include "../test_base.h"
+#include "test_base.h"
 
 // Verifies that AMDSMI_MUTEX_CROSS_PROCESS=1 (blocking mode) actually
 // serializes API calls across processes. Unlike TestMutualExclusion (which

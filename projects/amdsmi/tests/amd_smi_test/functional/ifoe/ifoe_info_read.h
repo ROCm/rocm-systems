@@ -20,31 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_KFD_ATFORK_READ_H_
-#define TESTS_AMD_SMI_TEST_FUNCTIONAL_KFD_ATFORK_READ_H_
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
 
-#include "../test_base.h"
+#include "test_base.h"
 
-// Verifies that querying GPU memory usage does not trigger a caller's
-// pthread_atfork handlers. The KFD VRAM helper spawns a short-lived child via
-// clone() rather than fork() specifically to bypass glibc's atfork dispatch,
-// which can recurse/deadlock when AMD-SMI is called from an atfork chain
-// (ROCM-24163). A regression to fork() would fire the handlers below.
-class TestKfdAtforkRead : public TestBase {
+class TestIfoeInfoRead : public TestBase {
  public:
-  TestKfdAtforkRead();
+  TestIfoeInfoRead();
 
-  virtual ~TestKfdAtforkRead();
+  // @Brief: Destructor for test case of TestIfoeInfoRead
+  virtual ~TestIfoeInfoRead();
 
-  virtual void SetUp();
+  // @Brief: Setup the environment for measurement
+  void SetUp() override;
 
-  virtual void Run();
+  // @Brief: Core measurement execution
+  void Run() override;
 
-  virtual void Close();
+  // @Brief: Clean up and retrieve the resource
+  void Close() override;
 
-  virtual void DisplayResults() const;
+  // @Brief: Display  results
+  void DisplayResults() const override;
 
-  virtual void DisplayTestInfo(void);
+  // @Brief: Display information about what this test does
+  void DisplayTestInfo() override;
 };
 
-#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_KFD_ATFORK_READ_H_
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_

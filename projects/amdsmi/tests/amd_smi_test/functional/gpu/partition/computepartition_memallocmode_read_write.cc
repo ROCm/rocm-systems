@@ -27,8 +27,8 @@
 #include <string>
 #include <vector>
 
-#include "../test_base.h"
-#include "../test_common.h"
+#include "test_base.h"
+#include "test_common.h"
 #include "amd_smi/amdsmi.h"
 
 TestComputePartitionMemAllocModeReadWrite::TestComputePartitionMemAllocModeReadWrite()

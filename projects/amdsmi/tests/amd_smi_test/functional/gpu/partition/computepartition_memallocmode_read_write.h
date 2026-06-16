@@ -20,32 +20,32 @@
  * THE SOFTWARE.
  */
 
-#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
-#define TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_COMPUTEPARTITIONMEMALLOCMODE_READ_WRITE_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_COMPUTEPARTITIONMEMALLOCMODE_READ_WRITE_H_
 
-#include "../test_base.h"
+#include "test_base.h"
 
-class TestIfoeInfoRead : public TestBase {
+class TestComputePartitionMemAllocModeReadWrite : public TestBase {
  public:
-  TestIfoeInfoRead();
+  TestComputePartitionMemAllocModeReadWrite();
 
-  // @Brief: Destructor for test case of TestIfoeInfoRead
-  virtual ~TestIfoeInfoRead();
+  // @Brief: Destructor for test case of TestComputePartitionMemAllocModeReadWrite
+  virtual ~TestComputePartitionMemAllocModeReadWrite();
 
   // @Brief: Setup the environment for measurement
-  void SetUp() override;
+  virtual void SetUp();
 
   // @Brief: Core measurement execution
-  void Run() override;
+  virtual void Run();
 
   // @Brief: Clean up and retrieve the resource
-  void Close() override;
+  virtual void Close();
 
-  // @Brief: Display  results
-  void DisplayResults() const override;
+  // @Brief: Display results
+  virtual void DisplayResults() const;
 
   // @Brief: Display information about what this test does
-  void DisplayTestInfo() override;
+  virtual void DisplayTestInfo(void);
 };
 
-#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_IFOE_INFO_READ_H_
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_COMPUTEPARTITIONMEMALLOCMODE_READ_WRITE_H_

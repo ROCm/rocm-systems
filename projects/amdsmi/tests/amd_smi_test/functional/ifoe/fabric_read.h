@@ -23,7 +23,7 @@
 #ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_FABRIC_READ_H_
 #define TESTS_AMD_SMI_TEST_FUNCTIONAL_FABRIC_READ_H_
 
-#include "../test_base.h"
+#include "test_base.h"
 
 class TestFabricRead : public TestBase {
  public:

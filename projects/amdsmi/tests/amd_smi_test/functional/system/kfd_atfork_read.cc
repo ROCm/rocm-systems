@@ -28,7 +28,7 @@
 #include <cstdint>
 #include <iostream>
 
-#include "../test_common.h"
+#include "test_common.h"
 #include "rocm_smi/rocm_smi_kfd_data_manager.h"
 
 namespace {

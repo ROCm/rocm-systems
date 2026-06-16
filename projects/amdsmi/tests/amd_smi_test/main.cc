@@ -24,10 +24,6 @@
 #include <cstdlib>
 
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "functional/computepartition_memallocmode_read_write.h"
-#include "functional/cross_process_serialization.h"
-#include "functional/fabric_read.h"
-#include "functional/kfd_atfork_read.h"
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
 #include "functional/gpu/events/evt_notif_read_write.h"
@@ -43,6 +39,7 @@
 #include "functional/gpu/metrics/gpu_partition_metrics_read.h"
 #include "functional/gpu/metrics/metrics_counter_read.h"
 #include "functional/gpu/metrics/process_info_read.h"
+#include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
 #include "functional/gpu/partition/memorypartition_read_write.h"
 #include "functional/gpu/pci/pci_read_write.h"
@@ -62,8 +59,12 @@
 #include "functional/gpu/thermal/fan_read_write.h"
 #include "functional/gpu/thermal/temp_read.h"
 #include "functional/gpu/xgmi/xgmi_read_write.h"
+#include "functional/ifoe/fabric_read.h"
+#include "functional/ifoe/ifoe_info_read.h"
+#include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
 #include "functional/system/init_shutdown_refcount.h"
+#include "functional/system/kfd_atfork_read.h"
 #include "functional/system/mutual_exclusion.h"
 #include "functional/system/sys_info_read.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -326,6 +327,11 @@ TEST(GpuFunctionalReadOnly, TestKfdAtforkRead) {
 
 TEST(GpuFunctionalReadOnly, TestFabricRead) {
   TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(GpuFunctionalReadOnly, TestIfoeInfoRead) {
+  TestIfoeInfoRead tst;
   RunGenericTest(&tst);
 }
 

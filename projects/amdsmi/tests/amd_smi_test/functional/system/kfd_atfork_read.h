@@ -20,32 +20,31 @@
  * THE SOFTWARE.
  */
 
-#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_COMPUTEPARTITIONMEMALLOCMODE_READ_WRITE_H_
-#define TESTS_AMD_SMI_TEST_FUNCTIONAL_COMPUTEPARTITIONMEMALLOCMODE_READ_WRITE_H_
+#ifndef TESTS_AMD_SMI_TEST_FUNCTIONAL_KFD_ATFORK_READ_H_
+#define TESTS_AMD_SMI_TEST_FUNCTIONAL_KFD_ATFORK_READ_H_
 
-#include "../test_base.h"
+#include "test_base.h"
 
-class TestComputePartitionMemAllocModeReadWrite : public TestBase {
+// Verifies that querying GPU memory usage does not trigger a caller's
+// pthread_atfork handlers. The KFD VRAM helper spawns a short-lived child via
+// clone() rather than fork() specifically to bypass glibc's atfork dispatch,
+// which can recurse/deadlock when AMD-SMI is called from an atfork chain
+// (ROCM-24163). A regression to fork() would fire the handlers below.
+class TestKfdAtforkRead : public TestBase {
  public:
-  TestComputePartitionMemAllocModeReadWrite();
+  TestKfdAtforkRead();
 
-  // @Brief: Destructor for test case of TestComputePartitionMemAllocModeReadWrite
-  virtual ~TestComputePartitionMemAllocModeReadWrite();
+  virtual ~TestKfdAtforkRead();
 
-  // @Brief: Setup the environment for measurement
   virtual void SetUp();
 
-  // @Brief: Core measurement execution
   virtual void Run();
 
-  // @Brief: Clean up and retrieve the resource
   virtual void Close();
 
-  // @Brief: Display results
   virtual void DisplayResults() const;
 
-  // @Brief: Display information about what this test does
   virtual void DisplayTestInfo(void);
 };
 
-#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_COMPUTEPARTITIONMEMALLOCMODE_READ_WRITE_H_
+#endif  // TESTS_AMD_SMI_TEST_FUNCTIONAL_KFD_ATFORK_READ_H_
